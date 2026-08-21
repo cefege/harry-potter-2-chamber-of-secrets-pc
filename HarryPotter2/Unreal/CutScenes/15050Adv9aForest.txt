@@ -1,0 +1,31 @@
+//15050Adv9aForest
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Aragog
+
+Harry Talk PC_Hry_Adv9aForest_01
+//Better follow the spiders like Hagrid said.
+
+Harry Talk PC_Hry_Adv9aForest_02
+//I don't want to lose sight of the spiders.
+
+Harry Talk PC_Hry_Adv9aForest_03
+//I hope the spiders know where they're going.
+
+Harry Talk PC_Hry_Adv9aForest_08
+//This ledge is too high to climb!
+
+Ron Talk PC_Ron_Adv9aForest_09
+//I'll give you a boost, Harry.  You'll have to brave the Forbidden Forest alone.
+
+Aragog Talk PC_Ara_Adv9aForest_10
+//An intruder has compromised the lair!  Protect our home, my children!
+
+Release BaseCam
+Release Harry
+Release Ron
+Release Aragog
+

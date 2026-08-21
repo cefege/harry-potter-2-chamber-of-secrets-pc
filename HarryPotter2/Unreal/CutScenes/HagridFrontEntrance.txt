@@ -1,0 +1,36 @@
+//HagridFrontEntrance
+
+[Thread]
+Capture BaseCam
+Capture Harry
+Capture Hagrid
+
+//Sends Hagrid to spot by front door
+Hagrid Teleport HagSurprise1
+Hagrid WalkTo HagridSurprisePP *
+
+Harry RunTo HarryHagridMark1
+Harry TurnTo Hagrid
+Harry animate wave
+
+
+BaseCam Target FlyTo HagridSurprisePP
+BaseCam FlyTo HarryHagridCamPos
+Harry RunTo HarryHagridMark2
+Harry TurnTo Hagrid *
+//Hagrid TurnTo Harry
+
+
+Sleep 3
+
+//Add here Hagrid Dialog:
+//Hagrid Say blahblah
+
+Hagrid SetOnPatrolPointPath HagridSurprisePP *
+
+trigger HagridBumpSceneOff
+//turns off bump scene near Hagrid's hut for this level
+release Hagrid
+release Harry
+release BaseCam
+

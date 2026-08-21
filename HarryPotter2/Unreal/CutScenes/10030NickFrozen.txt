@@ -1,0 +1,166 @@
+//10030NickFrozen
+
+[Dialog_01]
+
+Capture Harry
+Capture McGonagall
+Capture NickPetrified
+Capture BaseCam
+
+Harry WalkTo cutmark50
+Harry TurnTo NickPetrified
+
+sleep .5
+BaseCam Target FLyTo NickTarget
+BaseCam FlyTo NickCam
+
+Harry Talk PC_Hry_NickFrozen_15 *
+//Oh, no -- not another attack...
+
+McGonagall teleport cutmark94
+McGonagall face cutmark49
+McGonagall WalkTo cutmark49 *McGonagallDoneWalking
+
+sleep 1
+//BaseCam Target FlyTo Harry z=18
+//BaseCam FlyTo Harry z=17 x=40
+sleep 2
+
+BaseCam Target FlyTo NickPetrified
+BaseCam FlyTo CutCameraPos29
+BaseCam FlyTo NickCamEnd Time=8 easeto *
+
+waitfor McGonagallDoneWalking
+McGonagall TurnTo Harry
+McGonagall Talk PC_Mcg_NickFrozen_16
+//Mr Potter-
+
+McGonagall TurnTo NickPetrified
+McGonagall Talk PC_Mcg_NickFrozen_18
+//What’s happened here?
+
+Harry TurnTo McGonagall
+Harry Talk PC_Hry_NickFrozen_19
+//I don't know -- I found him like this.
+
+McGonagall TurnTo Harry
+
+sleep .5
+
+BaseCam FlyTo McGonagall x=50 z=25 y=-25
+BaseCam Target FlyTo McGonagall z=25 x=15
+//BaseCam FlyTo McGonagall x=45 z=25 y=-18 time=3 easeto *
+
+sleep .5
+
+McGonagall say PC_Mcg_NickFrozen_20
+//Follow me, Potter.
+
+cue WalkOff
+sleep 1
+BaseCam Target FlyTo NickPetrified
+BaseCam FlyTo CutCameraPos29
+
+sleep 3
+BaseCam FadeOut
+BaseCam Target FlyTo cutmark79
+BaseCam FlyTo CutCameraPos16
+waitfor FadeInCam
+BaseCam FadeIn
+BaseCam Target FlyTo Dragon x=-80 Time=4 *BasecamDone
+BaseCam Say PC_Hry_NickFrozen_21
+//Professor, I swear I didn’t-
+BaseCam Say PC_Mcg_NickFrozen_22
+//This is out of my hands, Potter.
+
+waitfor BasecamDone
+BaseCam FlyTo CutCameraPos14
+Cue CameraMoved
+BaseCam FlyTo CutCameraPos15 Time=10
+
+waitfor ThroughDoor
+sleep 2
+
+BaseCam Target FlyTo McGonagall
+BaseCam FlyTo CutCameraPos33
+
+waitfor ReleaseAll
+
+NickPetrified teleport CutMark102
+
+Release NickPetrified
+Release BaseCam
+
+
+[McGonagall]
+waitfor WalkOff
+
+ReCapture McGonagall
+
+McGonagall WalkTo cutmark94
+
+McGonagall FlyTo cutmark79
+Cue Harryteleport
+McGonagall WalkTo cutmark81 cutmark89
+
+waitfor CameraMoved
+McGonagall teleport cutmark87
+sleep 1.5
+McGonagall WalkTo cutmark82
+
+sleep 1
+//open secret door
+McGonagall animate talkbothhands
+trigger dragondis
+
+sleep 2
+McGonagall WalkTo cutmark84
+McGonagall TurnTo Harry //Permanent
+
+
+
+McGonagall Talk PC_Mcg_SecretToOffice_01 startanim=talklefthand
+//Through this door, please, Potter.
+Cue ThroughDoor
+McGonagall TurnTo Harry Follow 
+
+sleep 2
+//McGonagall StopTurnToFollowing
+
+
+waitfor ReleaseAll
+McGonagall teleport Cutmark71
+
+[Harry]
+waitfor WalkOff
+ReCapture Harry
+
+Harry WalkTo cutmark94
+waitfor Harryteleport
+sleep 1
+Harry Teleport cutmark79
+Harry Face Cutmark81
+Harry WalkTo cutmark81 *HarryDone
+Cue FadeInCam
+waitfor HarryDone
+Harry WalkTo cutmark90
+
+waitfor CameraMoved
+Harry teleport cutmark88
+sleep 1
+Harry WalkTo cutmark83
+Harry TurnTo Dragon
+
+waitfor ThroughDoor
+
+Harry RunTo cutmark86
+
+//close secret door
+trigger dragonClose
+
+Harry TurnTo McGonagall
+sleep 2
+
+Cue ReleaseAll
+
+Release Harry

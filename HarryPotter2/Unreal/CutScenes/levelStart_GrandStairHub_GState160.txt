@@ -1,0 +1,27 @@
+
+//levelStart_GrandStairHub_GState160
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+//this is a play once cut scene because right now there is nothing else happening at the start of the level.
+
+Capture Ron
+Capture Hermione
+Capture Harry
+Capture BaseCam
+
+Hermione Teleport CutMark134
+Hermione Face CutMark131
+Ron Teleport InfirmaryLanding2
+Ron LeadActor Harry InfirmaryLanding2 InfirmaryEnd *
+
+Harry Teleport InfirmaryLanding
+Harry Face InfirmaryLanding2
+
+BaseCam FadeIn *
+
+Release Hermione
+Release Ron
+Release Harry
+Release BaseCam

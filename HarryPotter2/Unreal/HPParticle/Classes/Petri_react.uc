@@ -1,0 +1,40 @@
+//=============================================================================
+// Petri_react.
+//=============================================================================
+class Petri_react expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=100.000000)
+    SourceWidth=(Base=50.000000)
+    SourceHeight=(Base=50.000000)
+    SourceDepth=(Base=100.000000)
+    AngularSpreadWidth=(Base=0.000000)
+    AngularSpreadHeight=(Base=0.000000)
+    bSteadyState=True
+    speed=(Base=1.000000)
+    Lifetime=(Base=1.750000)
+    ColorStart=(Base=(R=128,B=128))
+    ColorEnd=(Base=(R=0))
+    SizeWidth=(Base=12.000000)
+    SizeLength=(Base=20.000000)
+    SizeEndScale=(Base=5.000000)
+    DripTime=(Base=0.200000)
+    Attraction=(X=2.000000)
+    Damping=3.500000
+    Textures(0)=Texture'HPParticle.hp_fx.Particles.Sparkle_5'
+    LastUpdateLocation=(X=-384.649200,Y=201.869247,Z=15.724504)
+    LastEmitLocation=(X=-384.649200,Y=201.869247,Z=15.724504)
+    LastUpdateRotation=(Pitch=16256,Yaw=-16336)
+    EmissionResidue=0.304359
+    Age=7140.465332
+    CurrentPriorityTag=2
+    bDynamicLight=True
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-384.649200,Y=201.869247,Z=15.724504)
+    Rotation=(Pitch=16256,Yaw=-16336)
+    OldLocation=(X=-346.210083,Y=443.263794,Z=16.444515)
+    Name=ParticleFX8
+}

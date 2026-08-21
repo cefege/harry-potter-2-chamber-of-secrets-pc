@@ -1,0 +1,29 @@
+//GoToMMBAgain
+
+[Thread]
+
+
+Capture Ron
+Capture Harry
+Capture BaseCam
+
+BaseCam FlyTo CutCameraPos19 Time=3 *
+Basecam target flyto Ron z=-300 time=3 *
+Harry RunTo CutMark175
+Harry TurnTo Ron
+
+Basecam target flyto Harry *
+Basecam FlyTo CutCameraPos20
+
+Ron Talk PC_Ron_WhompTut1_77
+//Come on, Harry!
+
+sleep 1
+Ron LeadActor Harry CharmsLanding2 Mrytle *
+sleep .5
+
+Release Ron
+Release Harry
+Release BaseCam
+
+

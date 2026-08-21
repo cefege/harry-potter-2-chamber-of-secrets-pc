@@ -1,0 +1,31 @@
+//17170VoldRevealedV2
+
+[Dialog_01]
+
+Capture Harry
+Capture Tom
+tom flyto Cutmark8
+Tom Turnto Harry Follow *
+Capture Basilisk
+Capture basecam
+
+Basecam FlyTo CutCameraPos1
+Basecam Target FlyTo Basilisk
+Basilisk animate InPain loop *
+
+sleep 5
+Basilisk animate retreat
+Basilisk GotoState stateHidden
+
+basecam flyto tom x=40 z=18 *
+basecam target flyto tom z=25
+Tom Talk PC_Tmr_VoldRevealedV2_05
+//NO!  YOU CAN STILL SMELL THE BOY!  YOU CAN STILL KILL HIM!  KILL HIM NOW!
+
+//trigger SwordTrigger
+Release Harry
+Release basecam
+Release Basilisk
+
+Trigger BasiliskEncounterTag2
+sleep 0.0001

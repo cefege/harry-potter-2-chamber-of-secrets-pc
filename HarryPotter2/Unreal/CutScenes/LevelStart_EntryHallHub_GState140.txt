@@ -1,0 +1,91 @@
+//LevelStart_EntryHallHub_GState140
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+//All doors are open now.
+
+
+//--------------------------House Point Ceremony Setup-------------------------------------
+Capture Dumbledore
+Capture Draco
+Capture GFemRav1
+Capture GMaleHuf2
+
+Dumbledore Teleport CutMark32
+Dumbledore Face CutMark33
+
+Draco Teleport DracoHPLoc
+Draco Face CutMark32
+
+GFemRav1 Teleport PenelopeHPLoc
+GFemRav1 Face CutMark32
+
+GMaleHuf2 Teleport JustinHPLoc
+GMaleHuf2 Face CutMark32
+
+//Philip added this to teleport kids to the HPC room----------------
+capture GOldMaleGry1
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf3
+capture GFemRav2
+capture GMaleRav2
+capture GFemRav3
+capture GOldMaleSly1
+capture GFemSly2
+capture GOldMaleSly2
+capture GFemSly1
+capture GFemSly3
+
+GOldMaleGry1 teleport cmHPC13
+GFemGry0 teleport cmHPC12
+GMaleGry4 teleport cmHPC11
+GFemHuf2 teleport cmHPC10
+GMaleHuf3 teleport cmHPC09
+GFemRav2 teleport cmHPC08
+GMaleRav2 teleport cmHPC07
+GFemRav3 teleport cmHPC06
+GOldMaleSly1 teleport cmHPC05
+GFemSly2 teleport cmHPC04
+GOldMaleSly2 teleport cmHPC03
+GFemSly1 teleport cmHPC02
+GFemSly3 teleport cmHPC01
+
+GOldMaleGry1 face Dumbledore
+GFemGry0 face Dumbledore
+GMaleGry4 face Dumbledore
+GFemHuf2 face Dumbledore
+GMaleHuf3 face Dumbledore
+GFemRav2 face Dumbledore
+GMaleRav2 face Dumbledore
+GFemRav3 face Dumbledore
+GOldMaleSly1 face Dumbledore
+GFemSly2 face Dumbledore
+GOldMaleSly2 face Dumbledore
+GFemSly1 face Dumbledore
+GFemSly3 face Dumbledore
+
+release GOldMaleGry1
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf3
+release GFemRav2
+release GMaleRav2
+release GFemRav3
+release GOldMaleSly1
+release GFemSly2
+release GOldMaleSly2
+release GFemSly1
+release GFemSly3
+
+//end of student placement---------------------
+
+Release Dumbledore
+Release Draco
+Release GFemRav1
+Release GMaleHuf2
+//--------------------------House Point Ceremony Setup-------------------------------------

@@ -1,0 +1,16 @@
+//LevelStart_GroundsHub_GState110
+
+[Dialog_01]
+
+capture basecam
+
+//ambients-------------------------------------------------
+
+//teleports a Ravenclaw boy to search for a secret by the gates to Quidditch
+capture GMaleRav2
+GMaleRav2 teleport SlySecretPP2
+GMaleRav2 SetOnPatrolPointPath SlySecretPP2 *
+release GMaleRav2
+
+basecam fadein
+release basecam

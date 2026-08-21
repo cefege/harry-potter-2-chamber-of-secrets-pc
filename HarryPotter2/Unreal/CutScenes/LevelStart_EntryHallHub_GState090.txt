@@ -1,0 +1,13 @@
+
+//LevelStart_EntryHallHub_GState090
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+//don't need this to be open anymore.. right? -Eric
+//open adv3 in GState060 thru 090
+//trigger OpenADV3DungIng

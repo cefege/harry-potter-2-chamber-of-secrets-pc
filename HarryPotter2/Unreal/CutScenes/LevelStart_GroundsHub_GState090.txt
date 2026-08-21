@@ -1,0 +1,54 @@
+//LevelStart_GroundsHub_GState090
+
+//---------------------------------------------------------------------
+
+[Dialog_01]
+
+capture basecam
+
+//Level Set Up-------------------------------------------
+
+Trigger Adv4_BarsOpen
+
+Capture Ron
+Ron Teleport CutMark22
+Ron Face GoToAd4GreenStart
+Release Ron
+
+//######### New linear flow, Ron takes you to Adv4 GreenHouse.
+//Capture GMaleGry3
+//GMaleGry3 Teleport CutMark22
+//GMaleGry3 Face GoToHPCStart
+//Release GMaleGry3
+
+
+SetObjectiveId
+
+//---------------------------------------------------------------------
+
+
+//ambients-------------------------------------------------
+//teleports a couple boys to chat spots by the sundial
+capture GMaleGry3
+capture GMaleGry4
+GMaleGry3 teleport chatSpot1
+GMaleGry4 teleport chatSpot2
+GMaleGry3 Face GMaleGry4
+GMaleGry4 Face GMaleGry3
+release GMaleGry3
+release GMaleGry4
+
+//sends Hagrid to his hut for patrolling
+capture Hagrid
+Hagrid teleport HagridPP1
+Hagrid SetOnPatrolPointPath HagridPP1 *
+release Hagrid
+
+//teleports a human to search for a secret by the wall facing Hogwarts Entrance Hall
+capture GFemHuf3
+GFemHuf3 teleport SlySecretPP1
+GFemHuf3 SetOnPatrolPointPath SlySecretPP1 *
+release GFemHuf3
+
+basecam fadein
+release basecam

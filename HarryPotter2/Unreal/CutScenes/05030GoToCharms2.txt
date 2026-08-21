@@ -1,0 +1,29 @@
+//05030GoToCharms2
+
+[Dialog_01]
+
+Capture Harry
+Capture Hermione
+Capture BaseCam
+
+
+Hermione Talk PC_Her_GoToCharms2_01 EndAnim=wave *HermioneDone
+//Hurry up, Harry, we don't want to be late for Charms!
+BaseCam FlyTo CutCameraPos19 Time=3 *
+Basecam target flyto Hermione z=-300 time=3 *
+Harry RunTo CutMark175
+Harry TurnTo Hermione
+
+waitfor HermioneDone
+Basecam target flyto Harry *
+Basecam FlyTo CutCameraPos20
+Harry Talk PC_Hry_GoToCharms2_03 StartAnim=look_mirror
+//Coming, Hermione!
+sleep 1
+Hermione LeadActor Harry CharmsLanding CharmsClass * //anim=WaveAnim speech=speechIndex
+sleep .5
+Release Harry
+Release BaseCam
+
+
+Release Hermione

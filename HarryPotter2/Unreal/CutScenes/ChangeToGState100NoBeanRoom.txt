@@ -1,0 +1,46 @@
+//ChangeToGState100NoBeanRoom
+
+//----------------------------------------------------------------------
+
+[MainThread]
+
+Trigger NormalHousePointCeremony
+//This turns off the house Point Ceremony Cut scene, so that Harry can leave the room.
+
+Capture Harry
+ReCapture Harry
+
+Harry ChangeGameState GState100
+
+
+//Tell Harry he completed the House Point Ceremony in GState090.
+//Harry SetHub9CeremonyFlag
+
+//Ask Harry if he completed all three of his objectives required for advancing to GState100.
+//If ReadyForTransitionE Cue ChangeGameStateToGState100
+
+//Sleep while other thread runs if it needs to.
+sleep .5
+
+//***Disabled to send player to transition
+//Trigger ReloadEntryHall
+//Then reload the EntryHall_hub.
+
+Trigger GoFromEntryToTransition
+
+//*********** DEBUG
+//Release Harry
+//*********** DEBUG
+
+//----------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------
+[ChangeToGState100Thread]
+//waitfor ChangeGameStateToGState100
+//Capture Harry
+//ReCapture Harry
+//Harry ChangeGameState GState100
+
+//----------------------------------------------------------------------

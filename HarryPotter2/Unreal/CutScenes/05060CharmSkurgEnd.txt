@@ -1,0 +1,107 @@
+//05060CharmSkurgEnd
+
+[Dialog_01]
+
+Capture Flitwick
+Capture Harry
+Capture BaseCam
+
+BaseCam FlyTo CutCameraPos18
+BaseCam Target FlyTo Harry StayLocked
+
+Flitwick TurnTo Harry Follow
+
+Flitwick Talk PC_Flt_CharmSkurgEnd_01 *FlitDone1
+//Well done, Mr. Potter, you've sucessfully learned Skurge!
+Flitwick TurnTo Harry Follow
+sleep 1
+Flitwick TurnTo Harry Follow
+Harry WalkTo CutMark174
+
+BaseCam FlyTo Flitwick z=10 x=60 y=20
+BaseCam Target FlyTo FLitwick z=10
+
+waitfor FlitDone1
+Flitwick Talk PC_Flt_CharmSkurgEnd_02 *FlitDone2
+//Now it's time for you to test your newly learned knowledge in the Skurge Spell Challenge!
+
+sleep 4
+BaseCam FlyTo CutCameraPos18
+BaseCam Target FlyTo Harry StayLocked
+
+waitfor FlitDone2
+//Philip added this to get the students out of the classroom------------
+BaseCam Fadeout
+
+//teleport 16 students out of Flitwick's classroom------------------
+capture GOldMaleGry1
+capture GOldMaleGry2
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf2
+capture GMaleHuf3
+capture GFemRav1
+capture GMaleRav2
+capture GMaleRav3
+capture GFemRav2
+capture GOldMaleSly1
+capture GOldMaleSly2
+capture GFemSly1
+capture GFemSly2
+capture GFemSly3
+
+GOldMaleGry1 teleport Cutmark54
+GOldMaleGry2 teleport Cutmark66
+GFemGry0 teleport Cutmark51
+GMaleGry4 teleport Cutmark44
+GFemHuf2 teleport Cutmark25
+GMaleHuf2 teleport Cutmark56
+GMaleHuf3 teleport Cutmark57
+GFemRav1 teleport Cutmark27
+GMaleRav2 teleport Cutmark28
+GMaleRav3 teleport Cutmark61
+GFemRav2 teleport Cutmark3
+GOldMaleSly1 teleport Cutmark62
+GOldMaleSly2 teleport Cutmark63
+GFemSly1 teleport Cutmark42
+GFemSly2 teleport Cutmark45
+GFemSly3 teleport Cutmark46
+
+release GOldMaleGry1
+release GOldMaleGry2
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf2
+release GMaleHuf3
+release GFemRav1
+release GMaleRav2
+release GMaleRav3
+release GFemRav2
+release GOldMaleSly1
+release GOldMaleSly2
+release GFemSly1
+release GFemSly2
+release GFemSly3
+//end of student placement--------------------------------------
+
+
+
+//Put Ron and Hermione back in the people room for safe keeping.
+Capture Ron
+Capture Hermione
+Ron teleport RonLoc
+Hemione Teleport HermioneHidden
+Release Ron
+Release Hermione
+//Done moving Ron & Hermione
+
+
+Harry changegamestate gstate060
+trigger ChangeLevelSkurge
+
+Release Flitwick
+Release Harry
+Release BaseCam
+

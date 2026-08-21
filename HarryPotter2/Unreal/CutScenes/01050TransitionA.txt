@@ -1,0 +1,45 @@
+//01050TransitionA.txt
+
+[Dialog_01]
+
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto start
+basecam target flyto cutstart
+basecam FOV angle=60 time=20 *
+
+
+//basecam flyto end easebetween time=20 *done
+//basecam target flyto cutend easebetween time=20 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransA_00
+//Once inside the Common Room Harry was greeted by the cheers of his fellow Gryffindors.
+
+Narrator Talk PC_Nar_TransA_01
+//Harry and Ron became Gryffindor heroes due to their little accident with the Whomping Willow.
+
+Narrator Talk PC_Nar_TransA_02
+//Harry slept well that night and looked forward to his first day at Hogwarts.
+
+//waitfor done
+//sleep .5
+basecam fadeout
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints A
+Release Housepoints
+
+//change Game State-----------------------------------------------------------------------
+Harry changegamestate gstate020
+Trigger TriggerChangeLevel_EntryHall020
+
+Release Harry
+Release Narrator
+Release BaseCam

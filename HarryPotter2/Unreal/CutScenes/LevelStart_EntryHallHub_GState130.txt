@@ -1,0 +1,16 @@
+//LevelStart_EntryHallHub_GState130
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+Trigger NormalHousePointCeremony
+//This turns off the house Point Ceremony Cut scene, so that Harry can leave the room.
+
+
+
+//Jut realized I don't actually have to trigger all these other cut scenes, just make them all level load starts. -Eric
+//Trigger 13020GoToSponge

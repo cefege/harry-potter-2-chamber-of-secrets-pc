@@ -1,0 +1,8 @@
+//levelStart_GrandStairHub_GState120
+
+[Dialog_01]
+
+//Turn Harry into Goyle for this GState.
+trigger HarryToGoyle
+
+BaseCam FadeIn

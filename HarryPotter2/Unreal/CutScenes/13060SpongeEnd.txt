@@ -1,0 +1,68 @@
+//13060SpongeEnd
+
+[Dialog_01]
+
+capture Harry
+capture Lockhart
+capture Basecam
+
+Basecam FlyTo CutCameraPos7 *
+Basecam Target FlyTo CutMark30
+Basecam FlyTo CutCameraPos7 *
+Basecam Target FlyTo CutMark30
+
+Lockhart Turnto Harry follow
+Harry Turnto Lockhart *
+Lockhart Talk PC_Gil_SpongeEnd_01
+//You've done it, Harry! You have mastered Spongify!
+
+Lockhart Talk PC_Gil_SpongeEnd_02
+//So now it's time to take my newly completed and soon to be classic Spongify Spell Challenge!
+
+
+//change gstate and load the right level----------------------
+BaseCam FadeOut
+
+//teleport 6 students out of Lockhart's classroom------
+capture GOldMaleGry1
+capture GOldMaleGry2
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf2
+
+
+GOldMaleGry1 teleport Cutmark54
+GOldMaleGry2 teleport Cutmark66
+GFemGry0 teleport Cutmark51
+GMaleGry4 teleport Cutmark44
+GFemHuf2 teleport Cutmark25
+GMaleHuf2 teleport Cutmark56
+
+release GOldMaleGry1
+release GOldMaleGry2
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf2
+//end of student placement------------------------------
+
+//Put Ron and Hermione back in the people room for safe keeping.
+Capture Ron
+Capture Hermione
+Ron teleport RonLoc
+Hermione Teleport HermioneHidden
+Release Ron
+Release Hermione
+
+//Done moving Ron & Hermione------------------------------------------------------------------------------------------
+
+
+Harry changegamestate gstate140
+trigger ChangeLevelCh4Spongify
+
+release Harry
+release Lockhart
+release Basecam
+
+//--------

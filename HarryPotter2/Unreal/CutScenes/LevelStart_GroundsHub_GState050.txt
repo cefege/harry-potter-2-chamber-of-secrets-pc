@@ -1,0 +1,36 @@
+//LevelStart_GroundsHub_GState050
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+Trigger CloseHerbology
+
+//ambients----------------------------------------------------
+
+
+//sends Hagrid to his hut for patrolling
+capture Hagrid
+Hagrid teleport HagridPP1
+Hagrid SetOnPatrolPointPath HagridPP1 *
+release Hagrid
+
+//teleports a couple boys in for frolic: running in an endless oval
+capture GMaleHuf2
+GMaleHuf2 teleport LawnLoopPP1
+GMaleHuf2 SetOnPatrolPointPath LawnLoopPP1 *
+release GMaleHuf2
+sleep 0.5
+capture GMaleHuf3
+GMaleHuf3 teleport LawnLoopPP1
+GMaleHuf3 SetOnPatrolPointPath LawnLoopPP1 *
+release GMaleHuf3
+
+//teleports a girl to search for a secret by the wall facing Hogwarts Entrance Hall
+capture GFemRav3
+GFemRav3 teleport SlySecretPP1
+GFemRav3 SetOnPatrolPointPath SlySecretPP1 *
+release GFemRav3
+
+basecam fadein
+release basecam

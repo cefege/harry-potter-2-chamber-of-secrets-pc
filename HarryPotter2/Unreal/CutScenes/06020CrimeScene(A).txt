@@ -1,0 +1,211 @@
+
+//06020CrimeScene(A)
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Thread]
+
+Capture Harry
+Capture Ron
+Capture Hermione
+Capture BaseCam
+Capture Myrtle
+
+SetObjectiveId
+
+Hermione Teleport IBath_HerTelLoc
+Ron Teleport IBath_RonTelLoc
+
+Hermione Face IBath_HarryLoc
+Ron Face IBath_HarryLoc
+
+BaseCam FlyTo IBath_Cam1
+BaseCam Target FlyTo IBath_Focus1
+
+BaseCam FadeIn 1.5
+
+Harry RunTo IBath_HarryLoc *HarryDoneRun
+Hermione WalkTo IBath_Focus1 *HermioneDoneRun
+Ron WalkTo IBath_RonLoc1 *RonDoneRun
+
+Waitfor HarryDoneRun
+Harry TurnTo Hermione follow*
+
+Waitfor HermioneDoneRun
+Hermione Turnto Harry
+
+Waitfor RonDoneRun
+Ron TurnTo Harry
+
+Hermione Talk PC_Her_CrimeScene_74 startanim=talk_lhand
+//Harry! I want to investigate the scene of the crime. Filch usually guards the hallway where his cat was petrified, but he's away, so now is our chance!
+
+
+BaseCam Target FlyTo Harry StayLocked Time=3 *
+BaseCam flyto IBath_Cam2 z=-30 Time=4 *
+
+
+Hermione RunTo IBath_LeavePath3 *
+sleep .5
+Ron RunTo IBath_LeavePath *
+sleep .3
+Harry RunTo IBath_LeavePath2 *
+
+//sleep 0.8
+
+BaseCam FadeOut
+
+//%%%%%%%%%%%%%%%%%%%%%%% Merge of Two Cut Scenes %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+//Philip added this direction to Myrtle after putting Myrtle on a patrol path-----
+//but it might be better if she continued to move.  ??
+Myrtle flyto MyrtleOrigin
+
+
+Ron teleport CutMark178
+Ron WalkTo CutMark184 *
+Hermione Teleport CutMark179
+Hermione WalkTo CutMark185 *
+Harry teleport CutMark177
+Harry WalkTo CutMark183 *
+
+BaseCam FlyTo CutCameraPos30 *
+BaseCam Target FlyTo Harry Staylocked
+BaseCam FlyTo CutCameraPos28 Time=15 *
+Sleep .5
+BaseCam FadeIn
+
+Ron say PC_Ron_CrimeScene_57
+//Do you really think there's a Chamber of Secrets?
+
+Hermione say PC_Her_CrimeScene_58
+//I believe Flitwick's story even if he doesn't . And Dumbledore himself couldn't cure Mrs. Norris. I think that whatever attacked her might not be… human.
+
+Harry Talk PC_Hry_CrimeScene_59
+//Here we are at the scene of the crime. It can't hurt to look around, since we're already here…and Filch isn't.
+
+Harry Talk PC_Hry_CrimeScene_60
+//Remember all the water that was on the floor? Where had it come from?
+Hermione Turnto CutMark187
+Hermione say PC_Her_CrimeScene_40 *HermioneDone1
+//From in there. Let's have a look
+
+Sleep 1
+Hermione RunTo CutMark187 *HermioneDone2
+Harry TurnTo CutMark187
+Ron Turnto CutMark187
+
+WaitFor HermioneDone1
+Harry RunTo CutMark187 *HarryDone1
+Ron Talk PC_Ron_CrimeScene_41 *RonDone1
+//I can't go in there, that's a girls' toilet!
+
+Sleep 2
+BaseCam FlyTo CutCameraPos32
+BaseCam Target FlyTo Hermione StayLocked
+BaseCam FlyTo CutCameraPos31 Time=20 *
+
+Waitfor HermioneDone2
+Hermione WalkTo CutMark189 *HermioneDone3
+Ron RunTo CutMark187 *RonDone2
+Waitfor RonDone1
+Hermione say PC_Her_CrimeScene_61 *HermioneDone4
+//Oh, Ron, there won't be anyone in here. This is Moaning Myrtle's place.
+
+Waitfor HarryDone1
+Harry WalkTo CutMark188 *HarryDone2
+
+Waitfor RonDone2
+Ron WalkTo CutMark190 *RonDone3
+
+Waitfor HermioneDone3
+Hermione TurnTo Ron Follow
+
+WaitFor HarryDone2
+Harry TurnTo Ron Follow
+
+Waitfor HermioneDone4
+Hermione say PC_Her_CrimeScene_43
+//She haunts one of the toilets. It's been out-of-order all year because she keeps having tantrums and flooding the place.
+
+Harry TurnTo Myrtle
+Ron TurnTo Myrtle
+Hermione TurnTo Myrtle *
+
+Myrtle Talk PC_Myr_CrimeScene_75
+//I wish people would stop talking about me behind my back!!
+
+Hermione TurnTo Harry
+Harry TurnTo Hermione
+Ron TurnTo Hermione
+Harry Talk PC_Hry_CrimeScene_44
+//Who can the Heir of Slytherin be, though? Who'd want to frighten all the Muggle-borns out of Hogwarts?
+
+Ron TurnTo Harry
+Ron Talk PC_Ron_CrimeScene_81
+//Draco Malfoy. You heard him call Hermione a mud-blood. But how do we prove it's him?
+
+Ron TurnTo Hermione
+Hermione Talk PC_Her_CrimeScene_62
+//We'd need to sneak inside the Slytherin common room and ask Malfoy a few questions without him realizing it's us.
+
+Harry Talk PC_Hry_CrimeScene_80
+//<laugh>
+
+Ron Talk PC_Ron_CrimeScene_79
+//But that's impossible!
+
+Hermione Talk PC_Her_CrimeScene_47
+//All we'd need would be some Polyjuice Potion. It transforms you into somebody else.
+
+Hermione Talk PC_Her_CrimeScene_63
+//We could change Harry into a Slytherin. No one would know it was him.
+
+Hermione Talk PC_Her_CrimeScene_64
+//Two of the potion ingredients are a bit tricky, I'm afraid: Powdered bicorn horn and shredded boomslang skin.
+
+Hermione Talk PC_Her_CrimeScene_65
+//Harry, I'll need you to get me some of both, so I can finish the potion.
+
+Harry Talk PC_Hry_CrimeScene_67
+//Any idea where I can find some?
+
+Hermione Talk PC_Her_CrimeScene_66
+//There should be some boomslang skin outside, near the Herbology greenhouses; it's boomslang molting season.
+
+Hermione Talk PC_Her_CrimeScene_69
+//There's some bicorn horn in the Snape's storage room. But to get there, you'll have to go through the basement corridor that's choked with ectoplasm.
+
+SetObjectiveId PC_Hry_GoToHPc2_03
+
+Harry Talk PC_Hry_CrimeScene_70
+//Lovely. Molting boomslangs and corridors full of goo. This should be enjoyable.
+
+//BaseCam FadeOut
+
+release Harry
+release basecam
+
+//Put Ron and Hermione back in the people room for safe keeping.
+Ron teleport RonLoc
+Hermione Teleport HermioneHidden
+Release Ron
+Release Hermione
+//Done moving Ron & Hermione
+
+//Bring persistent HermioneCauldron to MMB and leave her there.
+//She stays here until GState130.
+//Too bad she doesn't have better bump lines. :(
+Capture HermioneCauldron
+HermioneCauldron Teleport CutMark189
+
+//Give her some bump lines.
+HermioneCauldron SET BumpSet HermBump	
+Release HermioneCauldron
+
+//Trigger GoToEntryHall
+
+
+//---------------------------------------------------------------------

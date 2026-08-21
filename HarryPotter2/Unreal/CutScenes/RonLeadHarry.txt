@@ -1,0 +1,9 @@
+
+//RonLeadHarry
+
+[Thread]
+
+Capture Ron
+sleep 9.5
+Ron RunTo cutmark115
+Ron TurnTo Harry Follow

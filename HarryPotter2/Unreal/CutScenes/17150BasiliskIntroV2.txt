@@ -1,0 +1,228 @@
+//17150BasiliskIntroV2
+
+[Dialog_01]
+
+Capture Harry
+Capture Tom
+Capture Fawkes
+Capture Ginny
+Capture Basecam
+Capture Sword
+
+//Harry say PC_Hry_BasiliskIntroV2_01
+//Open!
+
+Harry Turnto Ginny *
+sleep .5
+basecam Flyto Harry x=40 z=20 fixed *
+basecam target flyto harry z=20
+Capture Basilisk
+Harry say PC_Hry_BasiliskIntroV2_02
+//Ginny!
+
+//Basecam FlyTo CutCameraPos1 Time=6 easebetween *
+//basecam target flyto Cutmark2 Time=6 easebetween
+
+basecam target flyto ginny *
+basecam flyto ginny x=-240 z=318 y=-250
+Basecam flyto ginny x=-140 z=40 y=-40 time=8 easeto *cameraDOne1
+
+sleep 4
+Harry RunTo CutMark0
+Harry TurnTo ginny
+
+Harry Say PC_Hry_BasiliskIntroV2_40
+//Ginny, please wake up!
+
+waitfor cameraDOne1
+Tom flyto cutmark2
+Tom face Harry Follow
+sleep 1
+basecam flyto CutCameraPos0 *
+basecam target flyto tom
+basecam flyto cutcamerapos0 y=100 time=20 easeto *
+sleep 1
+
+Tom Talk PC_Tmr_BasiliskIntroV2_03 *TomDone1
+//She won’t wake.
+
+Harry turnto Tom follow*
+
+waitfor TomDone1
+Harry say PC_Hry_BasiliskIntroV2_04
+//Tom – Tom Riddle?
+
+Tom Talk PC_Tmr_BasiliskIntroV2_05
+//She’s still alive.  But only just.
+
+//basecam flyto Harry x=40 z=18 *
+//basecam target flyto harry z=18
+//Harry say PC_Hry_BasiliskIntroV2_06
+//You’ve got to help me, Tom.  We’ve got to get her out of here.  There’s a basilisk and it could be along at any moment!
+
+basecam flyto tom x=40 z=18 *
+basecam target flyto tom z=25
+Tom Talk PC_Tmr_BasiliskIntroV2_07 startanim=fidget_2 *tomDone1
+//Little Ginny's been writing in my old diary for months. She poured out her soul to me.
+
+sleep 3
+Tom Turnto Diary
+basecam flyto diary x=60 y=-60 z=100 *
+basecam target flyto diary z=20
+
+waitfor tomDone1
+
+Tom Talk PC_Tmr_BasiliskIntroV2_33 startanim=talk_LHand
+//It made me stronger until I had enough power to pour a little of my soul back into her.
+
+
+basecam flyto Harry x=40 z=20 *
+basecam target flyto harry z=20
+Harry Say PC_Hry_BasiliskIntroV2_41
+//What do you mean?
+
+basecam flyto cutcamerapos2 *
+basecam target flyto cutmark1
+Tom turnto Harry
+Tom Talk PC_Tmr_BasiliskIntroV2_11 startanim=talk_Rhand
+//Ginny Weasley opened the Chamber of Secrets, just as I had long ago… before I became... Lord Voldemort.
+
+
+//basecam flyto tom x=40 z=18 *
+//basecam target flyto tom z=25
+//Tom Talk PC_Tmr_BasiliskIntroV2_12 startanim=idle
+//She daubed threatening messages on the walls and set the Serpent of Slytherin on the Mudbloods and Filch’s cat.
+
+basecam flyto Harry x=40 z=20 *
+basecam target flyto harry z=20
+Harry say PC_Hry_BasiliskIntroV2_13
+//No.
+
+basecam flyto tom x=40 z=18 *
+basecam target flyto tom z=25
+Tom Talk PC_Tmr_BasiliskIntroV2_42 startanim=none
+//<laugh>
+
+Tom Talk PC_Tmr_BasiliskIntroV2_14 startanim=fidget_3
+//I’m afraid so. Ginny told me all about you, Harry. How is it that you managed to defeat me, the greatest sorcerer in the world?
+
+//Tom Talk PC_Tmr_BasiliskIntroV2_26 startanim=idle
+//So I decided to show you my famous capture of that great oaf, Hagrid, to gain your trust.
+
+//basecam flyto Harry x=40 z=20 *
+//basecam target flyto harry z=20
+//Harry say PC_Hry_BasiliskIntroV2_31
+//You framed Hagrid.
+
+//basecam flyto cutcamerapos2 *
+//basecam target flyto cutmark1
+//Tom Talk PC_Tmr_BasiliskIntroV2_27
+//Yes. But you, Harry Potter, how is it that you managed to defeat the greatest wizard of all time?
+
+//Harry say PC_Hry_BasiliskIntroV2_17
+//Why do you care?
+
+//Harry say PC_Tmr_BasiliskIntroV2_30
+//Haven’t you realised yet?
+
+//basecam flyto tom x=40 z=18 *
+//basecam target flyto tom z=25
+//Tom Talk PC_Tmr_BasiliskIntroV2_20 
+//Tom Marvolo Riddle is none other than Lord Voldemort.
+
+basecam flyto Harry x=40 z=20 *
+basecam target flyto harry z=20
+Harry say PC_Hry_BasiliskIntroV2_21
+//The greatest sorcerer in the world is Albus Dumbledore.
+
+basecam flyto cutcamerapos2 *
+basecam target flyto cutmark1
+Tom Talk PC_Tmr_BasiliskIntroV2_29
+//Dumbledore is gone! Now, I’m going to teach you a lesson. Let’s match the powers of Lord Voldemort, Heir of Slytherin, against the famous Harry Potter…
+
+//basecam flyto Harry x=40 z=20 *
+//basecam target flyto harry z=20
+//Harry say PC_Hry_BasiliskIntroV2_23
+//He’s not as gone as you might think!
+
+//basecam flyto tom x=40 z=18 *
+//basecam target flyto tom z=25
+//Tom Talk PC_Tmr_BasiliskIntroV2_24 startanim=talk_bothhands
+//To business, Harry.  I’m going to teach you a little lesson.
+
+basecam flyto CutCameraPos6 *
+basecam target flyto cutmark1
+Tom walkto Cutmark6
+Tom Turnto Harry *
+
+//Fawkws Flys In******************************************
+
+Fawkes AttachActorToBone Sword RightFoot
+
+basecam target flyto Fawkes StayLocked time=2 *
+
+Fawkes FollowSpline FawkesFlyInPoints easefrom start=FawkesStartPosition dest=FawkesEndPosition Time=15 accel=70 align *FawkesDOne
+Fawkes animate fly loop *
+Harry Turnto Fawkes follow 
+Tom TurnTo Fawkes follow
+basecam flyto CutCameraPos1 time=5 
+Fawkes animate fly loop *
+Tom TurnTo Fawkes follow
+basecam flyto tom x=40 z=18 *
+basecam target flyto tom z=25
+Tom TurnTo Fawkes follow
+Tom say PC_Tmr_BasiliskIntroV2_35
+//That's a phoenix…
+
+basecam flyto CutCameraPos1 *
+basecam target flyto Fawkes StayLocked *
+Harry Say PC_Hry_BasiliskIntroV2_39
+//Fawkes!
+sleep 1
+Fawkes UnAttachActor Sword
+
+sleep 2
+BaseCam FlyTo Sword fixed x=-50 z=50 StayLocked *
+BaseCam Target FlyTo Sword StayLocked *
+Tom Talk PC_Tmr_BasiliskIntroV2_36 *TomDoneDude
+//A sword…from Dumbledore, no doubt, afraid to come himself. Well, it won't save you, Harry Potter!
+
+waitfor FawkesDOne
+fawkes teleport CutMark9
+
+Waitfor TomDoneDude
+Tom TurnTo Basilisk *
+basecam flyto CutCameraPos6 *
+basecam target flyto cutmark1
+Harry runto CutMark5
+Harry Turnto Basilisk *
+
+
+tom animate summon *
+Tom say PC_Tmr_BasiliskIntroV2_43 *
+//Speak to me, Slytherin, greatest of the Hogwarts Four!
+
+sleep 3
+
+Basecam target flyto basilisk time=5 easebetween *
+Basilisk animate Entrance
+Basilisk animate idle loop *
+
+harry ToggleUseSword *
+sword teleport CutMark10
+basecam flyto tom x=40 z=18 *
+basecam target flyto tom z=25
+Tom Talk PC_Tmr_BasiliskIntroV2_37 startanim=idle
+//Kill him.
+
+Release Harry
+Release basilisk
+Release basecam
+Release Ginny
+Release Sword
+Trigger BasiliskEncounterTag *
+//Trigger BasiliskTag *
+
+Tom walkto Cutmark7 
+tom FlyTo Cutmark3
+release tom

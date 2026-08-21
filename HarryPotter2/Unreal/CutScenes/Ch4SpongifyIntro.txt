@@ -1,0 +1,172 @@
+
+//Multiple Intro Spongify Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Lockhart
+Capture challengescoremanager
+Capture basecam
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Lockhart
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeIsFirstTime Cue FirstTimeThread
+If ChallengePreviouslyBeaten Cue BeatenThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[FirstTimeThread]
+
+WaitFor FirstTimeThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry runto Point1 *HarryDone1
+
+basecam target flyto Harry staylocked time=1 *
+basecam flyto EntryCam01 time=2
+
+Waitfor HarryDone1
+
+Trigger EntryBars *
+
+basecam flyto IntroCam01 time=2 *
+
+Lockhart Talk PC_Gil_Chal4Spong_01 *LockhartDone0
+//Welcome, Harry Potter, to the Spongify Challenge. To complete the challenge, you must find the Completion Star, which can be found several floors above us.
+
+sleep 3
+
+basecam target flytounlocked
+
+basecam target flyto EndStar *
+basecam flyto IntroCam06
+
+sleep 1
+
+basecam flyto IntroCam07 time=3
+basecam flyto IntroCam08 time=2
+
+Waitfor LockhartDone0
+
+Lockhart Talk PC_Gil_Chal4Spong_02
+//Try to get to it as quickly as you can. If the Challenge Timer reaches zero before you have the Completion Star, you  lose the challenge.
+
+basecam flyto StarCam01 *
+basecam target flyto Star1 *
+
+Lockhart Talk PC_Gil_Chal4Spong_03 *LockhartDone1
+//Along the way you will find Challenge Stars. Collecting Challenge Stars will boost your timer and score. I highly recommend you try to find all of them.
+
+basecam flyto StarCam02 time=2
+
+Waitfor LockhartDone1
+
+basecam target flyto Harry *
+basecam flyto IntroCam03
+
+Lockhart Talk PC_Gil_Chal4Spong_04 *LockhartDone2
+//Try to get the Completion Star with as many seconds remaining as possible! The higher your score is when you complete the Challenge, the more house points I will award you!
+
+basecam flyto IntroCam02 time=3
+
+Waitfor LockhartDone2
+
+challengescoremanager beginchallenge *
+
+Release challengescoremanager
+Release Lockhart
+Release Harry
+Release basecam
+
+SaveGame
+
+
+//----------------------------------------------------------------------
+[BeatenThread]
+
+WaitFor BeatenThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry runto Point1 *HarryDone1
+
+basecam target flyto Harry staylocked time=1 *
+basecam flyto EntryCam01 time=2
+
+Waitfor HarryDone1
+
+basecam flyto IntroCam01 time=2 *
+
+Lockhart Talk PC_Gil_Chal4Spong_08 *LockhartDone0
+//Welcome back, Harry Potter, to my Spongify Challenge!  If you can manage to beat your high score, I will award you more house points.
+
+sleep 3
+
+basecam flyto IntroCam02 time=3
+
+Waitfor LockhartDone0
+
+challengescoremanager beginchallenge *
+
+Release challengescoremanager
+Release Lockhart
+Release Harry
+Release basecam
+
+SaveGame
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry runto Point1 *HarryDone1
+
+basecam target flyto Harry staylocked time=1 *
+basecam flyto EntryCam01 time=2
+
+Waitfor HarryDone1
+
+basecam flyto IntroCam01 time=2 *
+
+Lockhart Talk PC_Gil_Chal4Spong_13
+//Can't get enough of the Spongify Challenge, can you?  You have already mastered it, so I can not award you any more House Points.
+
+Lockhart Talk PC_Gil_Chal4Spong_14 *LockhartDone0
+//Feel free to go through it again, Harry.  Ready, set, go!
+
+sleep 1
+
+basecam flyto IntroCam02 time=3
+
+Waitfor LockhartDone0
+
+challengescoremanager beginchallenge *
+
+Release challengescoremanager
+Release Lockhart
+Release Harry
+Release basecam
+
+SaveGame

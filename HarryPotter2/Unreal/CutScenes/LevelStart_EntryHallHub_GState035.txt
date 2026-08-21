@@ -1,0 +1,16 @@
+
+//LevelStart_EntryHallHub_GState035
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+trigger CloseDungeon
+sleep .03
+trigger Close_Ch2Bars
+trigger ToggleCh2LevelLoad
+Sleep .03
+trigger Close_Ch4Bars
+Trigger ToggleCh4LevelLoad
+
+SetObjectiveId

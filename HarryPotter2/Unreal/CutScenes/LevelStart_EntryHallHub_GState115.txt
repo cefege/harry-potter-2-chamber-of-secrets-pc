@@ -1,0 +1,12 @@
+//LevelStart_EntryHallHub_GState115
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+
+//Tell Harry to tell himself what his objective is the first time you enter this Gstate.
+//trigger GoToMMB

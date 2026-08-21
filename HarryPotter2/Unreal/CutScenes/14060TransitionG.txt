@@ -1,0 +1,42 @@
+//14060TransitionG
+
+[Dialog_01]
+
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto GryfComCamPos
+basecam target flyto GryfComWindow
+basecam FOV angle=60 time=25 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransG_08
+//Harry put the diary in his room for safekeeping; he couldn't think of what else to do with it.
+
+Narrator Talk PC_Nar_TransG_00
+//Harry had always known that Hagrid had an unfortunate liking for large, monstrous creatures.
+
+Narrator Talk PC_Nar_TransG_06 *done
+//But he was equally certain that Hagrid would never mean to kill anybody…
+
+
+waitfor done
+sleep .5
+basecam fadeout
+basecam FOV angle=90
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints G
+Release Housepoints
+
+//Harry changegamestate gstate150
+Trigger TriggerChangeLevel_GryfComRm150
+
+Release Harry
+Release Narrator
+Release BaseCam

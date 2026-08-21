@@ -1,0 +1,42 @@
+//04090TransitionC
+
+[Dialog_01]
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto middle
+basecam target flyto cutmiddle
+
+
+basecam flyto start easeto time=25 *
+basecam target flyto cutstart easeto time=25 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransC_00
+//Everyone at Hogwarts was disturbed by the attack of Mrs. Norris and the mysterious words scrawled on the wall.   Rumors and speculation spread…
+
+Narrator Talk PC_Nar_TransC_01 *done
+//Hermione, in particular, was especially affected.  Ron and Harry became sure that she was up to something…but whatever it was, she remained tight-lipped.
+
+
+
+waitfor done
+sleep .5
+basecam fadeout
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints C
+Release Housepoints
+
+//Harry's gamestate changed in the preceding cutscene, so we don't need to ...
+//Harry changegamestate gstate050
+Trigger TriggerChangeLevel_EntryHall050
+
+Release Harry
+Release Narrator
+Release BaseCam

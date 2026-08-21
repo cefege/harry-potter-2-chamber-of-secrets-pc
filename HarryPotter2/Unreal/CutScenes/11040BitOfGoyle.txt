@@ -1,0 +1,92 @@
+//11040BitOfGoyle
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Hermione
+Capture Myrtle
+Capture BaseCam
+
+SetObjectiveId
+
+BaseCam FlyTo CutCameraPos38
+BaseCam Target FlyTo Harry StayLocked
+Harry WalkTo CutMark119 *
+Ron WalkTo CutMark117
+Ron TurnTo Hermione
+Hermione TurnTo Harry Follow
+Ron say PC_Ron_BitOfGoyle_13
+//I feel very uncomfortable being in a girls’ bathroom.
+
+
+
+Hermione say PC_Her_BitOfGoyle_14
+//Oh, Ron, there won’t be anyone in here.
+
+Harry say PC_Hry_BitOfGoyle_15
+//What about Moaning Myrtle -- she'll be in here, won't she?
+Harry TurnTo Hermione
+Myrtle Talk PC_Myr_BitOfGoyle_19
+//I wish people would stop interrupting my peace and quiet!  I do have feelings, you know, even if I am dead…
+
+Ron Talk PC_Ron_BitOfGoyle_20
+//She’s very touchy, isn’t she?
+
+Harry Talk PC_Hry_BitOfGoyle_09
+//What’s that horrible stink, Hermione?
+
+Hermione Talk PC_Her_BitOfGoyle_10
+//That will be the Polyjuice Potion-
+
+Hermione Talk PC_Her_BitOfGoyle_21
+//-- once you've given me the ingredients, Harry.
+
+Hermione Talk PC_Her_BitOfGoyle_34
+//Now - we need one more ingredient for the Potion to be completely effective.
+
+Hermione Talk PC_Her_BitOfGoyle_23
+//We’re going to need a bit of Goyle to complete the Potion.
+
+Ron Talk PC_Ron_BitOfGoyle_35
+//That’s disgusting.
+
+Harry Talk PC_Hry_BitOfGoyle_36
+//But how will I find Goyle?
+
+Hermione Talk PC_Her_BitOfGoyle_30
+//At this time he’s usually filling his face down in the dungeons.
+
+Hermione Talk PC_Her_BitOfGoyle_31
+//All you need to do is follow the trail of food, get the bit of Goyle and bring it back here to me.
+
+Ron Talk PC_Ron_BitOfGoyle_32
+//Good luck, Harry.
+
+Harry Talk PC_Hry_BitOfGoyle_33
+//Er, thanks, Ron.
+
+Harry ChangeGameState gstate110
+
+SetObjectiveId PC_Hry_GoToGoyle_03
+
+BaseCam FadeOut *
+
+//Chad when you put Harry down in the dungeon after this cutscene 
+//use these lines to get rid of Ron and Hermione. 
+//Eventually I need to leave HermioneCauldron in here. -Eric--------------------------------------------------------------------
+
+//Put Ron and Hermione back in the people room for safe keeping.
+
+Ron Teleport RonLoc
+Hermione Teleport HermioneHidden
+
+Trigger ChangeLevel_EntryHall
+
+//Done moving Ron & Hermione------------------------------------------------------------------------------------------
+
+Release Harry
+Release Ron
+Release Hermione
+Release Myrtle
+Release BaseCam

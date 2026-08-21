@@ -1,0 +1,253 @@
+
+//00307QuidditchTut3
+
+//Quidditch Tutorial continues, Taught by Oliver Wood.
+
+//Now the rest of the Griffindor team shows up and they start to play a practice game.
+
+//This game ends after X amount of time or when Harry Catches the Snitch.
+
+//Upon Win, Director sends the event: "WON"
+
+//Upon a LOSS, Director sends the event: "LOST"
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo Tut3CamFocus1 *
+BaseCam FlyTo Tut3Cam1 *
+
+WaitFor QplayersGetReady
+BaseCam FlyTo Tut3Cam2 Time=7 *
+
+WaitFor CamTurn
+BaseCam Target FlyTo Tut3CamFocus2 Time=2 *
+BaseCam FlyTo Tut3Cam3 Time=7 *
+
+Sleep 3.0
+Cue WoodSwap1
+
+WaitFor CamFOVIN
+//BaseCam FOV Angle=25 Time=5 *
+Sleep 2.0
+
+Cue TeamFaceCenter
+BaseCam FlyTo Tut3CamBeforeMatch
+
+
+WaitFor CamBackToHarry
+Sleep 5.0
+BaseCam GoHome
+
+//WaitFor CutEnd
+//Release BaseCam
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[BroomHarry]
+
+Capture Harry
+
+Harry FlyTo HarryLessonStartLoc
+Harry Face Wood
+
+
+WaitFor TeamFaceCenter
+//Harry MatchRot Harry_IntroPath_Start
+Harry FollowSpline Harry_IntroPath Start=Harry_IntroPath_Start Dest=Harry_IntroPath_End Time=1 Accel=100 Align EaseTo *
+
+//Harry FlyOnPath Harry_IntroPath Start=Harry_IntroPath_Start
+Harry Face Tut3CamFocus2
+
+Cue CamBackToHarry
+
+
+
+WaitFor WoodArrive
+//@@@@@@@@@@@@@@@@ Putting Quidditch Elements On the Field @@@@@@@@@@@@@@@@@@@@
+Capture Bludger1
+Capture Bludger2
+Capture Quaffle
+Capture Snitch
+
+Bludger1 Teleport IPBludger1
+Bludger2 Teleport IPBludger2
+Quaffle Teleport IPQuaffle
+Snitch Teleport IPSnitch
+
+Release Bludger1
+Release Bludger2
+Release Quaffle
+Release Snitch
+//@@@@@@@@@@@@@@@@ Putting Quidditch Elements On the Field @@@@@@@@@@@@@@@@@@@@
+
+Cue CutEnd
+
+WaitFor AllPlayersReleased
+WaitFor WoodDone
+ReCapture BaseCam
+Release Harry
+Release BaseCam
+
+
+
+ 
+Capture Director
+Director StartMockGame
+Release Director
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Wood]
+
+Capture Wood
+Capture BroomWood
+
+Wood FlyTo WoodLocStart
+//Teleports Ground Wood Onto the Field
+
+Wood TurnTo Tut3Cam1
+
+Wood Talk PC_Owd_QuidIntro_15 StartAnim=Talk_BothHands
+//Well now that the rest of the Gryffindor team is here lets play a mock game of Quidditch.
+
+Wood Talk PC_Owd_QuidIntro_16 StartAnim=Talk_flustered
+//You’ll want to avoid the purple Bludgers and other players Harry, and try to concentrate on the Snitch.
+
+Wood Talk PC_Owd_QuidIntro_18 StartAnim=Talk_rhand 
+//I’m gunna have a Gryffindor stand in as an enemy seeker, you’ll need to make sure she’s out of the way before you can catch the snitch.
+
+Wood Talk PC_Owd_QuidIntro_20 StartAnim=Talk_DontKnow
+//Don’t worry they’ll take it easy on you.
+
+//loopanim=Talk_BothHands
+
+Cue QplayersGetReady
+
+
+WaitFor WoodSwap1
+Wood Teleport GroundWoodOFF
+BroomWood Teleport WoodLocStart
+
+BroomWood MatchRot Wood_IntroPath_Start
+Cue CamFOVIN
+BroomWood FollowSpline Wood_IntroPath Start=Wood_IntroPath_Start Dest=Wood_IntroPath_End Time=1 Accel=100 Align EaseTo
+BroomWood Face Tut3CamFocus2
+Cue WoodArrive
+
+WaitFor CutEnd
+Release Wood
+Release BroomWood
+Cue WoodDone
+
+//Cue CamOnHarry
+//Sleep 1.0
+
+
+//---------------------------------------------------------------------
+
+WaitFor Ever
+Wood Talk PC_Owd_QuidIntro_21
+//When you’re close to another player Harry you can use your action key to kick or shove them.
+
+Wood Talk PC_Owd_QuidIntro_23
+//You’ll need to do this before you’ll be able to catch the Snitch.
+
+Wood Talk PC_Owd_QuidIntro_22
+//Quidditch is rough game Harry but don’t worry the padding helps.
+
+
+//---------------------------------------------------------------------
+
+[GryffindorQuidditchTeam]
+
+Capture GryffSeeker
+Capture George
+Capture Fred
+Capture GryffChaser1
+Capture GryffChaser2
+Capture GryffChaser3
+
+GryffSeeker Teleport GryffSeekerLocStart
+GryffSeeker Face Tut3Cam1
+
+George Teleport GeorgeLocStart
+George Face Tut3Cam1
+
+Fred Teleport FredLocStart
+Fred Face Tut3Cam1
+
+GryffChaser1 Teleport GryffChaser1LocStart
+GryffChaser1 Face Tut3Cam1
+
+GryffChaser2 Teleport GryffChaser2LocStart
+GryffChaser2 Face Tut3Cam1
+
+GryffChaser3 Teleport GryffChaser3LocStart
+GryffChaser3 Face Tut3Cam1
+
+WaitFor QplayersGetReady
+Fred MatchRot Fred_IntroPath_Start
+Fred FollowSpline Fred_IntroPath Start=Fred_IntroPath_Start Dest=Fred_IntroPath_End Time=9 Accel=100 Align EaseBetween *
+
+Sleep 0.05
+
+GryffChaser1 MatchRot GryffChaser1_IntroPath_Start
+GryffChaser1 FollowSpline GryffChaser1_IntroPath Start=GryffChaser1_IntroPath_Start Dest=GryffChaser1_IntroPath_End Time=9 Accel=100 Align EaseBetween *
+
+Sleep 0.05
+
+George MatchRot George_IntroPath_Start
+George FollowSpline George_IntroPath Start=George_IntroPath_Start Dest=George_IntroPath_End Time=9 Accel=100 Align EaseBetween *
+
+Sleep 0.50
+//This sleep is longer so that the front row can clear out before the back row heads out.
+//Back row are Chaser2 & Chaser3
+
+
+GryffChaser2 MatchRot GryffChaser2_IntroPath_Start
+GryffChaser2 FollowSpline GryffChaser2_IntroPath Start=GryffChaser2_IntroPath_Start Dest=GryffChaser2_IntroPath_End Time=9 Accel=100 Align EaseBetween *
+
+Sleep 0.10
+
+GryffChaser3 MatchRot GryffChaser3_IntroPath_Start
+GryffChaser3 FollowSpline GryffChaser3_IntroPath Start=GryffChaser3_IntroPath_Start Dest=GryffChaser3_IntroPath_End Time=9 Accel=100 Align EaseBetween *
+
+Sleep 1.0
+
+GryffSeeker MatchRot GryffSeeker_IntroPath_Start
+GryffSeeker FollowSpline GryffSeeker_IntroPath Start=GryffSeeker_IntroPath_Start Dest=GryffSeeker_IntroPath_End Time=8 Accel=100 Align EaseBetween *
+
+Sleep 5.0
+Cue CamTurn
+
+WaitFor TeamFaceCenter
+Fred Face Tut3CamFocus2
+GryffChaser1 Face Tut3CamFocus2
+George Face Tut3CamFocus2
+GryffChaser2 Face Tut3CamFocus2
+GryffChaser3 Face Tut3CamFocus2
+GryffSeeker Face Tut3CamFocus2
+
+WaitFor CutEnd
+Release GryffSeeker
+Release George
+Release Fred
+Release GryffChaser1
+Release GryffChaser2
+Release GryffChaser3
+
+Cue AllPlayersReleased
+
+//---------------------------------------------------------------------
+

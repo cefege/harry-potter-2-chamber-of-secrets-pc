@@ -1,0 +1,40 @@
+//=============================================================================
+// Incend_wand.
+//=============================================================================
+class Incend_wand expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=1.000000)
+    SourceWidth=(Base=1.000000)
+    SourceHeight=(Base=1.000000)
+    AngularSpreadWidth=(Base=0.000000)
+    AngularSpreadHeight=(Base=0.000000)
+    bSteadyState=True
+    speed=(Base=0.000000)
+    Lifetime=(Base=5.000000,Rand=2.000000)
+    ColorStart=(Base=(R=234,G=74,B=21))
+    ColorEnd=(Base=(R=30,G=30,B=30))
+    SizeWidth=(Base=3.000000,Rand=1.000000)
+    SizeLength=(Rand=2.000000)
+    SizeEndScale=(Base=3.000000)
+    DripTime=(Base=0.200000)
+    Damping=1.500000
+    Textures(0)=FireTexture'hp_fx.Particles.FireSingle'
+    EmitDelay=0.066670
+    LastUpdateLocation=(X=-388.530518,Y=-383.679016,Z=60.941666)
+    LastEmitLocation=(X=-388.530518,Y=-383.679016,Z=60.941666)
+    LastUpdateRotation=(Pitch=16528,Yaw=-16336)
+    EmissionResidue=0.153264
+    Age=16237.473633
+    CurrentPriorityTag=3
+    bDynamicLight=True
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-388.530518,Y=-383.679016,Z=60.941666)
+    Rotation=(Pitch=16528,Yaw=-16336)
+    OldLocation=(X=-32.000000,Y=64.000000,Z=96.000000)
+    bSelected=True
+    Name=ParticleFX1
+}

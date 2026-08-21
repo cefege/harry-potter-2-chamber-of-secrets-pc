@@ -1,0 +1,98 @@
+#=============================================================================
+# Unreal Engine makefile for Linux.
+#
+# Revision history:
+# 	* Created by Brandon Reinhart 
+#=============================================================================
+
+# Unreal directory. (Required by makefile-header.)
+UNREAL_DIR	= ../..
+
+# Include global definitions.
+include $(UNREAL_DIR)/makefile-header
+
+#-----------------------------------------------------------------------------
+# Directories.
+#-----------------------------------------------------------------------------
+
+SRC_DIRS	= $(ENGINE_SRC)
+INC_DIRS	= $(ENGINE_INC)
+BUILD_DIR	= $(ENGINE_BUILD)
+
+#-----------------------------------------------------------------------------
+# Compiler/linker options.
+#-----------------------------------------------------------------------------
+
+CXX		= $(STD_CXX)
+CXXFLAGS	= $(STD_CXXFLAGS) -I$(ENGINE_INC) -I$(CORE_INC) \
+			-DGPackage=GPackageEngine
+LDFLAGS		= $(STD_LDFLAGS) -shared -Wl,-soname,$(ENGINE_SONAME)
+LIBS		= $(STD_LIBS) $(CORE)
+AS		= $(STD_AS)
+ASFLAGS		= $(STD_ASFLAGS)
+LCFILE		= $(PSX2_LIB)/app.cmd
+
+#-----------------------------------------------------------------------------
+# Files.
+#-----------------------------------------------------------------------------
+
+OBJS =			\
+	Engine.o	\
+	UnEngineNative.o	\
+	UnActCol.o	\
+	UnActor.o	\
+	UnAudio.o	\
+	UnBunch.o	\
+	UnCamera.o	\
+	UnCamMgr.o	\
+	UnFont.o	\
+	UnCanvas.o	\
+	UnChan.o	\
+	UnCon.o		\
+	UnConn.o	\
+	UnDemoPenLev.o	\
+	UnDemoRec.o	\
+	UnDynBsp.o	\
+	UnEngine.o	\
+	UnFPoly.o	\
+	UnGame.o	\
+	UnIn.o		\
+	UnLevAct.o	\
+	UnLevel.o	\
+	UnLevTic.o	\
+	ULodMesh.o	\
+	UnMesh.o	\
+	UnModel.o	\
+	UnMover.o	\
+	UnNetDrv.o	\
+	UnParams.o	\
+	UnPath.o	\
+	UnPawn.o	\
+	UnPenLev.o	\
+	UnPhysic.o	\
+	UnPlayer.o	\
+	UnPrim.o	\
+	UnReach.o	\
+	UnRenderIterator.o	\
+	UnRoute.o	\
+	UnScript.o	\
+	UnScrTex.o	\
+	UnTex.o		\
+	UnTrace.o	\
+	UnURL.o		\
+	UnDownload.o\
+    UnSkeletalMesh.o\
+	AStatLog.o
+
+OUT = $(ENGINE)
+
+#-----------------------------------------------------------------------------
+# Rules.
+#-----------------------------------------------------------------------------
+
+# Use general rules.
+include $(UNREAL_DIR)/makefile-general
+
+#-----------------------------------------------------------------------------
+# The End.
+#-----------------------------------------------------------------------------

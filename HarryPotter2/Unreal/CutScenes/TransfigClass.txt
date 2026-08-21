@@ -1,0 +1,131 @@
+//TransfigClass
+
+[Thread]
+
+Capture Basecam
+Capture Harry
+Capture McGonagall
+Capture transfigM1
+Capture transfigM2
+Capture transfigM3
+Capture transfigF1
+Capture transfigF2
+Capture transfigF3
+
+McGonagall teleport McGTeach1
+
+transfigM1 TurnTo McGonagall Follow
+transfigM2 TurnTo McGonagall Follow
+transfigM3 TurnTo McGonagall Follow
+transfigF1 TurnTo McGonagall Follow
+transfigF2 TurnTo McGonagall Follow
+transfigF3 TurnTo McGonagall Follow
+
+McGonagall say PC_MCG_BUMPLINES_655 *
+//Morag! Please don't light the matches!
+
+Harry RunTo TransfigHarry1 *
+sleep 1
+
+
+
+McGonagall walkto McGTeach2 *Cue3
+
+BaseCam FlyTo HarryEntersCamPos
+BaseCam Target Flyto HarryEntersCamTarget
+
+WaitFor Cue3
+McGonagall turnto transfigM2 
+Harry TurnTo McGonagall Follow
+
+McGonagall talk PC_MCG_BUMPLINES_589 startanim=talkrighthand endanim=talklefthand
+//No No No. Hold your hands to the left, not the right.
+
+McGonagall TurnTo Harry
+//Basecam Target Flyto McGonagall
+
+BaseCam FlyTo McGCloseCamPos
+BaseCam Target FlyTo McGonagall z=20
+McGonagall talk PC_MCG_BUMPLINES_590 *Cue4
+// Mr. Potter! Why are you interrupting my class
+sleep 3
+
+BaseCam FlyTo farCam
+	
+
+
+transfigM1 TurnTo Harry Follow
+transfigF2 TurnTo Harry Follow
+
+sleep .2
+transfigM2 TurnTo Harry Follow
+transfigF1 TurnTo Harry Follow
+transfigF3 TurnTo Harry Follow
+
+sleep .2
+transfigM3 TurnTo Harry Follow
+
+WaitFor Cue4
+
+
+BaseCam FlyTo Harry x=64 y=-24 z=16
+Basecam Target flyto Harry y=-16 z=16
+Harry talk PC_HRY_BUMPLINES_591 startanim=talkbothhands
+//Sorry Professor McGonagall. I think I'm lost.
+
+
+BaseCam flyto McGonagall x=-60 y=32 z=32 *
+McGonagall WalkTo McGTeach3 *Cue1
+McGonagall say PC_MCG_BUMPLINES_652 *Cue2
+//Well, I suggest finding your way somewhere else while my class is in session.
+BaseCam flyto McGonagall x=-60 z=48 easebetween time=4 *
+WaitFor Cue1
+McGonagall TurnTo Harry
+
+WaitFor Cue2
+
+McGonagall Say PC_MCG_BUMPLINES_594
+//I shall deduct House Points the next time you barge into my classroom Mr. Potter!
+
+Basecam FlyTo farCam
+Basecam Target FlyTo McGonagall
+
+
+
+transfigM1 TurnTo McGonagall Follow
+transfigF2 TurnTo McGonagall Follow
+
+sleep .2
+transfigM2 TurnTo McGonagall Follow
+transfigF1 TurnTo McGonagall Follow
+transfigF3 TurnTo McGonagall Follow
+
+sleep .2
+transfigM3 TurnTo McGonagall Follow
+
+McGonagall talk PC_MCG_BUMPLINES_593
+//Now where were we? 
+
+McGonagall Walkto McGTeach2 *
+
+
+BaseCam Target AttachedTo=harry z=16
+BaseCam Locked Distance=100 
+
+sleep .5
+
+
+
+Harry RunTo TransfigHarry2
+trigger TransfigHarryLosesPoints
+
+Release transfigM1
+Release transfigM2
+Release transfigM3
+Release transfigF1
+Release transfigF2
+Release transfigF3
+
+Release McGonagall
+Release Harry
+Release BaseCam

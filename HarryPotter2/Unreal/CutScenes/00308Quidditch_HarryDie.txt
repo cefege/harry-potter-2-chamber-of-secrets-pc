@@ -1,0 +1,21 @@
+
+//00308Quidditch_HarryDie
+
+//This Cut scene is triggered when you lose because of Health (so Harry Dies)
+
+//This is an empty cut scene and is here just in case we need it.
+
+//The only thing this cut scene does is trigger a change level.
+
+//---------------------------------------------------------------------
+
+[Main]
+
+Sleep 5.0
+
+Trigger LoadGrounds
+//Loads you back out to the Grounds Hub
+
+
+
+//---------------------------------------------------------------------

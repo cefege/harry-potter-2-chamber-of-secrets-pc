@@ -1,0 +1,82 @@
+//00030WhompCrash
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture BaseCam
+
+//Add the following lines when Jason Newkirk cleans up the animations
+//Capture WhompWillow
+//WhompWillow animate HoldRon Bone=Bone16 loop *
+
+Harry Animate GetUp *HarryDone0
+BaseCam Target FlyTo CutMark29 *
+BaseCam FlyTo CutCameraPos2
+
+Harry changegamestate gstate010
+
+sleep 1
+BaseCam FadeIn time=2
+
+sleep 2
+basecam flash a=32 r=255 g=255 b=255 time=0.15 *
+trigger Thunder
+
+sleep 2
+Harry say PC_Hry_WhompCrash_08 *HarryDone1
+//Ron?  Ron, where are you?
+Basecam FlyTo CutCameraPos1 Time=11 easebetween *
+sleep 1
+cue yikesMusic
+
+
+waitfor HarryDone0
+Harry Animate Look_frantic loop Tween=2 * 
+Harry Turnto CutMark30
+waitfor HarryDone1
+BaseCam Target FlyTo Ron Time=4 easebetween *
+sleep 1
+Ron Talk PC_Ron_WhompCrash_09 StartAnim=Wave *RonDone1
+//Over here, Harry!  The Whomping Willow’s got me!
+Harry TurnTo Ron
+sleep 1
+Harry animate idle *
+
+waitfor RonDone1
+sleep 2
+Harry say PC_Hry_WhompCrash_10 *HarryDone2
+//Don’t worry, Ron – I’ll come and get you!  Just hold on!
+BaseCam Target FlyTo Harry z=21 *
+BaseCam FlyTo Harry z=25 x=30 
+BaseCam FlyTo Harry z=30 x=40 Time=4 *
+
+waitfor HarryDone2
+BaseCam Target FlyTo Ron z=25 *
+BaseCam FlyTo Ron z=25 x=40 y=-5
+BaseCam FlyTo Ron z=25 x=30 y=-5 Time=4 easeto *
+//Basecam FlyTo CutCameraPos4
+//BaseCam FlyTo CutCameraPos4 x=-20 time=5 easeto *
+ron animate scared loop *
+Ron say PC_Ron_WhompCrash_11 //startanim=scared loopanim=scared EndAnim=scared
+//I can’t do anything else!  Hurry up, Harry!
+basecam flash a=32 r=255 g=255 b=255 time=0.15 *
+trigger Thunder
+
+Release Harry
+Release BaseCam
+Ron animate idle loop *
+sleep .2
+Release Ron
+
+SaveGame
+//Added so that right at the end of this cut scene the game will be saved so if Harry dies
+//The game will have a spot to reload to. 
+
+
+[Music Timer]
+waitfor YikesMusic
+trigger MusicTriggerYikes
+sleep 3.2
+trigger MusicTriggerYikes
+trigger Music2

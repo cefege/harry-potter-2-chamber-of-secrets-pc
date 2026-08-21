@@ -1,0 +1,16 @@
+
+//levelStart_GrandStairHub_GState145
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+
+//this is a play once cut scene because right now there is nothing else happening at the start of the level.
+
+Capture Ron
+
+Ron Teleport CutMark153
+Ron face Harry Follow *
+
+Release Ron

@@ -1,0 +1,65 @@
+//14040Diary
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Myrtle
+Capture BaseCam
+
+Ron TurnTo Myrtle Follow*
+Harry WalkTo CutMark130
+
+BaseCam Target FlyTo Myrtle
+BaseCam FlyTo CutCameraPos45
+
+Harry TurnTo Myrtle Follow*
+Mrytle TurnTo Harry Follow*
+
+//Philip added this direction after putting Myrtle on a patrol path-----
+Myrtle FlyTo MyrtleOrigin Easebetween time=2 
+
+Myrtle Talk PC_Myr_Diary_00
+//Who’s that?  Come to throw something else at me?
+
+Harry Talk PC_Hry_Diary_09
+//Someone threw something at you?
+
+Myrtle Talk PC_Myr_Diary_12
+//Yes, they did.  It’s over there…
+
+Ron TurnTo Harry
+Myrtle TurnTo Ron
+Harry turnto Ron
+
+Ron Talk PC_Ron_Diary_11
+//Careful!  My dad told me some books can be very dangerous.
+
+Harry Talk PC_Hry_Diary_01
+//Well, we won’t find out unless we look at it.
+
+Harry Talk PC_Hry_Diary_03
+//It looks like an old diary.  Belonged to ‘T.M. Riddle’…
+
+Harry Talk PC_Hry_Diary_13
+//Whoever he was, he didn’t write in it.  It’s completely blank.
+
+Ron Talk PC_Ron_Diary_14
+//I wonder why someone wanted to try and get rid of it then?  Weird.
+
+basecam fadeout
+
+//Put Ron back in the people room for safe keeping.-------------------------------------------------------
+Ron teleport RonLoc
+Release Ron
+//Done moving Ron------------------------------------------------------------------------------------------
+
+
+Harry ChangeGameState GState150
+trigger ChangeLevelRiddle
+
+Release Basecam
+Release Harry
+
+Release Myrtle
+

@@ -1,0 +1,51 @@
+
+//WoodToQuid_GState035
+
+//----------------------------------------------------------------------
+[WoodLeadsToQuidditch]
+
+Capture Harry
+Capture Woods
+Capture Basecam
+
+//Woods FlyTo GoToQuidStart
+
+Woods teleport Quid_WoodTelLoc
+Harry RunTo Quid_HarryRunLoc1 *HarryDone
+Woods RunTo Quid_WoodRunLoc1 *GFemGry1Done0
+Waitfor GFemGry1Done0
+Woods TurnTo Harry *
+Basecam flyto Quid_Cam1 *
+Basecam Target Flyto Harry x=50 z=20
+
+Woods say PC_Owd_GoToQuid_00 *WoodDone1
+//Harry! There you are. Glad I found you!
+waitfor HarryDone
+Harry turnto woods Follow
+Waitfor GFemGry1Done0
+Woods TurnTo Harry *
+
+waitfor WoodDone1
+Harry say PC_Hry_GoToQuid_01
+//Hello, Wood.
+
+Woods say PC_Owd_GoToQuid_02
+//Time for Quidditch practice, Harry. None of the other teams have started training yet, so we'll have a good head start!
+
+Harry say PC_Hry_GoToQuid_03
+//But I haven't had lunch yet!
+
+Woods say PC_Owd_GoToQuid_04
+//You can eat later. Follow me to the Quidditch Pitch.
+
+Woods LeadActor Harry GoToQuidStart GoToQuidEnd *
+
+Release Woods
+sleep 1
+
+SetObjectiveId PC_Hry_GoToQuid2_07
+
+Release Harry
+BaseCam GoHome
+
+Release Basecam

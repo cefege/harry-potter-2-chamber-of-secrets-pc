@@ -1,0 +1,17 @@
+//HagridBumpScene020
+
+Capture Hagrid
+Capture Harry
+Capture Basecam
+
+Basecam Target flyto Hagrid z=24
+Harry TurnTo Hagrid
+Hagrid TurnTo Harry
+Hagrid Talk PC_HDW_Bumplines_353
+//Welcome back for th' new school year, Harry. I'm still gamekeeper here, thank goodness.
+
+Hagrid SetOnPatrolPointPath HagridPP1 *
+release Hagrid
+release Harry
+release BaseCam
+

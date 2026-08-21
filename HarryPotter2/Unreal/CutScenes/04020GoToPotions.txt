@@ -1,0 +1,62 @@
+//03100TransB and 04020GoToPotions
+
+[Dialog_01]
+
+//Get rid of last objective---------------------------------------
+SetObjectiveId
+
+
+//---------------------------------------------------------
+//03100TransB
+//********This has been moved to Transition.unr and its own cutscript
+//Capture Narrator
+
+//Narrator Talk PC_Nar_TransB_00
+//Mudblood... the nasty name some wizards use for other wizards who were born to non-magical parents.
+
+//Narrator Talk PC_Nar_TransB_02
+//And speaking of mud, October arrived damply at Hogwarts, spreading a soggy chill over the grounds and into the castle.
+
+//Narrator Talk PC_Nar_TransB_03
+//A different kind of chill would soon set in as well…
+
+//Release Narrator
+
+
+
+//---------------------------------------------------------
+//04020GoToPotions
+
+Capture Harry
+Capture Hermione
+Capture basecam
+
+Hermione teleport cutmark20
+Hermione Face Harry follow
+Harry teleport cutmark23
+basecam flyto CutCameraPos5 *
+basecam target flyto Harry
+basecam fadein *
+Harry walkto cutmark22 *HarryDone1
+Basecam Target flyto cutmark21 time=2 easebetween *
+
+sleep 1.5
+Hermione Talk PC_Her_GoToPotions_00 *HermioneDone1
+//It's time for Potions class with Professor Snape! We don't want to be late…you know what he's like.
+
+waitfor HarryDone1
+Harry turnto Hermione follow *
+
+waitfor HermioneDone1
+Hermione Talk PC_Her_GoToPotions_01 *
+//It's down in the Dungeons.  Follow me!
+sleep .5
+Hermione leadactor harry HermToPotionsStart HermToPotionsEnd *
+sleep .5
+
+SetObjectiveId PC_Hry_GoToPotions2_03
+
+release harry
+release hermione
+release basecam
+

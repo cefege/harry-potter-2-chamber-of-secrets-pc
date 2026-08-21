@@ -1,0 +1,40 @@
+
+//GroundsRonGoToAdv4
+
+//This cut scene takes place after Diffindo (Ch3) in the grounds.
+//This used to be where a gen kid lead Harry to a House Point Ceremony.
+//Now Ron leads you to Adv4 Green House.
+
+//---------------------------------------------------------------------
+
+[Dialog_01]
+
+SetObjectiveId
+
+Capture Harry
+Capture BaseCam
+
+Harry WalkTo CutMark23 *HarryDone
+sleep 1
+BaseCam Target FlyTo Ron
+BaseCam FlyTo CutCameraPos2
+
+Waitfor HarryDone
+Harry TurnTo Ron
+
+ReCapture Ron
+Ron TurnTo Harry
+
+Ron Talk PC_Ron_GetPoly_01
+//Harry! Hermione told me that you can find the shredded boomslang skin out in the greenhouse.
+
+Ron Talk PC_Ron_GetPoly_03
+//Follow me Harry.
+
+SetObjectiveId PC_Hry_GoToHPc2_04
+
+Ron LeadActor Harry GoToAd4GreenStart GoToAd4GreenEnd *
+
+Release Ron
+Release Harry
+Release BaseCam

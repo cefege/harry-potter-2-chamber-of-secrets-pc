@@ -1,0 +1,29 @@
+
+//LevelStart_EntryHallHub_GState010
+
+[MainThread]
+
+//Level Set Up-------------------------------------------
+
+trigger CloseGreatHall
+sleep .03
+trigger CloseGrandStaircase
+sleep .03
+trigger Close_Ch1Bars
+Trigger ToggleCh1LevelLoad
+sleep .03
+trigger CloseDungeon
+sleep .03
+trigger Close_Ch2Bars
+trigger ToggleCh2LevelLoad
+Sleep .03
+trigger Close_Ch4Bars
+Trigger ToggleCh4LevelLoad
+
+//This level only loads once in this game state because you can't leave. All the exits are locked.
+//So it's ok to leave the stuff below. -Eric
+
+//***** Removed the stuff below, because you can go back out into the Night Grounds. -Chad
+
+//Well then you probably don't need this either. -Eric
+//SetObjectiveId

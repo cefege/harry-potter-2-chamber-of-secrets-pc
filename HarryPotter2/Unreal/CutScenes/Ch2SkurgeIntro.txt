@@ -1,0 +1,194 @@
+
+//Multiple Intro Skurge Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Flitwick
+Capture challengescoremanager
+Capture basecam
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Flitwick
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeIsFirstTime Cue FirstTimeThread
+If ChallengePreviouslyBeaten Cue BeatenThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[FirstTimeThread]
+
+WaitFor FirstTimeThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+basecam FlyTo Start *
+basecam target FlyTo Cutmark1 x=-10 *
+
+Harry walkto cutmark1 *HarryDone1
+
+sleep 1
+
+Flitwick say PC_Flt_Chal2Skurge_02 *FlitDoneTalk
+//Welcome, Harry Potter, to my Skurge Challenge. 
+
+trigger EntryBars
+
+sleep .5
+
+sleep 3
+
+//basecam flyto CutCameraPos1 time=2
+//basecam target flyto CutCameraPos10 time=0.5
+
+//basecam MatchRot FirstCarSplinePoint
+//the x/y offset sucks, I"ll have to fix that at some point...
+
+BaseCam FollowSpline IntroFlyThru EaseBetween start=Start dest=End speed=450 accel=75 *BaseCamDone1
+
+sleep 4.5
+
+BaseCam Target FlyTo EndStar1 Easebetween time=2 *
+
+waitfor FlitDoneTalk
+Flitwick say PC_Flt_Chal2Skurge_08
+//Try to get to it as quickly as you can. If the Challenge Timer 
+waitfor BaseCamDone1
+
+basecam FlyTo CutCameraPos4 *
+basecam target FlyTo star1
+
+Flitwick say PC_Flt_Chal2Skurge_09 *FlitDoneTalk2
+//Along the way you will find Challenge Stars. C
+sleep 1
+basecam flyto CutCameraPos5 easebetween time=6
+
+
+basecam FlyTo Cutcamerapos0 *
+BaseCam Target AttachedTo=harry
+sleep .1
+BaseCam Locked YawStep=25 MoveTightness=0 *
+
+//basecam flyto CutCameraPos7 time=2 *
+waitfor FlitDoneTalk2
+Flitwick say PC_Flt_Chal2Skurge_10
+//Try to get the Completion Star with as many 
+
+//basecam flyto CutCameraPos8 time=2 *
+
+//Flitwick say PC_Flt_Chal2Skurge_15
+//Ready to begin? Good luck!  3 …2…1…go!
+
+challengescoremanager beginchallenge *
+
+release basecam
+release challengescoremanager
+release Harry
+release Flitwick
+
+SaveGame
+
+
+//----------------------------------------------------------------------
+[BeatenThread]
+
+WaitFor BeatenThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+basecam FlyTo Cutcamerapos7 *
+basecam target FlyTo Cutmark1 x=-10 *
+
+Harry walkto cutmark1 *HarryDone1
+
+sleep 1
+
+Flitwick Talk PC_Flt_Chal2Skurge_16 *
+//Welcome back, Harry Potter, to my Skurge Challenge!  If you can manage to beat your high score, I will award you more House Points.
+
+sleep .5
+
+sleep 3
+
+basecam FlyTo Cutcamerapos0 *
+BaseCam Target AttachedTo=harry
+sleep .1
+BaseCam Locked YawStep=25 MoveTightness=0 *
+
+//basecam flyto CutCameraPos7 time=2 *
+
+//basecam flyto CutCameraPos8 time=2 *
+
+Flitwick say PC_Flt_Chal2Skurge_15
+//Ready to begin? Good luck!  3 …2…1…go!
+
+challengescoremanager beginchallenge *
+
+release basecam
+release challengescoremanager
+release Harry
+release Flitwick
+
+SaveGame
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+basecam FlyTo Cutcamerapos7 *
+basecam target FlyTo Cutmark1 x=-10 *
+
+Harry walkto cutmark1 *HarryDone1
+
+sleep 1
+
+Flitwick Talk PC_Flt_Chal2Skurge_47 *FlitDone1
+//Welcome back, Mr. Potter.  You have already mastered the Skurge Challenge so I can not award you any more House Points.
+
+WaitFor FlitDone1
+
+Flitwick Talk PC_Flt_Chal2Skurge_48 *FlitDone2
+//However, feel free to go through the Challenge again.
+
+basecam FlyTo Cutcamerapos0 *
+BaseCam Target AttachedTo=harry
+sleep .1
+BaseCam Locked YawStep=25 MoveTightness=0 *
+
+//basecam flyto CutCameraPos7 time=2 *
+
+//basecam flyto CutCameraPos8 time=2 *
+
+WaitFor FlitDone2
+
+Flitwick say PC_Flt_Chal2Skurge_15
+//Ready to begin? Good luck!  3 …2…1…go!
+
+challengescoremanager beginchallenge *
+
+release basecam
+release challengescoremanager
+release Harry
+release Flitwick
+
+SaveGame

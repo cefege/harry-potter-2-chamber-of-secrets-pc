@@ -1,0 +1,185 @@
+//12020Trans2Goyle
+
+[Dialog_01]
+
+Capture HarryGlasses
+Capture HarryAsGoyle
+Capture HarryFoot
+Capture HarryHand
+Capture HarryToGoyle
+Capture Harry
+Capture Ron
+Capture Hermione
+Capture BaseCam
+
+SetObjectiveId
+
+Hermione TurnTo Harry Follow
+Ron TurnTo Harry Follow
+
+Harry RunTo CutMark129 *HarryMadeIt
+sleep 1
+BaseCam FlyTo CutCameraPos38
+BaseCam Target FlyTo Harry
+BaseCam Target FlyTo CutMark129 time=3 *
+Harry Say PC_Hry_Trans2Goyle_12 *
+//I’ve got the bit of Goyle.
+
+waitfor HarryMadeIt
+Harry WalkTo CutMark125 *HarryMadeIt2
+Ron Say PC_Ron_Trans2Goyle_13
+//Well done, mate.
+
+waitfor HarryMadeIt2
+Harry TurnTo Hermione
+Hermione TurnTo Harry
+Ron TurnTo Harry
+BaseCam Target FlyTo Hermione z=18
+BaseCam FlyTo Hermione z=18 x=40 y=-20
+
+Harry Teleport CutMarkBlank
+HarryToGoyle Teleport CutMark125
+HarryToGoyle face Hermione
+
+Hermione say PC_Her_Trans2Goyle_17
+//There you go.
+
+HarryToGoyle Animate DrinkUp tween=0.0 *
+sleep .1
+BaseCam FlyTo CutCameraPos38
+BaseCam Target FlyTo CutMark125
+sleep .5
+BaseCam Target FlyTo HarryToGoyle z=15 time=5 *
+BaseCam FlyTo HarryToGoyle z=15 x=55 time=5 *
+sleep .5
+Ron Say PC_Ron_Trans2Goyle_18
+//Rather you than me.
+
+sleep 1.8
+
+
+Harry Say PC_Hry_Trans2Goyle_19
+//Cheers.
+
+sleep 2.4
+Harry Say PC_Hry_Trans2Goyle_20
+//Urgh…
+
+BaseCam FlyTo CutCameraPos38
+BaseCam Target FlyTo HarryToGoyle
+
+Hermione Say PC_Her_Trans2Goyle_21
+//Harry!
+
+HarryHand Teleport CutMark128
+sleep .5
+HarryHand Animate HandThrob tween=0.0 *
+
+BaseCam Target FlyTo HarryHand z=3
+BaseCam FlyTo HarryHand x=5 z=20 
+
+sleep 1
+Ron Say PC_Ron_Trans2Goyle_22
+//Eurgh!  That’s disgusting!
+
+
+HarryFoot Teleport CutMark127
+HarryFoot Animate Foot tween=0.0 *
+sleep .1
+BaseCam Target FlyTo HarryFoot z=-40 y=5
+BaseCam FlyTo HarryFoot z=-25 x=15 //CutCameraPos41
+HarryHand Teleport CutMarkHarryHand
+
+
+HarryToGoyle Teleport CutMarkHarryToGoyle 
+HarryAsGoyle Teleport CutMark125
+HarryAsGoyle face Hermione
+sleep 3
+HarryAsGoyle Animate shakes tween=0.0 *
+
+
+sleep .1
+BaseCam Target FlyTo HarryAsGoyle x=20 z=-10
+BaseCam FlyTo GoyleStart
+HarryFoot Teleport CutMarkHarryFoot
+
+sleep 1
+BaseCam Target FlyTo HarryAsGoyle z=22 x=20 time=6 *
+BaseCam FollowSpline GoyleSpline start=GoyleStart dest=GoyleEnd easefrom Time=7.5 accel=20
+
+
+BaseCam Target FlyTo Ron z=20
+BaseCam FlyTo Ron z=18 x=40
+HarryAsGoyle Teleport CutMarkHarryAsGoyle
+HarryGlasses Teleport CutMark125
+HarryGlasses face Ron
+Ron Say PC_Ron_Trans2Goyle_23
+//Are you okay, er, Harry?
+HarryGlasses Animate TakeOffGlasses tween=0.0 *
+sleep .1
+BaseCam Target FlyTo HarryGlasses z=22
+BaseCam FlyTo HarryGlasses z=21 x=50 
+
+
+sleep 2
+BaseCam FlyTo CutCameraPos38
+HarryGlasses Say PC_AsG_Trans2Goyle_24
+//Yeah.  I’m fine.
+
+BaseCam Target FlyTo Ron z=20
+BaseCam FlyTo Ron z=18 x=40
+Ron Say PC_Ron_Trans2Goyle_26 *RonDone
+//Go down to the dungeons, see if you can get into the Slytherin Common Room and find Draco!
+
+HarryGlasses Teleport CutMarkHarryGlasses
+Harry Teleport CutMark125
+Harry Face Ron
+
+//change Harry's mesh to Goyle's
+trigger HarryToGoyle
+
+sleep 3
+
+BaseCam FlyTo CutCameraPos38
+BaseCam Target FlyTo Harry
+
+
+waitfor RonDone
+sleep .5
+Harry Say PC_AsG_Trans2Goyle_27
+//Okay.
+
+
+Hermione Say PC_Her_Trans2Goyle_28 *HermioneDone
+//Good luck, er, Harry.
+
+Harry changegamestate gstate120
+SetObjectiveId PC_AsG_GoToDung_03
+sleep 1
+
+//Chad when you put Harry down in the dungeon after this cutscene 
+//use these lines to get rid of Ron and Hermione. 
+//Eventually I need to leave HermioneCauldron in here. -Eric--------------------------------------------------------------------
+
+//Put Ron and Hermione back in the people room for safe keeping.
+
+//Ron teleport RonLoc
+//Hermione Teleport HermioneHidden
+//Release Ron
+//Release Hermione
+
+//Done moving Ron & Hermione------------------------------------------------------------------------------------------
+
+Release HarryAsGoyle
+Release BaseCam
+
+waitfor HermioneDone
+Release HarryGlasses
+Release HarryFoot
+Release HarryHand
+Release HarryToGoyle
+
+Release Harry
+Release Ron
+Release Hermione
+

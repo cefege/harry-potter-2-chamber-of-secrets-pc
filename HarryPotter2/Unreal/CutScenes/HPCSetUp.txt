@@ -1,0 +1,27 @@
+//HPCSetUp
+
+[thread]
+
+//--------------------------House Point Ceremony Setup-------------------------------------
+Capture Dumbledore
+Capture Draco
+Capture GFemRav1
+Capture GMaleHuf2
+
+Dumbledore Teleport CutMark32
+Dumbledore Face CutMark33
+
+Draco Teleport DracoHPLoc
+Draco Face CutMark32
+
+GFemRav1 Teleport PenelopeHPLoc
+GFemRav1 Face CutMark32
+
+GMaleHuf2 Teleport JustinHPLoc
+GMaleHuf2 Face CutMark32
+
+Release Dumbledore
+Release Draco
+Release GFemRav1
+Release GMaleHuf2
+//--------------------------House Point Ceremony Setup-------------------------------------

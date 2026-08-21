@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "name": "UT469eSDK",
+      "source_type": "release-archive",
+      "url": "https://github.com/OldUnreal/UnrealTournamentPatches/releases/download/v469e/OldUnreal-UTPatch469e-SDK.zip",
+      "release_asset_id": 314894393,
+      "size": 60007957,
+      "sha256": "b213789a18d736beacdf8bc2740bcc6e031789b806823b9f7eb3a75b2dacedcc",
+      "license": "Epic retail-derived personal non-profit terms",
+      "license_paths": ["ThirdParty/UT469eSDK/LICENSE.md", "ThirdParty/UT469eSDK/README.md"],
+      "role": "vendored SDLDrv and SDLLaunch source subset",
+      "vendored_metadata": "ThirdParty/UT469eSDK/.source.json"
+    },
+    {
+      "name": "XOpenGLDrv",
+      "source_type": "git",
+      "url": "https://github.com/OldUnreal/XOpenGLDrv",
+      "commit": "6907839798152fc02090711b260e54a7294eecfc",
+      "tree": "a7dde1f73285bacbb8fc21bad6e64da7ead915fe",
+      "license": "BSD-3-Clause-style with bundled glad MIT and GLM MIT notices",
+      "license_paths": ["ThirdParty/XOpenGLDrv/LICENSE.md", "ThirdParty/XOpenGLDrv/glm/copying.txt"],
+      "role": "vendored XOpenGL renderer subset",
+      "vendored_metadata": "ThirdParty/XOpenGLDrv/.source.json"
+    },
+    {
+      "name": "UT99VulkanDrv",
+      "source_type": "git",
+      "url": "https://github.com/dpjudas/UT99VulkanDrv",
+      "commit": "a29e9ac0df1c60ad302d91bc3a51ab026c1a307c",
+      "tree": "e3c6add0866e3b00d40c39031a5d46f9ad28d68e",
+      "license": "zlib with bundled ZVulkan, Vulkan-header, VMA, volk, and glslang notices",
+      "license_paths": ["ThirdParty/UT99VulkanDrv/LICENSE.md", "ThirdParty/UT99VulkanDrv/ZVulkan/LICENSE.md", "ThirdParty/UT99VulkanDrv/ZVulkan/src/glslang/LICENSE.txt"],
+      "role": "vendored VulkanDrv and self-contained ZVulkan trees",
+      "vendored_metadata": "ThirdParty/UT99VulkanDrv/.source.json"
+    },
+    {
+      "name": "SDL2",
+      "source_type": "git",
+      "url": "https://github.com/libsdl-org/SDL",
+      "archive_url": "https://codeload.github.com/libsdl-org/SDL/tar.gz/5d249570393f7a37e037abf22cd6012a4cc56a71",
+      "tag": "release-2.32.10",
+      "commit": "5d249570393f7a37e037abf22cd6012a4cc56a71",
+      "license": "zlib",
+      "upstream_license_path": "LICENSE.txt",
+      "role": "statically linked window, input, OpenGL, and Vulkan integration"
+    },
+    {
+      "name": "OpenAL Soft",
+      "source_type": "git",
+      "url": "https://github.com/kcat/openal-soft",
+      "archive_url": "https://codeload.github.com/kcat/openal-soft/tar.gz/b2c48f7718ef3fcf67921a8b6534c4914e328970",
+      "tag": "1.25.2",
+      "commit": "b2c48f7718ef3fcf67921a8b6534c4914e328970",
+      "license": "LGPL-2.0-or-later with BSD-3-Clause and PFFFT notices",
+      "upstream_license_paths": ["COPYING", "BSD-3Clause", "LICENSE-pffft"],
+      "role": "replaceable bundled dynamic OpenAL implementation"
+    },
+    {
+      "name": "libogg",
+      "source_type": "git",
+      "url": "https://github.com/xiph/ogg",
+      "archive_url": "https://codeload.github.com/xiph/ogg/tar.gz/be05b13e98b048f0b5a0f5fa8ce514d56db5f822",
+      "tag": "v1.3.6",
+      "tag_object": "db03f952b25717fd5c4938817c9290837a4ae1b2",
+      "commit": "be05b13e98b048f0b5a0f5fa8ce514d56db5f822",
+      "license": "Xiph BSD-3-Clause-style",
+      "upstream_license_path": "COPYING",
+      "role": "statically linked Ogg container support"
+    },
+    {
+      "name": "libvorbis",
+      "source_type": "git",
+      "url": "https://github.com/xiph/vorbis",
+      "archive_url": "https://codeload.github.com/xiph/vorbis/tar.gz/0657aee69dec8508a0011f47f3b69d7538e9d262",
+      "tag": "v1.3.7",
+      "tag_object": "0c55fa38933fd4bdb7db7c298b27e7bf2f2c5e98",
+      "commit": "0657aee69dec8508a0011f47f3b69d7538e9d262",
+      "license": "Xiph BSD-3-Clause-style",
+      "upstream_license_path": "COPYING",
+      "role": "statically linked Vorbis and vorbisfile decoding"
+    },
+    {
+      "name": "libSquish",
+      "source_type": "git-archive-mirror",
+      "url": "https://github.com/svn2github/libsquish",
+      "archive_url": "https://codeload.github.com/svn2github/libsquish/tar.gz/c763145a30512c10450954b7a2b5b3a2f9a94e00",
+      "commit": "c763145a30512c10450954b7a2b5b3a2f9a94e00",
+      "license": "MIT",
+      "upstream_license_path": "LICENSE",
+      "role": "statically linked DXT1 compatibility codec"
+    },
+    {
+      "name": "MoltenVK",
+      "source_type": "release-archive",
+      "url": "https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar",
+      "tag": "v1.4.2",
+      "commit": "db66022459ffb663aa2b50f6b018bc2e124f5edf",
+      "size": 59563008,
+      "sha256": "f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e",
+      "license": "Apache-2.0",
+      "upstream_license_path": "LICENSE",
+      "role": "replaceable bundled Vulkan loader and implementation"
+    },
+    {
+      "name": "SurrealEngine",
+      "source_type": "git-oracle",
+      "url": "https://github.com/dpjudas/SurrealEngine",
+      "commit": "1d2a694ccdceb2259a2fd2d6664db2fc505ac263",
+      "tree": "8c688ebf1423418c86e9e68cb59161a361047be2",
+      "license": "zlib-style project license",
+      "upstream_license_path": "LICENSE.md",
+      "role": "read-only macOS MoltenVK packaging and surface pattern; no copied code"
+    },
+    {
+      "name": "vgmstream",
+      "source_type": "git-oracle",
+      "url": "https://github.com/vgmstream/vgmstream",
+      "commit": "11508e91a069066d0f6526d0096568b46c354014",
+      "tree": "4d97b2bc2251ead99ceb51e35f343f3410e8427a",
+      "source_path": "src/coding/xa_decoder.c",
+      "source_blob": "631eac80b9d68e82ae3ce8a166013400bcc71de9",
+      "license": "ISC-style",
+      "upstream_license_path": "COPYING",
+      "role": "EA-XA coefficient and arithmetic oracle only"
+    }
+  ]
+}

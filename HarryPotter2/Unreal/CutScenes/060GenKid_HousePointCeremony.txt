@@ -1,0 +1,73 @@
+
+//060GenKid_HousePointCeremony
+
+//---------------------------------------------------------------------
+
+[MainStart]
+
+Capture Harry
+Capture BaseCam
+Capture GMaleGry4
+
+//Get rid of last objective---------------------------------------
+SetObjectiveId
+
+Harry teleport Cutmark178
+Harry Face Cutmark177
+GMaleGry4 Teleport CutMark183
+
+basecam flyto CutCameraPos24 y=-50
+BaseCam Target FlyTo Cutmark178
+
+//close bars and turn off level load trigger so Harry can open the bars, run through, and not trigger the level load.
+trigger Close_Ch2Bars
+Trigger ToggleCh2LevelLoad
+
+BaseCam FlyTo CutCameraPos24 y=0 time=5 *
+basecam fadein
+
+//open the bars
+trigger Close_Ch2Bars
+
+sleep 1
+//open the door
+trigger ComingFrom_Ch2
+
+sleep 1
+BaseCam Target FlyTo Cutmark181 time=4 *
+Harry RunTo Cutmark177 Cutmark179
+
+trigger Close_Ch2Door
+
+Harry RunTo Cutmark180 *HarryDoneRun
+
+WaitFor HarryDoneRun
+Harry TurnTo GMaleGry4 follow*
+
+GMaleGry4 RunTo Cutmark181 *GMaleGry4DoneRun
+
+WaitFor GMaleGry4DoneRun
+GMaleGry4 TurnTo Harry
+
+GMaleGry4 Talk PC_Grm_GoToHPCe_03
+//The weekly House Point Ceremony is starting soon.
+
+SetObjectiveId PC_Hry_GoToHPc2_00
+
+GMaleGry4 LeadActor Harry Chad1GoToHPCStart HPCeremony *
+
+//HPCeremony
+
+BaseCam GoHome
+Sleep 1.0
+
+Release Harry
+Release BaseCam
+Release GMaleGry4
+Trigger ToggleCh2LevelLoad
+
+//---------------------------------------------------------------------
+
+
+
+

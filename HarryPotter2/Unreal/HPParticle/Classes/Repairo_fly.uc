@@ -1,0 +1,38 @@
+//=============================================================================
+//=============================================================================
+class repairo_fly expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=200.000000)
+    SourceWidth=(Base=3.000000)
+    SourceHeight=(Base=3.000000)
+    AngularSpreadWidth=(Base=45.000000,Rand=10.000000)
+    AngularSpreadHeight=(Base=45.000000,Rand=10.000000)
+    bSteadyState=True
+    speed=(Base=20.000000)
+    Lifetime=(Base=0.750000)
+    ColorStart=(Base=(R=128,B=128))
+    ColorEnd=(Base=(R=128,G=128,B=128))
+    SizeWidth=(Rand=2.000000)
+    SizeLength=(Rand=2.000000)
+    SizeEndScale=(Base=0.250000)
+    SpinRate=(Base=-3.000000,Rand=3.000000)
+    SizeDelay=0.250000
+    Damping=5.000000
+    Gravity=(Z=-100.000000)
+    Textures(0)=Texture'HPParticle.hp_fx.Particles.Sparkle_3'
+    LastUpdateLocation=(X=-383.860016,Y=-178.575821,Z=65.730934)
+    LastEmitLocation=(X=-383.860016,Y=-178.575821,Z=65.730934)
+    LastUpdateRotation=(Pitch=16144,Yaw=-16336)
+    EmissionResidue=0.810257
+    Age=13676.870117
+    CurrentPriorityTag=2
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-383.860016,Y=-178.575821,Z=65.730934)
+    Rotation=(Pitch=16144,Yaw=-16336)
+    OldLocation=(X=1.133467,Y=115.525375,Z=68.572403)
+    Name=ParticleFX2
+}

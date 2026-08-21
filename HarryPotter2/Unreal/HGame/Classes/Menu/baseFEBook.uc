@@ -1,0 +1,2 @@
+class baseFEBook extends UWindowDialogClientWindow;
+

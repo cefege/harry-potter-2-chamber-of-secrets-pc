@@ -1,0 +1,181 @@
+
+//FIRST HousePointCeremony IntroCutScene
+
+[Thread1]
+
+Capture Harry
+Capture Dumbledore
+Capture basecam
+
+Trigger BeanBonusBars *
+
+//BaseCam FlyTo CutCamPos1 *
+
+
+
+Harry WalkTo CutMark33 *
+Dumbledore Talk PC_Dum_HPCeremony_01 *DumbDone
+//Good morning everyone. For those of you who have trouble remembering names, I am Albus Dumbledore, headmaster of Hogwarts.
+
+//Sleep 1
+
+//Basecam Flyto Dumbledore x=100 y=60 z=40 time=8 *
+BaseCam Target FlyTo Dumbledore z=15 Time=5 *
+BaseCam FlyTo CutCamPos2 EaseTo Time=5 *
+BaseCam FlyTo CutCamPos3 EaseTo Z=5 Time=14 *
+
+
+WaitFor DumbDone
+Dumbledore Talk PC_Dum_HPCeremony_02 startanim=Talk_bothhands
+//Welcome to the first weekly House Point Ceremony of the school year.
+
+Dumbledore Talk PC_Dum_HPCeremony_03 startanim=Idle
+//The House with the most points wins a visit to the Bean Bonus Room. The length of the visit is dependant on how many more points they have over the second placed House.
+
+Cue DumLine8
+
+//Cue PointsCloseUp
+//WaitFor PointsCloseUp
+//Added by Philip to face ambient kids at Harry **********
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GMaleGry4
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+Capture Draco
+
+Draco Face Harry Follow
+GOldMaleGry1 face Harry Follow
+GFemGry0 face Harry Follow
+GMaleGry4 face Harry Follow
+GFemHuf2 face Harry Follow
+GMaleHuf3 face Harry Follow
+GFemRav2 face Harry Follow
+GMaleRav2 face Harry Follow
+GFemRav3 face Harry Follow
+GOldMaleSly1 face Harry Follow
+GFemSly2 face Harry Follow
+GOldMaleSly2 face Harry Follow
+GFemSly1 face Harry Follow
+GFemSly3 face Harry Follow
+//ambient kids are facing Harry**********************
+
+BaseCam FlyTo PointsCamPos EaseTo Time=2 *
+BaseCam Target FlyTo PointsTarget Time=2 *
+//Sleep 2
+
+WaitFor DumTalkAgain
+ReCapture Dumbledore
+
+Dumbledore Talk PC_Dum_HPCeremony_12 startanim=Talk_rhand *HarryToBeanDoor
+//humm, It apears that Gryffindor is in the lead.  Harry, it looks like you get to visit the Bonus Bean Room.
+
+
+WaitFor HarryToBeanDoor
+BaseCam FlyTo CutCamPos2 EaseTo Time=2 *
+//BaseCam Target FlyTo Harry StayLocked *
+
+BaseCam Target FlyTo HarryGetReadyBeanMark *
+
+Harry WalkTo HarryGetReadyBeanMark *
+
+BaseCam Target FlyTo HarryGoingToBeanRoom Time=8 *
+
+Dumbledore Talk PC_Dum_HPCeremony_14 *
+//Good luck, and remember you only have a limited time to collect beans.
+
+BaseCam FlyTo BeanCam EaseTo Time=2 *
+Sleep 3
+BaseCam FlyTo EndCam EaseTo Time=3 *
+
+
+Trigger BeanDoor *
+Harry RunTo HarryGoingToBeanRoom FinalBeanCutMark *CutDone
+
+//Eric added the next two lines for hub stuff.
+Harry changegamestate gstate035
+SetObjectiveId
+
+WaitFor CutDone
+BaseCam Target FlyTo HarryGoingToBeanRoom
+
+//added by Philip to remove ambient kids**********************
+
+Trigger BeanDoor *
+BaseCam FadeOut
+
+GOldMaleGry1 teleport cutmark28
+GFemGry0 teleport cutmark62f
+GMaleGry4 teleport cutmark45
+GFemHuf2 teleport cutmark51f
+GMaleHuf3 teleport cutmark52
+GFemRav2 teleport cutmark54f
+GMaleRav2 teleport cutmark54
+GFemRav3 teleport cutmark55f
+GOldMaleSly1 teleport cutmark56
+GFemSly2 teleport cutmark57f
+GOldMaleSly2 teleport cutmark57
+GFemSly1 teleport cutmark56f
+GFemSly3 teleport cutmark58f
+
+release GOldMaleGry1
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf3
+release GFemRav2
+release GMaleRav2
+release GFemRav3
+release GOldMaleSly1
+release GFemSly2
+release GOldMaleSly2
+release GFemSly1
+release GFemSly3
+//ambient kids removed**********************
+
+//teleport the girl that lead Harry to the House Point Ceremony in GState035 back to the people room. -Eric
+Capture GFemGry1
+GFemGry1 GotoState stateIdle
+GFemGry1 teleport Cutmark28f
+Release GFemGry1
+
+Trigger ChangeLevelBeanRoom
+Release Harry
+Release Dumbledore
+//Release basecam
+
+
+//-----------------------------------------------------------------------
+[Music]
+
+Trigger HPSlience
+//Kills the Music
+Trigger HPC_Music
+
+WaitFor CutEnd
+//Trigger HPSlience
+
+
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+[DumbleDore]
+
+WaitFor DumLine8
+ReCapture Dumbledore
+Dumbledore Talk PC_Dum_HPCeremony_08
+//Lets take a look at the scores...
+
+Cue DumTalkAgain
+
+
+//-----------------------------------------------------------------------

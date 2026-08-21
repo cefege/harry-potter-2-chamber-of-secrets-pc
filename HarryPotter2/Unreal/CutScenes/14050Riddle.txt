@@ -1,0 +1,121 @@
+//14050Riddle
+
+[Dialog_01]
+
+Capture Narrator
+Capture Harry
+Capture Ron
+Capture Tom
+Capture YoungHagrid
+Capture NoFlapTom
+Capture Arragog
+
+Harry Teleport CutMark135
+Harry Face YoungHagrid
+
+
+Narrator Talk PC_Nar_Riddle_24
+//As Harry examined Riddle’s Diary, words began to form on the page…
+
+NoFlapTom Talk PC_Tmr_Riddle_25
+//Hello, Harry Potter.  My name is Tom Riddle.
+
+Narrator Talk PC_Nar_Riddle_36
+//And Harry replied…
+
+Harry Talk PC_Hry_Riddle_01
+//I’m at Hogwarts and horrible stuff’s been happening.  Do you know about the Chamber of Secrets?
+
+NoFlapTom Talk PC_Tmr_Riddle_27
+//Of course I know about the Chamber of Secrets.  In my fifth year, the Chamber was opened and the monster killed a girl.
+
+Tom WalkTo CutMark134 *TomDone
+
+NoFlapTom Talk PC_Tmr_Riddle_03
+//I caught the person who’d opened the Chamber and he was expelled.  I can show you, if you like.
+
+NoFlapTom Talk PC_Tmr_Riddle_30
+//I can take you inside my memory of the night when I caught him.
+
+
+
+Capture BaseCam
+basecam fadein r=200 g=200 b=0 a=30
+Release BaseCam
+
+Narrator Talk PC_Nar_Riddle_28
+//Harry was entranced by the memory Tom Riddle showed him…
+
+YoungHagrid Talk PC_Yha_Riddle_39
+//"C'mon, gotta get yeh outta here… C'mon now… in the box…
+
+
+YoungHagrid Talk PC_Yha_Riddle_41
+//It's alright, c'mon out... there ya go…
+
+waitfor TomDone
+Tom Turnto Hagrid
+slep .2
+YoungHagrid TurnTo Tom
+
+Tom Talk PC_Tmr_Riddle_40
+//Evening, Rubeus.
+
+YoungHagrid Talk PC_Yha_Riddle_29 startanim=talk_lhand
+//What yer doin’ down here, Tom?
+
+Tom Talk PC_Tmr_Riddle_31 startanim=talk_bothhands
+//It’s all over.  I don’t think you meant to kill anyone.  But monsters don’t make good pets.
+
+YoungHagrid Talk PC_Yha_Riddle_32 startanim=talk_bothhands
+//It never killed no one!
+
+Tom Talk PC_Tmr_Riddle_10 startanim=talk_rhand
+//Come on.  The least Hogwarts can do is make sure the thing that killed that girl is slaughtered.
+
+YoungHagrid Talk PC_Yha_Riddle_11 startanim=talk_rhand
+//It wasn’t him!  He wouldn’t!  He never!
+
+Tom TurnTo CutMark131 startanim=idle
+Tom Talk PC_Tmr_Riddle_42 StartAnim=DrawWand
+//Stand aside.
+
+Arragog Teleport CutMark131
+Arragog TurnTo Tom *
+YoungHagrid RunTo CutMark138
+YoungHagrid TurnTo Arragog
+YoungHagrid say PC_Yha_Riddle_33 startanim=idle *
+//NOOOOOOO!!
+
+Arragog RunTo CutMark139 *ArragogDone
+YoungHagrid Animate KnockedBack
+YoungHagrid Animate Stunned Loop
+sleep 1
+Tom Animate KnockedBack
+
+
+Waitfor ArragogDone
+Arragog RunTo CutMark140 *
+
+Sleep 5
+capture BaseCam
+BaseCam FadeOut
+
+
+Ron Talk PC_Ron_Riddle_34
+//Harry - what’s-?
+
+Harry Talk PC_Hry_Riddle_35
+//It was Hagrid, Ron.  Hagrid opened the Chamber of Secrets fifty years ago.  I’ve got to go and see him…
+
+Trigger ChangeLevelEntryHall
+//*****Without changing the trigger event name I changed the level from Entry to Transition --pd
+
+Release Narrator
+Release Harry
+Release Ron
+Release Tom
+Release YoungHagrid
+Release BaseCam
+Release Arragog
+

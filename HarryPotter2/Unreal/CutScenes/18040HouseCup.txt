@@ -1,0 +1,167 @@
+//18040HouseCup
+
+[Dialog_01]
+
+Capture GOldMaleHuf1
+Capture Harry
+Capture Ron
+Capture Hermione
+Capture Draco
+Capture Snape
+Capture GFemRav3
+//Capture Hagrid
+Capture McGonagall
+Capture Dumbledore
+Capture BaseCam
+BaseCam FadeOut
+
+GOldMaleHuf1 Teleport CutMark148
+Harry Teleport CutMark140
+Ron Teleport CutMark146
+Hermione Teleport CutMark139
+Draco Teleport CutMark141
+Snape Teleport CutMark136
+GFemRav3 Teleport CutMark143
+//Teleport Hagrid
+McGonagall Teleport CutMark135
+Dumbledore Teleport Cutmark134
+
+GOldMaleHuf1 Face Dumbledore
+Harry Face Dumbledore
+Ron Face Dumbledore
+Hermione Face Dumbledore
+Draco Face Dumbledore
+Snape Face Draco
+GFemRav3 Face Dumbledore
+//Hagrid Face
+McGonagall Face Harry
+Dumbledore Face Harry
+
+BaseCam Target FlyTo Dumbledore
+BaseCam FlyTo CutCameraPos37
+
+BaseCam FadeIn
+
+McGonagall Talk PC_Mcg_HouseCup_02
+//Attention please! Students, attention! The Headmaster wants to address you.
+
+Snape Talk PC_Snp_HouseCup_03
+//Silence! It isn't too late to lose house points, you know!
+
+Dumbledore Talk PC_Dum_HouseCup_04
+//This House Cup ceremony brings the school year to an end, and an eventful year it was.
+
+Dumbledore Talk PC_Dum_HouseCup_05
+//Without further ado, I shall now to present the Cup to the Hogwarts house with the most points.
+
+Ron Talk PC_Ron_HouseCup_07
+//Think we'll take it again this year?
+
+Hermione Talk PC_Her_HouseCup_08
+//After you and Harry saved Hogwarts? I should think so!
+
+Dumbledore Talk PC_Dum_HouseCup_09
+//In fourth place…Ravenclaw!
+
+GFemRav3 Talk PC_Gfr_HouseCup_10
+//Thank you for not saying last place.
+
+Dumbledore Talk PC_Dum_HouseCup_11
+//In third place…Hufflepuff!
+
+GOldMaleHuf1 Talk PC_Gmh_HouseCup_12
+//Thank you. We find finishing in the middle to be quite adequate.
+
+Dumbledore Talk PC_Dum_HouseCup_13
+//And now the for the second place house…
+
+Draco Talk PC_Drc_HouseCup_14
+//It'll be you, Gryffindors. You're naturally second best.  You won't steal the House Cup from Slytherin like you did last year.
+
+Dumbledore Talk PC_Dum_HouseCup_15
+//…after barely escaping disqualification…Slytherin.
+
+Draco Talk PC_Drc_HouseCup_17
+//What?!
+
+Harry Talk PC_Hry_HouseCup_18
+//That means…
+
+Dumbledore Talk PC_Dum_HouseCup_19
+//First place and the House Cup go to Gryffindor!
+
+Ron Talk PC_Ron_HouseCup_20
+//Yes!
+
+Harry Talk PC_Hry_HouseCup_21
+//We did it again!
+
+Hermione Talk PC_Her_HouseCup_22
+//No, you did it again, Harry!
+
+BaseCam FadeOut
+
+Trigger ChangeLevelCredits
+
+//Dumbledore Talk PC_Dum_HouseCup_23
+//In fourth place, Gryffindor!
+
+//Dumbledore Talk PC_Dum_HouseCup_24
+//In fourth place, Slytherin!
+
+//Dumbledore Talk PC_Dum_HouseCup_25
+//In fourth place, Hufflepuff!
+
+//Dumbledore Talk PC_Dum_HouseCup_26
+//In third place, Gryffindor!
+
+//Dumbledore Talk PC_Dum_HouseCup_27
+//In third place, Slytherin!
+
+//Dumbledore Talk PC_Dum_HouseCup_28
+//In third place, Ravenclaw!
+
+//Dumbledore Talk PC_Dum_HouseCup_29
+//And now for the second place house…Gryffindor!
+
+//Dumbledore Talk PC_Dum_HouseCup_30
+//And now for the second place house…Hufflepuff!
+
+//Dumbledore Talk PC_Dum_HouseCup_31
+//And now for the second place house…Ravenclaw!
+
+//Dumbledore Talk PC_Dum_HouseCup_32
+//Slytherin wins the House Cup!
+
+//Dumbledore Talk PC_Dum_HouseCup_33
+//Ravenclaw wins the House Cup!
+
+//Dumbledore Talk PC_Dum_HouseCup_34
+//Hufflepuff wins the House Cup!
+
+//Draco Talk PC_Drc_HouseCup_35
+//Ha! Told you so, Potter!
+
+//Draco Talk PC_Drc_HouseCup_36
+//What! I'd rather lose to Potter!
+
+//Harry Talk PC_Hry_HouseCup_37
+//You only won because you weren't caught!
+
+//Hagrid Talk PC_Hdw_HouseCup_38
+//Oh well. They deserve a turn, too. It was still a great year!
+
+
+
+Release GOldMaleHuf1
+Release Harry
+Release Ron
+Release Hermione
+Release Draco
+Release Snape
+Release GFemRav3
+//Release Hagrid
+Release McGonagall
+Release Dumbledore
+Release BaseCam
+

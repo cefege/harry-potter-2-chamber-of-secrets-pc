@@ -1,0 +1,186 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+IDM_MainMenu MENU DISCARDABLE 
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Load Package",               ID_LoadPackage
+        MENUITEM "&Save Package",               ID_SavePackage
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                       ID_Exit
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Refresh",                    ID_Refresh
+        MENUITEM "&Log",                        ID_ShowLog
+        MENUITEM SEPARATOR
+        POPUP "&Filter"
+        BEGIN
+            MENUITEM "&Objects",                    ID_Filter_AllObjects
+            MENUITEM "&Classes",                    ID_Filter_AllClasses
+            MENUITEM "&Actors",                     ID_Filter_AllActors
+        END
+    END
+    POPUP "&Object"
+    BEGIN
+        MENUITEM "&Object Properties",          ID_ShowObject
+        MENUITEM SEPARATOR
+        MENUITEM "&Create Object",              ID_CreateObject
+        MENUITEM "&Destroy Object",             ID_DestroyObject
+        MENUITEM SEPARATOR
+        MENUITEM "&Import Object",              ID_ImportObject
+        MENUITEM "&Export Object",              ID_ExportObject
+    END
+    POPUP "&Tools"
+    BEGIN
+        MENUITEM "&Collect Garbage",            ID_CollectGarbage
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_ImportDialog DIALOG DISCARDABLE  0, 0, 207, 66
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Import Object"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,150,7,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,150,24,50,14
+    LTEXT           "Class",IDC_STATIC,7,7,38,8
+    LTEXT           "Name",IDC_STATIC,7,20,38,8
+    LTEXT           "Filename",IDC_STATIC,7,47,38,8
+    LTEXT           "Outer",IDC_STATIC,7,34,38,8
+    COMBOBOX        IDC_Class,45,7,94,108,CBS_DROPDOWNLIST | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_Name,45,21,94,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_Outer,45,34,94,13,ES_AUTOHSCROLL | WS_DISABLED
+    EDITTEXT        IDC_Filename,45,47,94,12,ES_AUTOHSCROLL
+    PUSHBUTTON      ".....",IDC_BrowseFiles,139,47,12,11
+END
+
+IDD_CreateDialog DIALOG DISCARDABLE  0, 0, 207, 54
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Create Object"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,150,7,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,150,24,50,14
+    LTEXT           "Class",-1,7,7,38,8
+    LTEXT           "Name",-1,7,20,38,8
+    LTEXT           "Outer",-1,7,34,38,8
+    COMBOBOX        IDC_Class,45,7,94,108,CBS_DROPDOWNLIST | CBS_SORT | 
+                    WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_Name,45,21,94,13,ES_AUTOHSCROLL
+    EDITTEXT        IDC_Outer,45,34,94,13,ES_AUTOHSCROLL | WS_DISABLED
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    IDD_ImportDialog, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 200
+        VERTGUIDE, 45
+        VERTGUIDE, 139
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 59
+        HORZGUIDE, 7
+        HORZGUIDE, 21
+        HORZGUIDE, 34
+        HORZGUIDE, 47
+    END
+
+    IDD_CreateDialog, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 200
+        VERTGUIDE, 45
+        VERTGUIDE, 139
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 47
+        HORZGUIDE, 7
+        HORZGUIDE, 21
+        HORZGUIDE, 34
+        HORZGUIDE, 47
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

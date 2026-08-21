@@ -1,0 +1,90 @@
+Notes on the VBR mode - 22 April 2000
+mikecheng@cryogen.com
+(activate with compile switch -DVBR)
+
+*** NOTICE ***
+VBR mode is currently fragile and experimental.  It works in simple situations
+on 32/44/48khz files.  It has not been tested with LSF.
+
+INTRODUCTION
+
+VBR currently only works in the following situations
+	- 32, 44.1khz with VBR ranging from 192 to 384
+	- 48  khz with VBR ranging from 112 to 384
+	- currently VBR also forces STEREO mode (there's some extra stuff 
+	  going on in main_bit_alloc() when j-stereo is turned on, and I don't
+	  want to mess with it just yet)
+	- padding is turned off in this mode.
+	- mono VBR can be done with "toolame -v 0 -m m input"
+
+USAGE
+
+	toolame -v <level> inputfile outputfile.
+
+The <level> value can be considered as a measurement of quality in that, the higher
+the number the higher the average bitrate of the resultant file.
+
+Useful range of for <level>  -5 to 15  (integers)
+       level         output
+	-5	mp2 will be a constant bitrate file at the lowest allowable bitrate
+		(192 for 32/44.1khz and 112 for 48khz)
+
+	 0	raises average bitrate by about 5% (dependent on music type of course)
+
+	 5      raises average bitrate by about 20%
+
+	10	raises average bitrate by about 50%
+
+	15 	raises average bitrate by about 75%
+
+The above numbers are just guesstimated numbers based upon 'castanets.wav' and some
+other test files. YMMV.
+
+TECH STUFF
+
+The VBR mode is mainly centered around the main_bit_allocation() and 
+a_bit_allocation() routines in encode.c.
+
+The limited range of VBR is due to my particular implementation which restricts 
+ranges to within one alloc table (see tables B.2a, B.2b, B.2c and B.2d in ISO 11172).  
+The VBR range for 32/44.1khz lies within B.2b, and the 48khz VBR lies within table B.2a.
+
+I'm not sure whether it is worth extending these ranges down to lower bitrates.
+The purpose of VBR is to allow for greatest quality while still keeping a check on
+the bitrate.  I doubt that extending the 48khz range below 112 is useful at all.
+For the 32/44khz sampling rate, there probably is some merit in extending it at 
+least down to 160, but the work require to do so is major (alloc tables need to
+be switched in and out).  
+
+In the case of silence, it might be worth doing a quick check for very low signals
+and writing a pre-calculated *blank* 32kpbs frame. [probably also a lot of work].
+
+
+HOW CBR WORKS
+	- calculate the available data bits (adb) for this bitrate.
+	- Based upon the MNR (Masking:Noise Ratio) values, allocate bits to each 
+	  subband 
+	- Keep increasing the bits to whichever subband currently has the min MNR 
+	  value until we have no bits left.
+	- This mode does not guarentee that all the subbands are without noise
+	  ie there may still be subbands with MNR < 0.0  (noisy!)
+
+HOW VBR WORKS
+	- calculate the bits required to encode all the subbands with a prescribed
+	  minimum MNR value.(this is the value given by the command switch '-v lev')
+	- increase the bitrate until the adb > required_bits
+	- calculate a_bit_allocation()
+	- VBR "guarantees" that all subbands have MNR > VBRLEVEL or that we have 
+	  reached the maximum bitrate.
+
+FUTURE
+	- Since we *KNOW* beforehand that we have enough bits to encode without
+	  noise there is no need to do the iteration within a_bit_allocation().
+	- The iterative method creeps ahead trying to allocate bits fairly before
+	  they run out.
+	- with this VBR mode, we know the bits aren't going to run out, so we can
+	  just assign them "greedily".
+	- VBR_a_bit_allocation() is yet to be written :)
+
+FEEDBACK
+	- feedback and suggestions are welcome

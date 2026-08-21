@@ -1,0 +1,116 @@
+//ThirdGoToHPCe
+
+//This takes place out in the grounds hub after going to the Adv4GreenHouse
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Harry]
+Capture Harry
+
+Harry RunTo GoToHPC3HarryLoc1
+Harry TurnTo GoToHPC3HermioneLoc1
+
+//---------------------------------------------------------------------
+[Main]
+
+SetObjectiveId
+
+//Capture Harry
+Capture BaseCam
+Capture Hermione
+Capture GMaleGry3
+
+BaseCam Target FlyTo GoToHPC3Focus1
+BaseCam FlyTo GoToHPC3Cam1
+
+Hermione Teleport GoToHPC3HermioneTel1
+Hermione Face GoToHPC3Focus1
+
+Hermione RunTo GoToHPC3HermioneLoc1
+
+ReCapture Harry
+
+Harry Talk PC_Hry_GoToHPCe_13
+//Hey Hermione! I found a bunch of Shredded Boomslang Skin for the Polyjuice potion.
+
+Harry GiveHermioneBoomslang
+
+Hermione Talk PC_Her_GoToHPCe_14
+//That's great, Harry. I'll go add it to the potion right now.
+
+Cue HermioneRunOff
+
+GMaleGry3 Teleport GoToHPC3GenKidTel
+GMaleGry3 Face GoToHPC3GenLoc2
+
+BaseCam FlyTo GoToHPC3Cam2 Time=3 *
+
+Harry TurnTo GMaleGry3 Follow *
+
+GMaleGry3 RunTo GoToHPC3GenLoc2 GoToHPC3HermioneLoc1
+
+GMaleGry3 TurnTo Harry
+
+GMaleGry3 Talk PC_Grm_GoToHPCe_03 startanim=talk_bothhands
+//The weekly House Point Ceremony is starting soon.
+
+GMaleGry3 Talk PC_Grm_GoToHPCe_04 startanim=point_Right
+//You remember where it is, don't you?
+
+SetObjectiveId PC_Hry_GoToHPc1_01
+
+//GMaleGry3 LeadActor Harry GoToHPC3ChadStart GoToHPCEnd *
+//Old LeadActor Line from Grounds Hub
+
+//New LeadActor Line from HPCSetUp
+GMaleGry3 LeadActor Harry GoToHousePoint HPCeremony *
+
+Harry TurnTo GMaleGry3 Follow
+
+Sleep 1.0
+
+BaseCam GoHome
+
+Release Harry
+Release BaseCam
+Release GMaleGry3
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Hermione]
+
+WaitFor HermioneRunOff
+
+ReCapture Hermione
+
+Hermione RunTo GoToHPC3HermioneRunOff1 GoToHPC3HermioneRunOff2
+
+Hermione Teleport HermioneLOC
+
+Release Hermione
+
+//---------------------------------------------------------------------
+
+//[Ambients]
+
+//NOTE: This is no longer needed, as this cut scene now happens in the EntryHall.
+
+//teleports a couple girls in for frolic: running in an endless oval on the front lawn
+//capture GFemSly1
+//GFemSly1 teleport LawnLoopPP1
+//GFemSly1 SetOnPatrolPointPath LawnLoopPP1 *
+//release GFemSly1
+//sleep 0.5
+//capture GFemSly2
+//GFemSly2 teleport LawnLoopPP1
+//GFemSly2 SetOnPatrolPointPath LawnLoopPP1 *
+//release GFemSly2
+
+
+//---------------------------------------------------------------------
+

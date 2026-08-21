@@ -1,0 +1,43 @@
+//03100TransitionB
+
+[Dialog_01]
+
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto middle
+basecam target flyto cutmiddle
+
+basecam flyto twothirds easebetween time=30 *
+basecam target flyto cuttwothirds easebetween time=25 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransB_00
+//Mudblood... the nasty name some wizards use for other wizards who were born to non-magical parents.
+
+Narrator Talk PC_Nar_TransB_02
+//And speaking of mud, October arrived damply at Hogwarts, spreading a soggy chill over the grounds and into the castle.
+
+Narrator Talk PC_Nar_TransB_03
+//A different kind of chill would soon set in as well
+
+
+//waitfor done
+sleep .5
+basecam fadeout
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints B
+Release Housepoints
+
+//Harry changegamestate gstate040
+Trigger TriggerChangeLevel_EntryHall040
+
+Release Harry
+Release Narrator
+Release BaseCam

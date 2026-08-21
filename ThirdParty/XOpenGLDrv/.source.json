@@ -1,0 +1,72 @@
+{
+  "repository_url": "https://github.com/OldUnreal/XOpenGLDrv",
+  "archive_url": "https://github.com/OldUnreal/XOpenGLDrv/archive/6907839798152fc02090711b260e54a7294eecfc.tar.gz",
+  "commit": "6907839798152fc02090711b260e54a7294eecfc",
+  "tree_hashes": {
+    "root": "a7dde1f73285bacbb8fc21bad6e64da7ead915fe",
+    "Inc": "963cfb5c2f4f93074c91ada6a39a9fcbcd8750cd",
+    "Src": "4a61806fe4004cc53713b10473d07e890ff23b38",
+    "glm/glm": "e1f6ca29b3694f072badfc27abdf4983b213117c"
+  },
+  "selected_paths": [
+    "LICENSE.md",
+    "Inc/XOpenGL.h",
+    "Inc/XOpenGLDrv.h",
+    "Inc/XOpenGLTemplate.h",
+    "Inc/glad.h",
+    "Inc/KHR/khrplatform.h",
+    "Src/glad.cpp",
+    "Src/CheckExtensions.cpp",
+    "Src/DebugLog.cpp",
+    "Src/DrawComplex.cpp",
+    "Src/DrawComplex_GLSL.cpp",
+    "Src/DrawGouraud.cpp",
+    "Src/DrawGouraud_GLSL.cpp",
+    "Src/DrawPostProcess.cpp",
+    "Src/DrawSimple.cpp",
+    "Src/DrawSimple_GLSL.cpp",
+    "Src/DrawTile.cpp",
+    "Src/DrawTile_GLSL.cpp",
+    "Src/EditorHit.cpp",
+    "Src/SetTexture.cpp",
+    "Src/ShaderProgram.cpp",
+    "Src/XOpenGL.cpp",
+    "Src/XOpenGLDrv.cpp",
+    "glm/glm/**",
+    "glm/copying.txt"
+  ],
+  "excluded_roots": [
+    ".gitignore",
+    "README.md",
+    "XOpenGLDrv.int"
+  ],
+  "excluded_paths": [
+    "Inc/glext.h",
+    "Inc/wglext.h",
+    "Src/resource.h",
+    "Src/XOpenGLDrv.aps",
+    "Src/XOpenGLDrv.cbp",
+    "Src/XOpenGLDrv.cscope_file_list",
+    "Src/XOpenGLDrv.layout",
+    "Src/XOpenGLDrv.rc",
+    "Src/XOpenGLDrv.vcxproj",
+    "Src/XOpenGLDrv.vcxproj.filters",
+    "Src/XOpenGLDrv469.vcxproj",
+    "Src/XOpenGLDrv469.vcxproj.filters",
+    "glm/.appveyor.yml",
+    "glm/.gitignore",
+    "glm/.travis.yml",
+    "glm/cmake/**",
+    "glm/CMakeLists.txt",
+    "glm/doc/**",
+    "glm/manual.md",
+    "glm/readme.md",
+    "glm/test/**",
+    "glm/util/**"
+  ],
+  "license_paths": [
+    "LICENSE.md",
+    "glm/copying.txt"
+  ],
+  "modified": false
+}

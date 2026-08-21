@@ -1,0 +1,24 @@
+
+//LevelStart_EntryHallHub_GState065
+
+
+
+//---------------------------------------------------------------------
+
+
+//trigger Close_Ch2Bars
+//Trigger ToggleCh2LevelLoad
+Sleep .03
+Trigger Close_Ch4Bars
+Trigger ToggleCh4LevelLoad
+
+
+//open adv3 in GState065 
+Trigger OpenADV3DungIng
+Trigger Open_Adv3Bars
+
+//Capture BaseCam
+
+BaseCam FadeIn
+
+//Release BaseCam

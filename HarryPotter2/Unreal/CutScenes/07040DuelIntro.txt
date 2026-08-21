@@ -1,0 +1,170 @@
+//07040DuelIntro
+
+[Dialog_01]
+
+Capture Harry
+Capture Lockhart
+Capture Draco
+Capture DracoSnake
+Capture Duellist
+Capture Snape
+Capture Ron
+Capture BaseCam
+
+
+//Establishing shot (behind kids opposite)
+
+BaseCam Target FlyTo Lockhart z=30
+BaseCam FlyTo Lockhart x=800 y=-64 z=64
+Harry teleport CutMark2
+Harry Face Lockhart
+Ron Face Lockhart
+Basecam FadeIn 
+
+Lockhart Talk PC_Gil_DuelIntro_04 startanim=wave
+//Can everyone see me?  Can you all hear me?  Excellent!
+
+//Shot tightens
+BaseCam FlyTo Lockhart z=30 x=70
+BaseCam Target FlyTo Lockhart z=30
+BaseCam FlyTo Lockhart z=30 x=40 easebetween time=9 *
+
+Lockhart Talk PC_Gil_Dueling_63 startanim=fidget_1
+//I started Duelling Club to train you to defend yourselves. Duelling Club meets every day in the antechamber just outside the Great Hall.
+
+
+Lockhart Talk PC_Gil_DuelIntro_17 startanim=fidget_3
+//In Wizard Duelling the object of the exercise is to incapacitate your opponent.
+
+//Camera goes behind
+BaseCam FlyTo Lockhart z=30 y=24 x=-64
+Lockhart Talk PC_Gil_Dueling_64
+//There are three spells you may use in duelling:
+
+//return to front, slow pan and dolly
+BaseCam Target FlyTo Lockhart y=16 z=30
+BaseCam FlyTo Lockhart z=30 y=32 x=64
+BaseCam Target FlyTo Lockhart y=-8 z=30 easefrom time=12 *
+BaseCam FlyTo Lockhart z=30 y=16 x=56 easefrom time=12 *
+
+Lockhart Talk PC_Gil_Dueling_65 startanim=talk_lhand
+//Rictusempra, which knocks your opponent back and reduces stamina.
+
+Lockhart Talk PC_Gil_Dueling_66 startanim=talk_rhand
+//Mimble Wimble, which prevents your opponent from accurately casting their next spell.
+
+Lockhart Talk PC_Gil_Dueling_67 startanim=talk_bothhands
+//Expelliarmus, which reflects spells back onto your opponent.
+
+//cam pans the crowd
+basecam flyto kidcam1
+basecam target flyto kidpanpath1
+basecam followspline kidcam easeto start=kidcam1 dest=kidcam3 time=24 accel=50 *
+basecam target followspline kidpanpath easeto start=kidpanpath1 dest=kidpanpath2 time=24 accel=50 *
+
+Lockhart Talk PC_Gil_Dueling_68 startanim=talk
+//To select a spell, scroll through them by using the Space Bar or the right mouse button.
+
+ 
+Lockhart Talk PC_Gil_Dueling_69
+//To cast a selected spell on your opponent, press the left mouse button. You may build up the strength of Rictusempra and Mimble Wimble by holding the left mouse button down.
+
+Lockhart Talk PC_Gil_Dueling_70 startanim=talk_lhand
+//Note that potion drinking and jumping during duels are prohibited!
+
+Lockhart Talk PC_Gil_Dueling_71 startanim=talk
+//A fee payable in Bertie Bott’s Every Flavoured Beans is charged to enter a duel. The more advanced the duel is, the more beans you’ll need to pay. And, if you win a duel in the first round, you’ll win your opponents beans!
+
+Lockhart Talk PC_Gil_Dueling_72
+//To challenge a student to a duel, simply walk up to them. If you have enough beans you will be invited to duel.
+
+Lockhart Talk PC_Gil_Dueling_73
+//My assistant, Professor Snape…
+
+BaseCam Target FlyTo Snape y=24 z=36
+BaseCam FlyTo Snape z=30 y=14 x=48
+Snape TurnTo Lockhart *
+Snape say PC_Snp_Dueling_74
+//I am your colleague, not your assistant.
+Snape TurnTo CutMark10 *
+
+BaseCam Target FlyTo Lockhart z=30
+BaseCam FlyTo Lockhart z=30 x=40
+Lockhart Talk PC_Gil_Dueling_75
+//...has informed me that he knows a tiny bit about duelling and has graciously agreed to monitor the duels.
+
+
+BaseCam Target FlyTo Lockhart z=30
+BaseCam FlyTo Lockhart z=30 x=40
+Lockhart TurnTo Harry
+Lockhart Talk PC_Gil_DuelIntro_19
+//And now for a brief demonstration.  Mr Potter…
+
+BaseCam Target FlyTo Harry z=30
+BaseCam FlyTo Harry z=30 x=80
+Lockhart Talk PC_Gil_DuelIntro_20
+//…if you’d like to partner up with Mr Weasley?
+
+BaseCam Target FlyTo Snape y=12 z=30
+BaseCam FlyTo Snape z=30 y= 16 x=48
+Snape Talk PC_Snp_DuelIntro_21 endanim=talk_point *
+//I don’t think so.  Time to split up the dream team, I think.  Mr Malfoy, come over here.
+Sleep 2.5
+Snape TurnTo Draco
+
+BaseCam Target FlyTo Draco z=30
+BaseCam FlyTo Draco z=30 x=40
+BaseCam FlyTo Draco z=30 x=30 easebetween time=5 *
+Snape Talk PC_Snp_DuelIntro_22
+//Let’s see what you can make of the famous Potter.
+
+
+Draco Talk PC_Drc_Dueling_01
+//Thrashing you will be a treat, Potter.
+
+BaseCam FadeOut
+sleep 1
+Draco Teleport CutMark5
+Duellist Teleport CutMark0
+Harry Teleport CutMark1
+Harry Face Duellist
+Duellist Face Harry
+
+Harry animate duel_idle loop *
+Duellist animate duel_idle loop*
+
+BaseCam FlyTo CutCameraPos0
+BaseCam Target FlyTo CutMark1
+BaseCam FadeIn
+Lockhart Talk PC_Gil_DuelIntro_23
+//Very well, then.  Wands at the ready!  When I count to three!
+
+
+
+BaseCam Target FlyTo Duellist z=10
+BaseCam FlyTo Duellist z=30 x=50
+Duellist Talk PC_Drc_DuelIntro_24 startanim=taunt_1 loopanim=duel_idle
+//Scared, Potter?
+
+BaseCam Target FlyTo Harry z=10
+BaseCam FlyTo Harry z=30 x=50
+Harry Talk PC_Hry_DuelIntro_25 loopanim=duel_idle
+//You wish.
+
+BaseCam FlyTo CutCameraPos0
+BaseCam Target FlyTo CutMark1
+Lockhart Talk PC_Gil_DuelIntro_26
+//One -- two -- three!
+
+Release Ron
+Release BaseCam
+Release Harry
+Release Lockhart
+Release Draco
+Release DracoSnake
+Release Duellist
+Release Snape
+Release BaseCam
+Trigger DuelTrigger
+Trigger Music
+

@@ -1,0 +1,15 @@
+//LevelStart_EntryHallHub_GState110
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+//Open bit o' Goyle adventure for just this one GState----------------
+trigger Adv6_Bars
+Capture Goyle
+Goyle Teleport CutMark112
+Goyle Face CutMark120
+Release Goyle

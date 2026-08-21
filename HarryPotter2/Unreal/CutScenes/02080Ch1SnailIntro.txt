@@ -1,0 +1,31 @@
+
+//Snail Intro
+
+
+[Main]
+
+Capture Lockhart
+Capture Harry
+Capture BaseCam
+Capture Snail1
+
+BaseCam FlyTo SnailStartCam *
+BaseCam Target FlyTo Snail1 StayLocked *
+
+Sleep 1.0
+
+BaseCam FlyTo Snail1 EaseTo Time=4 X=55 Y=55 Z=60 * 
+
+Sleep 0.5
+
+Lockhart Talk PC_Gil_Chal1Ricta_14
+//That's a Giant Orange Snail.   Avoid touching them or their slime trails…the acid that they secrete will burn //you, Harry, trust me, I know!  Rictusempra will stun them, and then you can use Flipendo to push them //around the world.
+
+Sleep 0.75
+
+Release Lockhart
+Release Harry
+Release BaseCam
+Release Snail1
+
+

@@ -1,0 +1,323 @@
+
+//00307QuidditchTut1
+
+//Quidditch Tutorial, taught by Oliver Wood
+
+//Wood Recaps from first game, and then lets Harry go so he can tell him about the basic flight controls.
+
+//Upon Win, Director sends the event: "WON"
+
+//Upon a LOSS, Director sends the event: "LOST"
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo CamFocus1
+BaseCam FlyTo CamLocStart
+
+BaseCam FlyTo DriftCam1 Time=8 *
+
+Sleep 8.0
+
+Cue QuaffleWatch
+
+BaseCam Target FlyTo CamFocusTEMP2
+BaseCam FlyTo QuaffleWatchCam Time=3
+
+BaseCam FlyTo QuaffleCamDrift1 Time=7 *
+//BaseCam FlyTo QuaffleCamDrift2 Time=3 *
+
+Sleep 8.0
+
+Cue BludgerWatch
+
+BaseCam Target FlyTo CamFocusTEMP3
+BaseCam FlyTo BludgerWatchCam Time=3
+
+WaitFor CamShakeNow
+BaseCam Shake Magnitude=150 Time=1 * 
+
+Sleep 3.0
+
+Cue SnitchWatch
+
+BaseCam Target FlyTo CamFocusTEMP4
+BaseCam FlyTo SnitchWatchCam Time=2
+
+Sleep 7.0
+
+Cue Dialog2
+BaseCam Target FlyTo CamFocus1
+BaseCam FlyTo DriftCam1 Time=2
+
+WaitFor HarryNod
+BaseCam Target FlyTo Harry z=30 StayLocked
+BaseCam FlyTo Harry x=120 z=70 y=-5
+
+
+WaitFor BackToWood
+BaseCam Target FlyTo CamFocus2 *
+BaseCam FlyTo LowCam2 *
+BaseCam FlyTo Tut2DriftCam Time=4 *
+
+
+WaitFor HarryTakeOff
+//BaseCam Target FlyTo Harry Time=2 StayLocked *
+//BaseCam FlyTo Tut1HarryTakeOffCam Time=3
+
+BaseCam Target FlyTo Snitch StayLocked
+BaseCam FlyTo Tut2TopView
+Sleep 1.0
+
+
+WaitFor CutEnd
+BaseCam GoHome
+Sleep 1.0
+
+Release BaseCam
+ReCapture Harry
+Release Harry
+
+Capture Director
+Director StartSnitchLesson
+Release Director
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[BroomHarry]
+
+Capture Harry
+Harry Teleport HarryLocStart
+Harry Face WoodLocStart
+
+WaitFor HarryNod
+Harry Animate Positive *
+Sleep 1.5
+
+//Harry MatchRot HarryPrepForFlight1_Start
+//Harry FollowSpline HarryPrepForFlight1 Start=HarryPrepForFlight1_Start Dest=HarryPrepForFlight1_End Time=3 Accel=100 Align EaseTo *
+
+Harry FlyOnPath HarryPrepForFlight1 Start=HarryPrepForFlight1_Start
+
+Cue BackToWood
+
+WaitFor HarryTakeOff
+Sleep 0.5
+//Harry FlyOnPath HarryPrepForFlight1 Start=HarryPrepForFlight1_Start
+
+Harry TurnTo Snitch Follow
+
+Cue CutEnd
+//Release Harry
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Wood]
+
+Capture Wood
+
+Wood FlyTo WoodLocStart
+//Teleports Ground Wood Onto the Field
+
+Wood Face HarryLocStart
+
+WaitFor Dialog2
+Wood TurnTo HarryLocStart
+
+
+WaitFor CutEND
+Release Wood
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Quaffle]
+
+Capture Quaffle
+
+WaitFor QuaffleWatch
+
+Quaffle Teleport QuaffleLessonIntro_TelLoc
+
+Sleep 1.0
+
+Quaffle MatchRot GryffChaser2_IntroPath_Start
+Quaffle FollowSpline QuaffleLessonIntro Start=QuaffleLessonIntro_TelLoc Speed=450 Accel=150 Align *
+
+
+WaitFor Dialog2
+Quaffle Teleport QuaffleOFF
+
+WaitFor CutEnd
+Release Quaffle
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Bludgers]
+
+Capture Bludger1
+Capture Bludger2
+
+WaitFor BludgerWatch
+
+Bludger1 Teleport Bludger1LessonIntro_TelLoc
+Bludger1 FollowSpline Bludger1TeachPath Start=Bludger1LessonIntro_TelLoc Speed=450 Accel=150 Align *
+
+Bludger2 Teleport Bludger2LessonIntro_TelLoc
+Bludger2 FollowSpline Bludger2TeachPath Start=Bludger2LessonIntro_TelLoc Speed=255 Accel=150 Align *
+
+Sleep 3.7
+
+Cue CamShakeNow
+
+WaitFor Dialog2
+Bludger1 Teleport Bludger1OFF
+Bludger2 Teleport Bludger2OFF
+
+WaitFor CutEnd
+Release Bludger1
+Release Bludger2
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Snitch]
+
+Capture Snitch
+Snitch Teleport SnitchOFF
+
+WaitFor SnitchWatch
+
+Sleep 1.5
+
+Snitch Teleport Snitch_LessonPath_Start
+Snitch FollowSpline Snitch_LessonPath Start=Snitch_LessonPath_Start Dest=Snitch_LessonPath_END Time=2 Accel=100 Align *
+
+Sleep 3.5
+
+Snitch FollowSpline Snitch_LessonPath2 Start=Snitch_LessonPath2_Start Speed=450 Accel=150 Align *
+
+WaitFor Dialog2
+Snitch Teleport SnitchOFF
+
+//WaitFor CutEnd
+//Release Snitch
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Dialog_01]
+
+//WaitFor Dialog1
+
+ReCapture Wood
+Capture WoodSnitch
+
+Wood Talk PC_Owd_QuidIntro_01
+//Listen up Harry.  We’re going to make sure we win the Quidditch cup this year and the way we’re going to do that is practice, practice, practice.  First, a quick recap of what we learned last year…
+
+
+WaitFor QuaffleWatch
+Wood Talk PC_Owd_QuidIntro_02
+//Of course you already know that the red ball is called the Quaffle and it’s the job of the three Chasers to get it past the enemy Keeper into one of the Goal Posts.  But you don’t need to concern yourself with that.
+
+
+WaitFor BludgerWatch
+Wood Talk PC_Owd_QuidIntro_03
+//There are also two Bludgers flying around which you don’t want to get hit by, but don’t worry each team has two Beaters who try to keep them away from you.
+
+
+WaitFor SnitchWatch
+Wood Talk PC_Owd_QuidIntro_04
+//Last and most importantly it’s your job as our Seeker to catch the Golden Snitch before the enemy Seeker does.
+
+WaitFor Dialog2
+Wood Talk PC_Owd_QuidIntro_05
+//Sense you’ve been off all summer; Let’s start out easy.
+
+Wood Talk PC_Owd_QuidIntro_08 StartAnim=Talk_rhand
+//I’m going to throw up just a Snitch for you and I want to you to try to catch it.
+
+Wood Talk PC_Owd_QuidIntro_09 StartAnim=Talk_BothHands
+//Sound easy enough?
+
+Cue HarryNod
+
+WaitFor BackToWood
+Wood Teleport GroundWoodOFF
+WoodSnitch Teleport WoodLocStart
+WoodSnitch Face LowCam1
+WoodSnitch Animate ThrowSnitch *
+ReCapture Snitch
+Snitch Teleport SnitchTelLocOnGamePath
+Release Snitch
+Sleep 3.0
+
+Cue HarryTakeOff
+
+Sleep 1.5
+WoodSnitch Teleport WoodSnitchOFF
+Wood Teleport WoodLocStart
+Wood Face LowCam1
+
+//WaitFor CutEnd
+Release Wood
+
+
+
+//######################### Dialog to be used by Director ##########################################
+
+WaitFor Ever
+
+Wood Talk PC_Owd_QuidIntro_06
+//All right then, you can use the arrow keys to steer your broom, left, right, up and down.
+
+Wood Talk PC_Owd_QuidIntro_07
+//You can use the A key to speed up or the left mouse button.
+
+
+//%%%%%%%%%%%%%%%%%%%%%%%%%% After Flight Lesson %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Wood Talk PC_Owd_QuidIntro_10
+//When you get closer to the Snitch you’ll noticed that your hand reaches out, if you push the Ctrl key or Action key (right mouse button) and are close enough you’ll grab the Snitch.
+
+WaitFor Ever
+Wood Talk PC_Owd_QuidIntro_11
+//All right Harry, way to go!
+
+Wood Talk PC_Owd_QuidIntro_12
+//Nice-one Harry, nice-one!
+
+Wood Talk PC_Owd_QuidIntro_13
+//That’s it Harry stay right on the snitch, you’ve almost got it.
+
+Wood Talk PC_Owd_QuidIntro_14
+//That’s it Harry you’ve almost got it.
+
+//%%%%%%%%%%%%%%%%%%%%%%%%%% Enemy Seeker Dialog %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Wood Talk PC_Owd_QuidIntro_24
+//That’s it Harry, give them a good nudge so you can catch the snitch!
+
+Wood Talk PC_Owd_QuidIntro_25
+//Remember Harry you’ll not put your hand out till the enemy Seeker is out of the way.
+
+//######################### Dialog to be used by Director ##########################################

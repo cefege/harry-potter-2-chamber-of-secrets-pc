@@ -1,0 +1,534 @@
+//---------------------------------------------------------------------
+//levelStart_GrandStairHub_GState045
+//04070FollowVoiceB
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+[LevelSetUpThread] 
+Trigger MMBathroom
+Sleep .03
+
+//sleep .03
+//trigger Transfig
+
+//don't need to close charms... right?
+//Trigger Charms
+
+//Sleep .03
+//Capture MrsNorrisHanged, this is not going to be needed, as she will be grouped
+//Into gamestates so that she can be positioned precisely with the torch.
+
+Trigger ShowWriting1
+//This Triggers the Sheet Mover with the writting on it.
+
+Trigger StartingFVMusic
+//Trigger Starting Music
+
+
+//Trigger Silence *
+//Stops Starting Music
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[RonRun] 
+Capture Ron
+Ron Teleport CutMark40
+
+Sleep .5
+Ron RunTo CutMark38
+Ron Turnto Harry Follow
+
+Waitfor Run
+Sleep .75
+Ron RunTo CutMark138
+Ron Teleport ChadCutLoc2ndFloor
+Ron RunTo FV_RonVarry CutMark114
+//Ron RunTo CutMark6 *
+
+WaitFor CamChange1
+Ron Teleport FV_RonTelLoc
+Sleep 0.3
+Ron WalkTo FV_RonLoc
+Ron TurnTo FV_Focus1
+Ron Animate Negative
+
+WaitFor WatchDraco
+Ron TurnTo Draco
+
+WaitFor MovePlease
+Ron TurnTo Dumbledore Follow
+
+WaitFor RonTalk
+Ron TurnTo Harry
+Ron Talk PC_Ron_FollowVoice_53 *
+//C’mon, Harry.  Professor Dumbledore’s right.  There’s nothing more to see here.
+
+Cue HarryNod
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[HermioneRun] 
+Capture Hermione
+Hermione Teleport CutMark39
+
+Sleep 1
+Hermione RunTo CutMark37
+Hermione Turnto Harry Follow
+
+Waitfor Run
+Sleep 1
+Hermione RunTo CutMark138
+Hermione Teleport ChadCutLoc2ndFloor
+Hermione RunTo FV_HermioneVarry CutMark114
+//Hermione RunTo CutMark6 *
+
+WaitFor CamChange1
+Hermione Teleport FV_HermioneTelLoc
+Sleep 0.3
+Hermione WalkTo FV_HermioneLoc
+Hermione TurnTo FV_Focus1
+//Hermione Animate Negative
+
+WaitFor LookAtWall
+Sleep 3.0
+Hermione Talk PC_Her_FollowVoice_54 StartAnim=Negative
+//Ugh! That's horrible.
+
+WaitFor WatchDraco
+Hermione TurnTo Draco
+
+WaitFor MovePlease
+Sleep 0.3
+Hermione TurnTo Dumbledore Follow
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[HarryRun] 
+Capture Harry
+Harry Changegamestate gstate050
+
+Harry Teleport CutMark35
+Harry RunTo CutMark36
+Harry Animate Look_Frantic *
+
+Sleep 1.5
+Cue Run
+Harry RunTo CutMark137
+Harry Teleport ChadCutLoc2ndFloor
+Cue Run2
+Harry RunTo CutMark33
+Cue RoundCorner
+Harry RunTo CutMark114
+//Harry RunTo CutMark6 *
+
+WaitFor CamChange1
+
+Harry Teleport FV_HarryTelLoc
+Sleep 0.3
+Harry WalkTo FV_HarryLoc
+//Harry Animate Talk_Negative
+
+WaitFor HarryTalk1
+Sleep 1.0
+//Harry Talk PC_Hry_FollowVoice_45 StartAnim=Talk_Flustered
+Harry Talk PC_Hry_FollowVoice_45 StartAnim=Talk_DontKnow
+//What’s going on?
+
+WaitFor WatchDraco
+Sleep 0.5
+Harry TurnTo Draco
+
+WaitFor MovePlease
+Harry TurnTo Dumbledore Follow
+
+WaitFor HarryNod
+Sleep 0.5
+Harry TurnTo Ron
+Harry Animate Talk_Positive *
+
+Cue CutEnd
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[MainThread]
+Capture BaseCam
+Capture Narrator
+
+BaseCam FlyTo CutCameraPos25
+BaseCam Target FLyTo Harry StayLocked
+
+Sleep .5
+BaseCam FlyTo CutCameraPos24 Time=6 easeto *//Linear
+BaseCam FadeIn
+
+Waitfor Run
+Sleep .5
+BaseCam FadeOut
+BaseCam FlyTo CutCameraPos23
+BaseCam FlyTo CutCameraPos23 x=50 time=7 *
+
+Waitfor Run2
+BaseCam FadeIn
+
+Waitfor RoundCorner
+Sleep 2.0
+
+//************** Funky Cam *********************
+//BaseCam Target FlyTo CutMark12DUH *
+//BaseCam FOV Angle=150 Time=1.5 *
+//BaseCam FlyTo CutCameraPos13 Time=3
+//BaseCam FOV Angle=90 Time=0.5 *
+//BaseCam FlyTo FV_LowCam Time=4
+//WaitFor Ever
+//************** Funky Cam *********************
+
+Cue CamChange1
+BaseCam FadeOut 0.75
+//BaseCam Target FlyTo FV_Focus2 *
+//BaseCam FlyTo FV_ArriveCrimeCam1 *
+BaseCam Target FlyTo FV_DollyFocus Z=-10
+BaseCam FlyTo FV_DollyArrive Z=-10
+BaseCam FadeIn 0.75
+
+BaseCam Target FlyTo FV_DollyFocus Z=50 Time=4 *
+BaseCam FlyTo FV_DollyArrive Z=50 Time=4
+
+Cue LookAtWall
+
+Trigger Silence *
+//Stops All Music
+
+Trigger SeeWallAndCat *
+//Turns On ScaryMusic
+
+BaseCam Target FlyTo FV_HighFocus Z=60 *
+BaseCam FlyTo FV_LowCam Z=40 X=30 *
+
+Sleep 2.0
+Cue KidsTest
+
+BaseCam FlyTo FV_LowCam Time=3 Z=-8 *
+BaseCam Target FlyTo FV_Focus1 Time=3 Z=20
+
+Cue HarryTalk1
+
+Trigger Silence *
+//Stops All Music
+
+Trigger StartingFVMusic2 *
+//Trigger Starting Music Again
+
+BaseCam Target FlyTo Harry Z=30
+BaseCam FlyTo FV_HarryClose Z=-20
+
+WaitFor CamMove1
+BaseCam FlyTo FV_HarryClose Z=40 Time=1
+
+WaitFor WatchDraco
+BaseCam Target FlyTo Draco Z=20 Time=6 *
+BaseCam FlyTo FV_DracoCam Time=10 *
+
+WaitFor MovePlease
+BaseCam Target FlyTo DumbleDore Z=30 Time=3 StayLocked *
+BaseCam FlyTo FV_DumbCam1 Time=3
+
+BaseCam FlyTo FV_DumbCam2 *
+BaseCam Target FlyTo FV_Focus1 Z=30
+
+WaitFor CutEnd
+BaseCam FadeOut
+Sleep 1.0
+Cue CleanUp
+
+
+//Now the transition happens offshore in Transitions.unr
+
+Trigger Silence *
+//Stops All Music
+
+//Trigger NarMusic
+//Starts the Narrator Music
+
+//Narrator Talk PC_Nar_TransC_00
+//Everyone at Hogwarts was disturbed by the attack of Mrs. Norris and the mysterious words scrawled on the wall.   Rumors and speculation spread…
+
+//Narrator Talk PC_Nar_TransC_01
+//Hermione, in particular, was especially affected.  Ron and Harry became sure that she was up to something…but whatever it was, she remained tight-lipped.
+
+//Release Narrator
+
+WaitFor CleanUpFinished
+Trigger goFromStairToTransition
+
+//---------------------------------------------------------------------
+
+[DumbleDore] 
+Capture Dumbledore
+
+WaitFor WatchDraco
+Dumbledore Teleport FV_KidsTelLoc2
+Dumbledore WalkTo FV_KidPath3 FV_KidPath4
+Cue MovePlease
+Cue WatchDumble
+
+Dumbledore WalkTo FV_DumbleDoreLoc1
+Dumbledore TurnTo FV_Focus1
+Dumbledore Talk PC_Dum_FollowVoice_55
+//She’s been Petrified.  But how, I cannot say.
+
+Dumbledore TurnTo FV_HermioneLoc
+Sleep 1.5
+
+Dumbledore Talk PC_Dum_FollowVoice_52 StartAnim=Talk1
+//And now I would like everybody to please return to their dormitories.  There’s nothing else to see here.
+
+Cue RonTalk
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Draco] 
+Capture Draco
+
+WaitFor DracoShowUp
+Draco Teleport FV_KidsTelLoc1
+Draco RunTo FV_KidPath1
+Cue Crabbe_Go
+Sleep 0.4
+Cue Goyle_Go
+Draco RunTo FV_KidPath2
+Cue CamMove1
+Draco RunTo FV_DracoMoveOtherLoc
+Cue DracoComing
+Sleep 0.5
+Draco WalkTo FV_DracoFinalLoc
+Draco TurnTo FV_Focus1
+
+Draco Talk PC_Drc_FollowVoice_46 *
+//Enemies of the heir, beware!  You’ll be next, Mudbloods!
+
+Cue WatchDraco
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[KidsInHallLeft] 
+
+WaitFor KidsTest
+Sleep 1.0
+Cue GFemGry3_Go
+Sleep 0.3
+Cue GFemRav1_Go
+Sleep 0.4
+Cue GMaleRav3_Go
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[KidsInHallRight] 
+
+WaitFor KidsTest
+Sleep 1.0
+Cue GMaleHuf3_Go
+Sleep 0.5
+Cue GFemHuf3_Go
+Sleep 0.6
+Cue GMaleGry4_Go
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[GMaleHuf3] 
+//Right Side
+
+Capture GMaleHuf3
+//Capture GFemHuf3
+//Capture GMaleGry4
+
+//Capture GFemGry3
+//Capture GFemRav1
+//Capture GMaleRav3
+
+WaitFor GMaleHuf3_Go
+GMaleHuf3 Teleport FV_KidsTelLoc1
+GMaleHuf3 RunTo FV_KidPath1 FV_KidPath2 FV_GMaleHuf3Loc
+GMaleHuf3 TurnTo FV_Focus1
+
+WaitFor DracoComing
+GMaleHuf3 RunTo FV_GMaleHuf3Loc2
+GMaleHuf3 TurnTo Draco Follow
+Sleep 4.0
+GMaleHuf3 TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[GFemHuf3] 
+//Right Side
+Capture GFemHuf3
+
+WaitFor GFemHuf3_Go
+GFemHuf3 Teleport FV_KidsTelLoc1
+GFemHuf3 RunTo FV_KidPath1 FV_KidPath2 FV_GFemHuf3Loc
+GFemHuf3 TurnTo FV_Focus1
+
+WaitFor DracoComing
+GFemHuf3 RunTo FV_GFemHuf3Loc2
+GFemHuf3 TurnTo Draco Follow
+Sleep 4.0
+GFemHuf3 TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[GMaleGry4] 
+//Right Side
+Capture GMaleGry4
+
+WaitFor GMaleGry4_Go
+GMaleGry4 Teleport FV_KidsTelLoc1
+GMaleGry4 RunTo FV_KidPath1 FV_KidPath2 FV_GMaleGry4Loc
+GMaleGry4 TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[GFemGry3] 
+//Left Side
+Capture GFemGry3
+
+WaitFor GFemGry3_Go
+GFemGry3 Teleport FV_KidsTelLoc2
+GFemGry3 RunTo FV_KidPath3 FV_KidPath4 FV_GFemGry3Loc
+GFemGry3 TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[Ginny] 
+//Left Side
+Capture Ginny
+
+WaitFor GFemRav1_Go
+Ginny Teleport FV_KidsTelLoc2
+Ginny RunTo FV_KidPath3 FV_KidPath4 FV_GFemRav1Loc
+Ginny TurnTo FV_Focus1
+
+Cue DracoShowUp
+
+WaitFor MovePlease
+Ginny RunTo FV_GFemRav1Loc2
+Ginny TurnTo Dumbledore Follow
+Sleep 3.0
+Ginny TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[GMaleRav3] 
+//Left Side
+Capture GMaleRav3
+
+WaitFor GMaleRav3_Go
+GMaleRav3 Teleport FV_KidsTelLoc2
+GMaleRav3 RunTo FV_KidPath3 FV_KidPath4 FV_GMaleRav3Loc
+GMaleRav3 TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[Crabbe] 
+//Right Side
+Capture Crabbe
+
+WaitFor Crabbe_Go
+Sleep 0.5
+Crabbe Teleport FV_KidsTelLoc1
+Crabbe RunTo FV_KidPath1 FV_KidPath2 FV_CrabbeLoc
+Crabbe TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Goyle] 
+//Right Side
+Capture Goyle
+
+WaitFor Goyle_Go
+Sleep 0.5
+Goyle Teleport FV_KidsTelLoc1
+Goyle RunTo FV_KidPath1 FV_KidPath2 FV_GoyleLoc
+Goyle TurnTo FV_Focus1
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[CleanUp] 
+//CLEAN UP, putting kids back where they are suppose to be
+
+WaitFor CleanUp
+
+ReCapture GMaleHuf3
+ReCapture GFemHuf3
+ReCapture GMaleGry4
+ReCapture GFemGry3
+//ReCapture GFemRav1
+ReCapture GMaleRav3
+
+ReCapture Draco
+ReCapture Dumbledore
+ReCapture Crabbe
+ReCapture Goyle
+ReCapture Hermione
+ReCapture Ron
+ReCapture Ginny
+
+GMaleHuf3 Teleport Cutmark57
+GFemHuf3 Teleport Cutmark26
+
+GMaleGry4 Teleport Cutmark55
+GFemGry3 Teleport Cutmark52
+
+GFemRav1 Teleport Cutmark27
+GMaleRav3 Teleport Cutmark61
+
+Draco Teleport DracoHidden
+Dumbledore Teleport DumbledoreHidden
+Crabbe Teleport CrabbeHidden
+Goyle Teleport GoyleHidden
+Hermione Teleport HermioneHidden
+Ron Teleport RonLOC
+Ginny Teleport GinnyHidden
+
+Cue CleanUpFinished
+
+//---------------------------------------------------------------------

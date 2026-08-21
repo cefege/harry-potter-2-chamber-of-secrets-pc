@@ -1,0 +1,401 @@
+//00001PrivetIntroPart2
+
+//***************************************************************
+//Walking down the alley
+
+[thread]
+
+capture Harry
+capture BaseCam
+Capture Narrator
+
+capture Lockhart
+capture Lockharry
+capture LockhartToo
+capture Draco
+capture Lucius
+capture ron
+capture Ginny
+capture GinnyLucius
+capture LowerKid1
+capture LowerKid2
+capture LowerKid3
+capture LowerKid4
+capture LowerKid5
+capture LowerKid6
+capture UpperKid1
+capture UpperKid2
+capture UpperKid3
+capture UpperKid4
+capture UpperKid5
+capture UpperKid6
+capture SittingBoy
+capture SittingGirl
+
+LowerKid1 TurnTo Lockhart Follow *
+LowerKid2 TurnTo Lockhart Follow *
+LowerKid3 TurnTo Lockhart Follow *
+LowerKid4 TurnTo Lockhart Follow *
+LowerKid5 TurnTo Lockhart Follow *
+LowerKid6 TurnTo Lockhart Follow *
+UpperKid1 TurnTo Lockhart Follow *
+UpperKid2 TurnTo Lockhart Follow *
+UpperKid3 TurnTo Lockhart Follow *
+UpperKid4 TurnTo Lockhart Follow *
+UpperKid5 TurnTo Lockhart Follow *
+UpperKid6 TurnTo Lockhart Follow *
+
+
+//ron teleport cutmark18
+   
+//basecam teleport cutcamerapos11
+//basecam target teleport cutmark33
+
+harry teleport cutmark19
+harry face cutmark37
+
+BaseCam FollowSpline FlyInToFlorish EaseBetween start=AlleyStartPoint dest=AlleyEndPoint Time=12 accel=90 *CamSplineDone
+basecam target FlyTo Harry
+Basecam target flyto cutmark45 time=8 easebetween *
+Harry walkto cutmark36 *HarryDone2
+sleep .5
+Ginny walkto cutmark37 *GinnyDone3
+BaseCam FadeIn time=1
+
+waitfor NarDoneBlue
+sleep 1
+Narrator Talk PC_Nar_DiagonAlley_70 *NarDone
+//Harry met up with Ron’s sister, Ginny, and went with her to Flourish and Blotts where the famous wizard author, Gilderoy Lockhart, was signing his latest book.
+
+waitfor harrydone2
+Harry Walkto cutmark24 *HarryDone4
+waitfor GinnyDone3
+Ginny Walkto cutmark25 *GinnyDone5
+
+//**********************************************************************
+//Inside Bookstore
+
+
+waitfor HarryDone4
+Lockhart turnto harry follow *
+Harry Turnto Lockhart follow *
+
+waitfor CamSplineDone
+BaseCam FlyTo LockhartToo x=40 z=30 y=-7
+BaseCam Target FlyTo LockhartToo z=30
+
+
+waitfor NarDone
+LockhartToo Talk PC_Gil_DiagonAlley_71 startanim=talk_BothHands *LockDone1
+//Great Scott!  Is that-?  No, surely, not!
+
+sleep 3
+LockhartToo WalkTo CutMark62 *
+Lockhart teleport CutMark61
+Harry teleport CutMark62
+LockHarry teleport CutMark45
+Ginny walkto cutmark39 *GinnyDone1
+
+LowerKid1 Face LockHarry
+LowerKid2 Face LockHarry
+LowerKid3 Face LockHarry 
+LowerKid4 Face LockHarry
+LowerKid5 Face LockHarry 
+LowerKid6 Face LockHarry 
+UpperKid1 Face LockHarry 
+UpperKid2 Face LockHarry 
+UpperKid3 Face LockHarry 
+UpperKid4 Face LockHarry 
+UpperKid5 Face LockHarry 
+UpperKid6 Face LockHarry
+
+waitfor LockDone1
+LockHarry Animate GrabHarry loop *
+BaseCam FlyTo cutcamerapos6
+BaseCam Target FlyTo CutMark45
+
+Lockharry say PC_Gil_DiagonAlley_72 
+//It is!  It’s Harry Potter!
+
+Narrator say PC_Emo_DiagonAlley_87 *
+//<Crowd Ooos>
+
+sleep 2
+Lockharry say PC_Gil_DiagonAlley_73 *LockDone2
+//Ladies and gentlemen!  This is the perfect moment for me to make an important announcement!
+
+sleep .5
+basecam teleport cutcamerapos15 *
+basecam target teleport cutmark46
+basecam flyto cutcamerapos21 time=10 easebetween *
+
+waitfor GinnyDone1
+Ginny turnto LockHarry *
+
+waitfor LockDone2
+Lockharry say PC_Gil_DiagonAlley_74 *LockLast
+//I have great pleasure in announcing that, this term, I will be taking up the post of Defence Against the Dark Arts teacher at Hogwarts School of Witchcraft and Wizardry!
+
+sleep 3
+BaseCam FlyTo cutcamerapos6
+BaseCam Target FlyTo CutMark45
+
+sleep 4
+BaseCam FlyTo Ginny z=20 x=30
+BaseCam Target FlyTo Ginny z=20
+
+//Ginny animate Excited
+
+LockHarry teleport CutMark60
+Harry teleport cutmark40
+Lockhart teleport cutmark42
+Harry face Lockhart
+Lockhart face Harry
+Ginny TurnTo Harry follow *
+
+waitfor LockLast
+
+LowerKid1 Animate wave *
+sleep .2
+LowerKid2 Animate wave *
+sleep .2
+LowerKid3 Animate Clap *
+sleep .2
+LowerKid4 Animate Clap *
+sleep .2
+LowerKid5 Animate Clap *
+sleep .2
+LowerKid6 Animate clap *
+sleep .2
+UpperKid1 Animate Clap *
+sleep .2
+UpperKid2 Animate wave *
+sleep .2
+UpperKid3 Animate Clap *
+sleep .2
+UpperKid4 Animate Clap *
+sleep .2
+UpperKid5 Animate Clap *
+sleep .2
+UpperKid6 Animate wave *
+
+Narrator say PC_Emo_DiagonAlley_86 *
+//<Crowd Ahhs>
+
+sleep 2
+Lockhart Turnto Harry Follow
+basecam flyto cutcamerapos6 *
+basecam target flyto cutmark45
+
+sleep .5
+Harry walkto cutmark28 *HarryMadeIt
+
+sleep 1
+Lockhart WalkTo cutmark1
+Lockhart turnto LowerKid5
+Draco FlyTo cutmark22
+Draco face cutmark43
+basecam teleport cutcamerapos19 *
+basecam target flyto cutmark43
+Draco WalkTo cutmark43
+
+Draco Turnto Harry Follow *
+Draco Talk PC_Drc_DiagonAlley_75 *DracoDone2
+//Bet you loved that, didn’t you, Potter?  Famous Harry Potter.  Can’t even go into a book shop without making the front page.
+
+waitfor HarryMadeIt
+Harry Turnto Draco *
+
+sleep .1
+Ginny Turnto Draco *
+
+sleep 1
+BaseCam Target FlyTo Draco z=25 x=10 *
+BaseCam FlyTo Draco x=35 z=22 y=20
+
+waitfor DracoDone2
+BaseCam Target FlyTo Ginny z=22 x=8 *
+BaseCam FlyTo Ginny x=40 z=25 y=2
+Draco turnto Ginny *
+Lucius walkto Cutmark41 *LuciousDoneWalking
+Ginny Talk PC_Gin_DiagonAlley_76 startanim=talk_angry
+//Leave him alone, he didn’t want all that!
+
+BaseCam Target FlyTo Draco z=25 x=10 *
+BaseCam FlyTo Draco x=35 z=22 y=-10
+Draco Talk PC_Drc_DiagonAlley_77 *DracoDone3
+//Potter, you’ve got yourself a girlfriend!
+
+Ginny teleport CutMark37
+GinnyLucius teleport cutmark39
+GinnyLucius face draco
+
+waitfor LuciousDoneWalking
+Lucius teleport CutMark47
+
+waitfor DracoDone3
+GinnyLucius Talk PC_Luc_DiagonAlley_78 startanim=BendToTalk LoopAnim=Talk_Parents *LuciusDone2
+//I suppose your parents will go hungry for a month to pay for all the books you’re going to need at Hogwarts.  Here, girl, take this one…
+sleep .1
+basecam target flyto GinnyLucius z=25
+BaseCam FlyTo cutcamerapos3
+
+sleep .3
+Harry Turnto GinnyLucius *
+
+waitfor LuciusDone2
+GinnyLucius animate GiveBook *
+BaseCam Target FlyTo GinnyLucius z=25 *
+BaseCam FlyTo GinnyLucius x=40 z=23
+GinnyLucius say PC_Luc_DiagonAlley_79 
+//It’s the least I can do to help out the poor and needy.
+
+sleep 1
+BaseCam Target FlyTo Draco z=25 x=10 *
+BaseCam FlyTo Draco x=35 z=22 y=-10
+GinnyLucius teleport CutMark33
+Ginny teleport cutmark39
+
+release Ginny
+
+Draco animate disgust *DracoDoneDude
+Harry Turnto Draco Follow *
+
+sleep 2
+BaseCam FlyTo cutcamerapos19*
+BaseCam Target FlyTo cutmark22
+
+waitfor DracoDoneDude
+Draco walkto cutmark20 *DracoDone4
+BaseCam Target FlyTo cutmark44 time=4 *
+
+waitfor DracoDone4
+BaseCam fadeout *
+Draco RunTo cutmark36 *DracoDonFerShure
+
+//********************************************************************************
+//Harry Runs out of bookstore and talks to Ron.
+
+waitfor DracoDonFerShure
+Draco Teleport CutMark46Dude
+release Draco
+
+release Harry
+release Ron
+
+cue LetsAllGoOutside
+
+LowerKid1 destroy 
+LowerKid2 destroy 
+LowerKid3 destroy 
+LowerKid4 destroy 
+LowerKid5 destroy 
+LowerKid6 destroy 
+UpperKid1 destroy 
+UpperKid2 destroy 
+UpperKid3 destroy 
+UpperKid4 destroy 
+UpperKid5 destroy 
+UpperKid6 destroy 
+
+BaseCam FLyTo cutcamerapos13
+BaseCam Target FlyTo cutmark25
+BaseCam FlyTo cutcamerapos11 Time=6 easeto *
+BaseCam Target FlyTo cutmark35 Time=6 easeto *
+sleep 1
+BaseCam FadeIn *
+
+sleep 5
+BaseCam Target FlyTo Ron z=23 x=10 *
+BaseCam FlyTo Ron x=35 z=23 y=30
+
+waitfor RonDone
+BaseCam Target FlyTo Harry z=21 x=10 *
+BaseCam FlyTo Harry x=30 z=21 y=-30
+
+waitfor HarryDoneTalking1
+basecam FlyTo cutcamerapos11 *
+BaseCam Target FlyTo cutmark35
+
+Sleep 2
+BaseCam Target FlyTo Ron z=23 x=10 *
+BaseCam FlyTo Ron x=35 z=23 y=30
+
+waitfor RonDone1
+BaseCam Target FlyTo Harry z=21 x=10 *
+BaseCam FlyTo Harry x=30 z=21 y=-30
+
+waitfor HarryDoneTalking2
+basecam FlyTo cutcamerapos11 *
+BaseCam Target FlyTo cutmark35
+
+sleep 2
+basecam fadeout
+trigger TriggerChangeLevel
+
+release lockhart
+release Lucius
+release harry
+release basecam
+
+//********************************************************************************
+[HarryGoOutside]
+
+waitfor LetsAllGoOutside
+capture Harry
+Harry teleport cutmark20
+Harry WalkTo cutmark36
+
+cue HarryDoneWalking
+
+Harry Turnto Ron follow
+
+waitfor RonDone
+Harry talk PC_Hry_DiagonAlley_82 startanim=fidget_2
+//Oh, no!  What are we going to do?
+
+cue HarryDoneTalking1
+
+waitfor RonDone1
+Harry say PC_Hry_DiagonAlley_84 startanim=none
+//Okay.  It’s our only chance of getting to school on time!
+
+cue HarryDoneTalking2
+
+sleep .3
+Harry RunTo cutmark19 *
+
+//********************************************************************************
+[RonGoOutside]
+
+waitfor LetsAllGoOutside
+capture Ron
+ron teleport cutmark48
+
+sleep 3
+Ron RunTo cutmark51
+Ron TurnTo Harry follow
+
+waitfor HarryDoneWalking
+Ron TurnTo Harry follow
+sleep 1
+Ron Talk PC_Ron_DiagonAlley_81 *RonDoneTalking 
+//Harry – we’ve missed the train!  The Hogwarts Express left five minutes ago!
+Ron animate talk_flustered 
+Ron Animate talk_bothhands
+
+waitfor RonDoneTalking
+cue RonDone
+
+waitfor HarryDoneTalking1
+Ron Talk PC_Ron_DiagonAlley_83 *RonDoneTalkingd2
+//Well, I know that dad took the Ford Anglia to work this morning.  It’s parked in Charing Cross Road.
+Ron animate talk_remember 
+Ron Animate point_left 
+
+waitfor RonDoneTalkingd2
+cue RonDone1
+
+waitfor HarryDoneTalking2
+Ron runto cutmark19
+

@@ -1,0 +1,39 @@
+//=============================================================================
+// Incend_book.
+//=============================================================================
+class Incend_book expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=250.000000,Rand=50.000000)
+    SourceWidth=(Base=25.000000)
+    SourceHeight=(Base=15.000000)
+    SourceDepth=(Base=40.000000)
+    AngularSpreadWidth=(Base=35.000000)
+    AngularSpreadHeight=(Base=35.000000)
+    bSteadyState=True
+    speed=(Base=30.000000,Rand=10.000000)
+    Lifetime=(Base=1.500000)
+    ColorStart=(Base=(R=128,G=64))
+    ColorEnd=(Base=(R=0))
+    SizeWidth=(Base=9.000000)
+    SizeLength=(Base=15.000000)
+    SizeEndScale=(Base=2.000000)
+    DripTime=(Base=0.200000)
+    Attraction=(Z=-5.000000)
+    Damping=4.000000
+    Textures(0)=FireTexture'HPParticle.hp_fx.Particles.F_Spark2'
+    LastUpdateLocation=(X=-383.537079,Y=385.137329,Z=15.724504)
+    LastEmitLocation=(X=-383.537079,Y=385.137329,Z=15.724504)
+    LastUpdateRotation=(Pitch=16256,Yaw=-16336)
+    EmissionResidue=0.502352
+    Age=180.026321
+    bDynamicLight=True
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-383.537079,Y=385.137329,Z=15.724504)
+    Rotation=(Pitch=16256,Yaw=-16336)
+    OldLocation=(X=-352.649200,Y=233.869247,Z=15.724504)
+    Name=ParticleFX5
+}

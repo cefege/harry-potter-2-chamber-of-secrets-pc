@@ -1,0 +1,78 @@
+//LevelStart_EntryHallHub_GState040
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch2Bars
+trigger ToggleCh2LevelLoad
+Sleep .03
+trigger Close_Ch4Bars
+Trigger ToggleCh4LevelLoad
+
+//teleport Snape into potions class
+Capture Snape
+Snape teleport CutMark49 
+Snape face CutMark82
+Release Snape
+
+//teleport 13 students to Snape's classroom------------------
+capture GOldMaleGry1
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf3
+capture GFemRav1
+capture GMaleRav2
+capture GFemRav3
+capture GOldMaleSly1
+capture GFemSly2
+capture GOldMaleSly2
+capture GFemSly1
+capture GFemSly3
+
+GOldMaleGry1 teleport cmPotions13
+GFemGry0 teleport cmPotions12
+GMaleGry4 teleport cmPotions11
+GFemHuf2 teleport cmPotions10
+GMaleHuf3 teleport cmPotions09
+GFemRav1 teleport cmPotions08
+GMaleRav2 teleport cmPotions07
+GFemRav3 teleport cmPotions06
+GOldMaleSly1 teleport cmPotions05
+GFemSly2 teleport cmPotions04
+GOldMaleSly2 teleport cmPotions03
+GFemSly1 teleport cmPotions02
+GFemSly3 teleport cmPotions01
+
+GOldMaleGry1 face Snape
+GFemGry0 face Snape
+GMaleGry4 face Snape
+GFemHuf2 face Snape
+GMaleHuf3 face Snape
+GFemRav1 face Snape
+GMaleRav2 face Snape
+GFemRav3 face Snape
+GOldMaleSly1 face Snape
+GFemSly2 face Snape
+GOldMaleSly2 face Snape
+GFemSly1 face Snape
+GFemSly3 face Snape
+
+release GOldMaleGry1
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf3
+release GFemRav1
+release GMaleRav2
+release GFemRav3
+release GOldMaleSly1
+release GFemSly2
+release GOldMaleSly2
+release GFemSly1
+release GFemSly3
+
+//end of student placement--------------------------------------
+
+

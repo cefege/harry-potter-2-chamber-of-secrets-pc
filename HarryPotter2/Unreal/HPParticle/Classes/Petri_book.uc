@@ -1,0 +1,40 @@
+//=============================================================================
+// Petri_book.
+//=============================================================================
+class Petri_book expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=100.000000)
+    SourceWidth=(Base=50.000000)
+    SourceHeight=(Base=50.000000)
+    SourceDepth=(Base=60.000000)
+    AngularSpreadWidth=(Base=0.000000)
+    AngularSpreadHeight=(Base=0.000000)
+    bSteadyState=True
+    speed=(Base=1.000000)
+    Lifetime=(Base=1.750000)
+    ColorStart=(Base=(R=128,B=128))
+    ColorEnd=(Base=(R=0))
+    SizeWidth=(Base=12.000000)
+    SizeLength=(Base=20.000000)
+    SizeEndScale=(Base=5.000000)
+    DripTime=(Base=0.200000)
+    Attraction=(X=2.000000)
+    Damping=3.500000
+    Textures(0)=Texture'HPParticle.hp_fx.Particles.Sparkle_5'
+    LastUpdateLocation=(X=-383.463898,Y=384.388885,Z=15.724504)
+    LastEmitLocation=(X=-383.463898,Y=384.388885,Z=15.724504)
+    LastUpdateRotation=(Pitch=16256,Yaw=-16336)
+    EmissionResidue=0.783989
+    Age=380.673218
+    CurrentPriorityTag=1
+    bDynamicLight=True
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-383.463898,Y=384.388885,Z=15.724504)
+    Rotation=(Pitch=16256,Yaw=-16336)
+    OldLocation=(X=-352.056519,Y=32.978714,Z=15.724504)
+    Name=ParticleFX10
+}

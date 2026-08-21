@@ -1,0 +1,149 @@
+//07070DuelSnake
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Hermione
+Capture Lockhart
+Capture Draco
+Capture GMaleSly9
+Capture Snake
+Capture DracoSnake
+Capture Duellist
+Capture serpentsoriaPE
+//Capture chickenLeg
+Capture BaseCam
+
+SetObjectiveId
+
+Hermione Turnto Harry Follow
+Lockhart Turnto Harry Follow
+GMaleSly9 Turnto Harry Follow
+
+//BaseCam FlyTo CutCameraPos0
+//BaseCam Target FlyTo CutMark1
+
+//Harry WalkTo CutMark1
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+sleep 1
+harry animate celebrate 
+Duellist Teleport CutMark3
+Draco Teleport CutMark7
+Draco Face CutMark8 
+DracoSnake Teleport CutMark0
+DracoSnake Face CutMark1
+//attaches particle effect "serpentsoriaPE" to bone "emit" in DracoSnake mesh:
+DracoSnake AttachActorToBone serpentsoriaPE emit
+
+Sleep 3
+BaseCam Target FlyTo Draco z=30
+BaseCam FlyTo Draco z=30 x=50
+BaseCam flyto draco z=45 x=75 easebetween time=3 *
+Harry teleport CutMark1 *0
+//Draco animate duel_idle *
+//Draco Animate Summon *
+sleep 2
+
+Basecam target flyto Harry z=30
+Basecam flyto Harry x=70 z=24 
+Basecam flyto Harry x=50 z=12 time=2.5
+
+
+BaseCam FlyTo DracoSnake z=30 x=70
+BaseCam Target FlyTo DracoSnake z=30
+BaseCam FlyTo DracoSnake z=40 x=85 easeto time=2.5 *
+Harry Face DracoSnake
+DracoSnake Animate Summon *summondone
+//enables particle effect:
+//serpentsoriaPE EnableEmission
+
+sleep 2.5
+Draco Talk PC_Drc_DuelEnd_01
+//Serpensortia!
+
+//BaseCam Target FlyTo Harry z=30
+//BaseCam FlyTo Harry z=30 x=40
+
+//sleep .5
+//BaseCam Target FlyTo GMaleSly9
+//BaseCam FlyTo GMaleSly9 x=140 z=24
+
+
+waitfor summondone
+
+BaseCam flyto Harry x=160 y=30 z=160
+Basecam target flyto Harry z=30
+
+DracoSnake Teleport CutMark4
+sleep .2
+Draco Teleport CutMark0
+Draco TurnTo Harry follow
+
+Sleep .2
+Snake teleport CutMark10
+Snake Face Harry
+Snake animate birth 
+snake animate taunt loop *
+Harry animate duel_idle loop *
+
+BaseCam FlyTo CutCameraPos2 easebetween time=1 *
+BaseCam Target FlyTo CutMark10 easebetween time=2
+
+snake animate attack *
+
+sleep 1.25
+
+Harry Talk PC_Hry_DuelEnd_03 startanim=cast_expelliarmus endanim=idle_1
+//Leave me alone!
+
+Snake animate calm
+Snake animate slither loop *
+Ron face Harry
+sleep .5
+
+basecam flyto Ron x=40 y=-40 z=30 *
+basecam target flyto Ron z=24 *
+Ron Talk PC_Ron_DuelSnake_06
+//What was that?
+
+BaseCam Target FlyTo GMaleSly9
+BaseCam FlyTo GMaleSly9 x=140 y=40 z=24
+Hermione Talk PC_Her_DuelSnake_07
+//Did Harry just…hiss?
+
+BaseCam Target FlyTo Lockhart y=12 z=30
+BaseCam FlyTo Lockhart z=30 y=-8 x=40
+Lockhart Talk PC_Gil_DuelSnake_08
+//Oh my! That couldn't have been…
+
+BaseCam Target FlyTo Draco z=30
+BaseCam FlyTo Draco z=30 x=40
+Draco Talk PC_Drc_DuelSnake_09
+//It couldn't be! Not him!
+
+BaseCam FlyTo CutCameraPos0
+BaseCam Target FlyTo CutMark1
+
+sleep 1.5
+Harry ChangeGameState GState080
+BaseCam FadeOut
+
+
+release Harry
+release Ron
+release Hermione
+release Lockhart
+release Draco
+release GMaleSly9
+release Snake
+release DracoSnake
+release Duellist
+release serpentsoriaPE
+//release chickenLeg
+release BaseCam
+
+trigger LoadEntryHall

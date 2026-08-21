@@ -1,0 +1,125 @@
+
+//00307QuidditchTut2
+
+//Quidditch Tutorial, taught by Oliver Wood
+
+//This is where Wood throws up a snitch and explaines to Harry how to catch it.
+//Should be really easy as Harry will have no other distractions
+
+//Upon Win, Director sends the event: "WON"
+
+//Upon a LOSS, Director sends the event: "LOST"
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo CamFocus2 *
+BaseCam FlyTo LowCam2 *
+
+WaitFor HarryNod
+BaseCam Target FlyTo Harry z=30
+BaseCam FlyTo Harry x=120 z=70 y=-5
+
+WaitFor BackToWood
+BaseCam Target FlyTo CamFocus2 *
+BaseCam FlyTo LowCam2 *
+
+BaseCam FlyTo Tut2DriftCam Time=4 *
+
+
+WaitFor BackToHarry
+BaseCam Target FlyTo Snitch StayLocked
+BaseCam FlyTo Tut2TopView
+Sleep 1.0
+
+ReCapture Harry
+BaseCam GoHome
+Sleep 1.0
+//Release BaseCam
+Release Harry
+
+Capture Director
+Director StartSnitchLesson
+Release Director
+
+
+
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[BroomHarry]
+
+Capture Harry
+
+Harry Teleport Tut2HarryStartCatchLoc
+
+Harry Face WoodLocStart
+
+//Harry MatchRot IP_HarrySHORT_START
+//Harry FollowSpline Harry_Short Start=IP_HarrySHORT_START Dest=IP_HarrySHORT_End Time=1 Accel=50 Align EaseTo *
+//Harry Face IP_DracoSHORT_End
+
+Harry Face WoodLocStart
+
+WaitFor HarryNod
+Harry Animate Positive *
+Sleep 1.5
+Cue BackToWood
+
+WaitFor BackToHarry
+Harry TurnTo Snitch Follow
+
+//WaitFor CutEnd1
+//Cue CutEnd2
+//Release Harry
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Wood]
+
+Capture Wood
+Capture WoodSnitch
+Capture Snitch
+
+Wood Teleport WoodLocStart
+Wood Face LowCam1
+
+Wood Talk PC_Owd_QuidIntro_08 StartAnim=Talk_rhand
+//I’m going to throw up just a Snitch for you and I want to you to try to catch it.
+
+Wood Talk PC_Owd_QuidIntro_09 StartAnim=Talk_BothHands
+//Sound easy enough?
+
+Cue HarryNod
+
+WaitFor BackToWood
+Wood Teleport GroundWoodOFF
+WoodSnitch Teleport WoodLocStart
+WoodSnitch Face LowCam1
+WoodSnitch Animate ThrowSnitch *
+Snitch Teleport SnitchTelLocOnGamePath
+Sleep 3.0
+
+Cue BackToHarry
+Sleep 1.5
+WoodSnitch Teleport WoodSnitchOFF
+Wood Teleport WoodLocStart
+Wood Face LowCam1
+
+Release Wood
+
+//####### Below is an example of adding animation to a talk.
+//Ron Talk PC_Ron_WhompTut1_63 StartAnim=idle loopanim=idle endanim=idle
+
+//---------------------------------------------------------------------

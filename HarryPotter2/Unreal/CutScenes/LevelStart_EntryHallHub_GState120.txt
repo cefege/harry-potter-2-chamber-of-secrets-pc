@@ -1,0 +1,24 @@
+//LevelStart_EntryHallHub_GState120
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+
+//close challenges and great hall so Goyle can't duel or challenge himself.
+Trigger Close_Ch1Bars
+Trigger ToggleCh1LevelLoad
+Sleep .03
+Trigger Close_Ch2Bars
+Trigger ToggleCh2LevelLoad
+Sleep .03
+Trigger Close_Ch4Bars
+Trigger ToggleCh4LevelLoad
+Sleep .03
+trigger CloseGreatHall
+
+//Turn Harry into Goyle for this GState.
+Trigger HarryToGoyle
+
+BaseCam FadeIn
+

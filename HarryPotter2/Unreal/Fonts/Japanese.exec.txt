@@ -1,0 +1,6 @@
+#exec ..\fonts\Japanese.exec.txt
+
+new TrueTypeFontFactory PACKAGE="Japanese" Name=Japanese12 FontName="Lucida Sans Unicode" Height=12 AntiAlias=1 CharactersPerPage=128 Path=..\utlocalized Wildcard=*.jpt
+new TrueTypeFontFactory PACKAGE="Japanese" Name=Japanese20 FontName="Lucida Sans Unicode" Height=20 AntiAlias=1 CharactersPerPage=64 Path=..\utlocalized Wildcard=*.jpt
+
+OBJ SAVEPACKAGE PACKAGE="Japanese" FILE="..\Textures\Japanese.utx"

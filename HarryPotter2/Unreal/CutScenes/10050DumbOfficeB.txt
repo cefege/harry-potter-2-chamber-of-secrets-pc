@@ -1,0 +1,33 @@
+//10050DumbOfficeB
+//IntroduceSortingHat
+
+[StupidThread]
+
+Capture SortingHat
+Capture Harry
+Capture BaseCam
+
+BaseCam Target FlyTo SortingHat
+BaseCam FlyTo CutCameraPos35
+
+Harry WalkTo CutMark103Dude
+
+Harry TurnTo SortingHat
+Harry Talk PC_Hry_DumbOffice_07
+//It’s the old school Sorting Hat.  I wondered where it was kept.
+//SortingHat TurnTo Harry
+SortingHat Talk PC_Soh_DumbOffice_11
+//You’ve been wondering whether I put you in the right house.  Yes, you were particularly difficult to place.
+
+SortingHat Talk PC_Soh_DumbOffice_12
+//But I stand by what I said before – you would have done well in Slytherin.
+
+Harry Talk PC_Hry_DumbOffice_13
+//Oh, my gosh!
+
+
+Release SortingHat
+Release BaseCam
+Release Harry
+
+trigger CountForDumbEnterCutScene

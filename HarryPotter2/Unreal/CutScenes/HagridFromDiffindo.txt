@@ -1,0 +1,15 @@
+//HagridFromDiffindo
+
+//This simply teleports Hagrid to the Diffindo steps so he can walk
+//to his hut, where he patrols
+//This appears only in GStates 060,065,070
+
+[Thread]
+
+Capture Hagrid
+Hagrid Teleport HagridGoToHutPP
+Hagrid SetOnPatrolPointPath HagridGoToHutPP *
+Release Hagrid
+
+
+

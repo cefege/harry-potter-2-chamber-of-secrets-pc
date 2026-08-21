@@ -1,0 +1,68 @@
+//08040HerbDiffIntro
+
+[Dialog_01]
+
+Capture Harry
+Capture Sprout
+Capture BaseCam
+
+SetObjectiveId
+
+BaseCam Target FlyTo CutMark20 Time=2 *
+Harry RunTo CutMark20
+
+BaseCam FlyTo CutCameraPos0
+BaseCam Target FlyTo Sprout
+
+Sprout Talk PC_Spr_HerbDiffIntro_01 *SproutDone1
+//Welcome to second year Herbology, everyone!  And for those of you who have forgotten, I am Professor Sprout.
+
+Harry WalkTo CutMark2
+Capture Ron
+Ron Turnto Sprout
+Harry TurnTo Sprout
+BaseCam Target FlyTo Sprout z=20
+BaseCam FlyTo Sprout z=200 x=512
+
+waitfor SproutDone1
+BaseCam FlyTo Sprout z=200 x=512 y=-64 easeto time=5 *
+Sprout Talk PC_Spr_HerbDiffIntro_02
+//Let's dig right in, shall we? Today, I'll teach you Diffindo, the severing charm.
+
+BaseCam FlyTo Sprout z=20 x=50
+Sprout TurnTo Harry
+Sprout Talk PC_Spr_HerbDiffIntro_03
+//Harry Potter, would you like to plant your feet in front of class and be the first to learn the spell?
+
+BaseCam Target FlyTo Harry z=20 y=-30
+BaseCam FlyTo Harry z=18 x=60 y=-30
+Harry Talk PC_Hry_HerbDiffIntro_04
+//I'd be glad to, Professor Sprout.
+
+Harry TurnTo Ron *
+Ron TurnTo Harry
+Ron Talk PC_Ron_HerbDiffIntro_05
+//Taking a leaf from Hermione's book, aren't you?
+Harry RunTo CutMark20 *
+
+sleep 2
+Harry Teleport CutMark3
+Sprout Face Harry Follow
+BaseCam FlyTo CutCameraPos1
+BaseCam Target FlyTo Sprout
+
+Harry RunTo CutMark4
+Sprout TurnTo CutMark19
+Harry TurnTo CutMark19
+
+
+sleep 2
+
+Release Harry
+Release Ron
+Release Sprout
+Release BaseCam
+
+//Start Diffindo spell lesson
+Trigger SpellLessonTrigger
+

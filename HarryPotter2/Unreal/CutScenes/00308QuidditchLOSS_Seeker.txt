@@ -1,0 +1,64 @@
+
+//00308QuidditchLOSS_Seeker
+
+//Played when you lose a match because the other Seeker caught the Snitch
+
+
+//---------------------------------------------------------------------
+
+[Cam]
+
+Capture BaseCam
+
+BaseCam FlyTo LOSS_SeekerCamLoc
+BaseCam Target FlyTo CrazyCamFocus1
+
+//BaseCam Target AttachedTo=harry z=25
+//BaseCam Locked YawStep=-30 Distance=100
+
+WaitFor CutEnd
+Release BaseCam
+
+Trigger LoadGrounds
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[Harry]
+
+Capture Harry
+
+Harry Teleport IPGHarry_Intro_End
+Harry Face IPGHarry_Intro_End
+
+Capture Director
+Director SetEventCue End=EndMatch
+
+WaitFor EndMatch
+Release Director
+
+Cue CutEnd
+Release Harry
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[Enemy Seeker]
+
+//Capture Draco
+
+//Draco FlyTo IPGHarry_Intro_End
+
+//Draco FlyTo WinLoopFinish
+//Draco MatchRot WinLoopFinish
+//Draco FollowSpline IP_EnterTrench Start=WinLoopFinish Speed=300 Accel=100 Align *
+
+
+//---------------------------------------------------------------------

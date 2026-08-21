@@ -1,0 +1,61 @@
+//13040SpongeIntro
+
+[Dialog_01]
+
+capture Harry
+capture Lockhart
+capture Hermione
+capture Basecam
+
+
+Basecam Target Flyto Lockhart z=25 *
+Basecam Flyto CutCameraPos3
+Harry Walkto Cutmark7 *HarryDone
+Basecam Flyto CutCameraPos4 EaseTo Time=6 *
+
+Lockhart Talk PC_Gil_SpongeIntro_01
+//Welcome back to your favourite class, Gryffindor students!
+
+Basecam flyto Lockhart z=30 x=70
+Lockhart Talk PC_Gil_SpongeIntro_02 
+//Please hold your applause while we learn Spongify!
+
+
+
+
+
+Lockhart Talk PC_Gil_SpongeIntro_03 *LockhartDone0
+//Harry Potter! You look eager to soak up a little knowledge! Step up in front of class and we'll show 'em how it's done!
+
+sleep 3
+Basecam target Flyto cutmark27 *
+Basecam Flyto Harry x=50 y=-100 z=50
+
+
+Harry walkto cutmark27 *HarryDone
+waitfor LockhartDone0
+Harry say PC_Hry_SpongeIntro_04
+//Lucky me.
+
+Basecam Flyto CutCameraPos6
+
+
+waitfor HarryDone
+Harry runto cutmark28 
+
+
+Basecam FlyTo CutCameraPos7 *
+Basecam Target FlyTo CutMark30
+Harry turnto Cutmark 30 *
+LockHart turnto CutMark30 *
+
+release Harry
+release Lockhart
+release Hermione
+release Basecam
+
+
+//Start Spongify spell lesson
+trigger SpellLessonSpongifyTrigger
+
+

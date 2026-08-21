@@ -1,0 +1,49 @@
+
+//levelStart_GrandStairHub_GState130
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+//All the doors are open at this point so I put my play once only cutscene below.
+
+
+//put Lockhart in the DADA classroom for spongify class.
+
+Capture Lockhart
+
+Lockhart teleport cutmark13
+Lockhart face cutmark12
+
+release lockhart
+
+//teleport 6 students to Lockhart's classroom------------------
+capture GOldMaleGry1
+capture GOldMaleGry2
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf2
+
+GOldMaleGry1 teleport Cutmark9
+GOldMaleGry2 teleport Cutmark10
+GFemGry0 teleport Cutmark20
+GMaleGry4 teleport Cutmark21
+GFemHuf2 teleport Cutmark22
+GMaleHuf2 teleport Cutmark23
+
+GOldMaleGry1 face Lockhart
+GOldMaleGry2 face Lockhart
+GFemGry0 face Lockhart
+GMaleGry4 face Lockhart
+GFemHuf2 face Lockhart
+GMaleHuf2 face Lockhart
+
+release GOldMaleGry1
+release GOldMaleGry2
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf2
+//end of student placement--------------------------------------
+

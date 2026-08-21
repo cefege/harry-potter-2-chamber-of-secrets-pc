@@ -1,0 +1,44 @@
+
+//05030GoToCharms
+
+[Thread]
+
+//Get rid of last objective--------------------------------
+SetObjectiveId
+
+Capture Harry
+Capture Hermione
+Capture basecam
+
+Hermione teleport cutmark20
+Harry teleport cutmark23
+Hermione face harry follow
+basecam flyto CutCameraPos5 *
+basecam target flyto Harry
+basecam fadein *
+Harry walkto cutmark22 *HarryDone1
+Basecam Target flyto Cutmark21 time=2 easebetween *
+
+waitfor HarryDone1
+Harry turnto Hermione follow *
+Hermione Talk PC_Her_GoToCharms_01
+//We have to get to Charms Class, Harry. And I have an idea…
+
+Harry Talk PC_Hry_GoToCharms_02
+//An idea about what?
+
+Basecam flyto Harry x=-20 z=25 y=-25
+Basecam target Flyto Hermione z=20
+Hermione Talk PC_Her_GoToCharms_03
+//We should ask Professor Flitwick about the Chamber of Secrets. He's bound to know something. Let's go!
+
+basecam flyto CutCameraPos5 *
+Basecam Target flyto Cutmark21
+Hermione leadactor harry RonToDADAStart RonToDADAEnd *
+
+//set objective--------------------------------------------
+SetObjectiveId PC_Hry_GoToCharms2_05
+
+Release Harry
+Release Hermione
+release basecam

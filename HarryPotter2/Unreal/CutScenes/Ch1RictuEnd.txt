@@ -1,0 +1,220 @@
+
+//Multiple Ending Rictusempra Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Lockhart
+Capture challengescoremanager
+Capture basecam
+
+Trigger EndMusic
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Lockhart
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeJustWonFirstTime Cue WonFirstTimeThread
+If ChallengeWorseThanBefore Cue WorseThread
+If ChallengeNewBestScore Cue NewBestThread
+If ChallengeJustMastered Cue JustMasteredThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[WonFirstTimeThread]
+
+WaitFor WonFirstTimeThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Lockhart Talk PC_Gil_Chal1Ricta_09 *
+//Well done, Mr Potter, you have completed my Rictusempra Challenge!  The remaining time now becomes your personal high score.
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+
+sleep 2
+
+challengescoremanager tallychallenge *TallyDone
+
+harry animate celebrate
+
+waitfor TallyDone
+
+trigger levelexit
+
+sleep 1
+
+release Lockhart
+release basecam
+release challengescoremanager
+
+
+
+//----------------------------------------------------------------------
+[WorseThread]
+
+WaitFor WorseThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Lockhart Talk PC_Gil_Chal1Ricta_07 *Lockdone1
+//I'm sorry Harry, but you will have to do better before I can award you any more House Points.  I encourage you to come back and try again. If you can beat your personal high score, you will be awarded more House Points!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+
+sleep 2
+
+challengescoremanager tallychallenge *TallyDone
+
+WaitFor Lockdone1
+
+harry animate talk_remember
+
+waitfor TallyDone
+
+trigger levelexit
+
+sleep 1
+
+release Lockhart
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[NewBestThread]
+
+WaitFor NewBestThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Lockhart Talk PC_Gil_Chal1Ricta_13 *Lockdone1
+//Well done, Harry, you have set a new personal high score! You're almost as good as I was at your age!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+
+sleep 2
+
+challengescoremanager tallychallenge *TallyDone
+
+WaitFor Lockdone1
+
+harry animate celebrate
+
+waitfor TallyDone
+
+trigger levelexit
+
+sleep 1
+
+release Lockhart
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[JustMasteredThread]
+
+WaitFor JustMasteredThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Lockhart Talk PC_Gil_Chal1Ricta_08 *Lockdone1
+//Congratulations, Harry Potter, you have mastered the Rictusempra Spell  Challenge! 50 points to Gryffindor!  You are welcome to continue playing this challenge, but you will be awarded no more House Points
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+
+sleep 2
+
+challengescoremanager tallychallenge *TallyDone
+
+WaitFor Lockdone1
+
+harry animate celebrate
+
+waitfor TallyDone
+
+trigger levelexit
+
+sleep 1
+
+release Lockhart
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Lockhart Talk PC_Gil_Chal1Ricta_24 *Lockdone1
+//Good run, Harry!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+
+sleep 2
+
+challengescoremanager tallychallenge *TallyDone
+
+WaitFor Lockdone1
+
+harry animate celebrate
+
+waitfor TallyDone
+
+trigger levelexit
+
+sleep 1
+
+release Lockhart
+release basecam
+release challengescoremanager

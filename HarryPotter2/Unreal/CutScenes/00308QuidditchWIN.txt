@@ -1,0 +1,51 @@
+
+//00308QuidditchWIN
+
+//Quidditch, show after you beat a game.
+
+//Upon Win, Director sends the event: "WON"
+
+
+//---------------------------------------------------------------------
+
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target AttachedTo=harry z=25
+BaseCam Locked YawStep=-30 Distance=100
+
+
+WaitFor CutEnd
+Release BaseCam
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[Harry]
+
+Capture Harry
+
+Harry FlyOnPath IP_HarryWin_Loop Start=WinLoopStart *
+
+Sleep 5.0
+
+Capture Director
+Director SetEventCue End=EndMatch
+
+WaitFor EndMatch
+Release Director
+
+Cue CutEnd
+
+Release Harry
+
+Trigger LoadGrounds
+
+
+
+
+//---------------------------------------------------------------------

@@ -1,0 +1,88 @@
+[thread]
+
+capture Harry
+capture Aragog
+Capture SpiderLarge0
+
+
+Harry RunTo HarryWalk
+Harry WalkTo HarryStand
+capture Basecam
+//baseCam Target Flyto Aragog EaseBetween time=1 *
+basecam target flyto cutmarkpit easebetween time=1 *
+basecam Flyto spidercam1 EaseBetween time=1
+
+spiderlarge0 turnto Harry
+spiderlarge0 Talk PC_Spi_Adv9bLair_04 *
+//Aragog! A human is here!
+basecam target flyto spiderlarge0 easebetween time=1
+baseCam Target Flyto Aragog EaseBetween time=2.5 *
+basecam followSpline spidercam easebetween start=spidercam1 dest=spidercam3 time=4 accel=150
+Aragog Talk PC_Ara_Adv9bLair_05
+//Is it Hagrid?
+
+basecam flyto Harry x=128 z=32
+basecam target flyto Harry
+Harry Say PC_Hry_Adv9bLair_06
+//No, I am a friend of Hagrid's. I came to help him.
+
+
+basecam Flyto Spidercam3
+basecam Target Flyto Aragog
+
+Aragog animate rotate *
+Aragog turnto Harry
+
+
+Aragog Talk PC_Ara_Adv9bLair_07
+//Why does Hagrid need help?
+
+basecam flyto Harry x=128 z=32
+basecam target flyto Harry
+Harry Talk PC_Hry_Adv9bLair_08
+//Some say that Hagrid released a monster long ago in Hogwarts.  It killed someone and it must have come back.
+
+basecam target flyto Aragog
+Aragog Talk PC_Ara_Adv9bLair_09
+//It was me he released but he sent me away. I've never gone back. And I've never hurt anyone in Hogwarts.
+
+basecam flyto Harry x=128 z=32
+basecam target flyto Harry
+Harry Talk PC_Hry_Adv9bLair_10
+//So you're not the guardian of the Chamber of Secrets.
+
+basecam flyto spidercam1
+basecam target flyto Aragog
+Aragog Talk PC_Ara_Adv9bLair_11 startanim=react
+//No. The guardian is an ancient creature that spiders fear above all others.
+
+basecam followSpline spidercam easebetween start=spidercam1 dest=spidercam2 time=2 accel=150 *
+Aragog Talk PC_Ara_Adv9bLair_12
+//It killed the girl in the bathroom, not I.
+
+basecam flyto Harry x=128 z=32
+basecam target flyto Harry
+Harry Talk PC_Hry_Adv9bLair_13
+//Thank you.  I think I should go now.
+
+basecam flyto aragog x=256 z=128
+basecam target flyto aragog
+Aragog Talk PC_Ara_Adv9bLair_14
+//No you won't. I cannot deny my children such fresh meat. Goodbye, friend of Hagrid.
+
+//looking at webs:
+basecam Flyto cutcampos3
+basecam target flyto cutmark0 easebetween time=2
+sleep 1
+
+basecam target flyto cutmark1 easebetween time=1
+
+sleep 2
+
+release Harry
+release Aragog
+releae spiderlarge0
+release basecam
+
+
+

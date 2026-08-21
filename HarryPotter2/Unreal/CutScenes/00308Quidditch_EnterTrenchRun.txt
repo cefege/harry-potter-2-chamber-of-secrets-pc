@@ -1,0 +1,131 @@
+
+//00308Quidditch_EnterTrenchRun
+
+//This is the cut scene that transports the players into the Trench Run map.
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo EnterTrenchFocus1 *
+BaseCam FlyTo EnterTrenchCam1 *
+
+WaitFor SecondPart
+BaseCam Target FlyTo EnterTrenchFocus2 *
+BaseCam FlyTo EnterTrenchCam2 *
+
+WaitFor CutEnd
+Release BaseCam
+
+Capture Director
+//Trigger Director
+Release Durector
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Harry]
+
+Capture Harry
+
+
+WaitFor HarryGo
+Harry Teleport IP_EnterTrench_Start
+//Harry FlyOnPath IP_EnterTrench Start=IP_EnterTrench_Start
+Harry FollowSpline IP_EnterTrench Start=IP_EnterTrench_Start Dest=IP_EnterTrench_End Time=3 Accel=100 Align *
+
+Sleep 4.0
+
+Cue SecondPart
+
+WaitFor HarryGo2
+Harry Teleport IP_EnterTrench2_Start
+//Harry FlyOnPath IP_EnterTrench2 Start=IP_EnterTrench2_Start
+Harry FollowSpline IP_EnterTrench Start=IP_EnterTrench_Start Dest=IP_EnterTrench_End Time=3 Accel=100 Align *
+
+Sleep 2.0
+
+Cue CutEnd
+Release Harry
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Draco]
+
+Capture Draco
+
+WaitFor DracoGo
+Draco FlyTo IP_EnterTrench_Start
+Draco MatchRot IP_EnterTrench_Start
+Draco FollowSpline IP_EnterTrench Start=IP_EnterTrench_Start Dest=IP_EnterTrench_End Time=3 Accel=100 Align *
+//Draco FollowSpline IP_EnterTrench Start=IP_EnterTrench_Start Dest=IP_EnterTrench_End Speed=400 Accel=100 Align *
+
+Sleep 2.0
+
+Cue HarryGo
+
+WaitFor DracoGo2
+Draco FlyTo IP_EnterTrench2_Start
+Draco MatchRot IP_EnterTrench2_Start
+//Draco FollowSpline IP_EnterTrench2 Start=IP_EnterTrench2_Start Dest=IP_EnterTrench2_End Time=3 Accel=100 Align *
+Draco FollowSpline IP_EnterTrench2 Start=IP_EnterTrench2_Start Dest=IP_EnterTrench2_End Speed=400 Accel=100 Align *
+
+Sleep 2.0
+
+Cue HarryGo2
+
+WaitFor CutEnd
+Release Draco
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[Snitch]
+
+Capture Snitch
+
+Snitch FlyTo IP_EnterTrench_Start
+Snitch MatchRot IP_EnterTrench_Start
+Snitch FollowSpline IP_EnterTrench Start=IP_EnterTrench_Start Dest=IP_EnterTrench_End Time=3 Accel=100 Align *
+//Snitch FollowSpline IP_EnterTrench Start=IP_EnterTrench_Start Dest=IP_EnterTrench_End Speed=400 Accel=100 Align *
+
+Sleep 2.0
+
+Cue DracoGo
+
+WaitFor SecondPart
+Snitch FlyTo IP_EnterTrench2_Start
+Snitch MatchRot IP_EnterTrench2_Start
+Snitch FollowSpline IP_EnterTrench2 Start=IP_EnterTrench2_Start Dest=IP_EnterTrench2_End Time=3 Accel=100 Align *
+//Snitch FollowSpline IP_EnterTrench2 Start=IP_EnterTrench2_Start Dest=IP_EnterTrench2_End Speed=400 Accel=100 Align *
+
+Sleep 3.0
+
+Snitch FlyTo IPSnitchTrench_MainStart
+Snitch MatchRot IPSnitchTrench_MainStart
+//Snitch FollowSpline IP_EnterTrench2 Start=IP_EnterTrench2_Start Dest=IP_EnterTrench2_End Time=3 Accel=100 Align *
+Snitch FollowSpline IPSnitchTrench Start=IPSnitchTrench_MainStart Speed=400 Accel=100 Align *
+
+
+Sleep 2.0
+
+Cue DracoGo2
+
+WaitFor CutEnd
+Release Snitch
+
+
+
+//---------------------------------------------------------------------

@@ -1,0 +1,107 @@
+//07080Parselmouth
+
+[Harry]
+Capture Harry
+Harry Teleport CutMark108
+Harry Face CutMark113
+sleep 2.1
+Harry RunTo CutMark113
+Harry TurnTo Hermione follow
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+[Hermione]
+Capture Hermione
+Hermione Teleport CutMark109
+Hermione Face CutMark114
+
+sleep 2.4
+Hermione say PC_Her_Parselmouth_14 *HermioneDone
+//You’re a Parselmouth, Harry.  You can talk to snakes!
+Hermione RunTo CutMark114
+Hermione Turnto Harry Follow
+waitfor HermioneDone
+Cue HermioneDoneDude
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+[Ron]
+Capture Ron
+Ron teleport CutMark111
+Ron Face CutMark115
+
+sleep 2.3
+Ron RunTo CutMark115
+Ron Turnto Harry Follow
+
+Cue RonMadeIt
+
+//Main@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+[Dialog_01]
+
+trigger GreatHalldoor
+Capture BaseCam
+BaseCam FlyTo CutCameraPos31
+BaseCam Target FlyTo Harry StayLocked
+
+Sleep 2.4
+BaseCam FadeIn
+
+waitfor RonMadeIt
+
+ReCapture Harry
+ReCapture Ron
+ReCapture Hermione
+
+Harry say PC_Hry_Parselmouth_15
+//Why does it matter?
+
+Hermione Talk PC_Her_Parselmouth_16
+//It matters, Harry, because being able to talk to snakes was what Salazar Slytherin was famous for.
+
+Harry Talk PC_Hry_Parselmouth_27
+//Oh, no…
+Harry TurnTo Hermione follow
+Ron Talk PC_Ron_Parselmouth_28
+//Exactly.  Now the whole school’s going to think you’re his great-great-great-great-grandson or something…
+
+Harry Talk PC_Hry_Parselmouth_29
+//But I’m not!
+
+Ron Talk PC_Ron_Parselmouth_30
+//Anyway – we’ll see you later, Harry.
+Ron WalkTo CutMark116 *
+
+Hermione Talk PC_Her_Parselmouth_31
+//Bye, Harry.
+Harry TurnTo Hermione follow
+Hermione WalkTo CutMark116 *
+sleep 1
+Harry TurnTo Hermione follow
+BaseCam FlyTo Harry x=35 z=18
+BaseCam Target FlyTo Harry z=20
+
+sleep 2
+BaseCam FadeOut
+
+//Transition D---------------------------------------
+Capture Narrator
+BaseCam flyto transHeirCutCam1
+BaseCam Target FlyTo transHeirCutMark
+BaseCam FlyTo transHeirCutCam2 easeto time=14 *
+BaseCam fadein
+Narrator Talk PC_Nar_TransD_00
+//Harry lay awake for hours that night, wondering…
+
+Narrator Talk PC_Nar_TransD_02 *NarrDone
+//Could he be a descendant of Salazar Slytherin?
+
+WaitFor NarrDone
+BaseCam FadeOut
+Release Narrator
+
+Release Harry
+Release Ron
+Release Hermione
+Release BaseCam
+
+//next cutscene
+Trigger 08020GoToHerb

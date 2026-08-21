@@ -1,0 +1,36 @@
+//=============================================================================
+//=============================================================================
+class repairo_hit expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=80.000000,Rand=5.000000)
+    SourceWidth=(Base=30.000000)
+    SourceHeight=(Base=30.000000)
+    AngularSpreadWidth=(Base=10.000000,Rand=2.000000)
+    AngularSpreadHeight=(Base=10.000000)
+    Lifetime=(Base=3.000000)
+    ColorEnd=(Base=(R=30,G=30,B=30))
+    SizeWidth=(Base=12.000000)
+    SizeLength=(Base=12.000000)
+    SizeEndScale=(Base=5.000000)
+    SpinRate=(Base=-6.000000,Rand=6.000000)
+    DripTime=(Base=0.200000)
+    Attraction=(X=20.000000,Y=20.000000)
+    Damping=1.500000
+    ParticlesMax=80
+    Textures(0)=Texture'HPParticle.hp_fx.Particles.Sparkle_3'
+    LastUpdateLocation=(X=-388.113831,Y=-1.974696,Z=16.397217)
+    LastEmitLocation=(X=-388.113831,Y=-1.974696,Z=16.397217)
+    LastUpdateRotation=(Pitch=16208,Yaw=-16336)
+    EmissionResidue=0.003456
+    Age=1839.098877
+    CurrentPriorityTag=9
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-388.113831,Y=-1.974696,Z=16.397217)
+    Rotation=(Pitch=16208,Yaw=-16336)
+    OldLocation=(X=32.094711,Y=293.334137,Z=16.937803)
+    Name=ParticleFX6
+}

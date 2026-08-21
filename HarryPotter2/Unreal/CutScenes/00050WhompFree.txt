@@ -1,0 +1,167 @@
+//00050WhompFree
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+capture Fordcar
+capture basecam
+
+//*****************
+//Change the following line when Jason Newkirk cleans up the animations
+capture whompwillow
+//recapture whompwillow
+//*****************
+
+WhompWillow animate ReleaseRon bone=HoldRonRoot *RonReleased
+
+sleep 1
+BaseCam Target FlyTo CutMark15 z=-20
+BaseCam FlyTo CutCameraPos26 *
+Ron Talk PC_Ron_WhompFree_00 startanim=wave *RonDoneBuns
+//Thanks Harry, much appreciated.
+Harry RunTo CutMark4
+
+waitfor RonReleased
+WhompWillow animate ReleaseRonHold Bone=Bone16 loop *
+
+Harry TurnTo Ron Follow *
+
+waitfor RonDoneBuns
+//Harry Say PC_Hry_WhompFree_01 *
+//Oh, it was nothing…
+
+Ron animate GetDown *
+
+sleep 3
+trigger CarLeavingSound
+sleep 1
+Ron Say PC_Ron_WhompFree_08 *
+//Oh No!
+
+sleep .5
+FordCar MatchRot FirstCarSplinePoint 
+Basecam Target FlyTo FordCar Time=1 StayLocked *
+FordCar FlyTo FirstCarSplinePoint Time=2 easebetween
+WhompWillow Animate ReleaseCar Bone=Bone16
+WhompWillow Animate ReleaseCarHold Bone=Bone16 loop *
+FordCar FollowSpline SplineSet2 Start=FirstCarSplinePoint Dest=LastCarSplinePoint Time=20 Accel=100 align easebetween *
+Ron FlyTo CutMark2
+
+sleep 4
+Ron RunTo CutMark8 *RonDone2
+
+sleep 1
+Harry RunTo CutMark0
+Harry Turnto FordCar Follow
+
+waitfor RonDone2
+Ron TurnTo FordCar Follow
+BaseCam Target FlyTo CutMark27
+BaseCam FlyTo CutCameraPos20
+Ron talk PC_Ron_WhompFree_09 startanim=talk_comehere *RonDoneFun
+//Come Back!
+Ron TurnTo FordCar Follow
+sleep .5
+
+Ron TurnTo FordCar Follow
+BaseCam FlyTo CutCameraPos25 Time=10 *
+
+waitfor RonDoneFun
+BaseCam Target FlyTo CutMark1 Time=3 *
+Ron Talk PC_Ron_WhompFree_10 StartAnim=Talk_Flustered EndAnim=idle
+//Great. My Dad is not going to be happy that I lost his flying car.
+sleep .5
+basecam flash a=32 r=255 g=255 b=255 time=0.15 *
+sleep .5
+Harry TurnTo Ron Follow *
+trigger Thunder
+
+Ron TurnTo Harry *
+Ron Talk PC_Ron_WhompFree_06 startanim=talk_remember *RonDone3
+//Anyway, we’d better get a move on.  We don’t want Professor Snape catching us out so late.
+
+WaitFor RonDone3
+release ron
+cue RonRunOff
+sleep 1.5
+Release Harry
+release Fordcar
+release basecam
+//release WhompWillow
+
+[RonRunOff]
+waitfor RonRunOff
+trigger RonGate
+capture Ron
+Ron RunTo CutMark10 CutMark11
+//Ron RunTo CutMark11
+Ron FlyTo RonSend
+Ron LeadActor Harry RonSend RonBlend *
+Release Ron
+
+
+
+
+//Old Phil code******************************************************************************************************
+
+//capture harry
+//capture ron
+//capture Fordcar
+//capture basecam
+//capture WhompWillow
+
+//basecam target flyto ReleaseCam time=0.5 *
+
+//WhompWillow animate ReleaseRon bone=HoldRonRoot
+
+//sleep 1
+
+//basecam target flyto FordCar time=0.5 *
+//basecam flyto CarCam01 time=1 *
+
+//FordCar MatchRot FirstCarSplinePoint
+
+//FordCar FlyTo FirstCarSplinePoint Fixed Time=2
+
+//FordCar FlyTo EndCarPoint Time=5 *
+
+//basecam flyto ChatCam01 time=1 *
+//basecam target flyto ChatTarget01 time=1 *
+
+//Harry RunTo ChatMark1 *
+//Ron RunTo ChatMark0 *
+
+//sleep 2
+
+//Ron turnto Harry rate=120 *
+//Harry turnto Ron rate=120 *
+
+//sleep 2
+
+//basecam flyto ChatCam02 time=1 *
+
+//sleep 2
+
+//basecam flyto ChatCam02 time=1 *ChatDone
+
+//sleep 2
+
+//WaitFor ChatDone
+
+//Ron runto Point5
+
+//release Harry
+//release basecam
+
+//Ron runto Point6
+
+//Ron teleport Pop01 *
+//Ron turnto Harry rate=120
+
+//release WhompWillow
+//release Ron
+//release Fordcar
+//trigger OpenGate0
+
+

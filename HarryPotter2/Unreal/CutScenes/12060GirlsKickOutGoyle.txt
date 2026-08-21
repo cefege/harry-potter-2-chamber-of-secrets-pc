@@ -1,0 +1,60 @@
+
+//12060GirlsKickOutGoyle
+
+//This is the cut scene that plays when Goyle trys to go into the girls dorm rooms.
+
+
+[Harry]
+
+Capture PotterAsGoyle
+
+//PotterAsGoyle WalkTo HarryGirlDormLoc
+
+PotterAsGoyle TurnTo GirlsDormFocus
+
+WaitFor CutEnd
+
+Release PotterAsGoyle
+
+
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo GirlsDormFocus1
+BaseCam FlyTo GirlsDormCam1
+
+Waitfor CutEnd
+
+Release BaseCam
+
+[Girls]
+
+Capture GirlDorm1
+Capture GirlDorm2
+Capture GirlDorm3
+Capture GirlDorm4
+
+GirlDorm1 TurnTo HarryGirlDormLoc *
+GirlDorm2 TurnTo HarryGirlDormLoc *
+GirlDorm3 TurnTo HarryGirlDormLoc *
+GirlDorm4 TurnTo HarryGirlDormLoc *
+
+GirlDorm1 Talk PC_Gfs_Adv7aSlyth_15
+//Goyle!  This is the girl dormitories, what are you thinking!
+
+//GFemSly Talk PC_Gfs_Adv7aSlyth_13
+//Goyle are you trying to sneak in to the girls dorms again?
+
+GirlDorm2 Talk PC_Gfs_Adv7aSlyth_14
+//You don't want us to call for Professor Snape do you?
+
+GirlDorm1 TurnTo GirlDorm1FaceMark
+GirlDorm3 TurnTo GirlDorm3FaceMark
+
+Cue CutEnd
+
+Release GirlDorm1
+Release GirlDorm2
+Release GirlDorm3
+Release GirlDorm4

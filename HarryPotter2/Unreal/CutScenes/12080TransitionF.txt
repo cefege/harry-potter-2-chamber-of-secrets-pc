@@ -1,0 +1,57 @@
+//12080TransitionF
+
+[Dialog_01]
+
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+
+basecam flyto twothirds
+basecam target flyto cutGargoyle
+
+
+basecam flyto middle easebetween time=30 *
+basecam FOV angle=60 time=30 *
+basecam fadein
+
+
+Narrator Talk PC_Nar_TransF_00
+//The news that Nearly Headless Nick had been Petrified spread through the school like a dark cloud when everyone got back from holiday.
+
+Narrator Talk PC_Nar_TransF_06
+//If a ghost can be Petrified, the students thought, then no one is safe.
+
+Narrator Talk PC_Nar_TransF_02
+//The first years moved around the castle in tight-knit groups, afraid they might be attacked if they ventured out alone.
+
+Narrator Talk PC_Nar_TransF_03
+//A furious trade in talismans, amulets, and other protective devices was sweeping the school.
+
+Narrator Talk PC_Nar_TransF_09
+//In the meantime, Harry had learned that Draco Malfoy was not the Heir of Slytherin.
+
+Narrator Talk PC_Nar_TransF_10 *done
+//But if it isn't Draco…and it isn't Harry…who is it?
+
+
+waitfor done
+sleep .5
+basecam fadeout
+basecam FOV angle=90
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints F
+Release Housepoints
+
+//change Game State-----------------------------------------------------------------------
+Harry changegamestate gstate130
+Trigger TriggerChangeLevel_EntryHall130
+
+
+Release Harry
+Release Narrator
+Release BaseCam

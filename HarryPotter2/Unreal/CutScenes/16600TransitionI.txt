@@ -1,0 +1,46 @@
+//16600TransitionI
+
+[Dialog_01]
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto start
+basecam target flyto cutstart
+
+
+basecam flyto end easebetween time=20 *done
+basecam target flyto cutend easebetween time=20 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransI_01
+//Yes, there had been another attack, the worst one yet. This time, someone had disappeared…
+
+Narrator Talk PC_Nar_TransI_02
+//It was Ginny Weasley! And another message was left on a wall. It said "Her skeleton will lie in the chamber forever." Hogwarts would surely close now.
+
+Narrator Talk PC_Nar_TransI_03
+//Professor Lockhart had been given the task  of rescuing Ginny, but Ron and Harry were beside themselves with worry. They had to do something!
+
+Narrator Talk PC_Nar_TransI_04
+//So they hurried toward the Gryffindor Common Room, where they could devise a plan...
+
+
+waitfor done
+sleep .5
+basecam fadeout
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints I
+Release Housepoints
+
+//Harry changegamestate gstate170
+//Trigger TriggerChangeLevel_GryfComRm170
+
+Release Harry
+Release Narrator
+Release BaseCam

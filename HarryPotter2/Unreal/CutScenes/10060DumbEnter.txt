@@ -1,0 +1,106 @@
+//10060DumbEnter
+
+[Dialog_01]
+Capture Dumbledore
+Dumbledore Teleport CutMark104
+Dumbledore WalkTo CutMark105
+Dumbledore TurnTo Harry Follow
+Dumbledore Say PC_Dum_DumbEnter_14
+//Good evening, Harry.
+
+Capture Harry
+Capture Ron
+Capture Hermione
+
+Capture BaseCam
+BaseCam Target FlyTo Dumbledore
+BaseCam FlyTo CutCameraPos37
+
+Harry Say PC_Hry_DumbEnter_15 *HarryDone
+//Professor--your bird.  I couldn't do anything----he just caught fire.
+
+Harry RunTo CutMark111
+Harry TurnTo Dumbledore
+waitfor HarryDone
+Dumbledore Talk PC_Dum_DumbEnter_16
+//Fawkes is a phoenix, Harry.  Phoenixes burst into flame when it is time for them to die and are reborn from their ashes.
+
+Dumbledore Talk PC_Dum_DumbEnter_19
+//Fascinating creatures, phoenixes.  They can carry immensely heavy loads-
+
+Dumbledore Talk PC_Dum_DumbEnter_20
+//-their tears have healing powers and they make highly faithful pets.
+
+Harry Talk PC_Hry_DumbEnter_21
+//Professor, I just want you to know that it wasn’t me.  I’m not the attacker.
+
+Dumbledore Talk PC_Dum_DumbEnter_22
+//It wasn’t you, what, Harry?
+
+Harry Talk PC_Hry_DumbEnter_23
+//It wasn't me that -- I mean -- I'm not the attacker.
+
+Dumbledore Talk PC_Dum_DumbEnter_24
+//I know you’re not.  But I still want to talk to you.
+
+Dumbledore Talk PC_Dum_DumbEnter_34
+//I must ask you, Harry, whether there is anything you’d like to tell me.
+
+Hermione Talk PC_Her_DumbEnter_28
+//Being able to talk to snakes was what Salazar Slytherin was famous for…
+
+Dumbledore Talk PC_Dum_DumbEnter_29
+//Anything at all?
+
+Harry Talk PC_Hry_DumbEnter_30
+//No.  There isn’t anything, Professor.
+
+Dumbledore Talk PC_Dum_DumbEnter_31
+//Very well, if you’re sure.
+
+Dumbledore Talk PC_Dum_DumbEnter_32
+//Good night, Harry.
+
+Harry Talk PC_Hry_DumbEnter_33
+//‘ight, Professor.
+
+Ron Talk PC_Ron_DumbEnter_35
+//This is bad, Harry.
+
+BaseCam FadeOut
+Harry Teleport cutmark86
+Harry Face cutmark86
+Ron Teleport cutmark88
+Ron Face cutmark83
+BaseCam Target FlyTo Dragon x=-80
+BaseCam FlyTo CutCameraPos15
+
+BaseCam FadeIn
+
+//open secret door
+trigger dragondis
+
+
+
+sleep 1
+Ron RunTo cutmark83
+Ron TurnTo Harry Follow
+
+Harry RunTo cutmark82
+Harry TurnTo Ron
+
+Ron Talk PC_Ron_GoToBathroom_01
+//There you are!  You need to go to Moaning Myrtle’s Bathroom.  Hermione’s waiting for you.
+
+
+//Close Secret Door
+trigger dragonClose
+
+Ron LeadActor Harry DumBOffice GStair *
+
+Release BaseCam
+Release Harry
+Release Ron
+Release Hermione
+Release Dumbledore
+

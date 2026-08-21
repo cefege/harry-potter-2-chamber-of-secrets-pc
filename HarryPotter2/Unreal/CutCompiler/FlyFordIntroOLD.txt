@@ -1,0 +1,57 @@
+
+//Flying Ford Intro
+
+[Main]
+
+
+Capture FlyingCar
+Capture BaseCam
+Capture Harry
+
+BaseCam Target FlyTo FlyingCar StayLocked *
+
+//BaseCam FlyTo FlyingCar Relative X=200 Y=-500 Z=150 StayLocked *
+//BaseCam FlyTo FlyingCar Fixed X=200 Y=100 Z=100 StayLocked *
+
+
+//BaseCam Locked Distance=400 Yaw=90 z=175 RotTightness=4 MoveTightness=4
+
+//zoffset=175
+
+//################Cam On Spline#########################
+BaseCam MatchRot CAMPathStart2
+BaseCam FollowSpline TestCamPath Start=CAMPathStart2 Dest=CarPopUp Time=7 Accel=200 align easebetween *
+//################Cam On Spline#########################
+
+
+
+FlyingCar MatchRot FirstCarSplinePoint
+//FlyingCar FlyTo FirstCarSplinePoint Time=2 easebetween
+FlyingCar FollowSpline CarSalesMan Start=FirstCarSplinePoint Dest=LastCarSplinePoint Time=60 Accel=200 align easebetween *
+
+
+
+
+//$$$$$$$$$$$$$$$$$$$$$$$$4n PRE-CANCEL $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+//BaseCam FlyTo StartCam *
+//BaseCam FlyTo FlyingCar EaseTo Time=5 X=70 Y=70 Z=70
+//Sleep 2.0
+//BaseCam Target FlyTo Focus1 *
+//BaseCam FollowSpline Intro EaseBetween Time=3.0 Accel=600 Dest=EndIntroSplin Start=StartIntroSplin *
+//## Splin Tag = Intro ##
+//## Cutscene name of points, Dest=EndIntroSplin, Start=StartIntroSplin ##
+//Sleep 3.0
+//BaseCam Target FlyTo FlyingCar EaseBetween Time=2.5 X=70 Y=70 Z=70 *
+//Sleep 8.0
+//GoHome
+//Release FlyingCar
+//Release BaseCam
+//Trigger Director
+//$$$$$$$$$$$$$$$$$$$$$$$$4n PRE-CANCEL $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+//Trigger
+
+Sleep 60.0
+
+Release BaseCam
+Release FlyingCar
+Release Harry

@@ -1,0 +1,47 @@
+//17200TransitionJ
+
+[Dialog_01]
+
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto start
+basecam target flyto cutstart
+
+
+basecam flyto end easebetween time=20 *done
+basecam target flyto cutend easebetween time=20 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransJ_00
+//The rest of the final term passed in a haze of blazing sunshine. Hogwarts was back to normal with only a few, small differences…
+
+Narrator Talk PC_Nar_TransJ_01
+//Defence Against the Dark Arts classes were cancelled and Lucius Malfoy had been sacked as a school governor.
+
+Narrator Talk PC_Nar_TransJ_02
+//Draco was no longer strutting around the school as though he owned the place. On the contrary, he looked resentful and sulky.
+
+Narrator Talk PC_Nar_TransJ_03
+//On the other hand, Ginny Weasley was perfectly happy again.
+
+
+waitfor done
+sleep .5
+basecam fadeout
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints J
+Release Housepoints
+
+//Harry changegamestate gstate180
+//Trigger TriggerChangeLevel_EntranceHall180
+
+Release Harry
+Release Narrator
+Release BaseCam

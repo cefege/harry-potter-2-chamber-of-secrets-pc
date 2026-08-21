@@ -1,0 +1,15 @@
+
+//Ch1LastStarSucceed
+
+[Main]
+
+Capture Harry
+Capture BaseCam
+
+BaseCam Target FlyTo FinalStar StayLocked *
+BaseCam FlyTo LastCam *
+
+Sleep 3.0
+
+Release Harry
+Release BaseCam

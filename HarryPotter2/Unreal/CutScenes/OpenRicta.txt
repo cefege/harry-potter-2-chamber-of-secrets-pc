@@ -1,0 +1,38 @@
+//OpenRicta
+
+[MainThread]
+
+//Main Cutscene------------------------------------------
+
+Capture Harry
+capture basecam
+
+//Get rid of last objective--------------------------------
+SetObjectiveId
+
+Harry teleport Cutmark60
+Harry Face Cutmark30
+basecam flyto CutCameraPos23 *
+//Basecam target Flyto Harry z=10 staylocked
+BaseCam Target FlyTo Cutmark107
+sleep 1
+basecam fadein
+trigger Close_Ch1Bars
+
+sleep 1
+trigger ComingFrom_Ch1
+
+sleep 1
+Harry RunTo Cutmark30
+Harry RunTo Cutmark106
+
+trigger Close_Ch1Door
+
+Harry face cutmark31 *
+
+basecam gohome
+
+Release Harry
+release basecam
+
+trigger ToggleCh1LevelLoad

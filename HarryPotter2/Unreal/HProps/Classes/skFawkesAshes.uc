@@ -1,0 +1,29 @@
+//===============================================================================
+//  [skFawkesAshes] 
+//===============================================================================
+
+class skFawkesAshes extends HPMeshActor;
+#exec MESH  MODELIMPORT MESH=skFawkesAshesMesh MODELFILE=models\skFawkesAshes.PSK LODSTYLE=10
+#exec MESH  ORIGIN MESH=skFawkesAshesMesh X=0 Y=0 Z=0 YAW=0 PITCH=0 ROLL=0
+#exec ANIM  IMPORT ANIM=skFawkesAshesAnims ANIMFILE=models\skFawkesAshes.PSA COMPRESS=1 MAXKEYS=999999 IMPORTSEQS=1
+#exec MESHMAP   SCALE MESHMAP=skFawkesAshesMesh X=1.0 Y=1.0 Z=1.0
+#exec MESH  DEFAULTANIM MESH=skFawkesAshesMesh ANIM=skFawkesAshesAnims
+
+// Digest and compress the animation data. Must come after the sequence declarations.
+// 'VERBOSE' gives more debugging info in UCC.log 
+#exec ANIM DIGEST  ANIM=skFawkesAshesAnims VERBOSE
+
+#EXEC TEXTURE IMPORT NAME=skFawkesAshesTex0  FILE=TEXTURES\HP2ASHES_SKIN00.bmp  GROUP=Skins
+
+#EXEC MESHMAP SETTEXTURE MESHMAP=skFawkesAshesMesh NUM=0 TEXTURE=skFawkesAshesTex0
+
+// Original material [0] is [Material #1] SkinIndex: 0 Bitmap: HP2ASHES_SKIN00.bmp  Path: C:\HarryPotter\Harry Potter 2\Art\HP2 Characters\HP2_FawkesAshes 
+
+
+defaultproperties
+{
+    Mesh=skFawkesAshesMesh
+    DrawType=DT_Mesh
+    bStatic=False
+}
+
