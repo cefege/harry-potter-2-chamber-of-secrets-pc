@@ -25,6 +25,7 @@ set(HP2_CORE_SOURCES
     "${HP2_UNREAL_ROOT}/Core/Src/UnUnix.cpp"
     "${HP2_UNREAL_ROOT}/Core/Src/UnFileStream.cpp"
     "${HP2_UNREAL_ROOT}/Core/Src/FEAXABlockDecoder.cpp"
+    "${HP2_UNREAL_ROOT}/Core/Src/HP2CrashReporter.cpp"
 )
 
 # Engine.dsp runtime units, excluding the Windows-only winstuff.cpp unit.

@@ -47,8 +47,9 @@ install_manifest.txt
 *.crash
 *.ips
 *.stackdump
-core
-core.*
+/core
+/core.*
+/core.[0-9]*
 
 # Canonical runtime assets and local game state
 /HarryPotter2/Unreal/System/

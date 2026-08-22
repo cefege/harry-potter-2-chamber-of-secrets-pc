@@ -18,6 +18,7 @@ Revision history:
 #include "SDLLaunchPrivate.h"
 #include "HP2Paths.h"
 #include "NativeText.h"
+#include "HP2CrashReporter.h"
 
 
 /*-----------------------------------------------------------------------------
@@ -580,6 +581,43 @@ static const ANSICHAR* LauncherOptionValue(
 	return NULL;
 }
 
+// Parses the optional hang-watchdog timeout. Accepts
+// "--watchdog-seconds=<n>" / "-watchdog-seconds=<n>" and the two-token form
+// "--watchdog-seconds <n>". Returns 0 (disabled) when absent or invalid.
+static int ParseWatchdogSeconds( INT ArgC, char* ArgV[] )
+{
+	const ANSICHAR* Value = LauncherOptionValue(ArgC, ArgV, "watchdog-seconds");
+	if( !Value )
+	{
+		for( INT ArgIndex = 1; ArgIndex + 1 < ArgC; ++ArgIndex )
+		{
+			const ANSICHAR* Option = ArgV[ArgIndex];
+			while( *Option == '-' )
+				++Option;
+			const ANSICHAR* End = Option;
+			while( *End )
+				++End;
+			if( EqualLauncherOptionName(Option, End - Option, "watchdog-seconds") )
+			{
+				Value = ArgV[ArgIndex + 1];
+				break;
+			}
+		}
+	}
+	if( !Value || !*Value )
+		return 0;
+	int Seconds = 0;
+	for( const ANSICHAR* Digit = Value; *Digit; ++Digit )
+	{
+		if( *Digit < '0' || *Digit > '9' )
+			return 0;
+		Seconds = Seconds * 10 + ( *Digit - '0' );
+		if( Seconds > 3600 * 24 )
+			return 0;
+	}
+	return Seconds;
+}
+
 static std::string LauncherLogPath(
 	const HP2Launcher::LauncherPaths& Paths,
 	INT ArgC,
@@ -727,6 +765,14 @@ int main( int argc, char* argv[] )
 		fprintf(stderr, "The command line is too long, contains an unsupported quote, or is not valid UTF-8.\n");
 		return 1;
 	}
+
+	// Crash reporter covers the whole process, including the native launcher
+	// UI. The hang watchdog is opt-in via --watchdog-seconds.
+	HP2CrashReporterConfig CrashConfig = {};
+	CrashConfig.ProcessName = "HarryPotter2";
+	CrashConfig.LogFileBase = "HarryPotter2.log";
+	CrashConfig.WatchdogSeconds = ParseWatchdogSeconds(argc, argv);
+	HP2InstallCrashReporter(&CrashConfig);
 
 	// The launcher owns standard-library objects before appInit. This process
 	// overrides global new/delete with GMalloc, so install the launcher's ANSI

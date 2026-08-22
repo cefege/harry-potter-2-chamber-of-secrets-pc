@@ -17,6 +17,7 @@ Revision history:
 // Core and Engine
 #include "Engine.h"
 #include "HP2Paths.h"
+#include "HP2CrashReporter.h"
 
 #if __STATIC_LINK
 #include "HP2StaticPackages.h"
@@ -101,9 +102,16 @@ int main( int argc, char* argv[] )
 	if (!PrepareHP2Paths(argc, argv))
 		return 1;
 
+
 	#if __STATIC_LINK
 		InstallHP2NativeLookups();
 	#endif
+
+	// Crash reporter: signal handlers plus atexit marker; watchdog unused here.
+	HP2CrashReporterConfig CrashConfig = {};
+	CrashConfig.ProcessName = "UCC";
+	CrashConfig.LogFileBase = "UCC.log";
+	HP2InstallCrashReporter(&CrashConfig);
 
 	#if !_MSC_VER
 		__Context::StaticInit();
