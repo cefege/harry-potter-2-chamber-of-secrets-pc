@@ -29,6 +29,11 @@
 #include "UnSpan.h"
 
 #define MAKELABEL(A,B,C,D) A##B##C##D
+inline UBOOL RenderClipEdgeCrosses( FLOAT PreviousDot, FLOAT CurrentDot )
+{
+	return (PreviousDot >= 0.0f) != (CurrentDot >= 0.0f);
+}
+
 
 struct FBspDrawList
 {

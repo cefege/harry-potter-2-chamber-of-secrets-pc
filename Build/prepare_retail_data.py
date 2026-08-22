@@ -697,6 +697,7 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
         "BorderlessWindow": "False",
         "UseDesktopResolution": "False",
         "AllowUnicodeKeys": "True",
+        "NativeText": "True",
         "AllowCommandQKeys": "True",
         "MacKeepAllScreensOn": "False",
     }
@@ -786,6 +787,7 @@ def validate_default_ini(lines: list[str], profile: str) -> None:
         ("Engine.Engine", "AudioDevice"): "ALAudio.ALAudioSubsystem",
         ("Engine.Engine", "Language"): "usa" if profile in {"full", "retail-only"} else "int",
         ("Engine.GameEngine", "FrameRateLimit"): "60.000000",
+        ("SDLDrv.SDLClient", "NativeText"): "True",
     }
     for (section, key), value in expected.items():
         actual = ini_value(lines, section, key)

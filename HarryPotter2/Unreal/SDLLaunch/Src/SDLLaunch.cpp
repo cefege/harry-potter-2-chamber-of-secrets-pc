@@ -17,6 +17,7 @@ Revision history:
 // Engine/platform includes.
 #include "SDLLaunchPrivate.h"
 #include "HP2Paths.h"
+#include "NativeText.h"
 
 
 /*-----------------------------------------------------------------------------
@@ -56,6 +57,7 @@ FMallocAnsi Malloc;
 // SDL
 #include <SDL2/SDL.h>
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <limits.h>
@@ -254,7 +256,6 @@ static void ApplyPortableConfig()
 	GSys->SaveSlotPath = SavePath;
 	GSys->CachePath    = CachePath;
 
-	// SaveSlotPath is the runtime slot root derived from persisted SavePath;
 	// USystem exposes SavePath and CachePath (not SaveSlotPath) as config keys.
 	GConfig->SetString(TEXT("Core.System"), TEXT("SavePath"), *GSys->SavePath);
 	GConfig->SetString(TEXT("Core.System"), TEXT("CachePath"), *GSys->CachePath);
@@ -363,7 +364,10 @@ static bool MainLoopIteration( MainLoopArgs* Args )
 	if( GWindowManager )
 		GWindowManager->Tick(DeltaTime);
 	Args->OldTime = NewTime;
-	if( Args->RemainingTestTicks > 0 && --Args->RemainingTestTicks == 0 )
+	const ENativeTextRuntimeSmokeState SmokeState = GetNativeTextRuntimeSmokeState();
+	if( SmokeState == NativeTextRuntimeSmokePassed || SmokeState == NativeTextRuntimeSmokeFailed )
+		appRequestExit(0);
+	else if( Args->RemainingTestTicks > 0 && --Args->RemainingTestTicks == 0 )
 		appRequestExit(0);
 
 	++Args->TickCount;
@@ -525,23 +529,24 @@ static bool BuildCommandLine( int ArgC, char* ArgV[], TCHAR* Out, INT OutCapacit
 	return true;
 }
 
-static bool BuildLauncherPaths( HP2Launcher::LauncherPaths& Paths, std::string& ErrorMessage )
+static bool BuildLauncherPaths(
+	const std::string& UserRoot,
+	const std::string& SystemRoot,
+	HP2Launcher::LauncherPaths& Paths,
+	std::string& ErrorMessage )
 {
-	ANSICHAR UserRoot[PATH_MAX];
-	ANSICHAR SystemRoot[PATH_MAX];
-	if( !appToUtf8InPlace(UserRoot, appUserDir(), ARRAY_COUNT(UserRoot))
-		|| !appToUtf8InPlace(SystemRoot, appBaseDir(), ARRAY_COUNT(SystemRoot)) )
+	if( UserRoot.empty() || SystemRoot.empty() )
 	{
-		ErrorMessage = "The launcher paths are not valid UTF-8 or exceed the system path limit.";
+		ErrorMessage = "The selected game data source is not installed.";
 		return false;
 	}
 	Paths.userRoot = UserRoot;
 	Paths.systemRoot = SystemRoot;
 	return true;
 }
-static UBOOL EqualLauncherOptionName( const ANSICHAR* Text, INT Length, const ANSICHAR* Wanted )
+static UBOOL EqualLauncherOptionName( const ANSICHAR* Text, std::ptrdiff_t Length, const ANSICHAR* Wanted )
 {
-	INT Index = 0;
+	std::ptrdiff_t Index = 0;
 	for( ; Index < Length && Wanted[Index]; ++Index )
 	{
 		ANSICHAR A = Text[Index];
@@ -569,7 +574,7 @@ static const ANSICHAR* LauncherOptionValue(
 		const ANSICHAR* Equals = Option;
 		while( *Equals && *Equals != '=' )
 			++Equals;
-		if( *Equals == '=' && EqualLauncherOptionName(Option, static_cast<INT>(Equals - Option), Wanted) )
+		if( *Equals == '=' && EqualLauncherOptionName(Option, Equals - Option, Wanted) )
 			return Equals + 1;
 	}
 	return NULL;
@@ -623,12 +628,97 @@ static bool PrependCommandLine( TCHAR* CommandLine, INT Capacity, const TCHAR* P
 	return true;
 }
 
+static const char* DataSourceName( HP2Launcher::DataSource Source )
+{
+	switch( Source )
+	{
+		case HP2Launcher::DataSource::Retail:
+			return "Retail";
+		case HP2Launcher::DataSource::Prototype:
+			return "Prototype";
+	}
+	return NULL;
+}
+
+static std::string JoinLauncherPath( const std::string& Parent, const char* Child )
+{
+	return Parent + (Parent.empty() || Parent.back() == '/' ? "" : "/") + Child;
+}
+
+static std::string ConfiguredDataRoot(
+	const HP2Launcher::DataSourceConfiguration& Configuration )
+{
+	return Configuration.selected == HP2Launcher::DataSource::Retail
+		? Configuration.retailRoot
+		: Configuration.prototypeRoot;
+}
+
+static bool SameDataSourceConfiguration(
+	const HP2Launcher::DataSourceConfiguration& A,
+	const HP2Launcher::DataSourceConfiguration& B )
+{
+	return A.selected == B.selected
+		&& A.retailRoot == B.retailRoot
+		&& A.prototypeRoot == B.prototypeRoot;
+}
+
+static bool SameActiveDataSource(
+	const HP2Launcher::DataSourceConfiguration& A,
+	const HP2Launcher::DataSourceConfiguration& B )
+{
+	return A.selected == B.selected
+		&& ConfiguredDataRoot(A) == ConfiguredDataRoot(B);
+}
+
+static void PrefillDataSourceRoots(
+	HP2Launcher::DataSourceConfiguration& Configuration )
+{
+	if( Configuration.retailRoot.empty() )
+		GetHP2ConventionalRetailDataRoot(Configuration.retailRoot);
+	if( Configuration.prototypeRoot.empty() )
+		GetHP2ConventionalPrototypeDataRoot(Configuration.prototypeRoot);
+}
+
+static HP2Launcher::DataSourceOption BuildDataSourceOption(
+	HP2Launcher::DataSource Source,
+	const std::string& Root )
+{
+	HP2Launcher::DataSourceOption Option;
+	Option.source = Source;
+	Option.root = Root;
+	if( Root.empty() )
+	{
+		Option.error = "Choose a folder containing System/Default.ini.";
+		return Option;
+	}
+	std::string CanonicalRoot;
+	std::string Error;
+	Option.available = ValidateHP2DataRoot(Root, CanonicalRoot, Error);
+	if( Option.available )
+		Option.root = CanonicalRoot;
+	else
+		Option.error = "The selected folder must contain System/Default.ini.";
+	return Option;
+}
+
+static void BuildDataSourceOptions(
+	const HP2Launcher::DataSourceConfiguration& Configuration,
+	std::vector<HP2Launcher::DataSourceOption>& Options )
+{
+	Options.clear();
+	Options.push_back(BuildDataSourceOption(
+		HP2Launcher::DataSource::Retail, Configuration.retailRoot));
+	Options.push_back(BuildDataSourceOption(
+		HP2Launcher::DataSource::Prototype, Configuration.prototypeRoot));
+}
+
 //
 // Entry point.
 //
 int main( int argc, char* argv[] )
 {
-	if( !PrepareHP2Paths(argc, argv) )
+	const bool RunNativeLauncher = HP2Launcher::ShouldRunNativeLauncher(argc, argv);
+	if( !RunNativeLauncher && !PrepareHP2Paths(argc, argv) )
 		return 1;
 
 	TCHAR CmdLine[1024];
@@ -645,24 +735,119 @@ int main( int argc, char* argv[] )
 	GMalloc = &Malloc;
 	GMalloc->Init();
 
-	if( HP2Launcher::ShouldRunNativeLauncher(argc, argv) )
+
+	if( RunNativeLauncher )
 	{
-		HP2Launcher::LauncherPaths Paths;
-		HP2Launcher::LauncherState State;
+		std::string LauncherRoot;
 		std::string LauncherError;
-		if( !BuildLauncherPaths(Paths, LauncherError)
-			|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
+		if( !PrepareHP2LauncherHome(LauncherRoot, LauncherError) )
 		{
 			fprintf(stderr, "hp2: unable to prepare the native launcher: %s\n", LauncherError.c_str());
 			return 1;
 		}
 
+		HP2Launcher::DataSourceConfiguration DataSources;
+		if( !HP2Launcher::LoadDataSourceConfiguration(LauncherRoot, DataSources, LauncherError) )
+		{
+			fprintf(stderr, "hp2: unable to load launcher data sources: %s\n", LauncherError.c_str());
+			return 1;
+		}
+		const HP2Launcher::DataSourceConfiguration StoredDataSources = DataSources;
+		PrefillDataSourceRoots(DataSources);
+		bool DataSourceCatalogDirty =
+			!SameDataSourceConfiguration(StoredDataSources, DataSources);
+
+		const char* ExplicitDataRoot = NULL;
+		for( int ArgIndex = 1; ArgIndex < argc; ++ArgIndex )
+		{
+			ExplicitDataRoot = HP2DataDirectoryArgumentValue(argv[ArgIndex]);
+			if( ExplicitDataRoot )
+				break;
+		}
+
+		HP2Launcher::LauncherPaths Paths;
+		HP2Launcher::LauncherState State;
+		std::string ActiveDataRoot;
+		std::string ActiveProfileRoot;
+		HP2Launcher::DataSourceConfiguration ActiveDataSources = DataSources;
+		bool HasActivePaths = false;
+		bool HasExplicitDataRoot = ExplicitDataRoot != NULL;
+
+		if( HasExplicitDataRoot )
+		{
+			if( !ValidateHP2DataRoot(ExplicitDataRoot, ActiveDataRoot, LauncherError) )
+			{
+				fprintf(stderr, "hp2: invalid -datadir '%s': %s\n",
+					ExplicitDataRoot, LauncherError.c_str());
+				return 1;
+			}
+			ActiveProfileRoot = JoinLauncherPath(
+				JoinLauncherPath(LauncherRoot, "Profiles"), "Explicit");
+			if( !InstallHP2Paths(ActiveDataRoot, ActiveProfileRoot, LauncherError)
+				|| !BuildLauncherPaths(
+					ActiveProfileRoot,
+					JoinLauncherPath(ActiveDataRoot, "System"),
+					Paths,
+					LauncherError)
+				|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
+			{
+				fprintf(stderr, "hp2: unable to prepare the explicit data source: %s\n",
+					LauncherError.c_str());
+				return 1;
+			}
+			HasActivePaths = true;
+		}
+		else
+		{
+			const char* SourceName = DataSourceName(DataSources.selected);
+			if( !SourceName
+				|| !ValidateHP2DataRoot(
+					ConfiguredDataRoot(DataSources), ActiveDataRoot, LauncherError) )
+			{
+				LauncherError = std::string("The selected ")
+					+ (SourceName ? SourceName : "game data")
+					+ " folder must contain System/Default.ini.";
+			}
+			else if( !HP2Launcher::PrepareDataSourceProfile(
+					LauncherRoot,
+					DataSources.selected,
+					ActiveProfileRoot,
+					LauncherError)
+				|| !InstallHP2Paths(ActiveDataRoot, ActiveProfileRoot, LauncherError)
+				|| !BuildLauncherPaths(
+					ActiveProfileRoot,
+					JoinLauncherPath(ActiveDataRoot, "System"),
+					Paths,
+					LauncherError)
+				|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
+			{
+				LauncherError = std::string("The selected ")
+					+ SourceName + " source could not be prepared: " + LauncherError;
+			}
+			else
+				HasActivePaths = true;
+		}
+
 		HP2Launcher::LauncherRequest Request;
-		Request.settings = State.settings;
-		Request.saves = State.saves;
 		Request.rendererDisplayName = "XOpenGL";
-		Request.userRoot = Paths.userRoot;
-		Request.logPath = LauncherLogPath(Paths, argc, argv);
+		Request.dataSources = DataSources;
+		Request.hasExplicitDataRootOverride = HasExplicitDataRoot;
+		Request.explicitDataRoot = HasExplicitDataRoot ? ActiveDataRoot : "";
+		BuildDataSourceOptions(DataSources, Request.dataSourceOptions);
+		if( HasActivePaths )
+		{
+			Request.settings = State.settings;
+			Request.saves = State.saves;
+			Request.userRoot = Paths.userRoot;
+			Request.logPath = LauncherLogPath(Paths, argc, argv);
+		}
+		else
+		{
+			Paths.userRoot = LauncherRoot;
+			Request.userRoot = LauncherRoot;
+			Request.logPath = LauncherLogPath(Paths, argc, argv);
+			Request.errorMessage = LauncherError;
+		}
 
 		for( ;; )
 		{
@@ -677,6 +862,83 @@ int main( int argc, char* argv[] )
 				return 1;
 			}
 			Result.selection.action = Action;
+
+			if( !HasExplicitDataRoot
+				&& HasActivePaths
+				&& SameActiveDataSource(ActiveDataSources, Result.dataSources)
+				&& DataSourceCatalogDirty )
+			{
+				if( !HP2Launcher::CommitDataSourceConfiguration(
+						LauncherRoot, Result.dataSources, LauncherError) )
+				{
+					Request.settings = Result.settings;
+					Request.dataSources = Result.dataSources;
+					Request.errorMessage = std::string("The game data folders were not saved: ")
+						+ LauncherError;
+					continue;
+				}
+				DataSources = Result.dataSources;
+				ActiveDataSources = DataSources;
+				DataSourceCatalogDirty = false;
+			}
+
+			if( !HasExplicitDataRoot
+				&& (!HasActivePaths || !SameActiveDataSource(ActiveDataSources, Result.dataSources)) )
+			{
+				const char* SourceName = DataSourceName(Result.dataSources.selected);
+				std::string RequestedDataRoot;
+				if( !SourceName
+					|| !ValidateHP2DataRoot(
+						ConfiguredDataRoot(Result.dataSources), RequestedDataRoot, LauncherError) )
+				{
+					Request.settings = Result.settings;
+					Request.dataSources = Result.dataSources;
+					Request.errorMessage = std::string("The selected ")
+						+ (SourceName ? SourceName : "game data")
+						+ " folder must contain System/Default.ini.";
+					continue;
+				}
+				if( Result.dataSources.selected == HP2Launcher::DataSource::Retail )
+					Result.dataSources.retailRoot = RequestedDataRoot;
+				else
+					Result.dataSources.prototypeRoot = RequestedDataRoot;
+				if( !HP2Launcher::CommitDataSourceConfiguration(
+						LauncherRoot, Result.dataSources, LauncherError)
+					|| !HP2Launcher::PrepareDataSourceProfile(
+						LauncherRoot,
+						Result.dataSources.selected,
+						ActiveProfileRoot,
+						LauncherError)
+					|| !InstallHP2Paths(RequestedDataRoot, ActiveProfileRoot, LauncherError)
+					|| !BuildLauncherPaths(
+						ActiveProfileRoot,
+						JoinLauncherPath(RequestedDataRoot, "System"),
+						Paths,
+						LauncherError)
+					|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
+				{
+					Request.settings = Result.settings;
+					Request.dataSources = Result.dataSources;
+					Request.errorMessage = std::string("The selected source could not be prepared: ")
+						+ LauncherError;
+					continue;
+				}
+
+				DataSources = Result.dataSources;
+				ActiveDataSources = DataSources;
+				ActiveDataRoot = RequestedDataRoot;
+				HasActivePaths = true;
+				DataSourceCatalogDirty = false;
+				Request.settings = State.settings;
+				Request.saves = State.saves;
+				Request.userRoot = Paths.userRoot;
+				Request.logPath = LauncherLogPath(Paths, argc, argv);
+				Request.dataSources = DataSources;
+				BuildDataSourceOptions(DataSources, Request.dataSourceOptions);
+				Request.errorMessage =
+					"Game data source changed. Review its saves and settings, then choose New Game or Continue.";
+				continue;
+			}
 
 			std::string SelectedPrefix;
 			TCHAR Selection[128];
@@ -728,6 +990,10 @@ int main( int argc, char* argv[] )
 		GIsGuarded = 1;
 		appInit(TEXT("Game"), CmdLine, &Malloc, &Log, &Error, &Warn, &FileManager, FConfigCacheIni::Factory, 1);
 
+		const UBOOL NativeTextSmoke = ParseParam(CmdLine, TEXT("TESTNATIVETEXT"));
+		if( NativeTextSmoke )
+			BeginNativeTextRuntimeSmoke();
+
 #if __STATIC_LINK
 		// UObject::StaticInit, including Core classes, is owned by appInit.
 		RegisterHP2RuntimeClasses();
@@ -755,7 +1021,7 @@ int main( int argc, char* argv[] )
 		if( GFileManager->FileSize(*Filename) < 0 )
 			Filename = TEXT("../Help/Logo.bmp");
 
-		if( !ParseParam(CmdLine, TEXT("NOFRONTEND")) && GFileManager->FileSize(*Filename) > 0 )
+		if( !NativeTextSmoke && !ParseParam(CmdLine, TEXT("NOFRONTEND")) && GFileManager->FileSize(*Filename) > 0 )
 			InitSplash(*Filename);
 
 		if( ParseParam(CmdLine, TEXT("LOG")) )
@@ -780,10 +1046,18 @@ int main( int argc, char* argv[] )
 
 			INT TestTicks = 0;
 			Parse(CmdLine, TEXT("TESTTICKS="), TestTicks);
+			if( NativeTextSmoke )
+				TestTicks = 180;
 			debugf(TEXT("Entering main loop."));
 			if( !GIsRequestingExit )
 				MainLoop(Engine, Max(0, TestTicks));
 		}
+		if( NativeTextSmoke && GetNativeTextRuntimeSmokeState() != NativeTextRuntimeSmokePassed )
+		{
+			std::fprintf(stderr, "Native text runtime smoke failed; state=%d stage=%d\n", (INT)GetNativeTextRuntimeSmokeState(), (INT)GetNativeTextRuntimeSmokeStage());
+			ErrorLevel = 1;
+		}
+
 
 		CleanUpOnExit(Engine);
 	}

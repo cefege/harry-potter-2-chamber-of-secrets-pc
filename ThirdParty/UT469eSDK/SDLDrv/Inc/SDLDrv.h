@@ -227,6 +227,8 @@ class USDLViewport : public UViewport
 	void SetMouseCapture( UBOOL Capture, UBOOL Clip, UBOOL FocusOnly );
 	void GetMouseState( INT* MouseX, INT* MouseY);
 	
+	void DrawString( DWORD Flags, UFont* Font, INT& DrawX, INT& DrawY, const TCHAR* Text, const FPlane& Color );
+	UFont* CreateNativeFont( const TCHAR* FontName, int Height );
 	// USDLViewport interface.
 	void UpdateMouseGrabState(const UBOOL bGrab);
 	void ToggleFullscreen();

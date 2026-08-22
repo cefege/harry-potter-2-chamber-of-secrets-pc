@@ -7,7 +7,6 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
-#include <string>
 #include <thread>
 #include <vector>
 
@@ -54,61 +53,6 @@ std::mutex& StreamMutex(INT StreamId)
 	return *GRuntime.StreamMutexes[static_cast<size_t>(StreamId)];
 }
 
-UBOOL AppendUtf8(std::string& Result, DWORD CodePoint)
-{
-	if (CodePoint <= 0x7fu)
-	{
-		Result.push_back(static_cast<char>(CodePoint));
-	}
-	else if (CodePoint <= 0x7ffu)
-	{
-		Result.push_back(static_cast<char>(0xc0u | (CodePoint >> 6)));
-		Result.push_back(static_cast<char>(0x80u | (CodePoint & 0x3fu)));
-	}
-	else if (CodePoint <= 0xffffu)
-	{
-		if (CodePoint >= 0xd800u && CodePoint <= 0xdfffu)
-			return 0;
-		Result.push_back(static_cast<char>(0xe0u | (CodePoint >> 12)));
-		Result.push_back(static_cast<char>(0x80u | ((CodePoint >> 6) & 0x3fu)));
-		Result.push_back(static_cast<char>(0x80u | (CodePoint & 0x3fu)));
-	}
-	else if (CodePoint <= 0x10ffffu)
-	{
-		Result.push_back(static_cast<char>(0xf0u | (CodePoint >> 18)));
-		Result.push_back(static_cast<char>(0x80u | ((CodePoint >> 12) & 0x3fu)));
-		Result.push_back(static_cast<char>(0x80u | ((CodePoint >> 6) & 0x3fu)));
-		Result.push_back(static_cast<char>(0x80u | (CodePoint & 0x3fu)));
-	}
-	else
-	{
-		return 0;
-	}
-	return 1;
-}
-
-UBOOL ToUtf8Path(const TCHAR* Filename, std::string& Result)
-{
-	if (!Filename)
-		return 0;
-
-	Result.clear();
-	while (*Filename)
-	{
-		DWORD CodePoint = static_cast<DWORD>(*Filename++);
-		if (sizeof(TCHAR) == sizeof(UNICHAR) && CodePoint >= 0xd800u && CodePoint <= 0xdbffu)
-		{
-			const DWORD Low = static_cast<DWORD>(*Filename);
-			if (Low < 0xdc00u || Low > 0xdfffu)
-				return 0;
-			++Filename;
-			CodePoint = 0x10000u + ((CodePoint - 0xd800u) << 10) + (Low - 0xdc00u);
-		}
-		if (!AppendUtf8(Result, CodePoint))
-			return 0;
-	}
-	return 1;
-}
 
 void CancelPendingDestinationsLocked(FStream& Stream)
 {
@@ -347,11 +291,7 @@ UBOOL CreateFileLocked(INT StreamId, const TCHAR* Filename)
 	if (Stream.Type != ST_Regular && Stream.Type != ST_Ogg && Stream.Type != ST_OggLooping)
 		return 0;
 
-	std::string Utf8Filename;
-	if (!ToUtf8Path(Filename, Utf8Filename))
-		return 0;
-
-	FILE* File = std::fopen(Utf8Filename.c_str(), "rb");
+	FILE* File = appFopen(Filename, "rb");
 	if (!File)
 		return 0;
 

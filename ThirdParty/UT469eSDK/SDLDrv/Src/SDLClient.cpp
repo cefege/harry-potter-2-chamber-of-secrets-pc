@@ -318,10 +318,13 @@ void USDLClient::Tick()
 		}
 		*/
   		//else
+		SDL_Window* Window = static_cast<SDL_Window*>(Viewport->GetWindow());
+		const Uint32 WindowFlags = Window ? SDL_GetWindowFlags(Window) : 0;
 		if
 		(   Viewport->IsRealtime()
 		&&	Viewport->SizeX
-		&&	Viewport->SizeY )
+		&&	Viewport->SizeY
+		&&	(WindowFlags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) == 0 )
 		{
 			Viewport->Repaint(1);
 		}

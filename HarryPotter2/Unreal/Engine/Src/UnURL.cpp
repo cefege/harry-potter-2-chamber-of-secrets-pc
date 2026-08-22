@@ -72,6 +72,35 @@ ENGINE_API FArchive& operator<<( FArchive& Ar, FURL& U )
 template FArchive& operator<<( FArchive& Ar, TArray<TCHAR>& );
 #endif
 
+UBOOL appFilePathToFURLToken( const TCHAR* Path, TCHAR* Out, INT OutCapacity )
+{
+	if( !Out || OutCapacity <= 0 )
+		return 0;
+	Out[0] = 0;
+	if( !Path || !*Path || appStrstr(Path,TEXT("://")) )
+		return 0;
+
+	UBOOL InOptions = 0;
+	INT Index = 0;
+	for( ; Path[Index]; ++Index )
+	{
+		if( Index >= OutCapacity-1 || Path[Index]=='#' )
+		{
+			Out[0] = 0;
+			return 0;
+		}
+		TCHAR Ch = Path[Index];
+		if( Ch=='?' )
+			InOptions = 1;
+		else if( !InOptions && (Ch=='/' || Ch=='\\') )
+			Ch = '\\';
+		Out[Index] = Ch;
+	}
+	Out[Index] = 0;
+	return Index > 0 && Out[0]!='?';
+}
+
+
 /*-----------------------------------------------------------------------------
 	Internal.
 -----------------------------------------------------------------------------*/

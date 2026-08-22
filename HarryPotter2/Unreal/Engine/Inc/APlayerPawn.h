@@ -11,6 +11,10 @@
 
 	// APlayerPawn interface.
 	void SetPlayer( UPlayer* Player );
+	UBOOL BeginModernThirdPersonInput( FLOAT& RawBaseX, FLOAT& RawStrafe, FLOAT& RawCameraYaw, FLOAT& RawCameraPitch );
+	void FinishModernThirdPersonInput( UBOOL Active, FLOAT RawBaseX, FLOAT RawStrafe, FLOAT RawCameraYaw, FLOAT RawCameraPitch );
+	void ApplyModernThirdPersonMovement();
+
 
 	// PlayerPawn Render Control Interface (RCI).
 	// Override the operations in the game-specific PlayerPawn class to control rendering

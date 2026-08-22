@@ -9,6 +9,7 @@ Revision history:
 
 #include "EnginePrivate.h"
 #include "UnRender.h"
+#include "NativeText.h"
 
 void UCanvas::StaticConstructor()
 {
@@ -196,6 +197,30 @@ static inline FLOAT GetCanvasTextScale( const UCanvas* Canvas )
 	return Max(1.f, Width/640.f) * UIScale;
 }
 
+static inline UBOOL IsSafeCanvasTextFloat( FLOAT Value )
+{
+	const double WideValue = static_cast<double>(Value);
+	return !appIsNan(Value)
+		&& WideValue >= -static_cast<double>(MAXINT) - 1.0
+		&& WideValue <= static_cast<double>(MAXINT);
+}
+
+static inline UBOOL HasSafeCanvasTextRequestFloats( const UCanvas* Canvas )
+{
+	if( !Canvas )
+		return 0;
+	const FLOAT TextScale = GetCanvasTextScale(Canvas);
+	return IsSafeCanvasTextFloat(TextScale)
+		&& IsSafeCanvasTextFloat(Canvas->SpaceX * TextScale)
+		&& IsSafeCanvasTextFloat(Canvas->SpaceY * TextScale)
+		&& IsSafeCanvasTextFloat(Canvas->OrgX)
+		&& IsSafeCanvasTextFloat(Canvas->OrgY)
+		&& IsSafeCanvasTextFloat(Canvas->ClipX)
+		&& IsSafeCanvasTextFloat(Canvas->ClipY)
+		&& IsSafeCanvasTextFloat(Canvas->CurX)
+		&& IsSafeCanvasTextFloat(Canvas->CurY);
+}
+
 static inline INT ScaleFontMetric( INT Value, FLOAT Scale )
 {
 	return Value>0 ? Max(1, appRound(Value*Scale)) : 0;
@@ -250,6 +275,8 @@ static inline void GetCharSize( UFont* Font, TCHAR InCh, FLOAT TextScale, INT& W
 	guardSlow(GetCharSize);
 	Width = 0;
 	Height = 0;
+	if( !Font || Font->CharactersPerPage<=0 )
+		return;
 	INT Ch    = (TCHARU)Font->RemapChar(InCh);
 	INT Page  = Ch / Font->CharactersPerPage;
 	INT Index = Ch - Page * Font->CharactersPerPage;
@@ -261,6 +288,139 @@ static inline void GetCharSize( UFont* Font, TCHAR InCh, FLOAT TextScale, INT& W
 	}
 	unguardSlow;
 }
+class FCanvasTextLayoutDispatcher
+{
+public:
+	virtual ~FCanvasTextLayoutDispatcher() {}
+	virtual UBOOL Create( const FCanvasTextRequest& Request, FCanvasTextLayout*& Layout ) = 0;
+	virtual void Destroy( FCanvasTextLayout* Layout ) = 0;
+	virtual UBOOL Measure( FCanvasTextLayout* Layout, INT& Width, INT& Height ) = 0;
+	virtual UBOOL Draw( FSceneNode* Frame, FCanvasTextLayout* Layout ) = 0;
+};
+
+class FRenderDeviceCanvasTextDispatcher : public FCanvasTextLayoutDispatcher
+{
+	URenderDevice* RenderDevice;
+public:
+	FRenderDeviceCanvasTextDispatcher( URenderDevice* InRenderDevice ) : RenderDevice(InRenderDevice) {}
+	UBOOL Create( const FCanvasTextRequest& Request, FCanvasTextLayout*& Layout ) override { return RenderDevice->CreateCanvasTextLayout(Request, Layout); }
+	void Destroy( FCanvasTextLayout* Layout ) override { RenderDevice->DestroyCanvasTextLayout(Layout); }
+	UBOOL Measure( FCanvasTextLayout* Layout, INT& Width, INT& Height ) override { return RenderDevice->MeasureCanvasText(Layout, Width, Height); }
+	UBOOL Draw( FSceneNode* Frame, FCanvasTextLayout* Layout ) override { return RenderDevice->DrawCanvasText(Frame, Layout); }
+};
+
+class FBackendCanvasTextDispatcher : public FCanvasTextLayoutDispatcher
+{
+	FNativeTextPlatformBackend* Backend;
+public:
+	FBackendCanvasTextDispatcher( FNativeTextPlatformBackend* InBackend ) : Backend(InBackend) {}
+	UBOOL Create( const FCanvasTextRequest& Request, FCanvasTextLayout*& Layout ) override { return Backend->CreateLayout(Request, Layout); }
+	void Destroy( FCanvasTextLayout* Layout ) override { Backend->DestroyLayout(Layout); }
+	UBOOL Measure( FCanvasTextLayout* Layout, INT& Width, INT& Height ) override { return Backend->MeasureLayout(Layout, Width, Height); }
+	UBOOL Draw( FSceneNode*, FCanvasTextLayout* ) override { return 1; }
+};
+
+static UBOOL DispatchCanvasTextLayout( FCanvasTextLayoutDispatcher& Dispatcher, FSceneNode* Frame, const FCanvasTextRequest& Request, UBOOL bDraw, INT& OutWidth, INT& OutHeight )
+{
+	FCanvasTextLayout* Layout = NULL;
+	UBOOL Success = Dispatcher.Create(Request, Layout) && Dispatcher.Measure(Layout, OutWidth, OutHeight);
+	if( Success && bDraw )
+		Success = Dispatcher.Draw(Frame, Layout);
+	if( Layout )
+		Dispatcher.Destroy(Layout);
+	if( !Success )
+		OutWidth = OutHeight = 0;
+	return Success;
+}
+static UBOOL TryNativeCanvasText
+(
+	DWORD Flags,
+	UCanvas* Canvas,
+	UFont* Font,
+	INT DrawX,
+	INT DrawY,
+	const TCHAR* Text,
+	FPlane Color,
+	UBOOL bClip,
+	UBOOL bHandleAmpersand,
+	UBOOL bCenter,
+	UBOOL bWrap,
+	INT VisibleSourceCharacters,
+	INT& OutWidth,
+	INT& OutHeight,
+	FCanvasTextLayoutDispatcher* TestDispatcher = NULL,
+	const FCanvasTextRequest* TestRequest = NULL,
+	UBOOL TestNativeText = 1
+)
+{
+	OutWidth = OutHeight = 0;
+	if( TestDispatcher )
+		return TestRequest && TestRequest->Font
+			&& (TestNativeText || TestRequest->Font->FontName.Len()>0)
+			&& DispatchCanvasTextLayout(*TestDispatcher, NULL, *TestRequest, 0, OutWidth, OutHeight);
+#if !HP2_HAS_NATIVE_TEXT_BACKEND
+	return 0;
+#endif
+	if( !Canvas || !HasSafeCanvasTextRequestFloats(Canvas) || !Canvas->Viewport || !Canvas->Viewport->RenDev || !Font || !Text || !*Text )
+		return 0;
+
+	UClient* Client = Canvas->Viewport->GetOuterUClient();
+	if( !Client || (!Client->NativeText && Font->FontName.Len()==0) )
+		return 0;
+
+	FCanvasTextRequest Request = {};
+	const INT SourceLength = appStrlen(Text);
+	Request.Font = Font;
+	Request.Text = Text;
+	// A negative length is an Engine-private layout-mode marker.  The renderer
+	// still receives the full source span and never infers wrapping from clip.
+	Request.TextLength = bWrap ? -SourceLength : SourceLength;
+	Request.TextScale = GetCanvasTextScale(Canvas);
+	Request.SpaceX = Canvas->SpaceX * Request.TextScale;
+	Request.SpaceY = Canvas->SpaceY * Request.TextScale;
+	Request.OriginX = Canvas->OrgX;
+	Request.OriginY = Canvas->OrgY;
+	Request.ClipX = Canvas->ClipX;
+	Request.ClipY = Canvas->ClipY;
+	Request.StartX = DrawX;
+	Request.StartY = DrawY;
+	Request.PolyFlags = Flags;
+	Request.Color = Color;
+	Request.bClip = bClip;
+	Request.bCenter = bCenter;
+	Request.bHandleAmpersand = bHandleAmpersand;
+	Request.VisibleSourceCharacters = VisibleSourceCharacters > 0
+		? Min(VisibleSourceCharacters, SourceLength)
+		: SourceLength;
+
+	FRenderDeviceCanvasTextDispatcher Dispatcher(Canvas->Viewport->RenDev);
+	return DispatchCanvasTextLayout(Dispatcher, Canvas->Frame, Request, !(Flags & PF_Invisible), OutWidth, OutHeight);
+}
+
+UBOOL RunCanvasNativeTextCompatibilityForTests( FNativeTextPlatformBackend* Backend, FCanvasNativeTextTestState& State, INT& OutWidth, INT& OutHeight )
+{
+	OutWidth = OutHeight = 0;
+	if( !Backend || !State.Request.Font || !State.Request.Text || !*State.Request.Text )
+		return 0;
+	FBackendCanvasTextDispatcher Dispatcher(Backend);
+	if( !TryNativeCanvasText(0, NULL, NULL, 0, 0, NULL, FPlane(0,0,0,0), 0, 0, 0, 0, 0,
+		OutWidth, OutHeight, &Dispatcher, &State.Request, State.NativeText) )
+		return 0;
+
+	if( !State.bClipped )
+	{
+		State.CurX += OutWidth;
+		State.CurYL = Max(State.CurYL, OutHeight);
+		if( State.bCR )
+		{
+			State.CurX = 0;
+			State.CurY += State.CurYL;
+			State.CurYL = 0;
+		}
+	}
+	return 1;
+}
+
 
 
 //
@@ -280,18 +440,21 @@ static INT DrawString
 	UBOOL			bHandleApersand
 )
 {
-	if( !*Text )
+	if( !*Text || !HasSafeCanvasTextRequestFloats(Canvas) )
 		return 0;
+
+	INT NativeWidth, NativeHeight;
+	if( TryNativeCanvasText(Flags, Canvas, Font, DrawX, DrawY, Text, Color, bClip, bHandleApersand, 0, 0, appStrlen(Text), NativeWidth, NativeHeight) )
+		return NativeWidth;
 
 	if( Font->FontName )
 	{
-		// Native fonts are wholly owned by the viewport.  HP2's SDL viewport does not
-		// implement this optional path, so scaling only its reported advance here would
-		// disagree with what was actually drawn.
 		INT OldX = DrawX;
 		Canvas->Viewport->DrawString( Flags, Font, DrawX, DrawY, Text, Color );
 		return DrawX - OldX;
 	}
+	if( Font->CharactersPerPage<=0 )
+		return 0;
 	guardSlow(DrawString);
 
 	const FLOAT TextScale = GetCanvasTextScale(Canvas);
@@ -431,7 +594,7 @@ void VARARGS UCanvas::WrappedPrint( ERenderStyle Style, INT& XL, INT& YL, UFont*
 
 	bool bDoTeletype = numChars ? true : false;
 
-	if( ClipX<0 || ClipY<0 || !*Text )
+	if( !HasSafeCanvasTextRequestFloats(this) || ClipX<0 || ClipY<0 || !*Text )
 	{
 		XL = YL = 0;
 		return;
@@ -449,15 +612,22 @@ void VARARGS UCanvas::WrappedPrint( ERenderStyle Style, INT& XL, INT& YL, UFont*
 	:	(Style==STY_Modulated  ) ? PF_Modulated
 	:	                           0);
 
-	if( Font->FontName )
+	INT NativeWidth, NativeHeight;
+	if( TryNativeCanvasText(PolyFlags, this, Font, CurX, CurY, Text, DrawColor, 0, 0, Center, 1, numChars, NativeWidth, NativeHeight) )
 	{
-		// Viewport.DrawString handles word wrapping.
+		XL = NativeWidth;
+		YL = NativeHeight;
+		CurY += NativeHeight;
+		return;
+	}
+	if( Font->FontName.Len()>0 )
+	{
+		// Viewport.DrawString handles word wrapping for inherently native fonts.
 		INT X = CurX, Y = CurY;
-		if( Center )					// Pass centering info to DrawString.
+		if( Center )
 			PolyFlags |= PF_TwoSided;
 		Viewport->DrawString( PolyFlags, Font, X, Y, Text, DrawColor );
 		XL = X-CurX;  YL = Y-CurY;
-		CurX = X;  CurY = Y;
 		return;
 	}
 	const FLOAT TextScale = GetCanvasTextScale(this);
@@ -611,9 +781,9 @@ void UCanvas::execStrLen( FFrame& Stack, RESULT_DECL )
 	P_FINISH;
 
 	INT XLi, YLi;
-	INT OldCurX, OldCurY;
-	OldCurX = (INT) CurX;
-	OldCurY = (INT) CurY;
+	FLOAT OldCurX, OldCurY;
+	OldCurX = CurX;
+	OldCurY = CurY;
 	CurX = 0;
 	CurY = 0;
 	WrappedStrLenf( Font, XLi, YLi, TEXT("%s"), *InText );
@@ -850,6 +1020,9 @@ void UCanvas::execDrawTextClipped( FFrame& Stack, RESULT_DECL )
 	:	(Style==STY_Modulated  ) ? PF_Modulated
 	:	                           0);
 
+	if( !HasSafeCanvasTextRequestFloats(this) )
+		return;
+
 	FPlane DrawColor = Color.Plane();
 	DrawString( PolyFlags, this, Font, (INT) CurX, (INT) CurY, *InText, DrawColor, 1, CheckHotKey );
 
@@ -872,9 +1045,9 @@ void UCanvas::execTextSize( FFrame& Stack, RESULT_DECL )
 	}
 
 	INT XLi, YLi;
-	INT OldCurX, OldCurY, OldClipX = ClipX;
-	OldCurX = (INT) CurX;
-	OldCurY = (INT) CurY;
+	FLOAT OldCurX, OldCurY, OldClipX = ClipX;
+	OldCurX = CurX;
+	OldCurY = CurY;
 	CurX = 0;
 	CurY = 0;
 	ClipX = 32767;

@@ -13,6 +13,8 @@
 -----------------------------------------------------------------------------*/
 // Parse and consume the startup -LOAD slot at most once per process.
 ENGINE_API UBOOL appConsumeCommandLineLoadSlot( const TCHAR* CmdLine, INT& Slot );
+// Build the relative FURL option used for both startup and in-game save loads.
+ENGINE_API UBOOL appFormatLoadGameURL( INT Slot, TCHAR* Out, INT OutCapacity );
 
 
 //
@@ -37,6 +39,7 @@ class ENGINE_API UGameEngine : public UEngine
 	// Constructors.
 	UGameEngine();
 	void StaticConstructor();
+	static FLOAT GetConsoleUIScale( FLOAT Width, FLOAT Height, FLOAT UserScale );
 
 	// UObject interface.
 	void Serialize( FArchive& Ar );

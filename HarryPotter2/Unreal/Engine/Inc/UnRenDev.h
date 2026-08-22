@@ -29,6 +29,53 @@ enum EDescriptionFlags
 	RDDESCF_LowDetailSkins  = 8,
 	RDDESCF_LowDetailActors = 16,
 };
+class UFont;
+struct FSurfaceInfo;
+struct FSurfaceFacet;
+struct FTransTexture;
+struct FCanvasTextLayout;
+class FNativeTextPlatformBackend;
+struct FCanvasTextRequest
+{
+	UFont* Font;
+	const TCHAR* Text;
+	INT TextLength;
+	FLOAT TextScale;
+	FLOAT SpaceX;
+	FLOAT SpaceY;
+	FLOAT OriginX;
+	FLOAT OriginY;
+	FLOAT ClipX;
+	FLOAT ClipY;
+	INT StartX;
+	INT StartY;
+	DWORD PolyFlags;
+	FPlane Color;
+	UBOOL bClip;
+	UBOOL bCenter;
+	UBOOL bHandleAmpersand;
+	INT VisibleSourceCharacters;
+};
+
+// Deterministic test seam for the Canvas-native policy boundary.  It owns no
+// renderer state; production Canvas operations and contract tests use the
+// same request-dispatch routine.
+struct FCanvasNativeTextTestState
+{
+	UBOOL NativeText;
+	FCanvasTextRequest Request;
+	INT CurX;
+	INT CurY;
+	INT CurYL;
+	// 0=DrawText, 1=DrawTextClipped, 2=TextSize/StrLen,
+	// 3=WrappedPrint, 4=WrappedStrLenf.
+	INT Operation;
+	UBOOL bCR;
+	UBOOL bClipped;
+};
+
+ENGINE_API UBOOL RunCanvasNativeTextCompatibilityForTests( FNativeTextPlatformBackend* Backend, FCanvasNativeTextTestState& State, INT& OutWidth, INT& OutHeight );
+
 
 //
 // A low-level 3D rendering device.
@@ -76,6 +123,10 @@ class ENGINE_API URenderDevice : public USubsystem
 	virtual INT MaxVertices()=0;
 	virtual void DrawTriangles( FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, _WORD* Indices, INT NumIndices, DWORD PolyFlags, FSpanBuffer* Span )=0;
 	virtual void DrawGouraudPolygon( FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, int NumPts, DWORD PolyFlags, FSpanBuffer* Span );
+	virtual UBOOL CreateCanvasTextLayout( const FCanvasTextRequest&, FCanvasTextLayout*& OutLayout ) { OutLayout=NULL; return 0; }
+	virtual void DestroyCanvasTextLayout( FCanvasTextLayout* ) {}
+	virtual UBOOL MeasureCanvasText( FCanvasTextLayout*, INT& OutWidth, INT& OutHeight ) { return 0; }
+	virtual UBOOL DrawCanvasText( FSceneNode*, FCanvasTextLayout* ) { return 0; }
 	virtual void DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags )=0;
 	virtual void Draw3DLine( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector OrigP, FVector OrigQ );
 	virtual void Draw2DClippedLine( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2 );

@@ -733,6 +733,7 @@ INT UALAudioSubsystem::PlaySound( AActor* Actor, INT Id, USound* Sound, FVector 
 	//	Add any resident flags from the sound -tg
 	//
 	Sound->WorkingFlags = Sound->CoreFlags | Flags;
+	const UBOOL IsTalk = (Id & 14) == (SLOT_Talk * 2);
 
 	if( !Viewport || !Sound)
 		return -1;
@@ -742,7 +743,9 @@ INT UALAudioSubsystem::PlaySound( AActor* Actor, INT Id, USound* Sound, FVector 
 	//
 	if (!RegisterSound(Sound))
 	{
-		INT iIndex = FindLeastImportantSound(Sound);
+		INT iIndex = IsTalk
+			? FindLeastPriorityNonTalkSource(Sources)
+			: FindLeastImportantSound(Sound);
 
 		if (iIndex == -1)
 			return -1;
@@ -1149,38 +1152,41 @@ INT UALAudioSubsystem::PlayMusic( FString Song, FLOAT FadeInTime )
 {
 	guard(UALAudioSubsystem::PlayMusic);
 	// Start music.
+	if ( Song == TEXT("") || appStricmp(*Song, TEXT("none")) == 0 )
+		return 0;
 
-	if ( Song != TEXT("") && appStricmp(*Song, TEXT("none")) != 0 )
+	const UBOOL bAppendExt = appStricmp(appFExt(*Song), TEXT("ogg")) != 0;
+	FString Filename = TEXT("..\\music\\");
+	Filename += Song;
+	if (bAppendExt)
+		Filename += TEXT(".ogg");
+
+	debugf(NAME_DevMusic, TEXT("PlayMusic request: %s -> %s"), *Song, *Filename);
+	USound* Music = new USound(*Filename, SF_Streaming | SF_Music);
+	if (!Music)
 	{
-		UBOOL	bAppendExt = appStricmp(appFExt(*Song), TEXT("ogg")) != 0;
-
-		FString Filename = TEXT("..\\music\\");
-		Filename += Song;
-
-		if (bAppendExt)
-			Filename += TEXT(".ogg");
-
-		USound* Music = new USound( *Filename, SF_Streaming | SF_Music );
-		if (!Music)
-		{
-			debugf(NAME_DevSound, TEXT("Failed to allocate sound object for music file %s"), *Song );
-			return 0;
-		}
-
-		//debugf(NAME_DevSound, TEXT("PlayMusic(%s) - name = %s"), *Song, Music->GetName());
-
-		Music->FileType = FName(TEXT("ogg"));
-
-		RegisterSound( Music );
-		PlaySound( NULL, 2*SLOT_None | 1, Music, FVector(0,0,0), MusicVolume, 1000, 1.f, SF_Streaming | SF_No3D | SF_Music, FadeInTime );
-	
-		for( INT i=0; i<Sources.Num(); i++ )
-			if( Sources(i).Sound == Music )
-				return i+1;
-
-		//!!TODO: warning message.
+		debugf(NAME_Warning, TEXT("PlayMusic could not allocate %s"), *Filename);
+		return 0;
 	}
-	return 0;
+	Music->FileType = FName(TEXT("ogg"));
+
+	const INT SourceIndex = PlaySound(
+		NULL,
+		2*SLOT_None | 1,
+		Music,
+		FVector(0,0,0),
+		MusicVolume,
+		1000,
+		1.f,
+		SF_Streaming | SF_No3D | SF_Music,
+		FadeInTime);
+	if (SourceIndex < 0)
+	{
+		debugf(NAME_Warning, TEXT("PlayMusic could not start %s"), *Filename);
+		return 0;
+	}
+	debugf(NAME_DevMusic, TEXT("PlayMusic started source %i: %s"), SourceIndex, *Filename);
+	return SourceIndex + 1;
 	unguard;
 }
 
@@ -1333,7 +1339,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 	// Check for finished sounds
 	for (i=0; i<Sources.Num(); i++)
 	{
-		if(	Sources(i).Id && Sources(i).Sound && !(Sources(i).Flags & (SF_Looping | SF_Music)) )
+		if(	Sources(i).Id && Sources(i).Sound && !(Sources(i).Flags & SF_Looping) )
 		{
 			ALint State;
 			alGetSourcei( Sources(i).Source, AL_SOURCE_STATE, &State );
@@ -2064,6 +2070,24 @@ UBOOL UALAudioSubsystem::alError( TCHAR* Text, UBOOL Log )
 		}
 		return true;
 	}
+}
+
+INT UALAudioSubsystem::FindLeastPriorityNonTalkSource( const TArray<ALSource>& InSources )
+{
+	INT Result = INDEX_NONE;
+	FLOAT LowestPriority = 0.f;
+	for( INT Index=0; Index<InSources.Num(); ++Index )
+	{
+		const ALSource& Source = InSources(Index);
+		if( Source.Sound
+			&& (Source.Id & 14) != (SLOT_Talk * 2)
+			&& (Result==INDEX_NONE || Source.Priority<LowestPriority) )
+		{
+			Result = Index;
+			LowestPriority = Source.Priority;
+		}
+	}
+	return Result;
 }
 
 #define INITIAL_MIN_COUNT	3	//	we need to find at least this many playing instances of a sound before we'll kill it

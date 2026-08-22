@@ -49,6 +49,34 @@ enum class Difficulty
 	Hard
 };
 
+enum class ControlMode
+{
+	Classic,
+	Modern
+};
+
+enum class DataSource
+{
+	Retail,
+	Prototype
+};
+
+struct DataSourceConfiguration
+{
+	DataSource selected = DataSource::Retail;
+	std::string retailRoot;
+	std::string prototypeRoot;
+};
+
+struct DataSourceOption
+{
+	DataSource source = DataSource::Retail;
+	std::string root;
+	bool available = false;
+	std::string error;
+};
+
+
 struct DisplayResolution
 {
 	int width = 800;
@@ -59,6 +87,7 @@ inline constexpr std::array<double, 5> RenderScaleValues = {{0.50, 0.67, 0.75, 0
 inline constexpr std::array<double, 6> UIScaleValues = {{0.75, 1.00, 1.25, 1.50, 1.75, 2.00}};
 inline constexpr std::array<int, 3> AntiAliasingSampleValues = {{0, 2, 4}};
 inline constexpr std::array<int, 4> AnisotropyValues = {{0, 4, 8, 16}};
+inline constexpr std::array<int, 5> FrameRateLimitValues = {{0, 30, 60, 120, 144}};
 
 struct SaveRecord
 {
@@ -80,7 +109,9 @@ struct LauncherSettings
 	double renderScale = 1.0;
 	double uiScale = 1.0;
 	int frameRateLimit = 60;
+	bool showFPS = false;
 	bool maintainVerticalFOV = true;
+	bool nativeText = true;
 	int antiAliasingSamples = 0;
 	int anisotropy = 4;
 	double brightness = 0.4;
@@ -91,6 +122,7 @@ struct LauncherSettings
 	double musicVolume = 0.53;
 	double mouseSensitivity = 3.0;
 	bool invertMouse = false;
+	ControlMode controlMode = ControlMode::Classic;
 	bool autoCenterCamera = true;
 	bool moveWhileCasting = true;
 	bool autoQuaff = true;
@@ -120,6 +152,10 @@ struct LauncherRequest
 	std::string errorMessage;
 	std::string userRoot;
 	std::string logPath;
+	std::vector<DataSourceOption> dataSourceOptions;
+	DataSourceConfiguration dataSources;
+	bool hasExplicitDataRootOverride = false;
+	std::string explicitDataRoot;
 };
 
 struct LaunchSelection
@@ -133,6 +169,7 @@ struct LauncherResult
 {
 	LaunchSelection selection;
 	LauncherSettings settings;
+	DataSourceConfiguration dataSources;
 };
 
 }

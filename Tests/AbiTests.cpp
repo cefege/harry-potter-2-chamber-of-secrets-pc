@@ -5,6 +5,7 @@
 #include <stdlib.h>
 
 #include "Engine.h"
+#include "Render.h"
 #include "UnCon.h"
 #include "UnEngineNative.h"
 #include "SDLDrv.h"
@@ -17,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdarg>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -97,6 +99,8 @@ namespace
 		if (int Result = CheckWidth("SWORD", sizeof(SWORD), 2)) return Result;
 		if (int Result = CheckWidth("UNICHAR", sizeof(UNICHAR), 2)) return Result;
 		if (int Result = CheckWidth("INT", sizeof(INT), 4)) return Result;
+		if (int Result = CheckWidth("NAME_INDEX", sizeof(NAME_INDEX), 4)) return Result;
+		if (int Result = CheckWidth("FName", sizeof(FName), sizeof(NAME_INDEX))) return Result;
 		if (int Result = CheckWidth("DWORD", sizeof(DWORD), 4)) return Result;
 		if (int Result = CheckWidth("LONG", sizeof(LONG), 4)) return Result;
 		if (int Result = CheckWidth("FLOAT", sizeof(FLOAT), 4)) return Result;
@@ -126,6 +130,22 @@ namespace
 				offsetof(FCppPropertyProbe, HostText), offsetof(FCppPropertyProbe, WireText));
 		return 0;
 	}
+
+	int TestRenderClipClassification()
+	{
+		GTestName = "render_clip";
+		const FLOAT Epsilon = 0.000001f;
+		if (RenderClipEdgeCrosses(-0.0f, 0.0f)
+			|| RenderClipEdgeCrosses(0.0f, -0.0f))
+			return Fail("signed zero must describe one clipping-plane side");
+		if (!RenderClipEdgeCrosses(-Epsilon, Epsilon)
+			|| !RenderClipEdgeCrosses(Epsilon, -Epsilon))
+			return Fail("opposite clipping-plane sides did not produce an edge crossing");
+		if (RenderClipEdgeCrosses(-Epsilon, -Epsilon)
+			|| RenderClipEdgeCrosses(Epsilon, Epsilon))
+			return Fail("matching clipping-plane sides produced a false edge crossing");
+		return 0;
+	}
 	int TestProjectionFov()
 	{
 		GTestName = "projection_fov";
@@ -148,6 +168,10 @@ namespace
 			return Fail("16:9 projection did not retain the authored vertical view");
 		if (UClient::GetEffectiveFovAngle(160.f, 7680, 1080, 1) >= 170.f)
 			return Fail("ultrawide projection exceeded the safe FOV limit");
+		if (UGameEngine::GetConsoleUIScale(1920.f, 1080.f, 1.f) != 2.25f)
+			return Fail("16:9 menu UI did not fit the authored 640x480 height");
+		if (UGameEngine::GetConsoleUIScale(1280.f, 1024.f, 1.f) != 2.f)
+			return Fail("5:4 menu UI did not fit the authored 640x480 width");
 		return 0;
 	}
 	int TestCommandLineLoad()
@@ -178,6 +202,29 @@ namespace
 			return Fail("valid map-first load argument was not consumed");
 		if (Slot != 0)
 			return Fail("valid load argument expected slot 0, got %i", Slot);
+		TCHAR LoadURL[32];
+		if (!appFormatLoadGameURL(0, LoadURL, ARRAY_COUNT(LoadURL))
+			|| appStrcmp(LoadURL, TEXT("?load=0")) != 0
+			|| !appFormatLoadGameURL(17, LoadURL, ARRAY_COUNT(LoadURL))
+			|| appStrcmp(LoadURL, TEXT("?load=17")) != 0)
+			return Fail("load-game travel must use the relative ?load=<slot> FURL");
+
+		TCHAR FileToken[128];
+		if (!appFilePathToFURLToken(
+				TEXT("/tmp/Profile/Save0.usa"), FileToken, ARRAY_COUNT(FileToken))
+			|| appStrcmp(FileToken, TEXT("\\tmp\\Profile\\Save0.usa")) != 0)
+			return Fail("absolute native file path was not encoded as an FURL token");
+		if (!appFilePathToFURLToken(
+				TEXT("../Maps/Entry.unr?Name=Player"), FileToken, ARRAY_COUNT(FileToken))
+			|| appStrcmp(FileToken, TEXT("..\\Maps\\Entry.unr?Name=Player")) != 0)
+			return Fail("map path conversion changed FURL options");
+		if (appFilePathToFURLToken(
+				TEXT("unreal://example.invalid/Map"), FileToken, ARRAY_COUNT(FileToken)))
+			return Fail("network URL was accepted by the file-path FURL boundary");
+		if (appStrcmp(
+				appPathLeaf(TEXT("..\\Maps/Entryhall_hub.unr")),
+				TEXT("Entryhall_hub.unr")) != 0)
+			return Fail("path leaf did not recognize both separator styles");
 
 		Slot = 12345;
 		if (appConsumeCommandLineLoadSlot(TEXT("Startup.unr -LOAD=7"), Slot))
@@ -791,6 +838,39 @@ namespace
 		Actor->execGetCurrentKeyState(Stack, &Result);
 	}
 
+	int CheckLegacyNullContextNameClear()
+	{
+		struct FNameClearProbe
+		{
+			DWORD Before;
+			FName Value;
+			DWORD After;
+
+			FNameClearProbe()
+			: Before(0x13579bdf)
+			, Value(TEXT("LegacyContextName"))
+			, After(0x2468ace0)
+			{}
+		};
+
+		FNameClearProbe Probe;
+		BYTE Code[] =
+		{
+			EX_NoObject,
+			1, 0,
+			4,
+			EX_Nothing
+		};
+		FFrame Stack(UObject::GetTransientPackage());
+		Stack.Code = Code;
+		UObject::GetTransientPackage()->execContext(Stack, &Probe.Value);
+		if (Probe.Before != 0x13579bdf || Probe.After != 0x2468ace0)
+			return Fail("legacy null context overwrote adjacent Name storage");
+		if (Probe.Value != NAME_None)
+			return Fail("legacy null context did not clear the complete Name value");
+		return 0;
+	}
+
 	int CheckCurrentKeyStateNative()
 	{
 		AActor* Actor = Cast<AActor>(UObject::StaticConstructObject(
@@ -809,6 +889,101 @@ namespace
 			return Fail("GetCurrentKeyState accepted an out-of-range key");
 		return 0;
 	}
+
+	int ValidateStarPlatformFragments(
+		ULevel* Level,
+		AMover* Mover,
+		const char* Stage,
+		INT& FragmentCount)
+	{
+		FragmentCount = 0;
+		for (INT NodeIndex = Mover->Brush->MoverLink, ChainLength = 0;
+			NodeIndex != INDEX_NONE;)
+		{
+			if (!Level->Model->Nodes.IsValidIndex(NodeIndex))
+				return Fail("%s star platform links an invalid BSP node", Stage);
+			const FBspNode& Node = Level->Model->Nodes(NodeIndex);
+			if (!Level->Model->Surfs.IsValidIndex(Node.iSurf)
+				|| Node.NumVertices < 3
+				|| !Level->Model->Verts.IsValidIndex(Node.iVertPool)
+				|| !Level->Model->Verts.IsValidIndex(Node.iVertPool + Node.NumVertices - 1))
+				return Fail("%s star platform has an invalid BSP fragment", Stage);
+			for (INT VertexIndex = 0; VertexIndex < Node.NumVertices; ++VertexIndex)
+			{
+				const INT PointIndex = Level->Model->Verts(Node.iVertPool + VertexIndex).pVertex;
+				if (!Level->Model->Points.IsValidIndex(PointIndex))
+					return Fail("%s star platform references an invalid BSP point", Stage);
+				const FVector& Point = Level->Model->Points(PointIndex);
+				if (!std::isfinite(Point.X)
+					|| !std::isfinite(Point.Y)
+					|| !std::isfinite(Point.Z))
+					return Fail("%s star platform produced a non-finite BSP point", Stage);
+			}
+			++FragmentCount;
+			NodeIndex = Node.iRenderBound;
+			if (++ChainLength > Level->Model->Nodes.Num())
+				return Fail("%s star platform BSP chain is cyclic", Stage);
+		}
+		if (!FragmentCount)
+			return Fail("%s star platform has no render fragments", Stage);
+		return 0;
+	}
+
+	int CheckRictusempraStarPlatformMovement()
+	{
+		UPackage* Package = Cast<UPackage>(UObject::LoadPackage(
+			NULL, TEXT("../Maps/Ch1Rictusempra.unr"), LOAD_NoFail));
+		ULevel* Level = Package
+			? FindObject<ULevel>(Package, TEXT("MyLevel"))
+			: NULL;
+		AMover* Platform = Package
+			? FindObject<AMover>(Package, TEXT("Mover74"))
+			: NULL;
+		if (!Level || !Level->Model || !Platform || !Platform->Brush)
+			return Fail("Rictusempra star-platform fixture is unavailable");
+		if (Platform->Tag != FName(TEXT("starplatform01"))
+			|| Platform->NumKeys < 2
+			|| !Platform->bBlockPlayers
+			|| Platform->GetPrimitive() != Platform->Brush)
+			return Fail("Rictusempra star-platform fixture contract changed");
+
+		if (Level->BrushTracker)
+			delete Level->BrushTracker;
+		Level->BrushTracker = GNewBrushTracker(Level);
+		if (!Level->BrushTracker)
+			return Fail("Rictusempra moving-brush tracker was not created");
+
+		const FVector Start = Platform->BasePos;
+		const FVector End = Start + Platform->KeyPos[1];
+		const FVector Middle = Start + Platform->KeyPos[1] * 0.5f;
+		INT StartFragments = 0;
+		INT MiddleFragments = 0;
+		INT EndFragments = 0;
+		int Result = ValidateStarPlatformFragments(
+			Level, Platform, "raised", StartFragments);
+		if (!Result)
+		{
+			Platform->Location = Middle;
+			Level->BrushTracker->Update(Platform);
+			Result = ValidateStarPlatformFragments(
+				Level, Platform, "midpoint", MiddleFragments);
+		}
+		if (!Result)
+		{
+			Platform->Location = End;
+			Level->BrushTracker->Update(Platform);
+			Result = ValidateStarPlatformFragments(
+				Level, Platform, "lowered", EndFragments);
+		}
+		if (!Result && (Platform->SavedPos != End
+			|| Platform->GetPrimitive() != Platform->Brush
+			|| !Platform->bBlockPlayers))
+			Result = Fail("lowered star platform lost transform or collision state");
+		delete Level->BrushTracker;
+		Level->BrushTracker = NULL;
+		return Result;
+	}
+
 
 
 	int CheckRuntimeProperties(int ArgC, char** ArgV)
@@ -841,6 +1016,7 @@ namespace
 			appInit(TEXT("AbiTests"), CmdLine, &RuntimeMalloc, &RuntimeLog, &RuntimeError, &RuntimeWarn,
 				&RuntimeFileManager, FConfigCacheIni::Factory, 1);
 			RegisterHP2RuntimeClasses();
+			if (!Result) Result = CheckLegacyNullContextNameClear();
 			UClass* CompiledPatrolClass = APatrolPoint::StaticClass();
 			if (CompiledPatrolClass->GetSuperClass() != ANavigationPoint::StaticClass())
 				Result = Fail("compiled Engine.PatrolPoint superclass is not Engine.NavigationPoint");
@@ -862,10 +1038,22 @@ namespace
 				__builtin_offsetof(APlayerPawn, TotalGameStateTokens) - sizeof(BITFIELD));
 			if (!Result) Result = CheckReflectedBoolProperty(
 				APlayerPawn::StaticClass(), TEXT("bShowLoadingScreen"), CompiledLoadingScreenOffset, 1);
+			const INT CompiledSaveStateOffset = static_cast<INT>(
+				__builtin_offsetof(APlayerPawn, bMouseAltFire) - sizeof(BITFIELD));
+			if (!Result) Result = CheckReflectedBoolProperty(
+				APlayerPawn::StaticClass(), TEXT("bModernThirdPersonControls"), CompiledSaveStateOffset, 4);
+			UBoolProperty* ModernThirdPersonControls = FindField<UBoolProperty>(
+				APlayerPawn::StaticClass(), TEXT("bModernThirdPersonControls"));
+			if (!Result && (ModernThirdPersonControls->PropertyFlags & (CPF_Config | CPF_GlobalConfig)) !=
+				(CPF_Config | CPF_GlobalConfig))
+				Result = Fail("APlayerPawn.bModernThirdPersonControls is not config globalconfig");
+			if (!Result && ModernThirdPersonControls->Category != NAME_None)
+				Result = Fail("APlayerPawn.bModernThirdPersonControls category is not empty");
 			if (Result)
 				return Result;
 			if (!UObject::LoadPackage(NULL, TEXT("Engine.u"), LOAD_NoFail))
 				return Fail("Engine package load failed");
+			if (!Result) Result = CheckRictusempraStarPlatformMovement();
 		}
 		catch (...)
 		{
@@ -1137,6 +1325,13 @@ namespace
 		if (!Result) Result = CheckReflectedProperty(UClient::StaticClass(), TEXT("TextureDetail"), static_cast<INT>(__builtin_offsetof(UClient, TextureLODSet[1])));
 		if (!Result) Result = CheckReflectedProperty(UClient::StaticClass(), TEXT("SkinDetail"), static_cast<INT>(__builtin_offsetof(UClient, TextureLODSet[2])));
 		if (!Result) Result = CheckReflectedProperty(UClient::StaticClass(), TEXT("MaintainVerticalFOV"), static_cast<INT>(__builtin_offsetof(UClient, MaintainVerticalFOV)));
+		if (!Result) Result = CheckReflectedBoolProperty(
+			UClient::StaticClass(), TEXT("ShowFPS"),
+			static_cast<INT>(__builtin_offsetof(UClient, ShowFPS)), 1);
+		UProperty* ShowFPSProperty = FindField<UProperty>(UClient::StaticClass(), TEXT("ShowFPS"));
+		if (!Result && (!(ShowFPSProperty->PropertyFlags & CPF_Config)
+			|| ShowFPSProperty->Category != FName(TEXT("Display"))))
+			Result = Fail("reflected UClient.ShowFPS expected Config flags in the Display category");
 		if (!Result) Result = CheckReflectedProperty(UEngine::StaticClass(), TEXT("CacheSizeMegs"), static_cast<INT>(__builtin_offsetof(UEngine, CacheSizeMegs)));
 		if (!Result) Result = CheckReflectedProperty(UEngine::StaticClass(), TEXT("UseSound"), static_cast<INT>(__builtin_offsetof(UEngine, UseSound)));
 		if (!Result) Result = CheckReflectedProperty(UGameEngine::StaticClass(), TEXT("FrameRateLimit"), static_cast<INT>(__builtin_offsetof(UGameEngine, FrameRateLimit)));
@@ -1175,6 +1370,8 @@ namespace
 			Result = Fail("fresh SDL client particle density expected 1");
 		if (!Result && !SDLClientDefaults->MaintainVerticalFOV)
 			Result = Fail("fresh SDL client vertical-FOV maintenance expected enabled");
+		if (!Result && SDLClientDefaults->ShowFPS)
+			Result = Fail("fresh SDL client FPS display expected disabled");
 		if (!Result) Result = CheckCurrentKeyStateNative();
 		AMover* MoverProbe = Cast<AMover>(UObject::StaticConstructObject(
 			AMover::StaticClass(), UObject::GetTransientPackage(), NAME_None, RF_Transient));
@@ -1323,8 +1520,9 @@ int main(int ArgC, char** ArgV)
 			Test = ArgV[Index] + 7;
 		}
 	}
-	if (!Test || !*Test) return Fail("required argument: --test=<abi_widths|projection_fov|command_line_load|compact_index|fstring_archive|native_registration>");
+	if (!Test || !*Test) return Fail("required argument: --test=<abi_widths|render_clip|projection_fov|command_line_load|compact_index|fstring_archive|native_registration>");
 	if (std::strcmp(Test, "abi_widths") == 0) return TestAbiWidths();
+	if (std::strcmp(Test, "render_clip") == 0) return TestRenderClipClassification();
 	if (std::strcmp(Test, "projection_fov") == 0) return TestProjectionFov();
 	if (std::strcmp(Test, "command_line_load") == 0) return TestCommandLineLoad();
 	if (std::strcmp(Test, "compact_index") == 0) return TestCompactIndex();

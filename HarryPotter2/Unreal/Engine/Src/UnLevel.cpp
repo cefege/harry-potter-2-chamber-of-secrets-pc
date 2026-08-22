@@ -504,7 +504,7 @@ bool ULevel::SavePersistentActors( const FString& MapName )
 	
 	//************** CONSTRUCT CORRECT FILENAMES ********************
 	// Make sure the final mapName is just that.. the name ex: "startup.unr"
-	FinalMapName = MapName.Mid( MapName.InStr(PATH_SEPARATOR, true)+1 );
+	FinalMapName = appPathLeaf(*MapName);
 	if( FinalMapName.InStr( URL.DefaultMapExt ) < 0 )
 	{
 		FinalMapName += TEXT(".");
@@ -670,7 +670,7 @@ bool ULevel::LoadPersistentActors( const FString& MapName )
 
 	//************** CONSTRUCT CORRECT FILENAMES ********************
 	// Make sure the final mapName is just that.. the name ex: "startup.unr"
-	FinalMapName = MapName.Mid( MapName.InStr(PATH_SEPARATOR, true)+1 );
+	FinalMapName = appPathLeaf(*MapName);
 	if( FinalMapName.InStr( URL.DefaultMapExt ) < 0 )
 	{
 		FinalMapName += TEXT(".");

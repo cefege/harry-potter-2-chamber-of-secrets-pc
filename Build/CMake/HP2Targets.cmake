@@ -7,6 +7,7 @@ target_compile_definitions(hp2_compile_policy INTERFACE
     ASM=0
     UNICODE=1
     _UNICODE=1
+    HP2_HAS_NATIVE_TEXT_BACKEND=$<BOOL:${HP2_HAS_NATIVE_TEXT_BACKEND}>
 )
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
@@ -147,6 +148,7 @@ target_link_libraries(hp2_core PUBLIC vorbisfile)
 
 hp2_add_engine_object(hp2_engine Engine ${HP2_ENGINE_SOURCES})
 target_include_directories(hp2_engine PUBLIC ${HP2_ENGINE_INCLUDE_DIRS})
+target_include_directories(hp2_engine PRIVATE "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc")
 target_link_libraries(hp2_engine PUBLIC Squish::Squish)
 
 hp2_add_engine_object(hp2_render Render ${HP2_RENDER_SOURCES})
@@ -179,6 +181,13 @@ target_link_libraries(hp2_xopengldrv PUBLIC
     OpenGL::GL
     Squish::Squish
 )
+
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    target_link_libraries(hp2_xopengldrv PUBLIC
+        "${HP2_CORETEXT_FRAMEWORK}"
+        "${HP2_COREGRAPHICS_FRAMEWORK}"
+    )
+endif()
 
 function(hp2_add_executable target)
     add_executable("${target}" ${ARGN})
@@ -297,9 +306,37 @@ target_link_libraries(hp2_audio_tests PRIVATE
 
 hp2_add_executable(hp2_launcher_tests
     ${HP2_LAUNCHER_CORE_SOURCES}
+    ${HP2_PATH_SOURCE}
     ${HP2_LAUNCHER_TEST_SOURCE}
 )
 target_compile_definitions(hp2_launcher_tests PRIVATE HP2_LAUNCHER_TESTING=1)
+target_link_libraries(hp2_launcher_tests PRIVATE hp2_core)
+
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    hp2_add_executable(hp2_native_typography_tests
+        ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
+        ${HP2_PATH_SOURCE}
+    )
+    target_link_libraries(hp2_native_typography_tests PRIVATE
+        hp2_core
+        hp2_engine
+        hp2_render
+        hp2_xopengldrv
+    )
+endif()
+
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    hp2_add_executable(hp2_canvas_compatibility_tests
+        ${HP2_CANVAS_COMPATIBILITY_TEST_SOURCE}
+        ${HP2_PATH_SOURCE}
+    )
+    target_link_libraries(hp2_canvas_compatibility_tests PRIVATE
+        hp2_core
+        hp2_engine
+        hp2_render
+        hp2_xopengldrv
+    )
+endif()
 
 set(HP2_EXECUTABLE_TARGETS
     hp2_game
@@ -313,20 +350,43 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_launcher_tests
 )
 
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    list(APPEND HP2_EXECUTABLE_TARGETS hp2_native_typography_tests)
+endif()
+
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    list(APPEND HP2_EXECUTABLE_TARGETS hp2_canvas_compatibility_tests)
+endif()
+
+# Build every executable the behavioral test graph can invoke before CTest
+# starts, so sanitizer/preset runs never register tests that point at missing
+# binaries. Script-backed tests (Python) need no compiled target.
+add_custom_target(hp2_verification_binaries
+    DEPENDS ${HP2_EXECUTABLE_TARGETS}
+    COMMENT "Building every executable referenced by the HP2 behavioral test graph"
+)
+
 # Give every behavioral test an isolated, deterministic HOME. HP2 derives its
 # writable Application Support tree from HOME; immutable package data is
 # always selected explicitly with -datadir when runtime bootstrap is needed.
+# Each test also owns a stable artifact directory exposed through
+# HP2_ARTIFACT_DIR so structured reports, logs, and captures land in one
+# predictable place instead of ad-hoc stdout.
 function(hp2_add_behavior_test test_name target)
     set(_hp2_test_root "${CMAKE_BINARY_DIR}/Testing/HP2/${test_name}")
     set(_hp2_test_home "${_hp2_test_root}/Home")
     set(_hp2_test_tmp "${_hp2_test_root}/Tmp")
-    file(MAKE_DIRECTORY "${_hp2_test_home}" "${_hp2_test_tmp}")
+    set(_hp2_test_artifacts "${_hp2_test_root}/Artifacts")
+    file(MAKE_DIRECTORY "${_hp2_test_home}" "${_hp2_test_tmp}" "${_hp2_test_artifacts}")
 
     add_test(NAME "${test_name}" COMMAND "${target}" ${ARGN})
     set_tests_properties("${test_name}" PROPERTIES
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        # Deterministic contracts must never hang a verification run; a
+        # timeout is a first-class failure with retained artifacts.
+        TIMEOUT 900
         ENVIRONMENT
-            "HOME=${_hp2_test_home};TMPDIR=${_hp2_test_tmp};LC_ALL=C;TZ=UTC"
+            "HOME=${_hp2_test_home};TMPDIR=${_hp2_test_tmp};LC_ALL=C;TZ=UTC;HP2_TEST_NAME=${test_name};HP2_ARTIFACT_DIR=${_hp2_test_artifacts}"
     )
 endfunction()
 
@@ -334,6 +394,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 hp2_add_behavior_test(abi_widths hp2_abi_tests
     --test=abi_widths
+)
+hp2_add_behavior_test(render_clip hp2_abi_tests
+    --test=render_clip
 )
 hp2_add_behavior_test(projection_fov hp2_abi_tests
     --test=projection_fov
@@ -375,6 +438,17 @@ hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"
 )
+hp2_add_behavior_test(repair_save_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/RepairSaveTests.py"
+)
+
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests)
+endif()
+
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests)
+endif()
 
 # ABI and registration checks are prerequisites for package/runtime tests.
 # Codec tests are otherwise independent; audio lifecycle additionally requires

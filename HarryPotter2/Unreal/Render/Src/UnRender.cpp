@@ -1575,16 +1575,17 @@ inline INT URender::AMD3DClipBspSurf( INT iNode, FTransform**& Result )
 	Normal code.
 -----------------------------------------------------------------------------*/
 
+
 static inline INT Clip( FTransform** Dest, FTransform** Src, INT SrcNum )
 {
 	INT DestNum=0;
 	for( INT i=0,j=SrcNum-1; i<SrcNum; j=i++ )
 	{
-		if( *(INT*)(Dot+j) >= 0 )
+		if( Dot[j] >= 0.0f )
 		{
 			Dest[DestNum++] = Src[j];
 		}
-		if( (*(INT*)(Dot+j) ^ *(INT*)(Dot+i)) < 0 )
+		if( RenderClipEdgeCrosses(Dot[j],Dot[i]) )
 		{
 			FTransform* T = Dest[DestNum++] = New<FTransform>( GDynMem );
 			FLOAT Alpha   = Dot[j] / (Dot[j]-Dot[i]);
@@ -1602,11 +1603,11 @@ static inline INT Clip( FTransTexture** Dest, FTransTexture** Src, INT SrcNum )
 	INT DestNum=0;
 	for( INT i=0,j=SrcNum-1; i<SrcNum; j=i++ )
 	{
-		if( *(INT*)(Dot+j) >= 0 )
+		if( Dot[j] >= 0.0f )
 		{
 			Dest[DestNum++] = Src[j];
 		}
-		if( (*(INT*)(Dot+j) ^ *(INT*)(Dot+i)) < 0 )
+		if( RenderClipEdgeCrosses(Dot[j],Dot[i]) )
 		{
 			FTransTexture* T = Dest[DestNum++] = New<FTransTexture>( GDynMem );
 			FLOAT Alpha   = Dot[j] / (Dot[j]-Dot[i]);

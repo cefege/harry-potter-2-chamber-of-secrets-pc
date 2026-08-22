@@ -3,7 +3,11 @@
 =============================================================================*/
 #include "HP2LaunchPolicy.h"
 
+#include <cerrno>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 
 namespace HP2Launcher
 {
@@ -39,6 +43,8 @@ std::string OptionName(const char* argument)
 	return std::string(argument + first, end - first);
 }
 
+
+
 bool IsDataDirectoryArgument(const char* argument)
 {
 	if (!argument || argument[0] != '-' || argument[1] == '-')
@@ -57,7 +63,7 @@ bool IsDataDirectoryArgument(const char* argument)
 bool ShouldRunNativeLauncher(int argc, char* const argv[])
 {
 	static const char* const BypassOptions[] = {
-		"LOAD", "NOFRONTEND", "TESTTICKS", "TESTRENDEV", "SERVER",
+		"LOAD", "NOFRONTEND", "TESTTICKS", "TESTRENDEV", "TESTNATIVETEXT", "SERVER",
 		"REPLAY", "RECORD", "BENCHMARK", "COMMANDLET", "MAKE", "EXEC"
 	};
 
@@ -80,6 +86,8 @@ bool ShouldRunNativeLauncher(int argc, char* const argv[])
 	}
 	return true;
 }
+
+
 
 bool BuildSelectedCommand(
 	const LaunchSelection& selection,

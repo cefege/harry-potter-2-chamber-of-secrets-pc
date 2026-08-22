@@ -43,6 +43,11 @@ struct StagedFile
 	std::string destination, temporary, directory;
 	bool active = false;
 };
+struct StagedDirectory
+{
+	std::string destination, temporary, parent;
+	bool active = false;
+};
 
 #ifdef HP2_LAUNCHER_TESTING
 int GFailAfterPublication = 0;
@@ -458,7 +463,13 @@ std::string DoubleText(double value)
 	return stream.str();
 }
 const char* BoolText(bool value) { return value ? "True" : "False"; }
-bool ValidCap(int value) { return value == 0 || value == 30 || value == 60 || value == 120; }
+bool ValidCap(int value)
+{
+	return std::find(
+		FrameRateLimitValues.begin(),
+		FrameRateLimitValues.end(),
+		value) != FrameRateLimitValues.end();
+}
 
 bool LoadDocument(const std::string& path, Document& document, mode_t* mode, std::string& error)
 {
@@ -800,7 +811,9 @@ void LoadSettings(const Document& game, const Document& user, LauncherSettings& 
 		RenderScaleValues,
 		settings.renderScale);
 	LoadDiscreteNumber(game, "SDLDrv.SDLClient", "UIScale", UIScaleValues, settings.uiScale);
+	LoadBool(game, "SDLDrv.SDLClient", "ShowFPS", settings.showFPS);
 	LoadBool(game, "SDLDrv.SDLClient", "MaintainVerticalFOV", settings.maintainVerticalFOV);
+	LoadBool(game, "SDLDrv.SDLClient", "NativeText", settings.nativeText);
 	LoadBool(game, "SDLDrv.SDLClient", "ScreenFlashes", settings.screenFlashes);
 	LoadNumber(game, "SDLDrv.SDLClient", "Brightness", 0.1, 1.0, settings.brightness);
 	LoadAntiAliasing(game, settings.antiAliasingSamples);
@@ -826,6 +839,9 @@ void LoadSettings(const Document& game, const Document& user, LauncherSettings& 
 	}
 	LoadNumber(user, "Engine.PlayerPawn", "MouseSensitivity", 0.2, 10.0, settings.mouseSensitivity);
 	LoadBool(user, "Engine.PlayerPawn", "bInvertMouse", settings.invertMouse);
+	bool modernThirdPersonControls = false;
+	LoadBool(user, "Engine.PlayerPawn", "bModernThirdPersonControls", modernThirdPersonControls);
+	settings.controlMode = modernThirdPersonControls ? ControlMode::Modern : ControlMode::Classic;
 	LoadBool(user, "HGame.Harry", "bAutoCenterCamera", settings.autoCenterCamera);
 	LoadBool(user, "HGame.Harry", "bMoveWhileCasting", settings.moveWhileCasting);
 	LoadBool(user, "HGame.Harry", "bAutoQuaff", settings.autoQuaff);
@@ -890,7 +906,9 @@ void ApplyGame(Document& game, const LauncherSettings& settings)
 	Set(game, "XOpenGLDrv.XOpenGLRenderDevice", "UseVSync", settings.verticalSync ? "On" : "Off");
 	Set(game, "XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", DoubleText(settings.renderScale));
 	Set(game, "SDLDrv.SDLClient", "UIScale", DoubleText(settings.uiScale));
+	Set(game, "SDLDrv.SDLClient", "ShowFPS", BoolText(settings.showFPS));
 	Set(game, "SDLDrv.SDLClient", "MaintainVerticalFOV", BoolText(settings.maintainVerticalFOV));
+	Set(game, "SDLDrv.SDLClient", "NativeText", BoolText(settings.nativeText));
 	Set(game, "SDLDrv.SDLClient", "ScreenFlashes", BoolText(settings.screenFlashes));
 	Set(game, "XOpenGLDrv.XOpenGLRenderDevice", "UseAA", BoolText(settings.antiAliasingSamples != 0));
 	Set(game, "XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", std::to_string(settings.antiAliasingSamples));
@@ -902,11 +920,634 @@ void ApplyUser(Document& user, const LauncherSettings& settings)
 {
 	Set(user, "Engine.PlayerPawn", "MouseSensitivity", DoubleText(settings.mouseSensitivity));
 	Set(user, "Engine.PlayerPawn", "bInvertMouse", BoolText(settings.invertMouse));
+	Set(user, "Engine.PlayerPawn", "bModernThirdPersonControls", BoolText(settings.controlMode == ControlMode::Modern));
 	Set(user, "Engine.PlayerPawn", "Difficulty", DifficultyValue(settings.difficulty));
 	Set(user, "Engine.PlayerPawn", "ObjectDetail", Object(settings.objectDetail));
 	Set(user, "HGame.Harry", "bAutoCenterCamera", BoolText(settings.autoCenterCamera));
 	Set(user, "HGame.Harry", "bMoveWhileCasting", BoolText(settings.moveWhileCasting));
 	Set(user, "HGame.Harry", "bAutoQuaff", BoolText(settings.autoQuaff));
+}
+bool IsValidUtf8(const std::string& text)
+{
+	for (std::size_t offset = 0; offset < text.size();)
+	{
+		std::uint32_t codePoint;
+		if (!GetUtf8(text, offset, codePoint)) return false;
+	}
+	return true;
+}
+bool IsAbsolutePath(const std::string& path)
+{
+	return !path.empty() && path.front() == '/' && path.find('\0') == std::string::npos;
+}
+bool SourceText(DataSource source, const char*& text)
+{
+	switch (source)
+	{
+	case DataSource::Retail: text = "Retail"; return true;
+	case DataSource::Prototype: text = "Prototype"; return true;
+	}
+	return false;
+}
+bool ParseSource(const std::string& text, DataSource& source)
+{
+	if (Same(text, "Retail")) { source = DataSource::Retail; return true; }
+	if (Same(text, "Prototype")) { source = DataSource::Prototype; return true; }
+	return false;
+}
+bool LoadLauncherDocument(
+	const std::string& launcherRoot,
+	Document& document,
+	bool& exists,
+	mode_t& mode,
+	std::string& original,
+	std::string& error)
+{
+	if (!Directory(launcherRoot))
+	{
+		error = "Launcher root is not a directory: '" + launcherRoot + "'.";
+		return false;
+	}
+	const std::string path = Join(launcherRoot, "Launcher.ini");
+	struct stat info;
+	if (::lstat(path.c_str(), &info) != 0)
+	{
+		if (errno != ENOENT)
+		{
+			error = ErrorAt("Unable to inspect", path);
+			return false;
+		}
+		document = Document();
+		exists = false;
+		mode = 0600;
+		original.clear();
+		return true;
+	}
+	exists = true;
+	if (!ReadFile(path, original, &mode, error)) return false;
+	if (!Decode(original, document, error))
+	{
+		error = "Unable to decode '" + path + "': " + error;
+		return false;
+	}
+	return true;
+}
+bool PublishLauncherDocument(
+	const std::string& launcherRoot,
+	Document& document,
+	bool existed,
+	mode_t mode,
+	const std::string& original,
+	std::string& error)
+{
+	const std::string path = Join(launcherRoot, "Launcher.ini");
+	std::string bytes;
+	if (!Encode(document, bytes, error)) return false;
+	if (existed && !Backup(path, original, mode, error)) return false;
+
+	StagedFile staged, rollback;
+	if (!Stage(path, bytes, existed ? mode : 0600, staged, error)) return false;
+	if (existed && !Stage(path, original, mode, rollback, error))
+	{
+		Discard(staged);
+		return false;
+	}
+	if (!Publish(staged, error))
+	{
+		const std::string publicationError = error;
+		std::string restorationError;
+		const bool restored = RestorePublishedFile(path, existed, rollback, restorationError);
+		error = restored ? publicationError : publicationError + " Rollback failed: " + restorationError;
+		return false;
+	}
+	Discard(rollback);
+	return true;
+}
+bool OpenDirectoryNoFollow(const std::string& path, int& fd, mode_t& mode, std::string& error)
+{
+	fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+	if (fd < 0)
+	{
+		error = ErrorAt("Unable to open directory", path);
+		return false;
+	}
+	struct stat info;
+	if (::fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode))
+	{
+		::close(fd);
+		error = "Unable to verify directory '" + path + "'.";
+		return false;
+	}
+	mode = info.st_mode & 07777;
+	return true;
+}
+bool OpenDirectoryAtNoFollow(
+	int parentFd,
+	const std::string& name,
+	const std::string& displayPath,
+	int& fd,
+	mode_t& mode,
+	std::string& error)
+{
+	fd = ::openat(parentFd, name.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+	if (fd < 0)
+	{
+		error = ErrorAt("Unable to open directory", displayPath);
+		return false;
+	}
+	struct stat info;
+	if (::fstat(fd, &info) != 0 || !S_ISDIR(info.st_mode))
+	{
+		::close(fd);
+		error = "Unable to verify directory '" + displayPath + "'.";
+		return false;
+	}
+	mode = info.st_mode & 07777;
+	return true;
+}
+bool DirectoryNamesAt(int fd, const std::string& displayPath, std::vector<std::string>& names, std::string& error)
+{
+	const int copy = ::dup(fd);
+	if (copy < 0)
+	{
+		error = ErrorAt("Unable to duplicate directory descriptor", displayPath);
+		return false;
+	}
+	DIR* directory = ::fdopendir(copy);
+	if (!directory)
+	{
+		const int saved = errno;
+		::close(copy);
+		errno = saved;
+		error = ErrorAt("Unable to open directory", displayPath);
+		return false;
+	}
+	names.clear();
+	errno = 0;
+	while (dirent* entry = ::readdir(directory))
+	{
+		const std::string name = entry->d_name;
+		if (name != "." && name != "..") names.push_back(name);
+		errno = 0;
+	}
+	const int readError = errno;
+	if (::closedir(directory) != 0 && readError == 0)
+	{
+		error = ErrorAt("Unable to close directory", displayPath);
+		return false;
+	}
+	if (readError)
+	{
+		errno = readError;
+		error = ErrorAt("Unable to read directory", displayPath);
+		return false;
+	}
+	std::sort(names.begin(), names.end());
+	return true;
+}
+bool SyncDirectoryFd(int fd, const std::string& path, std::string& error)
+{
+	if (::fsync(fd) == 0) return true;
+	error = ErrorAt("Unable to synchronize directory", path);
+	return false;
+}
+bool InspectLegacyTreeAt(
+	int parentFd,
+	const std::string& name,
+	const std::string& path,
+	bool missingOkay,
+	std::string& error)
+{
+	struct stat info;
+	if (::fstatat(parentFd, name.c_str(), &info, AT_SYMLINK_NOFOLLOW) != 0)
+	{
+		if (missingOkay && errno == ENOENT) return true;
+		error = ErrorAt("Unable to inspect legacy profile item", path);
+		return false;
+	}
+	if (S_ISREG(info.st_mode)) return true;
+	if (!S_ISDIR(info.st_mode))
+	{
+		error = "Legacy profile item is not a regular non-symlink file or directory: '" + path + "'.";
+		return false;
+	}
+	int directoryFd;
+	mode_t mode;
+	if (!OpenDirectoryAtNoFollow(parentFd, name, path, directoryFd, mode, error)) return false;
+	std::vector<std::string> names;
+	bool okay = DirectoryNamesAt(directoryFd, path, names, error);
+	for (const std::string& child : names)
+		if (okay && !InspectLegacyTreeAt(directoryFd, child, Join(path, child), false, error)) okay = false;
+	if (::close(directoryFd) != 0 && okay)
+	{
+		error = ErrorAt("Unable to close directory", path);
+		okay = false;
+	}
+	return okay;
+}
+bool CopyRegularFileAt(
+	int sourceParentFd,
+	const std::string& sourceName,
+	int destinationParentFd,
+	const std::string& destinationName,
+	const std::string& sourcePath,
+	const std::string& destinationPath,
+	std::string& error)
+{
+	const int sourceFd = ::openat(sourceParentFd, sourceName.c_str(), O_RDONLY | O_NOFOLLOW);
+	if (sourceFd < 0)
+	{
+		error = ErrorAt("Unable to open legacy profile file", sourcePath);
+		return false;
+	}
+	struct stat sourceInfo;
+	if (::fstat(sourceFd, &sourceInfo) != 0 || !S_ISREG(sourceInfo.st_mode))
+	{
+		::close(sourceFd);
+		error = "Legacy profile item is not a regular non-symlink file: '" + sourcePath + "'.";
+		return false;
+	}
+	const int destinationFd = ::openat(
+		destinationParentFd,
+		destinationName.c_str(),
+		O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW,
+		0600);
+	if (destinationFd < 0)
+	{
+		const int saved = errno;
+		::close(sourceFd);
+		errno = saved;
+		error = ErrorAt("Unable to create staged profile file", destinationPath);
+		return false;
+	}
+	bool okay = true;
+	char buffer[32768];
+	while (okay)
+	{
+		const ssize_t count = ::read(sourceFd, buffer, sizeof(buffer));
+		if (count < 0 && errno == EINTR) continue;
+		if (count < 0) { okay = false; break; }
+		if (count == 0) break;
+		std::size_t written = 0;
+		while (written < static_cast<std::size_t>(count))
+		{
+			const ssize_t result = ::write(
+				destinationFd,
+				buffer + written,
+				static_cast<std::size_t>(count) - written);
+			if (result < 0 && errno == EINTR) continue;
+			if (result <= 0)
+			{
+				if (result == 0) errno = EIO;
+				okay = false;
+				break;
+			}
+			written += static_cast<std::size_t>(result);
+		}
+	}
+	if (okay && ::fchmod(destinationFd, sourceInfo.st_mode & 07777) != 0) okay = false;
+	if (okay && ::fsync(destinationFd) != 0) okay = false;
+	int saved = errno;
+	if (::close(destinationFd) != 0 && okay) { saved = errno; okay = false; }
+	if (::close(sourceFd) != 0 && okay) { saved = errno; okay = false; }
+	if (okay) return true;
+	errno = saved;
+	error = ErrorAt("Unable to copy legacy profile file", sourcePath);
+	::unlinkat(destinationParentFd, destinationName.c_str(), 0);
+	return false;
+}
+bool SynchronizeCopiedDirectory(int fd, mode_t mode, const std::string& path, std::string& error)
+{
+	if (::fchmod(fd, mode & 07777) != 0)
+	{
+		error = ErrorAt("Unable to set staged profile directory permissions", path);
+		return false;
+	}
+	return SyncDirectoryFd(fd, path, error);
+}
+bool CopyLegacyTreeAt(
+	int sourceParentFd,
+	const std::string& sourceName,
+	int destinationParentFd,
+	const std::string& destinationName,
+	const std::string& sourcePath,
+	const std::string& destinationPath,
+	std::string& error)
+{
+	struct stat info;
+	if (::fstatat(sourceParentFd, sourceName.c_str(), &info, AT_SYMLINK_NOFOLLOW) != 0)
+	{
+		error = ErrorAt("Unable to inspect legacy profile item", sourcePath);
+		return false;
+	}
+	if (S_ISREG(info.st_mode))
+	{
+		return CopyRegularFileAt(
+			sourceParentFd,
+			sourceName,
+			destinationParentFd,
+			destinationName,
+			sourcePath,
+			destinationPath,
+			error);
+	}
+	if (!S_ISDIR(info.st_mode))
+	{
+		error = "Legacy profile item is not a regular non-symlink file or directory: '" + sourcePath + "'.";
+		return false;
+	}
+	if (::mkdirat(destinationParentFd, destinationName.c_str(), 0700) != 0)
+	{
+		error = ErrorAt("Unable to create staged profile directory", destinationPath);
+		return false;
+	}
+	int sourceFd = -1, destinationFd = -1;
+	mode_t sourceMode, destinationMode;
+	if (!OpenDirectoryAtNoFollow(sourceParentFd, sourceName, sourcePath, sourceFd, sourceMode, error) ||
+		!OpenDirectoryAtNoFollow(destinationParentFd, destinationName, destinationPath, destinationFd, destinationMode, error))
+	{
+		if (sourceFd >= 0) ::close(sourceFd);
+		return false;
+	}
+	std::vector<std::string> names;
+	bool okay = DirectoryNamesAt(sourceFd, sourcePath, names, error);
+	for (const std::string& child : names)
+	{
+		if (okay &&
+			!CopyLegacyTreeAt(
+				sourceFd,
+				child,
+				destinationFd,
+				child,
+				Join(sourcePath, child),
+				Join(destinationPath, child),
+				error))
+		{
+			okay = false;
+		}
+	}
+	if (okay && !SynchronizeCopiedDirectory(destinationFd, sourceMode, destinationPath, error)) okay = false;
+	int saved = errno;
+	if (::close(destinationFd) != 0 && okay) { saved = errno; okay = false; }
+	if (::close(sourceFd) != 0 && okay) { saved = errno; okay = false; }
+	if (!okay) errno = saved;
+	return okay;
+}
+bool RemoveTreeAt(int parentFd, const std::string& name, const std::string& path, std::string& error)
+{
+	struct stat info;
+	if (::fstatat(parentFd, name.c_str(), &info, AT_SYMLINK_NOFOLLOW) != 0)
+	{
+		error = ErrorAt("Unable to inspect staged profile item", path);
+		return false;
+	}
+	if (S_ISREG(info.st_mode))
+	{
+		if (::unlinkat(parentFd, name.c_str(), 0) == 0) return true;
+		error = ErrorAt("Unable to remove staged profile file", path);
+		return false;
+	}
+	if (!S_ISDIR(info.st_mode))
+	{
+		error = "Staged profile contains a symlink or irregular file: '" + path + "'.";
+		return false;
+	}
+	int directoryFd;
+	mode_t mode;
+	if (!OpenDirectoryAtNoFollow(parentFd, name, path, directoryFd, mode, error)) return false;
+	std::vector<std::string> names;
+	bool okay = DirectoryNamesAt(directoryFd, path, names, error);
+	for (const std::string& child : names)
+		if (okay && !RemoveTreeAt(directoryFd, child, Join(path, child), error)) okay = false;
+	int saved = errno;
+	if (::close(directoryFd) != 0 && okay) { saved = errno; okay = false; }
+	if (!okay)
+	{
+		errno = saved;
+		return false;
+	}
+	if (::unlinkat(parentFd, name.c_str(), AT_REMOVEDIR) == 0) return true;
+	error = ErrorAt("Unable to remove staged profile directory", path);
+	return false;
+}
+bool RemoveTreeNoFollow(const std::string& path, std::string& error)
+{
+	int parentFd;
+	mode_t mode;
+	if (!OpenDirectoryNoFollow(Parent(path), parentFd, mode, error)) return false;
+	const bool removed = RemoveTreeAt(parentFd, Base(path), path, error);
+	const int saved = errno;
+	if (::close(parentFd) != 0 && removed)
+	{
+		error = ErrorAt("Unable to close directory", Parent(path));
+		return false;
+	}
+	errno = saved;
+	return removed;
+}
+void DiscardStagedDirectory(StagedDirectory& staged)
+{
+	if (staged.active)
+	{
+		std::string ignored;
+		RemoveTreeNoFollow(staged.temporary, ignored);
+	}
+	staged.active = false;
+}
+bool EnsureDirectoryNoFollow(const std::string& path, std::string& error)
+{
+	struct stat info;
+	if (::lstat(path.c_str(), &info) == 0)
+	{
+		if (S_ISDIR(info.st_mode)) return true;
+		error = "Expected a directory at '" + path + "'.";
+		return false;
+	}
+	if (errno != ENOENT)
+	{
+		error = ErrorAt("Unable to inspect directory", path);
+		return false;
+	}
+	if (::mkdir(path.c_str(), 0700) != 0)
+	{
+		error = ErrorAt("Unable to create directory", path);
+		return false;
+	}
+	return SyncParent(Parent(path), error);
+}
+bool StageProfile(
+	const std::string& launcherRoot,
+	const std::string& profileRoot,
+	bool copyLegacy,
+	StagedDirectory& staged,
+	std::string& error)
+{
+	staged.destination = profileRoot;
+	staged.parent = Parent(profileRoot);
+	int parentFd;
+	mode_t parentMode;
+	if (!OpenDirectoryNoFollow(staged.parent, parentFd, parentMode, error)) return false;
+	const std::string temporaryNamePrefix = "." + Base(profileRoot) + ".tmp.";
+	std::random_device random;
+	bool created = false;
+	for (int attempt = 0; attempt != 128; ++attempt)
+	{
+		const std::uint64_t nonce = static_cast<std::uint64_t>(random()) << 32 ^ random();
+		std::ostringstream name;
+		name << temporaryNamePrefix << std::hex << nonce;
+		staged.temporary = Join(staged.parent, name.str());
+		if (::mkdirat(parentFd, name.str().c_str(), 0700) == 0)
+		{
+			created = true;
+			break;
+		}
+		if (errno != EEXIST)
+		{
+			const int saved = errno;
+			::close(parentFd);
+			errno = saved;
+			error = ErrorAt("Unable to create staged profile", staged.temporary);
+			return false;
+		}
+	}
+	if (!created)
+	{
+		::close(parentFd);
+		error = "Unable to allocate an unpredictable staged profile directory.";
+		return false;
+	}
+	staged.active = true;
+	int stagedFd;
+	mode_t stagedMode;
+	if (!OpenDirectoryAtNoFollow(parentFd, Base(staged.temporary), staged.temporary, stagedFd, stagedMode, error))
+	{
+		::close(parentFd);
+		DiscardStagedDirectory(staged);
+		return false;
+	}
+	bool okay = true;
+	int launcherFd = -1;
+	if (copyLegacy)
+	{
+		mode_t launcherMode;
+		if (!OpenDirectoryNoFollow(launcherRoot, launcherFd, launcherMode, error)) okay = false;
+		static const char* const LegacyItems[] = {"Game.ini", "User.ini", "Save", "Cache"};
+		for (const char* name : LegacyItems)
+		{
+			struct stat info;
+			if (okay && ::fstatat(launcherFd, name, &info, AT_SYMLINK_NOFOLLOW) != 0)
+			{
+				if (errno == ENOENT) continue;
+				error = ErrorAt("Unable to inspect legacy profile item", Join(launcherRoot, name));
+				okay = false;
+			}
+			if (okay &&
+				!CopyLegacyTreeAt(
+					launcherFd,
+					name,
+					stagedFd,
+					name,
+					Join(launcherRoot, name),
+					Join(staged.temporary, name),
+					error))
+			{
+				okay = false;
+			}
+		}
+	}
+	if (launcherFd >= 0 && ::close(launcherFd) != 0 && okay)
+	{
+		error = ErrorAt("Unable to close directory", launcherRoot);
+		okay = false;
+	}
+	if (okay && !SyncDirectoryFd(stagedFd, staged.temporary, error)) okay = false;
+	if (::close(stagedFd) != 0 && okay)
+	{
+		error = ErrorAt("Unable to close directory", staged.temporary);
+		okay = false;
+	}
+	if (::close(parentFd) != 0 && okay)
+	{
+		error = ErrorAt("Unable to close directory", staged.parent);
+		okay = false;
+	}
+	if (!okay)
+	{
+		DiscardStagedDirectory(staged);
+		return false;
+	}
+	return true;
+}
+bool RemovePublishedProfile(const std::string& profileRoot, std::string& error);
+
+bool PublishProfile(StagedDirectory& staged, std::string& error)
+{
+	int parentFd;
+	mode_t parentMode;
+	if (!OpenDirectoryNoFollow(staged.parent, parentFd, parentMode, error))
+	{
+		DiscardStagedDirectory(staged);
+		return false;
+	}
+	struct stat info;
+	if (::fstatat(parentFd, Base(staged.destination).c_str(), &info, AT_SYMLINK_NOFOLLOW) == 0)
+	{
+		::close(parentFd);
+		error = "Profile already exists: '" + staged.destination + "'.";
+		DiscardStagedDirectory(staged);
+		return false;
+	}
+	if (errno != ENOENT)
+	{
+		const int saved = errno;
+		::close(parentFd);
+		errno = saved;
+		error = ErrorAt("Unable to inspect profile", staged.destination);
+		DiscardStagedDirectory(staged);
+		return false;
+	}
+	if (::renameat(parentFd, Base(staged.temporary).c_str(), parentFd, Base(staged.destination).c_str()) != 0)
+	{
+		const int saved = errno;
+		::close(parentFd);
+		errno = saved;
+		error = ErrorAt("Unable to publish profile", staged.destination);
+		DiscardStagedDirectory(staged);
+		return false;
+	}
+	staged.active = false;
+	const bool synchronized = SyncDirectoryFd(parentFd, staged.parent, error);
+	const int synchronizationError = errno;
+	bool closed = ::close(parentFd) == 0;
+	if (!closed && synchronized) error = ErrorAt("Unable to close directory", staged.parent);
+	if (synchronized && closed) return true;
+	if (!synchronized) errno = synchronizationError;
+	const std::string publicationError = error;
+	std::string removalError;
+	const bool removed = RemovePublishedProfile(staged.destination, removalError);
+	error = publicationError;
+	if (!removed) error += " Profile rollback failed: " + removalError;
+	return false;
+}
+bool RemovePublishedProfile(const std::string& profileRoot, std::string& error)
+{
+	int parentFd;
+	mode_t parentMode;
+	if (!OpenDirectoryNoFollow(Parent(profileRoot), parentFd, parentMode, error)) return false;
+	const bool removed = RemoveTreeAt(parentFd, Base(profileRoot), profileRoot, error);
+	if (removed && !SyncDirectoryFd(parentFd, Parent(profileRoot), error))
+	{
+		::close(parentFd);
+		return false;
+	}
+	const int saved = errno;
+	if (::close(parentFd) != 0 && removed)
+	{
+		error = ErrorAt("Unable to close directory", Parent(profileRoot));
+		return false;
+	}
+	errno = saved;
+	return removed;
 }
 }
 #ifdef HP2_LAUNCHER_TESTING
@@ -917,6 +1558,209 @@ void SetLauncherPublishFailureForTesting(int publicationIndex)
 }
 #endif
 
+
+bool LoadDataSourceConfiguration(
+	const std::string& launcherRoot,
+	DataSourceConfiguration& configuration,
+	std::string& error)
+{
+	configuration = DataSourceConfiguration();
+	error.clear();
+	Document document;
+	bool exists;
+	mode_t mode;
+	std::string original;
+	if (!LoadLauncherDocument(launcherRoot, document, exists, mode, original, error)) return false;
+
+	std::string value;
+	DataSource source;
+	if (Get(document, "DataSources", "Selected", value) && ParseSource(value, source))
+		configuration.selected = source;
+	if (Get(document, "DataSources", "RetailRoot", value) &&
+		IsAbsolutePath(value) &&
+		IsValidUtf8(value) &&
+		value.find_first_of("\r\n") == std::string::npos &&
+		Trim(value) == value)
+	{
+		configuration.retailRoot = value;
+	}
+	if (Get(document, "DataSources", "PrototypeRoot", value) &&
+		IsAbsolutePath(value) &&
+		IsValidUtf8(value) &&
+		value.find_first_of("\r\n") == std::string::npos &&
+		Trim(value) == value)
+	{
+		configuration.prototypeRoot = value;
+	}
+	return true;
+}
+
+bool CommitDataSourceConfiguration(
+	const std::string& launcherRoot,
+	const DataSourceConfiguration& configuration,
+	std::string& error)
+{
+	error.clear();
+	const char* selected;
+	if (!SourceText(configuration.selected, selected))
+	{
+		error = "Data source configuration contains an invalid selection.";
+		return false;
+	}
+	auto validRoot = [](const std::string& root)
+	{
+		return root.empty() ||
+			(IsAbsolutePath(root) &&
+				IsValidUtf8(root) &&
+				root.find_first_of("\r\n") == std::string::npos &&
+				Trim(root) == root);
+	};
+	if (!validRoot(configuration.retailRoot) || !validRoot(configuration.prototypeRoot))
+	{
+		error = "Data source roots must be absolute, valid UTF-8 single-line paths.";
+		return false;
+	}
+
+	Document document;
+	bool exists;
+	mode_t mode;
+	std::string original;
+	if (!LoadLauncherDocument(launcherRoot, document, exists, mode, original, error)) return false;
+	Set(document, "DataSources", "Selected", selected);
+	Set(document, "DataSources", "RetailRoot", configuration.retailRoot);
+	Set(document, "DataSources", "PrototypeRoot", configuration.prototypeRoot);
+	return PublishLauncherDocument(launcherRoot, document, exists, mode, original, error);
+}
+
+bool PrepareDataSourceProfile(
+	const std::string& launcherRoot,
+	DataSource source,
+	std::string& profileRoot,
+	std::string& error)
+{
+	profileRoot.clear();
+	error.clear();
+	const char* sourceName;
+	if (!SourceText(source, sourceName))
+	{
+		error = "Data source configuration contains an invalid selection.";
+		return false;
+	}
+	if (!Directory(launcherRoot))
+	{
+		error = "Launcher root is not a directory: '" + launcherRoot + "'.";
+		return false;
+	}
+
+	const std::string profilesRoot = Join(launcherRoot, "Profiles");
+	const std::string requestedProfile = Join(profilesRoot, sourceName);
+	struct stat profilesInfo;
+	if (::lstat(profilesRoot.c_str(), &profilesInfo) == 0)
+	{
+		if (!S_ISDIR(profilesInfo.st_mode))
+		{
+			error = "Profiles root is not a directory: '" + profilesRoot + "'.";
+			return false;
+		}
+		struct stat profileInfo;
+		if (::lstat(requestedProfile.c_str(), &profileInfo) == 0)
+		{
+			if (!S_ISDIR(profileInfo.st_mode))
+			{
+				error = "Profile root is not a directory: '" + requestedProfile + "'.";
+				return false;
+			}
+			profileRoot = requestedProfile;
+			return true;
+		}
+		if (errno != ENOENT)
+		{
+			error = ErrorAt("Unable to inspect profile", requestedProfile);
+			return false;
+		}
+	}
+	else if (errno != ENOENT)
+	{
+		error = ErrorAt("Unable to inspect profiles root", profilesRoot);
+		return false;
+	}
+
+	Document document;
+	bool documentExists;
+	mode_t documentMode;
+	std::string originalDocument;
+	if (!LoadLauncherDocument(
+			launcherRoot,
+			document,
+			documentExists,
+			documentMode,
+			originalDocument,
+			error))
+	{
+		return false;
+	}
+	bool hasLegacyProfile = false;
+	std::string legacyProfile;
+	if (Get(document, "DataSources", "LegacyProfile", legacyProfile))
+	{
+		DataSource legacySource;
+		if (!ParseSource(legacyProfile, legacySource))
+		{
+			error = "Launcher data source configuration has an invalid LegacyProfile marker.";
+			return false;
+		}
+		hasLegacyProfile = true;
+	}
+
+	if (!hasLegacyProfile)
+	{
+		int legacyRootFd;
+		mode_t legacyRootMode;
+		if (!OpenDirectoryNoFollow(launcherRoot, legacyRootFd, legacyRootMode, error)) return false;
+		static const char* const LegacyItems[] = {"Game.ini", "User.ini", "Save", "Cache"};
+		bool inspected = true;
+		for (const char* name : LegacyItems)
+		{
+			if (inspected &&
+				!InspectLegacyTreeAt(legacyRootFd, name, Join(launcherRoot, name), true, error))
+			{
+				inspected = false;
+			}
+		}
+		if (::close(legacyRootFd) != 0 && inspected)
+		{
+			error = ErrorAt("Unable to close directory", launcherRoot);
+			inspected = false;
+		}
+		if (!inspected) return false;
+	}
+
+	if (!EnsureDirectoryNoFollow(profilesRoot, error)) return false;
+	StagedDirectory staged;
+	if (!StageProfile(launcherRoot, requestedProfile, !hasLegacyProfile, staged, error)) return false;
+	if (!PublishProfile(staged, error)) return false;
+	if (!hasLegacyProfile)
+	{
+		Set(document, "DataSources", "LegacyProfile", sourceName);
+		if (!PublishLauncherDocument(
+				launcherRoot,
+				document,
+				documentExists,
+				documentMode,
+				originalDocument,
+				error))
+		{
+			const std::string publicationError = error;
+			std::string removalError;
+			const bool removed = RemovePublishedProfile(requestedProfile, removalError);
+			error = publicationError;
+			if (!removed) error += " Profile rollback failed: " + removalError;
+			return false;
+		}
+	}
+	profileRoot = requestedProfile;
+	return true;
+}
 
 bool ValidateLauncherSettings(const LauncherSettings& settings, std::string& error)
 {
@@ -937,7 +1781,7 @@ bool ValidateLauncherSettings(const LauncherSettings& settings, std::string& err
 	if (!std::isfinite(settings.soundVolume) || settings.soundVolume < 0 || settings.soundVolume > 1 ||
 		!std::isfinite(settings.musicVolume) || settings.musicVolume < 0 || settings.musicVolume > 1)
 	{ error = "Sound and music volumes must be between 0.0 and 1.0."; return false; }
-	if (!ValidCap(settings.frameRateLimit)) { error = "Frame rate limit must be unlimited, 30, 60, or 120."; return false; }
+	if (!ValidCap(settings.frameRateLimit)) { error = "Frame rate limit must be unlimited, 30, 60, 120, or 144."; return false; }
 	if (std::find(
 			AntiAliasingSampleValues.begin(),
 			AntiAliasingSampleValues.end(),
@@ -947,7 +1791,9 @@ bool ValidateLauncherSettings(const LauncherSettings& settings, std::string& err
 	{ error = "Anisotropy must be off, 4x, 8x, or 16x."; return false; }
 	const int screen = static_cast<int>(settings.screenMode), texture = static_cast<int>(settings.textureDetail);
 	const int object = static_cast<int>(settings.objectDetail), difficulty = static_cast<int>(settings.difficulty);
-	if (screen < 0 || screen > 2 || texture < 0 || texture > 2 || object < 0 || object > 4 || difficulty < 0 || difficulty > 2)
+	const int control = static_cast<int>(settings.controlMode);
+	if (screen < 0 || screen > 2 || texture < 0 || texture > 2 || object < 0 || object > 4 ||
+		difficulty < 0 || difficulty > 2 || control < 0 || control > 1)
 	{ error = "Launcher settings contain an invalid selection."; return false; }
 	return true;
 }

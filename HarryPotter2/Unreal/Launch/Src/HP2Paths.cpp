@@ -17,6 +17,10 @@ namespace
 constexpr const char* DataDirPrefix = "-datadir=";
 constexpr const char* ExternalDataSuffix =
 	"Library/Application Support/Harry Potter 2/Data/Unreal";
+constexpr const char* ConventionalRetailDataSuffix =
+	"Library/Application Support/Harry Potter 2/Data/Retail";
+constexpr const char* ConventionalPrototypeDataSuffix =
+	"Library/Application Support/Harry Potter 2/Data/Prototype";
 constexpr const char* UserSuffix =
 	"Library/Application Support/Harry Potter 2/User";
 
@@ -62,6 +66,26 @@ char* JoinPath(const char* Left, const char* Right)
 		Result[Position++] = '/';
 	std::memcpy(Result + Position, Right, RightLength + 1);
 	return Result;
+}
+
+char* CanonicalizeExistingDirectory(const char* Directory);
+
+bool GetConventionalDataRoot(
+	const char* Suffix,
+	std::string& AbsoluteRoot)
+{
+	AbsoluteRoot.clear();
+	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	if (!Home)
+		return false;
+
+	char* Root = JoinPath(Home, Suffix);
+	std::free(Home);
+	if (!Root)
+		return false;
+	AbsoluteRoot = Root;
+	std::free(Root);
+	return true;
 }
 
 bool IsReadableFile(const char* Filename)
@@ -158,6 +182,35 @@ char* DiscoverDevelopmentDataRoot()
 	return nullptr;
 }
 
+char* DiscoverPrototypeDataRoot()
+{
+	char* Current = getcwd(nullptr, 0);
+	if (!Current)
+		return nullptr;
+
+	for (;;)
+	{
+		char* Candidate = JoinPath(Current, "HarryPotter2/Unreal");
+		char* CanonicalRoot = ValidateDataRoot(Candidate);
+		std::free(Candidate);
+		if (CanonicalRoot)
+		{
+			std::free(Current);
+			return CanonicalRoot;
+		}
+		if (std::strcmp(Current, "/") == 0)
+			break;
+
+		char* Slash = std::strrchr(Current, '/');
+		if (!Slash || Slash == Current)
+			Current[1] = '\0';
+		else
+			*Slash = '\0';
+	}
+	std::free(Current);
+	return nullptr;
+}
+
 bool EnsureDirectory(const char* Directory, mode_t Mode)
 {
 	if (Directory && mkdir(Directory, Mode) == 0)
@@ -202,7 +255,7 @@ bool EnsureWritableChildDirectory(const char* Parent, const char* Child, mode_t 
 	return Success;
 }
 
-char* PrepareUserRoot(const char* Home)
+char* PrepareLauncherRoot(const char* Home)
 {
 	char* ApplicationSupport = JoinPath(
 		Home, "Library/Application Support/Harry Potter 2");
@@ -224,6 +277,21 @@ char* PrepareUserRoot(const char* Home)
 		std::free(CanonicalUserRoot);
 		return nullptr;
 	}
+	return CanonicalUserRoot;
+}
+
+char* PrepareActiveUserRoot(const char* UserRoot)
+{
+	if (!UserRoot || UserRoot[0] != '/'
+		|| !EnsureDirectoryTree(UserRoot, 0700))
+		return nullptr;
+
+	char* CanonicalUserRoot = CanonicalizeExistingDirectory(UserRoot);
+	if (!CanonicalUserRoot || !IsWritableDirectory(CanonicalUserRoot))
+	{
+		std::free(CanonicalUserRoot);
+		return nullptr;
+	}
 
 	const bool Success = EnsureWritableChildDirectory(CanonicalUserRoot, "Save", 0700)
 		&& EnsureWritableChildDirectory(CanonicalUserRoot, "Save/cache", 0700)
@@ -234,6 +302,16 @@ char* PrepareUserRoot(const char* Home)
 		return nullptr;
 	}
 	return CanonicalUserRoot;
+}
+
+char* PrepareUserRoot(const char* Home)
+{
+	char* LauncherRoot = PrepareLauncherRoot(Home);
+	if (!LauncherRoot)
+		return nullptr;
+	char* UserRoot = PrepareActiveUserRoot(LauncherRoot);
+	std::free(LauncherRoot);
+	return UserRoot;
 }
 
 bool Utf8ToTchar(const char* Input, TCHAR*& Output)
@@ -261,9 +339,158 @@ bool Utf8ToTchar(const char* Input, TCHAR*& Output)
 	return true;
 }
 }
+const char* HP2DataDirectoryArgumentValue(const char* Argument)
+{
+	return DataDirArgument(Argument);
+}
+
 bool IsHP2DataDirectoryArgument(const char* Argument)
 {
-	return DataDirArgument(Argument) != nullptr;
+	return HP2DataDirectoryArgumentValue(Argument) != nullptr;
+}
+
+bool GetHP2ConventionalRetailDataRoot(std::string& AbsoluteRoot)
+{
+	return GetConventionalDataRoot(ConventionalRetailDataSuffix, AbsoluteRoot);
+}
+
+bool GetHP2ConventionalPrototypeDataRoot(std::string& AbsoluteRoot)
+{
+	return GetConventionalDataRoot(ConventionalPrototypeDataSuffix, AbsoluteRoot);
+}
+
+bool DiscoverHP2RetailDataRoot(std::string& CanonicalRoot)
+{
+	CanonicalRoot.clear();
+	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	if (!Home)
+		return false;
+	char* Candidate = JoinPath(Home, ExternalDataSuffix);
+	char* Root = ValidateDataRoot(Candidate);
+	std::free(Candidate);
+	std::free(Home);
+	if (!Root)
+		return false;
+	CanonicalRoot = Root;
+	std::free(Root);
+	return true;
+}
+
+bool DiscoverHP2PrototypeDataRoot(std::string& CanonicalRoot)
+{
+	CanonicalRoot.clear();
+	char* Root = DiscoverPrototypeDataRoot();
+	if (!Root)
+		return false;
+	CanonicalRoot = Root;
+	std::free(Root);
+	return true;
+}
+
+bool PrepareHP2LauncherHome(std::string& LauncherRoot, std::string& Error)
+{
+	LauncherRoot.clear();
+	Error.clear();
+	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	if (!Home)
+	{
+		Error = "HOME does not name an existing directory";
+		return false;
+	}
+
+	char* Root = PrepareLauncherRoot(Home);
+	std::free(Home);
+	if (!Root)
+	{
+		Error = "could not create writable launcher directory";
+		return false;
+	}
+	LauncherRoot = Root;
+	std::free(Root);
+	return true;
+}
+
+bool ValidateHP2DataRoot(
+	const std::string& Candidate,
+	std::string& CanonicalRoot,
+	std::string& Error)
+{
+	CanonicalRoot.clear();
+	Error.clear();
+	char* Root = ValidateDataRoot(Candidate.c_str());
+	if (!Root)
+	{
+		Error = "expected a readable System/Default.ini";
+		return false;
+	}
+	CanonicalRoot = Root;
+	std::free(Root);
+	return true;
+}
+
+bool InstallHP2Paths(
+	const std::string& DataRoot,
+	const std::string& UserRoot,
+	std::string& Error)
+{
+	Error.clear();
+	std::string CanonicalDataRoot;
+	if (!ValidateHP2DataRoot(DataRoot, CanonicalDataRoot, Error))
+		return false;
+	if (UserRoot.empty() || UserRoot[0] != '/')
+	{
+		Error = "user directory must be an absolute path";
+		return false;
+	}
+
+	char* CanonicalUserRoot = PrepareActiveUserRoot(UserRoot.c_str());
+	if (!CanonicalUserRoot)
+	{
+		Error = "could not create writable user directory";
+		return false;
+	}
+	if (IsSameOrDescendant(CanonicalDataRoot.c_str(), CanonicalUserRoot)
+		|| IsSameOrDescendant(CanonicalUserRoot, CanonicalDataRoot.c_str()))
+	{
+		Error = "data and user directories must be separate";
+		std::free(CanonicalUserRoot);
+		return false;
+	}
+
+	char* SystemDirectory = JoinPath(CanonicalDataRoot.c_str(), "System");
+	char* CanonicalSystem = CanonicalizeExistingDirectory(SystemDirectory);
+	std::free(SystemDirectory);
+	if (!CanonicalSystem)
+	{
+		Error = "could not canonicalize the validated System directory";
+		std::free(CanonicalUserRoot);
+		return false;
+	}
+
+	char* BaseDirectory = JoinPath(CanonicalSystem, "");
+	char* UserDirectory = JoinPath(CanonicalUserRoot, "");
+	std::free(CanonicalSystem);
+	std::free(CanonicalUserRoot);
+	TCHAR* BaseTchar = nullptr;
+	TCHAR* UserTchar = nullptr;
+	if (!BaseDirectory || !UserDirectory
+		|| !Utf8ToTchar(BaseDirectory, BaseTchar)
+		|| !Utf8ToTchar(UserDirectory, UserTchar))
+	{
+		Error = "filesystem paths are not valid UTF-8";
+		std::free(BaseTchar);
+		std::free(UserTchar);
+		std::free(BaseDirectory);
+		std::free(UserDirectory);
+		return false;
+	}
+	std::free(BaseDirectory);
+	std::free(UserDirectory);
+	appSetBaseDir(BaseTchar);
+	appSetUserDir(UserTchar);
+	std::free(BaseTchar);
+	std::free(UserTchar);
+	return true;
 }
 
 

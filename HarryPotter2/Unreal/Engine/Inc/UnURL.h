@@ -13,6 +13,13 @@
 //
 // A uniform resource locator.
 //
+// Encode a file-backed map path for FURL's textual grammar without applying
+// host-native separator rules to network URLs or travel options.
+ENGINE_API UBOOL appFilePathToFURLToken(
+	const TCHAR* Path,
+	TCHAR* Out,
+	INT OutCapacity );
+
 class ENGINE_API FURL
 {
 public:

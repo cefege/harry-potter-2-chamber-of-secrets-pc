@@ -26,22 +26,10 @@ void UXOpenGLRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT
 	if (NoDrawTile)
 		return;
 
-    STAT(clockFast(Stats.TileBufferCycles));
+	STAT(clockFast(Stats.TileBufferCycles));
+
 	SetProgram(Tile_Prog);
 
-	auto ShaderCore = dynamic_cast<DrawTileCoreProgram*>(Shaders[Tile_Prog]);
-	auto ShaderES   = dynamic_cast<DrawTileESProgram*>  (Shaders[Tile_Prog]);
-	
-	DWORD DrawFlags = ShaderDrawFlags::DF_None;
-	DWORD NextPolyFlags = GetPolyFlagsAndDrawFlags(PolyFlags, DrawFlags, 1);
-	DrawFlags |= ShaderDrawFlags::DF_DiffuseTexture;
-	PolyFlags &= ~(PF_RenderHint | PF_Unlit); // Using PF_RenderHint internally for CW/CCW switch.
-
-	if (GIsEditor && NextPolyFlags & PF_Selected)
-		DrawFlags |= ShaderDrawFlags::DF_Selected;
-
-
-	// Color
 	if (PolyFlags & PF_Modulated)
 	{
 		Color.X = 1.0f;
@@ -53,6 +41,107 @@ void UXOpenGLRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT
 		Color.W = Info.Texture->Alpha;
 	else
 		Color.W = 1.0f;
+
+	SetTexture(DiffuseTextureIndex, Info, PolyFlags, 0);
+	const FTexInfo& TextureInfo = TexInfo[DiffuseTextureIndex];
+	SubmitTileBatch(
+		Frame,
+		TextureInfo.BindlessTexHandle,
+		TextureInfo.UMult,
+		TextureInfo.VMult,
+		X, Y, XL, YL, U, V, UL, VL, Z, Color, PolyFlags
+	);
+
+	STAT(unclockFast(Stats.TileBufferCycles));
+}
+
+UBOOL UXOpenGLRenderDevice::DrawNativeTextTile(
+	FSceneNode* Frame,
+	GLuint Texture,
+	GLuint Sampler,
+	GLuint64 BindlessTextureHandle,
+	INT TextureWidth,
+	INT TextureHeight,
+	FLOAT X,
+	FLOAT Y,
+	FLOAT XL,
+	FLOAT YL,
+	FLOAT U,
+	FLOAT V,
+	FLOAT UL,
+	FLOAT VL,
+	FLOAT Z,
+	FPlane Color,
+	DWORD PolyFlags
+)
+{
+	if (NoDrawTile || !Frame || !Texture || !Sampler || TextureWidth <= 0 || TextureHeight <= 0)
+		return 0;
+	if (UsingBindlessTextures && !BindlessTextureHandle)
+		return 0;
+
+	STAT(clockFast(Stats.TileBufferCycles));
+	SetProgram(Tile_Prog);
+
+	// A tile batch records only texture handles.  It must be issued before
+	// changing the texture/sampler state it relies on.
+	if (NativeTextActiveTexture != Texture)
+	{
+		PrepareNativeTextTextureMutation(Texture);
+		glBindSampler(DiffuseTextureIndex, Sampler);
+		NativeTextActiveTexture = Texture;
+
+		FTexInfo& TextureInfo = TexInfo[DiffuseTextureIndex];
+		TextureInfo.UMult = 1.f / static_cast<FLOAT>(TextureWidth);
+		TextureInfo.VMult = 1.f / static_cast<FLOAT>(TextureHeight);
+		TextureInfo.BindlessTexHandle = BindlessTextureHandle;
+	}
+
+	SubmitTileBatch(
+		Frame,
+		BindlessTextureHandle,
+		1.f / static_cast<FLOAT>(TextureWidth),
+		1.f / static_cast<FLOAT>(TextureHeight),
+		X, Y, XL, YL, U, V, UL, VL, Z, Color, PolyFlags
+	);
+	STAT(unclockFast(Stats.TileBufferCycles));
+	return 1;
+}
+
+void UXOpenGLRenderDevice::FlushNativeTextTileBatch()
+{
+	if (ActiveProgram == Tile_Prog && Shaders[Tile_Prog])
+		Shaders[Tile_Prog]->Flush(false);
+}
+
+void UXOpenGLRenderDevice::SubmitTileBatch(
+	FSceneNode* Frame,
+	GLuint64 BindlessTextureHandle,
+	FLOAT UMult,
+	FLOAT VMult,
+	FLOAT X,
+	FLOAT Y,
+	FLOAT XL,
+	FLOAT YL,
+	FLOAT U,
+	FLOAT V,
+	FLOAT UL,
+	FLOAT VL,
+	FLOAT Z,
+	FPlane Color,
+	DWORD PolyFlags
+)
+{
+	auto ShaderCore = dynamic_cast<DrawTileCoreProgram*>(Shaders[Tile_Prog]);
+	auto ShaderES   = dynamic_cast<DrawTileESProgram*>  (Shaders[Tile_Prog]);
+
+	DWORD DrawFlags = ShaderDrawFlags::DF_None;
+	DWORD NextPolyFlags = GetPolyFlagsAndDrawFlags(PolyFlags, DrawFlags, 1);
+	DrawFlags |= ShaderDrawFlags::DF_DiffuseTexture;
+	PolyFlags &= ~(PF_RenderHint | PF_Unlit); // Using PF_RenderHint internally for CW/CCW switch.
+
+	if (GIsEditor && NextPolyFlags & PF_Selected)
+		DrawFlags |= ShaderDrawFlags::DF_Selected;
 
 	glm::vec4 DrawColor = HitTesting() ? FPlaneToVec4(HitColor) : FPlaneToVec4(Color);
 	bool CanBuffer = false;
@@ -68,12 +157,11 @@ void UXOpenGLRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT
 	ShaderCompilationOptions RequiredOptions;
 	if (PerDrawSignature == Shader->LastPerDrawSignature && RendererConfigOptions == Shader->LastRendererConfigOptions)
 	{
-		// Nothing that matters has changed since the last draw call -- reuse what we computed then.
 		RequiredOptions = Shader->LastResolvedOptions;
 	}
 	else
 	{
-		RequiredOptions = RendererConfigOptions; // already has the per-draw bits cleared
+		RequiredOptions = RendererConfigOptions;
 		if (DrawFlags & ShaderDrawFlags::DF_Masked)
 			RequiredOptions.SetOption(ShaderCompilationOptions::OPT_IsMasked);
 		if (DrawFlags & ShaderDrawFlags::DF_AlphaBlended)
@@ -97,82 +185,60 @@ void UXOpenGLRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT
 			!ShaderES->DrawBuffer.IsFull();
 	}
 
-	// Check if global GL state will change. Bound sampler state no longer needs to be pre-checked
-	// here -- BindTextureAndSampler flushes lazily, exactly when it actually needs to rebind, instead
-	// of us predicting it upfront.
 	if (WillBlendStateChange(CurrentBlendPolyFlags, NextPolyFlags) ||
-		// Check if we need a different shader specialization
 		!(RequiredOptions == Shader->CurrentSpecialization->Options) ||
-		// Check if we have space to batch more data
 		!CanBuffer)
 	{
 		if (ShaderCore)
 			ShaderCore->Flush(!CanBuffer);
 		else
 			ShaderES->Flush(!CanBuffer);
-
-		// Set new GL state
 		SetBlend(NextPolyFlags);
-
 	}
 
 	Shader->SelectSpecialization(RequiredOptions);
 
-	SetTexture(DiffuseTextureIndex, Info, PolyFlags, 0);
-
 	DrawCallParams = ShaderCore ? ShaderCore->ParametersBuffer.GetCurrentElementPtr() : ShaderES->ParametersBuffer.GetCurrentElementPtr();
-
-	// Buffer new drawcall parameters
-	const auto& TexInfo = this->TexInfo[DiffuseTextureIndex];
 	DrawCallParams->DrawColor = DrawColor;
-	DrawCallParams->TexHandles[DiffuseTextureIndex] = TexInfo.BindlessTexHandle;
+	DrawCallParams->TexHandles[DiffuseTextureIndex] = BindlessTextureHandle;
 	DrawCallParams->DrawFlags = DrawFlags;
 
 	if (GIsEditor &&
 		Frame->Viewport->Actor &&
 		(Frame->Viewport->IsOrtho() || Abs(Z) <= SMALL_NUMBER))
 	{
-		Z = 1.0f; // Probably just needed because projection done below assumes non ortho projection.
+		Z = 1.0f;
 	}
 
-	// Buffer the tile
 	if (ShaderES)
 	{
 		ShaderES->DrawBuffer.StartDrawCall();
-		// ES doesn't have geo shaders so we manually emit two triangles here
 		auto Out = ShaderES->VertBuffer.GetCurrentElementPtr();
 		const auto DrawID = ShaderES->DrawBuffer.GetDrawID();
 
-		// Vertex 0
 		Out[0].Coords = glm::vec3(RFX2 * Z * (X - Frame->FX2), RFY2 * Z * (Y - Frame->FY2), Z);
 		Out[0].DrawID = DrawID;
-		Out[0].TexCoords = glm::vec2((U)*TexInfo.UMult, (V)*TexInfo.VMult);
+		Out[0].TexCoords = glm::vec2(U * UMult, V * VMult);
 
-		// Vertex 1
 		Out[1].Coords = glm::vec3(RFX2 * Z * (X + XL - Frame->FX2), RFY2 * Z * (Y - Frame->FY2), Z);
 		Out[1].DrawID = DrawID;
-		Out[1].TexCoords = glm::vec2((U + UL) * TexInfo.UMult, (V)*TexInfo.VMult);
+		Out[1].TexCoords = glm::vec2((U + UL) * UMult, V * VMult);
 
-		// Vertex 2
 		Out[2].Coords = glm::vec3(RFX2 * Z * (X + XL - Frame->FX2), RFY2 * Z * (Y + YL - Frame->FY2), Z);
 		Out[2].DrawID = DrawID;
-		Out[2].TexCoords = glm::vec2((U + UL) * TexInfo.UMult, (V + VL) * TexInfo.VMult);
+		Out[2].TexCoords = glm::vec2((U + UL) * UMult, (V + VL) * VMult);
 
-		// Vertex 0
 		Out[3].Coords = glm::vec3(RFX2 * Z * (X - Frame->FX2), RFY2 * Z * (Y - Frame->FY2), Z);
 		Out[3].DrawID = DrawID;
-		Out[3].TexCoords = glm::vec2((U)*TexInfo.UMult, (V)*TexInfo.VMult);
+		Out[3].TexCoords = glm::vec2(U * UMult, V * VMult);
 
-		// Vertex 2
 		Out[4].Coords = glm::vec3(RFX2 * Z * (X + XL - Frame->FX2), RFY2 * Z * (Y + YL - Frame->FY2), Z);
 		Out[4].DrawID = DrawID;
-		Out[4].TexCoords = glm::vec2((U + UL) * TexInfo.UMult, (V + VL) * TexInfo.VMult);
+		Out[4].TexCoords = glm::vec2((U + UL) * UMult, (V + VL) * VMult);
 
-		// Vertex 3
 		Out[5].Coords = glm::vec3(RFX2 * Z * (X - Frame->FX2), RFY2 * Z * (Y + YL - Frame->FY2), Z);
 		Out[5].DrawID = DrawID;
-		Out[5].TexCoords = glm::vec2((U)*TexInfo.UMult, (V + VL) * TexInfo.VMult);
-
+		Out[5].TexCoords = glm::vec2(U * UMult, (V + VL) * VMult);
 
 		ShaderES->VertBuffer.Advance(6);
 		ShaderES->DrawBuffer.EndDrawCall(6);
@@ -181,25 +247,21 @@ void UXOpenGLRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT
 	else
 	{
 		ShaderCore->DrawBuffer.StartDrawCall();
-		// Our Core geo shader emits the triangles. We only need to pass the tile origin and dimensions
 		auto Out = ShaderCore->VertBuffer.GetCurrentElementPtr();
 		const auto DrawID = ShaderCore->DrawBuffer.GetDrawID();
 
 		Out->Coords = glm::vec3(X, Y, Z);
 		Out->TexCoords0 = glm::vec4(RFX2, RFY2, Frame->FX2, Frame->FY2);
 		Out->TexCoords1 = glm::vec4(U, V, UL, VL);
-		Out->TexCoords2 = glm::vec4(XL, YL, TexInfo.UMult, TexInfo.VMult);
+		Out->TexCoords2 = glm::vec4(XL, YL, UMult, VMult);
 		(Out++)->DrawID = DrawID;
 		(Out++)->DrawID = DrawID;
 		Out->DrawID = DrawID;
 
-
 		ShaderCore->VertBuffer.Advance(3);
 		ShaderCore->DrawBuffer.EndDrawCall(3);
 		ShaderCore->ParametersBuffer.Advance(1);
-	}	
-
-	STAT(unclockFast(Stats.TileBufferCycles));
+	}
 }
 
 /*-----------------------------------------------------------------------------

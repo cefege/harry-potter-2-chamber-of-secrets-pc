@@ -14,6 +14,149 @@
 #include "UnNet.h"
 #include "FConfigCacheIni.h"
 
+namespace
+{
+struct FModernHarryProperties
+{
+	UClass* HarryClass;
+	UBOOL bResolved;
+	UBOOL bValid;
+	UBoolProperty* ScreenRelativeMovement;
+	UBoolProperty* LockedOnTarget;
+	UBoolProperty* FixedFaceDirection;
+	UBoolProperty* InDuelingMode;
+	UBoolProperty* ReverseInput;
+	UBoolProperty* KeepStationary;
+	UBoolProperty* LockOutForward;
+	UBoolProperty* LockOutBackward;
+	UBoolProperty* LockOutStrafeLeft;
+	UBoolProperty* LockOutStrafeRight;
+	UBoolProperty* IsAiming;
+	UBoolProperty* E3DemoLockout;
+	UObjectProperty* BossTarget;
+};
+
+static FModernHarryProperties GModernHarryProperties;
+static UBOOL GReportedModernHarryContractFailure;
+
+static UBOOL ReadModernHarryBool( const APlayerPawn* PlayerPawn, const UBoolProperty* Property )
+{
+	return (*(const BITFIELD*)((const BYTE*)PlayerPawn + Property->Offset) & Property->BitMask) != 0;
+}
+
+static void WriteModernHarryBool( APlayerPawn* PlayerPawn, const UBoolProperty* Property, UBOOL Value )
+{
+	BITFIELD& Storage = *(BITFIELD*)((BYTE*)PlayerPawn + Property->Offset);
+	if( Value )
+		Storage |= Property->BitMask;
+	else
+		Storage &= ~Property->BitMask;
+}
+
+static UObject* ReadModernHarryObject( const APlayerPawn* PlayerPawn, const UObjectProperty* Property )
+{
+	return *(UObject* const*)((const BYTE*)PlayerPawn + Property->Offset);
+}
+
+static UBOOL IsInScriptState( UObject* Object, const TCHAR* StateName )
+{
+	if( !Object || !Object->GetStateFrame() )
+		return 0;
+
+	const FName RequiredState( StateName, FNAME_Find );
+	for( UState* State=Object->GetStateFrame()->StateNode; State; State=State->GetSuperState() )
+		if( State->GetFName()==RequiredState )
+			return 1;
+	return 0;
+}
+
+static FModernHarryProperties* GetModernHarryProperties( APlayerPawn* PlayerPawn )
+{
+	FModernHarryProperties& Properties = GModernHarryProperties;
+	UClass* HarryClass = Properties.HarryClass;
+	if( !HarryClass || !PlayerPawn->IsA(HarryClass) )
+	{
+		HarryClass = NULL;
+		for( UClass* Candidate=PlayerPawn->GetClass(); Candidate; Candidate=Candidate->GetSuperClass() )
+			if( appStricmp(Candidate->GetPathName(),TEXT("HGame.Harry"))==0 )
+			{
+				HarryClass = Candidate;
+				break;
+			}
+		if( !HarryClass )
+			return NULL;
+	}
+	if( Properties.HarryClass!=HarryClass )
+	{
+		appMemzero( &Properties, sizeof(Properties) );
+		Properties.HarryClass = HarryClass;
+	}
+
+	if( !Properties.bResolved )
+	{
+		Properties.bResolved = 1;
+		const TCHAR* MissingProperty = NULL;
+
+		Properties.ScreenRelativeMovement = FindField<UBoolProperty>( HarryClass, TEXT("bScreenRelativeMovement") );
+		if( !Properties.ScreenRelativeMovement && !MissingProperty ) MissingProperty = TEXT("bScreenRelativeMovement");
+		Properties.LockedOnTarget = FindField<UBoolProperty>( HarryClass, TEXT("bLockedOnTarget") );
+		if( !Properties.LockedOnTarget && !MissingProperty ) MissingProperty = TEXT("bLockedOnTarget");
+		Properties.FixedFaceDirection = FindField<UBoolProperty>( HarryClass, TEXT("bFixedFaceDirection") );
+		if( !Properties.FixedFaceDirection && !MissingProperty ) MissingProperty = TEXT("bFixedFaceDirection");
+		Properties.InDuelingMode = FindField<UBoolProperty>( HarryClass, TEXT("bInDuelingMode") );
+		if( !Properties.InDuelingMode && !MissingProperty ) MissingProperty = TEXT("bInDuelingMode");
+		Properties.ReverseInput = FindField<UBoolProperty>( HarryClass, TEXT("bReverseInput") );
+		if( !Properties.ReverseInput && !MissingProperty ) MissingProperty = TEXT("bReverseInput");
+		Properties.KeepStationary = FindField<UBoolProperty>( HarryClass, TEXT("bKeepStationary") );
+		if( !Properties.KeepStationary && !MissingProperty ) MissingProperty = TEXT("bKeepStationary");
+		Properties.LockOutForward = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutForward") );
+		if( !Properties.LockOutForward && !MissingProperty ) MissingProperty = TEXT("bLockOutForward");
+		Properties.LockOutBackward = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutBackward") );
+		if( !Properties.LockOutBackward && !MissingProperty ) MissingProperty = TEXT("bLockOutBackward");
+		Properties.LockOutStrafeLeft = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutStrafeLeft") );
+		if( !Properties.LockOutStrafeLeft && !MissingProperty ) MissingProperty = TEXT("bLockOutStrafeLeft");
+		Properties.LockOutStrafeRight = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutStrafeRight") );
+		if( !Properties.LockOutStrafeRight && !MissingProperty ) MissingProperty = TEXT("bLockOutStrafeRight");
+		Properties.IsAiming = FindField<UBoolProperty>( HarryClass, TEXT("bIsAiming") );
+		if( !Properties.IsAiming && !MissingProperty ) MissingProperty = TEXT("bIsAiming");
+		Properties.E3DemoLockout = FindField<UBoolProperty>( HarryClass, TEXT("bE3DemoLockout") );
+		if( !Properties.E3DemoLockout && !MissingProperty ) MissingProperty = TEXT("bE3DemoLockout");
+		Properties.BossTarget = FindField<UObjectProperty>( HarryClass, TEXT("BossTarget") );
+		if( !Properties.BossTarget && !MissingProperty ) MissingProperty = TEXT("BossTarget");
+
+		Properties.bValid = MissingProperty==NULL;
+		if( MissingProperty && !GReportedModernHarryContractFailure )
+		{
+			debugf
+			(
+				NAME_Warning,
+				TEXT("Modern third-person controls disabled: HGame.Harry is missing required property %s"),
+				MissingProperty
+			);
+			GReportedModernHarryContractFailure = 1;
+		}
+	}
+
+	return Properties.bValid ? &Properties : NULL;
+}
+
+static UBOOL IsModernThirdPersonContext( APlayerPawn* PlayerPawn, const FModernHarryProperties& Properties )
+{
+	return
+		IsInScriptState(PlayerPawn,TEXT("PlayerWalking"))
+	&&	IsInScriptState(PlayerPawn->ViewTarget,TEXT("StateStandardCam"))
+	&&	!PlayerPawn->bShowMenu
+	&&	!PlayerPawn->bIsCaptured
+	&&	!ReadModernHarryBool(PlayerPawn,Properties.KeepStationary)
+	&&	!ReadModernHarryBool(PlayerPawn,Properties.E3DemoLockout)
+	&&	!ReadModernHarryObject(PlayerPawn,Properties.BossTarget)
+	&&	!ReadModernHarryBool(PlayerPawn,Properties.InDuelingMode)
+	&&	!ReadModernHarryBool(PlayerPawn,Properties.LockedOnTarget)
+	&&	!ReadModernHarryBool(PlayerPawn,Properties.FixedFaceDirection)
+	&&	!ReadModernHarryBool(PlayerPawn,Properties.ReverseInput);
+}
+}
+
 /*-----------------------------------------------------------------------------
 	APawn object implementation.
 -----------------------------------------------------------------------------*/
@@ -50,10 +193,135 @@ void APlayerPawn::StaticConstructor()
 	UBoolProperty* IsCaptured = new(GetClass(),TEXT("bIsCaptured"),RF_Public)
 		UBoolProperty(EC_CppProperty,SaveStateOffset,TEXT(""),0);
 	IsCaptured->BitMask = 2;
+	UBoolProperty* ModernThirdPersonControls = new(GetClass(),TEXT("bModernThirdPersonControls"),RF_Public)
+		UBoolProperty(EC_CppProperty,SaveStateOffset,TEXT(""),CPF_Config|CPF_GlobalConfig);
+	ModernThirdPersonControls->BitMask = 4;
 	new(GetClass(),TEXT("bMouseAltFire"),RF_Public)
 		UByteProperty(CPP_PROPERTY(bMouseAltFire),TEXT(""),CPF_Input);
 	new(GetClass(),TEXT("bKeyAltFire"),RF_Public)
 		UByteProperty(CPP_PROPERTY(bKeyAltFire),TEXT(""),CPF_Input);
+
+	unguard;
+}
+
+UBOOL APlayerPawn::BeginModernThirdPersonInput
+(
+	FLOAT& RawBaseX,
+	FLOAT& RawStrafe,
+	FLOAT& RawCameraYaw,
+	FLOAT& RawCameraPitch
+)
+{
+	guard(APlayerPawn::BeginModernThirdPersonInput);
+
+	if( !bModernThirdPersonControls )
+		return 0;
+
+	RawBaseX = aBaseX;
+	RawStrafe = aStrafe;
+	RawCameraYaw = aTurn;
+	RawCameraPitch = aLookUp;
+
+	FModernHarryProperties* Properties = GetModernHarryProperties( this );
+	if( !Properties )
+		return 0;
+
+	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
+	if( !IsModernThirdPersonContext(this,*Properties) )
+		return 0;
+
+	aBaseX = 0.f;
+	aTurn = 0.f;
+	aLookUp = 0.f;
+	return 1;
+
+	unguard;
+}
+
+void APlayerPawn::FinishModernThirdPersonInput
+(
+	UBOOL Active,
+	FLOAT RawBaseX,
+	FLOAT RawStrafe,
+	FLOAT RawCameraYaw,
+	FLOAT RawCameraPitch
+)
+{
+	guard(APlayerPawn::FinishModernThirdPersonInput);
+
+	if( !Active || !bModernThirdPersonControls )
+		return;
+
+	FModernHarryProperties* Properties = GetModernHarryProperties( this );
+	if( !Properties )
+		return;
+
+	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
+	if( ReadModernHarryBool(this,Properties->KeepStationary) )
+	{
+		aForward = 0.f;
+		aStrafe = 0.f;
+		aSideMove = 0.f;
+		return;
+	}
+	if( !IsModernThirdPersonContext(this,*Properties) )
+		return;
+
+	const FLOAT CameraScale = DesiredFOV * 0.01111f;
+	SmoothMouseX += RawCameraYaw * CameraScale;
+	SmoothMouseY += RawCameraPitch * CameraScale;
+
+	FLOAT EffectiveSide = RawBaseX + 0.8f * RawStrafe;
+	if
+	(	(EffectiveSide<0.f && ReadModernHarryBool(this,Properties->LockOutStrafeLeft))
+	||	(EffectiveSide>0.f && ReadModernHarryBool(this,Properties->LockOutStrafeRight)) )
+		EffectiveSide = 0.f;
+	if
+	(	(aForward>0.f && ReadModernHarryBool(this,Properties->LockOutForward))
+	||	(aForward<0.f && ReadModernHarryBool(this,Properties->LockOutBackward)) )
+		aForward = 0.f;
+
+	aSideMove = EffectiveSide;
+	aStrafe = 1.25f * EffectiveSide;
+	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 1 );
+
+	unguard;
+}
+
+void APlayerPawn::ApplyModernThirdPersonMovement()
+{
+	guard(APlayerPawn::ApplyModernThirdPersonMovement);
+
+	if( !bModernThirdPersonControls )
+		return;
+
+	FModernHarryProperties* Properties = GetModernHarryProperties( this );
+	if( !Properties )
+		return;
+
+	const UBOOL WasActive = ReadModernHarryBool( this, Properties->ScreenRelativeMovement );
+	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
+	if( !WasActive || !IsModernThirdPersonContext(this,*Properties) )
+		return;
+	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 1 );
+
+	const FCoords CameraAxes = GMath.UnitCoords / FRotator(0,ViewTarget->Rotation.Yaw,0);
+	Acceleration = aForward * CameraAxes.XAxis + aSideMove * CameraAxes.YAxis;
+	Acceleration.Z = 0.f;
+
+	if( !ReadModernHarryBool(this,Properties->IsAiming) )
+	{
+		if( Acceleration.X!=0.f || Acceleration.Y!=0.f )
+			DesiredRotation.Yaw = Acceleration.Rotation().Yaw;
+		else if( Velocity.X!=0.f || Velocity.Y!=0.f )
+		{
+			FVector PlanarVelocity = Velocity;
+			PlanarVelocity.Z = 0.f;
+			DesiredRotation.Yaw = PlanarVelocity.Rotation().Yaw;
+		}
+		else
+			DesiredRotation.Yaw = Rotation.Yaw;
+	}
 
 	unguard;
 }

@@ -10,8 +10,12 @@
 #include <thread>
 #include <vector>
 
-#include "Core.h"
+#include "Engine.h"
+#include "ALAudioSubsystem.h"
 #include "vorbis/vorbisfile.h"
+#if __UNIX__
+#include "FFileManagerUnix.h"
+#endif
 
 extern "C" TCHAR GPackage[64] = TEXT("AudioTests");
 
@@ -71,6 +75,62 @@ std::vector<BYTE> ReadBytes(const std::filesystem::path& Path)
 {
 	std::ifstream Input(Path, std::ios::binary);
 	return std::vector<BYTE>(std::istreambuf_iterator<char>(Input), std::istreambuf_iterator<char>());
+}
+
+void TestUnixFileArchiveNames(const std::filesystem::path& TempDir)
+{
+#if __UNIX__
+	const std::filesystem::path Path = TempDir / "archive-name.bin";
+	const std::string Filename = Path.string();
+	FILE* Output = std::fopen(Filename.c_str(), "wb");
+	Require(Output != NULL, "Unix archive-name output opens");
+	if (!Output)
+		return;
+	FName SavedName(TEXT("PersistentState"));
+	{
+		FArchiveFileWriterUnix Writer(Output, GNull, 0);
+		Writer << SavedName;
+		Require(!Writer.GetError() && Writer.Close(), "Unix archive writes FName as bounded UTF-16LE");
+	}
+
+	FILE* Input = std::fopen(Filename.c_str(), "rb");
+	Require(Input != NULL, "Unix archive-name input opens");
+	if (Input)
+	{
+		FArchiveFileReaderUnix Reader(
+			Input, GNull, static_cast<off_t>(std::filesystem::file_size(Path)));
+		FName LoadedName(NAME_None);
+		Reader << LoadedName;
+		Require(
+			!Reader.GetError() && LoadedName == SavedName,
+			"Unix file archive round-trips an FName");
+		Reader.Close();
+	}
+
+	const std::filesystem::path InvalidPath = TempDir / "archive-name-invalid.bin";
+	const INT InvalidLength = NAME_SIZE * static_cast<INT>(sizeof(UNICHAR)) + 2;
+	{
+		std::ofstream Invalid(InvalidPath, std::ios::binary | std::ios::trunc);
+		Invalid.write(
+			reinterpret_cast<const char*>(&InvalidLength),
+			static_cast<std::streamsize>(sizeof(InvalidLength)));
+	}
+	FILE* InvalidInput = std::fopen(InvalidPath.string().c_str(), "rb");
+	Require(InvalidInput != NULL, "invalid Unix archive-name input opens");
+	if (InvalidInput)
+	{
+		FArchiveFileReaderUnix Reader(
+			InvalidInput,
+			GNull,
+			static_cast<off_t>(std::filesystem::file_size(InvalidPath)));
+		FName LoadedName(NAME_None);
+		Reader << LoadedName;
+		Require(Reader.GetError(), "Unix archive rejects an oversized FName before reading it");
+		Reader.Close();
+	}
+#else
+	(void)TempDir;
+#endif
 }
 
 bool WaitForCompletion(FFileStream* Streams, INT StreamId, void*& OutDestination, UBOOL& OutTerminal)
@@ -281,13 +341,19 @@ void TestOggEOFLoopAndErrors(const std::filesystem::path& TempDir)
 	Require(Pcm.size() > 64, "stock Ogg has decoded PCM");
 	Require(Pcm.size() + 64 < static_cast<size_t>(MAXINT), "stock Ogg fits one test request");
 	const std::basic_string<TCHAR> Filename = ToTChar(OggPath);
+	std::basic_string<TCHAR> BackslashFilename = Filename;
+	std::replace(
+		BackslashFilename.begin(),
+		BackslashFilename.end(),
+		static_cast<TCHAR>('/'),
+		static_cast<TCHAR>('\\'));
 
 	FFileStream* Streams = FFileStream::Init(2);
 	std::vector<BYTE> NonLoop(Pcm.size() + 64, 0x7f);
 	OggVorbis_File* NonLoopState = new OggVorbis_File;
 	const INT NonLoopId = Streams->CreateStream(
-		Filename.c_str(), static_cast<INT>(NonLoop.size()), 1, NonLoop.data(), ST_Ogg, NonLoopState);
-	Require(NonLoopId == 0, "non-looping Ogg stream creates");
+		BackslashFilename.c_str(), static_cast<INT>(NonLoop.size()), 1, NonLoop.data(), ST_Ogg, NonLoopState);
+	Require(NonLoopId == 0, "non-looping Ogg stream normalizes Windows path separators");
 	if (NonLoopId >= 0)
 	{
 		const FStream& State = FFileStream::Streams[NonLoopId];
@@ -508,6 +574,32 @@ void TestRepeatedTeardownHasNoWorker(const std::filesystem::path& TempDir)
 		Require(Output == Snapshot, "no worker writes after Destroy returns");
 	}
 }
+
+void TestTalkRegistrationEvictionPolicy()
+{
+	TArray<ALSource> Sources;
+	Sources.AddZeroed(3);
+	for( INT Index=0; Index<Sources.Num(); ++Index )
+		Sources(Index).Sound = reinterpret_cast<USound*>(
+			static_cast<UPTRINT>(Index + 1));
+	Sources(0).Id = SLOT_Talk * 2;
+	Sources(0).Priority = 100.f;
+	Sources(1).Id = SLOT_Ambient * 2;
+	Sources(1).Priority = 2.f;
+	Sources(2).Id = SLOT_Misc * 2;
+	Sources(2).Priority = 1.f;
+	Require(
+		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == 2,
+		"talk registration evicts the lowest-priority non-talk source");
+	Sources(2).Id = SLOT_Talk * 2;
+	Require(
+		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == 1,
+		"talk registration never evicts an existing talk source");
+	Sources(1).Id = SLOT_Talk * 2;
+	Require(
+		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == INDEX_NONE,
+		"talk-only source sets are protected from registration eviction");
+}
 } // namespace
 
 int main()
@@ -519,12 +611,15 @@ int main()
 	std::error_code Error;
 	std::filesystem::create_directories(TempDir, Error);
 	Require(!Error, "temporary audio directory is created");
+	FName::StaticInit();
+	TestUnixFileArchiveNames(TempDir);
 
 	TestRegularLifecycle(TempDir);
 	TestQueuedDestroy(TempDir);
 	TestOggEOFLoopAndErrors(TempDir);
 	TestQueuedDestinationIdentity(TempDir);
 	TestXAPartialsAndLoop();
+	TestTalkRegistrationEvictionPolicy();
 	TestRepeatedTeardownHasNoWorker(TempDir);
 
 	FFileStream::Destroy();
@@ -532,6 +627,7 @@ int main()
 	if (Error)
 		Require(false, "temporary audio directory is removed");
 
+	FName::StaticExit();
 	if (GFailures != 0)
 	{
 		std::fprintf(stderr, "%d audio lifecycle test(s) failed\n", GFailures);

@@ -248,6 +248,7 @@ class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 	void SetI3DL2Listener( UI3DL2Listener* Listener );
 	UBOOL alError( TCHAR* Text, UBOOL Log = true );
 	INT FindLeastImportantSound( USound *pIncomingSound );
+	static INT FindLeastPriorityNonTalkSource( const TArray<ALSource>& InSources );
 
 	//	Added by TG as part of initial test port
 	//

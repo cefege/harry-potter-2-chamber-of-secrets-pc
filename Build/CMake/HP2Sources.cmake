@@ -175,6 +175,8 @@ set(HP2_EAXA_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/EaxaTests.cpp")
 set(HP2_AUDIO_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/AudioTests.cpp")
 set(HP2_DXT1_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/Dxt1Tests.cpp")
 set(HP2_LAUNCHER_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/LauncherTests.cpp")
+set(HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/NativeTypographyTests.cpp")
+set(HP2_CANVAS_COMPATIBILITY_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/CanvasCompatibilityTests.cpp")
 
 # Every source below is required by the completed native test graph. Keep the
 # list explicit so HP2_REQUIRE_IMPLEMENTED_SOURCES reports a focused error at
@@ -195,6 +197,7 @@ set(HP2_PLANNED_IMPLEMENTATION_SOURCES
     ${HP2_LAUNCHER_CORE_SOURCES}
     "${HP2_NATIVE_LAUNCHER_SOURCE}"
     "${HP2_LAUNCHER_TEST_SOURCE}"
+    "${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}"
 )
 
 set(_hp2_missing_implementation_sources)

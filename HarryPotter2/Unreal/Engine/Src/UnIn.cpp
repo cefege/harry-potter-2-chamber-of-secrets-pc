@@ -58,9 +58,9 @@ void UInput::StaticInitInput()
 
 	// Create input alias struct.
 	UStruct* AliasStruct = new(StaticClass(),TEXT("Alias"))UStruct( NULL );
-	AliasStruct->SetPropertiesSize( sizeof(FName) + sizeof(FString));
-	new(AliasStruct,TEXT("Alias"),  RF_Public)UNameProperty( EC_CppProperty, 0,             TEXT(""), CPF_Config );
-	new(AliasStruct,TEXT("Command"),RF_Public)UStrProperty ( EC_CppProperty, sizeof(FName), TEXT(""), CPF_Config );
+	AliasStruct->SetPropertiesSize( sizeof(FAlias) );
+	new(AliasStruct,TEXT("Alias"),  RF_Public)UNameProperty( EC_CppProperty, static_cast<INT>(offsetof(FAlias,Alias)),   TEXT(""), CPF_Config );
+	new(AliasStruct,TEXT("Command"),RF_Public)UStrProperty ( EC_CppProperty, static_cast<INT>(offsetof(FAlias,Command)), TEXT(""), CPF_Config );
 	AliasStruct->Link( ArDummy, 0 );
 
 	// Add alias list to class.

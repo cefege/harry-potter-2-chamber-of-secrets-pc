@@ -98,6 +98,20 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
         "$<$<COMPILE_LANGUAGE:CXX>:-Wno-error=function-effects>")
 endif()
 
+set(HP2_HAS_NATIVE_TEXT_BACKEND OFF)
+if(APPLE)
+    find_library(HP2_CORETEXT_FRAMEWORK CoreText)
+    find_library(HP2_COREGRAPHICS_FRAMEWORK CoreGraphics)
+    if(HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK)
+        set(HP2_HAS_NATIVE_TEXT_BACKEND ON)
+        list(APPEND HP2_XOPENGLDRV_SOURCES
+            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeText.cpp"
+        )
+    else()
+        message(STATUS "Native text backend unavailable: CoreText/CoreGraphics not found")
+    endif()
+endif()
+
 find_package(OpenGL REQUIRED)
 find_library(HP2_APPKIT_FRAMEWORK AppKit REQUIRED)
 

@@ -554,8 +554,11 @@ APlayerPawn* ULevel::SpawnPlayActor( UPlayer* Player, ENetRole RemoteRole, const
 		debugf( NAME_Warning, TEXT("Login failed: %s"), *Error);
 		return NULL;
 	}
-//	UBOOL AcceptInventory = (SavedActorCount!=Actors.Num());//oldver: Hack, accepts inventory iff actor was spawned.
-	UBOOL AcceptInventory= true;  //modified by gk
+	// Save packages restore serialized inventory; stale travel state must not be replayed or resaved.
+	const UBOOL LoadingGame = URL.HasOption(TEXT("load")) || URL.GetOption(TEXT("load="),NULL) != NULL;
+	UBOOL AcceptInventory = !LoadingGame;
+	if( LoadingGame )
+		TravelInfo.Empty();
 
 
 	// Possess the newly-spawned player.
@@ -681,6 +684,9 @@ APlayerPawn* ULevel::SpawnPlayActor( UPlayer* Player, ENetRole RemoteRole, const
 	GetLevelInfo()->Game->eventAcceptInventory( Actor );
 	for( INT i=Accepted.Num()-1; i>=0; i-- )
 		Accepted(i).Actor->eventTravelPostAccept();
+	UStrProperty* PreviousLevelName = FindField<UStrProperty>( Actor->GetClass(), TEXT("PreviousLevelName") );
+	if( LoadingGame && PreviousLevelName && (PreviousLevelName->PropertyFlags & CPF_Travel) )
+		*(FString*)((BYTE*)Actor + PreviousLevelName->Offset) = TEXT("");
 	Actor->eventTravelPostAccept();
 	GetLevelInfo()->Game->eventPostLogin( Actor );
 

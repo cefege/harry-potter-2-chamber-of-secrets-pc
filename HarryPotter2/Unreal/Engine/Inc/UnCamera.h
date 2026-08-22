@@ -380,10 +380,12 @@ class ENGINE_API UClient : public UObject
 	BITFIELD	CurvedSurfaces;
 	BITFIELD	ScreenFlashes;
 	BITFIELD	MaintainVerticalFOV;
+	BITFIELD	NativeText;
 	BITFIELD	NoLighting;
 	BITFIELD	Decals;
 	BITFIELD	NoDynamicLights;
 	BITFIELD    NoFractalAnim;
+	BITFIELD	ShowFPS;
 	INT			WindowedViewportX;
 	INT			WindowedViewportY;
 	INT			WindowedColorBits;

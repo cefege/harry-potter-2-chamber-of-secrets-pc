@@ -123,8 +123,7 @@ int main( int argc, char* argv[] )
 		GModule[sizeof(GModule)-1] = 0;
 		#endif
 		
-		// Parse the UTF-8 command and parameters, excluding the path bootstrap
-		// option consumed before appInit.
+		// Data-root bootstrap switches are not UCC commands or engine options.
 		INT CommandIndex = 1;
 		while (CommandIndex < argc && IsHP2DataDirectoryArgument(argv[CommandIndex]))
 			++CommandIndex;

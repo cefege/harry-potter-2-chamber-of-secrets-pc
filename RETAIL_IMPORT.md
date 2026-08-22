@@ -22,7 +22,7 @@ From an archive:
 ```sh
 python3 Build/prepare_retail_data.py \
   --archive "/path/to/Harry Potter and the Chamber of Secrets.7z" \
-  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
   --profile retail-only \
   --link-mode copy
 ```
@@ -32,7 +32,7 @@ From an extracted installation:
 ```sh
 python3 Build/prepare_retail_data.py \
   --retail-root "/path/to/Harry Potter and the Chamber of Secrets" \
-  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
   --profile retail-only \
   --link-mode copy
 ```
@@ -44,7 +44,7 @@ Validate the completed import without changing it:
 ```sh
 python3 Build/prepare_retail_data.py \
   --retail-root "/path/to/Harry Potter and the Chamber of Secrets" \
-  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
   --profile retail-only \
   --link-mode copy \
   --check
@@ -62,7 +62,19 @@ After a successful import, open:
 dist/macos-arm64/HarryPotter2.app
 ```
 
-A normal Finder double-click discovers the data at `~/Library/Application Support/Harry Potter 2/Data/Unreal` and opens the native launcher. Choose **New Game** for a clean retail campaign or **Continue** for a listed save.
+In the native launcher, **Game Data** initially displays
+`~/Library/Application Support/Harry Potter 2/Data/Retail` for **Retail**,
+even before you import data there. Use **Choose Folder…** to assign that folder
+or any other validated retail root. The launcher does not automatically select
+`out/retail-data` or a `full` retail-plus-prototype output as either named
+source.
+
+**Prototype / Beta** is optional and uses the separate external location
+`~/Library/Application Support/Harry Potter 2/Data/Prototype`. It is not the
+repository checkout: choose that folder after placing a valid prototype/beta
+tree there, or use **Choose Folder…** to assign a different validated custom
+root. Choose **New Game** for a clean campaign or **Continue** for a listed
+save.
 
 For an alternate validated output directory, launch explicitly:
 
@@ -71,4 +83,16 @@ open -n dist/macos-arm64/HarryPotter2.app --args \
   -datadir="/absolute/path/to/retail-data"
 ```
 
-Writable settings, logs, cache, persistent actors, and saves remain separate under `~/Library/Application Support/Harry Potter 2/User`. Re-importing data does not overwrite that user directory. The launcher reads saves without modifying them and commits settings only after **New Game** or **Continue** is chosen.
+Writable settings, logs, cache, persistent actors, and saves are separated by
+edition under:
+
+```text
+~/Library/Application Support/Harry Potter 2/User/Profiles/Retail
+~/Library/Application Support/Harry Potter 2/User/Profiles/Prototype
+```
+
+The common `User/Launcher.ini` stores launcher folder assignments. Re-importing
+data does not overwrite profile state. The launcher reads saves without
+modifying them and commits settings only after **New Game** or **Continue** is
+chosen. `-datadir=` remains a transient command-line override: it uses an
+isolated `Profiles/Explicit` state and does not change saved folders.

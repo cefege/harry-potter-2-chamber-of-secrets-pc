@@ -102,12 +102,14 @@ void UGameEngine::BuildServerMasterMap( UNetDriver* NetDriver, ULevel* InLevel )
 /*-----------------------------------------------------------------------------
 	Game init and exit.
 -----------------------------------------------------------------------------*/
-static UBOOL ParseCommandLineLoadSlot( const TCHAR* CmdLine, INT& Slot )
+static INT GRepairSaveSlot = INDEX_NONE;
+static UBOOL GRepairSavePending = 0;
+
+static UBOOL ParseCommandLineSaveSlot( const TCHAR* CmdLine, const TCHAR* Prefix, INT& Slot )
 {
-	if( !CmdLine )
+	if( !CmdLine || !Prefix )
 		return 0;
 
-	const TCHAR* Prefix = TEXT("-LOAD=");
 	const INT PrefixLen = appStrlen(Prefix);
 	while( *CmdLine )
 	{
@@ -171,11 +173,21 @@ UBOOL appConsumeCommandLineLoadSlot( const TCHAR* CmdLine, INT& Slot )
 		return 0;
 
 	INT ParsedSlot;
-	if( !ParseCommandLineLoadSlot(CmdLine,ParsedSlot) )
+	const UBOOL RepairSave = ParseCommandLineSaveSlot(CmdLine,TEXT("-REPAIRSAVE="),ParsedSlot);
+	if( !RepairSave && !ParseCommandLineSaveSlot(CmdLine,TEXT("-LOAD="),ParsedSlot) )
 		return 0;
 
 	Consumed = 1;
+	GRepairSaveSlot = RepairSave ? ParsedSlot : INDEX_NONE;
 	Slot = ParsedSlot;
+	return 1;
+}
+
+UBOOL appFormatLoadGameURL( INT Slot, TCHAR* Out, INT OutCapacity )
+{
+	if( Slot < 0 || !Out || OutCapacity < 18 )
+		return 0;
+	appSprintf(Out,TEXT("?load=%i"),Slot);
 	return 1;
 }
 
@@ -278,6 +290,13 @@ void UGameEngine::Init()
 	}
 	
 
+	if( !appStrstr(Parm,TEXT("://")) && Parm[0]!='?' )
+	{
+		TCHAR FileToken[ARRAY_COUNT(Parm)];
+		if( appFilePathToFURLToken(Parm,FileToken,ARRAY_COUNT(FileToken)) )
+			appStrcpy(Parm,FileToken);
+	}
+
 	FURL URL( &DefaultURL, Parm, TRAVEL_Partial );
 	if( !URL.Valid )
 		appErrorf( LocalizeError("InvalidUrl"), Parm );
@@ -327,9 +346,11 @@ void UGameEngine::Init()
 	{
 		GFileManager->MakeDirectory( *GSys->SavePath, 0 );
 		GFileManager->MakeDirectory( *GSys->SaveSlotPath, 0 );
-		const FString LoadURL = FString::Printf(TEXT("?load=%i"),LoadGameSlot);
+		TCHAR LoadURL[32];
+		if( !appFormatLoadGameURL(LoadGameSlot,LoadURL,ARRAY_COUNT(LoadURL)) )
+			appErrorf(TEXT("Invalid startup load slot %i"),LoadGameSlot);
 		debugf( NAME_Log, TEXT("Loading game slot %i"), LoadGameSlot );
-		GLevel->GetLevelInfo()->eventServerTravel(*LoadURL, 0);
+		GLevel->GetLevelInfo()->eventServerTravel(LoadURL, 0);
 	}
 
 	unguard;
@@ -539,16 +560,19 @@ UBOOL UGameEngine::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 	{
 		if( appIsDigit(Str[0]) )
 		{
-			// Whenever we try to load a game we should first load our persistentActorCache
+			if( !GLevel || GLevel->GetLevelInfo()->NextURL!=TEXT("") )
+				return 1;
+
+			// Whenever we try to load a game we should first load our persistentActorCache.
 			LoadPersistentActorCache();
-			
-			TCHAR Filename[256];
+
+			const INT Slot = appAtoi(Str);
 			GFileManager->MakeDirectory( *GSys->SavePath, 0 );
 			GFileManager->MakeDirectory( *GSys->SaveSlotPath, 0 );
-			appSprintf( Filename, TEXT("%s") PATH_SEPARATOR TEXT("Save%i.usa"), *GSys->SaveSlotPath, appAtoi(Str) );
-			
-			debugf( NAME_Log, TEXT("Loading game... filename: %s"), Filename );
-			GLevel->GetLevelInfo()->eventServerTravel(Filename,0);
+			debugf( NAME_Log, TEXT("Loading game slot %i"), Slot );
+			TCHAR LoadURL[32];
+			if( appFormatLoadGameURL(Slot,LoadURL,ARRAY_COUNT(LoadURL)) )
+				GLevel->GetLevelInfo()->eventServerTravel(LoadURL,0);
 		}
 		return 1;
 	}
@@ -771,10 +795,12 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 		guard(PopURL);
 		if( GLevel && GLevel->GetLevelInfo()->HubStackLevel>0 )
 		{
-			TCHAR Filename[256], SavedPortal[256];
+			TCHAR Filename[256], FileToken[256], SavedPortal[256];
 			appSprintf( Filename, TEXT("%s") PATH_SEPARATOR TEXT("Game%i.usa"), *GSys->SaveSlotPath, GLevel->GetLevelInfo()->HubStackLevel-1 );
+			if( !appFilePathToFURLToken(Filename,FileToken,ARRAY_COUNT(FileToken)) )
+				return 0;
 			appStrcpy( SavedPortal, *URL.Portal );
-			URL = FURL( &URL, Filename, TRAVEL_Partial );
+			URL = FURL( &URL, FileToken, TRAVEL_Partial );
 			URL.Portal = SavedPortal;
 		}
 		else return 0;
@@ -792,7 +818,8 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 		// Handle loadgame.
 		guard(LoadURL);
 		FPushMemTag Push(TEXT("LoadGame"));
-		FString Error, Temp=FString::Printf( TEXT("%s") PATH_SEPARATOR TEXT("Save%i.usa"), *GSys->SaveSlotPath, appAtoi(Option) );
+		const INT Slot = appAtoi(Option);
+		FString Error, Temp=FString::Printf( TEXT("%s") PATH_SEPARATOR TEXT("Save%i.usa"), *GSys->SaveSlotPath, Slot );
 		FURL SaveURL(*Temp);
 		SaveURL.AddOption(TEXT("load"));
 		if( LoadMap(SaveURL,NULL,NULL,Error) )
@@ -802,7 +829,7 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 			for( i=0; i<GLevel->GetLevelInfo()->HubStackLevel; i++ )
 			{
 				TCHAR Src[256], Dest[256];//!!
-				appSprintf( Src, TEXT("%s") PATH_SEPARATOR TEXT("Save%i%i.usa"), *GSys->SaveSlotPath, appAtoi(Option), i );
+				appSprintf( Src, TEXT("%s") PATH_SEPARATOR TEXT("Save%i%i.usa"), *GSys->SaveSlotPath, Slot, i );
 				appSprintf( Dest, TEXT("%s") PATH_SEPARATOR TEXT("Game%i.usa"), *GSys->SaveSlotPath, i );
 				GFileManager->Copy( Src, Dest );
 			}
@@ -813,6 +840,8 @@ UBOOL UGameEngine::Browse( FURL URL, const TMap<FString,FString>* TravelInfo, FS
 					break;
 				GFileManager->Delete( *Temp );
 			}
+			if( GRepairSaveSlot==Slot && !GRepairSavePending )
+				GRepairSavePending = 1;
 			LastURL = GLevel->URL;
 			return 1;
 		}
@@ -1556,6 +1585,16 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 	Game Viewport functions.
 -----------------------------------------------------------------------------*/
 
+FLOAT UGameEngine::GetConsoleUIScale( FLOAT Width, FLOAT Height, FLOAT UserScale )
+{
+	if( Width<=0.f || Height<=0.f )
+		return 1.f;
+	if( appIsNan(UserScale) )
+		UserScale = 1.f;
+	UserScale = Clamp(UserScale,0.75f,2.f);
+	return Min(Width/640.f,Height/480.f) * UserScale;
+}
+
 static void ApplyConsoleUIScale( UViewport* Viewport )
 {
 	if( !Viewport || !Viewport->Console )
@@ -1579,23 +1618,21 @@ static void ApplyConsoleUIScale( UViewport* Viewport )
 	static UClass* CachedRootClass = NULL;
 	static UFloatProperty* GUIScaleProperty = NULL;
 	static UFloatProperty* RealWidthProperty = NULL;
+	static UFloatProperty* RealHeightProperty = NULL;
 	if( CachedRootClass != Root->GetClass() )
 	{
 		CachedRootClass = Root->GetClass();
 		GUIScaleProperty = FindField<UFloatProperty>( CachedRootClass, TEXT("GUIScale") );
 		RealWidthProperty = FindField<UFloatProperty>( CachedRootClass, TEXT("RealWidth") );
+		RealHeightProperty = FindField<UFloatProperty>( CachedRootClass, TEXT("RealHeight") );
 	}
-	if( !GUIScaleProperty || !RealWidthProperty )
+	if( !GUIScaleProperty || !RealWidthProperty || !RealHeightProperty )
 		return;
 
-	FLOAT UIScale = Viewport->GetOuterUClient()->GetUIScale();
-	if( appIsNan(UIScale) )
-		UIScale = 1.f;
-	UIScale = Clamp(UIScale, 0.75f, 2.f);
 	const FLOAT RealWidth = *(FLOAT*)((BYTE*)Root + RealWidthProperty->Offset);
-	if( RealWidth<=0.f )
-		return;
-	const FLOAT DesiredScale = (RealWidth / 640.f) * UIScale;
+	const FLOAT RealHeight = *(FLOAT*)((BYTE*)Root + RealHeightProperty->Offset);
+	const FLOAT DesiredScale = UGameEngine::GetConsoleUIScale(
+		RealWidth,RealHeight,Viewport->GetOuterUClient()->GetUIScale());
 	const FLOAT CurrentScale = *(FLOAT*)((BYTE*)Root + GUIScaleProperty->Offset);
 	if( Abs(CurrentScale - DesiredScale) <= 0.0001f )
 		return;
@@ -1700,10 +1737,40 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 		Viewport->Actor->eventPostRender( Viewport->Canvas );
 		if( Viewport->Console )
 		{
+			UCanvas* Canvas = Viewport->Canvas;
+			const FLOAT SavedOrgX = Canvas->OrgX;
+			const FLOAT SavedOrgY = Canvas->OrgY;
+			const FLOAT SavedClipX = Canvas->ClipX;
+			const FLOAT SavedClipY = Canvas->ClipY;
+			const FLOAT SavedMouseX = Viewport->WindowsMouseX;
+			const INT SavedSizeX = Canvas->X;
+			const INT SavedSizeY = Canvas->Y;
+			const FLOAT SavedMouseY = Viewport->WindowsMouseY;
+			const FLOAT Scale = UGameEngine::GetConsoleUIScale(
+				SavedClipX,SavedClipY,Viewport->GetOuterUClient()->GetUIScale());
+			const FLOAT UIWidth = Min(SavedClipX,640.f*Scale);
+			const FLOAT UIHeight = Min(SavedClipY,480.f*Scale);
+			const FLOAT OffsetX = Max(0.f,(SavedClipX-UIWidth)*0.5f);
+			const FLOAT OffsetY = Max(0.f,(SavedClipY-UIHeight)*0.5f);
+			Canvas->OrgX += OffsetX;
+			Canvas->OrgY += OffsetY;
+			Canvas->ClipX = UIWidth;
+			Canvas->X = appRound(UIWidth);
+			Canvas->Y = appRound(UIHeight);
+			Canvas->ClipY = UIHeight;
+			Viewport->WindowsMouseX -= OffsetX;
+			Viewport->WindowsMouseY -= OffsetY;
 			ApplyConsoleUIScale( Viewport );
 			Viewport->Console->PostRender( Frame );
-			Viewport->Console->eventPostRender( Viewport->Canvas );
-			ApplyConsoleUIScale( Viewport );
+			Viewport->Console->eventPostRender( Canvas );
+			Canvas->OrgX = SavedOrgX;
+			Canvas->OrgY = SavedOrgY;
+			Canvas->ClipX = SavedClipX;
+			Canvas->ClipY = SavedClipY;
+			Canvas->X = SavedSizeX;
+			Canvas->Y = SavedSizeY;
+			Viewport->WindowsMouseX = SavedMouseX;
+			Viewport->WindowsMouseY = SavedMouseY;
 		}
 		if( Replay.Replaying() || Replay.Recording() )
 		{
@@ -1750,6 +1817,40 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 		}
 /* END BETA VERSION */
 #endif
+
+		const INT FramesPerSecond = appRound(CurrentTickRate);
+		if( Client->ShowFPS && FramesPerSecond>0 )
+		{
+			UCanvas* Canvas = Frame->Viewport->Canvas;
+			const FLOAT SavedOrgX = Canvas->OrgX;
+			const FLOAT SavedOrgY = Canvas->OrgY;
+			const FLOAT SavedClipX = Canvas->ClipX;
+			const FLOAT SavedClipY = Canvas->ClipY;
+			const FLOAT SavedCurX = Canvas->CurX;
+			const FLOAT SavedCurY = Canvas->CurY;
+			const FColor SavedColor = Canvas->Color;
+
+			Canvas->OrgX = 0.f;
+			Canvas->OrgY = 0.f;
+			Canvas->ClipX = Canvas->X;
+			Canvas->ClipY = Canvas->Y;
+			Canvas->CurX = 0.f;
+			Canvas->CurY = 0.f;
+			INT TextWidth, TextHeight;
+			Canvas->WrappedStrLenf( Canvas->SmallFont, TextWidth, TextHeight, TEXT("%d"), FramesPerSecond );
+			Canvas->CurX = Canvas->ClipX - TextWidth - 12.f;
+			Canvas->CurY = 12.f;
+			Canvas->Color = FColor(190,198,204,255);
+			Canvas->WrappedPrintf( Canvas->SmallFont, 0, TEXT("%d"), FramesPerSecond );
+
+			Canvas->OrgX = SavedOrgX;
+			Canvas->OrgY = SavedOrgY;
+			Canvas->ClipX = SavedClipX;
+			Canvas->ClipY = SavedClipY;
+			Canvas->CurX = SavedCurX;
+			Canvas->CurY = SavedCurY;
+			Canvas->Color = SavedColor;
+		}
 
 		Viewport->Canvas->Render = 0;
 		Render->PostRender( Frame );
@@ -1862,8 +1963,7 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 	if
 	(	Client
 	&&	Client->Viewports.Num()==1
-	&&	GLevel
-	&&	!Client->Viewports(0)->IsFullscreen() )
+	&&	GLevel )
 	{
 		UBOOL IsPaused
 		=	GLevel->GetLevelInfo()->Pauser!=TEXT("")
@@ -1894,6 +1994,29 @@ void UGameEngine::Tick( FLOAT DeltaSeconds )
 	unclock(GameCycles);
 	unguard;
 
+
+	// A repair rewrite is deferred until the loaded player has completed
+	// possession and travel acceptance in LoadMap.
+	guard(SaveRepair);
+	if
+	(	GRepairSavePending
+	&&	GRepairSaveSlot!=INDEX_NONE
+	&&	Client
+	&&	Client->Viewports.Num()
+	&&	Client->Viewports(0)->Actor
+	&&	Client->Viewports(0)->Actor->GetLevel()==GLevel )
+	{
+		const INT RepairSlot = GRepairSaveSlot;
+		APlayerPawn* RepairPlayer = Client->Viewports(0)->Actor;
+		RepairPlayer->bQueuedToSaveGame = false;
+		GRepairSavePending = 0;
+		GRepairSaveSlot = INDEX_NONE;
+		SaveGame( RepairSlot );
+		debugf( NAME_Log, TEXT("Save repair completed: %i"), RepairSlot );
+		appRequestExit( 0 );
+		return;
+	}
+	unguard;
 
 	// HP2 specific - Handle player saving
 	guard(PlayerSaving);
@@ -2174,7 +2297,6 @@ void UGameEngine::MouseDelta( UViewport* Viewport, DWORD ClickFlags, FLOAT DX, F
 	&&	Client
 	&&	Client->Viewports.Num()==1
 	&&	GLevel
-	&&	!Client->Viewports(0)->IsFullscreen()
 	&&	GLevel->GetLevelInfo()->Pauser==TEXT("")
 	&&	!Viewport->Actor->bShowMenu
 	&&  !Viewport->bShowWindowsMouse )

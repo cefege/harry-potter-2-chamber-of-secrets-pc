@@ -319,6 +319,16 @@ bool ValidateSettings(const HP2Launcher::LauncherSettings& settings, std::string
 		return false;
 	}
 
+	switch (settings.controlMode)
+	{
+	case HP2Launcher::ControlMode::Classic:
+	case HP2Launcher::ControlMode::Modern:
+		break;
+	default:
+		error = "Choose a valid control style.";
+		return false;
+	}
+
 	if (settings.resolution.width < MinimumResolutionWidth ||
 		settings.resolution.height < MinimumResolutionHeight ||
 		settings.resolution.width > MaximumResolutionDimension ||
@@ -328,12 +338,12 @@ bool ValidateSettings(const HP2Launcher::LauncherSettings& settings, std::string
 		return false;
 	}
 
-	if (settings.frameRateLimit != 0 &&
-		settings.frameRateLimit != 30 &&
-		settings.frameRateLimit != 60 &&
-		settings.frameRateLimit != 120)
+	if (std::find(
+			HP2Launcher::FrameRateLimitValues.begin(),
+			HP2Launcher::FrameRateLimitValues.end(),
+			settings.frameRateLimit) == HP2Launcher::FrameRateLimitValues.end())
 	{
-		error = "Choose 30, 60, 120, or Unlimited for the frame rate.";
+		error = "Choose 30, 60, 120, 144, or Unlimited for the frame rate.";
 		return false;
 	}
 	if (std::find(
@@ -446,6 +456,29 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	}
 	return false;
 }
+
+bool IsKnownDataSource(HP2Launcher::DataSource source)
+{
+	switch (source)
+	{
+	case HP2Launcher::DataSource::Retail:
+	case HP2Launcher::DataSource::Prototype:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool CopyCocoaString(NSString* value, std::string& result)
+{
+	NSData* data = [value dataUsingEncoding:NSUTF8StringEncoding];
+	if (data == nil)
+	{
+		return false;
+	}
+	result.assign(static_cast<const char*>(data.bytes), data.length);
+	return true;
+}
 }
 
 @interface HP2MacLauncherController : NSObject <NSWindowDelegate, NSTabViewDelegate>
@@ -459,11 +492,16 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	HP2Launcher::DisplayResolution _windowedSelection;
 	HP2Launcher::DisplayResolution _fullscreenSelection;
 	HP2Launcher::ScreenMode _displayedScreenMode;
+	HP2Launcher::DataSourceConfiguration _dataSources;
 	HP2Launcher::LauncherResult _result;
 	BOOL _completed;
 
 	NSWindow* _window;
 	NSDateFormatter* _dateFormatter;
+	NSPopUpButton* _dataSourcePopup;
+	NSTextField* _dataSourceRootField;
+	NSTextField* _dataSourceStatusLabel;
+	NSButton* _chooseDataFolderButton;
 	NSPopUpButton* _savePopup;
 	NSImageView* _thumbnailImageView;
 	NSTextField* _saveSummaryLabel;
@@ -481,7 +519,9 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	NSPopUpButton* _uiScalePopup;
 	NSButton* _verticalSyncCheckbox;
 	NSPopUpButton* _frameRatePopup;
+	NSButton* _showFPSCheckbox;
 	NSPopUpButton* _widescreenViewPopup;
+	NSPopUpButton* _textRenderingPopup;
 	NSPopUpButton* _antiAliasingPopup;
 	NSPopUpButton* _anisotropyPopup;
 	NSSlider* _brightnessSlider;
@@ -498,6 +538,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	NSSlider* _mouseSensitivitySlider;
 	NSTextField* _mouseSensitivityValueLabel;
 	NSButton* _invertMouseCheckbox;
+	NSPopUpButton* _controlModePopup;
 	NSButton* _joystickCheckbox;
 	NSButton* _autoCenterCameraCheckbox;
 	NSButton* _moveWhileCastingCheckbox;
@@ -513,6 +554,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 - (instancetype)initWithRequest:(const HP2Launcher::LauncherRequest*)request
 	application:(NSApplication*)application;
 - (NSWindow*)buildWindow;
+- (NSView*)buildGameDataSection;
 - (void)showInitialErrorIfNeeded;
 - (void)copyResultTo:(HP2Launcher::LauncherResult*)result;
 - (void)finalizeAsQuitIfNeeded;
@@ -522,11 +564,18 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 - (IBAction)quit:(id)sender;
 - (IBAction)openUserFolder:(id)sender;
 - (IBAction)revealLog:(id)sender;
+- (IBAction)dataSourceChanged:(id)sender;
+- (IBAction)chooseDataFolder:(id)sender;
 - (IBAction)saveSelectionChanged:(id)sender;
 - (IBAction)displayModeChanged:(id)sender;
 - (void)rebuildResolutionPopupForMode:(HP2Launcher::ScreenMode)mode;
 - (IBAction)soundEnabledChanged:(id)sender;
 - (IBAction)sliderChanged:(id)sender;
+- (HP2Launcher::DataSource)selectedDataSource;
+- (std::string)rootForDataSource:(HP2Launcher::DataSource)source;
+- (const HP2Launcher::DataSourceOption*)dataSourceOptionForSource:(HP2Launcher::DataSource)source;
+- (void)updateDataSourceControls;
+- (HP2Launcher::DataSourceConfiguration)dataSourcesFromControls;
 @end
 
 @implementation HP2MacLauncherController
@@ -547,6 +596,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 		_fullscreenSelection = request->settings.resolution;
 		_displayedScreenMode = static_cast<HP2Launcher::ScreenMode>(-1);
 		_result.settings = request->settings;
+		_dataSources = request->dataSources;
 		_result.selection.action = HP2Launcher::LaunchAction::Quit;
 		_completed = NO;
 
@@ -760,6 +810,81 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	return [NSString stringWithFormat:@"%@ — %@ — %@", name, location, dateText];
 }
 
+- (NSView*)buildGameDataSection
+{
+	NSTextField* gameDataLabel = [self staticLabel:@"Game Data"];
+	gameDataLabel.font = [NSFont boldSystemFontOfSize:NSFont.systemFontSize];
+
+	_dataSourcePopup = [self popupWithAccessibilityLabel:@"Game data source"];
+	AddTaggedPopupItem(
+		_dataSourcePopup,
+		@"Retail",
+		static_cast<NSInteger>(HP2Launcher::DataSource::Retail));
+	AddTaggedPopupItem(
+		_dataSourcePopup,
+		@"Prototype / Beta",
+		static_cast<NSInteger>(HP2Launcher::DataSource::Prototype));
+	const HP2Launcher::DataSource selectedSource =
+		IsKnownDataSource(_dataSources.selected)
+			? _dataSources.selected
+			: HP2Launcher::DataSource::Retail;
+	SelectPopupItemWithTag(_dataSourcePopup, static_cast<NSInteger>(selectedSource));
+	_dataSourcePopup.target = self;
+	_dataSourcePopup.action = @selector(dataSourceChanged:);
+
+	_dataSourceRootField = [[NSTextField alloc] initWithFrame:NSZeroRect];
+	_dataSourceRootField.translatesAutoresizingMaskIntoConstraints = NO;
+	_dataSourceRootField.editable = NO;
+	_dataSourceRootField.selectable = YES;
+	_dataSourceRootField.bezeled = YES;
+	_dataSourceRootField.drawsBackground = YES;
+	_dataSourceRootField.backgroundColor = NSColor.controlBackgroundColor;
+	_dataSourceRootField.usesSingleLineMode = YES;
+	_dataSourceRootField.lineBreakMode = NSLineBreakByTruncatingMiddle;
+	[_dataSourceRootField setAccessibilityLabel:@"Game data folder"];
+	[_dataSourceRootField.widthAnchor constraintGreaterThanOrEqualToConstant:PopupMinimumWidth].active = YES;
+	[_dataSourceRootField setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow
+		forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+	_chooseDataFolderButton = [self
+		utilityButtonWithTitle:@"Choose Folder…"
+		action:@selector(chooseDataFolder:)];
+	[_chooseDataFolderButton setAccessibilityLabel:@"Choose game data folder"];
+
+	NSStackView* folderControls = [self horizontalStackWithViews:@[
+		_dataSourceRootField,
+		_chooseDataFolderButton
+	] spacing:ItemSpacing];
+	[folderControls setHuggingPriority:NSLayoutPriorityDefaultLow
+		forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+	_dataSourceStatusLabel = [self staticLabel:@""];
+	_dataSourceStatusLabel.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+	_dataSourceStatusLabel.textColor = NSColor.secondaryLabelColor;
+	_dataSourceStatusLabel.lineBreakMode = NSLineBreakByWordWrapping;
+	_dataSourceStatusLabel.maximumNumberOfLines = 2;
+	[_dataSourceStatusLabel setAccessibilityLabel:@"Game data status"];
+	[_dataSourceStatusLabel setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow
+		forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+	NSStackView* form = [self verticalStackWithViews:@[
+		[self formRowWithTitle:@"Source" control:_dataSourcePopup],
+		[self formRowWithTitle:@"Folder" control:folderControls],
+		[self formRowWithTitle:@"" control:_dataSourceStatusLabel]
+	] spacing:RowSpacing];
+	[form setHuggingPriority:NSLayoutPriorityDefaultLow
+		forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+	NSStackView* section = [self verticalStackWithViews:@[
+		gameDataLabel,
+		form
+	] spacing:ItemSpacing];
+	[section setHuggingPriority:NSLayoutPriorityDefaultLow
+		forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[self updateDataSourceControls];
+	return section;
+}
+
 - (NSView*)buildSaveSection
 {
 	_thumbnailImageView = [[NSImageView alloc] initWithFrame:NSZeroRect];
@@ -902,6 +1027,16 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	}
 	[_uiScalePopup setAccessibilityHelp:
 		@"Controls in-game text and interface size. Higher values are easier to read."];
+	_textRenderingPopup = [self popupWithAccessibilityLabel:@"Text rendering"];
+	AddTaggedPopupItem(_textRenderingPopup, @"Clear Native Text (CoreText)", 1);
+	AddTaggedPopupItem(_textRenderingPopup, @"Original Bitmap Fonts", 0);
+	_textRenderingPopup.menu.autoenablesItems = NO;
+	for (NSMenuItem* item in _textRenderingPopup.itemArray)
+		item.enabled = YES;
+	_textRenderingPopup.enabled = YES;
+	SelectPopupItemWithTag(_textRenderingPopup, _request->settings.nativeText ? 1 : 0);
+	[_textRenderingPopup setAccessibilityHelp:
+		@"Clear Native Text uses CoreText and safely falls back to Original Bitmap Fonts if native drawing fails."];
 	_widescreenViewPopup = [self popupWithAccessibilityLabel:@"Widescreen view"];
 	AddTaggedPopupItem(_widescreenViewPopup, @"Preserve Vertical View", 1);
 	AddTaggedPopupItem(_widescreenViewPopup, @"Original 4:3 Framing", 0);
@@ -920,11 +1055,17 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	AddTaggedPopupItem(_frameRatePopup, @"30 FPS", 30);
 	AddTaggedPopupItem(_frameRatePopup, @"60 FPS", 60);
 	AddTaggedPopupItem(_frameRatePopup, @"120 FPS — High Refresh", 120);
+	AddTaggedPopupItem(_frameRatePopup, @"144 FPS — High Refresh", 144);
 	AddTaggedPopupItem(_frameRatePopup, @"Unlimited", 0);
 	if (!SelectPopupItemWithTag(_frameRatePopup, _request->settings.frameRateLimit))
 	{
 		SelectPopupItemWithTag(_frameRatePopup, 60);
 	}
+	_showFPSCheckbox = [self checkboxWithTitle:@"Show FPS" action:nil];
+	_showFPSCheckbox.state = _request->settings.showFPS
+		? NSControlStateValueOn : NSControlStateValueOff;
+	[_showFPSCheckbox setAccessibilityHelp:
+		@"Shows the current frame rate as a small number in the top-right corner."];
 	_antiAliasingPopup = [self popupWithAccessibilityLabel:@"Anti-aliasing"];
 	AddTaggedPopupItem(_antiAliasingPopup, @"Off", 0);
 	AddTaggedPopupItem(_antiAliasingPopup, @"2× MSAA", 2);
@@ -987,9 +1128,11 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 		[self formRowWithTitle:@"Resolution" control:_resolutionPopup],
 		[self formRowWithTitle:@"Render Scale" control:_renderScalePopup],
 		[self formRowWithTitle:@"UI Scale" control:_uiScalePopup],
+		[self formRowWithTitle:@"Text Rendering" control:_textRenderingPopup],
 		[self formRowWithTitle:@"Widescreen View" control:_widescreenViewPopup],
 		[self formRowWithTitle:@"" control:_verticalSyncCheckbox],
 		[self formRowWithTitle:@"Frame Rate" control:_frameRatePopup],
+		[self formRowWithTitle:@"" control:_showFPSCheckbox],
 		[self formRowWithTitle:@"Anti-Aliasing" control:_antiAliasingPopup],
 		[self formRowWithTitle:@"Texture Filtering" control:_anisotropyPopup],
 		[self formRowWithTitle:@"Brightness" control:brightnessControl],
@@ -1003,9 +1146,11 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 		_resolutionPopup,
 		_renderScalePopup,
 		_uiScalePopup,
+		_textRenderingPopup,
 		_widescreenViewPopup,
 		_verticalSyncCheckbox,
 		_frameRatePopup,
+		_showFPSCheckbox,
 		_antiAliasingPopup,
 		_anisotropyPopup,
 		_brightnessSlider,
@@ -1063,6 +1208,16 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 
 - (NSView*)buildControlsAndGameplayTab
 {
+	_controlModePopup = [self popupWithAccessibilityLabel:@"Control style"];
+	AddTaggedPopupItem(_controlModePopup, @"Classic", static_cast<NSInteger>(HP2Launcher::ControlMode::Classic));
+	AddTaggedPopupItem(_controlModePopup, @"Modern", static_cast<NSInteger>(HP2Launcher::ControlMode::Modern));
+	if (!SelectPopupItemWithTag(_controlModePopup, static_cast<NSInteger>(_request->settings.controlMode)))
+	{
+		SelectPopupItemWithTag(_controlModePopup, static_cast<NSInteger>(HP2Launcher::ControlMode::Classic));
+	}
+	[_controlModePopup setAccessibilityHelp:
+		@"Modern uses camera-relative movement, makes Harry face the direction of travel, and maps the right stick to the camera without changing movement speed."];
+
 	_mouseSensitivitySlider = [self
 		sliderWithMinimum:MinimumMouseSensitivity
 		maximum:MaximumMouseSensitivity
@@ -1107,6 +1262,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	}
 
 	NSStackView* form = [self verticalStackWithViews:@[
+		[self formRowWithTitle:@"Control Style" control:_controlModePopup],
 		[self formRowWithTitle:@"Mouse Sensitivity" control:mouseSensitivityControl],
 		[self formRowWithTitle:@"" control:_invertMouseCheckbox],
 		[self formRowWithTitle:@"" control:_joystickCheckbox],
@@ -1118,6 +1274,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	] spacing:RowSpacing];
 
 	_gameplayKeyViews = @[
+		_controlModePopup,
 		_mouseSensitivitySlider,
 		_invertMouseCheckbox,
 		_joystickCheckbox,
@@ -1189,6 +1346,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	header.distribution = NSStackViewDistributionFill;
 
 
+	NSView* gameDataSection = [self buildGameDataSection];
 	NSView* saveSection = [self buildSaveSection];
 
 	NSBox* separator = [[NSBox alloc] initWithFrame:NSZeroRect];
@@ -1218,6 +1376,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 
 	NSStackView* rootStack = [self verticalStackWithViews:@[
 		header,
+		gameDataSection,
 		saveSection,
 		separator,
 		_tabView
@@ -1233,6 +1392,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 		[rootStack.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:OuterMargin],
 		[rootStack.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-OuterMargin],
 		[header.widthAnchor constraintEqualToAnchor:rootStack.widthAnchor],
+		[gameDataSection.widthAnchor constraintEqualToAnchor:rootStack.widthAnchor],
 		[saveSection.widthAnchor constraintEqualToAnchor:rootStack.widthAnchor],
 		[separator.widthAnchor constraintEqualToAnchor:rootStack.widthAnchor],
 		[_tabView.widthAnchor constraintEqualToAnchor:rootStack.widthAnchor]
@@ -1256,10 +1416,13 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	}
 
 	_mainKeyViews = @[
+		_dataSourcePopup,
+		_dataSourceRootField,
+		_chooseDataFolderButton,
+		_savePopup,
 		_continueButton,
 		_newGameButton,
 		_quitButton,
-		_savePopup,
 		_openUserFolderButton,
 		_revealLogButton,
 		_tabView
@@ -1285,12 +1448,12 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 
 - (void)showInitialErrorIfNeeded
 {
-	if (_request->errorMessage.empty())
+	if (_request->errorMessage.empty() || _request->hasExplicitDataRootOverride)
 	{
 		return;
 	}
 	[self
-		showAlertWithMessage:@"Settings Could Not Be Saved"
+		showAlertWithMessage:@"Review Launcher Setup"
 		informativeText:CocoaString(_request->errorMessage)];
 }
 
@@ -1331,6 +1494,172 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 		? [NSString stringWithFormat:@"Thumbnail for %@", saveName]
 		: @"Selected saved game thumbnail"];
 }
+
+- (HP2Launcher::DataSource)selectedDataSource
+{
+	const HP2Launcher::DataSource source =
+		_dataSourcePopup != nil
+			? static_cast<HP2Launcher::DataSource>(_dataSourcePopup.selectedItem.tag)
+			: HP2Launcher::DataSource::Retail;
+	return IsKnownDataSource(source) ? source : HP2Launcher::DataSource::Retail;
+}
+
+- (std::string)rootForDataSource:(HP2Launcher::DataSource)source
+{
+	return source == HP2Launcher::DataSource::Prototype
+		? _dataSources.prototypeRoot
+		: _dataSources.retailRoot;
+}
+
+- (const HP2Launcher::DataSourceOption*)dataSourceOptionForSource:(HP2Launcher::DataSource)source
+{
+	for (const HP2Launcher::DataSourceOption& option : _request->dataSourceOptions)
+	{
+		if (option.source == source)
+		{
+			return &option;
+		}
+	}
+	return nullptr;
+}
+
+- (void)updateDataSourceControls
+{
+	const BOOL hasExplicitOverride = _request->hasExplicitDataRootOverride;
+	const HP2Launcher::DataSource source = [self selectedDataSource];
+	const std::string root = hasExplicitOverride
+		? _request->explicitDataRoot
+		: [self rootForDataSource:source];
+	NSString* rootText = CocoaString(root);
+	_dataSourceRootField.stringValue = rootText;
+	[_dataSourceRootField setAccessibilityValue:rootText.length > 0
+		? rootText
+		: @"No game data folder selected"];
+
+	if (hasExplicitOverride)
+	{
+		static NSString* const overrideHelp =
+			@"Command-line data overrides launcher folders.";
+		_dataSourcePopup.enabled = NO;
+		_chooseDataFolderButton.enabled = NO;
+		[_dataSourcePopup setAccessibilityHelp:overrideHelp];
+		[_dataSourceRootField setAccessibilityHelp:overrideHelp];
+		[_chooseDataFolderButton setAccessibilityHelp:overrideHelp];
+		NSString* message = CocoaString(_request->errorMessage);
+		_dataSourceStatusLabel.stringValue = message.length > 0 ? message : overrideHelp;
+		[_dataSourceStatusLabel setAccessibilityValue:_dataSourceStatusLabel.stringValue];
+		return;
+	}
+
+	_dataSourcePopup.enabled = YES;
+	_chooseDataFolderButton.enabled = YES;
+	[_dataSourcePopup setAccessibilityHelp:
+		@"Choose the data source whose folder and separate profile you want to use."];
+	[_dataSourceRootField setAccessibilityHelp:
+		@"The selected source's game data folder. It must contain System/Default.ini."];
+	[_chooseDataFolderButton setAccessibilityHelp:
+		@"Choose a game data folder that contains System/Default.ini."];
+
+	const HP2Launcher::DataSourceOption* option = [self dataSourceOptionForSource:source];
+	NSString* status = @"";
+	if (root.empty())
+	{
+		status = @"Choose a folder that contains System/Default.ini.";
+	}
+	else if (option != nullptr && !option->available && option->root == root)
+	{
+		status = CocoaString(option->error);
+		if (status.length == 0)
+		{
+			status = @"The selected folder must contain System/Default.ini.";
+		}
+	}
+	else
+	{
+		status = @"Retail and Prototype / Beta use separate saves and settings.";
+	}
+	_dataSourceStatusLabel.stringValue = status;
+	[_dataSourceStatusLabel setAccessibilityValue:status];
+}
+
+- (HP2Launcher::DataSourceConfiguration)dataSourcesFromControls
+{
+	HP2Launcher::DataSourceConfiguration dataSources = _dataSources;
+	dataSources.selected = [self selectedDataSource];
+	return dataSources;
+}
+- (IBAction)dataSourceChanged:(id)sender
+{
+	(void)sender;
+	[self updateDataSourceControls];
+	[self updateKeyViewLoop];
+}
+
+- (IBAction)chooseDataFolder:(id)sender
+{
+	(void)sender;
+	if (_request->hasExplicitDataRootOverride)
+	{
+		return;
+	}
+
+	NSOpenPanel* panel = [NSOpenPanel openPanel];
+	panel.canChooseDirectories = YES;
+	panel.canChooseFiles = NO;
+	panel.allowsMultipleSelection = NO;
+	panel.canCreateDirectories = NO;
+	panel.prompt = @"Choose Folder";
+
+	const std::string currentRoot = [self rootForDataSource:[self selectedDataSource]];
+	NSString* currentPath = CocoaString(currentRoot);
+	BOOL isDirectory = NO;
+	if (currentPath.length > 0 &&
+		[[NSFileManager defaultManager] fileExistsAtPath:currentPath isDirectory:&isDirectory] &&
+		isDirectory)
+	{
+		panel.directoryURL = [NSURL fileURLWithPath:currentPath isDirectory:YES];
+	}
+
+	[panel beginSheetModalForWindow:_window completionHandler:^(NSModalResponse response)
+	{
+		if (response != NSModalResponseOK)
+		{
+			return;
+		}
+
+		NSURL* selectedURL = panel.URL;
+		NSString* selectedPath = [[selectedURL path] stringByStandardizingPath];
+		if (selectedURL == nil ||
+			![selectedURL isFileURL] ||
+			![selectedPath isAbsolutePath])
+		{
+			[self
+				showAlertWithMessage:@"Game Data Folder Could Not Be Used"
+				informativeText:@"Choose an absolute folder for the selected game data source."];
+			return;
+		}
+
+		std::string selectedRoot;
+		if (!CopyCocoaString(selectedPath, selectedRoot) || selectedRoot.empty())
+		{
+			[self
+				showAlertWithMessage:@"Game Data Folder Could Not Be Used"
+				informativeText:@"The selected folder name could not be read as UTF-8."];
+			return;
+		}
+
+		if ([self selectedDataSource] == HP2Launcher::DataSource::Prototype)
+		{
+			_dataSources.prototypeRoot = std::move(selectedRoot);
+		}
+		else
+		{
+			_dataSources.retailRoot = std::move(selectedRoot);
+		}
+		[self updateDataSourceControls];
+	}];
+}
+
 
 - (void)updateSliderLabels
 {
@@ -1424,7 +1753,9 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	settings.renderScale = static_cast<double>(_renderScalePopup.selectedItem.tag) / 100.0;
 	settings.uiScale = static_cast<double>(_uiScalePopup.selectedItem.tag) / 100.0;
 	settings.frameRateLimit = static_cast<int>(_frameRatePopup.selectedItem.tag);
+	settings.showFPS = _showFPSCheckbox.state == NSControlStateValueOn;
 	settings.maintainVerticalFOV = _widescreenViewPopup.selectedItem.tag != 0;
+	settings.nativeText = _textRenderingPopup.selectedItem.tag != 0;
 	settings.antiAliasingSamples = static_cast<int>(_antiAliasingPopup.selectedItem.tag);
 	settings.anisotropy = static_cast<int>(_anisotropyPopup.selectedItem.tag);
 	settings.brightness = _brightnessSlider.doubleValue;
@@ -1435,6 +1766,7 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 	settings.musicVolume = _musicVolumeSlider.doubleValue;
 	settings.mouseSensitivity = _mouseSensitivitySlider.doubleValue;
 	settings.invertMouse = _invertMouseCheckbox.state == NSControlStateValueOn;
+	settings.controlMode = static_cast<HP2Launcher::ControlMode>(_controlModePopup.selectedItem.tag);
 	settings.joystickEnabled = _joystickCheckbox.state == NSControlStateValueOn;
 	settings.autoCenterCamera = _autoCenterCameraCheckbox.state == NSControlStateValueOn;
 	settings.moveWhileCasting = _moveWhileCastingCheckbox.state == NSControlStateValueOn;
@@ -1492,6 +1824,12 @@ bool SelectPopupItemWithTag(NSPopUpButton* popup, NSInteger tag)
 		}
 		_result.selection.hasSave = true;
 		_result.selection.save = _request->saves[static_cast<std::size_t>(selectedIndex)];
+	}
+
+	if (action == HP2Launcher::LaunchAction::Continue ||
+		action == HP2Launcher::LaunchAction::NewGame)
+	{
+		_result.dataSources = [self dataSourcesFromControls];
 	}
 
 	_completed = YES;

@@ -210,6 +210,7 @@ var float	fLumosRadius;
 var bool	bQueuedToSaveGame;		// If set to true we will save the game at the end of a level tick
 
 var bool	bIsCaptured;			// CutScene has harry captured. 
+var globalconfig bool bModernThirdPersonControls;
 
 // Input Buttons
 var input byte

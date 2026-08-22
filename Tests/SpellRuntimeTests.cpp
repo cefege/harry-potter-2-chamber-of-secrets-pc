@@ -83,6 +83,8 @@ namespace
 		InstallHP2NativeLookups();
 		GIsStarted = 1;
 		GIsGuarded = 1;
+		GIsClient = GIsServer = GIsEditor = GIsScriptable = 1;
+		GLazyLoad = 0;
 		appInit(TEXT("SpellRuntimeTests"), CmdLine, &RuntimeMalloc, &RuntimeLog, &RuntimeError, &RuntimeWarn,
 			&RuntimeFileManager, FConfigCacheIni::Factory, 1);
 		RegisterHP2RuntimeClasses();
@@ -94,6 +96,31 @@ namespace
 		UObject* HGamePackage = UObject::LoadPackage(NULL, TEXT("HGame.u"), LOAD_NoFail);
 		if (!Cast<UPackage>(HGamePackage))
 			return Fail("HGame package load failed");
+		TestStage = "Harry-reflection-contract";
+		UClass* HarryClass = UObject::StaticLoadClass(
+			APlayerPawn::StaticClass(), NULL, TEXT("HGame.Harry"), NULL, LOAD_NoWarn, NULL);
+		if (!HarryClass)
+			return Fail("HGame.Harry class is unavailable after package load");
+		static const TCHAR* RequiredHarryBools[] =
+		{
+			TEXT("bScreenRelativeMovement"),
+			TEXT("bLockedOnTarget"),
+			TEXT("bFixedFaceDirection"),
+			TEXT("bInDuelingMode"),
+			TEXT("bReverseInput"),
+			TEXT("bKeepStationary"),
+			TEXT("bLockOutForward"),
+			TEXT("bLockOutBackward"),
+			TEXT("bLockOutStrafeLeft"),
+			TEXT("bLockOutStrafeRight"),
+			TEXT("bIsAiming"),
+			TEXT("bE3DemoLockout")
+		};
+		for (INT Index = 0; Index < ARRAY_COUNT(RequiredHarryBools); ++Index)
+			if (!FindField<UBoolProperty>(HarryClass, RequiredHarryBools[Index]))
+				return Fail("HGame.Harry.%ls is missing or is not a bool property", RequiredHarryBools[Index]);
+		if (!FindField<UObjectProperty>(HarryClass, TEXT("BossTarget")))
+			return Fail("HGame.Harry.BossTarget is missing or is not an object property");
 		if (!UObject::StaticFindObject(UClass::StaticClass(), ANY_PACKAGE, TEXT("Engine.Mover"), 1))
 			return Fail("Engine.Mover class is unavailable after package load");
 		return 0;

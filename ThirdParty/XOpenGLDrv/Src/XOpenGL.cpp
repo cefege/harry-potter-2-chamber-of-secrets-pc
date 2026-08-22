@@ -352,6 +352,17 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 	//it is really a bad habit of the UEngine1 games to call init again each time a fullscreen change is needed.
 
 	Viewport = InViewport;
+	// Init may be called again for a viewport transition.  The atlas belongs
+	// to the old GL context and must not survive that transition.
+	if (NativeTextBackend)
+	{
+		MakeCurrent();
+		NativeTextBackend->Reset(*this);
+		delete NativeTextBackend;
+		NativeTextBackend = NULL;
+	}
+	NativeTextActiveTexture = 0;
+
 	glContext = NULL;
 	iPixelFormat = 0;
 
@@ -550,6 +561,11 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 		return 0;
 	}
 
+#if HP2_HAS_NATIVE_TEXT_BACKEND
+	NativeTextBackend = CreateNativeTextPlatformBackend();
+#endif
+
+
 #if UNREAL_OLDUNREAL || UNREAL_TOURNAMENT_OLDUNREAL
     // Doing after extensions have been checked.
 	UsingPersistentBuffers = UsePersistentBuffers ? true : false;
@@ -636,6 +652,65 @@ void UXOpenGLRenderDevice::PostEditChange()
 	Flush(UsePrecache);
 	unguard;
 }
+
+#if !HP2_HAS_NATIVE_TEXT_BACKEND
+UBOOL UXOpenGLRenderDevice::CreateCanvasTextLayout(const FCanvasTextRequest&, FCanvasTextLayout*& OutLayout)
+{
+	OutLayout = NULL;
+	return 0;
+}
+
+void UXOpenGLRenderDevice::DestroyCanvasTextLayout(FCanvasTextLayout*)
+{
+}
+
+UBOOL UXOpenGLRenderDevice::MeasureCanvasText(FCanvasTextLayout*, INT&, INT&)
+{
+	return 0;
+}
+
+UBOOL UXOpenGLRenderDevice::DrawCanvasText(FSceneNode*, FCanvasTextLayout*)
+{
+	return 0;
+}
+
+namespace
+{
+	ENativeTextRuntimeSmokeState GNativeTextRuntimeSmokeState = NativeTextRuntimeSmokeIdle;
+	ENativeTextRuntimeSmokeStage GNativeTextRuntimeSmokeStage = NativeTextRuntimeSmokeStageNone;
+}
+
+void BeginNativeTextRuntimeSmoke()
+{
+	GNativeTextRuntimeSmokeState = NativeTextRuntimeSmokePending;
+	GNativeTextRuntimeSmokeStage = NativeTextRuntimeSmokeStageNone;
+}
+
+ENativeTextRuntimeSmokeState GetNativeTextRuntimeSmokeState()
+{
+	return GNativeTextRuntimeSmokeState;
+}
+ENativeTextRuntimeSmokeStage GetNativeTextRuntimeSmokeStage()
+{
+	return GNativeTextRuntimeSmokeStage;
+}
+void SetNativeTextRuntimeSmokeStage(ENativeTextRuntimeSmokeStage Stage)
+{
+	GNativeTextRuntimeSmokeStage = Stage;
+}
+
+void CompleteNativeTextRuntimeSmoke(UBOOL Success)
+{
+	GNativeTextRuntimeSmokeState = Success ? NativeTextRuntimeSmokePassed : NativeTextRuntimeSmokeFailed;
+	if( !Success )
+		debugf(TEXT("Native text runtime smoke backend stage failed."));
+}
+
+UBOOL UXOpenGLRenderDevice::RunNativeTextRuntimeSmoke(FSceneNode*)
+{
+	return 0;
+}
+#endif
 
 #if _WIN32
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uiMsg, WPARAM wParam, LPARAM lParam)
@@ -1384,6 +1459,10 @@ void UXOpenGLRenderDevice::Flush(UBOOL AllowPrecache)
 	debugf(NAME_Dev, TEXT("XOpenGL: Flush"));
 
 	MakeCurrent();
+	if (NativeTextBackend)
+		NativeTextBackend->Reset(*this);
+	NativeTextActiveTexture = 0;
+
 
 	// Create a list of lights.
 	if (LightList.Num())
@@ -1783,7 +1862,7 @@ void UXOpenGLRenderDevice::UpdateRenderFBO(INT Width, INT Height)
 
 	// Always create the single-sample color texture used by the postprocess pass.
 	glGenTextures(1, &RenderColorTexture);
-	glBindTexture(GL_TEXTURE_2D, RenderColorTexture);
+	PrepareNativeTextTextureMutation(RenderColorTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Width, Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -1907,7 +1986,7 @@ void UXOpenGLRenderDevice::UpdateUICompositeFBO(INT Width, INT Height)
 		return;
 
 	glGenTextures(1, &UICompositeColorTexture);
-	glBindTexture(GL_TEXTURE_2D, UICompositeColorTexture);
+	PrepareNativeTextTextureMutation(UICompositeColorTexture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Width, Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -2330,7 +2409,11 @@ void UXOpenGLRenderDevice::Lock(FPlane InFlashScale, FPlane InFlashFog, FPlane S
 	const INT LogicalHeight = Max(1, Viewport->SizeY);
 	const INT SceneWidth = ScaledRenderDimension(LogicalWidth, RenderScale);
 	const INT SceneHeight = ScaledRenderDimension(LogicalHeight, RenderScale);
-	const UBOOL WantsUIComposite = !InHitData && (SceneWidth != LogicalWidth || SceneHeight != LogicalHeight);
+	const UBOOL NativeTextSmokePending = GetNativeTextRuntimeSmokeState() == NativeTextRuntimeSmokePending;
+	// The smoke must exercise the normal post-world UI transition even at a
+	// full render scale.  It creates the same logical-resolution composite FBO
+	// that a scaled frame uses; BeginUI still receives the live FSceneNode.
+	const UBOOL WantsUIComposite = !InHitData && ((SceneWidth != LogicalWidth || SceneHeight != LogicalHeight) || NativeTextSmokePending);
 
 	if (WantsUIComposite)
 	{
@@ -2438,8 +2521,12 @@ void UXOpenGLRenderDevice::BeginUI(FSceneNode* Frame)
 	glBindFramebuffer(GL_FRAMEBUFFER, UICompositeFBO);
 	glViewport(0, 0, UICompositeWidth, UICompositeHeight);
 	SetBlend(PF_Occlude);
+
 	glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 	UICompositeBound = 1;
+
+	if (GetNativeTextRuntimeSmokeState() == NativeTextRuntimeSmokePending)
+		CompleteNativeTextRuntimeSmoke(RunNativeTextRuntimeSmoke(Frame));
 
 	unguard;
 }
@@ -2792,6 +2879,14 @@ void UXOpenGLRenderDevice::Exit()
 
 	if (!GIsEditor)
 		Flush(0);
+	if (NativeTextBackend)
+	{
+		NativeTextBackend->Reset(*this);
+		delete NativeTextBackend;
+		NativeTextBackend = NULL;
+	}
+	NativeTextActiveTexture = 0;
+
 
 	DestroyUICompositeFBO();
 	DestroyRenderFBO();

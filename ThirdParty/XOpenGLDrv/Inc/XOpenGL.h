@@ -44,6 +44,7 @@
 
 
 #include "XOpenGLTemplate.h" //thanks han!
+#include "NativeText.h"
 
 #define clockFast(Timer)   {Timer -= appCycles();}
 #define unclockFast(Timer) {Timer += appCycles()-34;}
@@ -536,6 +537,7 @@ class UXOpenGLRenderDevice : public URenderDevice
 	UBOOL  UICompositeBound;
 	UBOOL  SceneColorResolved;
 	UBOOL  LastFrameUsedUIComposite;
+	FNativeTextPlatformBackend* NativeTextBackend{};
 
 	// Context specifics.
 	INT DesiredColorBits;
@@ -1940,6 +1942,11 @@ class UXOpenGLRenderDevice : public URenderDevice
 	void  DrawTriangles(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, _WORD* Indices, INT NumIndices, DWORD PolyFlags, FSpanBuffer* Span);
 	void  DrawGouraudPolygon(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, DWORD PolyFlags, FSpanBuffer* Span);
 	void  DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags);
+	UBOOL CreateCanvasTextLayout( const FCanvasTextRequest& Request, FCanvasTextLayout*& OutLayout );
+	void DestroyCanvasTextLayout( FCanvasTextLayout* Layout );
+	UBOOL MeasureCanvasText( FCanvasTextLayout* Layout, INT& OutWidth, INT& OutHeight );
+	UBOOL DrawCanvasText( FSceneNode* Frame, FCanvasTextLayout* Layout );
+	UBOOL RunNativeTextRuntimeSmoke( FSceneNode* Frame );
 	void  Draw3DLine(FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2);
 	void  Draw2DLine(FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2);
 	void  Draw2DPoint(FSceneNode* Frame, FPlane Color, DWORD LineFlags, FLOAT X1, FLOAT Y1, FLOAT X2, FLOAT Y2, FLOAT Z);
@@ -2064,4 +2071,48 @@ class UXOpenGLRenderDevice : public URenderDevice
 #else
     static void DebugCallback(unsigned int source, unsigned int type, unsigned int id, unsigned int severity, int length, const char* message, const void* userParam);
 #endif
+private:
+	friend class FNativeTextCoreTextBackend;
+	friend class FNativeTextAtlas;
+	void PrepareNativeTextTextureMutation(GLuint Texture);
+
+	UBOOL DrawNativeTextTile(
+		FSceneNode* Frame,
+		GLuint Texture,
+		GLuint Sampler,
+		GLuint64 BindlessTextureHandle,
+		INT TextureWidth,
+		INT TextureHeight,
+		FLOAT X,
+		FLOAT Y,
+		FLOAT XL,
+		FLOAT YL,
+		FLOAT U,
+		FLOAT V,
+		FLOAT UL,
+		FLOAT VL,
+		FLOAT Z,
+		FPlane Color,
+		DWORD PolyFlags
+	);
+	void SubmitTileBatch(
+		FSceneNode* Frame,
+		GLuint64 BindlessTextureHandle,
+		FLOAT UMult,
+		FLOAT VMult,
+		FLOAT X,
+		FLOAT Y,
+		FLOAT XL,
+		FLOAT YL,
+		FLOAT U,
+		FLOAT V,
+		FLOAT UL,
+		FLOAT VL,
+		FLOAT Z,
+		FPlane Color,
+		DWORD PolyFlags
+	);
+	void FlushNativeTextTileBatch();
+
+	GLuint NativeTextActiveTexture{};
 };

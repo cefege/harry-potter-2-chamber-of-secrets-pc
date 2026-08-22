@@ -67,13 +67,17 @@ void UClient::StaticConstructor()
 	new(GetClass(),TEXT("SkinDetail"),			RF_Public)UByteProperty (CPP_PROPERTY(TextureLODSet[2]		), TEXT("Display"), CPF_Config, Details );
 	new(GetClass(),TEXT("ScreenFlashes"),		RF_Public)UBoolProperty (CPP_PROPERTY(ScreenFlashes			), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("MaintainVerticalFOV"),	RF_Public)UBoolProperty (CPP_PROPERTY(MaintainVerticalFOV	), TEXT("Display"), CPF_Config );
+	new(GetClass(),TEXT("NativeText"),			RF_Public)UBoolProperty (CPP_PROPERTY(NativeText				), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("NoLighting"),			RF_Public)UBoolProperty (CPP_PROPERTY(NoLighting			), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("MinDesiredFrameRate"),	RF_Public)UFloatProperty(CPP_PROPERTY(MinDesiredFrameRate	), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("Decals"),				RF_Public)UBoolProperty (CPP_PROPERTY(Decals				), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("NoDynamicLights"),		RF_Public)UBoolProperty (CPP_PROPERTY(NoDynamicLights		), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("NoFractalAnim"),		RF_Public)UBoolProperty (CPP_PROPERTY(NoFractalAnim 		), TEXT("Display"), CPF_Config );
+	new(GetClass(),TEXT("ShowFPS"),				RF_Public)UBoolProperty (CPP_PROPERTY(ShowFPS				), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("ParticleDensity"),		RF_Public)UIntProperty  (CPP_PROPERTY(ParticleDensity		), TEXT("Display"), CPF_Config );
 	MaintainVerticalFOV = 1;
+	NativeText = 1;
+	ShowFPS = 0;
 
 	unguard;
 }

@@ -367,8 +367,17 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 
 			// Process PlayerTick with input.
 			PlayerPawn->Player->ReadInput( DeltaSeconds );
+			FLOAT RawBaseX = 0.f;
+			FLOAT RawStrafe = 0.f;
+			FLOAT RawCameraYaw = 0.f;
+			FLOAT RawCameraPitch = 0.f;
+			const UBOOL ModernThirdPersonInput = PlayerPawn->BeginModernThirdPersonInput(
+				RawBaseX,RawStrafe,RawCameraYaw,RawCameraPitch);
 			PlayerPawn->eventPlayerInput( DeltaSeconds );
+			PlayerPawn->FinishModernThirdPersonInput(
+				ModernThirdPersonInput,RawBaseX,RawStrafe,RawCameraYaw,RawCameraPitch);
 			PlayerPawn->eventPlayerTick( DeltaSeconds );
+			PlayerPawn->ApplyModernThirdPersonMovement();
 			PlayerPawn->Player->ReadInput( -1.0f );
 
 			if( GetLevel()->DemoRecDriver && !GetLevel()->DemoRecDriver->ServerConnection )
@@ -956,8 +965,8 @@ void ULevel::Tick( ELevelTick TickType, FLOAT DeltaSeconds )
 	// Update time.
 	guard(UpdateTime);
 
-	// Clamp time between 200 fps and 10 fps.
-	DeltaSeconds = Clamp(DeltaSeconds,0.005f,0.10f);
+	// Cap long stalls without imposing a minimum timestep above 200 rendered FPS.
+	DeltaSeconds = Min(DeltaSeconds,0.10f);
 	DeltaSeconds *= Info->TimeDilation;
 	TimeSeconds = TimeSeconds + DeltaSeconds;
 	Info->TimeSeconds = TimeSeconds.GetFloat();

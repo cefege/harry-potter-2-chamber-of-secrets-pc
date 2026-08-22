@@ -107,10 +107,26 @@ UXOpenGLRenderDevice::GetCachedTextureInfo
 }
 
 
+void UXOpenGLRenderDevice::PrepareNativeTextTextureMutation(GLuint Texture)
+{
+	guard(UXOpenGLRenderDevice::PrepareNativeTextTextureMutation);
+	FlushNativeTextTileBatch();
+	NativeTextActiveTexture = 0;
+	glActiveTexture(GL_TEXTURE0 + DiffuseTextureIndex);
+	TexInfo[DiffuseTextureIndex].CurrentCacheID = 0;
+	glBindTexture(GL_TEXTURE_2D, Texture);
+	unguard;
+}
+
+
 void UXOpenGLRenderDevice::SetNoTexture( INT Multi )
 {
 	guard(UXOpenGLRenderDevice::SetNoTexture);
-	if( TexInfo[Multi].CurrentCacheID != 0 )
+	if( Multi == DiffuseTextureIndex )
+	{
+		PrepareNativeTextTextureMutation(0);
+	}
+	else if( TexInfo[Multi].CurrentCacheID != 0 )
 	{
 		glBindTexture( GL_TEXTURE_2D, 0 );
 		TexInfo[Multi].CurrentCacheID = 0;
@@ -457,6 +473,15 @@ void UXOpenGLRenderDevice::SetTexture(INT Multi, FTextureInfo& Info, DWORD PolyF
 
 	if (ActiveProgram <= No_Prog)
         return;
+
+	// Native text binds its atlas directly instead of through FTextureInfo.
+	// Any regular diffuse binding invalidates that raw binding, even when this
+	// particular cached texture later takes the SetTexture fast path.
+	if (Multi == DiffuseTextureIndex && NativeTextActiveTexture)
+	{
+		FlushNativeTextTileBatch();
+		NativeTextActiveTexture = 0;
+	}
 
 	// Set panning.
 	FTexInfo& Tex = TexInfo[Multi];

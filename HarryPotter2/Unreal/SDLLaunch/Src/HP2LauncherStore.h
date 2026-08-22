@@ -25,6 +25,22 @@ bool CommitLauncherSettings(
 	const LauncherSettings& settings,
 	std::string& error);
 
+bool LoadDataSourceConfiguration(
+	const std::string& launcherRoot,
+	DataSourceConfiguration& configuration,
+	std::string& error);
+
+bool CommitDataSourceConfiguration(
+	const std::string& launcherRoot,
+	const DataSourceConfiguration& configuration,
+	std::string& error);
+
+bool PrepareDataSourceProfile(
+	const std::string& launcherRoot,
+	DataSource source,
+	std::string& profileRoot,
+	std::string& error);
+
 #ifdef HP2_LAUNCHER_TESTING
 void SetLauncherPublishFailureForTesting(int publicationIndex);
 #endif

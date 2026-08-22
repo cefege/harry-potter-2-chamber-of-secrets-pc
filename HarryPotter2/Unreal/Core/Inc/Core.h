@@ -22,6 +22,8 @@
 #include "UnBuild.h"
 #include <array>
 #include <limits>
+#include <cstdio>
+#include <string>
 
 // Time.
 #define FIXTIME 4294967296.f

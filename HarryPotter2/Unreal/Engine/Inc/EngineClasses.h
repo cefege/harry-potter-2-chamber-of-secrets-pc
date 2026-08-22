@@ -2061,6 +2061,7 @@ public:
     FLOAT fLumosRadius GCC_PACK(4);
     BITFIELD bQueuedToSaveGame:1 GCC_PACK(4);
     BITFIELD bIsCaptured:1;
+    BITFIELD bModernThirdPersonControls:1;
     BYTE bMouseAltFire GCC_PACK(4);
     BYTE bKeyAltFire;
     DECLARE_FUNCTION(execScreenToWorld);

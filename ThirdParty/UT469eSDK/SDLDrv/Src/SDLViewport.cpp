@@ -286,6 +286,52 @@ USDLViewport::USDLViewport()
 		   linked.major, linked.minor, linked.patch);
 	unguard;
 }
+UFont* USDLViewport::CreateNativeFont( const TCHAR* FontName, int Height )
+{
+	if( !FontName || !*FontName || Height<=0 )
+		return NULL;
+
+	UFont* Font = new UFont;
+	Font->FontName = FontName;
+	Font->FontHeight = Height;
+	Font->NativeFont = NULL;
+	return Font;
+}
+
+void USDLViewport::DrawString( DWORD Flags, UFont* Font, INT& DrawX, INT& DrawY, const TCHAR* Text, const FPlane& Color )
+{
+	if( !RenDev || !Canvas || !Canvas->Frame || !GetOuterUClient() || !Font || !Text || !*Text )
+		return;
+
+	const INT SourceLength = appStrlen(Text);
+	FCanvasTextRequest Request = {};
+	Request.Font = Font;
+	Request.Text = Text;
+	Request.TextLength = -SourceLength;
+	Request.TextScale = 1.f;
+	Request.OriginX = 0;
+	Request.OriginY = 0;
+	Request.ClipX = SizeX;
+	Request.ClipY = SizeY;
+	Request.StartX = DrawX;
+	Request.StartY = DrawY;
+	Request.PolyFlags = Flags;
+	Request.Color = Color;
+	Request.VisibleSourceCharacters = SourceLength;
+	Request.bCenter = (Flags & PF_TwoSided) != 0;
+
+	FCanvasTextLayout* Layout = NULL;
+	INT Width = 0, Height = 0;
+	if( RenDev->CreateCanvasTextLayout(Request, Layout) &&
+		RenDev->MeasureCanvasText(Layout, Width, Height) &&
+		RenDev->DrawCanvasText(Canvas->Frame, Layout) )
+	{
+		DrawX += Width;
+		DrawY += Height;
+	}
+	if( Layout )
+		RenDev->DestroyCanvasTextLayout(Layout);
+}
 
 //
 // Destroy.
@@ -371,8 +417,8 @@ void USDLViewport::UpdateMouseGrabState(const UBOOL bGrab)
 	}
 
 #ifndef __EMSCRIPTEN__  // we grab this elsewhere for Emscripten.
-	SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, 0);
-	SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SCALING, 0);
+	SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "0");
+	SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SCALING, "0");
 	SDL_SetRelativeMouseMode(MouseIsGrabbed ? SDL_TRUE : SDL_FALSE);
 	SDL_SetWindowGrab(Window, MouseIsGrabbed ? SDL_TRUE : SDL_FALSE);
 #endif
@@ -943,12 +989,7 @@ void USDLViewport::SetTitleBar()
 	// Set viewport window's name to show resolution.
 	if( !GIsEditor || (Actor->ShowFlags&SHOW_PlayerCtrl) )
 	{
-		WindowName = *LocalizeGeneralHelper("Product",appPackage());
-#if ENGINE_VERSION==227
-		WindowName += FString::Printf(TEXT(" - Version: %i Subversion: %i (Build date: %ls %ls)"), ENGINE_VERSION, ENGINE_SUBVERSION, appFromAnsi(__DATE__), appFromAnsi(__TIME__));
-#else
-		WindowName += FString::Printf(TEXT(" - Version: %d (Build date: %ls %ls)"), ENGINE_VERSION, appFromAnsi(__DATE__), appFromAnsi(__TIME__));
-#endif
+		WindowName = TEXT("Harry Potter and the Chamber of Secrets");
 	}
 	else switch( Actor->RendMap )
 	{
@@ -1100,9 +1141,7 @@ void USDLViewport::SetMouseCapture( UBOOL Capture, UBOOL Clip, UBOOL OnlyFocus )
 {
 	guard(USDLViewport::SetMouseCapture);
 
-#if ENGINE_VERSION==227
 	bWindowsMouseAvailable = !Capture;
-#endif
 	UpdateMouseGrabState(Capture);
 
 	unguard;
@@ -1417,10 +1456,17 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 
 					InResize = 0;
 				}
-				else if (Event.window.event == SDL_WINDOWEVENT_FOCUS_LOST
+				else if ((Event.window.event == SDL_WINDOWEVENT_FOCUS_LOST
+					|| Event.window.event == SDL_WINDOWEVENT_MINIMIZED
+					|| Event.window.event == SDL_WINDOWEVENT_HIDDEN)
 					&& Window != NULL
 					&& Event.window.windowID == SDL_GetWindowID(Window))
 				{
+					if (!LostGrab && MouseIsGrabbed)
+					{
+						LostGrab = 1;
+						UpdateMouseGrabState(0);
+					}
 					ReleaseAllInput();
 					INT IgnoredRelativeX, IgnoredRelativeY;
 					SDL_GetRelativeMouseState(&IgnoredRelativeX, &IgnoredRelativeY);
@@ -1428,6 +1474,21 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 					JoyHatMoved = false;
 					DX = DY = 0;
 					ThisJoyHat = IK_None;
+				}
+				else if ((Event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED
+					|| Event.window.event == SDL_WINDOWEVENT_RESTORED
+					|| Event.window.event == SDL_WINDOWEVENT_SHOWN)
+					&& Window != NULL
+					&& Event.window.windowID == SDL_GetWindowID(Window))
+				{
+					const Uint32 WindowFlags = SDL_GetWindowFlags(Window);
+					if (LostGrab
+						&& (WindowFlags & SDL_WINDOW_INPUT_FOCUS) != 0
+						&& (WindowFlags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) == 0)
+					{
+						UpdateMouseGrabState(GetOuterUSDLClient()->CaptureMouse);
+						LostGrab = 0;
+					}
 				}
 				break;
 
@@ -1467,20 +1528,11 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			}
 		}
 		
-		WindowsMouseX = AbsX * MouseScaleX;
-		WindowsMouseY = AbsY * MouseScaleY;
-		
-		if (WindowsMouseX > SizeX)
-			WindowsMouseX = SizeX;
-		
-		if (WindowsMouseX < 0)
-			WindowsMouseX = 0;
-		
-		if (WindowsMouseY > SizeY)
-			WindowsMouseY = SizeY;
-		
-		if (WindowsMouseY < 0)
-			WindowsMouseY = 0;
+		if (!MouseIsGrabbed)
+		{
+			WindowsMouseX = Clamp(AbsX * MouseScaleX, 0.0, (DOUBLE)SizeX);
+			WindowsMouseY = Clamp(AbsY * MouseScaleY, 0.0, (DOUBLE)SizeY);
+		}
 	}
 
 	if ( (LastJoyHat != ThisJoyHat) && JoyHatMoved )
