@@ -491,6 +491,19 @@ hp2_add_behavior_test(asset_hashes "${Python3_EXECUTABLE}"
     "--repo-root=${PROJECT_SOURCE_DIR}"
     --check
 )
+hp2_add_behavior_test(ucc_smoke_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
+)
+if(EXISTS "${CMAKE_BINARY_DIR}/hp2_ucc")
+    hp2_add_behavior_test(ucc_help_smoke "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
+        --smoke "--ucc-binary=${CMAKE_BINARY_DIR}/hp2_ucc"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+    )
+endif()
+hp2_add_behavior_test(prototype_archive_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/PrototypeArchiveTests.py"
+)
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests)
@@ -542,6 +555,10 @@ set_tests_properties(package79_manifest PROPERTIES
 )
 set_tests_properties(spell_runtime_contracts PROPERTIES
     DEPENDS "native_registration;package79_manifest;spell_interaction_manifest"
+)
+set_tests_properties(native_launcher_contract game_test_contract repair_save_contract
+    asset_hashes ucc_smoke_contract prototype_archive_contract
+    PROPERTIES LABELS "fast;data-none"
 )
 set_tests_properties(dxt1_codec eaxa_decoder PROPERTIES DEPENDS abi_widths)
 set_tests_properties(audio_lifecycle PROPERTIES
