@@ -6,6 +6,17 @@ failure policy. A map is verified structurally instead only when its package
 contains positive editor-template evidence independent of its filename. Maps
 without that evidence remain playable candidates and launch normally, so a
 missing PlayerStart cannot by itself turn a broken game level into a pass.
+
+Budgets are enforced on the whole run only: the engine does not emit per-tick
+frame timing yet (its Frame/Render MSEC lines require the interactive ``stat``
+console command), so ``--max-frame-ms`` is recorded with ``frame_ms: null`` /
+``reason: "engine_does_not_emit"`` while ``--max-map-seconds`` compares the
+observed wall duration against the requested budget. Resource accounting is
+groundwork for an optional engine marker protocol: lines shaped like
+``<HP2_RES> gl_textures_created=128`` are parsed leniently into each map's
+``resources`` field (null when absent), and a launched map with both
+gl_textures_created and gl_textures_destroyed present and unequal fails as a
+leak. Report format_version stays 2; all new keys are additive.
 """
 
 from __future__ import annotations
@@ -542,6 +553,8 @@ def _run_map(
     renderer: str,
     ticks: int,
     timeout_seconds: float,
+    max_frame_ms: float | None,
+    max_map_seconds: float | None,
     repo_root: Path,
     log_path: Path,
     inspection: dict[str, object],
@@ -569,6 +582,11 @@ def _run_map(
             "map_relative_to_data_root": map_relative,
         }
     )
+    _apply_budget_contract(
+        result,
+        max_frame_ms=max_frame_ms,
+        max_map_seconds=max_map_seconds,
+    )
     return result
 
 
@@ -580,6 +598,8 @@ def _verify_map_package(
     repo_root: Path,
     log_path: Path,
     inspection: dict[str, object],
+    max_frame_ms: float | None,
+    max_map_seconds: float | None,
 ) -> dict[str, object]:
     verification_error = inspection["package_error"]
     passed = verification_error is None
@@ -613,7 +633,7 @@ def _verify_map_package(
         + "\n"
     ).encode("utf-8")
     game_test._write_atomic(log_path, output)
-    return {
+    record = {
         "map": game_test._display_path(map_path, repo_root),
         "map_relative_to_data_root": map_relative,
         "map_token": game_test._map_token(map_path, data_root),
@@ -637,6 +657,156 @@ def _verify_map_package(
         "cleanup_error": None,
         "passed": passed,
     }
+    _apply_budget_contract(
+        record,
+        max_frame_ms=max_frame_ms,
+        max_map_seconds=max_map_seconds,
+    )
+    return record
+
+
+def _resources_record(observed: dict[str, object]) -> dict[str, object]:
+    """Normalize parsed <HP2_RES> fields; canonical keys pass through as null."""
+    record: dict[str, object] = {
+        key: observed.get(key) for key in game_test.RESOURCE_KEYS
+    }
+    for key, value in sorted(observed.items()):
+        if key not in record:
+            record[key] = value
+    return record
+
+
+def _resource_leak(resources: dict[str, object]) -> str | None:
+    created = resources.get("gl_textures_created")
+    destroyed = resources.get("gl_textures_destroyed")
+    numeric = (
+        lambda value: isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    )
+    if (
+        numeric(created)
+        and numeric(destroyed)
+        and created != destroyed
+    ):
+        return (
+            f"gl_textures_created={created} but "
+            f"gl_textures_destroyed={destroyed}"
+        )
+    return None
+
+
+def _budgets_record(
+    duration_seconds: float | None,
+    *,
+    max_frame_ms: float | None,
+    max_map_seconds: float | None,
+) -> dict[str, object]:
+    # The engine emits no per-tick frame timing in test logs today (its
+    # Frame/Render MSEC output requires the interactive `stat` command), so
+    # frame_ms stays null with an explicit reason. When the engine starts
+    # emitting <HP2_RES> tick markers this parses them into frame_ms and drops
+    # the reason key.
+    return {
+        "max_frame_ms": max_frame_ms,
+        "max_map_seconds": max_map_seconds,
+        "frame_ms": None,
+        "frame_samples": 0,
+        "reason": "engine_does_not_emit",
+        "map_seconds": duration_seconds,
+    }
+
+
+def _budget_violations(budgets: dict[str, object]) -> list[dict[str, object]]:
+    violations: list[dict[str, object]] = []
+    map_limit = budgets["max_map_seconds"]
+    map_seconds = budgets["map_seconds"]
+    if (
+        isinstance(map_limit, (int, float))
+        and isinstance(map_seconds, (int, float))
+        and map_seconds > map_limit
+    ):
+        violations.append(
+            {
+                "code": "budget.map_seconds_exceeded",
+                "observed_seconds": map_seconds,
+                "limit_seconds": map_limit,
+            }
+        )
+    frame_limit = budgets["max_frame_ms"]
+    frame_ms = budgets["frame_ms"]
+    if (
+        isinstance(frame_limit, (int, float))
+        and isinstance(frame_ms, (int, float))
+        and frame_ms > frame_limit
+    ):
+        violations.append(
+            {
+                "code": "budget.frame_ms_exceeded",
+                "observed_ms": frame_ms,
+                "limit_ms": frame_limit,
+            }
+        )
+    return violations
+
+
+_PROCESS_REASON_CODES = (
+    ("launch_error", "process.launch_error"),
+    ("exit_status", "process.exit_status"),
+    ("timed_out", "process.timeout"),
+    ("orphaned_process_group", "process.orphaned_group"),
+    ("cleanup_error", "process.cleanup_error"),
+)
+
+
+def _failure_reason_code(record: dict[str, object]) -> str:
+    """First failing condition as a dotted lowercase reason_code."""
+    for key, code in _PROCESS_REASON_CODES:
+        value = record.get(key)
+        if key == "exit_status":
+            if value not in (0, None):
+                return code
+            continue
+        if value:
+            return code
+    if record.get("verification_error"):
+        return "package.structure"
+    if record.get("resource_leak"):
+        return "resources.leak"
+    violations = record.get("budget_violations") or []
+    if violations:
+        return str(violations[0]["code"])
+    markers = record.get("failure_markers") or []
+    if markers:
+        return f"marker.{markers[0]['category']}"
+    return "unknown"
+
+
+def _apply_budget_contract(
+    record: dict[str, object],
+    *,
+    max_frame_ms: float | None,
+    max_map_seconds: float | None,
+) -> None:
+    """Attach additive schema-v1 alignment fields; format_version stays 2."""
+    record["resources"] = _resources_record(record.get("resources") or {})
+    record["resource_leak"] = _resource_leak(record["resources"])
+    duration = record.get("duration_seconds")
+    record["budgets"] = _budgets_record(
+        duration if isinstance(duration, (int, float)) else None,
+        max_frame_ms=max_frame_ms,
+        max_map_seconds=max_map_seconds,
+    )
+    record["budget_violations"] = _budget_violations(record["budgets"])
+    process_passed = bool(record["passed"])
+    record["passed"] = bool(
+        process_passed
+        and not record["resource_leak"]
+        and not record["budget_violations"]
+    )
+    record["status"] = "pass" if record["passed"] else "fail"
+    record["reason_code"] = (
+        None if record["passed"] else _failure_reason_code(record)
+    )
 
 
 def _positive_int(value: str) -> int:
@@ -667,7 +837,11 @@ def _arguments() -> argparse.Namespace:
             "Failure policy: nonzero exit, timeout, launch/cleanup failure, an "
             "orphaned process group, or any case-insensitive script/native/package/"
             "render/assert/critical marker fails the map. UE1 ScriptWarning and "
-            "Accessed None diagnostics count as script failures."
+            "Accessed None diagnostics count as script failures. Budgets: "
+            "--max-map-seconds fails launched maps over the wall budget; "
+            "--max-frame-ms awaits engine-side per-tick timing and stays null. "
+            "'<HP2_RES> key=value' log markers feed resources; unequal created/"
+            "destroyed texture counts fail the map as a leak."
         ),
     )
     parser.add_argument(
@@ -699,6 +873,24 @@ def _arguments() -> argparse.Namespace:
         type=_positive_float,
         default=DEFAULT_TIMEOUT_SECONDS,
         help="wall-clock timeout per map in seconds",
+    )
+    parser.add_argument(
+        "--max-frame-ms",
+        type=_positive_float,
+        default=None,
+        help=(
+            "per-tick frame-time budget in milliseconds (advisory: the engine "
+            "does not emit per-tick timing yet; recorded as null)"
+        ),
+    )
+    parser.add_argument(
+        "--max-map-seconds",
+        type=_positive_float,
+        default=None,
+        help=(
+            "per-map wall-clock budget in seconds, distinct from --timeout; "
+            "maps whose total duration exceeds it fail"
+        ),
     )
     parser.add_argument(
         "--output",
@@ -799,7 +991,6 @@ def main() -> int:
             raise SmokeError(f"output path must name a JSON file: {output_argument}")
         logs = _log_directory(output)
         _replace_log_directory(logs)
-
         records: list[dict[str, object]] = []
         for index, ((map_path, map_relative), inspection) in enumerate(
             zip(maps, inspections), start=1
@@ -817,6 +1008,8 @@ def main() -> int:
                     repo_root=repo_root,
                     log_path=log_path,
                     inspection=inspection,
+                    max_frame_ms=arguments.max_frame_ms,
+                    max_map_seconds=arguments.max_map_seconds,
                 )
             else:
                 record = _verify_map_package(
@@ -826,6 +1019,8 @@ def main() -> int:
                     repo_root=repo_root,
                     log_path=log_path,
                     inspection=inspection,
+                    max_frame_ms=arguments.max_frame_ms,
+                    max_map_seconds=arguments.max_map_seconds,
                 )
             records.append(record)
 
@@ -859,6 +1054,9 @@ def main() -> int:
             "renderer": arguments.renderer,
             "ticks": arguments.ticks,
             "timeout_seconds": arguments.timeout,
+            "max_frame_ms": arguments.max_frame_ms,
+            "max_map_seconds": arguments.max_map_seconds,
+            "status": "pass" if not failed_count else "fail",
             "log_directory": game_test._display_path(logs, repo_root),
             "failure_marker_policy": {
                 "case_sensitive": False,
@@ -888,6 +1086,12 @@ def main() -> int:
                 "passed": passed_count,
                 "failed": failed_count,
                 "failure_markers_by_category": category_counts,
+                "resource_leaks": sum(
+                    bool(record["resource_leak"]) for record in records
+                ),
+                "budget_violation_maps": sum(
+                    bool(record["budget_violations"]) for record in records
+                ),
                 "by_classification": classification_counts,
                 "by_verification_mode": verification_mode_counts,
             },

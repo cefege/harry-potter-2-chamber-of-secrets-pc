@@ -1,5 +1,11 @@
-#!/usr/bin/env python3
-"""List and launch HP2 maps through the direct engine bootstrap for tests."""
+"""List and launch HP2 maps through the direct engine bootstrap for tests.
+
+Launches are supervised end to end and scanned for strict failure markers.
+The engine MAY additionally emit optional ``<HP2_RES> key=value`` log lines
+(for example ``<HP2_RES> gl_textures_created=128``); these are parsed
+leniently into the ``resources`` result field and are never fatal by
+themselves. Absent markers leave consumers to report nulls.
+"""
 
 from __future__ import annotations
 
@@ -66,6 +72,31 @@ FAILURE_MARKER_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bappErrorf?\b",
     ),
 }
+
+# Optional engine-side resource/timing marker protocol. The engine emits lines
+# like "<HP2_RES> gl_textures_created=128"; parsing is lenient (unknown keys
+# are kept, non-numeric values stay raw strings) because the protocol is a
+# forward contract the engine does not emit everywhere yet.
+HP2_RESOURCE_MARKER = re.compile(
+    r"<HP2_RES>\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^\s]+)"
+)
+RESOURCE_KEYS = ("gl_textures_created", "gl_textures_destroyed")
+
+
+def _resource_markers(output: bytes) -> dict[str, object]:
+    fields: dict[str, object] = {}
+    text = output.decode("utf-8", errors="replace")
+    for match in HP2_RESOURCE_MARKER.finditer(text):
+        key, raw_value = match.group(1), match.group(2)
+        try:
+            value: object = int(raw_value, 10)
+        except ValueError:
+            try:
+                value = float(raw_value)
+            except ValueError:
+                value = raw_value
+        fields[key] = value
+    return fields
 COMPILED_FAILURE_MARKERS = {
     category: tuple(re.compile(pattern, re.IGNORECASE) for pattern in patterns)
     for category, patterns in FAILURE_MARKER_PATTERNS.items()
@@ -526,6 +557,7 @@ def run_command(
         "exit_status": exit_status, "timed_out": timed_out, "launch_error": launch_error,
         "failure_markers": markers, "orphaned_process_group": orphaned_process_group,
         "process_group_cleanup": cleanup_action, "cleanup_error": cleanup_error,
+        "resources": _resource_markers(output),
     }
     result["passed"] = _passed(result)
     return result
