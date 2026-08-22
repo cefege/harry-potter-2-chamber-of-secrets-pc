@@ -1,3 +1,9 @@
+# Root of the immutable prototype data tree handed to behavioral tests via
+# -datadir/--data-root. Defaults to the build's prototype checkout so test
+# runs can be pointed at an alternate data root without editing this file.
+set(HP2_TEST_DATA_ROOT "${HP2_UNREAL_ROOT}" CACHE PATH
+    "Prototype data root passed to behavioral tests via -datadir/--data-root")
+
 add_library(hp2_compile_policy INTERFACE)
 target_compile_features(hp2_compile_policy INTERFACE cxx_std_17)
 
@@ -380,17 +386,56 @@ function(hp2_add_behavior_test test_name target)
     file(MAKE_DIRECTORY "${_hp2_test_home}" "${_hp2_test_tmp}" "${_hp2_test_artifacts}")
 
     add_test(NAME "${test_name}" COMMAND "${target}" ${ARGN})
+    set(_hp2_test_env
+        "HOME=${_hp2_test_home}"
+        "TMPDIR=${_hp2_test_tmp}"
+        "LC_ALL=C"
+        "TZ=UTC"
+        "HP2_TEST_NAME=${test_name}"
+        "HP2_ARTIFACT_DIR=${_hp2_test_artifacts}"
+    )
+    if(HP2_ENABLE_ASAN_UBSAN)
+        list(APPEND _hp2_test_env
+            "HP2_SANITIZER=asan-ubsan"
+            # Leak checks stay on; ASan reports land beside the other test
+            # artifacts instead of stderr so structured reports stay parseable.
+            "ASAN_OPTIONS=detect_leaks=1:log_path=${_hp2_test_artifacts}/asan"
+        )
+    elseif(HP2_ENABLE_TSAN)
+        list(APPEND _hp2_test_env
+            "HP2_SANITIZER=tsan"
+            "TSAN_OPTIONS=halt_on_error=1"
+        )
+    endif()
     set_tests_properties("${test_name}" PROPERTIES
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
         # Deterministic contracts must never hang a verification run; a
         # timeout is a first-class failure with retained artifacts.
         TIMEOUT 900
-        ENVIRONMENT
-            "HOME=${_hp2_test_home};TMPDIR=${_hp2_test_tmp};LC_ALL=C;TZ=UTC;HP2_TEST_NAME=${test_name};HP2_ARTIFACT_DIR=${_hp2_test_artifacts}"
+        ENVIRONMENT "${_hp2_test_env}"
     )
 endfunction()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+# Deterministic build/observation fingerprint: writes out/<preset>/
+# hp2-state.json at configure time (toolchain, capability gates, data
+# availability) and offers a refreshable drift check target.
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/hp2_state.py"
+            "--build-dir" "${CMAKE_BINARY_DIR}"
+    RESULT_VARIABLE _hp2_state_result
+    ERROR_VARIABLE _hp2_state_err
+)
+if(NOT _hp2_state_result EQUAL 0)
+    message(WARNING "hp2_state failed (${_hp2_state_result}): ${_hp2_state_err}")
+endif()
+
+add_custom_target(hp2_state
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/hp2_state.py"
+            "--build-dir" "${CMAKE_BINARY_DIR}" --check
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Validating hp2-state.json drift")
 
 hp2_add_behavior_test(abi_widths hp2_abi_tests
     --test=abi_widths
@@ -412,16 +457,16 @@ hp2_add_behavior_test(fstring_archive hp2_abi_tests
 )
 hp2_add_behavior_test(native_registration hp2_abi_tests
     --test=native_registration
-    "-datadir=${HP2_UNREAL_ROOT}"
+    "-datadir=${HP2_TEST_DATA_ROOT}"
 )
 hp2_add_behavior_test(package79_manifest hp2_package_audit
-    "-datadir=${HP2_UNREAL_ROOT}"
+    "-datadir=${HP2_TEST_DATA_ROOT}"
     "--reference=${PROJECT_SOURCE_DIR}/Tests/Fixtures/package79-reference.json"
 )
 hp2_add_behavior_test(spell_interaction_manifest "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
     "--repo-root=${PROJECT_SOURCE_DIR}"
-    "--data-root=${HP2_UNREAL_ROOT}"
+    "--data-root=${HP2_TEST_DATA_ROOT}"
     "--output=${PROJECT_SOURCE_DIR}/Tests/Fixtures/spell-interactions.json"
     --check
 )
@@ -429,7 +474,7 @@ set_tests_properties(spell_interaction_manifest PROPERTIES
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/Testing/HP2/spell_interaction_manifest"
 )
 hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
-    "-datadir=${HP2_UNREAL_ROOT}"
+    "-datadir=${HP2_TEST_DATA_ROOT}"
 )
 hp2_add_behavior_test(dxt1_codec hp2_dxt1_tests)
 hp2_add_behavior_test(eaxa_decoder hp2_eaxa_tests)
@@ -440,6 +485,11 @@ hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
 )
 hp2_add_behavior_test(repair_save_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/RepairSaveTests.py"
+)
+hp2_add_behavior_test(asset_hashes "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Build/hash_assets.py"
+    "--repo-root=${PROJECT_SOURCE_DIR}"
+    --check
 )
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
@@ -497,3 +547,25 @@ set_tests_properties(dxt1_codec eaxa_decoder PROPERTIES DEPENDS abi_widths)
 set_tests_properties(audio_lifecycle PROPERTIES
     DEPENDS "eaxa_decoder;native_registration"
 )
+
+# Label taxonomy: layer labels (fast|integration|smoke|visual|manual) plus a
+# data-profile label (data-none|data-prototype|data-retail). Smoke tests keep
+# the labels assigned in the smoke block above.
+set_tests_properties(abi_widths render_clip projection_fov command_line_load
+    compact_index fstring_archive dxt1_codec eaxa_decoder audio_lifecycle
+    native_launcher_contract game_test_contract repair_save_contract
+    asset_hashes
+    PROPERTIES LABELS "fast;data-none"
+)
+set_tests_properties(native_registration package79_manifest
+    spell_interaction_manifest spell_runtime_contracts
+    PROPERTIES LABELS "integration;data-prototype"
+)
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    set_tests_properties(native_typography_contracts
+        PROPERTIES LABELS "fast;data-none"
+    )
+    set_tests_properties(canvas_compatibility_contracts
+        PROPERTIES LABELS "integration;data-prototype"
+    )
+endif()
