@@ -27,7 +27,8 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/macos-arm64",
         "HP2_ENABLE_ASAN_UBSAN": "OFF",
-        "HP2_ENABLE_TSAN": "OFF"
+        "HP2_ENABLE_TSAN": "OFF",
+        "HP2_ENABLE_FULL_MAP_SMOKE": "OFF"
       }
     },
     {
@@ -55,6 +56,17 @@
         "HP2_ENABLE_ASAN_UBSAN": "OFF",
         "HP2_ENABLE_TSAN": "ON"
       }
+    },
+    {
+      "name": "macos-arm64-full-smoke",
+      "displayName": "macOS 15 arm64 Release + full map sweep",
+      "inherits": "macos-arm64-base",
+      "binaryDir": "${sourceDir}/out/macos-arm64-full-smoke",
+      "installDir": "${sourceDir}/out/install/macos-arm64-full-smoke",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HP2_ENABLE_FULL_MAP_SMOKE": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -69,6 +81,10 @@
     {
       "name": "macos-arm64-tsan",
       "configurePreset": "macos-arm64-tsan"
+    },
+    {
+      "name": "macos-arm64-full-smoke",
+      "configurePreset": "macos-arm64-full-smoke"
     }
   ],
   "testPresets": [
@@ -98,6 +114,17 @@
       "name": "macos-arm64-tsan",
       "displayName": "macOS 15 arm64 TSan tests",
       "configurePreset": "macos-arm64-tsan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "macos-arm64-full-smoke",
+      "displayName": "macOS 15 arm64 full sweep tests",
+      "configurePreset": "macos-arm64-full-smoke",
       "output": {
         "outputOnFailure": true
       },

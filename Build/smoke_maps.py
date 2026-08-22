@@ -706,7 +706,40 @@ def _arguments() -> argparse.Namespace:
         default=None,
         help="JSON report path (default: build/smoke-maps-<renderer>.json)",
     )
+    parser.add_argument(
+        "--maps",
+        type=str,
+        default=None,
+        help=(
+            "comma-separated map-name allowlist matched exactly and "
+            "case-insensitively against map file stems (default: every map)"
+        ),
+    )
     return parser.parse_args()
+
+
+def _select_maps(
+    maps: list[tuple[Path, str]], allowlist: str | None
+) -> list[tuple[Path, str]]:
+    """Filter an enumerated map list by exact, case-insensitive stem names."""
+    if not allowlist:
+        return maps
+    wanted = {
+        name.strip().casefold()
+        for name in allowlist.split(",")
+        if name.strip()
+    }
+    selected = [
+        (path, relative)
+        for path, relative in maps
+        if Path(relative).stem.casefold() in wanted
+    ]
+    missing = sorted(wanted - {Path(r).stem.casefold() for _, r in selected})
+    if missing:
+        raise SmokeError(
+            "requested maps not found: " + ", ".join(missing)
+        )
+    return selected
 
 
 def main() -> int:
@@ -718,7 +751,7 @@ def main() -> int:
         game_test._validate_data_root(data_root)
         executable = game_test._bundle_executable(app)
         game_test._validate_native_arm64(executable)
-        maps = game_test._enumerate_maps(data_root)
+        maps = _select_maps(game_test._enumerate_maps(data_root), arguments.maps)
         super_by_class = _class_catalog(data_root)
         inspections = [
             _inspect_map_package(map_path, map_relative, super_by_class)

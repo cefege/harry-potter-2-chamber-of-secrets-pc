@@ -33,11 +33,21 @@ struct FModernHarryProperties
 	UBoolProperty* LockOutStrafeRight;
 	UBoolProperty* IsAiming;
 	UBoolProperty* E3DemoLockout;
+	UBoolProperty* AutoCenterCamera;
 	UObjectProperty* BossTarget;
 };
 
 static FModernHarryProperties GModernHarryProperties;
 static UBOOL GReportedModernHarryContractFailure;
+
+struct FModernAutoCenterOverride
+{
+	APlayerPawn* PlayerPawn;
+	UBoolProperty* Property;
+	UBOOL SavedValue;
+};
+
+static FModernAutoCenterOverride GModernAutoCenterOverride;
 
 static UBOOL ReadModernHarryBool( const APlayerPawn* PlayerPawn, const UBoolProperty* Property )
 {
@@ -51,6 +61,48 @@ static void WriteModernHarryBool( APlayerPawn* PlayerPawn, const UBoolProperty* 
 		Storage |= Property->BitMask;
 	else
 		Storage &= ~Property->BitMask;
+}
+
+static void RestoreModernAutoCenter( APlayerPawn* PlayerPawn )
+{
+	if( GModernAutoCenterOverride.PlayerPawn!=PlayerPawn )
+		return;
+	WriteModernHarryBool
+	(
+		PlayerPawn,
+		GModernAutoCenterOverride.Property,
+		GModernAutoCenterOverride.SavedValue
+	);
+	appMemzero( &GModernAutoCenterOverride, sizeof(GModernAutoCenterOverride) );
+}
+
+static void SuppressModernAutoCenter
+(
+	APlayerPawn* PlayerPawn,
+	const FModernHarryProperties& Properties
+)
+{
+	if( !ReadModernHarryBool(PlayerPawn,Properties.AutoCenterCamera) )
+		return;
+	GModernAutoCenterOverride.PlayerPawn = PlayerPawn;
+	GModernAutoCenterOverride.Property = Properties.AutoCenterCamera;
+	GModernAutoCenterOverride.SavedValue = 1;
+	WriteModernHarryBool( PlayerPawn, Properties.AutoCenterCamera, 0 );
+}
+
+static FLOAT ExpandModernAnalogMovement
+(
+	FLOAT Value,
+	FLOAT DeltaSeconds,
+	FLOAT MaxAnalogFrameContribution,
+	FLOAT Scale
+)
+{
+	if( DeltaSeconds<=0.f || Abs(Value * DeltaSeconds)>MaxAnalogFrameContribution + 0.0001f )
+		return Value;
+	// A normalized SDL axis contributes at most 0.2*Speed before UInput divides by DeltaSeconds.
+	// Classify in that pre-divide domain so full-stick response stays monotonic at every frame rate.
+	return Value * DeltaSeconds * Scale;
 }
 
 static UObject* ReadModernHarryObject( const APlayerPawn* PlayerPawn, const UObjectProperty* Property )
@@ -121,6 +173,8 @@ static FModernHarryProperties* GetModernHarryProperties( APlayerPawn* PlayerPawn
 		if( !Properties.IsAiming && !MissingProperty ) MissingProperty = TEXT("bIsAiming");
 		Properties.E3DemoLockout = FindField<UBoolProperty>( HarryClass, TEXT("bE3DemoLockout") );
 		if( !Properties.E3DemoLockout && !MissingProperty ) MissingProperty = TEXT("bE3DemoLockout");
+		Properties.AutoCenterCamera = FindField<UBoolProperty>( HarryClass, TEXT("bAutoCenterCamera") );
+		if( !Properties.AutoCenterCamera && !MissingProperty ) MissingProperty = TEXT("bAutoCenterCamera");
 		Properties.BossTarget = FindField<UObjectProperty>( HarryClass, TEXT("BossTarget") );
 		if( !Properties.BossTarget && !MissingProperty ) MissingProperty = TEXT("BossTarget");
 
@@ -244,7 +298,8 @@ void APlayerPawn::FinishModernThirdPersonInput
 	FLOAT RawBaseX,
 	FLOAT RawStrafe,
 	FLOAT RawCameraYaw,
-	FLOAT RawCameraPitch
+	FLOAT RawCameraPitch,
+	FLOAT DeltaSeconds
 )
 {
 	guard(APlayerPawn::FinishModernThirdPersonInput);
@@ -257,21 +312,23 @@ void APlayerPawn::FinishModernThirdPersonInput
 		return;
 
 	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
-	if( ReadModernHarryBool(this,Properties->KeepStationary) )
+	if
+	(	ReadModernHarryBool(this,Properties->KeepStationary)
+	||	!IsModernThirdPersonContext(this,*Properties) )
 	{
 		aForward = 0.f;
 		aStrafe = 0.f;
 		aSideMove = 0.f;
 		return;
 	}
-	if( !IsModernThirdPersonContext(this,*Properties) )
-		return;
 
 	const FLOAT CameraScale = DesiredFOV * 0.01111f;
 	SmoothMouseX += RawCameraYaw * CameraScale;
 	SmoothMouseY += RawCameraPitch * CameraScale;
 
-	FLOAT EffectiveSide = RawBaseX + 0.8f * RawStrafe;
+	RawBaseX = ExpandModernAnalogMovement( RawBaseX, DeltaSeconds, 0.2f, 20000.f ); // JoyX Speed=1 -> RotLeft/Right Speed=200.
+	aForward = ExpandModernAnalogMovement( aForward, DeltaSeconds, 0.4f, 15000.f ); // JoyY Speed=2 -> MoveForward Speed=300.
+	FLOAT EffectiveSide = 1.2f * RawBaseX + 0.8f * RawStrafe;
 	if
 	(	(EffectiveSide<0.f && ReadModernHarryBool(this,Properties->LockOutStrafeLeft))
 	||	(EffectiveSide>0.f && ReadModernHarryBool(this,Properties->LockOutStrafeRight)) )
@@ -283,6 +340,7 @@ void APlayerPawn::FinishModernThirdPersonInput
 
 	aSideMove = EffectiveSide;
 	aStrafe = 1.25f * EffectiveSide;
+	SuppressModernAutoCenter( this, *Properties );
 	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 1 );
 
 	unguard;
@@ -291,6 +349,8 @@ void APlayerPawn::FinishModernThirdPersonInput
 void APlayerPawn::ApplyModernThirdPersonMovement()
 {
 	guard(APlayerPawn::ApplyModernThirdPersonMovement);
+
+	RestoreModernAutoCenter( this );
 
 	if( !bModernThirdPersonControls )
 		return;

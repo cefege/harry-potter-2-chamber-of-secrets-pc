@@ -40,6 +40,10 @@ option(HP2_REQUIRE_IMPLEMENTED_SOURCES
 )
 option(HP2_ENABLE_ASAN_UBSAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(HP2_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+option(HP2_ENABLE_FULL_MAP_SMOKE
+    "Register the full playable-map renderer sweep (long; opt-in preset)"
+    OFF
+)
 
 if(HP2_ENABLE_ASAN_UBSAN AND HP2_ENABLE_TSAN)
     message(FATAL_ERROR "ASan+UBSan and TSan configurations are mutually exclusive.")

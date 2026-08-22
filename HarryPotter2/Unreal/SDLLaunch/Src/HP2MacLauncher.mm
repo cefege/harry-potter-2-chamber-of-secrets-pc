@@ -569,6 +569,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 - (IBAction)saveSelectionChanged:(id)sender;
 - (IBAction)displayModeChanged:(id)sender;
 - (void)rebuildResolutionPopupForMode:(HP2Launcher::ScreenMode)mode;
+- (IBAction)controlModeChanged:(id)sender;
 - (IBAction)soundEnabledChanged:(id)sender;
 - (IBAction)sliderChanged:(id)sender;
 - (HP2Launcher::DataSource)selectedDataSource;
@@ -1210,13 +1211,15 @@ bool CopyCocoaString(NSString* value, std::string& result)
 {
 	_controlModePopup = [self popupWithAccessibilityLabel:@"Control style"];
 	AddTaggedPopupItem(_controlModePopup, @"Classic", static_cast<NSInteger>(HP2Launcher::ControlMode::Classic));
+	_controlModePopup.target = self;
+	_controlModePopup.action = @selector(controlModeChanged:);
 	AddTaggedPopupItem(_controlModePopup, @"Modern", static_cast<NSInteger>(HP2Launcher::ControlMode::Modern));
 	if (!SelectPopupItemWithTag(_controlModePopup, static_cast<NSInteger>(_request->settings.controlMode)))
 	{
 		SelectPopupItemWithTag(_controlModePopup, static_cast<NSInteger>(HP2Launcher::ControlMode::Classic));
 	}
 	[_controlModePopup setAccessibilityHelp:
-		@"Modern uses camera-relative movement, makes Harry face the direction of travel, and maps the right stick to the camera without changing movement speed."];
+		@"Modern keeps the camera in free orbit without movement recentering, uses camera-relative movement, and maps the right stick to the camera without changing top speed."];
 
 	_mouseSensitivitySlider = [self
 		sliderWithMinimum:MinimumMouseSensitivity
@@ -1239,6 +1242,8 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	_autoCenterCameraCheckbox = [self checkboxWithTitle:@"Auto-Center Camera" action:nil];
 	_autoCenterCameraCheckbox.state = _request->settings.autoCenterCamera
 		? NSControlStateValueOn : NSControlStateValueOff;
+	[_autoCenterCameraCheckbox setAccessibilityHelp:
+		@"Classic can recenter camera pitch while Harry moves. Modern always keeps movement from recentering the camera."];
 	_moveWhileCastingCheckbox = [self checkboxWithTitle:@"Move While Casting" action:nil];
 	_moveWhileCastingCheckbox.state = _request->settings.moveWhileCasting
 		? NSControlStateValueOn : NSControlStateValueOff;
@@ -1284,6 +1289,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 		_screenFlashesCheckbox,
 		_difficultyPopup
 	];
+	[self controlModeChanged:nil];
 	return [self scrollViewForForm:form];
 }
 
@@ -2031,6 +2037,15 @@ bool CopyCocoaString(NSString* value, std::string& result)
 		[_resolutionPopup setAccessibilityHelp:
 			@"Borderless Desktop always uses the main display's current logical resolution."];
 	}
+	[self updateKeyViewLoop];
+}
+
+- (IBAction)controlModeChanged:(id)sender
+{
+	(void)sender;
+	const BOOL modern =
+		_controlModePopup.selectedItem.tag == static_cast<NSInteger>(HP2Launcher::ControlMode::Modern);
+	_autoCenterCameraCheckbox.enabled = !modern;
 	[self updateKeyViewLoop];
 }
 

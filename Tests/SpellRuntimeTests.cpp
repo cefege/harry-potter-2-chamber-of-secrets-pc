@@ -104,6 +104,7 @@ namespace
 		static const TCHAR* RequiredHarryBools[] =
 		{
 			TEXT("bScreenRelativeMovement"),
+			TEXT("bAutoCenterCamera"),
 			TEXT("bLockedOnTarget"),
 			TEXT("bFixedFaceDirection"),
 			TEXT("bInDuelingMode"),

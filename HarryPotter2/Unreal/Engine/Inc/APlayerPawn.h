@@ -12,7 +12,7 @@
 	// APlayerPawn interface.
 	void SetPlayer( UPlayer* Player );
 	UBOOL BeginModernThirdPersonInput( FLOAT& RawBaseX, FLOAT& RawStrafe, FLOAT& RawCameraYaw, FLOAT& RawCameraPitch );
-	void FinishModernThirdPersonInput( UBOOL Active, FLOAT RawBaseX, FLOAT RawStrafe, FLOAT RawCameraYaw, FLOAT RawCameraPitch );
+	void FinishModernThirdPersonInput( UBOOL Active, FLOAT RawBaseX, FLOAT RawStrafe, FLOAT RawCameraYaw, FLOAT RawCameraPitch, FLOAT DeltaSeconds );
 	void ApplyModernThirdPersonMovement();
 
 

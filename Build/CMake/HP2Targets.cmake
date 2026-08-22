@@ -450,6 +450,37 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests)
 endif()
 
+# Deterministic renderer smoke tiers. The commit gate runs a fixed three-map
+# subset; the full sweep is registered under the smoke-full label and
+# excluded from default test presets because it launches every playable map.
+# Both require the installed app bundle and prototype data at configure time;
+# without them the tests are not silently skipped, they simply do not exist,
+# which the verification docs call out as a configuration gap.
+if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
+        AND EXISTS "${HP2_UNREAL_ROOT}/System/Default.ini")
+    hp2_add_behavior_test(renderer_smoke_xopengl "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
+        "--renderer=xopengl"
+        "--maps=PrivetDr,Entry,Ch2Skurge"
+        "--ticks=120"
+        "--timeout=90"
+        "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_xopengl/smoke-maps.json"
+    )
+    if(HP2_ENABLE_FULL_MAP_SMOKE)
+        hp2_add_behavior_test(renderer_smoke_full "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
+            "--renderer=xopengl"
+            "--ticks=300"
+            "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_full/smoke-maps.json"
+        )
+        set_tests_properties(renderer_smoke_full PROPERTIES
+            LABELS "smoke;renderer;xopengl;smoke-full"
+            RESOURCE_LOCK hp2_gpu
+            TIMEOUT 14400
+        )
+    endif()
+endif()
+
 # ABI and registration checks are prerequisites for package/runtime tests.
 # Codec tests are otherwise independent; audio lifecycle additionally requires
 # the decoder and native registration contracts.

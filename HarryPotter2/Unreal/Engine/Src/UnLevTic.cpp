@@ -375,7 +375,7 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 				RawBaseX,RawStrafe,RawCameraYaw,RawCameraPitch);
 			PlayerPawn->eventPlayerInput( DeltaSeconds );
 			PlayerPawn->FinishModernThirdPersonInput(
-				ModernThirdPersonInput,RawBaseX,RawStrafe,RawCameraYaw,RawCameraPitch);
+				ModernThirdPersonInput,RawBaseX,RawStrafe,RawCameraYaw,RawCameraPitch,DeltaSeconds);
 			PlayerPawn->eventPlayerTick( DeltaSeconds );
 			PlayerPawn->ApplyModernThirdPersonMovement();
 			PlayerPawn->Player->ReadInput( -1.0f );

@@ -95,7 +95,7 @@ FULL_DEFAULT_MERGES = (
 FULL_DEFUSER_MERGES = (
     "base: prototype System/DefUser.ini, retaining prototype controller fallback",
     "Engine.Input: retail final keyboard/mouse broom, map, cutscene, potion, and duel bindings",
-    "Engine.PlayerPawn: retail ObjectDetailMedium",
+    "Engine.PlayerPawn: retail ObjectDetailMedium and Modern controls disabled by default",
     "HGame.Harry: retail final difficulty damage multipliers",
 )
 RETAIL_ONLY_DEFAULT_MERGES = (
@@ -112,7 +112,7 @@ RETAIL_ONLY_DEFAULT_MERGES = (
 RETAIL_ONLY_DEFUSER_MERGES = (
     "base: retail System/DefUser.ini; no prototype bytes",
     "Engine.Input: retail final keyboard/mouse broom, map, cutscene, potion, and duel bindings",
-    "Engine.PlayerPawn: retail ObjectDetailMedium",
+    "Engine.PlayerPawn: retail ObjectDetailMedium and Modern controls disabled by default",
     "HGame.Harry: retail final difficulty damage multipliers",
 )
 SAFE_DEFAULT_MERGES = (
@@ -124,7 +124,7 @@ SAFE_DEFAULT_MERGES = (
     "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
 )
 SAFE_DEFUSER_MERGES = (
-    "prototype System/DefUser.ini unchanged; prototype controller and gameplay bindings retained",
+    "base: prototype System/DefUser.ini with Modern controls disabled; prototype bindings retained",
 )
 
 
@@ -736,6 +736,7 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
 
 def build_defuser_ini(template_path: Path, retail_path: Path, profile: str) -> bytes:
     lines = decode_ini(template_path)
+    set_ini_value(lines, "Engine.PlayerPawn", "bModernThirdPersonControls", "False")
     if profile == "safe":
         return encode_ini(lines)
     retail_lines = decode_ini(retail_path)
@@ -829,6 +830,8 @@ def validate_defuser_ini(lines: list[str], retail_lines: list[str]) -> None:
     ):
         if ini_value(lines, "Engine.Input", key) != ini_value(retail_lines, "Engine.Input", key):
             error(f"retail final binding was not merged: [Engine.Input] {key}")
+    if ini_value(lines, "Engine.PlayerPawn", "bModernThirdPersonControls") != "False":
+        error("Modern controls must default to False")
     if ini_value(lines, "Engine.PlayerPawn", "ObjectDetail") != "ObjectDetailMedium":
         error("retail ObjectDetailMedium was not merged")
     expected_damage = {"fDamageMultiplier_Easy": "1.2", "fDamageMultiplier_Medium": "2.0", "fDamageMultiplier_Hard": "3.0"}
