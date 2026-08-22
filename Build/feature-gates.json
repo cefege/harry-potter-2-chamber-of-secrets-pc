@@ -1,0 +1,15 @@
+{
+  "format": "hp2-feature-gates",
+  "schema_version": 1,
+  "gates": {
+    "native_text": {
+      "state": "experimental",
+      "default_enabled": false,
+      "promotion_evidence": [
+        "fast semantic contracts",
+        "renderer smoke incl. reset/resize",
+        "visual baseline matrix (retail)"
+      ]
+    }
+  }
+}

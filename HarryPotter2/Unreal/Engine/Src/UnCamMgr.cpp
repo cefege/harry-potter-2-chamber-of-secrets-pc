@@ -76,7 +76,10 @@ void UClient::StaticConstructor()
 	new(GetClass(),TEXT("ShowFPS"),				RF_Public)UBoolProperty (CPP_PROPERTY(ShowFPS				), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("ParticleDensity"),		RF_Public)UIntProperty  (CPP_PROPERTY(ParticleDensity		), TEXT("Display"), CPF_Config );
 	MaintainVerticalFOV = 1;
-	NativeText = 1;
+	// Native text is an experimental, opt-in feature gate: bitmap fonts remain
+	// the default compatibility path. Users enable it explicitly with
+	// [Display] NativeText=True after the gate reaches default-enabled state.
+	NativeText = 0;
 	ShowFPS = 0;
 
 	unguard;
