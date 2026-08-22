@@ -1,0 +1,184 @@
+{
+  "cases": [
+    {
+      "expectation": "parses_and_loads",
+      "file": "Save0.usa",
+      "invariant": "save.package79.golden_parses",
+      "kind": "golden",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "package_stem": "Save0",
+      "sha256": "6a1169edb582c55f196e0c9fdc92385b6aa8ef27934e2521a261451048f49dc9",
+      "size": 168
+    },
+    {
+      "expectation": "parses_and_loads",
+      "file": "Save1.usa",
+      "invariant": "save.package79.golden_parses",
+      "kind": "golden",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "package_stem": "Save1",
+      "sha256": "516e5fc51f2b32045eddd849423440936cf1e8f0320e23dd9aac4c08f835c030",
+      "size": 267
+    },
+    {
+      "expectation": "parses_and_loads",
+      "file": "Save2.usa",
+      "invariant": "save.package79.golden_parses",
+      "kind": "golden",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "package_stem": "Save2",
+      "sha256": "f2e4f6ccc73d76946a172084b0dd8983401e6e6cdce66de343c23ec84f2f8c61",
+      "size": 216
+    },
+    {
+      "base": "Save0.usa",
+      "corruption": "package tag overwritten with 0xDEADBEEF",
+      "expectation": "rejected",
+      "file": "bad_magic.usa",
+      "invariant": "save.package79.header.tag",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "bad package tag",
+      "reason_code": "header.bad_tag",
+      "sha256": "7c46585fc8abc4ea8b5a2be3d7e62cd096e91723b27525fd89935b6b22bbf986",
+      "size": 168
+    },
+    {
+      "base": "Save0.usa",
+      "corruption": "version word rewritten from 79 to 80",
+      "expectation": "rejected",
+      "file": "bad_version.usa",
+      "invariant": "save.package79.header.version",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "unsupported version/licensee 80/0",
+      "reason_code": "header.bad_version",
+      "sha256": "3b4ca0068a75c2f53fd0e3cf0401249a592de44d10001d48ff49e91e3ba58133",
+      "size": 168
+    },
+    {
+      "base": "Save0.usa",
+      "corruption": "licensee word rewritten from 0 to 1",
+      "expectation": "rejected",
+      "file": "bad_licensee.usa",
+      "invariant": "save.package79.header.licensee",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "unsupported version/licensee 79/1",
+      "reason_code": "header.bad_licensee",
+      "sha256": "d0365b83346150a63083602ac5b069875950228e2cb16c00d94cfa02bf2f1480",
+      "size": 168
+    },
+    {
+      "base": "Save0.usa",
+      "corruption": "summary name count zeroed (offset 12)",
+      "expectation": "rejected",
+      "file": "zeroed_name_count.usa",
+      "invariant": "save.package79.header.generation_consistency",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "latest generation counts disagree with summary",
+      "reason_code": "header.generation_disagreement",
+      "sha256": "4128ed89434e4b07326210db7c9cd0ffe93658c47b413187a620e0240984e196",
+      "size": 168
+    },
+    {
+      "base": "Save1.usa",
+      "corruption": "second import outer_ref rewritten to 99999",
+      "expectation": "rejected",
+      "file": "dangling_import_outer.usa",
+      "invariant": "save.package79.table.reference_integrity",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "is out of range",
+      "reason_code": "table.dangling_reference",
+      "sha256": "d9b77a36539c245c74e4fc984e65d7189a6c70aa2059ab155cd26667a40b898e",
+      "size": 267
+    },
+    {
+      "base": "Save1.usa",
+      "corruption": "final 8 bytes removed",
+      "expectation": "rejected",
+      "file": "truncated_tail.usa",
+      "invariant": "save.package79.structure.export_table_complete",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "truncated export table",
+      "reason_code": "structure.truncated_export_table",
+      "sha256": "e7b67665d77f68810734aeb13efa829c526d03027deac3d39f7e1dd8720dcf1c",
+      "size": 259
+    },
+    {
+      "base": null,
+      "corruption": "zero-byte file",
+      "expectation": "rejected",
+      "file": "empty.usa",
+      "invariant": "save.package79.structure.summary_present",
+      "kind": "corrupt",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "message_contains": "truncated package summary",
+      "reason_code": "structure.truncated_summary",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "base": "Save1.usa",
+      "corruption": "one payload bit flipped mid-export",
+      "detail": "package-79 carries no checksum; the structural reader accepts this file. Only the export payload sha256 changes, which is why repair_save re-saves through the native loader instead of patching bytes.",
+      "expectation": "parses_structurally_corruption_undetectable",
+      "file": "flipped_payload_bit.usa",
+      "flipped_offset": 190,
+      "invariant": "save.package79.payload.no_checksum_coverage",
+      "kind": "probe",
+      "labels": {
+        "data_profile": "data-none",
+        "layer": "integration"
+      },
+      "reason_code": "payload.no_checksum_coverage",
+      "sha256": "f621b050d0bf76189a1051c3953b7bfcd42313aba6011051fd9716ad9df9036f",
+      "size": 267
+    }
+  ],
+  "data_profile": "data-none",
+  "format": "hp2-save-format-golden",
+  "generator": "Tests/SaveFormatTests.py",
+  "licensee_version": 0,
+  "notes": [
+    "Synthetic corpus: generic UE1 identifiers, arithmetic payloads, fixed GUIDs. No copyrighted game data.",
+    "package-79 has no checksum field anywhere in the format; see the flipped_payload_bit.usa probe case."
+  ],
+  "package_tag_hex": "0x9e2a83c1",
+  "package_version": 79,
+  "regenerate_command": "python3 Tests/SaveFormatTests.py --generate",
+  "schema_version": 1
+}

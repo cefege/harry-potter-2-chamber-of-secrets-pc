@@ -504,6 +504,14 @@ endif()
 hp2_add_behavior_test(prototype_archive_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/PrototypeArchiveTests.py"
 )
+hp2_add_behavior_test(save_format_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/SaveFormatTests.py"
+)
+if(EXISTS "${HP2_UNREAL_ROOT}/System/CUTSCENES")
+    hp2_add_behavior_test(localization_contract "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/LocalizationTests.py"
+    )
+endif()
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests)
