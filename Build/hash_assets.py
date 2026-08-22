@@ -207,8 +207,32 @@ def _arguments() -> argparse.Namespace:
         default=DEFAULT_OUTPUT,
         help=f"manifest path, relative to the repository (default: {DEFAULT_OUTPUT})",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="compare regenerated hashes against the manifest instead of writing it",
+    )
     return parser.parse_args()
 
+
+
+def _read_manifest(path: Path) -> bytes:
+    try:
+        with open(path, "rb") as stream:
+            return stream.read()
+    except OSError as error:
+        raise ManifestError(f"cannot read manifest {path}: {error}") from error
+
+
+def _drift_summary(recorded: bytes, regenerated: bytes) -> list[str]:
+    recorded_rows = set(recorded.splitlines())
+    regenerated_rows = set(regenerated.splitlines())
+    drift: list[str] = []
+    for row in sorted(recorded_rows - regenerated_rows):
+        drift.append(f"recorded but not regenerated (stale or changed): {row.decode('utf-8', 'replace')}")
+    for row in sorted(regenerated_rows - recorded_rows):
+        drift.append(f"regenerated but not recorded (new or changed): {row.decode('utf-8', 'replace')}")
+    return drift
 
 def main() -> int:
     arguments = _arguments()
@@ -236,10 +260,30 @@ def main() -> int:
             must_exist=False,
         )
         contents = _manifest(repo_root, source)
-        _write_atomic(output, contents)
+        if arguments.check:
+            recorded = _read_manifest(output)
+        else:
+            _write_atomic(output, contents)
     except ManifestError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+
+    if arguments.check:
+        if recorded != contents:
+            for line in _drift_summary(recorded, contents):
+                print(line, file=sys.stderr)
+            print(
+                f"error: {output.relative_to(repo_root)} does not match the "
+                f"{len(contents.splitlines())} hashed assets; regenerate it "
+                "with Build/hash_assets.py",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"{output.relative_to(repo_root)} matches all "
+            f"{len(contents.splitlines())} asset hashes"
+        )
+        return 0
 
     print(f"wrote {len(contents.splitlines())} asset hashes to {output.relative_to(repo_root)}")
     return 0
