@@ -54,6 +54,16 @@ For archive-based validation, use the same `--archive` argument instead of `--re
 
 The importer writes `overlay-manifest.json` with per-file SHA-256 hashes, provenance, classifications, and profile metadata. A malformed or incomplete retail tree fails before launch rather than silently borrowing prototype files.
 
+## Data identity
+
+`overlay-manifest.json` is written and fully validated at import time: every
+file's SHA-256, provenance, classification, and profile metadata are recorded,
+and a malformed or incomplete tree fails the import instead of producing a
+silent mix of retail and prototype files. Runtime enforcement of these
+manifests is landing separately; until it ships, the runtime does not yet
+re-validate the manifest at launch, so treat import-time validation as the
+current integrity boundary.
+
 ## Run
 
 After a successful import, open:
