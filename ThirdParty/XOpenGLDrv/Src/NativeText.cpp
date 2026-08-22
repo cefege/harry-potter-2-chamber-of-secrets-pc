@@ -1736,9 +1736,78 @@ ENativeTextRole NativeTextRoleForFont(const UFont* Font)
 	return Font->FontName.Len() > 0 ? NTROLE_Console : NTROLE_Body;
 }
 
+// Availability is decided from facts the CoreText backend actually depends on:
+// a non-empty system font registry, a resolvable role font (never .LastResort),
+// and a CoreGraphics bitmap context for glyph rasterization.  Any miss reports
+// Unavailable with a stable reason code so the renderer falls back cleanly
+// instead of crashing during the first text layout.
+static bool NativeTextProbeAvailability(const char*& OutReasonCode)
+{
+	CFArrayRef FamilyNames = CTFontManagerCopyAvailableFontFamilyNames();
+	if (!FamilyNames || CFArrayGetCount(FamilyNames) == 0)
+	{
+		if (FamilyNames)
+			CFRelease(FamilyNames);
+		OutReasonCode = "text.fonts_unavailable";
+		return false;
+	}
+	CFRelease(FamilyNames);
+
+	CTFontRef RoleFont = CreateRoleFont(NTROLE_Body, 12);
+	if (!RoleFont)
+	{
+		OutReasonCode = "text.fonts_unavailable";
+		return false;
+	}
+	CFRelease(RoleFont);
+
+	CGColorSpaceRef ColorSpace = CGColorSpaceCreateDeviceRGB();
+	if (!ColorSpace)
+	{
+		OutReasonCode = "text.rasterizer_unavailable";
+		return false;
+	}
+	BYTE Pixel[4] = {0, 0, 0, 0};
+	CGContextRef Context = CGBitmapContextCreate(
+		Pixel,
+		1,
+		1,
+		8,
+		4,
+		ColorSpace,
+		kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	CGColorSpaceRelease(ColorSpace);
+	if (!Context)
+	{
+		OutReasonCode = "text.rasterizer_unavailable";
+		return false;
+	}
+	CGContextRelease(Context);
+
+	OutReasonCode = "text.ready";
+	return true;
+}
+
+FNativeTextPlatformBackend* CreateNativeTextPlatformBackend(FNativeTextBackendStatus& OutStatus)
+{
+	const char* ReasonCode = "text.internal_error";
+	if (!NativeTextProbeAvailability(ReasonCode))
+	{
+		// Unavailable platform text stack: hand back no backend at all so every
+		// per-draw call site keeps its existing Boolean fallback path.
+		OutStatus.Available = false;
+		OutStatus.ReasonCode = ReasonCode;
+		return NULL;
+	}
+
+	OutStatus.Available = true;
+	OutStatus.ReasonCode = ReasonCode;
+	return new FNativeTextCoreTextBackend;
+}
 FNativeTextPlatformBackend* CreateNativeTextPlatformBackend()
 {
-	return new FNativeTextCoreTextBackend;
+	FNativeTextBackendStatus Status;
+	return CreateNativeTextPlatformBackend(Status);
 }
 
 void BeginNativeTextRuntimeSmoke()
@@ -1789,6 +1858,7 @@ UBOOL NativeTextInspectLayoutForTests(const FCanvasTextLayout* Layout, FNativeTe
 	OutInfo.ClusterCount = static_cast<INT>(Layout->Clusters.size());
 	OutInfo.GlyphKeyCount = static_cast<INT>(Layout->Glyphs.size());
 	OutInfo.UnderlineCount = static_cast<INT>(Layout->Underlines.size());
+
 	std::unordered_set<std::string> Fonts;
 	uint64_t Fingerprint = 1469598103934665603ull;
 	auto Mix = [&Fingerprint](uint64_t Value)

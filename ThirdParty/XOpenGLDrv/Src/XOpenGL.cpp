@@ -562,7 +562,15 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 	}
 
 #if HP2_HAS_NATIVE_TEXT_BACKEND
-	NativeTextBackend = CreateNativeTextPlatformBackend();
+	FNativeTextBackendStatus BackendStatus;
+	NativeTextBackend = CreateNativeTextPlatformBackend(BackendStatus);
+	NativeTextBackendStatus = BackendStatus;
+	const FString NativeTextReason = BackendStatus.ReasonCode ? appFromAnsi(BackendStatus.ReasonCode) : FString(TEXT("unknown"));
+	debugf(TEXT("XOpenGL: native text backend %s (%s)"), BackendStatus.Available ? TEXT("ready") : TEXT("unavailable"), *NativeTextReason);
+#else
+	NativeTextBackendStatus.Available = false;
+	NativeTextBackendStatus.ReasonCode = "capability.compile_time_disabled";
+	debugf(TEXT("XOpenGL: native text backend unavailable (capability.compile_time_disabled)"));
 #endif
 
 

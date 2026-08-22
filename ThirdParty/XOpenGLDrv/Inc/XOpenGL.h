@@ -538,6 +538,7 @@ class UXOpenGLRenderDevice : public URenderDevice
 	UBOOL  SceneColorResolved;
 	UBOOL  LastFrameUsedUIComposite;
 	FNativeTextPlatformBackend* NativeTextBackend{};
+	FNativeTextBackendStatus NativeTextBackendStatus{false, "capability.compile_time_disabled"};
 
 	// Context specifics.
 	INT DesiredColorBits;

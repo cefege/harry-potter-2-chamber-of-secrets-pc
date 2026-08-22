@@ -35,8 +35,22 @@ public:
 	virtual UBOOL RunRuntimeSmoke( UXOpenGLRenderDevice& Renderer, FSceneNode* Frame ) { return 0; }
 };
 
-// Returns a CoreText implementation only in a capability-enabled build.  The
-// renderer owns the returned instance for the lifetime of its GL context.
+// Runtime availability report for the platform text stack.  Available=false
+// means the renderer must keep using the per-draw Boolean Canvas fallback;
+// ReasonCode is a stable dotted-lowercase diagnostic string backed by static
+// storage and safe to log or persist.
+struct FNativeTextBackendStatus
+{
+	bool Available;
+	const char* ReasonCode;
+};
+
+// Status-reporting factory.  Returns NULL on an unusable platform text stack,
+// filling OutStatus with a stable reason code; never crashes when unavailable.
+FNativeTextPlatformBackend* CreateNativeTextPlatformBackend( FNativeTextBackendStatus& OutStatus );
+
+// Source-compatibility wrapper around the status factory.  A NULL return means
+// unavailable; callers wanting the reason code use the overload above.
 FNativeTextPlatformBackend* CreateNativeTextPlatformBackend();
 
 ENativeTextRole NativeTextRoleForFont( const UFont* Font );
