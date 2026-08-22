@@ -372,6 +372,9 @@ hp2_add_behavior_test(dxt1_codec hp2_dxt1_tests)
 hp2_add_behavior_test(eaxa_decoder hp2_eaxa_tests)
 hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
+hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"
+)
 
 # ABI and registration checks are prerequisites for package/runtime tests.
 # Codec tests are otherwise independent; audio lifecycle additionally requires

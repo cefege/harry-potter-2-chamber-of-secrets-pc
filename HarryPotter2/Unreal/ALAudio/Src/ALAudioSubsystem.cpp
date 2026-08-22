@@ -112,7 +112,14 @@ void UALAudioSubsystem::Destroy()
 		Buffers.Empty();
 
 		for (i=0; i<Streams.Num(); i++ )
-			alDeleteBuffers( Streams(i).NumBuffers, &Streams(i).Buffer[0] );
+		{
+			if (Streams(i).Id)
+				GFileStream->DestroyStream(Streams(i).Id - 1, false);
+			if (Streams(i).NumBuffers)
+				alDeleteBuffers( Streams(i).NumBuffers, &Streams(i).Buffer[0] );
+			for (INT BufferIndex = 0; BufferIndex < MAX_BUFFERS_PER_STREAM; ++BufferIndex)
+				delete [] Streams(i).RefillData[BufferIndex];
+		}
 		Streams.Empty();
 
 		alcMakeContextCurrent( NULL );
@@ -343,19 +350,25 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				if (!PrimeData)
 					return false;
 
-				BYTE* StreamData = new BYTE[iStreamChunkSize];
-				if (!StreamData)
+				BYTE* RefillData[MAX_BUFFERS_PER_STREAM] = { NULL };
+				for (INT i = 0; i < MAX_BUFFERS_PER_STREAM; ++i)
 				{
-					delete [] PrimeData;
-					return false;
+					RefillData[i] = new BYTE[iStreamChunkSize];
+					if (!RefillData[i])
+					{
+						for (INT j = 0; j < i; ++j)
+							delete [] RefillData[j];
+						delete [] PrimeData;
+						return false;
+					}
 				}
 
 				OggVorbis_File* OggFile = new OggVorbis_File;
 				if (!OggFile)
 				{
-					delete [] StreamData;
+					for (INT i = 0; i < MAX_BUFFERS_PER_STREAM; ++i)
+						delete [] RefillData[i];
 					delete [] PrimeData;
-				
 					return false;
 				}
 
@@ -366,7 +379,8 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 					debugf( NAME_DevSound, TEXT("Failed to register sound: %s"), *Sound->Filename );
 
 					delete OggFile;
-					delete [] StreamData;
+					for (INT i = 0; i < MAX_BUFFERS_PER_STREAM; ++i)
+						delete [] RefillData[i];
 					delete [] PrimeData;
 
 					return false;
@@ -374,7 +388,7 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 
 				if ( ov_pcm_total(OggFile, -1) < iStreamChunkSize * MAX_BUFFERS_PER_STREAM )
 					debugf( NAME_DevSound, TEXT("Sound is too short for streaming: %s"), *Sound->Filename );
-				
+
 				vorbis_info *VorbisInfo = ov_info(OggFile, -1);
 
 				Sound->Duration			= ov_time_total(OggFile, -1);
@@ -387,7 +401,8 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 
 					GFileStream->DestroyStream( Id, false );
 					// A successful CreateStream transfers OggFile ownership to FFileStream.
-					delete [] StreamData;
+					for (INT i = 0; i < MAX_BUFFERS_PER_STREAM; ++i)
+						delete [] RefillData[i];
 					delete [] PrimeData;
 
 					return false;
@@ -396,7 +411,6 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 
 				ALStream& Stream		= Streams(iStreamIndex - 1);
 				Stream.Flags			= Flags;
-				Stream.Counter			= 0;
 				Stream.Id				= Id + 1;
 				Stream.Processed		= 0;
 				Stream.Alive			= 1;
@@ -406,7 +420,11 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				Stream.Name				= Sound->GetPathName();
 				Stream.StreamChunkSize	= iStreamChunkSize;
 				Stream.NumBuffers		= MAX_BUFFERS_PER_STREAM;
-				Stream.Data				= StreamData;
+				for (INT i = 0; i < Stream.NumBuffers; ++i)
+				{
+					Stream.RefillData[i] = RefillData[i];
+					Stream.BufferState[i] = QueuedNoPrefetch;
+				}
 
 				alGenBuffers( Stream.NumBuffers, &Stream.Buffer[0] );
 				alError(TEXT("Creating streaming buffer."));
@@ -417,7 +435,7 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 					Stream.Format = AL_FORMAT_MONO16;
 					break;
 				case 2:
-					Stream.Format = AL_FORMAT_STEREO16;				
+					Stream.Format = AL_FORMAT_STEREO16;
 					break;
 				default:
 					Stream.Format = 0;
@@ -427,9 +445,12 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 
 				for (INT i = 0; i < Stream.NumBuffers; i++)
 					alBufferData( Stream.Buffer[i], Stream.Format, PrimeData + i * iStreamChunkSize, iStreamChunkSize, Stream.Rate );
+				for (INT i = 0; i < Stream.NumBuffers; ++i)
+				{
+					if (GFileStream->RequestChunk(Stream.Id - 1, Stream.RefillData[i]))
+						Stream.BufferState[i] = QueuedPending;
+				}
 
-				// The initial request.  This replaces the Data sent in to CreateStream(), so we can now delete the old Data.
-				GFileStream->RequestChunks( Stream.Id - 1, 1, Stream.Data );
 
 				// error checking!!
 				delete [] PrimeData;
@@ -449,21 +470,20 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				if (!PrimeData)
 					return false;
 
-				//	Allocate streaming buffer (if required)
-				//
-				BYTE* StreamData;
+				BYTE* RefillData[MAX_BUFFERS_PER_STREAM] = { NULL };
 				if (bNeedsOngoingChunks)
 				{
-					StreamData = new BYTE[iStreamChunkSize];
-					if (!StreamData)
+					for (INT i = 0; i < iNumBuffers; ++i)
 					{
-						delete [] PrimeData;
-						return false;
+						RefillData[i] = new BYTE[iStreamChunkSize];
+						if (!RefillData[i])
+						{
+							for (INT j = 0; j < i; ++j)
+								delete [] RefillData[j];
+							delete [] PrimeData;
+							return false;
+						}
 					}
-				}
-				else
-				{
-					StreamData = NULL;
 				}
 
 				EFileStreamType Type = (Flags & SF_Looping) ? ST_XALooping :  ST_XA;
@@ -472,8 +492,8 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				{
 					debugf( NAME_DevSound, TEXT("Failed to register sound: %s"), Sound->GetName() );
 
-					if (StreamData)
-						delete [] StreamData;
+					for (INT i = 0; i < iNumBuffers; ++i)
+						delete [] RefillData[i];
 					delete [] PrimeData;
 
 					return false;
@@ -486,8 +506,8 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 					debugf( NAME_DevSound, TEXT("Failed to register sound: %s"), Sound->GetName() );
 
 					GFileStream->DestroyStream( Id, false );
-					if (StreamData)
-						delete [] StreamData;
+					for (INT i = 0; i < iNumBuffers; ++i)
+						delete [] RefillData[i];
 					delete [] PrimeData;
 
 					return false;
@@ -496,21 +516,21 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 
 				ALStream& Stream		= Streams(iStreamIndex - 1);
 				Stream.Flags			= Flags;
-				Stream.Counter			= 0;
 				Stream.Id				= Id + 1;
 				Stream.Processed		= 0;
-				Stream.Alive			= 1;
+				Stream.Alive			= bNeedsOngoingChunks;
 				Stream.Reset			= 0;
 				Stream.Rate				= Sound->raw_SampleRate;
 				Stream.Name				= Sound->GetPathName();
 				Stream.StreamChunkSize	= iStreamChunkSize;
 				Stream.NumBuffers		= iNumBuffers;
-				Stream.Data				= StreamData;
+				for (INT i = 0; i < Stream.NumBuffers; ++i)
+				{
+					Stream.RefillData[i] = RefillData[i];
+					Stream.BufferState[i] = QueuedNoPrefetch;
+				}
 
-				//	debugf( NAME_DevSound, TEXT("RegisterSound(): %s  CreateStream() returned %d,  GetNewStreamStruct() + 1 = %d "), Sound->GetName(), Id, iStreamIndex); 
-
-				//  May be NULL if sound is too small to stream.
-				//
+				//	debugf( NAME_DevSound, TEXT("RegisterSound(): %s  CreateStream() returned %d,  GetNewStreamStruct() + 1 = %d "), Sound->GetName(), Id, iStreamIndex);
 
 				alGenBuffers( Stream.NumBuffers, &Stream.Buffer[0] );
 				alError(TEXT("Creating streaming buffer."));
@@ -528,16 +548,17 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 					if (Sound->raw_NumChannels == 1)
 						Stream.Format = AL_FORMAT_MONO16;
 					else
-						Stream.Format = AL_FORMAT_STEREO16;				
+						Stream.Format = AL_FORMAT_STEREO16;
 				}
 
 				for (INT i = 0; i < Stream.NumBuffers; i++)
 					alBufferData( Stream.Buffer[i], Stream.Format, PrimeData + i * iStreamChunkSize, iStreamChunkSize, Stream.Rate );
+				for (INT i = 0; i < Stream.NumBuffers; ++i)
+				{
+					if (Stream.RefillData[i] && GFileStream->RequestChunk(Stream.Id - 1, Stream.RefillData[i]))
+						Stream.BufferState[i] = QueuedPending;
+				}
 
-				//	The initial chunk request (if necessary).
-				//
-				if (Stream.Data)
-					GFileStream->RequestChunks( Stream.Id - 1, 1, Stream.Data );
 
 				//	error checking!!
 				//
@@ -653,8 +674,8 @@ void UALAudioSubsystem::UnregisterSound(USound* Sound, INT Id)
 
 					alDeleteBuffers( Streams(i).NumBuffers, &Streams(i).Buffer[0] );
 					appMemzero( Streams(i).Buffer, sizeof(Streams(i).Buffer) );
-					if (Streams(i).Data)
-						delete [] Streams(i).Data;
+					for (INT BufferIndex = 0; BufferIndex < MAX_BUFFERS_PER_STREAM; ++BufferIndex)
+						delete [] Streams(i).RefillData[BufferIndex];
 					appMemzero( &Streams(i), sizeof(ALStream) );
 
 				}
@@ -671,8 +692,8 @@ void UALAudioSubsystem::UnregisterSound(USound* Sound, INT Id)
 
 				alDeleteBuffers( Streams(i).NumBuffers, &Streams(i).Buffer[0] );
 				appMemzero( Streams(i).Buffer, sizeof(Streams(i).Buffer) );
-				if (Streams(i).Data)
-					delete [] Streams(i).Data;
+				for (INT BufferIndex = 0; BufferIndex < MAX_BUFFERS_PER_STREAM; ++BufferIndex)
+					delete [] Streams(i).RefillData[BufferIndex];
 				appMemzero( &Streams(i), sizeof(ALStream) );
 	
 				Sound->UnbindStream(Id);
@@ -1458,80 +1479,95 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 				if (Sources(i).Flags & SF_Streaming)
 				{
 					guard(UpdateStreamingSounds);
-					INT Processed		= 0; 
-					UBOOL Alive			= false;
+					INT Processed = 0;
 
 					ALStream& Stream = Streams(Sources(i).Sound->GetHandle(Sources(i).Id) - 1);
 					alGetSourcei( Sources(i).Source, AL_BUFFERS_PROCESSED, &Processed );
-					
-					if ( Stream.Alive )
-						Alive = GFileStream->IsStreamAlive( Stream.Id - 1 );
-		
-					if (!Alive)
-					{
-					//	GFileStream->DestroyStream( Stream.Id - 1, false );
-					//	debugf(NAME_DevSound, TEXT("Stream not alive - %s"), Sources(i).Sound->GetName());
-						Stream.Alive = 0;
-					}
-					//debugf(NAME_DevSound, TEXT("Processed		= %i"), Processed);
-					//debugf(NAME_DevSound, TEXT("ChunksWaiting	= %i"), ChunksWaiting);
+
+					UBOOL TerminalObserved = !Stream.Alive;
 
 					alError(TEXT("Before queueing."),false);
-#if 1
-					if (Processed)
+					for (INT ProcessedIndex = 0; ProcessedIndex < Processed; ++ProcessedIndex)
 					{
-						guard(CheckRemainingChunks);
+						ALuint ProcessedBuffer = 0;
+						alSourceUnqueueBuffers(Sources(i).Source, 1, &ProcessedBuffer);
+						alError(TEXT("unqueueing"));
 
-						if ( GFileStream->ChunksRemaining(Stream.Id - 1) )
+						INT BufferIndex = INDEX_NONE;
+						for (INT Candidate = 0; Candidate < Stream.NumBuffers; ++Candidate)
 						{
-							//debugf(NAME_DevSound, TEXT("BufferData for %s - Slot = %i ChunksRemaining = %d  Time = %i"), Sources(i).Sound->GetName(), i, GFileStream->ChunksRemaining(Stream.Id - 1), (int)(appSeconds().GetFloat() * 1000));
-
-							GFileStream->DecrementChunkCount(Stream.Id - 1);
-
-							alSourceUnqueueBuffers( Sources(i).Source, 1, &Stream.Buffer[Stream.Counter] );
-							alError(TEXT("unqueueing"));
-							alBufferData( Stream.Buffer[Stream.Counter], Stream.Format, Stream.Data, Stream.StreamChunkSize, Stream.Rate );
-							alError(TEXT("bufferdata"));
-							alSourceQueueBuffers( Sources(i).Source, 1, &Stream.Buffer[Stream.Counter] );
-							alError(TEXT("queueing"));
-
-							++Stream.Counter %= Stream.NumBuffers;
+							if (Stream.Buffer[Candidate] == ProcessedBuffer)
+							{
+								BufferIndex = Candidate;
+								break;
+							}
 						}
+						check(BufferIndex != INDEX_NONE);
 
-						unguard;
-
-						guard(RequestChunks);
-						if (Alive && Stream.Data)
-						{
-							GFileStream->RequestChunks( Stream.Id - 1, 1, Stream.Data );
-						}
-						unguard;
+						if (Stream.BufferState[BufferIndex] == QueuedPending)
+							Stream.BufferState[BufferIndex] = FreePending;
+						else if (Stream.BufferState[BufferIndex] == QueuedReady)
+							Stream.BufferState[BufferIndex] = FreeReady;
+						else if (Stream.BufferState[BufferIndex] != QueuedNoPrefetch)
+							check(0);
 					}
-#else
-					if ( Processed && Alive )
+
+					void* CompletedDestination = NULL;
+					UBOOL CompletionTerminal = 0;
+					while (GFileStream->PopCompletedChunk(Stream.Id - 1, CompletedDestination, CompletionTerminal))
 					{
-						if ( ChunksWaiting )
+						INT BufferIndex = INDEX_NONE;
+						INT Matches = 0;
+						for (INT Candidate = 0; Candidate < Stream.NumBuffers; ++Candidate)
 						{
+							if (Stream.RefillData[Candidate] == CompletedDestination)
+							{
+								BufferIndex = Candidate;
+								++Matches;
+							}
+						}
+						check(Matches == 1);
+
+						if (Stream.BufferState[BufferIndex] == QueuedPending)
+							Stream.BufferState[BufferIndex] = QueuedReady;
+						else if (Stream.BufferState[BufferIndex] == FreePending)
+							Stream.BufferState[BufferIndex] = FreeReady;
+						else
+							check(0);
+
+						if (CompletionTerminal)
+						{
+							TerminalObserved = 1;
+							Stream.Alive = 0;
+						}
+					}
+
+					for (INT BufferIndex = 0; BufferIndex < Stream.NumBuffers; ++BufferIndex)
+					{
+						if (Stream.BufferState[BufferIndex] != FreeReady)
+							continue;
+
+						check(Stream.RefillData[BufferIndex] != NULL);
+						alBufferData(
+							Stream.Buffer[BufferIndex],
+							Stream.Format,
+							Stream.RefillData[BufferIndex],
+							Stream.StreamChunkSize,
+							Stream.Rate);
+						alError(TEXT("bufferdata"));
+						alSourceQueueBuffers(Sources(i).Source, 1, &Stream.Buffer[BufferIndex]);
+						alError(TEXT("queueing"));
+
+						if (!TerminalObserved
+							&& GFileStream->RequestChunk(Stream.Id - 1, Stream.RefillData[BufferIndex]))
+						{
+							Stream.BufferState[BufferIndex] = QueuedPending;
 						}
 						else
 						{
-							alSourceUnqueueBuffers( Sources(i).Source, 1, &Stream.Buffer[Stream.Counter] );
-							alError(TEXT("unqueueing"));
-							alBufferData( Stream.Buffer[Stream.Counter], Stream.Format, Stream.Data, Stream.StreamChunkSize, Stream.Rate );
-							alError(TEXT("bufferdata"));
-							alSourceQueueBuffers( Sources(i).Source, 1, &Stream.Buffer[Stream.Counter] );
-							alError(TEXT("queueing"));
-
-							debugf(NAME_DevSound, TEXT("BufferData for %s"), Sources(i).Sound->GetName());
-
-							if (Stream.Data)
-								GFileStream->RequestChunks( Stream.Id - 1, 1, Stream.Data );
-
-							//debugf(NAME_DevSound, TEXT("RequestChunks for %s, time = %d"), Sources(i).Sound->GetName(), (int)(appSeconds().GetFloat() * 10000));
-							++Stream.Counter %= Stream.NumBuffers;
+							Stream.BufferState[BufferIndex] = QueuedNoPrefetch;
 						}
 					}
-#endif
 					
 					if ( Stream.Reset )
 					{

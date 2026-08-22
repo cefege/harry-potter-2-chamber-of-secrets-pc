@@ -14,31 +14,26 @@ import argparse
 import json
 import os
 from pathlib import Path
-import plistlib
 import re
 import shutil
-import signal
-import stat
 import struct
-import subprocess
 import sys
-import tempfile
-import time
-from typing import BinaryIO, Iterator
+from typing import Iterator
 
 if __package__:
+    from . import game_test
     from . import package79_reference as _package79
 else:
+    import game_test
     import package79_reference as _package79
+
+SmokeError = game_test.GameTestError
 
 
 DEFAULT_APP = Path("dist/macos-arm64/HarryPotter2.app")
 DEFAULT_DATA_ROOT = Path("HarryPotter2/Unreal")
 DEFAULT_TICKS = 300
 DEFAULT_TIMEOUT_SECONDS = 120.0
-ARM64_CPU_TYPE = 0x0100000C
-TERMINATION_GRACE_SECONDS = 5.0
-KILL_GRACE_SECONDS = 5.0
 REPORT_FORMAT_VERSION = 2
 SUPPORTED_MAP_VERSIONS = frozenset((76, 79))
 MAP_CLASSIFICATIONS = (
@@ -69,242 +64,8 @@ STRUCT_PROPERTY_TYPE = 10
 STR_PROPERTY_TYPE = 13
 PACKAGE_ASSET_SUFFIXES = frozenset((".u", ".utx", ".uax"))
 
-# ScriptWarning is included deliberately: UE1 reports runtime script faults such
-# as Accessed None through that channel even though the label says "warning".
-FAILURE_MARKER_PATTERNS: dict[str, tuple[str, ...]] = {
-    "script": (
-        r"\bscript(?:error|exception|fatal)\b",
-        r"\bscript(?:ing)?\s+(?:error|exception|failure|failed)\b",
-        r"\bscriptwarning\s*:",
-        r"\baccessed\s+none\b",
-    ),
-    "native": (
-        r"\bnative(?:error|exception|fatal)\b",
-        r"\bnative\s+(?:error|exception|failure|failed)\b",
-        r"\b(?:segmentation fault|bus error|illegal instruction|abort trap)\b",
-        r"\buncaught\s+(?:c\+\+\s+)?exception\b",
-        r"\bterminate called\b",
-    ),
-    "package": (
-        r"\bpackage(?:error|exception|fatal)\b",
-        r"\bpackage\s+(?:error|exception|failure|failed)\b",
-        r"\b(?:failed|unable) to (?:load|find) (?:file for )?package\b",
-        r"\bcan(?:not|'t) (?:find|resolve) (?:file for )?package\b",
-        r"\bpackage\b.*\b(?:not found|is corrupt|version mismatch)\b",
-    ),
-    "render": (
-        r"\b(?:render|renderer|rendering)(?:error|exception|fatal)\b",
-        r"\b(?:render|renderer|rendering)\s+(?:error|exception|failure|failed)\b",
-        r"\b(?:xopengl|opengl|vulkan|gl)\s+(?:error|exception|failure|failed)\b",
-        r"\bfailed to (?:initialize|initialise|create)\b.*\b(?:renderer|rendering|opengl|vulkan|context)\b",
-        r"\bvulkan validation (?:error|failure)\b",
-        r"\bgl_invalid_(?:enum|value|operation|framebuffer_operation)\b",
-    ),
-    "assert": (
-        r"\bassert(?:ion)?\s*:",
-        r"\bassert(?:ion)?\s+(?:failed|failure)\b",
-        r"\bfailed assertion\b",
-        r"\bcheck\s+failed\b",
-    ),
-    "critical": (
-        r"\bcritical error\b",
-        r"\bcritical\s*:",
-        r"\bfatal error\b",
-        r"\bappErrorf?\b",
-    ),
-}
-COMPILED_FAILURE_MARKERS = {
-    category: tuple(re.compile(pattern, re.IGNORECASE) for pattern in patterns)
-    for category, patterns in FAILURE_MARKER_PATTERNS.items()
-}
 
 
-class SmokeError(Exception):
-    """Raised when the harness cannot safely perform a complete sweep."""
-
-
-def _repo_root() -> Path:
-    try:
-        return Path(__file__).resolve(strict=True).parent.parent
-    except OSError as error:
-        raise SmokeError(f"cannot resolve the repository root: {error}") from error
-
-
-def _resolve_path(value: Path, repo_root: Path, *, strict: bool) -> Path:
-    expanded = value.expanduser()
-    candidate = expanded if expanded.is_absolute() else repo_root / expanded
-    try:
-        return candidate.resolve(strict=strict)
-    except OSError as error:
-        raise SmokeError(f"cannot resolve path {value}: {error}") from error
-
-
-def _display_path(path: Path, repo_root: Path) -> str:
-    try:
-        return path.relative_to(repo_root).as_posix()
-    except ValueError:
-        return str(path)
-
-
-def _bundle_executable(app: Path) -> Path:
-    if app.is_file():
-        executable = app
-    elif app.is_dir():
-        info_path = app / "Contents" / "Info.plist"
-        try:
-            with info_path.open("rb") as stream:
-                info = plistlib.load(stream)
-        except (OSError, plistlib.InvalidFileException) as error:
-            raise SmokeError(f"cannot read app metadata {info_path}: {error}") from error
-
-        executable_name = info.get("CFBundleExecutable")
-        if (
-            not isinstance(executable_name, str)
-            or not executable_name
-            or Path(executable_name).name != executable_name
-        ):
-            raise SmokeError(
-                f"invalid CFBundleExecutable in {info_path}: {executable_name!r}"
-            )
-        executable = app / "Contents" / "MacOS" / executable_name
-    else:
-        raise SmokeError(f"app path is neither an app bundle nor an executable: {app}")
-
-    try:
-        executable = executable.resolve(strict=True)
-        mode = executable.stat().st_mode
-    except OSError as error:
-        raise SmokeError(f"cannot inspect app executable {executable}: {error}") from error
-    if not stat.S_ISREG(mode):
-        raise SmokeError(f"app executable is not a regular file: {executable}")
-    if not os.access(executable, os.X_OK):
-        raise SmokeError(f"app executable is not executable: {executable}")
-    return executable
-
-
-def _thin_header_cpu(stream: BinaryIO, offset: int, size: int) -> int:
-    if size < 8:
-        raise SmokeError("Mach-O slice is too small to contain a header")
-    stream.seek(offset)
-    header = stream.read(8)
-    if len(header) != 8:
-        raise SmokeError("cannot read complete Mach-O slice header")
-
-    magic = header[:4]
-    if magic == b"\xcf\xfa\xed\xfe":
-        endian = "<"
-    elif magic == b"\xfe\xed\xfa\xcf":
-        endian = ">"
-    elif magic in (b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xce"):
-        raise SmokeError("app executable contains a 32-bit Mach-O slice")
-    else:
-        raise SmokeError(f"unrecognized Mach-O slice magic {magic.hex()}")
-    return struct.unpack(f"{endian}I", header[4:8])[0]
-
-
-def _validate_native_arm64(executable: Path) -> None:
-    try:
-        file_size = executable.stat().st_size
-        with executable.open("rb") as stream:
-            header = stream.read(8)
-            if len(header) != 8:
-                raise SmokeError(f"app executable is too small to be Mach-O: {executable}")
-
-            magic = header[:4]
-            if magic in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"):
-                cpu_type = _thin_header_cpu(stream, 0, file_size)
-                if cpu_type != ARM64_CPU_TYPE:
-                    raise SmokeError(
-                        f"app executable is not arm64 (Mach-O CPU type 0x{cpu_type:08x}): "
-                        f"{executable}"
-                    )
-                return
-
-            fat_formats = {
-                b"\xca\xfe\xba\xbe": (">", False),
-                b"\xbe\xba\xfe\xca": ("<", False),
-                b"\xca\xfe\xba\xbf": (">", True),
-                b"\xbf\xba\xfe\xca": ("<", True),
-            }
-            fat_format = fat_formats.get(magic)
-            if fat_format is None:
-                raise SmokeError(
-                    f"app executable is not a recognized Mach-O binary: {executable}"
-                )
-
-            endian, is_64_bit_fat = fat_format
-            architecture_count = struct.unpack(f"{endian}I", header[4:8])[0]
-            entry_size = 32 if is_64_bit_fat else 20
-            if architecture_count == 0:
-                raise SmokeError("fat Mach-O app executable contains no architectures")
-            if architecture_count > (file_size - 8) // entry_size:
-                raise SmokeError("fat Mach-O architecture table extends past end of file")
-
-            architectures: list[tuple[int, int, int]] = []
-            for _ in range(architecture_count):
-                entry = stream.read(entry_size)
-                if len(entry) != entry_size:
-                    raise SmokeError("cannot read complete fat Mach-O architecture table")
-                if is_64_bit_fat:
-                    cpu_type, _subtype, offset, size, _align, _reserved = struct.unpack(
-                        f"{endian}IIQQII", entry
-                    )
-                else:
-                    cpu_type, _subtype, offset, size, _align = struct.unpack(
-                        f"{endian}IIIII", entry
-                    )
-                architectures.append((cpu_type, offset, size))
-
-            for cpu_type, offset, size in architectures:
-                if cpu_type != ARM64_CPU_TYPE:
-                    raise SmokeError(
-                        "app executable contains a non-arm64 Mach-O slice "
-                        f"(CPU type 0x{cpu_type:08x})"
-                    )
-                if offset > file_size or size > file_size - offset:
-                    raise SmokeError("fat Mach-O slice extends past end of file")
-                slice_cpu_type = _thin_header_cpu(stream, offset, size)
-                if slice_cpu_type != ARM64_CPU_TYPE:
-                    raise SmokeError("fat Mach-O table and slice CPU types disagree")
-    except SmokeError:
-        raise
-    except (OSError, struct.error) as error:
-        raise SmokeError(f"cannot parse app executable {executable}: {error}") from error
-
-
-def _map_files(directory: Path) -> Iterator[Path]:
-    try:
-        entries = sorted(
-            os.scandir(directory), key=lambda entry: os.fsencode(entry.name)
-        )
-    except OSError as error:
-        raise SmokeError(f"cannot enumerate data directory {directory}: {error}") from error
-
-    for entry in entries:
-        path = Path(entry.path)
-        try:
-            if entry.is_dir(follow_symlinks=False):
-                yield from _map_files(path)
-            elif entry.is_file(follow_symlinks=False) and entry.name[-4:].lower() == ".unr":
-                yield path
-            elif entry.is_symlink() and entry.name[-4:].lower() == ".unr":
-                raise SmokeError(f"refusing symlinked map: {path}")
-        except OSError as error:
-            raise SmokeError(f"cannot inspect data path {path}: {error}") from error
-
-
-def _enumerate_maps(data_root: Path) -> list[tuple[Path, str]]:
-    maps: list[tuple[Path, str]] = []
-    for path in _map_files(data_root):
-        try:
-            relative = path.relative_to(data_root).as_posix()
-        except ValueError as error:
-            raise SmokeError(f"map resolves outside data root: {path}") from error
-        maps.append((path, relative))
-    maps.sort(key=lambda item: os.fsencode(item[1]))
-    if not maps:
-        raise SmokeError(f"no .unr maps found under data root {data_root}")
-    return maps
 
 
 def _read_package(path: Path, relative: str) -> tuple[bytes, dict[str, object]]:
@@ -753,12 +514,6 @@ def _classify_map_package(
     evidence["rule"] = "conservative-playable-fallback"
 
 
-def _map_token(path: Path, data_root: Path) -> str:
-    # FURL treats forward slashes as URL/portal delimiters. Backslashes survive
-    # URL parsing, then FFileManagerUnix normalizes them to POSIX separators.
-    system_directory = data_root / "System"
-    relative = os.path.relpath(path, system_directory)
-    return relative.replace(os.sep, "\\")
 
 
 def _log_directory(output: Path) -> Path:
@@ -778,131 +533,6 @@ def _replace_log_directory(directory: Path) -> None:
         raise SmokeError(f"cannot replace log directory {directory}: {error}") from error
 
 
-def _write_atomic(path: Path, contents: bytes) -> None:
-    temporary: Path | None = None
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="wb", prefix=f".{path.name}.", dir=path.parent, delete=False
-        ) as stream:
-            temporary = Path(stream.name)
-            stream.write(contents)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.chmod(temporary, 0o644)
-        os.replace(temporary, path)
-    except OSError as error:
-        raise SmokeError(f"cannot write {path}: {error}") from error
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink(missing_ok=True)
-            except OSError:
-                pass
-
-
-def _group_exists(process_group: int) -> bool:
-    try:
-        os.killpg(process_group, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def _signal_group(process_group: int, requested_signal: signal.Signals) -> str | None:
-    try:
-        os.killpg(process_group, requested_signal)
-        return None
-    except ProcessLookupError:
-        return None
-    except OSError as error:
-        return f"cannot send {requested_signal.name} to process group: {error}"
-
-
-def _wait_for_group_exit(process_group: int, seconds: float) -> bool:
-    deadline = time.monotonic() + seconds
-    while _group_exists(process_group):
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(0.05)
-    return True
-
-
-def _stop_remaining_group(process_group: int) -> tuple[str, str | None]:
-    if not _group_exists(process_group):
-        return "none", None
-
-    error = _signal_group(process_group, signal.SIGTERM)
-    if error is None and _wait_for_group_exit(process_group, TERMINATION_GRACE_SECONDS):
-        return "sigterm", None
-
-    kill_error = _signal_group(process_group, signal.SIGKILL)
-    errors = [message for message in (error, kill_error) if message]
-    if _wait_for_group_exit(process_group, KILL_GRACE_SECONDS):
-        return "sigkill", "; ".join(errors) or None
-    errors.append("process group still exists after SIGKILL")
-    return "failed", "; ".join(errors)
-
-
-def _report_line(text: str, repo_root: Path, isolated_home: Path) -> str:
-    replacements = (
-        (str(isolated_home), "<isolated-home>"),
-        (str(repo_root) + os.sep, ""),
-    )
-    for source, replacement in replacements:
-        text = text.replace(source, replacement)
-    return text
-
-
-def _failure_markers(
-    output: bytes, repo_root: Path, isolated_home: Path
-) -> list[dict[str, object]]:
-    decoded = output.decode("utf-8", errors="replace")
-    markers: list[dict[str, object]] = []
-    for line_number, line in enumerate(decoded.splitlines(), start=1):
-        for category, patterns in COMPILED_FAILURE_MARKERS.items():
-            matching_pattern = next((pattern for pattern in patterns if pattern.search(line)), None)
-            if matching_pattern is None:
-                continue
-            reported = _report_line(line.strip(), repo_root, isolated_home)
-            truncated = len(reported) > 1000
-            markers.append(
-                {
-                    "category": category,
-                    "line": line_number,
-                    "pattern": matching_pattern.pattern,
-                    "text": reported[:1000],
-                    "truncated": truncated,
-                }
-            )
-    return markers
-
-
-def _isolated_environment(home: Path) -> dict[str, str]:
-    temporary = home / "tmp"
-    config = home / ".config"
-    cache = home / ".cache"
-    for directory in (temporary, config, cache):
-        directory.mkdir(parents=True, exist_ok=True)
-
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "HOME": str(home),
-            "CFFIXED_USER_HOME": str(home),
-            "TMPDIR": str(temporary) + os.sep,
-            "XDG_CONFIG_HOME": str(config),
-            "XDG_CACHE_HOME": str(cache),
-            "LANG": "C",
-            "LC_ALL": "C",
-            "TZ": "UTC",
-        }
-    )
-    return environment
-
-
 def _run_map(
     *,
     executable: Path,
@@ -916,191 +546,30 @@ def _run_map(
     log_path: Path,
     inspection: dict[str, object],
 ) -> dict[str, object]:
-    token = _map_token(map_path, data_root)
-    arguments = [
-        str(executable),
-        f"-datadir={data_root}",
-        token,
-    ]
-    arguments.append("-xopengl" if renderer == "xopengl" else "-vulkan")
-    arguments.extend(
-        [
-            "-NOFRONTEND",
-            "-window",
-            "-nosound",
-            f"-testticks={ticks}",
-            "-log",
-        ]
+    result = game_test.run_game(
+        app=executable,
+        data_root=data_root,
+        selected_map=map_relative,
+        renderer=renderer,
+        ticks=ticks,
+        timeout_seconds=timeout_seconds,
+        log_path=log_path,
+        no_sound=True,
     )
-
-    started = time.monotonic()
-    output = b""
-    exit_status: int | None = None
-    timed_out = False
-    launch_error: str | None = None
-    cleanup_action = "none"
-    cleanup_error: str | None = None
-    orphaned_process_group = False
-
-    with tempfile.TemporaryDirectory(prefix="hp2-map-smoke-") as home_name:
-        isolated_home = Path(home_name)
-        environment = _isolated_environment(isolated_home)
-        process: subprocess.Popen[bytes] | None = None
-        try:
-            process = subprocess.Popen(
-                arguments,
-                cwd=repo_root,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-            try:
-                output, _ = process.communicate(timeout=timeout_seconds)
-            except subprocess.TimeoutExpired as timeout_error:
-                timed_out = True
-                partial_output = timeout_error.output or b""
-                term_error = _signal_group(process.pid, signal.SIGTERM)
-                cleanup_action = "sigterm"
-                cleanup_error = term_error
-                try:
-                    output, _ = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
-                except subprocess.TimeoutExpired as term_timeout:
-                    partial_output = term_timeout.output or partial_output
-                    kill_error = _signal_group(process.pid, signal.SIGKILL)
-                    cleanup_action = "sigkill"
-                    if kill_error:
-                        cleanup_error = "; ".join(
-                            message for message in (cleanup_error, kill_error) if message
-                        )
-                    try:
-                        output, _ = process.communicate(timeout=KILL_GRACE_SECONDS)
-                    except subprocess.TimeoutExpired as kill_timeout:
-                        output = kill_timeout.output or partial_output
-                        cleanup_action = "failed"
-                        message = "app did not exit after process-group SIGKILL"
-                        cleanup_error = "; ".join(
-                            item for item in (cleanup_error, message) if item
-                        )
-                if not output:
-                    output = partial_output
-
-            exit_status = process.returncode
-            if _group_exists(process.pid):
-                orphaned_process_group = not timed_out
-                remaining_action, remaining_error = _stop_remaining_group(process.pid)
-                if remaining_action != "none":
-                    cleanup_action = remaining_action
-                if remaining_error:
-                    cleanup_error = "; ".join(
-                        item for item in (cleanup_error, remaining_error) if item
-                    )
-        except OSError as error:
-            launch_error = _report_line(
-                f"{type(error).__name__}: {error}", repo_root, isolated_home
-            )
-            output = f"smoke harness launch error: {error}\n".encode(
-                "utf-8", errors="backslashreplace"
-            )
-        finally:
-            if process is not None and process.poll() is None:
-                orphaned_process_group = True
-                final_term_error = _signal_group(process.pid, signal.SIGTERM)
-                cleanup_action = "sigterm"
-                if final_term_error:
-                    cleanup_error = "; ".join(
-                        item for item in (cleanup_error, final_term_error) if item
-                    )
-                try:
-                    final_output, _ = process.communicate(
-                        timeout=TERMINATION_GRACE_SECONDS
-                    )
-                    if final_output:
-                        output = final_output
-                except subprocess.TimeoutExpired as final_timeout:
-                    final_partial = final_timeout.output or output
-                    final_kill_error = _signal_group(process.pid, signal.SIGKILL)
-                    cleanup_action = "sigkill"
-                    if final_kill_error:
-                        cleanup_error = "; ".join(
-                            item
-                            for item in (cleanup_error, final_kill_error)
-                            if item
-                        )
-                    try:
-                        final_output, _ = process.communicate(
-                            timeout=KILL_GRACE_SECONDS
-                        )
-                        output = final_output or final_partial
-                    except subprocess.TimeoutExpired as unreaped:
-                        output = unreaped.output or final_partial
-                        cleanup_action = "failed"
-                        cleanup_error = "; ".join(
-                            item
-                            for item in (
-                                cleanup_error,
-                                "app could not be reaped after SIGKILL",
-                            )
-                            if item
-                        )
-                exit_status = process.returncode
-                if _group_exists(process.pid):
-                    remaining_action, remaining_error = _stop_remaining_group(
-                        process.pid
-                    )
-                    if remaining_action != "none":
-                        cleanup_action = remaining_action
-                    if remaining_error:
-                        cleanup_error = "; ".join(
-                            item
-                            for item in (cleanup_error, remaining_error)
-                            if item
-                        )
-
-        markers = _failure_markers(output, repo_root, isolated_home)
-
-    duration_seconds = round(time.monotonic() - started, 6)
-    _write_atomic(log_path, output)
-
-    displayed_command = [
-        _display_path(executable, repo_root),
-        f"-datadir={_display_path(data_root, repo_root)}",
-        token,
-        *arguments[3:],
-    ]
-    passed = (
-        exit_status == 0
-        and not timed_out
-        and launch_error is None
-        and not markers
-        and not orphaned_process_group
-        and cleanup_error is None
+    result.update(
+        {
+            "classification": inspection["classification"],
+            "classification_evidence": inspection["classification_evidence"],
+            "expected_player_start": inspection["expected_player_start"],
+            "file_sha256": inspection["file_sha256"],
+            "package_error": inspection["package_error"],
+            "verification_mode": inspection["verification_mode"],
+            "verification_error": None,
+            "map": game_test._display_path(map_path, repo_root),
+            "map_relative_to_data_root": map_relative,
+        }
     )
-    return {
-        "classification": inspection["classification"],
-        "classification_evidence": inspection["classification_evidence"],
-        "expected_player_start": inspection["expected_player_start"],
-        "file_sha256": inspection["file_sha256"],
-        "package_error": inspection["package_error"],
-        "verification_mode": inspection["verification_mode"],
-        "verification_error": None,
-        "map": _display_path(map_path, repo_root),
-        "map_relative_to_data_root": map_relative,
-        "map_token": token,
-        "command": displayed_command,
-        "log": _display_path(log_path, repo_root),
-        "captured_output_bytes": len(output),
-        "duration_seconds": duration_seconds,
-        "exit_status": exit_status,
-        "timed_out": timed_out,
-        "launch_error": launch_error,
-        "failure_markers": markers,
-        "orphaned_process_group": orphaned_process_group,
-        "process_group_cleanup": cleanup_action,
-        "cleanup_error": cleanup_error,
-        "passed": passed,
-    }
+    return result
 
 
 def _verify_map_package(
@@ -1143,11 +612,11 @@ def _verify_map_package(
         )
         + "\n"
     ).encode("utf-8")
-    _write_atomic(log_path, output)
+    game_test._write_atomic(log_path, output)
     return {
-        "map": _display_path(map_path, repo_root),
+        "map": game_test._display_path(map_path, repo_root),
         "map_relative_to_data_root": map_relative,
-        "map_token": _map_token(map_path, data_root),
+        "map_token": game_test._map_token(map_path, data_root),
         "classification": inspection["classification"],
         "classification_evidence": inspection["classification_evidence"],
         "expected_player_start": inspection["expected_player_start"],
@@ -1156,7 +625,7 @@ def _verify_map_package(
         "verification_mode": inspection["verification_mode"],
         "verification_error": verification_error,
         "command": [],
-        "log": _display_path(log_path, repo_root),
+        "log": game_test._display_path(log_path, repo_root),
         "captured_output_bytes": len(output),
         "duration_seconds": 0.0,
         "exit_status": None,
@@ -1243,18 +712,13 @@ def _arguments() -> argparse.Namespace:
 def main() -> int:
     arguments = _arguments()
     try:
-        repo_root = _repo_root()
-        app = _resolve_path(arguments.app, repo_root, strict=True)
-        data_root = _resolve_path(arguments.data_root, repo_root, strict=True)
-        if not data_root.is_dir():
-            raise SmokeError(f"data root is not a directory: {data_root}")
-        default_ini = data_root / "System" / "Default.ini"
-        if not default_ini.is_file():
-            raise SmokeError(f"data root does not contain System/Default.ini: {data_root}")
-
-        executable = _bundle_executable(app)
-        _validate_native_arm64(executable)
-        maps = _enumerate_maps(data_root)
+        repo_root = game_test._repo_root()
+        app = game_test._resolve_path(arguments.app, repo_root, strict=True)
+        data_root = game_test._resolve_path(arguments.data_root, repo_root, strict=True)
+        game_test._validate_data_root(data_root)
+        executable = game_test._bundle_executable(app)
+        game_test._validate_native_arm64(executable)
+        maps = game_test._enumerate_maps(data_root)
         super_by_class = _class_catalog(data_root)
         inspections = [
             _inspect_map_package(map_path, map_relative, super_by_class)
@@ -1297,7 +761,7 @@ def main() -> int:
         output_argument = arguments.output or Path(
             f"build/smoke-maps-{arguments.renderer}.json"
         )
-        output = _resolve_path(output_argument, repo_root, strict=False)
+        output = game_test._resolve_path(output_argument, repo_root, strict=False)
         if not output.name:
             raise SmokeError(f"output path must name a JSON file: {output_argument}")
         logs = _log_directory(output)
@@ -1341,7 +805,7 @@ def main() -> int:
                 for marker in record["failure_markers"]
                 if marker["category"] == category
             )
-            for category in FAILURE_MARKER_PATTERNS
+            for category in game_test.FAILURE_MARKER_PATTERNS
         }
         classification_counts = {
             classification: sum(
@@ -1356,16 +820,16 @@ def main() -> int:
         report = {
             "format_version": REPORT_FORMAT_VERSION,
             "script": "Build/smoke_maps.py",
-            "app": _display_path(app, repo_root),
-            "executable": _display_path(executable, repo_root),
-            "data_root": _display_path(data_root, repo_root),
+            "app": game_test._display_path(app, repo_root),
+            "executable": game_test._display_path(executable, repo_root),
+            "data_root": game_test._display_path(data_root, repo_root),
             "renderer": arguments.renderer,
             "ticks": arguments.ticks,
             "timeout_seconds": arguments.timeout,
-            "log_directory": _display_path(logs, repo_root),
+            "log_directory": game_test._display_path(logs, repo_root),
             "failure_marker_policy": {
                 "case_sensitive": False,
-                "patterns": FAILURE_MARKER_PATTERNS,
+                "patterns": game_test.FAILURE_MARKER_PATTERNS,
                 "success_requires": (
                     "runtime verification requires no case-insensitive script/native/"
                     "package/render/assert/critical marker"
@@ -1406,9 +870,9 @@ def main() -> int:
             )
             + "\n"
         ).encode("utf-8")
-        _write_atomic(output, encoded)
+        game_test._write_atomic(output, encoded)
         print(
-            f"{_display_path(output, repo_root)}: "
+            f"{game_test._display_path(output, repo_root)}: "
             f"{passed_count}/{len(records)} maps passed"
         )
         return 1 if failed_count else 0

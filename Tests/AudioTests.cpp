@@ -73,12 +73,12 @@ std::vector<BYTE> ReadBytes(const std::filesystem::path& Path)
 	return std::vector<BYTE>(std::istreambuf_iterator<char>(Input), std::istreambuf_iterator<char>());
 }
 
-bool WaitForChunks(FFileStream* Streams, INT StreamId, INT Expected)
+bool WaitForCompletion(FFileStream* Streams, INT StreamId, void*& OutDestination, UBOOL& OutTerminal)
 {
 	const auto Deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
 	while (std::chrono::steady_clock::now() < Deadline)
 	{
-		if (Streams->ChunksRemaining(StreamId) >= Expected)
+		if (Streams->PopCompletedChunk(StreamId, OutDestination, OutTerminal))
 			return true;
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
@@ -143,21 +143,24 @@ void TestRegularLifecycle(const std::filesystem::path& TempDir)
 		const FStream& State = FFileStream::Streams[StreamId];
 		Require(State.Type == ST_Regular && State.ChunkSize == 4 && State.NumSamples == -1,
 			"regular stream metadata preserves type, chunk size, and sample sentinel");
-		Require(State.Data == Initial + 4, "regular stream advances Data by bytes actually read");
 	}
 	Require(std::memcmp(Initial, Source.data(), 4) == 0, "regular initial chunk preserves file bytes");
 	Require(Streams->IsStreamAlive(StreamId), "full regular chunk does not report EOF");
 
 	BYTE Tail[4] = {0xcc, 0xcc, 0xcc, 0xcc};
-	Streams->RequestChunks(StreamId, 1, Tail);
-	Require(WaitForChunks(Streams, StreamId, 1), "regular queued read completes");
+	Require(Streams->RequestChunk(StreamId, Tail), "regular queued read is accepted");
+	void* CompletedDestination = NULL;
+	UBOOL Terminal = 0;
+	Require(WaitForCompletion(Streams, StreamId, CompletedDestination, Terminal), "regular queued read completes");
+	Require(CompletedDestination == Tail, "regular completion preserves destination identity");
+	Require(Terminal, "short regular completion is terminal");
 	Require(Tail[0] == 5 && Tail[1] == 6, "regular queued read continues at the file position");
 	Require(!Streams->IsStreamAlive(StreamId), "short regular read reports EOF");
-	Require(Streams->ChunksRemaining(StreamId) == 1, "completed regular request increments queue count");
-	Streams->DecrementChunkCount(StreamId);
-	Require(Streams->ChunksRemaining(StreamId) == 0, "consumer decrement removes the completed chunk");
-	Streams->DecrementChunkCount(StreamId);
-	Require(Streams->ChunksRemaining(StreamId) == 0, "completed count never underflows");
+	CompletedDestination = reinterpret_cast<void*>(static_cast<UPTRINT>(1));
+	Terminal = 1;
+	Require(!Streams->PopCompletedChunk(StreamId, CompletedDestination, Terminal)
+		&& CompletedDestination == reinterpret_cast<void*>(static_cast<UPTRINT>(1)) && Terminal == 1,
+		"empty completion pop preserves its output arguments");
 	Streams->DestroyStream(StreamId, 0);
 
 	BYTE Reuse[2] = {0, 0};
@@ -188,14 +191,85 @@ void TestQueuedDestroy(const std::filesystem::path& TempDir)
 	FFileStream* Streams = FFileStream::Init(1);
 	const INT StreamId = Streams->CreateStream(Filename.c_str(), ChunkSize, 0, Output.data(), ST_Regular, NULL);
 	Require(StreamId == 0, "queued-destroy stream creates");
-	Streams->RequestChunks(StreamId, ChunkCount, Output.data());
+	for (INT Chunk = 0; Chunk < ChunkCount; ++Chunk)
+		Require(Streams->RequestChunk(StreamId, Output.data() + static_cast<size_t>(Chunk) * ChunkSize),
+			"queued destroy request is accepted");
 	Streams->DestroyStream(StreamId, 1);
 	Require(Output == Source, "queued destroy drains every requested regular byte exactly once");
+
+	std::vector<BYTE> Discarded(Source.size(), 0x5a);
+	const INT DiscardedId = Streams->CreateStream(Filename.c_str(), ChunkSize, 0, Discarded.data(), ST_Regular, NULL);
+	Require(DiscardedId == StreamId, "discarded queued stream reuses its slot");
+	for (INT Chunk = 0; Chunk < ChunkCount; ++Chunk)
+		Require(Streams->RequestChunk(DiscardedId, Discarded.data() + static_cast<size_t>(Chunk) * ChunkSize),
+			"discarded queued request is accepted");
+	Streams->DestroyStream(DiscardedId, 0);
+	const std::vector<BYTE> DiscardedSnapshot = Discarded;
+	std::this_thread::sleep_for(std::chrono::milliseconds(2));
+	Require(Discarded == DiscardedSnapshot, "queued destroy without draining causes no later writes");
 
 	BYTE Reuse[ChunkSize] = {};
 	const INT ReusedId = Streams->CreateStream(Filename.c_str(), ChunkSize, 0, Reuse, ST_Regular, NULL);
 	Require(ReusedId == StreamId, "queued destroy leaves the slot reusable");
 	Streams->DestroyStream(ReusedId, 0);
+	FFileStream::Destroy();
+}
+
+void TestQueuedDestinationIdentity(const std::filesystem::path& TempDir)
+{
+	constexpr INT ChunkSize = 32;
+	constexpr INT ChunkCount = 6;
+	std::vector<BYTE> SourceA(static_cast<size_t>(ChunkSize) * ChunkCount);
+	std::vector<BYTE> SourceB(static_cast<size_t>(ChunkSize) * ChunkCount);
+	for (size_t Index = 0; Index < SourceA.size(); ++Index)
+	{
+		SourceA[Index] = static_cast<BYTE>((Index * 13u + 3u) & 0xffu);
+		SourceB[Index] = static_cast<BYTE>((Index * 29u + 7u) & 0xffu);
+	}
+
+	const std::filesystem::path PathA = TempDir / "queue-a.bin";
+	const std::filesystem::path PathB = TempDir / "queue-b.bin";
+	WriteBytes(PathA, SourceA);
+	WriteBytes(PathB, SourceB);
+	const std::basic_string<TCHAR> FilenameA = ToTChar(PathA);
+	const std::basic_string<TCHAR> FilenameB = ToTChar(PathB);
+
+	FFileStream* Streams = FFileStream::Init(2);
+	std::vector<BYTE> PrimeA(ChunkSize);
+	std::vector<BYTE> PrimeB(ChunkSize);
+	const INT StreamA = Streams->CreateStream(FilenameA.c_str(), ChunkSize, 1, PrimeA.data(), ST_Regular, NULL);
+	const INT StreamB = Streams->CreateStream(FilenameB.c_str(), ChunkSize, 1, PrimeB.data(), ST_Regular, NULL);
+	Require(StreamA == 0 && StreamB == 1, "two regular streams reserve independent slots");
+
+	std::vector<std::vector<BYTE> > DestinationsA(ChunkCount - 1, std::vector<BYTE>(ChunkSize, 0xa5));
+	std::vector<std::vector<BYTE> > DestinationsB(ChunkCount - 1, std::vector<BYTE>(ChunkSize, 0x5a));
+	for (INT Chunk = 0; Chunk < ChunkCount - 1; ++Chunk)
+	{
+		Require(Streams->RequestChunk(StreamA, DestinationsA[Chunk].data()), "stream A request is accepted");
+		Require(Streams->RequestChunk(StreamB, DestinationsB[Chunk].data()), "stream B request is accepted");
+	}
+
+	for (INT Chunk = 0; Chunk < ChunkCount - 1; ++Chunk)
+	{
+		void* Destination = NULL;
+		UBOOL Terminal = 1;
+		Require(WaitForCompletion(Streams, StreamA, Destination, Terminal), "stream A completion arrives");
+		Require(Destination == DestinationsA[Chunk].data() && !Terminal, "stream A preserves FIFO destination identity");
+		Require(std::equal(DestinationsA[Chunk].begin(), DestinationsA[Chunk].end(),
+			SourceA.begin() + static_cast<std::ptrdiff_t>((Chunk + 1) * ChunkSize)),
+			"stream A writes only its successive requested chunk");
+
+		Destination = NULL;
+		Terminal = 1;
+		Require(WaitForCompletion(Streams, StreamB, Destination, Terminal), "stream B completion arrives");
+		Require(Destination == DestinationsB[Chunk].data() && !Terminal, "stream B preserves FIFO destination identity");
+		Require(std::equal(DestinationsB[Chunk].begin(), DestinationsB[Chunk].end(),
+			SourceB.begin() + static_cast<std::ptrdiff_t>((Chunk + 1) * ChunkSize)),
+			"stream B writes only its successive requested chunk");
+	}
+
+	Streams->DestroyStream(StreamA, 0);
+	Streams->DestroyStream(StreamB, 0);
 	FFileStream::Destroy();
 }
 
@@ -208,7 +282,7 @@ void TestOggEOFLoopAndErrors(const std::filesystem::path& TempDir)
 	Require(Pcm.size() + 64 < static_cast<size_t>(MAXINT), "stock Ogg fits one test request");
 	const std::basic_string<TCHAR> Filename = ToTChar(OggPath);
 
-	FFileStream* Streams = FFileStream::Init(1);
+	FFileStream* Streams = FFileStream::Init(2);
 	std::vector<BYTE> NonLoop(Pcm.size() + 64, 0x7f);
 	OggVorbis_File* NonLoopState = new OggVorbis_File;
 	const INT NonLoopId = Streams->CreateStream(
@@ -219,7 +293,6 @@ void TestOggEOFLoopAndErrors(const std::filesystem::path& TempDir)
 		const FStream& State = FFileStream::Streams[NonLoopId];
 		Require(State.Type == ST_Ogg && State.TDD == NonLoopState && State.NumSamples == -1,
 			"Ogg stream preserves caller-visible decoder metadata");
-		Require(State.Data == NonLoop.data(), "Ogg decoding preserves the chunk base Data pointer");
 		Require(std::equal(Pcm.begin(), Pcm.end(), NonLoop.begin()), "Ogg stream yields libvorbisfile PCM bytes");
 		Require(std::all_of(NonLoop.begin() + static_cast<std::ptrdiff_t>(Pcm.size()), NonLoop.end(),
 			[](BYTE Value) { return Value == 0; }), "non-looping Ogg zero-fills its final partial request");
@@ -230,6 +303,66 @@ void TestOggEOFLoopAndErrors(const std::filesystem::path& TempDir)
 	{
 		delete NonLoopState;
 	}
+
+	BYTE BlockerOutput = 0;
+	const INT BlockerId = Streams->CreateStream(Filename.c_str(), 1, 0, &BlockerOutput, ST_Regular, NULL);
+	Require(BlockerId == 0, "queued Ogg blocker stream reserves the first slot");
+
+	std::vector<std::vector<BYTE> > QueuedOutput(3, std::vector<BYTE>(Pcm.size() + 64, 0xa4));
+	OggVorbis_File* QueuedState = new OggVorbis_File;
+	const INT QueuedId = Streams->CreateStream(
+		Filename.c_str(), static_cast<INT>(QueuedOutput[0].size()), 0, NULL, ST_Ogg, QueuedState);
+	Require(QueuedId == 1, "queued Ogg stream uses the second slot");
+	if (QueuedId >= 0 && BlockerId >= 0)
+	{
+		Streams->Enter(BlockerId);
+		UBOOL AllAccepted = 1;
+		for (INT Index = 0; Index < 3; ++Index)
+		{
+			if (!Streams->RequestChunk(QueuedId, QueuedOutput[Index].data()))
+				AllAccepted = 0;
+		}
+		Require(
+			FFileStream::Streams[QueuedId].CompletionCount == 3
+				&& !FFileStream::Streams[QueuedId].CompletedChunks[0].Ready
+				&& !FFileStream::Streams[QueuedId].CompletedChunks[1].Ready
+				&& !FFileStream::Streams[QueuedId].CompletedChunks[2].Ready,
+			"requesting thread reserves completion slots before worker decode");
+		Streams->Leave(BlockerId);
+		Require(AllAccepted, "queued Ogg destinations are accepted before decode reaches EOF");
+
+		void* Destination = NULL;
+		UBOOL Terminal = 0;
+		Require(WaitForCompletion(Streams, QueuedId, Destination, Terminal), "queued Ogg final chunk completes");
+		Require(Destination == QueuedOutput[0].data() && Terminal,
+			"only the final queued Ogg chunk reports terminal completion");
+		Require(std::equal(Pcm.begin(), Pcm.end(), QueuedOutput[0].begin()),
+			"queued Ogg terminal chunk preserves decoded PCM");
+		Require(std::all_of(QueuedOutput[0].begin() + static_cast<std::ptrdiff_t>(Pcm.size()), QueuedOutput[0].end(),
+			[](BYTE Value) { return Value == 0; }), "queued Ogg terminal chunk retains its zero-filled tail");
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+		Destination = reinterpret_cast<void*>(static_cast<UPTRINT>(1));
+		Terminal = 1;
+		Require(!Streams->PopCompletedChunk(QueuedId, Destination, Terminal)
+			&& Destination == reinterpret_cast<void*>(static_cast<UPTRINT>(1)) && Terminal == 1,
+			"queued Ogg destinations after EOF are cancelled without completions");
+		Require(std::all_of(QueuedOutput[1].begin(), QueuedOutput[1].end(),
+			[](BYTE Value) { return Value == 0xa4; })
+			&& std::all_of(QueuedOutput[2].begin(), QueuedOutput[2].end(),
+				[](BYTE Value) { return Value == 0xa4; }),
+			"queued Ogg destinations after EOF remain unwritten");
+		Require(!Streams->RequestChunk(QueuedId, QueuedOutput[1].data()),
+			"requests after queued Ogg EOF are rejected");
+		Streams->DestroyStream(QueuedId, 0);
+	}
+	else
+	{
+		if (QueuedId < 0)
+			delete QueuedState;
+	}
+	if (BlockerId >= 0)
+		Streams->DestroyStream(BlockerId, 0);
 
 	std::vector<BYTE> Loop(Pcm.size() + 64, 0);
 	OggVorbis_File* LoopState = new OggVorbis_File;
@@ -316,13 +449,15 @@ void TestXAPartialsAndLoop()
 		const FStream& State = FFileStream::Streams[PartialId];
 		Require(State.Type == ST_XA && State.Handle == NULL && State.TDD != NULL && State.NumSamples == 28,
 			"XA stream keeps package data out of worker state and preserves decoder metadata");
-		Require(State.Data == First.data(), "XA decoding preserves the chunk base Data pointer");
 	}
 	Require(std::equal(First.begin(), First.end(), Expected.begin()), "XA initial partial returns requested samples");
 
 	std::vector<SWORD> Second(5, 0);
-	Streams->RequestChunks(PartialId, 1, Second.data());
-	Require(WaitForChunks(Streams, PartialId, 1), "XA queued partial completes");
+	Require(Streams->RequestChunk(PartialId, Second.data()), "XA queued partial is accepted");
+	void* CompletedDestination = NULL;
+	UBOOL Terminal = 0;
+	Require(WaitForCompletion(Streams, PartialId, CompletedDestination, Terminal), "XA queued partial completes");
+	Require(CompletedDestination == Second.data() && !Terminal, "XA completion identifies its non-terminal destination");
 	Require(std::equal(Second.begin(), Second.end(), Expected.begin() + 5), "XA residue continues without dropping samples");
 	Streams->DestroyStream(PartialId, 0);
 
@@ -335,7 +470,6 @@ void TestXAPartialsAndLoop()
 		"XA EOF zero-fills the remaining sample request");
 	Require(!Streams->IsStreamAlive(EndId), "XA EOF is observable");
 	Streams->DestroyStream(EndId, 0);
-
 	std::vector<SWORD> Loop(34, 0);
 	const INT LoopId = Streams->CreateStream(&Raw, 28, static_cast<INT>(Loop.size() * sizeof(SWORD)), 1,
 		Loop.data(), ST_XALooping, NULL);
@@ -362,7 +496,9 @@ void TestRepeatedTeardownHasNoWorker(const std::filesystem::path& TempDir)
 		Require(Streams != NULL, "cycle Init creates one worker");
 		const INT StreamId = Streams->CreateStream(Filename.c_str(), 64, 0, Output.data(), ST_Regular, NULL);
 		Require(StreamId == 0, "cycle stream creates");
-		Streams->RequestChunks(StreamId, 1024, Output.data());
+		for (INT Chunk = 0; Chunk < 1024; ++Chunk)
+			Require(Streams->RequestChunk(StreamId, Output.data() + static_cast<size_t>(Chunk) * 64),
+				"cycle request is accepted");
 		FFileStream::Destroy();
 		Require(FFileStream::Destroyed == 2, "cycle Destroy joins its worker");
 		Require(FFileStream::Instance == NULL, "cycle Destroy clears the singleton");
@@ -387,6 +523,7 @@ int main()
 	TestRegularLifecycle(TempDir);
 	TestQueuedDestroy(TempDir);
 	TestOggEOFLoopAndErrors(TempDir);
+	TestQueuedDestinationIdentity(TempDir);
 	TestXAPartialsAndLoop();
 	TestRepeatedTeardownHasNoWorker(TempDir);
 

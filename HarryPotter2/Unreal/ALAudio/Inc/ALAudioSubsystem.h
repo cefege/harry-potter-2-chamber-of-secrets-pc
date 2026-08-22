@@ -116,18 +116,27 @@ struct ALBuffer
 	FString		Name;
 };
 
+enum EALStreamBufferState
+{
+	QueuedPending,
+	QueuedReady,
+	FreePending,
+	FreeReady,
+	QueuedNoPrefetch
+};
+
 struct ALStream
 {
 	ALuint			Buffer[MAX_BUFFERS_PER_STREAM];
+	BYTE*			RefillData[MAX_BUFFERS_PER_STREAM];
+	EALStreamBufferState BufferState[MAX_BUFFERS_PER_STREAM];
 	INT				Id;
 	INT				Flags;
-	INT				Counter;
 	INT				Processed;
 	INT				Rate;
 	UBOOL			Alive;
 	UBOOL			Reset;
 	ALuint			Format;
-	void*			Data;
 	INT				StreamChunkSize;
 	INT				NumBuffers;
 	FString			Name;
