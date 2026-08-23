@@ -20,22 +20,22 @@
 
 struct HP2CrashReporterConfig
 {
-	// Directory receiving crash-report.json. Empty = current working dir.
-	const char* ArtifactDir;
+	// Human-readable process label embedded in reports ("HarryPotter2", "UCC").
+	const char* ProcessName;
+	// Engine log filename under the user root (e.g. "HarryPotter2.log");
+	// its tail is embedded into every report.
+	const char* LogFileBase;
+	// Optional wall-clock deadline from install time. 0 disables.
+	double WatchdogSeconds;
 };
 
 // Install handlers once at startup. Safe to call twice (second call is a
-// no-op). Never throws; never allocates after install.
+// no-op). Never throws; never allocates after install. When
+// Config->WatchdogSeconds > 0 a monitor thread raises SIGABRT with a
+// structured report on expiry.
 void HP2InstallCrashReporter( const struct HP2CrashReporterConfig* Config );
 
-// Optional wall-clock deadline in seconds measured from install time.
-// 0 disables (default). On expiry the reporter writes exit_reason
-// "watchdog", reason_code crash.watchdog.timeout, then raises SIGABRT.
-void HP2SetCrashReporterWatchdogSeconds( double Seconds );
-
-// Override engine-log discovery with an explicit UTF-8 path (log tail is
-// embedded into the report). Call once the launcher knows the real log
-// location. Not signal-safe: setup path only.
+// Override engine-log discovery with an explicit UTF-8 path. Call after
+// install once the launcher knows the real location. Setup-path only.
 void HP2SetCrashReporterLogHint( const char* Utf8Path );
-
 #endif // HP2CRASHREPORTER_H

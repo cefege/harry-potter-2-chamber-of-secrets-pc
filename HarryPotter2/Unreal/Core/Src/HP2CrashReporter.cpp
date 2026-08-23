@@ -32,6 +32,7 @@ namespace
 	volatile double g_InstallTime = 0.0;
 
 	char g_ArtifactDir[1024] = {0};
+	char g_ProcessName[128] = {0};
 	char g_LogHint[1024] = {0};
 
 	const int kWatchedSignals[kMaxSignals] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
@@ -158,6 +159,8 @@ namespace
 		AppendC( ExitReason );
 		AppendC( "\",\"reason_code\":\"" );
 		AppendC( ReasonCode );
+		AppendC( "\",\"process\":\"" );
+		AppendC( g_ProcessName[0] ? g_ProcessName : "unknown" );
 		AppendC( "\"" );
 		if( Signal > 0 )
 		{
@@ -245,20 +248,50 @@ namespace
 		WriteReportAndStderr( "watchdog", "crash.watchdog.timeout", 0 );
 		raise( SIGABRT );
 		return NULL;
-	}
 }
 
+} // namespace
+
+//-----------------------------------------------------------------------------
 void HP2InstallCrashReporter( const HP2CrashReporterConfig* Config )
 {
 	if( g_Installed ) return;
 	g_Installed = 1;
 
-	if( Config && Config->ArtifactDir )
+	if( Config )
 	{
-		size_t N = StrLen( Config->ArtifactDir );
-		if( N >= sizeof( g_ArtifactDir ) ) N = sizeof( g_ArtifactDir ) - 1;
-		MemCopy( g_ArtifactDir, Config->ArtifactDir, N );
-		g_ArtifactDir[N] = 0;
+		size_t N = StrLen( Config->ProcessName );
+		if( N >= sizeof( g_ProcessName ) ) N = sizeof( g_ProcessName ) - 1;
+		MemCopy( g_ProcessName, Config->ProcessName ? Config->ProcessName : "", N );
+		g_ProcessName[N] = 0;
+
+		double Watchdog = Config->WatchdogSeconds;
+		if( Watchdog < 0.0 ) Watchdog = 0.0;
+		if( Watchdog > 86400.0 ) Watchdog = 86400.0;
+		g_WatchdogSeconds = Watchdog;
+
+		// Default engine-log discovery: <user root>/<LogFileBase>. The user
+		// root layout matches HP2Paths (Application Support/Harry Potter 2).
+		if( !g_LogHint[0] && Config->LogFileBase )
+		{
+			const char* Home = getenv( "HOME" );
+			if( Home )
+			{
+				static const char UserRoot[] =
+					"/Library/Application Support/Harry Potter 2/User/";
+				size_t HN = StrLen( Home );
+				size_t BN = StrLen( Config->LogFileBase );
+				size_t Total = HN + sizeof(UserRoot) - 1 + BN;
+				if( Total < sizeof( g_LogHint ) - 1 )
+				{
+					MemCopy( g_LogHint, Home, HN );
+					MemCopy( g_LogHint + HN, UserRoot, sizeof(UserRoot) - 1 );
+					MemCopy( g_LogHint + HN + sizeof(UserRoot) - 1,
+						Config->LogFileBase, BN );
+					g_LogHint[Total] = 0;
+				}
+			}
+		}
 	}
 
 	g_InstallTime = NowMonotonic();
@@ -270,23 +303,15 @@ void HP2InstallCrashReporter( const HP2CrashReporterConfig* Config )
 	for( int I = 0; I < kMaxSignals; ++I )
 		sigaction( kWatchedSignals[I], &Sa, NULL );
 
-	static pthread_t WatchdogThreadHandle;
-	if( pthread_create( &WatchdogThreadHandle, NULL, WatchdogThread, NULL ) != 0 )
+	if( g_WatchdogSeconds > 0.0 )
 	{
-		// Without the watchdog thread the reporter still covers signals.
+		static pthread_t WatchdogThreadHandle;
+		pthread_create( &WatchdogThreadHandle, NULL, WatchdogThread, NULL );
 	}
 
 	static const char Installed[] = "HP2_CRASH installed\n";
 	write( 2, Installed, sizeof(Installed) - 1 );
 }
-
-void HP2SetCrashReporterWatchdogSeconds( double Seconds )
-{
-	if( Seconds < 0.0 ) Seconds = 0.0;
-	if( Seconds > 86400.0 ) Seconds = 86400.0;
-	g_WatchdogSeconds = Seconds;
-}
-
 void HP2SetCrashReporterLogHint( const char* Utf8Path )
 {
 	if( !Utf8Path ) return;
