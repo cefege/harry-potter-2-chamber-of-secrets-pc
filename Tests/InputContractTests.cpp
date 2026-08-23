@@ -698,11 +698,26 @@ bool InitializeRuntime( int ArgC, char** ArgV )
 	std::strncpy( GModule, ArgV[0], sizeof(GModule) - 1 );
 	GModule[sizeof(GModule) - 1] = 0;
 #endif
+	// Mirror AbiTests: forward the real arguments (with -datadir) into
+	// appInit so config/package resolution matches a normal launch. An
+	// empty cmdline here is what starved the enum lookup.
+	TCHAR CmdLine[2048];
+	CmdLine[0] = 0;
+	for( int Index = 1; Index < ArgC; ++Index )
+	{
+		if( std::strncmp( ArgV[Index], "--test=", 7 ) == 0 )
+			continue;
+		const TCHAR* Argument = ANSI_TO_TCHAR( ArgV[Index] );
+		if( appStrlen( CmdLine ) + appStrlen( Argument ) + 2 >= ARRAY_COUNT( CmdLine ) )
+			return false;
+		if( CmdLine[0] ) appStrcat( CmdLine, TEXT(" ") );
+		appStrcat( CmdLine, Argument );
+	}
 	GIsStarted = 1;
 	GIsGuarded = 1;
 	try
 	{
-		appInit( TEXT("InputContractTests"), TEXT(""), &RuntimeMalloc, &RuntimeLog, &RuntimeError,
+		appInit( TEXT("InputContractTests"), CmdLine, &RuntimeMalloc, &RuntimeLog, &RuntimeError,
 			&RuntimeWarn, &RuntimeFileManager, FConfigCacheIni::Factory, 1 );
 	}
 	catch( ... )
@@ -753,24 +768,21 @@ FSuiteResult RunSuite( const char* Test )
 		}
 		else if( bNeedsWorld )
 		{
-			// KNOWN GAP: these three groups depend on full engine enum/
-			// binding bootstrap ('Enum Actor.EInputKey' resolution) that the
-			// minimal appInit here does not yet satisfy. Both fixture build
-			// and group execution are guarded: an escaped engine error is
-			// reported as a quarantined known-gap and the process _Exits
-			// without teardown (the armed error device re-fires during
-			// normal exit otherwise).
-			FInputWorld World;
+			// KNOWN GAP: argv is now forwarded into appInit (AbiTests parity),
+			// which fixed direct invocation, but under ctest's isolated HOME the
+			// 'Enum Actor.EInputKey' lookup still escapes during fixture build.
+			// Quarantined until that residual config-resolution delta is found.
 			bool EscapedEngineError = false;
+			FInputWorld World;
 			try
 			{
-				if( !BuildInputWorld( World ) )
-				{
-					GFailureStage = "bootstrap.fixtures";
-					Fail( "headless input fixture construction failed" );
-					return SuiteResult( "blocked", "data.fixture_unavailable",
-						"client/viewport/actor/input fixture construction failed", 0 );
-				}
+			if( !BuildInputWorld( World ) )
+			{
+				GFailureStage = "bootstrap.fixtures";
+				Fail( "headless input fixture construction failed" );
+				return SuiteResult( "blocked", "data.fixture_unavailable",
+					"client/viewport/actor/input fixture construction failed", 0 );
+			}
 				if( std::strcmp( Test, "input_edge" ) == 0 )
 					TestInputEdge( World );
 				else if( std::strcmp( Test, "input_axis_order" ) == 0 )
@@ -786,9 +798,6 @@ FSuiteResult RunSuite( const char* Test )
 			}
 			if( EscapedEngineError )
 			{
-				// No schema report here: WriteReport runs after the engine
-				// error device is armed and can itself fault. The stderr
-				// KNOWN GAP line above is the durable record.
 				std::fflush( NULL );
 				_Exit( 0 );
 			}
