@@ -550,11 +550,17 @@ if(EXISTS "${HP2_UNREAL_ROOT}/System/CUTSCENES")
 endif()
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests)
+    # Data-backed contracts pass their root explicitly (never CWD discovery),
+    # so a local out/retail-data import can never hijack the fixture path.
+    hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
 endif()
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests)
+    hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
 endif()
 
 # Deterministic renderer smoke tiers. The commit gate runs a fixed three-map
