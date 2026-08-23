@@ -57,3 +57,20 @@ will gain a row above when its test registers.
 | Launcher-config contracts | `User/Launcher.ini` folder assignment and profile-state persistence rules. | planned |
 | Config-INI contracts | Generated `Default.ini`/`DefUser.ini` content matches the importer's profile contract. | planned |
 | Crash diagnostics | Structured failure reports with reason codes for launch-time crashes. | planned |
+
+## Rust-era gate map (working copy during hp2rs migration)
+
+Master checklist for the clean-room Rust engine (`crates/`, binary
+`hp2rs`). Gate definitions live in the rewrite plan; oracle disposition and
+the two known-red baseline tests are recorded in
+[ORACLE_BASELINE.md](ORACLE_BASELINE.md). Status updated at each phase gate.
+
+| Gate | Rust-side proof | Ports these ctest contracts | Status |
+| --- | --- | --- | --- |
+| G0 | `cargo clippy --workspace --all-targets -- -D warnings` + `cargo fmt --check` + `cargo test --workspace`; C++ suite re-run identical | (none — scaffold) | DONE 2026-08-24 |
+| G1 format parity | `cargo test -p hp-format -p hp-ini`; `diff` of `Build/package79_reference.py` audit vs `cargo run -p hp-format --example p79audit` over prototype root → empty | `compact_index`, `fstring_archive`, `eaxa_decoder`, `dxt1_codec` (decode side), audit half of `package79_manifest` | OPEN |
+| G2 object runtime | `cargo test -p hp-uobject`: three stock packages bind zero unbound classes/natives (`data-prototype`); double-run snapshot-hash equality | `native_registration`, `spell_runtime_contracts`, determinism intent of `determinism_double_run` | OPEN |
+| G3 headless sim | `game_test.py run PrivetDr/Entry/Ch2Skurge --engine-bin target/release/hp2rs --ticks 120` all `"passed": true`, zero failure markers | launch half of `input_script_contract`/`input_script_smoke`; replaces C++ determinism tier via seeded RNG (own acceptance record) | OPEN |
+| G4 renderer | Same trio WITH rendering; texture counters balanced; two identical-seed `--capture-frames` runs byte-identical final frames; advisory side-by-side vs C++ captures user-approved | `renderer_smoke_xopengl` (red in frozen baseline), `projection_fov`, `render_clip`, canvas metric cases | OPEN |
+| G5 audio/saves/launcher | save-fixture script over all `Tests/Fixtures/save-format-golden/` entries; `repair_save.py --engine target/release/hp2rs` contract; `HP2_LAUNCHER_TESTING=1 cargo test -p hp-app`; audio lifecycle suite | `repair_save_contract`, `audio_lifecycle`, `native_launcher_contract`, `command_line_load`, replay round-trip cases | OPEN |
+| G6 product | fresh clone `cargo test --workspace`; packaged app opens; retail flow completes; `python3 Build/check_bundle_rs.py` exit 0 | full-suite parity row of the plan's Verification section | OPEN |
