@@ -1,26 +1,14 @@
 /*=============================================================================
 	NativeText.h: Platform-neutral native Canvas text backend contract.
 =============================================================================*/
-#pragma once
+
+#include "NativeTextShared.h"
 
 class UXOpenGLRenderDevice;
 struct FCanvasTextLayout;
 struct FCanvasTextRequest;
 struct FCanvasTextLayoutRequest;
 
-enum ENativeTextRole
-{
-	NTROLE_Tiny,
-	NTROLE_Small,
-	NTROLE_Body,
-	NTROLE_BodyBold,
-	NTROLE_Heading,
-	NTROLE_HeadingBold,
-	NTROLE_HPMenuMedium,
-	NTROLE_HPMenuLarge,
-	NTROLE_Console,
-	NTROLE_Subtitle,
-};
 
 // Platform implementations own shaped-layout and rasterizer objects entirely.
 // This boundary intentionally carries no CoreText, DirectWrite, or Pango types.
@@ -54,7 +42,6 @@ FNativeTextPlatformBackend* CreateNativeTextPlatformBackend( FNativeTextBackendS
 // unavailable; callers wanting the reason code use the overload above.
 FNativeTextPlatformBackend* CreateNativeTextPlatformBackend();
 
-ENativeTextRole NativeTextRoleForFont( const UFont* Font );
 // These diagnostics expose facts from an opaque shaped layout so the native
 // typography contract can be exercised without creating a GL window.
 struct FNativeTextLayoutTestInfo
@@ -76,32 +63,6 @@ UBOOL NativeTextInspectLayoutForTests( const FCanvasTextLayout* Layout, FNativeT
 // The game executable drives this state while -TESTNATIVETEXT is active.  It
 // is deliberately renderer-owned: a successful result means a real GL Canvas
 // draw completed, rather than only a CoreText layout unit test.
-enum ENativeTextRuntimeSmokeState
-{
-	NativeTextRuntimeSmokeIdle,
-	NativeTextRuntimeSmokePending,
-	NativeTextRuntimeSmokePassed,
-	NativeTextRuntimeSmokeFailed,
-};
-enum ENativeTextRuntimeSmokeStage
-{
-	NativeTextRuntimeSmokeStageNone,
-	NativeTextRuntimeSmokeStageFonts,
-	NativeTextRuntimeSmokeStagePageDraw,
-	NativeTextRuntimeSmokeStageNativeDraw,
-	NativeTextRuntimeSmokeStageAtlas,
-	NativeTextRuntimeSmokeStageFallback,
-	NativeTextRuntimeSmokeStageReset,
-	NativeTextRuntimeSmokeStageRecreate,
-	NativeTextRuntimeSmokeStageFinalReset,
-	NativeTextRuntimeSmokeStageGLError,
-	NativeTextRuntimeSmokeStageRecreateLayout,
-	NativeTextRuntimeSmokeStageRecreateMeasure,
-	NativeTextRuntimeSmokeStageRecreateSubmit,
-	NativeTextRuntimeSmokeStageRecreatePage,
-	NativeTextRuntimeSmokeStageFallbackAllocation,
-	NativeTextRuntimeSmokeStageFallbackCursor,
-};
 
 void BeginNativeTextRuntimeSmoke();
 ENativeTextRuntimeSmokeState GetNativeTextRuntimeSmokeState();
