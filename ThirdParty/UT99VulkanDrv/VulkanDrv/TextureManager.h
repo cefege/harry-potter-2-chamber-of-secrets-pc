@@ -26,7 +26,7 @@ public:
 
 	std::unique_ptr<SceneTextures> Scene;
 
-	int GetTexturesInCache() { return TextureCache[0].size() + TextureCache[1].size(); }
+	int GetTexturesInCache() { return (int)(TextureCache[0].size() + TextureCache[1].size()); }
 
 private:
 	void CreateNullTexture();

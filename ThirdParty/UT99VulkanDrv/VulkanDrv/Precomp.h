@@ -46,10 +46,7 @@
 #include "Engine.h"
 #include "UnRender.h"
 
-#if !defined(UNREALGOLD) && !defined(DEUSEX)
-#define OLDUNREAL469SDK
-#endif
-
-#if defined(OLDUNREAL469SDK)
-#include "Render.h"
-#endif
+// HP2 flavor: neither the OldUnreal 469 SDK extensions (DrawGouraudTriangles,
+// SupportsTextureFormat, UpdateTextureRect) nor the UnrealGold Flush() variant
+// are part of this engine's URenderDevice interface, so neither compatibility
+// macro is defined here and no 469-only header is included.

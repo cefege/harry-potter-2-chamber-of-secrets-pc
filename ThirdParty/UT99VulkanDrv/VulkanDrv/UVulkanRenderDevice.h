@@ -1,3 +1,17 @@
+/*
+ * UVulkanRenderDevice - HP2 adaptation of the UT99VulkanDrv donor renderer.
+ *
+ * Donor: ThirdParty/UT99VulkanDrv (ZVulkan-lineage community UE1 Vulkan driver,
+ * BSD 3-Clause, see LICENSE.md alongside this file). This header mirrors the
+ * HP2 URenderDevice interface (Engine/Inc/UnRenDev.h) instead of the donor's
+ * OldUnreal469/UnrealGold conditional interface:
+ *  - DrawComplexSurface carries the engine's (PolyFlags, cAlpha) tail.
+ *  - DrawTriangles replaces the donor's 469-only DrawGouraudTriangles as the
+ *    indexed primitive entry point (XOpenGLDrv DrawGouraud index semantics).
+ *  - MaxVertices() is part of the HP2 vtable.
+ *  - CanvasText hooks keep the base-class no-op defaults.
+ */
+
 #pragma once
 
 #include "CommandBufferManager.h"
@@ -14,33 +28,24 @@
 
 class CachedTexture;
 
-#if defined(OLDUNREAL469SDK)
-class UVulkanRenderDevice : public URenderDeviceOldUnreal469
-{
-public:
-	DECLARE_CLASS(UVulkanRenderDevice, URenderDeviceOldUnreal469, CLASS_Config, VulkanDrv)
-#else
 class UVulkanRenderDevice : public URenderDevice
 {
-public:
-	DECLARE_CLASS(UVulkanRenderDevice, URenderDevice, CLASS_Config)
-#endif
+	DECLARE_CLASS(UVulkanRenderDevice, URenderDevice, CLASS_Config, VulkanDrv)
 
+public:
 	UVulkanRenderDevice();
 	void StaticConstructor();
 
 	UBOOL Init(UViewport* InViewport, INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen) override;
 	UBOOL SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen) override;
 	void Exit() override;
-#if defined(UNREALGOLD)
-	void Flush() override;
-#else
 	void Flush(UBOOL AllowPrecache) override;
-#endif
 	UBOOL Exec(const TCHAR* Cmd, FOutputDevice& Ar) override;
 	void Lock(FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize) override;
 	void Unlock(UBOOL Blit) override;
-	void DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet) override;
+	void DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet, DWORD PolyFlags, BYTE cAlpha) override;
+	INT MaxVertices() override;
+	void DrawTriangles(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, _WORD* Indices, INT NumIndices, DWORD PolyFlags, FSpanBuffer* Span) override;
 	void DrawGouraudPolygon(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, int NumPts, DWORD PolyFlags, FSpanBuffer* Span) override;
 	void DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags) override;
 	void Draw3DLine(FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector OrigP, FVector OrigQ) override;
@@ -59,14 +64,7 @@ public:
 
 	void SetHitLocation();
 
-#if defined(OLDUNREAL469SDK)
-	// URenderDeviceOldUnreal469 extensions
-	void DrawGouraudTriangles(const FSceneNode* Frame, const FTextureInfo& Info, FTransTexture* const Pts, INT NumPts, DWORD PolyFlags, DWORD DataFlags, FSpanBuffer* Span) override;
-	UBOOL SupportsTextureFormat(ETextureFormat Format) override;
-	void UpdateTextureRect(FTextureInfo& Info, INT U, INT V, INT UL, INT VL) override;
-#endif
-
-	int InterfacePadding[64]; // For allowing URenderDeviceOldUnreal469 interface to add things
+	int InterfacePadding[64]; // For allowing future URenderDevice interface additions
 
 #ifdef WIN32
 	HWND WindowHandle = 0;
@@ -98,9 +96,7 @@ public:
 	INT GrayFormula;
 	BITFIELD Hdr;
 	BYTE HdrScale;
-#if !defined(OLDUNREAL469SDK)
 	BITFIELD OccludeLines;
-#endif
 	BITFIELD Bloom;
 	BYTE BloomAmount;
 	FLOAT LODBias;

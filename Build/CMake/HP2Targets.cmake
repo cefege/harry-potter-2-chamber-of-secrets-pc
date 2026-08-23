@@ -318,6 +318,21 @@ hp2_add_executable(hp2_launcher_tests
 target_compile_definitions(hp2_launcher_tests PRIVATE HP2_LAUNCHER_TESTING=1)
 target_link_libraries(hp2_launcher_tests PRIVATE hp2_core)
 
+# Config contract: links full hp2_core because FConfigCacheIni behavior lives
+# in CORE_API helpers (appStricmp, codecs), not the header-only container.
+hp2_add_executable(hp2_config_ini_tests
+    ${HP2_CONFIG_INI_TEST_SOURCE}
+)
+target_link_libraries(hp2_config_ini_tests PRIVATE hp2_core)
+
+# Replay wire-format contract: uses the in-test verbatim oracle of UnReplay's
+# operator<< (see Tests/ReplayRoundTripTests.cpp). Linking hp2_engine would
+# drag static initializers (FURL globals) that require a full appInit
+# bootstrap, so this target intentionally links core only.
+hp2_add_executable(hp2_replay_roundtrip_tests
+    ${HP2_REPLAY_ROUNDTRIP_TEST_SOURCE}
+)
+target_link_libraries(hp2_replay_roundtrip_tests PRIVATE hp2_core)
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_executable(hp2_native_typography_tests
         ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
@@ -354,6 +369,8 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_dxt1_tests
     hp2_audio_tests
     hp2_launcher_tests
+    hp2_config_ini_tests
+    hp2_replay_roundtrip_tests
 )
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
@@ -478,6 +495,25 @@ hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
 )
 hp2_add_behavior_test(dxt1_codec hp2_dxt1_tests)
 hp2_add_behavior_test(eaxa_decoder hp2_eaxa_tests)
+hp2_add_behavior_test(replay_roundtrip hp2_replay_roundtrip_tests)
+hp2_add_behavior_test(config_ini_parse_semantics hp2_config_ini_tests
+    --test=parse_semantics
+)
+hp2_add_behavior_test(config_ini_typed_getters hp2_config_ini_tests
+    --test=typed_getters
+)
+hp2_add_behavior_test(config_ini_set_and_write hp2_config_ini_tests
+    --test=set_and_write
+)
+hp2_add_behavior_test(config_ini_rewrite_normalization hp2_config_ini_tests
+    --test=rewrite_normalization
+)
+hp2_add_behavior_test(config_ini_cache_filenames hp2_config_ini_tests
+    --test=cache_filenames
+)
+hp2_add_behavior_test(config_ini_unicode_roundtrip hp2_config_ini_tests
+    --test=unicode_roundtrip
+)
 hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
@@ -593,4 +629,123 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
     set_tests_properties(canvas_compatibility_contracts
         PROPERTIES LABELS "integration;data-prototype"
     )
+endif()
+# ---------------------------------------------------------------------------
+# Experimental Vulkan render device: HP2 port of ThirdParty/UT99VulkanDrv
+# (ZVulkan-lineage community UE1 driver). Opt-in only; stays OFF by default
+# until first successful launch evidence, exactly like the -vulkan feature
+# state. Everything below this comment is owned by the Vulkan port block.
+#
+# Layout mirrors hp2_xopengldrv: object libraries linked into hp2_game so the
+# engine's static class registry finds VulkanDrv.VulkanRenderDevice at boot.
+# ---------------------------------------------------------------------------
+option(HP2_ENABLE_VULKAN_DRIVER
+    "Build the experimental Vulkan render device port (ThirdParty/UT99VulkanDrv)" OFF)
+
+if(HP2_ENABLE_VULKAN_DRIVER)
+    set(HP2_VULKANDRV_ROOT "${HP2_THIRD_PARTY_ROOT}/UT99VulkanDrv")
+
+    # ZVulkan core + vendored volk / vk_mem_alloc / glslang (runtime GLSL ->
+    # SPIR-V for ShaderManager). Third-party code is exempt from the repo
+    # warning policy; only hp2_vulkandrv itself compiles under it.
+    set(HP2_ZVULKAN_SOURCES
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkanbuilders.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkandevice.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkaninstance.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkansurface.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkanswapchain.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vk_mem_alloc/vk_mem_alloc.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/volk/volk.c"
+        # vendored glslang (Unix OSDependent layer)
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/GenericCodeGen/CodeGen.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/GenericCodeGen/Link.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Constant.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/InfoSink.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Initialize.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/IntermTraverse.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Intermediate.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/ParseContextBase.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/ParseHelper.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/PoolAlloc.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/RemoveTree.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Scan.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/ShaderLang.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/SpirvIntrinsics.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/SymbolTable.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Versions.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/attribute.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/glslang_tab.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/intermOut.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/iomapper.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/limits.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/linkValidate.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/parseConst.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/propagateNoContraction.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/reflection.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/Pp.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpAtom.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpContext.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpScanner.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpTokens.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/OSDependent/Unix/ossource.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/ResourceLimits/ResourceLimits.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/GlslangToSpv.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/InReadableOrder.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/Logger.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/SpvBuilder.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/SpvPostProcess.cpp"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/SpvTools.cpp"
+    )
+
+    add_library(hp2_zvulkan OBJECT ${HP2_ZVULKAN_SOURCES})
+    target_compile_features(hp2_zvulkan PUBLIC cxx_std_17)
+    target_include_directories(hp2_zvulkan PUBLIC
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/include"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/include/zvulkan"
+        "${HP2_VULKANDRV_ROOT}/ZVulkan/src"
+    )
+    # The donor's ZVulkan CMake defines UNIX/_UNIX on non-Win32 for its
+    # glslang OSDependent selection and volk platform branches.
+    target_compile_definitions(hp2_zvulkan PRIVATE UNIX=1 _UNIX=1)
+
+    set(HP2_VULKANDRV_SOURCES
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/UVulkanRenderDevice.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/VulkanDrv.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/BufferManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/CommandBufferManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/DescriptorSetManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/FileResource.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/FramebufferManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/halffloat.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/mat.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/RenderPassManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/SamplerManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/SceneTextures.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/ShaderManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/TextureManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/TextureUploader.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/UploadManager.cpp"
+    )
+
+    add_library(hp2_vulkandrv OBJECT ${HP2_VULKANDRV_SOURCES})
+    target_link_libraries(hp2_vulkandrv PRIVATE hp2_compile_policy)
+    target_link_libraries(hp2_vulkandrv PUBLIC hp2_zvulkan)
+    target_include_directories(hp2_vulkandrv PUBLIC
+        ${HP2_RENDER_INCLUDE_DIRS}
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv"
+    )
+    target_compile_definitions(hp2_vulkandrv PRIVATE
+        __STATIC_LINK=1
+        SDL2BUILD=1
+    )
+    target_link_libraries(hp2_vulkandrv PUBLIC SDL2::SDL2-static)
+
+    # Static registration: adding the objects to hp2_game puts
+    # VulkanDrv.VulkanRenderDevice into the engine class registry next to
+    # XOpenGLDrv.XOpenGLRenderDevice; config/-flag selection stays lead-owned.
+    target_link_libraries(hp2_game PRIVATE
+        hp2_vulkandrv
+        hp2_zvulkan
+    )
+
 endif()

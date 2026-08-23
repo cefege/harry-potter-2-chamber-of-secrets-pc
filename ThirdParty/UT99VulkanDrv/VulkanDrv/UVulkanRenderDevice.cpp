@@ -31,19 +31,9 @@ void UVulkanRenderDevice::StaticConstructor()
 	UsePrecache = 1;
 	Coronas = 1;
 	ShinySurfaces = 1;
-#if !defined(UNREALGOLD)
 	DetailTextures = 1;
-#endif
 	HighDetailActors = 1;
 	VolumetricLighting = 1;
-
-#if defined(OLDUNREAL469SDK)
-	UseLightmapAtlas = 0; // Note: do not turn this on. It does not work and generates broken fogmaps.
-	SupportsUpdateTextureRect = 1;
-	MaxTextureSize = 4096;
-	NeedsMaskedFonts = 0;
-	DescFlags |= RDDESCF_Certified;
-#endif
 
 	GammaMode = 0;
 	GammaOffset = 0.0f;
@@ -58,9 +48,7 @@ void UVulkanRenderDevice::StaticConstructor()
 
 	Hdr = 0;
 	HdrScale = 128;
-#if !defined(OLDUNREAL469SDK)
 	OccludeLines = 0;
-#endif
 	Bloom = 0;
 	BloomAmount = 128;
 
@@ -73,9 +61,7 @@ void UVulkanRenderDevice::StaticConstructor()
 	VkDebug = 0;
 	VkExclusiveFullscreen = 0;
 
-#if defined(OLDUNREAL469SDK)
-	new(GetClass(), TEXT("UseLightmapAtlas"), RF_Public) UBoolProperty(CPP_PROPERTY(UseLightmapAtlas), TEXT("Display"), CPF_Config);
-#endif
+
 
 	new(GetClass(), TEXT("UseVSync"), RF_Public) UBoolProperty(CPP_PROPERTY(UseVSync), TEXT("Display"), CPF_Config);
 	new(GetClass(), TEXT("UsePrecache"), RF_Public) UBoolProperty(CPP_PROPERTY(UsePrecache), TEXT("Display"), CPF_Config);
@@ -90,9 +76,7 @@ void UVulkanRenderDevice::StaticConstructor()
 	new(GetClass(), TEXT("GrayFormula"), RF_Public) UIntProperty(CPP_PROPERTY(GrayFormula), TEXT("Display"), CPF_Config);
 	new(GetClass(), TEXT("Hdr"), RF_Public) UBoolProperty(CPP_PROPERTY(Hdr), TEXT("Display"), CPF_Config);
 	new(GetClass(), TEXT("HdrScale"), RF_Public) UByteProperty(CPP_PROPERTY(HdrScale), TEXT("Display"), CPF_Config);
-#if !defined(OLDUNREAL469SDK)
 	new(GetClass(), TEXT("OccludeLines"), RF_Public) UBoolProperty(CPP_PROPERTY(OccludeLines), TEXT("Display"), CPF_Config);
-#endif
 	new(GetClass(), TEXT("Bloom"), RF_Public) UBoolProperty(CPP_PROPERTY(Bloom), TEXT("Display"), CPF_Config);
 	new(GetClass(), TEXT("BloomAmount"), RF_Public) UByteProperty(CPP_PROPERTY(BloomAmount), TEXT("Display"), CPF_Config);
 	new(GetClass(), TEXT("LODBias"), RF_Public) UFloatProperty(CPP_PROPERTY(LODBias), TEXT("Display"), CPF_Config);
@@ -347,11 +331,7 @@ UBOOL UVulkanRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL F
 
 	SaveConfig();
 
-#if defined(UNREALGOLD)
-	Flush();
-#else
 	Flush(1);
-#endif
 
 	return 1;
 	unguard;
@@ -388,41 +368,6 @@ void UVulkanRenderDevice::SubmitAndWait(bool present, int presentWidth, int pres
 	SceneVertexPos = 0;
 	SceneIndexPos = 0;
 }
-
-#if defined(UNREALGOLD)
-
-void UVulkanRenderDevice::Flush()
-{
-	guard(UVulkanRenderDevice::Flush);
-
-	if (IsLocked)
-	{
-		DrawBatch(Commands->GetDrawCommands());
-		RenderPasses->EndScene(Commands->GetDrawCommands());
-		SubmitAndWait(false, 0, 0, false);
-
-		ClearTextureCache();
-
-		auto cmdbuffer = Commands->GetDrawCommands();
-		RenderPasses->BeginScene(cmdbuffer, 0.0f, 0.0f, 0.0f, 1.0f);
-
-		VkBuffer vertexBuffers[] = { Buffers->SceneVertexBuffer->buffer };
-		VkDeviceSize offsets[] = { 0 };
-		cmdbuffer->bindVertexBuffers(0, 1, vertexBuffers, offsets);
-		cmdbuffer->bindIndexBuffer(Buffers->SceneIndexBuffer->buffer, 0, VK_INDEX_TYPE_UINT32);
-	}
-	else
-	{
-		ClearTextureCache();
-	}
-
-	if (UsePrecache && !GIsEditor)
-		PrecacheOnFlip = 1;
-
-	unguard;
-}
-
-#else
 
 void UVulkanRenderDevice::Flush(UBOOL AllowPrecache)
 {
@@ -475,8 +420,6 @@ void UVulkanRenderDevice::Flush(UBOOL AllowPrecache)
 
 	unguard;
 }
-
-#endif
 
 UBOOL UVulkanRenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
 {
@@ -585,11 +528,7 @@ UBOOL UVulkanRenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
 #endif
 	else
 	{
-#if !defined(UNREALGOLD)
 		return Super::Exec(Cmd, Ar);
-#else
-		return 0;
-#endif
 	}
 
 	unguard;
@@ -659,6 +598,8 @@ void UVulkanRenderDevice::Lock(FPlane InFlashScale, FPlane InFlashFog, FPlane Sc
 #ifdef WIN32
 		// To do: can we report this back to unreal in a better way?
 		MessageBoxA(0, e.what(), "Vulkan Error", MB_OK);
+#else
+		debugf(TEXT("VulkanDrv fatal error during Lock: %s"), appFromAnsi(e.what()));
 #endif
 		exit(0);
 	}
@@ -703,10 +644,6 @@ void UVulkanRenderDevice::FlushDrawBatchAndWait()
 void UVulkanRenderDevice::DrawStats(FSceneNode* Frame)
 {
 	Super::DrawStats(Frame);
-
-#if defined(OLDUNREAL469SDK)
-	GRender->ShowStat(CurrentFrame, TEXT("Vulkan: Draw calls: %d, Complex surfaces: %d, Gouraud polygons: %d, Tiles: %d; Uploads: %d, Rect Uploads: %d\r\n"), Stats.DrawCalls, Stats.ComplexSurfaces, Stats.GouraudPolygons, Stats.Tiles, Stats.Uploads, Stats.RectUploads);
-#endif
 
 	Stats.DrawCalls = 0;
 	Stats.ComplexSurfaces = 0;
@@ -807,28 +744,6 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 	unguard;
 }
 
-#if defined(OLDUNREAL469SDK)
-
-UBOOL UVulkanRenderDevice::SupportsTextureFormat(ETextureFormat Format)
-{
-	guard(UVulkanRenderDevice::SupportsTextureFormat);
-
-	return Uploads->SupportsTextureFormat(Format) ? TRUE : FALSE;
-
-	unguard;
-}
-
-void UVulkanRenderDevice::UpdateTextureRect(FTextureInfo& Info, INT U, INT V, INT UL, INT VL)
-{
-	guardSlow(UVulkanRenderDevice::UpdateTextureRect);
-
-	Textures->UpdateTextureRect(&Info, U, V, UL, VL);
-
-	unguardSlow;
-}
-
-#endif
-
 void UVulkanRenderDevice::DrawBatch(VulkanCommandBuffer* cmdbuffer)
 {
 	size_t icount = SceneIndexPos - Batch.SceneIndexStart;
@@ -845,17 +760,19 @@ void UVulkanRenderDevice::DrawBatch(VulkanCommandBuffer* cmdbuffer)
 		cmdbuffer->bindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, Batch.Pipeline->Pipeline.get());
 		cmdbuffer->bindDescriptorSet(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, DescriptorSets->GetBindlessSet());
 		cmdbuffer->pushConstants(layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ScenePushConstants), &pushconstants);
-		cmdbuffer->drawIndexed(icount, 1, Batch.SceneIndexStart, 0, 0);
+		cmdbuffer->drawIndexed((uint32_t)icount, 1, (uint32_t)Batch.SceneIndexStart, 0, 0);
 		Batch.SceneIndexStart = SceneIndexPos;
 		Stats.DrawCalls++;
 	}
 }
 
-void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet)
+void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet, DWORD InPolyFlags, BYTE cAlpha)
 {
 	guardSlow(UVulkanRenderDevice::DrawComplexSurface);
 
-	DWORD PolyFlags = ApplyPrecedenceRules(Surface.PolyFlags);
+	// HP2 passes the effective surface PolyFlags explicitly instead of taking
+	// them from Surface.PolyFlags like the donor did.
+	DWORD PolyFlags = ApplyPrecedenceRules(InPolyFlags);
 
 	CachedTexture* tex = Textures->GetTexture(Surface.Texture, !!(PolyFlags & PF_Masked));
 	CachedTexture* lightmap = Textures->GetTexture(Surface.LightMap, false);
@@ -863,11 +780,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 	CachedTexture* detailtex = Textures->GetTexture(Surface.DetailTexture, false);
 	CachedTexture* fogmap = (Surface.FogMap && Surface.FogMap->Mips[0] && Surface.FogMap->Mips[0]->DataPtr) ? Textures->GetTexture(Surface.FogMap, false) : nullptr;
 
-#if defined(UNREALGOLD)
-	if (Surface.DetailTexture && Surface.FogMap) detailtex = nullptr;
-#else
 	if ((Surface.DetailTexture && Surface.FogMap) || (!DetailTextures)) detailtex = nullptr;
-#endif
 
 	float UDot = Facet.MapCoords.XAxis | Facet.MapCoords.Origin;
 	float VDot = Facet.MapCoords.YAxis | Facet.MapCoords.Origin;
@@ -909,7 +822,7 @@ void UVulkanRenderDevice::DrawComplexSurface(FSceneNode* Frame, FSurfaceInfo& Su
 	SetPipeline(RenderPasses->GetPipeline(PolyFlags));
 
 	ivec4 textureBinds = GetTextureIndexes(PolyFlags, tex, lightmap, macrotex, detailtex);
-	vec4 color(1.0f);
+	vec4 color(1.0f, 1.0f, 1.0f, cAlpha / 255.0f); // HP2 tail adapter: per-call surface alpha
 
 	for (FSavedPoly* Poly = Facet.Polys; Poly; Poly = Poly->Next)
 	{
@@ -1135,7 +1048,14 @@ void UVulkanRenderDevice::DrawGouraudPolygon(FSceneNode* Frame, FTextureInfo& In
 	unguardSlow;
 }
 
-#if defined(OLDUNREAL469SDK)
+INT UVulkanRenderDevice::MaxVertices()
+{
+	// The engine sizes its per-frame gouraud/particle staging arrays with this
+	// (UnMeshRn.cpp / UnParticleRn.cpp), so keep the 256 every other driver
+	// uses instead of exposing our internal batch-buffer capacity. Our scene
+	// batch flushes transparently regardless of call size.
+	return 256;
+}
 
 static void EnviroMap(const FSceneNode* Frame, FTransTexture& P, FLOAT UScale, FLOAT VScale)
 {
@@ -1144,17 +1064,18 @@ static void EnviroMap(const FSceneNode* Frame, FTransTexture& P, FLOAT UScale, F
 	P.V = (T.Y + 1.0f) * 0.5f * 256.0f * VScale;
 }
 
-void UVulkanRenderDevice::DrawGouraudTriangles(const FSceneNode* Frame, const FTextureInfo& Info, FTransTexture* const Pts, INT NumPts, DWORD PolyFlags, DWORD DataFlags, FSpanBuffer* Span)
+void UVulkanRenderDevice::DrawTriangles(FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, _WORD* Indices, INT NumIndices, DWORD PolyFlags, FSpanBuffer* Span)
 {
-	guardSlow(UVulkanRenderDevice::DrawGouraudTriangles);
+	guardSlow(UVulkanRenderDevice::DrawTriangles);
 
-	if (NumPts < 3) return; // This can apparently happen!!
+	if (!Pts || NumPts < 3) return; // This can apparently happen!!
 
+	PolyFlags &= ~PF_Memorized;
 	PolyFlags = ApplyPrecedenceRules(PolyFlags);
 
 	SetPipeline(RenderPasses->GetPipeline(PolyFlags));
 
-	CachedTexture* tex = Textures->GetTexture(const_cast<FTextureInfo*>(&Info), !!(PolyFlags & PF_Masked));
+	CachedTexture* tex = Textures->GetTexture(&Info, !!(PolyFlags & PF_Masked));
 	ivec4 textureBinds = GetTextureIndexes(PolyFlags, tex);
 
 	float UMult = GetUMult(Info);
@@ -1165,14 +1086,33 @@ void UVulkanRenderDevice::DrawGouraudTriangles(const FSceneNode* Frame, const FT
 
 	if (PolyFlags & PF_Environment)
 	{
+		// Same env-mapped coordinate space the donor used for UT99's
+		// PF_Environment actors; HP2's engine still delegates this to the driver.
 		FLOAT UScale = Info.UScale * Info.USize * (1.0f / 256.0f);
 		FLOAT VScale = Info.VScale * Info.VSize * (1.0f / 256.0f);
 
 		for (INT i = 0; i < NumPts; i++)
-			::EnviroMap(Frame, Pts[i], UScale, VScale);
+			EnviroMap(Frame, *Pts[i], UScale, VScale);
 	}
 
-	auto alloc = ReserveVertices(NumPts, (NumPts - 2) * 3);
+	// Indexed path semantics follow XOpenGLDrv's DrawGouraud.cpp: when the
+	// engine supplies an index buffer it references triangle corners inside
+	// Pts; otherwise fan-triangulate from Pts directly.
+	const UBOOL Indexed = Indices != NULL;
+	const INT OutIndexCount = Indexed ? NumIndices - (NumIndices % 3) : (NumPts - 2) * 3;
+	if (OutIndexCount < 3) return;
+
+	for (INT i = 0; i < (Indexed ? OutIndexCount : NumPts); ++i)
+	{
+		const INT PointIndex = Indexed ? (INT)Indices[i] : i;
+		if (PointIndex < 0 || PointIndex >= NumPts || !Pts[PointIndex])
+		{
+			GWarn->Logf(TEXT("VulkanDrv: DrawTriangles received an invalid vertex index."));
+			return;
+		}
+	}
+
+	auto alloc = ReserveVertices(NumPts, OutIndexCount);
 	if (alloc.vptr)
 	{
 		SceneVertex* vptr = alloc.vptr;
@@ -1184,7 +1124,7 @@ void UVulkanRenderDevice::DrawGouraudTriangles(const FSceneNode* Frame, const FT
 			SceneVertex* vertex = vptr;
 			for (INT i = 0; i < NumPts; i++)
 			{
-				FTransTexture* P = &Pts[i];
+				FTransTexture* P = Pts[i];
 				vertex->Flags = flags;
 				vertex->Position.x = P->Point.X;
 				vertex->Position.y = P->Point.Y;
@@ -1210,7 +1150,7 @@ void UVulkanRenderDevice::DrawGouraudTriangles(const FSceneNode* Frame, const FT
 			SceneVertex* vertex = vptr;
 			for (INT i = 0; i < NumPts; i++)
 			{
-				FTransTexture* P = &Pts[i];
+				FTransTexture* P = Pts[i];
 				vertex->Flags = flags;
 				vertex->Position.x = P->Point.X;
 				vertex->Position.y = P->Point.Y;
@@ -1232,54 +1172,28 @@ void UVulkanRenderDevice::DrawGouraudTriangles(const FSceneNode* Frame, const FT
 			}
 		}
 
-		bool mirror = (Frame->Mirror == -1.0);
-
-		size_t vstart = vpos;
-		size_t vcount = NumPts;
-		size_t icount = 0;
-
-		if (PolyFlags & PF_TwoSided)
+		if (Indexed)
 		{
-			for (uint32_t i = 2; i < vcount; i += 3)
-			{
-				// If outcoded, skip it.
-				if (Pts[i - 2].Flags & Pts[i - 1].Flags & Pts[i].Flags)
-					continue;
-
-				*(iptr++) = vstart + i;
-				*(iptr++) = vstart + i - 1;
-				*(iptr++) = vstart + i - 2;
-				icount += 3;
-			}
+			for (INT i = 0; i < OutIndexCount; i++)
+				*(iptr++) = vpos + (uint32_t)Indices[i];
 		}
 		else
 		{
-			for (uint32_t i = 2; i < vcount; i += 3)
+			for (uint32_t i = vpos + 2; i < vpos + (uint32_t)NumPts; i++)
 			{
-				// If outcoded, skip it.
-				if (Pts[i - 2].Flags & Pts[i - 1].Flags & Pts[i].Flags)
-					continue;
-
-				bool backface = FTriple(Pts[i - 2].Point, Pts[i - 1].Point, Pts[i].Point) <= 0.0;
-				if (mirror == backface)
-				{
-					*(iptr++) = vstart + i - 2;
-					*(iptr++) = vstart + i - 1;
-					*(iptr++) = vstart + i;
-					icount += 3;
-				}
+				*(iptr++) = vpos;
+				*(iptr++) = i - 1;
+				*(iptr++) = i;
 			}
 		}
 
-		UseVertices(vcount, icount);
+		UseVertices(NumPts, OutIndexCount);
 	}
 
 	Stats.GouraudPolygons++;
 
 	unguardSlow;
 }
-
-#endif
 
 void UVulkanRenderDevice::DrawTile(FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags)
 {
@@ -1537,7 +1451,7 @@ void UVulkanRenderDevice::PopHit(INT Count, UBOOL bForce)
 	guard(UVulkanRenderDevice::PopHit);
 
 	if (bForce) // Force hit what we are popping
-		ForceHitIndex = HitQueries.size() - 1;
+		ForceHitIndex = (INT)(HitQueries.size() - 1);
 
 	HitQueryStack.resize(HitQueryStack.size() - Count);
 
@@ -1552,11 +1466,11 @@ void UVulkanRenderDevice::SetHitLocation()
 
 	if (!HitQueryStack.empty())
 	{
-		INT index = HitQueries.size();
+		INT index = (INT)HitQueries.size();
 
 		HitQuery query;
-		query.Start = HitBuffer.size();
-		query.Count = HitQueryStack.size();
+		query.Start = (INT)HitBuffer.size();
+		query.Count = (INT)HitQueryStack.size();
 		HitQueries.push_back(query);
 
 		HitBuffer.insert(HitBuffer.end(), HitQueryStack.begin(), HitQueryStack.end());

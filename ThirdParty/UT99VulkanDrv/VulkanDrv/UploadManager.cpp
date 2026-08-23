@@ -153,7 +153,7 @@ void UploadManager::UploadWhite(CachedTexture* tex)
 	UploadBufferPos += 16; // 16-byte aligned
 }
 
-void UploadManager::WaitIfUploadBufferIsFull(int bytes)
+void UploadManager::WaitIfUploadBufferIsFull(size_t bytes)
 {
 	if (UploadBufferPos + bytes > BufferManager::UploadBufferSize)
 	{
@@ -210,7 +210,7 @@ void UploadManager::SubmitUploads()
 				else
 					renderer->Stats.RectUploads++;
 
-				cmdbuffer->copyBufferToImage(buffer, tex->image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, tex->pendingUploads[i].size(), tex->pendingUploads[i].data());
+				cmdbuffer->copyBufferToImage(buffer, tex->image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, (uint32_t)tex->pendingUploads[i].size(), tex->pendingUploads[i].data());
 			}
 		}
 	}

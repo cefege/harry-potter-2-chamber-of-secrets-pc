@@ -165,6 +165,11 @@ void VulkanInstance::CreateInstance()
 		createInfo.enabledLayerCount = (uint32_t)enabledLayersCStr.size();
 		createInfo.ppEnabledLayerNames = enabledLayersCStr.data();
 		createInfo.ppEnabledExtensionNames = enabledExtensionsCStr.data();
+		// MoltenVK presents itself as a portability implementation on macOS; without
+		// this flag it does not enumerate any physical devices at all.
+		#if defined(__APPLE__) && defined(VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR)
+		createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+		#endif
 
 		VkLayerSettingsCreateInfoEXT layerSettingsInfo = { VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT };
 		layerSettingsInfo.settingCount = (uint32_t)layersettings.size();
