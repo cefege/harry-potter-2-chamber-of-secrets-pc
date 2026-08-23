@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace HP2Launcher
 {
@@ -78,6 +79,31 @@ bool BuildLauncherAutomationResult(
 bool BuildSelectedCommand(
 	const LaunchSelection& selection,
 	std::string& utf8Prefix,
+	std::string& error);
+
+struct LaunchSelectionField
+{
+	std::string key;
+	std::string value;
+};
+
+// Pure launch-selection persistence contract. Serialization emits the
+// canonical [LastLaunch] field rows: Action, plus the minimal save
+// coordinates for Continue. Runtime-derived save metadata (paths, display
+// label, size, timestamp) is deliberately not part of the contract.
+bool SerializeLaunchSelection(
+	const LaunchSelection& selection,
+	std::vector<LaunchSelectionField>& fields,
+	std::string& error);
+
+// Parses persisted field rows. Row order is free, the final duplicated row
+// wins (matching INI lookup semantics), and unrelated rows are ignored.
+// Malformed or inconsistent stores fall back as a whole to the safe Quit
+// selection: the returned bool is false and error carries the reason, while
+// selection is still populated with the fallback.
+bool DeserializeLaunchSelection(
+	const std::vector<LaunchSelectionField>& fields,
+	LaunchSelection& selection,
 	std::string& error);
 
 bool ShouldRunNativeLauncher(int argc, char* const argv[]);

@@ -5,6 +5,7 @@
 #include "HP2Paths.h"
 #include "HP2LauncherStore.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cctype>
 #include <cstdio>
@@ -996,7 +997,589 @@ void TestDataDirectoryArgumentContract()
 	else
 		::unsetenv("HOME");
 }
+
+LegacySettingValue V(const char* section, const char* key, const char* value)
+{
+	return {section, key, value};
 }
+
+SettingsMigrationChange C(const char* section, const char* key,
+	const char* previous, const char* next, const char* reason)
+{
+	return {section, key, previous, next, reason};
+}
+
+void ExpectRows(const std::vector<LegacySettingValue>& actual,
+	const std::vector<LegacySettingValue>& expected, const std::string& context)
+{
+	Expect(actual.size() == expected.size(),
+		context + ": row count is " + std::to_string(actual.size()) +
+		", expected " + std::to_string(expected.size()));
+	const std::size_t shared = std::min(actual.size(), expected.size());
+	for (std::size_t i = 0; i < shared; ++i)
+	{
+		Expect(actual[i].section == expected[i].section && actual[i].key == expected[i].key &&
+			actual[i].value == expected[i].value,
+			context + ": row " + std::to_string(i) + " is [" + actual[i].section + "]" +
+			actual[i].key + "=" + actual[i].value + ", expected [" + expected[i].section + "]" +
+			expected[i].key + "=" + expected[i].value);
+	}
+}
+
+void ExpectJournal(const std::vector<SettingsMigrationChange>& actual,
+	const std::vector<SettingsMigrationChange>& expected, const std::string& context)
+{
+	Expect(actual.size() == expected.size(),
+		context + ": journal length is " + std::to_string(actual.size()) +
+		", expected " + std::to_string(expected.size()));
+	const std::size_t shared = std::min(actual.size(), expected.size());
+	for (std::size_t i = 0; i < shared; ++i)
+	{
+		Expect(actual[i].section == expected[i].section && actual[i].key == expected[i].key &&
+			actual[i].previousValue == expected[i].previousValue &&
+			actual[i].newValue == expected[i].newValue && actual[i].reason == expected[i].reason,
+			context + ": journal entry " + std::to_string(i) + " is [" + actual[i].section + "]" +
+			actual[i].key + " " + actual[i].previousValue + "->" + actual[i].newValue + " (" +
+			actual[i].reason + "), expected [" + expected[i].section + "]" + expected[i].key + " " +
+			expected[i].previousValue + "->" + expected[i].newValue + " (" + expected[i].reason + ")");
+	}
+}
+
+void TestLegacySettingsMigration()
+{
+	struct MigrationCase
+	{
+		const char* description;
+		std::vector<LegacySettingValue> input;
+		std::vector<LegacySettingValue> expected;
+		std::vector<SettingsMigrationChange> journal;
+	};
+	std::vector<MigrationCase> cases;
+
+	// Renderer-era legacy configuration normalizes completely into the modern
+	// schema, with every rewrite observable in the journal.
+	{
+		MigrationCase full;
+		full.description = "renderer-era legacy configuration normalizes completely";
+		full.input = {
+			V("SDLDrv.SDLClient", "StartupFullscreen", "On"),
+			V("SDLDrv.SDLClient", "BorderlessWindow", "yes"),
+			V("SDLDrv.SDLClient", "UseDesktopResolution", "False"),
+			V("SDLDrv.SDLClient", "WindowedViewportX", "1024"),
+			V("SDLDrv.SDLClient", "WindowedViewportY", "768"),
+			V("SDLDrv.SDLClient", "FullscreenViewportX", "640"),
+			V("SDLDrv.SDLClient", "FullscreenViewportY", "480"),
+			V("Engine.GameEngine", "FrameRateLimit", "30.000000"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.850000"),
+			V("SDLDrv.SDLClient", "UIScale", "1.25"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "1"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "4"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16.000000"),
+			V("SDLDrv.SDLClient", "Brightness", "0.400000"),
+			V("ALAudio.ALAudioSubsystem", "SoundVolume", "0.900000"),
+			V("ALAudio.ALAudioSubsystem", "MusicVolume", "0.53"),
+			V("Engine.PlayerPawn", "MouseSensitivity", "3"),
+			V("Engine.PlayerPawn", "Difficulty", "difficultyhard"),
+			V("Engine.PlayerPawn", "ObjectDetail", "objectdetailhigh"),
+			V("SDLDrv.SDLClient", "TextureDetail", "LOW"),
+			V("HGame.Harry", "bAutoQuaff", "No"),
+			V("Unrelated.Section", "KeepMe", "Untouched"),
+		};
+		full.expected = {
+			V("SDLDrv.SDLClient", "StartupFullscreen", "False"),
+			V("SDLDrv.SDLClient", "BorderlessWindow", "True"),
+			V("SDLDrv.SDLClient", "UseDesktopResolution", "False"),
+			V("SDLDrv.SDLClient", "WindowedViewportX", "640"),
+			V("SDLDrv.SDLClient", "WindowedViewportY", "480"),
+			V("SDLDrv.SDLClient", "FullscreenViewportX", "640"),
+			V("SDLDrv.SDLClient", "FullscreenViewportY", "480"),
+			V("Engine.GameEngine", "FrameRateLimit", "30"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.85"),
+			V("SDLDrv.SDLClient", "UIScale", "1.25"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "True"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "4"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16"),
+			V("SDLDrv.SDLClient", "Brightness", "0.4"),
+			V("ALAudio.ALAudioSubsystem", "SoundVolume", "0.9"),
+			V("ALAudio.ALAudioSubsystem", "MusicVolume", "0.53"),
+			V("Engine.PlayerPawn", "MouseSensitivity", "3"),
+			V("Engine.PlayerPawn", "Difficulty", "DifficultyHard"),
+			V("Engine.PlayerPawn", "ObjectDetail", "ObjectDetailHigh"),
+			V("SDLDrv.SDLClient", "TextureDetail", "Low"),
+			V("HGame.Harry", "bAutoQuaff", "False"),
+			V("Unrelated.Section", "KeepMe", "Untouched"),
+		};
+		full.journal = {
+			C("SDLDrv.SDLClient", "StartupFullscreen", "On", "True", "settings.boolean_spelling"),
+			C("SDLDrv.SDLClient", "BorderlessWindow", "yes", "True", "settings.boolean_spelling"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "1", "True", "settings.boolean_spelling"),
+			C("HGame.Harry", "bAutoQuaff", "No", "False", "settings.boolean_spelling"),
+			C("SDLDrv.SDLClient", "StartupFullscreen", "True", "False", "settings.screen_mode_consolidated"),
+			C("SDLDrv.SDLClient", "WindowedViewportX", "1024", "640", "settings.viewport_consolidated"),
+			C("SDLDrv.SDLClient", "WindowedViewportY", "768", "480", "settings.viewport_consolidated"),
+			C("Engine.GameEngine", "FrameRateLimit", "30.000000", "30", "settings.frame_rate_limit_normalized"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.850000", "0.85", "settings.scale_normalized"),
+			C("SDLDrv.SDLClient", "Brightness", "0.400000", "0.4", "settings.range_normalized"),
+			C("ALAudio.ALAudioSubsystem", "SoundVolume", "0.900000", "0.9", "settings.range_normalized"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16.000000", "16", "settings.anisotropy_normalized"),
+			C("SDLDrv.SDLClient", "TextureDetail", "LOW", "Low", "settings.enum_normalized"),
+			C("Engine.PlayerPawn", "ObjectDetail", "objectdetailhigh", "ObjectDetailHigh", "settings.enum_normalized"),
+			C("Engine.PlayerPawn", "Difficulty", "difficultyhard", "DifficultyHard", "settings.enum_normalized"),
+		};
+		cases.push_back(full);
+	}
+
+	// Conflicting switches and invalid values resolve exactly the way the
+	// loader would have resolved them implicitly.
+	{
+		MigrationCase invalid;
+		invalid.description = "conflicting and invalid legacy values fall back to model defaults";
+		invalid.input = {
+			V("SDLDrv.SDLClient", "StartupFullscreen", "True"),
+			V("SDLDrv.SDLClient", "BorderlessWindow", "True"),
+			V("SDLDrv.SDLClient", "WindowedViewportX", "12"),
+			V("SDLDrv.SDLClient", "WindowedViewportY", "768"),
+			V("Engine.GameEngine", "FrameRateLimit", "59"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.9"),
+			V("SDLDrv.SDLClient", "UIScale", "abc"),
+			V("SDLDrv.SDLClient", "Brightness", "nan"),
+			V("Engine.PlayerPawn", "MouseSensitivity", "not-a-number"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "maybe"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "8"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "32"),
+			V("Engine.PlayerPawn", "Difficulty", "Ultra"),
+			V("SDLDrv.SDLClient", "NativeText", "garbage"),
+		};
+		invalid.expected = {
+			V("SDLDrv.SDLClient", "StartupFullscreen", "False"),
+			V("SDLDrv.SDLClient", "BorderlessWindow", "True"),
+			V("SDLDrv.SDLClient", "WindowedViewportX", "800"),
+			V("SDLDrv.SDLClient", "WindowedViewportY", "600"),
+			V("Engine.GameEngine", "FrameRateLimit", "60"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "1"),
+			V("SDLDrv.SDLClient", "UIScale", "1"),
+			V("SDLDrv.SDLClient", "Brightness", "0.4"),
+			V("Engine.PlayerPawn", "MouseSensitivity", "3"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "False"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "0"),
+			V("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "4"),
+			V("Engine.PlayerPawn", "Difficulty", "DifficultyEasy"),
+			V("SDLDrv.SDLClient", "NativeText", "True"),
+		};
+		invalid.journal = {
+			C("SDLDrv.SDLClient", "NativeText", "garbage", "True", "settings.boolean_invalid_defaulted"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "maybe", "False", "settings.boolean_invalid_defaulted"),
+			C("SDLDrv.SDLClient", "StartupFullscreen", "True", "False", "settings.screen_mode_consolidated"),
+			C("SDLDrv.SDLClient", "WindowedViewportX", "12", "800", "settings.viewport_consolidated"),
+			C("SDLDrv.SDLClient", "WindowedViewportY", "768", "600", "settings.viewport_consolidated"),
+			C("Engine.GameEngine", "FrameRateLimit", "59", "60", "settings.frame_rate_limit_invalid_defaulted"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.9", "1", "settings.scale_invalid_defaulted"),
+			C("SDLDrv.SDLClient", "UIScale", "abc", "1", "settings.scale_invalid_defaulted"),
+			C("SDLDrv.SDLClient", "Brightness", "nan", "0.4", "settings.range_invalid_defaulted"),
+			C("Engine.PlayerPawn", "MouseSensitivity", "not-a-number", "3", "settings.range_invalid_defaulted"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "8", "0", "settings.antialiasing_normalized"),
+			C("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "32", "4", "settings.anisotropy_invalid_defaulted"),
+			C("Engine.PlayerPawn", "Difficulty", "Ultra", "DifficultyEasy", "settings.enum_invalid_defaulted"),
+		};
+		cases.push_back(invalid);
+	}
+
+	// Windowed mode keeps the launcher on the windowed resolution pair even
+	// when a stale fullscreen pair disagrees.
+	{
+		MigrationCase windowed;
+		windowed.description = "windowed mode consolidates onto the windowed resolution pair";
+		windowed.input = {
+			V("SDLDrv.SDLClient", "StartupFullscreen", "False"),
+			V("SDLDrv.SDLClient", "WindowedViewportX", "1280"),
+			V("SDLDrv.SDLClient", "WindowedViewportY", "800"),
+			V("SDLDrv.SDLClient", "FullscreenViewportX", "640"),
+			V("SDLDrv.SDLClient", "FullscreenViewportY", "480"),
+		};
+		windowed.expected = {
+			V("SDLDrv.SDLClient", "StartupFullscreen", "False"),
+			V("SDLDrv.SDLClient", "WindowedViewportX", "1280"),
+			V("SDLDrv.SDLClient", "WindowedViewportY", "800"),
+			V("SDLDrv.SDLClient", "FullscreenViewportX", "1280"),
+			V("SDLDrv.SDLClient", "FullscreenViewportY", "800"),
+		};
+		windowed.journal = {
+			C("SDLDrv.SDLClient", "FullscreenViewportX", "640", "1280", "settings.viewport_consolidated"),
+			C("SDLDrv.SDLClient", "FullscreenViewportY", "480", "800", "settings.viewport_consolidated"),
+		};
+		cases.push_back(windowed);
+	}
+
+	// Unrelated rows and already-canonical owned values pass through without
+	// touching the journal.
+	{
+		MigrationCase passthrough;
+		passthrough.description = "canonical and unrelated rows leave no journal entries";
+		passthrough.input = {
+			V("Engine.Engine", "GameRenderDevice", "D3DDrv.D3DRenderDevice"),
+			V("SDLDrv.SDLClient", "ShowFPS", "True"),
+			V("Unrelated.Section", "MiXeDKey", "MiXeDValue"),
+		};
+		passthrough.expected = passthrough.input;
+		cases.push_back(passthrough);
+	}
+
+	// Duplicate rows follow INI lookup semantics: the final occurrence wins
+	// and earlier shadowed rows remain untouched.
+	{
+		MigrationCase duplicates;
+		duplicates.description = "final duplicated row wins while shadowed rows stay untouched";
+		duplicates.input = {
+			V("Engine.GameEngine", "FrameRateLimit", "120"),
+			V("Engine.GameEngine", "FrameRateLimit", "30.000000"),
+		};
+		duplicates.expected = {
+			V("Engine.GameEngine", "FrameRateLimit", "120"),
+			V("Engine.GameEngine", "FrameRateLimit", "30"),
+		};
+		duplicates.journal = {
+			C("Engine.GameEngine", "FrameRateLimit", "30.000000", "30", "settings.frame_rate_limit_normalized"),
+		};
+		cases.push_back(duplicates);
+	}
+
+	for (const MigrationCase& testCase : cases)
+	{
+		std::vector<SettingsMigrationChange> changes;
+		const std::vector<LegacySettingValue> migrated =
+			MigrateLegacySettings(testCase.input, changes);
+		ExpectRows(migrated, testCase.expected, testCase.description);
+		ExpectJournal(changes, testCase.journal, testCase.description);
+
+		// Migration is idempotent: rerunning it on migrated output is a no-op
+		// with an empty journal.
+		std::vector<SettingsMigrationChange> rerunChanges;
+		const std::vector<LegacySettingValue> rerun =
+			MigrateLegacySettings(migrated, rerunChanges);
+		ExpectRows(rerun, testCase.expected, std::string(testCase.description) + " (idempotence)");
+		Expect(rerunChanges.empty(), std::string(testCase.description) + ": rerun journal is empty");
+	}
+}
+
+bool SameSelectionCore(const LaunchSelection& a, const LaunchSelection& b)
+{
+	return a.action == b.action && a.hasSave == b.hasSave &&
+		a.save.saveIndex == b.save.saveIndex &&
+		a.save.usesSlotDirectory == b.save.usesSlotDirectory &&
+		a.save.slot == b.save.slot;
+}
+
+LaunchSelection ContinueSelection(int index, int slot)
+{
+	LaunchSelection selection;
+	selection.action = LaunchAction::Continue;
+	selection.hasSave = true;
+	selection.save.saveIndex = index;
+	selection.save.usesSlotDirectory = slot >= 0;
+	selection.save.slot = slot;
+	selection.save.displayName = "Slot 3 - Save 12";
+	selection.save.savePath = "/runtime/derived/path.usa";
+	return selection;
+}
+
+LaunchSelectionField F(const char* key, const char* value)
+{
+	return {key, value};
+}
+
+void TestLaunchSelectionSerializationContract()
+{
+	std::string error;
+
+	LaunchSelection quit;
+	LaunchSelection newGame;
+	newGame.action = LaunchAction::NewGame;
+	struct SerializableRow
+	{
+		const char* description;
+		LaunchSelection selection;
+	};
+	const std::vector<SerializableRow> serializable = {
+		{"quit selection serializes", quit},
+		{"new game selection serializes", newGame},
+		{"flat continue selection serializes", ContinueSelection(12, -1)},
+		{"slotted continue selection serializes", ContinueSelection(12, 3)},
+	};
+	for (const SerializableRow& row : serializable)
+	{
+		std::vector<LaunchSelectionField> fields;
+		Expect(SerializeLaunchSelection(row.selection, fields, error),
+			std::string(row.description) + ": " + error);
+		LaunchSelection restored;
+		Expect(DeserializeLaunchSelection(fields, restored, error),
+			std::string(row.description) + " deserializes: " + error);
+		Expect(SameSelectionCore(restored, row.selection),
+			std::string(row.description) + " round-trips identically");
+		Expect(error.empty(), std::string(row.description) + " leaves no diagnostic");
+	}
+
+	// Canonical row shapes are minimal: Quit/NewGame carry no save rows and
+	// slotted Continue carries exactly the slot coordinate.
+	{
+		std::vector<LaunchSelectionField> fields;
+		Expect(SerializeLaunchSelection(quit, fields, error), "quit serializes");
+		Expect(fields.size() == 1 && fields[0].key == "Action" && fields[0].value == "Quit",
+			"quit serializes to a single Action row");
+		fields.clear();
+		Expect(SerializeLaunchSelection(ContinueSelection(12, 3), fields, error), "slotted continue serializes");
+		Expect(fields.size() == 4 && fields[1].key == "HasSave" && fields[1].value == "True" &&
+			fields[2].key == "SaveIndex" && fields[2].value == "12" &&
+			fields[3].key == "SaveSlot" && fields[3].value == "3",
+			"slotted continue serializes Action, HasSave, SaveIndex, and SaveSlot rows");
+	}
+
+	struct RejectedRow
+	{
+		const char* description;
+		LaunchSelection selection;
+	};
+	LaunchSelection unsavedContinue = ContinueSelection(-1, -1);
+	unsavedContinue.hasSave = false;
+	LaunchSelection negativeSlot = ContinueSelection(5, -1);
+	negativeSlot.save.usesSlotDirectory = true;
+	negativeSlot.save.slot = -7;
+	LaunchSelection errorAction;
+	errorAction.action = LaunchAction::Error;
+	const std::vector<RejectedRow> rejected = {
+		{"continue without a save is not serializable", unsavedContinue},
+		{"continue with a negative save index is not serializable", ContinueSelection(-1, -1)},
+		{"slotted continue with a negative slot is not serializable", negativeSlot},
+		{"error action is not serializable", errorAction},
+	};
+	for (const RejectedRow& row : rejected)
+	{
+		std::vector<LaunchSelectionField> fields;
+		Expect(!SerializeLaunchSelection(row.selection, fields, error) && !error.empty() && fields.empty(),
+			std::string(row.description));
+	}
+
+	// Malformed or inconsistent field tables fall back as a whole to Quit.
+	LaunchSelection fallback;
+	struct MalformedRow
+	{
+		const char* description;
+		std::vector<LaunchSelectionField> fields;
+	};
+	const std::vector<MalformedRow> malformed = {
+		{"empty store falls back to quit", {}},
+		{"unknown action falls back to quit", {F("Action", "Bogus")}},
+		{"continue without a save marker falls back to quit", {F("Action", "Continue")}},
+		{"continue with an explicit false save marker falls back to quit",
+			{F("Action", "Continue"), F("HasSave", "False"), F("SaveIndex", "5")}},
+		{"continue with a missing save index falls back to quit",
+			{F("Action", "Continue"), F("HasSave", "True")}},
+		{"continue with a nonnumeric save index falls back to quit",
+			{F("Action", "Continue"), F("HasSave", "True"), F("SaveIndex", "nope")}},
+		{"continue with a negative save index falls back to quit",
+			{F("Action", "Continue"), F("HasSave", "True"), F("SaveIndex", "-5")}},
+		{"slotted continue with a bad slot falls back to quit",
+			{F("Action", "Continue"), F("HasSave", "True"), F("SaveIndex", "5"), F("SaveSlot", "x")}},
+		{"unrelated rows alone fall back to quit", {F("RetailRoot", "/Retail")}},
+	};
+	for (const MalformedRow& row : malformed)
+	{
+		LaunchSelection restored;
+		Expect(!DeserializeLaunchSelection(row.fields, restored, error) && !error.empty(),
+			std::string(row.description) + " reports malformed store");
+		Expect(restored.action == LaunchAction::Quit && !restored.hasSave,
+			std::string(row.description) + " falls back to the safe quit selection");
+	}
+	fallback = LaunchSelection();
+	Expect(!DeserializeLaunchSelection({}, fallback, error) && fallback.action == LaunchAction::Quit,
+		"fallback selection is populated even when parsing fails");
+
+	// Row order is free, later duplicates win, case-insensitive keys and
+	// actions are accepted, and unrelated rows are ignored.
+	{
+		LaunchSelection restored;
+		const std::vector<LaunchSelectionField> reordered = {
+			F("SaveSlot", "3"), F("Unrelated", "ignored"), F("saveindex", "12"),
+			F("hassave", "True"), F("ACTION", "CONTINUE"),
+		};
+		Expect(DeserializeLaunchSelection(reordered, restored, error),
+			"field order, casing, and unrelated rows are tolerated: " + error);
+		Expect(SameSelectionCore(restored, ContinueSelection(12, 3)),
+			"reordered case-insensitive rows restore the slotted continue selection");
+
+		const std::vector<LaunchSelectionField> duplicated = {
+			F("Action", "NewGame"), F("Action", "Continue"),
+			F("HasSave", "True"), F("SaveIndex", "7"),
+		};
+		Expect(DeserializeLaunchSelection(duplicated, restored, error),
+			"duplicated rows deserialize: " + error);
+		Expect(SameSelectionCore(restored, ContinueSelection(7, -1)),
+			"the final duplicated action row wins");
+	}
+}
+
+std::size_t CountOccurrences(const std::string& text, const std::string& needle)
+{
+	std::size_t count = 0;
+	for (std::size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size()))
+		++count;
+	return count;
+}
+
+void TestLaunchSelectionPersistenceRoundTrip()
+{
+	TemporaryRoots roots;
+	const fs::path catalog = roots.user / "Launcher.ini";
+	std::string error;
+
+	// Round-trip contract: commit, reload, identical selection for every
+	// canonical shape.
+	LaunchSelection quit;
+	LaunchSelection newGame;
+	newGame.action = LaunchAction::NewGame;
+	struct PersistedRow
+	{
+		const char* description;
+		LaunchSelection selection;
+	};
+	const std::vector<PersistedRow> persisted = {
+		{"quit selection persists", quit},
+		{"new game selection persists", newGame},
+		{"flat continue selection persists", ContinueSelection(12, -1)},
+		{"slotted continue selection persists", ContinueSelection(12, 3)},
+	};
+	for (const PersistedRow& row : persisted)
+	{
+		Expect(CommitLaunchSelection(roots.user.string(), row.selection, error),
+			std::string(row.description) + ": " + error);
+		LaunchSelection restored;
+		Expect(LoadLaunchSelection(roots.user.string(), restored, error),
+			std::string(row.description) + " reloads: " + error);
+		Expect(SameSelectionCore(restored, row.selection),
+			std::string(row.description) + " round-trips identically");
+	}
+
+	// The store stays minimal: a NewGame catalog carries no save rows at all.
+	Expect(CommitLaunchSelection(roots.user.string(), newGame, error), "minimal selection commits");
+	const std::string minimalStore = ReadBytes(catalog);
+	Expect(minimalStore.find("[LastLaunch]") != std::string::npos &&
+		minimalStore.find("Action=NewGame") != std::string::npos &&
+		minimalStore.find("SaveIndex") == std::string::npos &&
+		minimalStore.find("HasSave") == std::string::npos,
+		"non-continue selections persist only their action row");
+
+	// Malformed stores fall back to the safe Quit selection with the whole
+	// ordering documented in the pure contract.
+	struct MalformedCatalog
+	{
+		const char* description;
+		std::string contents;
+	};
+	const std::vector<MalformedCatalog> malformed = {
+		{"an empty catalog falls back to quit", ""},
+		{"an unknown action falls back to quit", "[LastLaunch]\nAction=Bogus\n"},
+		{"continue without a save index falls back to quit",
+			"[LastLaunch]\nAction=Continue\nHasSave=True\n"},
+		{"a nonnumeric save index falls back to quit",
+			"[LastLaunch]\nAction=Continue\nHasSave=True\nSaveIndex=nope\n"},
+		{"a negative save index falls back to quit",
+			"[LastLaunch]\nAction=Continue\nHasSave=True\nSaveIndex=-5\n"},
+		{"a bad slot coordinate falls back to quit",
+			"[LastLaunch]\nAction=Continue\nHasSave=True\nSaveIndex=5\nSaveSlot=x\n"},
+		{"an inconsistent save marker falls back to quit",
+			"[LastLaunch]\nAction=Continue\nHasSave=False\nSaveIndex=5\n"},
+	};
+	for (const MalformedCatalog& row : malformed)
+	{
+		WriteBytes(catalog, row.contents);
+		LaunchSelection restored;
+		Expect(!LoadLaunchSelection(roots.user.string(), restored, error) && !error.empty(),
+			std::string(row.description) + " reports a malformed store");
+		Expect(restored.action == LaunchAction::Quit && !restored.hasSave,
+			std::string(row.description));
+	}
+
+	// A missing catalog behaves like a malformed one: usable fallback, no
+	// crash, no implicit file creation.
+	TemporaryRoots missingRoots;
+	LaunchSelection restoredMissing;
+	error.clear();
+	Expect(!LoadLaunchSelection(missingRoots.user.string(), restoredMissing, error) &&
+		!error.empty() && restoredMissing.action == LaunchAction::Quit,
+		"a missing catalog yields the quit fallback without creating files");
+	Expect(!fs::exists(missingRoots.user / "Launcher.ini"),
+		"loading a missing catalog never materializes it");
+
+	// Selection persistence coexists with the data source catalog: unrelated
+	// sections survive untouched across selection commits.
+	WriteBytes(catalog, "[DataSources]\nSelected=Prototype\n");
+	DataSourceConfiguration sources;
+	Expect(LoadDataSourceConfiguration(roots.user.string(), sources, error) &&
+		sources.selected == DataSource::Prototype,
+		"data source catalog loads alongside launch selection state");
+	Expect(CommitLaunchSelection(roots.user.string(), ContinueSelection(7, -1), error),
+		"selection commits into an existing catalog: " + error);
+	sources = DataSourceConfiguration();
+	LaunchSelection combined;
+	Expect(LoadDataSourceConfiguration(roots.user.string(), sources, error) &&
+		sources.selected == DataSource::Prototype,
+		"selection commit preserves the data source section");
+	Expect(LoadLaunchSelection(roots.user.string(), combined, error) &&
+		SameSelectionCore(combined, ContinueSelection(7, -1)),
+		"both catalogs coexist after a selection commit");
+}
+
+void TestDuplicateLaunchSelectionCommitKeepsLastWriter()
+{
+	TemporaryRoots roots;
+	const fs::path catalog = roots.user / "Launcher.ini";
+	std::string error;
+
+	// Two sequential saves of different selections: the second publication
+	// atomically replaces the first (last writer wins), leaving exactly one
+	// canonical action row behind.
+	const LaunchSelection first = ContinueSelection(7, -1);
+	LaunchSelection second;
+	second.action = LaunchAction::NewGame;
+	Expect(CommitLaunchSelection(roots.user.string(), first, error),
+		"duplicate-write first commit succeeds: " + error);
+	const std::string firstStore = ReadBytes(catalog);
+	Expect(!firstStore.empty() && !fs::exists(catalog.string() + ".bak"),
+		"the first commit creates no backup because no prior generation existed");
+
+	Expect(CommitLaunchSelection(roots.user.string(), second, error),
+		"duplicate-write second commit succeeds: " + error);
+	LaunchSelection reloaded;
+	Expect(LoadLaunchSelection(roots.user.string(), reloaded, error),
+		"second generation reloads: " + error);
+	Expect(SameSelectionCore(reloaded, second),
+		"the last writer's selection is the persisted one");
+
+	const std::string secondStore = ReadBytes(catalog);
+	Expect(secondStore != firstStore, "the second commit rewrote the catalog");
+	Expect(CountOccurrences(secondStore, "Action=") == 1,
+		"exactly one canonical action row survives duplicate writes");
+	Expect(secondStore.find("SaveIndex") == std::string::npos && secondStore.find("HasSave") == std::string::npos,
+		"the replaced generation leaves no stale save coordinates");
+	Expect(fs::exists(catalog.string() + ".bak") && ReadBytes(catalog.string() + ".bak") == firstStore,
+		"the previous generation is preserved exactly as the backup");
+
+	// A third write keeps winning while the original backup is never
+	// overwritten, matching settings-commit semantics.
+	const LaunchSelection third = ContinueSelection(12, 3);
+	Expect(CommitLaunchSelection(roots.user.string(), third, error),
+		"duplicate-write third commit succeeds: " + error);
+	Expect(LoadLaunchSelection(roots.user.string(), reloaded, error) &&
+		SameSelectionCore(reloaded, third),
+		"the third generation wins");
+	const std::string thirdStore = ReadBytes(catalog);
+	Expect(CountOccurrences(thirdStore, "Action=") == 1 &&
+		thirdStore.find("SaveIndex=12") != std::string::npos &&
+		thirdStore.find("SaveSlot=3") != std::string::npos,
+		"the third generation is complete and singular");
+	Expect(ReadBytes(catalog.string() + ".bak") == firstStore,
+		"the first-generation backup is never overwritten by later writes");
+}
+ }
 
 
 int main()
@@ -1022,6 +1605,10 @@ int main()
 	TestDataSourceMigrationFailureAndQuit();
 	TestInstalledDataRootIsolation();
 	TestDataDirectoryArgumentContract();
+	TestLegacySettingsMigration();
+	TestLaunchSelectionSerializationContract();
+	TestLaunchSelectionPersistenceRoundTrip();
+	TestDuplicateLaunchSelectionCommitKeepsLastWriter();
 	if (Failures != 0)
 		std::fprintf(stderr, "%d launcher test(s) failed\n", Failures);
 	return Failures == 0 ? 0 : 1;

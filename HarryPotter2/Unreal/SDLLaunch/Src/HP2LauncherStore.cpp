@@ -3,6 +3,8 @@
 =============================================================================*/
 #include "HP2LauncherStore.h"
 
+#include "HP2LaunchPolicy.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
@@ -1918,5 +1920,351 @@ bool CommitLauncherSettings(const LauncherPaths& paths, const LauncherSettings& 
 	Discard(rollbackGame);
 	Discard(rollbackUser);
 	return true;
+}
+
+namespace
+{
+bool MigrationFinalValue(
+	const std::vector<LegacySettingValue>& values,
+	const char* section,
+	const char* key,
+	std::string& text)
+{
+	bool found = false;
+	for (const LegacySettingValue& entry : values)
+	{
+		if (Same(entry.section, section) && Same(entry.key, key))
+		{
+			text = entry.value;
+			found = true;
+		}
+	}
+	return found;
+}
+
+void MigrationRewrite(
+	std::vector<LegacySettingValue>& values,
+	const char* section,
+	const char* key,
+	const std::string& next,
+	const char* reason,
+	std::vector<SettingsMigrationChange>& changes)
+{
+	std::string previous;
+	const bool existed = MigrationFinalValue(values, section, key, previous);
+	std::size_t last = values.size();
+	for (std::size_t i = 0; i < values.size(); ++i)
+	{
+		if (Same(values[i].section, section) && Same(values[i].key, key)) last = i;
+	}
+	if (last != values.size())
+		values[last].value = next;
+	else
+		values.push_back({section, key, next});
+	if (!existed || previous != next)
+		changes.push_back({section, key, existed ? previous : "", next, reason});
+}
+}
+
+std::vector<LegacySettingValue> MigrateLegacySettings(
+	const std::vector<LegacySettingValue>& legacyValues,
+	std::vector<SettingsMigrationChange>& changes)
+{
+	changes.clear();
+	std::vector<LegacySettingValue> values = legacyValues;
+
+	// Owned booleans canonicalize to True/False; invalid spellings fall back
+	// to the model default the loader would have used.
+	struct OwnedBoolean { const char* section; const char* key; bool fallback; };
+	static const OwnedBoolean OwnedBooleans[] = {
+		{"SDLDrv.SDLClient", "StartupFullscreen", false},
+		{"SDLDrv.SDLClient", "BorderlessWindow", false},
+		{"SDLDrv.SDLClient", "UseDesktopResolution", false},
+		{"SDLDrv.SDLClient", "ShowFPS", false},
+		{"SDLDrv.SDLClient", "MaintainVerticalFOV", true},
+		{"SDLDrv.SDLClient", "NativeText", true},
+		{"SDLDrv.SDLClient", "ScreenFlashes", true},
+		{"SDLDrv.SDLClient", "UseJoystick", true},
+		{"XOpenGLDrv.XOpenGLRenderDevice", "UseVSync", false},
+		{"XOpenGLDrv.XOpenGLRenderDevice", "UseAA", false},
+		{"Engine.GameEngine", "UseSound", true},
+		{"Engine.PlayerPawn", "bInvertMouse", false},
+		{"Engine.PlayerPawn", "bModernThirdPersonControls", false},
+		{"HGame.Harry", "bAutoCenterCamera", true},
+		{"HGame.Harry", "bMoveWhileCasting", true},
+		{"HGame.Harry", "bAutoQuaff", true},
+	};
+	for (const OwnedBoolean& owned : OwnedBooleans)
+	{
+		std::string text;
+		if (!MigrationFinalValue(values, owned.section, owned.key, text)) continue;
+		bool parsed = owned.fallback;
+		const bool recognized = Boolean(text, parsed);
+		MigrationRewrite(
+			values,
+			owned.section,
+			owned.key,
+			BoolText(parsed),
+			recognized ? "settings.boolean_spelling" : "settings.boolean_invalid_defaulted",
+			changes);
+	}
+
+	// Screen mode: borderless/desktop overrides fullscreen, exactly as the
+	// loader resolves the three legacy switches.
+	std::string text;
+	bool startupFullscreen = false, borderless = false, desktopResolution = false;
+	const bool hasStartupFullscreen =
+		MigrationFinalValue(values, "SDLDrv.SDLClient", "StartupFullscreen", text) &&
+		Boolean(text, startupFullscreen);
+	const bool hasBorderless =
+		MigrationFinalValue(values, "SDLDrv.SDLClient", "BorderlessWindow", text) &&
+		Boolean(text, borderless);
+	const bool hasDesktopResolution =
+		MigrationFinalValue(values, "SDLDrv.SDLClient", "UseDesktopResolution", text) &&
+		Boolean(text, desktopResolution);
+	if (hasStartupFullscreen || hasBorderless || hasDesktopResolution)
+	{
+		const bool borderlessDesktop = borderless || desktopResolution;
+		if (hasStartupFullscreen)
+		{
+			MigrationRewrite(
+				values,
+				"SDLDrv.SDLClient",
+				"StartupFullscreen",
+				BoolText(startupFullscreen && !borderlessDesktop),
+				"settings.screen_mode_consolidated",
+				changes);
+		}
+		if (hasBorderless)
+		{
+			MigrationRewrite(
+				values,
+				"SDLDrv.SDLClient",
+				"BorderlessWindow",
+				BoolText(borderlessDesktop),
+				"settings.screen_mode_consolidated",
+				changes);
+		}
+
+		// Viewport quartet collapses onto the resolution the launcher would
+		// actually run for the consolidated mode: the loader reads the
+		// fullscreen pair only when the mode is not windowed.
+		const bool fullSize = borderlessDesktop || startupFullscreen;
+		const char* widthKey = fullSize ? "FullscreenViewportX" : "WindowedViewportX";
+		const char* heightKey = fullSize ? "FullscreenViewportY" : "WindowedViewportY";
+		int width = 800, height = 600;
+		int parsedDimension;
+		if (MigrationFinalValue(values, "SDLDrv.SDLClient", widthKey, text) &&
+			Integer(text, parsedDimension) && parsedDimension >= 320 && parsedDimension <= 16384)
+		{
+			width = parsedDimension;
+		}
+		if (MigrationFinalValue(values, "SDLDrv.SDLClient", heightKey, text) &&
+			Integer(text, parsedDimension) && parsedDimension >= 320 && parsedDimension <= 16384)
+		{
+			height = parsedDimension;
+		}
+		static const char* const ViewportKeys[] = {
+			"WindowedViewportX", "WindowedViewportY", "FullscreenViewportX", "FullscreenViewportY"
+		};
+		for (const char* viewportKey : ViewportKeys)
+		{
+			if (!MigrationFinalValue(values, "SDLDrv.SDLClient", viewportKey, text)) continue;
+			const bool isHeight = Same(viewportKey, "WindowedViewportY") ||
+				Same(viewportKey, "FullscreenViewportY");
+			MigrationRewrite(
+				values,
+				"SDLDrv.SDLClient",
+				viewportKey,
+				std::to_string(isHeight ? height : width),
+				"settings.viewport_consolidated",
+				changes);
+		}
+	}
+
+	// Frame rate cap: renderer floats like "60.000000" become plain integers.
+	if (MigrationFinalValue(values, "Engine.GameEngine", "FrameRateLimit", text))
+	{
+		double cap;
+		int canonical = 60;
+		const char* reason = "settings.frame_rate_limit_invalid_defaulted";
+		if (Number(text, cap) && cap == std::floor(cap) && cap >= 0 && cap <= INT_MAX &&
+			ValidCap(static_cast<int>(cap)))
+		{
+			canonical = static_cast<int>(cap);
+			reason = "settings.frame_rate_limit_normalized";
+		}
+		MigrationRewrite(values, "Engine.GameEngine", "FrameRateLimit", std::to_string(canonical), reason, changes);
+	}
+
+	auto migrateDiscreteScale = [&](const char* section, const char* key,
+		const double* accepted, std::size_t count, double fallback)
+	{
+		std::string raw;
+		if (!MigrationFinalValue(values, section, key, raw)) return;
+		double parsed;
+		double canonical = fallback;
+		bool acceptedValue = false;
+		if (Number(raw, parsed))
+		{
+			for (std::size_t i = 0; i < count; ++i)
+			{
+				if (parsed == accepted[i]) { canonical = accepted[i]; acceptedValue = true; break; }
+			}
+		}
+		MigrationRewrite(
+			values,
+			section,
+			key,
+			DoubleText(canonical),
+			acceptedValue ? "settings.scale_normalized" : "settings.scale_invalid_defaulted",
+			changes);
+	};
+	migrateDiscreteScale("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale",
+		RenderScaleValues.data(), RenderScaleValues.size(), 1.0);
+	migrateDiscreteScale("SDLDrv.SDLClient", "UIScale",
+		UIScaleValues.data(), UIScaleValues.size(), 1.0);
+
+	auto migrateRangedNumber = [&](const char* section, const char* key,
+		double minimum, double maximum, double fallback)
+	{
+		std::string raw;
+		if (!MigrationFinalValue(values, section, key, raw)) return;
+		double parsed;
+		double canonical = fallback;
+		const bool valid = Number(raw, parsed) && parsed >= minimum && parsed <= maximum;
+		if (valid) canonical = parsed;
+		MigrationRewrite(
+			values,
+			section,
+			key,
+			DoubleText(canonical),
+			valid ? "settings.range_normalized" : "settings.range_invalid_defaulted",
+			changes);
+	};
+	migrateRangedNumber("SDLDrv.SDLClient", "Brightness", 0.1, 1.0, 0.4);
+	migrateRangedNumber("ALAudio.ALAudioSubsystem", "SoundVolume", 0.0, 1.0, 0.9);
+	migrateRangedNumber("ALAudio.ALAudioSubsystem", "MusicVolume", 0.0, 1.0, 0.53);
+	migrateRangedNumber("Engine.PlayerPawn", "MouseSensitivity", 0.2, 10.0, 3.0);
+
+	// Anti-aliasing: a disabled or unrecognized UseAA clears any stale sample
+	// count, mirroring LoadAntiAliasing.
+	{
+		std::string aaRaw, samplesRaw;
+		const bool hasUseAA =
+			MigrationFinalValue(values, "XOpenGLDrv.XOpenGLRenderDevice", "UseAA", aaRaw);
+		const bool hasSamples =
+			MigrationFinalValue(values, "XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", samplesRaw);
+		if (hasUseAA || hasSamples)
+		{
+			bool enabled = false;
+			if (hasUseAA) Boolean(aaRaw, enabled);
+			int samples = 0;
+			int parsedSamples;
+			if (enabled && hasSamples && Integer(samplesRaw, parsedSamples) &&
+				(parsedSamples == 2 || parsedSamples == 4))
+			{
+				samples = parsedSamples;
+			}
+			enabled = samples != 0;
+			if (hasUseAA)
+			{
+				MigrationRewrite(values, "XOpenGLDrv.XOpenGLRenderDevice", "UseAA",
+					BoolText(enabled), "settings.antialiasing_normalized", changes);
+			}
+			if (hasSamples)
+			{
+				MigrationRewrite(values, "XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples",
+					std::to_string(samples), "settings.antialiasing_normalized", changes);
+			}
+		}
+	}
+
+	if (MigrationFinalValue(values, "XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", text))
+	{
+		double parsed;
+		int canonical = 4;
+		const char* reason = "settings.anisotropy_invalid_defaulted";
+		if (Number(text, parsed) && parsed == std::floor(parsed) && parsed >= INT_MIN && parsed <= INT_MAX)
+		{
+			const int discrete = static_cast<int>(parsed);
+			if (std::find(AnisotropyValues.begin(), AnisotropyValues.end(), discrete) != AnisotropyValues.end())
+			{
+				canonical = discrete;
+				reason = "settings.anisotropy_normalized";
+			}
+		}
+		MigrationRewrite(values, "XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", std::to_string(canonical), reason, changes);
+	}
+
+	auto migrateEnum = [&](const char* section, const char* key,
+		const char* const* spellings, std::size_t count, std::size_t fallbackIndex)
+	{
+		std::string raw;
+		if (!MigrationFinalValue(values, section, key, raw)) return;
+		std::size_t selected = fallbackIndex;
+		bool recognized = false;
+		const std::string trimmed = Trim(raw);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			if (Same(trimmed, spellings[i])) { selected = i; recognized = true; break; }
+		}
+		MigrationRewrite(
+			values,
+			section,
+			key,
+			spellings[selected],
+			recognized ? "settings.enum_normalized" : "settings.enum_invalid_defaulted",
+			changes);
+	};
+	static const char* const TextureSpellings[] = {"Low", "Medium", "High"};
+	static const char* const ObjectSpellings[] = {
+		"ObjectDetailVeryLow", "ObjectDetailLow", "ObjectDetailMedium",
+		"ObjectDetailHigh", "ObjectDetailVeryHigh"
+	};
+	static const char* const DifficultySpellings[] = {"DifficultyEasy", "DifficultyMedium", "DifficultyHard"};
+	migrateEnum("SDLDrv.SDLClient", "TextureDetail", TextureSpellings, 3, 2);
+	migrateEnum("Engine.PlayerPawn", "ObjectDetail", ObjectSpellings, 5, 2);
+	migrateEnum("Engine.PlayerPawn", "Difficulty", DifficultySpellings, 3, 0);
+
+	return values;
+}
+
+bool CommitLaunchSelection(
+	const std::string& launcherRoot,
+	const LaunchSelection& selection,
+	std::string& error)
+{
+	error.clear();
+	std::vector<LaunchSelectionField> fields;
+	if (!SerializeLaunchSelection(selection, fields, error)) return false;
+	Document document;
+	bool exists;
+	mode_t mode;
+	std::string original;
+	if (!LoadLauncherDocument(launcherRoot, document, exists, mode, original, error)) return false;
+	for (const LaunchSelectionField& field : fields)
+		Set(document, "LastLaunch", field.key.c_str(), field.value);
+	return PublishLauncherDocument(launcherRoot, document, exists, mode, original, error);
+}
+
+bool LoadLaunchSelection(const std::string& launcherRoot, LaunchSelection& selection, std::string& error)
+{
+	selection = LaunchSelection();
+	error.clear();
+	Document document;
+	bool exists;
+	mode_t mode;
+	std::string original;
+	if (!LoadLauncherDocument(launcherRoot, document, exists, mode, original, error)) return false;
+	std::vector<LaunchSelectionField> fields;
+	static const char* const SelectionKeys[] = {"Action", "HasSave", "SaveIndex", "SaveSlot"};
+	for (const char* selectionKey : SelectionKeys)
+	{
+		std::string value;
+		if (Get(document, "LastLaunch", selectionKey, value))
+			fields.push_back({selectionKey, value});
+	}
+	return DeserializeLaunchSelection(fields, selection, error);
 }
 }
