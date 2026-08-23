@@ -646,6 +646,7 @@ def _run_map(
     capture_frames_dir: Path | None = None,
     extra_environment: dict[str, str] | None = None,
     ini_file: Path | None = None,
+    engine_bin: Path | None = None,
 ) -> dict[str, object]:
     # Per-tick timing markers are opt-in inside the engine; every smoke
     # launch turns them on so frame budgets measure real ticks.
@@ -672,6 +673,7 @@ def _run_map(
         no_sound=True,
         extra_env=extra_env,
         ini_file=ini_file,
+        engine_bin=engine_bin,
     )
     result.update(
         {
@@ -986,6 +988,13 @@ def _arguments() -> argparse.Namespace:
         help=".app bundle or direct Mach-O executable, relative to the repository",
     )
     parser.add_argument(
+        "--engine-bin",
+        type=Path,
+        default=None,
+        help="launch this engine executable instead of resolving --app as a "
+        ".app bundle (native arm64 Mach-O validation still applies)",
+    )
+    parser.add_argument(
         "--data-root",
         type=Path,
         default=DEFAULT_DATA_ROOT,
@@ -1100,7 +1109,11 @@ def main() -> int:
         app = game_test._resolve_path(arguments.app, repo_root, strict=True)
         data_root = game_test._resolve_path(arguments.data_root, repo_root, strict=True)
         game_test._validate_data_root(data_root)
-        executable = game_test._bundle_executable(app)
+        executable = (
+            game_test._resolve_path(arguments.engine_bin, repo_root, strict=True)
+            if arguments.engine_bin is not None
+            else game_test._bundle_executable(app)
+        )
         game_test._validate_native_arm64(executable)
         maps = _select_maps(game_test._enumerate_maps(data_root), arguments.maps)
         super_by_class = _class_catalog(data_root)
@@ -1189,6 +1202,7 @@ def main() -> int:
                     capture_frames_dir=capture_frames_dir,
                     extra_environment=vulkan_environment,
                     ini_file=vulkan_ini,
+                    engine_bin=arguments.engine_bin,
                 )
             else:
                 record = _verify_map_package(

@@ -576,15 +576,19 @@ def run_game(
     timeout_seconds: float, log_path: Path, no_sound: bool = False,
     extra_env: dict[str, str] | None = None,
     ini_file: Path | None = None,
+    engine_bin: Path | None = None,
 ) -> dict[str, object]:
-    """Validate a real app, then launch one exact listed map."""
+    """Validate an app bundle or override engine binary, then launch one map."""
     repo_root = _repo_root()
     app = _resolve_path(app, repo_root, strict=True)
     data_root = _resolve_path(data_root, repo_root, strict=True)
     log_path = _resolve_path(log_path, repo_root, strict=False)
     _validate_data_root(data_root)
     _positive_float(timeout_seconds)
-    executable = _bundle_executable(app)
+    if engine_bin is None:
+        executable = _bundle_executable(app)
+    else:
+        executable = _resolve_path(engine_bin, repo_root, strict=True)
     _validate_native_arm64(executable)
     map_path, map_token = _resolve_map(data_root, selected_map)
     command = build_launch_command(
@@ -632,6 +636,13 @@ def _arguments() -> argparse.Namespace:
     run.add_argument("--timeout", required=True, type=_argument_positive_float)
     run.add_argument("--log", required=True, type=Path)
     run.add_argument("--no-sound", action="store_true")
+    run.add_argument(
+        "--engine-bin",
+        type=Path,
+        default=None,
+        help="launch this engine executable instead of resolving --app as a "
+        ".app bundle (native arm64 Mach-O validation still applies)",
+    )
     return parser.parse_args()
 
 
@@ -647,6 +658,7 @@ def main() -> int:
             app=arguments.app, data_root=arguments.data_root, selected_map=arguments.selected_map,
             renderer=arguments.renderer, ticks=arguments.ticks, timeout_seconds=arguments.timeout,
             log_path=arguments.log, no_sound=arguments.no_sound,
+            engine_bin=arguments.engine_bin,
         )
         print(json.dumps(result, ensure_ascii=True, allow_nan=False, sort_keys=True))
         return 0 if result["passed"] else 1
