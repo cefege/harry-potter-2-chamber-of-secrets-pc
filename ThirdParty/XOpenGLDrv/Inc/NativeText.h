@@ -6,6 +6,7 @@
 class UXOpenGLRenderDevice;
 struct FCanvasTextLayout;
 struct FCanvasTextRequest;
+struct FCanvasTextLayoutRequest;
 
 enum ENativeTextRole
 {
@@ -27,7 +28,7 @@ class FNativeTextPlatformBackend
 {
 public:
 	virtual ~FNativeTextPlatformBackend() {}
-	virtual UBOOL CreateLayout( const FCanvasTextRequest& Request, FCanvasTextLayout*& OutLayout ) = 0;
+	virtual UBOOL CreateLayout( const FCanvasTextLayoutRequest& Request, FCanvasTextLayout*& OutLayout ) = 0;
 	virtual void DestroyLayout( FCanvasTextLayout* Layout ) = 0;
 	virtual UBOOL MeasureLayout( FCanvasTextLayout* Layout, INT& OutWidth, INT& OutHeight ) = 0;
 	virtual UBOOL DrawLayout( UXOpenGLRenderDevice& Renderer, FSceneNode* Frame, FCanvasTextLayout* Layout ) = 0;

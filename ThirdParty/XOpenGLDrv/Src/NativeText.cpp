@@ -148,7 +148,7 @@ namespace
 		if (!Text)
 			return Result;
 
-		for (INT Index = 0; TextLength < 0 || Index < TextLength; ++Index)
+		for (INT Index = 0; Index < TextLength; ++Index)
 		{
 			if (!Text[Index])
 				break;
@@ -265,7 +265,7 @@ namespace
 			PointSize > static_cast<CGFloat>(std::numeric_limits<uint32_t>::max()) / 64)
 			return NULL;
 
-		const std::vector<UniChar> UTF16Name = UTF16FromTCHAR(FamilyName, -1);
+		const std::vector<UniChar> UTF16Name = UTF16FromTCHAR(FamilyName, appStrlen(FamilyName));
 		if (UTF16Name.empty())
 			return NULL;
 
@@ -304,7 +304,7 @@ namespace
 		return Font;
 	}
 
-	static CTFontRef CreateRequestFont(const FCanvasTextRequest& Request, ENativeTextRole Role)
+	static CTFontRef CreateRequestFont(const FCanvasTextLayoutRequest& Request, ENativeTextRole Role)
 	{
 		if (!Request.Font)
 			return NULL;
@@ -346,13 +346,13 @@ namespace
 			WideValue <= static_cast<double>(std::numeric_limits<INT>::max());
 	}
 
-	static bool IsSafeNativeTextRequest(const FCanvasTextRequest& Request)
+	static bool IsSafeNativeTextRequest(const FCanvasTextLayoutRequest& Request)
 	{
+		// Draw-side Canvas origin never enters the layout request; it is
+		// validated at the canvas-request boundary and applied by the device.
 		return IsSafeNativeTextFloat(Request.TextScale) &&
 			IsSafeNativeTextFloat(Request.SpaceX) &&
 			IsSafeNativeTextFloat(Request.SpaceY) &&
-			IsSafeNativeTextFloat(Request.OriginX) &&
-			IsSafeNativeTextFloat(Request.OriginY) &&
 			IsSafeNativeTextFloat(Request.ClipX) &&
 			IsSafeNativeTextFloat(Request.ClipY) &&
 			IsSafeNativeTextFloat(Request.Color.X) &&
@@ -363,7 +363,7 @@ namespace
 
 	static bool MakePreprocessedText
 	(
-		const FCanvasTextRequest& Request,
+		const FCanvasTextLayoutRequest& Request,
 		std::vector<UniChar>& OutText,
 		std::vector<INT>& OutSourceEnds,
 		std::vector<CFRange>& OutUnderlines
@@ -372,13 +372,12 @@ namespace
 		OutText.clear();
 		OutSourceEnds.clear();
 		OutUnderlines.clear();
-		if (Request.TextLength == std::numeric_limits<INT>::min() ||
-			!IsSafeNativeTextRequest(Request))
+		if (Request.TextLength < 0 || !IsSafeNativeTextRequest(Request))
 			return false;
 		if (!Request.Text || !Request.Font)
 			return false;
 
-		const INT TextLength = Request.TextLength < 0 ? -Request.TextLength : Request.TextLength;
+		const INT TextLength = Request.TextLength;
 		for (INT Index = 0; Index < TextLength && Request.Text[Index]; ++Index)
 		{
 			const uint32_t Scalar = static_cast<uint32_t>(static_cast<TCHARU>(Request.Text[Index]));
@@ -661,7 +660,7 @@ namespace
 		}
 	}
 
-	static bool AppendNativeTextLine(FCanvasTextLayout& Layout, CTTypesetterRef Typesetter, CFStringRef Source, CFRange LineRange, const std::vector<INT>& SourceEnds, const std::vector<CFRange>& UnderlineRanges, CTFontRef BaseFont, const FCanvasTextRequest& Request, CGFloat& InOutTop, UBOOL bCaptureGlyphs)
+	static bool AppendNativeTextLine(FCanvasTextLayout& Layout, CTTypesetterRef Typesetter, CFStringRef Source, CFRange LineRange, const std::vector<INT>& SourceEnds, const std::vector<CFRange>& UnderlineRanges, CTFontRef BaseFont, const FCanvasTextLayoutRequest& Request, CGFloat& InOutTop, UBOOL bCaptureGlyphs)
 	{
 		if (LineRange.length == 0)
 		{
@@ -740,7 +739,7 @@ namespace
 		return true;
 	}
 
-	static bool BuildNativeTextLayout(FCanvasTextLayout& Layout, const FCanvasTextRequest& Request, const std::vector<UniChar>& Text, const std::vector<INT>& SourceEnds, const std::vector<CFRange>& UnderlineRanges, CTFontRef BaseFont, UBOOL bCaptureGlyphs)
+	static bool BuildNativeTextLayout(FCanvasTextLayout& Layout, const FCanvasTextLayoutRequest& Request, const std::vector<UniChar>& Text, const std::vector<INT>& SourceEnds, const std::vector<CFRange>& UnderlineRanges, CTFontRef BaseFont, UBOOL bCaptureGlyphs)
 	{
 		if (Text.empty())
 			return true;
@@ -763,9 +762,7 @@ namespace
 		}
 
 		const CFIndex TextLength = static_cast<CFIndex>(Text.size());
-		// Canvas uses a negative TextLength only for its private wrapped-layout
-		// request.  Keep bClip exclusively for local quad clipping.
-		const bool bWrap = Request.TextLength < 0;
+		const bool bWrap = Request.Mode == CanvasLayout_Wrapped;
 		const CGFloat AvailableWidth = Request.bCenter
 			? static_cast<CGFloat>(Request.ClipX)
 			: static_cast<CGFloat>(Request.ClipX) - static_cast<CGFloat>(Request.StartX);
@@ -1260,7 +1257,7 @@ namespace
 	class FNativeTextCoreTextBackend final : public FNativeTextPlatformBackend
 	{
 	public:
-		UBOOL CreateLayout(const FCanvasTextRequest& Request, FCanvasTextLayout*& OutLayout) override
+		UBOOL CreateLayout(const FCanvasTextLayoutRequest& Request, FCanvasTextLayout*& OutLayout) override
 		{
 			OutLayout = NULL;
 			std::vector<UniChar> Text;
@@ -1301,8 +1298,6 @@ namespace
 			FCanvasTextLayout* Layout = new FCanvasTextLayout;
 			Layout->PolyFlags = Request.PolyFlags;
 			Layout->Color = Request.Color;
-			Layout->OriginX = Request.OriginX;
-			Layout->OriginY = Request.OriginY;
 			Layout->ClipX = Request.ClipX;
 			Layout->ClipY = Request.ClipY;
 			Layout->StartX = Request.StartX;
@@ -1465,10 +1460,8 @@ namespace
 			const UBOOL SavedNativeText = Client->NativeText;
 			Client->NativeText = 1;
 
-			FCanvasTextRequest Request = {};
+			FCanvasTextLayoutRequest Request = FCanvasTextLayoutRequest::Computed(NULL, NULL, 0);
 			Request.TextScale = 1.f;
-			Request.OriginX = 0;
-			Request.OriginY = 0;
 			Request.ClipX = Max(1, Viewport->SizeX);
 			Request.ClipY = Max(1, Viewport->SizeY);
 			Request.PolyFlags = PF_Translucent | PF_TwoSided;
@@ -1894,9 +1887,21 @@ UBOOL NativeTextInspectLayoutForTests(const FCanvasTextLayout* Layout, FNativeTe
 UBOOL UXOpenGLRenderDevice::CreateCanvasTextLayout(const FCanvasTextRequest& Request, FCanvasTextLayout*& OutLayout)
 {
 	OutLayout = NULL;
-	return NativeTextBackend ? NativeTextBackend->CreateLayout(Request, OutLayout) : 0;
+	if (!NativeTextBackend)
+		return 0;
+	// Draw-side state: the Canvas origin is validated here and applied to the
+	// opaque layout only after a successful all-or-nothing creation.
+	if (!IsSafeNativeTextFloat(Request.OriginX) || !IsSafeNativeTextFloat(Request.OriginY))
+		return 0;
+	FCanvasTextLayoutRequest LayoutRequest;
+	if (!ProjectCanvasTextLayoutRequest(Request, LayoutRequest))
+		return 0;
+	if (!NativeTextBackend->CreateLayout(LayoutRequest, OutLayout) || !OutLayout)
+		return 0;
+	OutLayout->OriginX = Request.OriginX;
+	OutLayout->OriginY = Request.OriginY;
+	return 1;
 }
-
 void UXOpenGLRenderDevice::DestroyCanvasTextLayout(FCanvasTextLayout* Layout)
 {
 	if (NativeTextBackend)

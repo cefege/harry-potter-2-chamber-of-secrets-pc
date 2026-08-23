@@ -127,17 +127,11 @@ void Check( bool Condition, const char* Message )
 	}
 }
 
-FCanvasTextRequest RequestFor( UFont& Font, const TCHAR* Text, INT Length = -1 )
+FCanvasTextLayoutRequest RequestFor( UFont& Font, const TCHAR* Text, INT Length = 0 )
 {
-	FCanvasTextRequest Request = {};
-	Request.Font = &Font;
-	Request.Text = Text;
-	Request.TextLength = Length < 0 ? appStrlen(Text) : Length;
-	Request.TextScale = 1.f;
-	Request.ClipX = 4096;
-	Request.ClipY = 4096;
-	Request.Color = FPlane(1.f, 1.f, 1.f, 1.f);
-	return Request;
+	// TextLength is always the non-negative source span; wrapping is chosen
+	// with an explicit Wrapped() request, never by a negative length.
+	return FCanvasTextLayoutRequest::Computed( &Font, Text, Length > 0 ? Length : appStrlen(Text) );
 }
 
 struct FLayout
@@ -147,7 +141,7 @@ struct FLayout
 	~FLayout() { if( Value ) Backend.DestroyLayout(Value); }
 };
 
-FNativeTextLayoutTestInfo Shape( FNativeTextPlatformBackend& Backend, const FCanvasTextRequest& Request, const char* Message, std::vector<INT>* Ends = NULL )
+FNativeTextLayoutTestInfo Shape( FNativeTextPlatformBackend& Backend, const FCanvasTextLayoutRequest& Request, const char* Message, std::vector<INT>* Ends = NULL )
 {
 	FLayout Layout = { Backend, NULL };
 	Check( Backend.CreateLayout(Request, Layout.Value) && Layout.Value, Message );
@@ -184,7 +178,7 @@ void TestRejectedRequests()
 	if( !Font ) return;
 
 	const TCHAR Text[] = { 'A', 0 };
-	auto Reject = [&]( const FCanvasTextRequest& Request, const char* Message )
+	auto Reject = [&]( const FCanvasTextLayoutRequest& Request, const char* Message )
 	{
 		FCanvasTextLayout* Layout = reinterpret_cast<FCanvasTextLayout*>(1);
 		const UBOOL Created = Backend->CreateLayout(Request, Layout);
@@ -193,9 +187,11 @@ void TestRejectedRequests()
 			Backend->DestroyLayout(Layout);
 	};
 
-	FCanvasTextRequest Request = RequestFor(*Font, Text);
-	Request.TextLength = std::numeric_limits<INT>::min();
-	Reject(Request, "INT_MIN wrapped length was negated instead of rejected");
+	// The negative-length sentinel is gone: TextLength is contractually
+	// non-negative, and the backend still rejects violations defensively
+	// instead of negating them into a wrapped request.
+	FCanvasTextLayoutRequest Request = FCanvasTextLayoutRequest::Wrapped( Font, Text, std::numeric_limits<INT>::min() );
+	Reject(Request, "negative wrapped length was negated instead of rejected");
 
 	Request = RequestFor(*Font, Text);
 	Request.TextScale = std::numeric_limits<FLOAT>::infinity();
@@ -260,7 +256,7 @@ void TestLayoutSemantics()
 	const TCHAR A[] = { 'A', 0 };
 	const FNativeTextLayoutTestInfo Plain = Shape(*Backend, RequestFor(*Font, A), "plain layout failed");
 	const TCHAR Markup[] = { '&', 'A', 0 };
-	FCanvasTextRequest MarkupRequest = RequestFor(*Font, Markup);
+	FCanvasTextLayoutRequest MarkupRequest = RequestFor(*Font, Markup);
 	MarkupRequest.bHandleAmpersand = 1;
 	const FNativeTextLayoutTestInfo Underlined = Shape(*Backend, MarkupRequest, "ampersand layout failed");
 	Check( Underlined.Width == Plain.Width && Underlined.Height == Plain.Height && Underlined.UnderlineCount == 1, "ampersand markup changed advance or missed underline" );
@@ -268,13 +264,20 @@ void TestLayoutSemantics()
 	const FNativeTextLayoutTestInfo NewlineInfo = Shape(*Backend, RequestFor(*Font, Newline), "newline layout failed");
 	Check( NewlineInfo.Width == Plain.Width && NewlineInfo.Height > Plain.Height, "newline did not form an independent line" );
 	const TCHAR Wrapped[] = { 'w', 'o', 'r', 'd', ' ', 'w', 'o', 'r', 'd', 0 };
-	FCanvasTextRequest WrapRequest = RequestFor(*Font, Wrapped);
-	WrapRequest.TextLength = -appStrlen(Wrapped);
+	FCanvasTextLayoutRequest WrapRequest = FCanvasTextLayoutRequest::Wrapped( Font, Wrapped, appStrlen(Wrapped) );
 	WrapRequest.ClipX = Plain.Width + 4;
 	const FNativeTextLayoutTestInfo WrappedInfo = Shape(*Backend, WrapRequest, "wrapped layout failed");
 	Check( WrappedInfo.Height > Plain.Height && WrappedInfo.ClusterCount == appStrlen(Wrapped), "wrap did not preserve all shaped source clusters" );
+
+	// Mode, not TextLength sign or clip width alone, decides wrapping: the
+	// identical positive-length request in Computed mode must stay one line.
+	FCanvasTextLayoutRequest UnwrappedRequest = FCanvasTextLayoutRequest::Computed( Font, Wrapped, appStrlen(Wrapped) );
+	UnwrappedRequest.ClipX = Plain.Width + 4;
+	const FNativeTextLayoutTestInfo UnwrappedInfo = Shape(*Backend, UnwrappedRequest, "computed layout failed");
+	Check( UnwrappedInfo.Height == Plain.Height && UnwrappedInfo.Width > WrappedInfo.Width,
+		"Computed mode must stay one wide line where Wrapped mode broke" );
 	const TCHAR Truncated[] = { 'A', static_cast<TCHAR>(0x1f9d9u), 'B', 0 };
-	FCanvasTextRequest VisibleRequest = RequestFor(*Font, Truncated);
+	FCanvasTextLayoutRequest VisibleRequest = RequestFor(*Font, Truncated);
 	VisibleRequest.VisibleSourceCharacters = 2;
 	const FNativeTextLayoutTestInfo Visible = Shape(*Backend, VisibleRequest, "visible-source layout failed");
 	Check( Visible.UTF16Length == 3 && Visible.VisibleSourceEnd == 2, "visible-source truncation split a non-BMP cluster" );

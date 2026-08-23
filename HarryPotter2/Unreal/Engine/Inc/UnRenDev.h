@@ -35,6 +35,63 @@ struct FSurfaceFacet;
 struct FTransTexture;
 struct FCanvasTextLayout;
 class FNativeTextPlatformBackend;
+struct FCanvasTextRequest;
+// Layout-only text request.  Draw-side state (Canvas origin, cursor rules)
+// never travels in this struct: layout creation is pure, and drawing stays
+// driven by the existing Canvas flow against the returned layout.  TextLength
+// is always the full, non-negative source span; wrapping is requested
+// exclusively through Mode -- never through the sign of TextLength.
+enum ECanvasTextLayoutMode
+{
+	CanvasLayout_Compute = 0,
+	CanvasLayout_Wrapped = 1,
+};
+struct FCanvasTextLayoutRequest
+{
+	UFont* Font;
+	const TCHAR* Text;
+	INT TextLength;
+	FLOAT TextScale;
+	FLOAT SpaceX;
+	FLOAT SpaceY;
+	FLOAT ClipX;
+	FLOAT ClipY;
+	INT StartX;
+	INT StartY;
+	DWORD PolyFlags;
+	FPlane Color;
+	UBOOL bClip;
+	UBOOL bCenter;
+	UBOOL bHandleAmpersand;
+	INT VisibleSourceCharacters;
+	ECanvasTextLayoutMode Mode;
+
+	FCanvasTextLayoutRequest()
+	: Font(NULL), Text(NULL), TextLength(0), TextScale(1.f), SpaceX(0.f), SpaceY(0.f)
+	, ClipX(0.f), ClipY(0.f), StartX(0), StartY(0), PolyFlags(0), Color(0.f,0.f,0.f,0.f)
+	, bClip(0), bCenter(0), bHandleAmpersand(0), VisibleSourceCharacters(0), Mode(CanvasLayout_Compute)
+	{}
+	FCanvasTextLayoutRequest( UFont* InFont, const TCHAR* InText, INT InTextLength, ECanvasTextLayoutMode InMode )
+	: Font(InFont), Text(InText), TextLength(InTextLength), TextScale(1.f), SpaceX(0.f), SpaceY(0.f)
+	, ClipX(0.f), ClipY(0.f), StartX(0), StartY(0), PolyFlags(0), Color(0.f,0.f,0.f,0.f)
+	, bClip(0), bCenter(0), bHandleAmpersand(0), VisibleSourceCharacters(0), Mode(InMode)
+	{}
+	static FCanvasTextLayoutRequest Computed( UFont* InFont, const TCHAR* InText, INT InTextLength )
+	{
+		return FCanvasTextLayoutRequest( InFont, InText, InTextLength, CanvasLayout_Compute );
+	}
+	static FCanvasTextLayoutRequest Wrapped( UFont* InFont, const TCHAR* InText, INT InTextLength )
+	{
+		return FCanvasTextLayoutRequest( InFont, InText, InTextLength, CanvasLayout_Wrapped );
+	}
+};
+
+// Projects a full Canvas text request onto the layout-only request consumed by
+// FNativeTextPlatformBackend.  Draw-side OriginX/Y are validated but dropped
+// here; returns 0 (leaving OutRequest untouched) for negative lengths or
+// non-finite origin/clip bounds.
+ENGINE_API UBOOL ProjectCanvasTextLayoutRequest( const FCanvasTextRequest& CanvasRequest, FCanvasTextLayoutRequest& OutRequest );
+
 struct FCanvasTextRequest
 {
 	UFont* Font;
@@ -55,6 +112,7 @@ struct FCanvasTextRequest
 	UBOOL bCenter;
 	UBOOL bHandleAmpersand;
 	INT VisibleSourceCharacters;
+	ECanvasTextLayoutMode Mode;
 };
 
 // Deterministic test seam for the Canvas-native policy boundary.  It owns no

@@ -10,6 +10,7 @@ Revision history:
 #include "EnginePrivate.h"
 #include "UnRender.h"
 #include "NativeText.h"
+#include <cmath>
 
 void UCanvas::StaticConstructor()
 {
@@ -314,7 +315,13 @@ class FBackendCanvasTextDispatcher : public FCanvasTextLayoutDispatcher
 	FNativeTextPlatformBackend* Backend;
 public:
 	FBackendCanvasTextDispatcher( FNativeTextPlatformBackend* InBackend ) : Backend(InBackend) {}
-	UBOOL Create( const FCanvasTextRequest& Request, FCanvasTextLayout*& Layout ) override { return Backend->CreateLayout(Request, Layout); }
+	UBOOL Create( const FCanvasTextRequest& Request, FCanvasTextLayout*& Layout ) override
+	{
+		FCanvasTextLayoutRequest LayoutRequest;
+		if( !ProjectCanvasTextLayoutRequest(Request, LayoutRequest) )
+			return 0;
+		return Backend->CreateLayout(LayoutRequest, Layout);
+	}
 	void Destroy( FCanvasTextLayout* Layout ) override { Backend->DestroyLayout(Layout); }
 	UBOOL Measure( FCanvasTextLayout* Layout, INT& Width, INT& Height ) override { return Backend->MeasureLayout(Layout, Width, Height); }
 	UBOOL Draw( FSceneNode*, FCanvasTextLayout* ) override { return 1; }
@@ -332,6 +339,35 @@ static UBOOL DispatchCanvasTextLayout( FCanvasTextLayoutDispatcher& Dispatcher, 
 		OutWidth = OutHeight = 0;
 	return Success;
 }
+UBOOL ProjectCanvasTextLayoutRequest( const FCanvasTextRequest& CanvasRequest, FCanvasTextLayoutRequest& OutRequest )
+{
+	static const FLOAT MaxSafe = (FLOAT)0x7fffffff;
+	const double WideClipX = CanvasRequest.ClipX, WideClipY = CanvasRequest.ClipY;
+	if( !CanvasRequest.Font || !CanvasRequest.Text
+	||	CanvasRequest.TextLength < 0
+	||	!std::isfinite((double)CanvasRequest.OriginX) || !std::isfinite((double)CanvasRequest.OriginY)
+	||	!std::isfinite(WideClipX) || !std::isfinite(WideClipY)
+	||	WideClipX < -MaxSafe || WideClipX > MaxSafe || WideClipY < -MaxSafe || WideClipY > MaxSafe )
+		return 0;
+
+	OutRequest = FCanvasTextLayoutRequest::Computed(CanvasRequest.Font, CanvasRequest.Text, CanvasRequest.TextLength);
+	OutRequest.Mode = CanvasRequest.Mode;
+	OutRequest.TextScale = CanvasRequest.TextScale;
+	OutRequest.SpaceX = CanvasRequest.SpaceX;
+	OutRequest.SpaceY = CanvasRequest.SpaceY;
+	OutRequest.ClipX = CanvasRequest.ClipX;
+	OutRequest.ClipY = CanvasRequest.ClipY;
+	OutRequest.StartX = CanvasRequest.StartX;
+	OutRequest.StartY = CanvasRequest.StartY;
+	OutRequest.PolyFlags = CanvasRequest.PolyFlags;
+	OutRequest.Color = CanvasRequest.Color;
+	OutRequest.bClip = CanvasRequest.bClip;
+	OutRequest.bCenter = CanvasRequest.bCenter;
+	OutRequest.bHandleAmpersand = CanvasRequest.bHandleAmpersand;
+	OutRequest.VisibleSourceCharacters = CanvasRequest.VisibleSourceCharacters;
+	return 1;
+}
+
 static UBOOL TryNativeCanvasText
 (
 	DWORD Flags,
@@ -372,9 +408,7 @@ static UBOOL TryNativeCanvasText
 	const INT SourceLength = appStrlen(Text);
 	Request.Font = Font;
 	Request.Text = Text;
-	// A negative length is an Engine-private layout-mode marker.  The renderer
-	// still receives the full source span and never infers wrapping from clip.
-	Request.TextLength = bWrap ? -SourceLength : SourceLength;
+	Request.TextLength = SourceLength;
 	Request.TextScale = GetCanvasTextScale(Canvas);
 	Request.SpaceX = Canvas->SpaceX * Request.TextScale;
 	Request.SpaceY = Canvas->SpaceY * Request.TextScale;
@@ -392,6 +426,7 @@ static UBOOL TryNativeCanvasText
 	Request.VisibleSourceCharacters = VisibleSourceCharacters > 0
 		? Min(VisibleSourceCharacters, SourceLength)
 		: SourceLength;
+	Request.Mode = bWrap ? CanvasLayout_Wrapped : CanvasLayout_Compute;
 
 	FRenderDeviceCanvasTextDispatcher Dispatcher(Canvas->Viewport->RenDev);
 	return DispatchCanvasTextLayout(Dispatcher, Canvas->Frame, Request, !(Flags & PF_Invisible), OutWidth, OutHeight);

@@ -308,7 +308,7 @@ void USDLViewport::DrawString( DWORD Flags, UFont* Font, INT& DrawX, INT& DrawY,
 	FCanvasTextRequest Request = {};
 	Request.Font = Font;
 	Request.Text = Text;
-	Request.TextLength = -SourceLength;
+	Request.TextLength = SourceLength;
 	Request.TextScale = 1.f;
 	Request.OriginX = 0;
 	Request.OriginY = 0;
@@ -319,6 +319,7 @@ void USDLViewport::DrawString( DWORD Flags, UFont* Font, INT& DrawX, INT& DrawY,
 	Request.PolyFlags = Flags;
 	Request.Color = Color;
 	Request.VisibleSourceCharacters = SourceLength;
+	Request.Mode = CanvasLayout_Wrapped;
 	Request.bCenter = (Flags & PF_TwoSided) != 0;
 
 	FCanvasTextLayout* Layout = NULL;

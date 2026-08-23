@@ -82,16 +82,21 @@ UFont* CreatePageBackedFontFixture()
 	}
 	return Font;
 }
-FCanvasTextRequest RequestFor( UFont& Font, const TCHAR* Text, INT Length = 0 )
+FCanvasTextRequest RequestFor( UFont& Font, const TCHAR* Text )
 {
 	FCanvasTextRequest Request = {};
-	Request.Font = &Font; Request.Text = Text; Request.TextLength = Length ? Length : appStrlen(Text);
+	Request.Font = &Font; Request.Text = Text; Request.TextLength = appStrlen(Text);
+	Request.Mode = CanvasLayout_Compute;
 	Request.TextScale = 1.f; Request.ClipX = 512; Request.ClipY = 128; Request.Color = FPlane(1.f, 1.f, 1.f, 1.f);
 	Request.VisibleSourceCharacters = appStrlen(Text);
 	return Request;
 }
+FCanvasTextLayoutRequest LayoutRequestFor( UFont& Font, const TCHAR* Text )
+{
+	return FCanvasTextLayoutRequest::Computed( &Font, Text, appStrlen(Text) );
+}
 struct FLayout { FNativeTextPlatformBackend& Backend; FCanvasTextLayout* Value{}; ~FLayout() { if( Value ) Backend.DestroyLayout(Value); } };
-FNativeTextLayoutTestInfo Shape( FNativeTextPlatformBackend& Backend, const FCanvasTextRequest& Request, const char* Message )
+FNativeTextLayoutTestInfo Shape( FNativeTextPlatformBackend& Backend, const FCanvasTextLayoutRequest& Request, const char* Message )
 {
 	FLayout Layout = { Backend, NULL }; Check(Backend.CreateLayout(Request, Layout.Value) && Layout.Value, Message);
 	FNativeTextLayoutTestInfo Info = {}; if( !Layout.Value ) return Info;
@@ -157,20 +162,47 @@ void TestCanvasLayoutContract( FNativeTextPlatformBackend& Backend )
 {
 	UFont* Font = CreateNativeFontFixture(TEXT("Times"), 18); if( !Font ) return;
 	const TCHAR PlainText[] = { 'A', ' ', 'B', 0 };
-	const FNativeTextLayoutTestInfo Plain = Shape(Backend, RequestFor(*Font, PlainText), "plain Canvas layout failed");
+	const FNativeTextLayoutTestInfo Plain = Shape(Backend, LayoutRequestFor(*Font, PlainText), "plain Canvas layout failed");
 	static_assert(
 		std::is_same<decltype(FCanvasTextRequest::OriginX), FLOAT>::value &&
 		std::is_same<decltype(FCanvasTextRequest::OriginY), FLOAT>::value &&
 		std::is_same<decltype(FCanvasTextRequest::ClipX), FLOAT>::value &&
-		std::is_same<decltype(FCanvasTextRequest::ClipY), FLOAT>::value,
+		std::is_same<decltype(FCanvasTextRequest::ClipY), FLOAT>::value &&
+		std::is_same<decltype(FCanvasTextLayoutRequest::ClipX), FLOAT>::value &&
+		std::is_same<decltype(FCanvasTextLayoutRequest::ClipY), FLOAT>::value,
 		"Canvas native bounds must remain floating point");
-	FCanvasTextRequest FractionalRequest = RequestFor(*Font, PlainText);
-	FractionalRequest.OriginX = 37.25f; FractionalRequest.OriginY = -19.5f;
+
+	// Draw-side origin never enters the layout request: the projector validates
+	// it at the canvas-request boundary and drops it from the projected copy.
+	auto RejectProjection = [&]( const FCanvasTextRequest& CanvasRequest, const char* Message )
+	{
+		FCanvasTextLayoutRequest Projected;
+		Check(!ProjectCanvasTextLayoutRequest(CanvasRequest, Projected), Message);
+	};
+	FCanvasTextLayoutRequest FractionalRequest = LayoutRequestFor(*Font, PlainText);
 	FractionalRequest.ClipX = 511.75f; FractionalRequest.ClipY = 127.5f;
 	const FNativeTextLayoutTestInfo Fractional = Shape(Backend, FractionalRequest, "finite fractional Canvas bounds were rejected");
 	Check(Fractional.Width == Plain.Width && Fractional.Height == Plain.Height, "fractional Canvas bounds changed text metrics");
 
-	auto RejectBounds = [&]( const FCanvasTextRequest& Request, const char* Message )
+	FCanvasTextRequest FractionalCanvas = RequestFor(*Font, PlainText);
+	FractionalCanvas.OriginX = 37.25f; FractionalCanvas.OriginY = -19.5f;
+	FractionalCanvas.ClipX = 511.75f; FractionalCanvas.ClipY = 127.5f;
+	FCanvasTextLayoutRequest ProjectedFractional;
+	Check(ProjectCanvasTextLayoutRequest(FractionalCanvas, ProjectedFractional), "finite fractional Canvas request was rejected by projection");
+	Check(ProjectedFractional.ClipX == 511.75f && ProjectedFractional.ClipY == 127.5f && ProjectedFractional.Mode == CanvasLayout_Compute,
+		"projection altered finite fractional Canvas bounds or mode");
+
+	FCanvasTextRequest InvalidOrigin = RequestFor(*Font, PlainText);
+	InvalidOrigin.OriginX = std::numeric_limits<FLOAT>::infinity();
+	RejectProjection(InvalidOrigin, "non-finite Canvas origin passed projection");
+	InvalidOrigin = RequestFor(*Font, PlainText);
+	InvalidOrigin.OriginY = std::numeric_limits<FLOAT>::quiet_NaN();
+	RejectProjection(InvalidOrigin, "NaN Canvas origin passed projection");
+	FCanvasTextRequest NegativeLength = RequestFor(*Font, PlainText);
+	NegativeLength.TextLength = -1;
+	RejectProjection(NegativeLength, "negative Canvas text length passed projection");
+
+	auto RejectBounds = [&]( const FCanvasTextLayoutRequest& Request, const char* Message )
 	{
 		FCanvasTextLayout* Layout = reinterpret_cast<FCanvasTextLayout*>(1);
 		const UBOOL Created = Backend.CreateLayout(Request, Layout);
@@ -178,45 +210,79 @@ void TestCanvasLayoutContract( FNativeTextPlatformBackend& Backend )
 		if( Created && Layout )
 			Backend.DestroyLayout(Layout);
 	};
-	FCanvasTextRequest InvalidBounds = RequestFor(*Font, PlainText);
-	InvalidBounds.OriginX = std::numeric_limits<FLOAT>::infinity();
-	RejectBounds(InvalidBounds, "non-finite Canvas origin reached CoreText");
-	InvalidBounds = RequestFor(*Font, PlainText);
-	InvalidBounds.OriginY = std::numeric_limits<FLOAT>::quiet_NaN();
-	RejectBounds(InvalidBounds, "NaN Canvas origin reached CoreText");
-	InvalidBounds = RequestFor(*Font, PlainText);
-	InvalidBounds.ClipX = std::numeric_limits<FLOAT>::max();
-	RejectBounds(InvalidBounds, "finite out-of-domain Canvas clip reached CoreText");
-	InvalidBounds = RequestFor(*Font, PlainText);
-	InvalidBounds.ClipY = -std::numeric_limits<FLOAT>::max();
-	RejectBounds(InvalidBounds, "negative out-of-domain Canvas clip reached CoreText");
-	FCanvasTextRequest SpacedRequest = RequestFor(*Font, PlainText); SpacedRequest.SpaceX = 3.f;
+	FCanvasTextLayoutRequest InvalidLayout = LayoutRequestFor(*Font, PlainText);
+	InvalidLayout.ClipX = std::numeric_limits<FLOAT>::max();
+	RejectBounds(InvalidLayout, "finite out-of-domain Canvas clip reached CoreText");
+	InvalidLayout = LayoutRequestFor(*Font, PlainText);
+	InvalidLayout.ClipY = -std::numeric_limits<FLOAT>::max();
+	RejectBounds(InvalidLayout, "negative out-of-domain Canvas clip reached CoreText");
+
+	FCanvasTextLayoutRequest SpacedRequest = LayoutRequestFor(*Font, PlainText); SpacedRequest.SpaceX = 3.f;
 	const FNativeTextLayoutTestInfo Spaced = Shape(Backend, SpacedRequest, "spaced Canvas layout failed");
 	Check(Spaced.Width > Plain.Width && Spaced.Height == Plain.Height, "Canvas SpaceX was not included in shaped advance");
-	FCanvasTextRequest CenteredRequest = RequestFor(*Font, PlainText); CenteredRequest.bCenter = 1; CenteredRequest.StartX = 200;
+	FCanvasTextLayoutRequest CenteredRequest = LayoutRequestFor(*Font, PlainText); CenteredRequest.bCenter = 1; CenteredRequest.StartX = 200;
 	const FNativeTextLayoutTestInfo Centered = Shape(Backend, CenteredRequest, "centered Canvas layout failed");
 	Check(Centered.Width == Plain.Width && Centered.Height == Plain.Height, "centering changed Canvas text metrics");
-	FCanvasTextRequest ClippedRequest = RequestFor(*Font, PlainText); ClippedRequest.bClip = 1; ClippedRequest.OriginX = 37; ClippedRequest.OriginY = 19; ClippedRequest.StartX = -11; ClippedRequest.StartY = -5; ClippedRequest.ClipX = 9; ClippedRequest.ClipY = 7;
+	FCanvasTextLayoutRequest ClippedRequest = LayoutRequestFor(*Font, PlainText); ClippedRequest.bClip = 1; ClippedRequest.StartX = -11; ClippedRequest.StartY = -5; ClippedRequest.ClipX = 9; ClippedRequest.ClipY = 7;
 	const FNativeTextLayoutTestInfo Clipped = Shape(Backend, ClippedRequest, "clipped Canvas layout failed");
-	const FNativeTextLayoutTestInfo PlainAgain = Shape(Backend, RequestFor(*Font, PlainText), "post-clip Canvas layout failed");
+	const FNativeTextLayoutTestInfo PlainAgain = Shape(Backend, LayoutRequestFor(*Font, PlainText), "post-clip Canvas layout failed");
 	Check(Clipped.Width == Plain.Width && Clipped.Height == Plain.Height && PlainAgain.Width == Plain.Width && PlainAgain.Height == Plain.Height, "local clipping changed or leaked Canvas cursor metrics");
 	const TCHAR Ampersand[] = { '&', 'A', 0 }; const TCHAR EscapedAmpersand[] = { '&', '&', 0 };
-	FCanvasTextRequest AmpersandRequest = RequestFor(*Font, Ampersand); AmpersandRequest.bHandleAmpersand = 1;
+	FCanvasTextLayoutRequest AmpersandRequest = LayoutRequestFor(*Font, Ampersand); AmpersandRequest.bHandleAmpersand = 1;
 	const FNativeTextLayoutTestInfo Underlined = Shape(Backend, AmpersandRequest, "ampersand Canvas layout failed");
-	const FNativeTextLayoutTestInfo A = Shape(Backend, RequestFor(*Font, TEXT("A")), "single character Canvas layout failed");
-	FCanvasTextRequest EscapedRequest = RequestFor(*Font, EscapedAmpersand); EscapedRequest.bHandleAmpersand = 1;
+	const FNativeTextLayoutTestInfo A = Shape(Backend, LayoutRequestFor(*Font, TEXT("A")), "single character Canvas layout failed");
+	FCanvasTextLayoutRequest EscapedRequest = LayoutRequestFor(*Font, EscapedAmpersand); EscapedRequest.bHandleAmpersand = 1;
 	const FNativeTextLayoutTestInfo Escaped = Shape(Backend, EscapedRequest, "escaped ampersand Canvas layout failed");
-	const FNativeTextLayoutTestInfo Literal = Shape(Backend, RequestFor(*Font, TEXT("&")), "literal ampersand Canvas layout failed");
+	const FNativeTextLayoutTestInfo Literal = Shape(Backend, LayoutRequestFor(*Font, TEXT("&")), "literal ampersand Canvas layout failed");
 	Check(Underlined.Width == A.Width && Underlined.UnderlineCount == 1, "ampersand markup changed advance or omitted underline");
 	Check(Escaped.Width == Literal.Width && Escaped.UnderlineCount == 0, "&& did not produce exactly one literal ampersand");
 	const TCHAR WrappedText[] = { 'w', 'o', 'r', 'd', ' ', 'w', 'o', 'r', 'd', 0 };
-	FCanvasTextRequest WrappedRequest = RequestFor(*Font, WrappedText, -appStrlen(WrappedText)); WrappedRequest.ClipX = Plain.Width + 4;
+	FCanvasTextLayoutRequest WrappedRequest = FCanvasTextLayoutRequest::Wrapped(Font, WrappedText, appStrlen(WrappedText));
+	WrappedRequest.ClipX = Plain.Width + 4;
 	const FNativeTextLayoutTestInfo Wrapped = Shape(Backend, WrappedRequest, "wrapped Canvas layout failed");
-	const TCHAR NewlineText[] = { 'A', '\n', 'A', 0 }; const FNativeTextLayoutTestInfo Newline = Shape(Backend, RequestFor(*Font, NewlineText), "newline Canvas layout failed");
+	const TCHAR NewlineText[] = { 'A', '\n', 'A', 0 }; const FNativeTextLayoutTestInfo Newline = Shape(Backend, LayoutRequestFor(*Font, NewlineText), "newline Canvas layout failed");
 	Check(Wrapped.Height > Plain.Height && Newline.Height > A.Height, "wrapped/newline Canvas layout did not create independent lines");
-	const TCHAR Teletype[] = { 'A', static_cast<TCHAR>(0x1f9d9u), 'B', 0 }; FCanvasTextRequest VisibleRequest = RequestFor(*Font, Teletype); VisibleRequest.VisibleSourceCharacters = 2;
+	const TCHAR Teletype[] = { 'A', static_cast<TCHAR>(0x1f9d9u), 'B', 0 }; FCanvasTextLayoutRequest VisibleRequest = LayoutRequestFor(*Font, Teletype); VisibleRequest.VisibleSourceCharacters = 2;
 	const FNativeTextLayoutTestInfo Visible = Shape(Backend, VisibleRequest, "visible-source Canvas layout failed");
 	Check(Visible.VisibleSourceEnd == 2 && Visible.UTF16Length == 3, "numChars did not stop at a legal shaped source cluster");
+}
+
+void TestWrappedSeamEquivalence( FNativeTextPlatformBackend& Backend )
+{
+	UFont* Font = CreateNativeFontFixture(TEXT("Times"), 18); if( !Font ) return;
+	const TCHAR PlainText[] = { 'A', ' ', 'B', 0 };
+	const FNativeTextLayoutTestInfo Plain = Shape(Backend, LayoutRequestFor(*Font, PlainText), "plain layout failed");
+	const TCHAR WrappedText[] = { 'w', 'o', 'r', 'd', ' ', 'w', 'o', 'r', 'd', 0 };
+
+	// Direct backend output for the positive-length Wrapped request...
+	FCanvasTextLayoutRequest DirectRequest = FCanvasTextLayoutRequest::Wrapped(Font, WrappedText, appStrlen(WrappedText));
+	DirectRequest.ClipX = Plain.Width + 4;
+	const FNativeTextLayoutTestInfo Direct = Shape(Backend, DirectRequest, "direct wrapped layout failed");
+	Check(Direct.Height > Plain.Height, "wrapped layout did not create an independent line");
+
+	// ...must match the deterministic Canvas seam byte-for-byte: the seam
+	// drives the identical request shape through the production dispatcher.
+	FCanvasNativeTextTestState State = {};
+	State.NativeText = 1;
+	State.Request = RequestFor(*Font, WrappedText);
+	State.Request.Mode = CanvasLayout_Wrapped;
+	State.Request.ClipX = Plain.Width + 4;
+	INT Width = 0, Height = 0;
+	Check(RunCanvasNativeTextCompatibilityForTests(&Backend, State, Width, Height), "seam wrapped layout failed");
+	Check(Width == Direct.Width && Height == Direct.Height,
+		"positive-length wrapped layout does not match the seam output byte-for-byte");
+
+	// The sign of TextLength is dead protocol: a legacy negative canvas length
+	// is rejected wholesale with no cursor mutation (all-or-nothing fallback).
+	State.Request = RequestFor(*Font, WrappedText);
+	State.Request.Mode = CanvasLayout_Wrapped;
+	State.Request.TextLength = -appStrlen(WrappedText);
+	State.Request.ClipX = Plain.Width + 4;
+	State.CurX = 9; State.CurY = 11; State.CurYL = 3;
+	Width = Height = 0;
+	Check(!RunCanvasNativeTextCompatibilityForTests(&Backend, State, Width, Height) && Width == 0 && Height == 0 &&
+		State.CurX == 9 && State.CurY == 11 && State.CurYL == 3,
+		"legacy negative-length request was absorbed instead of rejected without cursor mutation");
 }
 }
 int main( int ArgC, char** ArgV )
@@ -224,5 +290,5 @@ int main( int ArgC, char** ArgV )
 	const std::filesystem::path RepositoryRoot = std::filesystem::current_path();
 	if( !InitializeRuntime(ArgC, ArgV) ) return 1; FRuntimeExit RuntimeExit;
 	std::unique_ptr<FNativeTextPlatformBackend> Backend(CreateNativeTextPlatformBackend()); Check(Backend.get() != NULL, "CoreText backend was not created");
-	if( Backend ) { TestCanvasPolicyAndCursorContract(*Backend); TestCanvasLayoutContract(*Backend); } TestImmutableFontPackages(RepositoryRoot); return Failures == 0 ? 0 : 1;
+	if( Backend ) { TestCanvasPolicyAndCursorContract(*Backend); TestCanvasLayoutContract(*Backend); TestWrappedSeamEquivalence(*Backend); } TestImmutableFontPackages(RepositoryRoot); return Failures == 0 ? 0 : 1;
 }

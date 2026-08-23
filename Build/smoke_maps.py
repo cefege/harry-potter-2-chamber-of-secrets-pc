@@ -956,8 +956,9 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=None,
-        help="JSON report path (default: build/smoke-maps-<renderer>.json)",
+        required=True,
+        help="JSON report path (no default: every caller names its own "
+        "report location; the retired default wrote under build/)",
     )
     parser.add_argument(
         "--maps",
@@ -1055,12 +1056,9 @@ def main() -> int:
                 super_by_class,
             )
 
-        output_argument = arguments.output or Path(
-            f"build/smoke-maps-{arguments.renderer}.json"
-        )
-        output = game_test._resolve_path(output_argument, repo_root, strict=False)
+        output = game_test._resolve_path(arguments.output, repo_root, strict=False)
         if not output.name:
-            raise SmokeError(f"output path must name a JSON file: {output_argument}")
+            raise SmokeError(f"output path must name a JSON file: {arguments.output}")
         logs = _log_directory(output)
         _replace_directory(logs)
         frames_root = (
