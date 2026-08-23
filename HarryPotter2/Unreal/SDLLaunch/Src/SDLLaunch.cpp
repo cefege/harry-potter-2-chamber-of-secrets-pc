@@ -875,7 +875,6 @@ int main( int argc, char* argv[] )
 		}
 
 		HP2Launcher::LauncherRequest Request;
-		Request.rendererDisplayName = "XOpenGL";
 		Request.dataSources = DataSources;
 		Request.hasExplicitDataRootOverride = HasExplicitDataRoot;
 		Request.explicitDataRoot = HasExplicitDataRoot ? ActiveDataRoot : "";

@@ -825,6 +825,13 @@ void LoadSettings(const Document& game, const Document& user, LauncherSettings& 
 	LoadDimension(game, fullSize ? "FullscreenViewportX" : "WindowedViewportX", settings.resolution.width);
 	LoadDimension(game, fullSize ? "FullscreenViewportY" : "WindowedViewportY", settings.resolution.height);
 	settings.resolution.label = std::to_string(settings.resolution.width) + " x " + std::to_string(settings.resolution.height);
+	std::string renderDevice;
+	if (Get(game, "Engine.Engine", "GameRenderDevice", renderDevice))
+	{
+		settings.renderBackend = Same(Trim(renderDevice), "VulkanDrv.VulkanRenderDevice")
+			? RenderBackend::Vulkan
+			: RenderBackend::XOpenGL;
+	}
 	LoadBool(game, "XOpenGLDrv.XOpenGLRenderDevice", "UseVSync", settings.verticalSync);
 	LoadDiscreteNumber(
 		game,
@@ -903,12 +910,18 @@ const char* DifficultyValue(Difficulty value)
 	switch (value) { case Difficulty::Easy: return "DifficultyEasy"; case Difficulty::Medium: return "DifficultyMedium"; case Difficulty::Hard: return "DifficultyHard"; }
 	return "DifficultyEasy";
 }
+const char* RenderDeviceClass(RenderBackend value)
+{
+	switch (value) { case RenderBackend::XOpenGL: return "XOpenGLDrv.XOpenGLRenderDevice"; case RenderBackend::Vulkan: return "VulkanDrv.VulkanRenderDevice"; }
+	return "XOpenGLDrv.XOpenGLRenderDevice";
+}
 void ApplyGame(Document& game, const LauncherSettings& settings)
 {
 	Set(game, "Engine.Engine", "ViewportManager", "SDLDrv.SDLClient");
-	Set(game, "Engine.Engine", "GameRenderDevice", "XOpenGLDrv.XOpenGLRenderDevice");
-	Set(game, "Engine.Engine", "WindowedRenderDevice", "XOpenGLDrv.XOpenGLRenderDevice");
-	Set(game, "Engine.Engine", "RenderDevice", "XOpenGLDrv.XOpenGLRenderDevice");
+	const char* renderDevice = RenderDeviceClass(settings.renderBackend);
+	Set(game, "Engine.Engine", "GameRenderDevice", renderDevice);
+	Set(game, "Engine.Engine", "WindowedRenderDevice", renderDevice);
+	Set(game, "Engine.Engine", "RenderDevice", renderDevice);
 	Set(game, "Engine.Engine", "AudioDevice", "ALAudio.ALAudioSubsystem");
 	Set(game, "Engine.GameEngine", "UseSound", BoolText(settings.soundEnabled));
 	Set(game, "Engine.GameEngine", "FrameRateLimit", std::to_string(settings.frameRateLimit));
@@ -1813,9 +1826,9 @@ bool ValidateLauncherSettings(const LauncherSettings& settings, std::string& err
 	{ error = "Anisotropy must be off, 4x, 8x, or 16x."; return false; }
 	const int screen = static_cast<int>(settings.screenMode), texture = static_cast<int>(settings.textureDetail);
 	const int object = static_cast<int>(settings.objectDetail), difficulty = static_cast<int>(settings.difficulty);
-	const int control = static_cast<int>(settings.controlMode);
+	const int control = static_cast<int>(settings.controlMode), backend = static_cast<int>(settings.renderBackend);
 	if (screen < 0 || screen > 2 || texture < 0 || texture > 2 || object < 0 || object > 4 ||
-		difficulty < 0 || difficulty > 2 || control < 0 || control > 1)
+		difficulty < 0 || difficulty > 2 || control < 0 || control > 1 || backend < 0 || backend > 1)
 	{ error = "Launcher settings contain an invalid selection."; return false; }
 	return true;
 }

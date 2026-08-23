@@ -56,7 +56,7 @@ Full procedure, presets, and interpretation: `Docs/OPERATIONS.md`. Quick map:
 | Single test | `ctest --preset macos-arm64 -R <name>` — e.g. `abi_widths`, `package79_manifest`, `game_test_contract`, `renderer_smoke_xopengl` |
 | List maps | `python3 Build/game_test.py maps --data-root HarryPotter2/Unreal` |
 | Launch one map | `python3 Build/game_test.py run <map> ...` (see `Docs/OPERATIONS.md`) |
-| Renderer smoke | `python3 Build/smoke_maps.py --renderer=xopengl [--maps=...]` |
+| Renderer smoke | `python3 Build/smoke_maps.py --renderer=xopengl --output=<report.json> [--maps=...]` |
 | Bundle integrity | `python3 Build/check_bundle.py` (exit 0 pass / 1 fail / 2 blocked) |
 | Retail data overlay | `python3 Build/prepare_retail_data.py` → writes `overlay-manifest.json` |
 

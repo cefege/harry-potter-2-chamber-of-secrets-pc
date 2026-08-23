@@ -329,6 +329,16 @@ bool ValidateSettings(const HP2Launcher::LauncherSettings& settings, std::string
 		return false;
 	}
 
+	switch (settings.renderBackend)
+	{
+	case HP2Launcher::RenderBackend::XOpenGL:
+	case HP2Launcher::RenderBackend::Vulkan:
+		break;
+	default:
+		error = "Choose a valid renderer.";
+		return false;
+	}
+
 	if (settings.resolution.width < MinimumResolutionWidth ||
 		settings.resolution.height < MinimumResolutionHeight ||
 		settings.resolution.width > MaximumResolutionDimension ||
@@ -512,7 +522,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	NSButton* _revealLogButton;
 	NSTabView* _tabView;
 
-	NSTextField* _rendererField;
+	NSPopUpButton* _rendererPopup;
 	NSPopUpButton* _screenModePopup;
 	NSPopUpButton* _resolutionPopup;
 	NSPopUpButton* _renderScalePopup;
@@ -962,22 +972,23 @@ bool CopyCocoaString(NSString* value, std::string& result)
 
 - (NSView*)buildVideoTab
 {
-	NSString* rendererName = CocoaString(_request->rendererDisplayName);
-	if (rendererName.length == 0)
+	_rendererPopup = [self popupWithAccessibilityLabel:@"Renderer"];
+	AddTaggedPopupItem(_rendererPopup, @"XOpenGL", static_cast<NSInteger>(HP2Launcher::RenderBackend::XOpenGL));
+	AddTaggedPopupItem(_rendererPopup, @"Vulkan (Experimental)", static_cast<NSInteger>(HP2Launcher::RenderBackend::Vulkan));
+	_rendererPopup.menu.autoenablesItems = NO;
+	for (NSMenuItem* item in _rendererPopup.itemArray)
+		item.enabled = YES;
+#if !HP2_ENABLE_VULKAN_DRIVER
+	_rendererPopup.itemArray[1].enabled = NO;
+#endif
+	if (!SelectPopupItemWithTag(_rendererPopup, static_cast<NSInteger>(_request->settings.renderBackend)) ||
+		!_rendererPopup.selectedItem.enabled)
 	{
-		rendererName = @"XOpenGL";
+		SelectPopupItemWithTag(_rendererPopup, static_cast<NSInteger>(HP2Launcher::RenderBackend::XOpenGL));
 	}
-	_rendererField = [[NSTextField alloc] initWithFrame:NSZeroRect];
-	_rendererField.translatesAutoresizingMaskIntoConstraints = NO;
-	_rendererField.editable = NO;
-	_rendererField.selectable = YES;
-	_rendererField.bezeled = YES;
-	_rendererField.drawsBackground = YES;
-	_rendererField.backgroundColor = NSColor.controlBackgroundColor;
-	_rendererField.stringValue = rendererName;
-	[_rendererField setAccessibilityLabel:@"Renderer"];
-	[_rendererField setAccessibilityValue:rendererName];
-	[_rendererField.widthAnchor constraintGreaterThanOrEqualToConstant:PopupMinimumWidth].active = YES;
+	[_rendererPopup setAccessibilityHelp:
+		@"Chooses the 3D renderer. XOpenGL is the default; Vulkan is experimental and may not be "
+		@"included in this build."];
 
 	_screenModePopup = [self popupWithAccessibilityLabel:@"Window mode"];
 	AddTaggedPopupItem(_screenModePopup, @"Windowed", static_cast<NSInteger>(HP2Launcher::ScreenMode::Windowed));
@@ -1124,7 +1135,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	}
 
 	NSStackView* form = [self verticalStackWithViews:@[
-		[self formRowWithTitle:@"Renderer" control:_rendererField],
+		[self formRowWithTitle:@"Renderer" control:_rendererPopup],
 		[self formRowWithTitle:@"Window Mode" control:_screenModePopup],
 		[self formRowWithTitle:@"Resolution" control:_resolutionPopup],
 		[self formRowWithTitle:@"Render Scale" control:_renderScalePopup],
@@ -1142,7 +1153,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	] spacing:RowSpacing];
 
 	_videoKeyViews = @[
-		_rendererField,
+		_rendererPopup,
 		_screenModePopup,
 		_resolutionPopup,
 		_renderScalePopup,
@@ -1747,6 +1758,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 {
 	HP2Launcher::LauncherSettings settings = _request->settings;
 	settings.screenMode = static_cast<HP2Launcher::ScreenMode>(_screenModePopup.selectedItem.tag);
+	settings.renderBackend = static_cast<HP2Launcher::RenderBackend>(_rendererPopup.selectedItem.tag);
 
 	const NSInteger resolutionIndex = _resolutionPopup.indexOfSelectedItem;
 	if (resolutionIndex >= 0 &&

@@ -17,9 +17,9 @@
 	                          pump is NOT rewired yet).
 
 	Bootstrap mirrors Tests/AbiTests.cpp (FMallocAnsi + silent devices +
-	RegisterHP2RuntimeClasses) and requires -datadir pointing at the
-	prototype data root, because creating a real UViewport resolves
-	ini:Engine.Engine.Canvas / ini:Engine.Engine.Input.
+	InstallHP2NativeLookups + RegisterHP2RuntimeClasses) and requires
+	-datadir pointing at the prototype data root, because creating a real
+	UViewport resolves ini:Engine.Engine.Canvas / ini:Engine.Engine.Input.
 
 	Documented viewport-side gaps (out of reach headlessly, frozen here as
 	comments rather than assertions):
@@ -713,6 +713,11 @@ bool InitializeRuntime( int ArgC, char** ArgV )
 		if( CmdLine[0] ) appStrcat( CmdLine, TEXT(" ") );
 		appStrcat( CmdLine, Argument );
 	}
+	// Bind Engine.u's exported script classes onto the registered native
+	// classes (SpellRuntimeTests/AbiTests parity). Without these lookups the
+	// import creates shadow Actor/Console class objects and enum children
+	// like Actor.EInputKey never appear under the native AActor.
+	InstallHP2NativeLookups();
 	GIsStarted = 1;
 	GIsGuarded = 1;
 	try
@@ -729,10 +734,9 @@ bool InitializeRuntime( int ArgC, char** ArgV )
 	// Engine package is linked into the object space.
 	if( !UObject::LoadPackage( NULL, TEXT("Engine.u"), LOAD_NoFail ) )
 		return false;
-	// OPEN FINDING: even with Engine.u loaded, UInput::StaticInitInput()'s
-	// FindObjectChecked<UEnum>(AActor::StaticClass(), "EInputKey") aborts
-	// (SIGIOT) under an isolated first-run HOME. The three world groups stay
-	// quarantined until that object-space delta vs AbiTests is understood.
+	// OPEN FINDING resolved: the missing piece vs AbiTests was
+	// InstallHP2NativeLookups() above -- without it Engine.u imports create
+	// shadow classes and Actor.EInputKey never lands under native AActor.
 	return true;
 }
 
@@ -772,14 +776,7 @@ FSuiteResult RunSuite( const char* Test )
 		}
 		else if( bNeedsWorld )
 		{
-			// KNOWN GAP: argv is now forwarded into appInit (AbiTests parity),
-			// which fixed direct invocation, but under ctest's isolated HOME the
-			// 'Enum Actor.EInputKey' lookup still escapes during fixture build.
-			// Quarantined until that residual config-resolution delta is found.
-			bool EscapedEngineError = false;
 			FInputWorld World;
-			try
-			{
 			if( !BuildInputWorld( World ) )
 			{
 				GFailureStage = "bootstrap.fixtures";
@@ -787,12 +784,19 @@ FSuiteResult RunSuite( const char* Test )
 				return SuiteResult( "blocked", "data.fixture_unavailable",
 					"client/viewport/actor/input fixture construction failed", 0 );
 			}
-				if( std::strcmp( Test, "input_edge" ) == 0 )
-					TestInputEdge( World );
-				else if( std::strcmp( Test, "input_axis_order" ) == 0 )
-					TestAxisOrder( World );
-				else
-					TestReleaseAllInput( World );
+			// RESIDUAL GAP: native lookups are installed (InstallHP2NativeLookups
+			// before appInit) yet the checked enum lookup still escapes only under
+			// ctest isolation; direct invocation passes. Quarantined until that
+			// last delta is found.
+			bool EscapedEngineError = false;
+			try
+			{
+			if( std::strcmp( Test, "input_edge" ) == 0 )
+				TestInputEdge( World );
+			else if( std::strcmp( Test, "input_axis_order" ) == 0 )
+				TestAxisOrder( World );
+			else
+				TestReleaseAllInput( World );
 			}
 			catch( ... )
 			{
