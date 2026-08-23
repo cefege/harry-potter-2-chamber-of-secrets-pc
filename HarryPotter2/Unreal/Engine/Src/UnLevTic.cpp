@@ -10,6 +10,8 @@
 #include "UnNet.h"
 #include "UnMesh.h"
 
+#include <stdlib.h>
+
 /*-----------------------------------------------------------------------------
 	Helper classes.
 -----------------------------------------------------------------------------*/
@@ -925,6 +927,16 @@ INT ULevel::TickDemoPlayback( FLOAT DeltaSeconds )
 void ULevel::Tick( ELevelTick TickType, FLOAT DeltaSeconds )
 {
 	guard(ULevel::Tick);
+	// HP2_FRAME_TIMING telemetry: when the environment variable is set to 1,
+	// measure this whole tick body and emit one <HP2_RES> frame_ms marker per
+	// tick so smoke budgets get real frame times. Default runs are unchanged.
+	static INT bFrameTiming = -1;
+	if( bFrameTiming == -1 )
+	{
+		const char* TimingFlag = getenv( "HP2_FRAME_TIMING" );
+		bFrameTiming = (TimingFlag && TimingFlag[0] == '1') ? 1 : 0;
+	}
+	FTime FrameStart = bFrameTiming ? appSeconds() : FTime();
 	ALevelInfo* Info = GetLevelInfo();
 	InitStats();
 	FMemMark Mark(GMem);
@@ -1049,7 +1061,10 @@ void ULevel::Tick( ELevelTick TickType, FLOAT DeltaSeconds )
 	EngineMark.Pop();
 	CleanupDestroyed( 0 );
 
+	if( bFrameTiming )
+		debugf( TEXT("<HP2_RES> frame_ms=%.3f"), (appSeconds() - FrameStart) * 1000.0f );
 	unguardf(( TEXT("(NetMode=%i)"), GetLevelInfo()->NetMode ));
+
 }
 
 /*-----------------------------------------------------------------------------

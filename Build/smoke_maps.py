@@ -7,16 +7,18 @@ contains positive editor-template evidence independent of its filename. Maps
 without that evidence remain playable candidates and launch normally, so a
 missing PlayerStart cannot by itself turn a broken game level into a pass.
 
-Budgets are enforced on the whole run only: the engine does not emit per-tick
-frame timing yet (its Frame/Render MSEC lines require the interactive ``stat``
-console command), so ``--max-frame-ms`` is recorded with ``frame_ms: null`` /
-``reason: "engine_does_not_emit"`` while ``--max-map-seconds`` compares the
-observed wall duration against the requested budget. Resource accounting is
-groundwork for an optional engine marker protocol: lines shaped like
-``<HP2_RES> gl_textures_created=128`` are parsed leniently into each map's
-``resources`` field (null when absent), and a launched map with both
-gl_textures_created and gl_textures_destroyed present and unequal fails as a
-leak. Report format_version stays 2; all new keys are additive.
+Budgets are enforced on the whole run: ``--max-map-seconds`` compares the
+observed wall duration against the requested budget, and ``--max-frame-ms``
+compares the worst observed per-tick frame time against its budget. The
+engine emits per-tick timing only when ``HP2_FRAME_TIMING=1`` is set: each
+tick then logs ``<HP2_RES> frame_ms=<milliseconds>``. Those markers are
+parsed leniently like every other ``<HP2_RES> key=value`` line into each
+map's ``resources`` field, and additionally aggregated into ``budgets``
+(``frame_ms`` = max observed, ``frame_samples`` = count). When a launched
+map produced no samples the engine-side reason ``engine_does_not_emit`` is
+recorded instead. A launched map with both gl_textures_created and
+gl_textures_destroyed present and unequal fails as a leak. Report
+format_version stays 2; all new keys are additive.
 """
 
 from __future__ import annotations
@@ -608,14 +610,18 @@ def _run_map(
     inspection: dict[str, object],
     capture_frames_dir: Path | None = None,
 ) -> dict[str, object]:
-    extra_env = None
+    # Per-tick timing markers are opt-in inside the engine; every smoke
+    # launch turns them on so frame budgets measure real ticks.
+    extra_env = {"HP2_FRAME_TIMING": "1"}
     if capture_frames_dir is not None:
         _replace_directory(capture_frames_dir)
-        extra_env = {
-            "HP2_CAPTURE_FRAMES": str(capture_frames_dir),
-            "HP2_CAPTURE_MAP": Path(map_relative).stem,
-            "HP2_CAPTURE_TICKS": str(ticks),
-        }
+        extra_env.update(
+            {
+                "HP2_CAPTURE_FRAMES": str(capture_frames_dir),
+                "HP2_CAPTURE_MAP": Path(map_relative).stem,
+                "HP2_CAPTURE_TICKS": str(ticks),
+            }
+        )
     result = game_test.run_game(
         app=executable,
         data_root=data_root,
@@ -647,6 +653,7 @@ def _run_map(
         result,
         max_frame_ms=max_frame_ms,
         max_map_seconds=max_map_seconds,
+        frame_samples_ms=_frame_ms_samples(log_path),
     )
     return result
 
@@ -722,6 +729,7 @@ def _verify_map_package(
         record,
         max_frame_ms=max_frame_ms,
         max_map_seconds=max_map_seconds,
+        frame_samples_ms=[],
     )
     return record
 
@@ -756,25 +764,47 @@ def _resource_leak(resources: dict[str, object]) -> str | None:
     return None
 
 
+def _frame_ms_samples(log_path: Path | None) -> list[float]:
+    """Collect <HP2_RES> frame_ms values from a captured run log."""
+    if log_path is None:
+        return []
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    samples: list[float] = []
+    for match in game_test.HP2_RESOURCE_MARKER.finditer(text):
+        if match.group(1) != "frame_ms":
+            continue
+        try:
+            sample = float(match.group(2))
+        except ValueError:
+            continue
+        if sample >= 0.0 and sample != float("inf"):
+            samples.append(sample)
+    return samples
+
+
 def _budgets_record(
     duration_seconds: float | None,
     *,
     max_frame_ms: float | None,
     max_map_seconds: float | None,
+    frame_samples_ms: list[float],
 ) -> dict[str, object]:
-    # The engine emits no per-tick frame timing in test logs today (its
-    # Frame/Render MSEC output requires the interactive `stat` command), so
-    # frame_ms stays null with an explicit reason. When the engine starts
-    # emitting <HP2_RES> tick markers this parses them into frame_ms and drops
-    # the reason key.
-    return {
+    frame_samples = len(frame_samples_ms)
+    record: dict[str, object] = {
         "max_frame_ms": max_frame_ms,
         "max_map_seconds": max_map_seconds,
-        "frame_ms": None,
-        "frame_samples": 0,
-        "reason": "engine_does_not_emit",
+        "frame_ms": max(frame_samples_ms) if frame_samples else None,
+        "frame_samples": frame_samples,
         "map_seconds": duration_seconds,
     }
+    if not frame_samples:
+        # The engine emits per-tick frame timing only with HP2_FRAME_TIMING=1;
+        # without samples the frame budget stays unmeasured and we say so.
+        record["reason"] = "engine_does_not_emit"
+    return record
 
 
 def _budget_violations(budgets: dict[str, object]) -> list[dict[str, object]]:
@@ -847,6 +877,7 @@ def _apply_budget_contract(
     *,
     max_frame_ms: float | None,
     max_map_seconds: float | None,
+    frame_samples_ms: list[float],
 ) -> None:
     """Attach additive schema-v1 alignment fields; format_version stays 2."""
     record["resources"] = _resources_record(record.get("resources") or {})
@@ -856,6 +887,7 @@ def _apply_budget_contract(
         duration if isinstance(duration, (int, float)) else None,
         max_frame_ms=max_frame_ms,
         max_map_seconds=max_map_seconds,
+        frame_samples_ms=frame_samples_ms,
     )
     record["budget_violations"] = _budget_violations(record["budgets"])
     process_passed = bool(record["passed"])
@@ -900,7 +932,9 @@ def _arguments() -> argparse.Namespace:
             "render/assert/critical marker fails the map. UE1 ScriptWarning and "
             "Accessed None diagnostics count as script failures. Budgets: "
             "--max-map-seconds fails launched maps over the wall budget; "
-            "--max-frame-ms awaits engine-side per-tick timing and stays null. "
+            "--max-frame-ms fails launched maps whose worst observed per-tick "
+            "frame time exceeds it (requires the engine's HP2_FRAME_TIMING=1 "
+            "markers; unmeasured maps record frame_ms null). "
             "'<HP2_RES> key=value' log markers feed resources; unequal created/"
             "destroyed texture counts fail the map as a leak."
         ),
@@ -940,8 +974,10 @@ def _arguments() -> argparse.Namespace:
         type=_positive_float,
         default=None,
         help=(
-            "per-tick frame-time budget in milliseconds (advisory: the engine "
-            "does not emit per-tick timing yet; recorded as null)"
+            "per-tick frame-time budget in milliseconds; fails launched maps "
+            "whose worst observed <HP2_RES> frame_ms sample exceeds it "
+            "(unmeasured runs record frame_ms null with reason "
+            "engine_does_not_emit)"
         ),
     )
     parser.add_argument(
