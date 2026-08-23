@@ -8,8 +8,8 @@
 
 /*-----------------------------------------------------------------------------
 	This header freezes the mouse-capture decisions that used to live inline
-	in USDLViewport's SDL_WINDOWEVENT handler (ThirdParty/UT469eSDK/SDLDrv/
-	Src/SDLViewport.cpp). It is deliberately free of SDL and engine includes:
+	in USDLViewport's SDL_WINDOWEVENT handler
+	(HarryPotter2/Unreal/SDLDrv/Src/SDLViewport.cpp). It is deliberately free of SDL and engine includes:
 	callers translate raw SDL events into the plain structs below and apply
 	the returned action through UpdateMouseGrabState().
 

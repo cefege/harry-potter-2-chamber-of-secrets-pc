@@ -120,9 +120,9 @@ set(HP2_ALAUDIO_SOURCES
 )
 
 set(HP2_SDLDRV_SOURCES
-    "${HP2_THIRD_PARTY_ROOT}/UT469eSDK/SDLDrv/Src/SDLClient.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/UT469eSDK/SDLDrv/Src/SDLDrv.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/UT469eSDK/SDLDrv/Src/SDLViewport.cpp"
+    "${HP2_UNREAL_ROOT}/SDLDrv/Src/SDLClient.cpp"
+    "${HP2_UNREAL_ROOT}/SDLDrv/Src/SDLDrv.cpp"
+    "${HP2_UNREAL_ROOT}/SDLDrv/Src/SDLViewport.cpp"
 )
 
 # This allowlist is the complete pinned XOpenGL runtime subset. The vendored

@@ -2,18 +2,6 @@
   "schema_version": 1,
   "sources": [
     {
-      "name": "UT469eSDK",
-      "source_type": "release-archive",
-      "url": "https://github.com/OldUnreal/UnrealTournamentPatches/releases/download/v469e/OldUnreal-UTPatch469e-SDK.zip",
-      "release_asset_id": 314894393,
-      "size": 60007957,
-      "sha256": "b213789a18d736beacdf8bc2740bcc6e031789b806823b9f7eb3a75b2dacedcc",
-      "license": "Epic retail-derived personal non-profit terms",
-      "license_paths": ["ThirdParty/UT469eSDK/LICENSE.md", "ThirdParty/UT469eSDK/README.md"],
-      "role": "vendored SDLDrv and SDLLaunch source subset",
-      "vendored_metadata": "ThirdParty/UT469eSDK/.source.json"
-    },
-    {
       "name": "XOpenGLDrv",
       "source_type": "git",
       "url": "https://github.com/OldUnreal/XOpenGLDrv",
