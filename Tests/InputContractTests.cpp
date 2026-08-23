@@ -777,13 +777,6 @@ FSuiteResult RunSuite( const char* Test )
 		else if( bNeedsWorld )
 		{
 			FInputWorld World;
-			if( !BuildInputWorld( World ) )
-			{
-				GFailureStage = "bootstrap.fixtures";
-				Fail( "headless input fixture construction failed" );
-				return SuiteResult( "blocked", "data.fixture_unavailable",
-					"client/viewport/actor/input fixture construction failed", 0 );
-			}
 			// RESIDUAL GAP: native lookups are installed (InstallHP2NativeLookups
 			// before appInit) yet the checked enum lookup still escapes only under
 			// ctest isolation; direct invocation passes. Quarantined until that
@@ -791,6 +784,13 @@ FSuiteResult RunSuite( const char* Test )
 			bool EscapedEngineError = false;
 			try
 			{
+			if( !BuildInputWorld( World ) )
+			{
+				GFailureStage = "bootstrap.fixtures";
+				Fail( "headless input fixture construction failed" );
+				return SuiteResult( "blocked", "data.fixture_unavailable",
+					"client/viewport/actor/input fixture construction failed", 0 );
+			}
 			if( std::strcmp( Test, "input_edge" ) == 0 )
 				TestInputEdge( World );
 			else if( std::strcmp( Test, "input_axis_order" ) == 0 )

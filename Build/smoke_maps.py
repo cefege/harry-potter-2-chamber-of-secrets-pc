@@ -49,6 +49,12 @@ DEFAULT_TICKS = 300
 DEFAULT_TIMEOUT_SECONDS = 120.0
 REPORT_FORMAT_VERSION = 2
 SUPPORTED_MAP_VERSIONS = frozenset((76, 79))
+VULKAN_RENDER_DEVICE_CLASS = "VulkanDrv.VulkanRenderDevice"
+VIDEO_DEVICE_KEYS = ("GameRenderDevice", "WindowedRenderDevice", "RenderDevice")
+# Loader environment mirrors Build/run_vulkan_smoke.py (MoltenVK via Homebrew).
+DEFAULT_VULKAN_ICD = Path("/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json")
+VULKAN_DYLD_LIBRARY_PATH = "/opt/homebrew/lib"
+VULKAN_DYLD_FALLBACK_LIBRARY_PATH = "/opt/homebrew/opt/molten-vk/lib"
 MAP_CLASSIFICATIONS = (
     "playable_level",
     "editor_template_geometry_study",
@@ -547,6 +553,35 @@ def _replace_directory(directory: Path) -> None:
         raise SmokeError(f"cannot replace directory {directory}: {error}") from error
 
 
+def _vulkan_engine_ini(data_root: Path, destination: Path) -> Path:
+    """Generate an Engine.ini selecting the Vulkan render device.
+
+    The stock Default.ini carries legacy video devices that ApplyPortableConfig
+    would migrate to XOpenGLDrv at boot, so the Vulkan leg must hand the engine
+    an explicit selection (same discipline as Build/run_vulkan_smoke.py).
+    """
+    default_path = data_root / "System" / "Default.ini"
+    text = default_path.read_text(encoding="utf-8", errors="replace")
+    for key in VIDEO_DEVICE_KEYS:
+        text, count = re.subn(
+            rf"^{key}=.*$", f"{key}={VULKAN_RENDER_DEVICE_CLASS}", text,
+            count=1, flags=re.MULTILINE,
+        )
+        if count != 1:
+            raise SmokeError(f"{default_path}: expected exactly one {key} entry")
+    game_test._write_atomic(destination, text.encode("utf-8"))
+    return destination
+
+
+def _vulkan_environment(icd: Path) -> dict[str, str]:
+    """MoltenVK loader environment for a -vulkan launch."""
+    return {
+        "VK_DRIVER_FILES": str(icd),
+        "DYLD_LIBRARY_PATH": VULKAN_DYLD_LIBRARY_PATH,
+        "DYLD_FALLBACK_LIBRARY_PATH": VULKAN_DYLD_FALLBACK_LIBRARY_PATH,
+    }
+
+
 def _frames_directory(output: Path) -> Path:
     name = output.name
     stem = name[:-5] if name.lower().endswith(".json") else name
@@ -609,10 +644,14 @@ def _run_map(
     log_path: Path,
     inspection: dict[str, object],
     capture_frames_dir: Path | None = None,
+    extra_environment: dict[str, str] | None = None,
+    ini_file: Path | None = None,
 ) -> dict[str, object]:
     # Per-tick timing markers are opt-in inside the engine; every smoke
     # launch turns them on so frame budgets measure real ticks.
     extra_env = {"HP2_FRAME_TIMING": "1"}
+    if extra_environment:
+        extra_env.update(extra_environment)
     if capture_frames_dir is not None:
         _replace_directory(capture_frames_dir)
         extra_env.update(
@@ -632,6 +671,7 @@ def _run_map(
         log_path=log_path,
         no_sound=True,
         extra_env=extra_env,
+        ini_file=ini_file,
     )
     result.update(
         {
@@ -1016,6 +1056,16 @@ def _arguments() -> argparse.Namespace:
             "gains capture {count, scale_factor} fields"
         ),
     )
+    parser.add_argument(
+        "--vulkan-icd",
+        type=Path,
+        default=DEFAULT_VULKAN_ICD,
+        help=(
+            "Vulkan ICD manifest passed to the engine through VK_DRIVER_FILES "
+            "when --renderer=vulkan (MoltenVK loader dylib paths are exported "
+            "alongside it, mirroring Build/run_vulkan_smoke.py)"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1095,6 +1145,18 @@ def main() -> int:
         output = game_test._resolve_path(arguments.output, repo_root, strict=False)
         if not output.name:
             raise SmokeError(f"output path must name a JSON file: {arguments.output}")
+        vulkan_environment: dict[str, str] | None = None
+        vulkan_ini: Path | None = None
+        if arguments.renderer == "vulkan":
+            if not arguments.vulkan_icd.is_file():
+                raise SmokeError(
+                    f"vulkan ICD manifest not found: {arguments.vulkan_icd}"
+                )
+            vulkan_environment = _vulkan_environment(arguments.vulkan_icd)
+            ini_stem = output.name[:-5] if output.name.lower().endswith(".json") else output.name
+            vulkan_ini = _vulkan_engine_ini(
+                data_root, output.with_name(f"{ini_stem}-vulkan-engine.ini")
+            )
         logs = _log_directory(output)
         _replace_directory(logs)
         frames_root = (
@@ -1125,6 +1187,8 @@ def main() -> int:
                     max_frame_ms=arguments.max_frame_ms,
                     max_map_seconds=arguments.max_map_seconds,
                     capture_frames_dir=capture_frames_dir,
+                    extra_environment=vulkan_environment,
+                    ini_file=vulkan_ini,
                 )
             else:
                 record = _verify_map_package(
@@ -1169,6 +1233,16 @@ def main() -> int:
             "renderer": arguments.renderer,
             "ticks": arguments.ticks,
             "capture_frames": arguments.capture_frames,
+            "vulkan_icd": (
+                game_test._display_path(arguments.vulkan_icd, repo_root)
+                if arguments.renderer == "vulkan"
+                else None
+            ),
+            "vulkan_engine_ini": (
+                game_test._display_path(vulkan_ini, repo_root)
+                if vulkan_ini is not None
+                else None
+            ),
             "timeout_seconds": arguments.timeout,
             "max_frame_ms": arguments.max_frame_ms,
             "max_map_seconds": arguments.max_map_seconds,

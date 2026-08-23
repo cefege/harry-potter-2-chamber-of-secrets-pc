@@ -325,6 +325,7 @@ def build_launch_command(
     ticks: int,
     *,
     no_sound: bool = False,
+    ini_file: Path | None = None,
 ) -> list[str]:
     if renderer not in ("xopengl", "vulkan"):
         raise GameTestError(f"unsupported renderer: {renderer}")
@@ -340,6 +341,8 @@ def build_launch_command(
     if no_sound:
         arguments.append("-nosound")
     arguments.extend((f"-testticks={ticks}", "-log"))
+    if ini_file is not None:
+        arguments.append(f"-INI={ini_file}")
     return arguments
 
 
@@ -572,6 +575,7 @@ def run_game(
     *, app: Path, data_root: Path, selected_map: str, renderer: str, ticks: int,
     timeout_seconds: float, log_path: Path, no_sound: bool = False,
     extra_env: dict[str, str] | None = None,
+    ini_file: Path | None = None,
 ) -> dict[str, object]:
     """Validate a real app, then launch one exact listed map."""
     repo_root = _repo_root()
@@ -583,7 +587,10 @@ def run_game(
     executable = _bundle_executable(app)
     _validate_native_arm64(executable)
     map_path, map_token = _resolve_map(data_root, selected_map)
-    command = build_launch_command(executable, data_root, map_token, renderer, ticks, no_sound=no_sound)
+    command = build_launch_command(
+        executable, data_root, map_token, renderer, ticks,
+        no_sound=no_sound, ini_file=ini_file,
+    )
     displayed_command = [
         _display_path(executable, repo_root), f"-datadir={_display_path(data_root, repo_root)}",
         map_token, *command[3:],
