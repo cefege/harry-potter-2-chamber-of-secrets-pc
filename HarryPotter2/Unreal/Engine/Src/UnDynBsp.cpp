@@ -12,6 +12,27 @@ Revision history:
 
 #include "EnginePrivate.h"
 
+// HP2 mover diagnostics: HP2_MOVER_DEBUG=1 enables per-move tracker logging.
+static INT GMoverDebugLog = -1;
+static INT GMoverDroppedPolys = 0;
+static INT MoverDebugEnabled()
+{
+	if( GMoverDebugLog < 0 )
+	{
+		const char* Flag = getenv( "HP2_MOVER_DEBUG" );
+		GMoverDebugLog = (Flag && Flag[0] == '1') ? 1 : 0;
+	}
+	return GMoverDebugLog;
+}
+
+// Rate-limited warning for previously-silent geometry drops (pool exhaustion).
+static void MoverDropWarning( const TCHAR* Pool, AMover* Actor, INT iSurf )
+{
+	GMoverDroppedPolys++;
+	if( GMoverDroppedPolys <= 32 || (GMoverDroppedPolys % 1024) == 0 )
+		debugf( NAME_Warning, TEXT("FMovingBrushTracker: %s exhausted adding brush %s surf %i - mover geometry dropped (%i total)"), Pool, Actor->GetName(), iSurf, GMoverDroppedPolys );
+}
+
 /*---------------------------------------------------------------------------------------
 	Brush class implementation.
 ---------------------------------------------------------------------------------------*/
@@ -279,6 +300,8 @@ void FMovingBrushTracker::Update( AActor* InActor )
 	else if( Actor->SavedPos!=Actor->Location || Actor->SavedRot!=Actor->Rotation )
 	{
 		// Update the single brush.
+		if( MoverDebugEnabled() )
+			debugf( NAME_Log, TEXT("MoverTracker: re-add %s at (%f,%f,%f) rot(%i,%i,%i)"), Actor->GetName(), Actor->Location.X, Actor->Location.Y, Actor->Location.Z, Actor->Rotation.Pitch, Actor->Rotation.Yaw, Actor->Rotation.Roll );
 		AddGroupActor( Actor );
 	}
 
@@ -541,6 +564,23 @@ void FMovingBrushTracker::SetupActorBrush( AMover* Actor )
 	Actor->bAssimilated = 0;
 	for( INT i=0; i<Brush->Polys->Element.Num(); i++ )
 	{
+		if( MoverDebugEnabled() && i==0 )
+		{
+			DWORD Seen[16];
+			INT NumSeen = 0;
+			for( INT j=0; j<Brush->Polys->Element.Num(); j++ )
+			{
+				DWORD F = Brush->Polys->Element(j).PolyFlags;
+				INT k = 0;
+				for( ; k<NumSeen && Seen[k]!=F; k++ ) {}
+				if( k==NumSeen && NumSeen<16 )
+					Seen[NumSeen++] = F;
+			}
+			FString FlagList;
+			for( INT k=0; k<NumSeen; k++ )
+				FlagList += FString::Printf( TEXT("%s0x%08x"), k ? TEXT(",") : TEXT(""), (unsigned)Seen[k] );
+			debugf( NAME_Log, TEXT("MoverFlags: %s polys=%i flags=[%s]"), Actor->GetName(), Brush->Polys->Element.Num(), *FlagList );
+		}
 		// Create new surface elements.
 		FPoly* Poly               = &Brush->Polys->Element(i);
 		INT iSurf                 = Level->Model->Surfs.AddZeroed();
@@ -601,6 +641,7 @@ void FMovingBrushTracker::AddPolyFragment
 	INT iNode = NewThing( iNodeRover, iOriginalTopNode, Level->Model->Nodes.Num(), NodeMaps, FActorIndex(AddActor,iParent) );
 	if( iNode == INDEX_NONE )
 	{
+		MoverDropWarning( TEXT("node pool"), AddActor, iAddSurf );
 		return;
 	}
 	FBspNode* Node        = &Level->Model->Nodes(iNode);
@@ -642,6 +683,7 @@ void FMovingBrushTracker::AddPolyFragment
 	INT iVertPool = Node->iVertPool = NewVertPoolIndex(AddActor,EdPoly->NumVertices);
 	if( iVertPool==INDEX_NONE )
 	{
+		MoverDropWarning( TEXT("vertex pool"), AddActor, iAddSurf );
 		NodeMaps( iNode-iOriginalTopNode ) = FActorIndex();
 		return;
 	}
@@ -653,6 +695,7 @@ void FMovingBrushTracker::AddPolyFragment
 		INT pVertex = NewThang( iFirstRovingPoint, Level->Model->Points, PointOwners, PointFreeLinks, iFreePoints, AddActor );
 		if( pVertex==INDEX_NONE )
 		{
+			MoverDropWarning( TEXT("point pool"), AddActor, iAddSurf );
 			while( --i >= 0 )
 				FreeThang( (--VertPool)->pVertex, iFirstRovingPoint, PointOwners, PointFreeLinks, iFreePoints );
 			NodeMaps( iNode-iOriginalTopNode ) = FActorIndex();

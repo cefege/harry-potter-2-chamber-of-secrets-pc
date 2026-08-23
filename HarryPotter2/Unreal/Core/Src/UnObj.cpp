@@ -387,7 +387,6 @@ UObject::~UObject()
 	{
 		// Validate it.
 		check(IsValid());
-
 		// Destroy the object if necessary.
 		ConditionalDestroy();
 
@@ -860,6 +859,32 @@ void UObject::LoadConfig( UBOOL Propagate, UClass* Class, const TCHAR* InFilenam
 	unguardobj;
 }
 
+// Classes whose localized defaults could not be loaded because their script
+// superclass had not yet linked its properties. Retried by
+// FlushPendingLocalizedDefaults() as classes finish linking.
+static TArray<UClass*> GPendingLocalized;
+
+void FlushPendingLocalizedDefaults()
+{
+	guard(FlushPendingLocalizedDefaults);
+	// Process the current snapshot once; LoadLocalized() re-queues any entry
+	// whose inherited properties are still not materialized.
+	INT Count = GPendingLocalized.Num();
+	for( INT i=0; i<Count; i++ )
+	{
+		UClass* Pending = GPendingLocalized(0);
+		GPendingLocalized.Remove( 0 );
+		if( Pending->Defaults.Num()!=Pending->GetPropertiesSize() )
+		{
+			// Mid-replacement or reload; retry on a later flush.
+			GPendingLocalized.AddItem( Pending );
+			continue;
+		}
+		Pending->GetDefaultObject()->LoadLocalized();
+	}
+	unguard;
+}
+
 //
 // Load localized text.
 //warning: Must be safe on class-default metaobjects.
@@ -867,21 +892,35 @@ void UObject::LoadConfig( UBOOL Propagate, UClass* Class, const TCHAR* InFilenam
 void UObject::LoadLocalized( UBOOL Propagate, UClass* Class )
 {
 	guard(UObject::LoadLocalized);
-	checkSlow(GetClass());
 	if( !Class )
 		Class = GetClass();
 	if( !(Class->ClassFlags & CLASS_Localized) )
 		return;
-	if( GIsEditor )
+	if( !Class->Children && Class->GetSuperClass() && !Class->GetSuperClass()->Children )
+	{
+		// Premature: this native class registered before its script superclass
+		// linked the inherited (CPF_Localized) properties. Retry once they exist.
+		if( GPendingLocalized.FindItemIndex(Class)==INDEX_NONE )
+			GPendingLocalized.AddItem( Class );
 		return;
+	}
+	if( GIsEditor )
+	{
+		// Editor mode skips localization; retry once localization is possible.
+		if( GPendingLocalized.FindItemIndex(Class)==INDEX_NONE )
+			GPendingLocalized.AddItem( Class );
+		return;
+	}
 	if( Propagate && Class->GetSuperClass() )
 		LoadLocalized( Propagate, Class->GetSuperClass() );
 	const TCHAR* PackageName = GetIndex()==INDEX_NONE ? Class->GetOuter()->GetName() : GetOuter()->GetName();
 	const TCHAR* Section     = GetIndex()==INDEX_NONE ? Class->GetName()             : GetName();
+	INT NumLocalizedProps = 0;
 	for( TFieldIterator<UProperty> It(Class); It; ++It )
 	{
 		if( It->PropertyFlags & CPF_Localized )
 		{
+			NumLocalizedProps++;
 			for( INT i=0; i<It->ArrayDim; i++ )
 			{
 				TCHAR TempKey[256];
@@ -896,6 +935,13 @@ void UObject::LoadLocalized( UBOOL Propagate, UClass* Class )
 					It->ImportText( Text, (BYTE*)this + It->Offset + i*It->ElementSize, 0 );
 			}
 		}
+	}
+	if( !NumLocalizedProps && Class->GetSuperClass() )
+	{
+		// The inherited property chain is not fully materialized yet (child
+		// fields load lazily); retry once the current batch finishes loading.
+		if( GPendingLocalized.FindItemIndex(Class)==INDEX_NONE )
+			GPendingLocalized.AddItem( Class );
 	}
 	unguardobj;
 }
@@ -2576,6 +2622,9 @@ void UObject::EndLoad()
 			GObjLoaded.Empty();
 			unguard;
 
+			// All exports are materialized; retry any localized defaults that
+			// were deferred because their script superclass loaded later.
+			FlushPendingLocalizedDefaults();
 			// Dissociate all linker import object references, since they 
 			// may be destroyed, causing their pointers to become invalid.
 			guard(DissociateImports);

@@ -2,6 +2,9 @@
 #include "Precomp.h"
 #include "UVulkanRenderDevice.h"
 #include "CachedTexture.h"
+// HP2: end-of-frame capture hook (mirrors the XOpenGLDrv end-of-present
+// capture; vendored-mod against upstream a29e9ac0df1c60ad302d91bc3a51ab026c1a307c).
+#include "Hp2FrameCapture.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -681,6 +684,11 @@ void UVulkanRenderDevice::Unlock(UBOOL Blit)
 #endif
 
 		SubmitAndWait(Blit ? true : false, windowWidth, windowHeight, Viewport->IsFullscreen());
+
+		// HP2: end-of-present frame capture (mirrors the XOpenGLDrv
+		// end-of-present hook; vendored-mod against upstream a29e9ac0df1c60ad302d91bc3a51ab026c1a307c).
+		if (Blit)
+			Hp2CaptureFrame(this);
 
 		Batch.Pipeline = nullptr;
 

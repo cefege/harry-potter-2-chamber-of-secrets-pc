@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Compare the committed three-map smoke subset across render drivers.
 
-Runs Build/smoke_maps.py twice over the same map allowlist -- once with
---renderer=xopengl and once with --renderer=vulkan, both with frame capture
-enabled (HP2_CAPTURE_FRAMES) -- then pairs each map's last captured frame and
-compares the drivers with Tools/baseline_compare.py semantics.
+Runs Build/smoke_maps.py over the same map allowlist -- with --renderer=xopengl
+and with --renderer=vulkan, both with frame capture enabled
+(HP2_CAPTURE_FRAMES) -- then pairs each map's last captured frame and compares
+the drivers with Tools/baseline_compare.py semantics.
 
 Per map the combined matrix report records:
     {map: {xopengl_sha256, vulkan_sha256, delta: <baseline_compare result>}}
@@ -13,6 +13,11 @@ delta.verdict is "same" when the frames match within --tolerance (the
 downscaled-thumbnail fallback absorbs minor AA noise), so the whole matrix
 passes only when every map renders equivalently under both drivers.
 
+By default (--runs 2) each driver also runs twice; a driver that disagrees
+with ITSELF on a map (UE1 cutscene cues advance with wall time, so same-tick
+frames can differ across runs) is reported as state.nondeterministic instead
+of producing a phantom cross-driver renderer.frame_differs failure.
+
 Exit codes: 0 pass, 1 fail, 2 blocked(reason).
 """
 from __future__ import annotations
@@ -20,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -168,6 +174,141 @@ def compare_maps(
     return matrix, failures
 
 
+_CUE_LOCATION_PATTERN = re.compile(
+    r"LOCATION:\s*(-?[\d.]+,\s*-?[\d.]+,\s*-?[\d.]+)"
+)
+
+
+def cue_fingerprint(log_path: Path) -> str | None:
+    """LOCATION triple of the last FlyTo cue line in an engine log.
+
+    Returns None when the log has no FlyTo/LOCATION line or cannot be read;
+    cutscene cues advance with wall time, so this fingerprint is evidence of
+    which tick a run actually reached, not a pass/fail signal by itself.
+    """
+    try:
+        text = log_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    fingerprint: str | None = None
+    for line in text.splitlines():
+        if "FlyTo" in line:
+            matched = _CUE_LOCATION_PATTERN.search(line)
+            if matched is not None:
+                fingerprint = matched.group(1)
+    return fingerprint
+
+
+def _map_log_path(
+    report: dict[str, object], positions: dict[str, int], stem: str,
+) -> Path | None:
+    """Per-map engine log: <log_directory>/<1-based maps[] position>.log."""
+    directory = report.get("log_directory")
+    if not isinstance(directory, str) or not directory:
+        return None
+    return Path(directory) / f"{positions[stem]:06d}.log"
+
+
+def selfdiff_maps(
+    report_a: dict[str, object],
+    report_b: dict[str, object],
+    *,
+    tolerance: int,
+) -> dict[str, dict[str, object]]:
+    """Pixel-compare two runs of the SAME driver to detect nondeterminism.
+
+    Returns per-stem {verdict, max_channel_delta, cue_a, cue_b}; records that
+    are missing, failed, or lack usable captures yield an "error" entry
+    instead (mirroring compare_maps).
+    """
+    def by_stem(report: dict[str, object]) -> tuple[dict[str, dict[str, object]], dict[str, int]]:
+        indexed: dict[str, dict[str, object]] = {}
+        positions: dict[str, int] = {}
+        maps = report.get("maps")
+        if isinstance(maps, list):
+            for position, record in enumerate(maps, start=1):
+                if isinstance(record, dict):
+                    relative = str(record.get("map_relative_to_data_root", ""))
+                    stem = Path(relative).stem.casefold()
+                    indexed[stem] = record
+                    positions[stem] = position
+        return indexed, positions
+
+    a_by_stem, a_positions = by_stem(report_a)
+    b_by_stem, b_positions = by_stem(report_b)
+    results: dict[str, dict[str, object]] = {}
+    for stem in sorted(set(a_by_stem) | set(b_by_stem)):
+        entry: dict[str, object] = {}
+        try:
+            record_a = a_by_stem.get(stem)
+            record_b = b_by_stem.get(stem)
+            if record_a is None or record_b is None:
+                raise MatrixCompareError(
+                    f"{stem}: missing from "
+                    f"{'first' if record_a is None else 'second'} selfdiff run"
+                )
+            for label, record in (("first", record_a), ("second", record_b)):
+                if record.get("passed") is not True:
+                    raise MatrixCompareError(f"{stem}: {label} run did not pass")
+            frame_a = _representative_frame(record_a, "selfdiff first run")
+            frame_b = _representative_frame(record_b, "selfdiff second run")
+            delta = baseline_compare.compare_png_files(
+                frame_a, frame_b, tolerance=tolerance,
+            )
+            entry["verdict"] = delta["verdict"]
+            entry["max_channel_delta"] = delta["max_channel_delta"]
+            log_a = _map_log_path(report_a, a_positions, stem)
+            entry["cue_a"] = cue_fingerprint(log_a) if log_a else None
+            log_b = _map_log_path(report_b, b_positions, stem)
+            entry["cue_b"] = cue_fingerprint(log_b) if log_b else None
+        except (MatrixCompareError, OSError) as error:
+            entry["error"] = str(error)
+        results[stem] = entry
+    return results
+
+
+def compose_selfdiff(
+    matrix: dict[str, dict[str, object]],
+    failures: list[str],
+    selfdiff_by_driver: dict[str, dict[str, dict[str, object]]] | None,
+) -> None:
+    """Fold per-driver self-determinism into cross-driver verdicts, in place.
+
+    selfdiff_by_driver is None when --runs=1: every entry is marked
+    {"selfdiff": "skipped"} and cross verdicts stand as-is. Otherwise each
+    entry gains {"selfdiff": {driver: result}}; a driver whose own runs
+    disagree (or whose selfdiff could not be computed) downgrades the map to
+    state.nondeterministic and suppresses the phantom cross-driver failure.
+    """
+    for stem, entry in matrix.items():
+        if selfdiff_by_driver is None:
+            entry["selfdiff"] = "skipped"
+            continue
+        entry["selfdiff"] = {
+            driver: results.get(stem, {})
+            for driver, results in selfdiff_by_driver.items()
+        }
+        reasons = []
+        for driver, results in selfdiff_by_driver.items():
+            result = results.get(stem)
+            if result is None or not result:
+                reasons.append(f"{driver}: no selfdiff result")
+            elif "error" in result:
+                reasons.append(f"{driver}: {result['error']}")
+            elif result.get("verdict") != "same":
+                reasons.append(
+                    f"{driver}: {result.get('verdict')} "
+                    f"(max_channel_delta={result.get('max_channel_delta')})"
+                )
+        if reasons:
+            for item in [
+                item for item in failures
+                if item.startswith(f"{stem}: renderer.")
+            ]:
+                failures.remove(item)
+            failures.append(f"{stem}: state.nondeterministic")
+
+
 def build_report(
     matrix: dict[str, dict[str, object]],
     failures: list[str],
@@ -263,7 +404,13 @@ def _arguments() -> argparse.Namespace:
         type=Path,
         required=True,
         help="combined matrix report path; per-leg reports are written as "
-             "<stem>-xopengl.json and <stem>-vulkan.json beside it",
+             "<stem>-<driver>[runN].json beside it",
+    )
+    parser.add_argument(
+        "--runs", type=_positive_int, default=2,
+        help="runs per driver; 2 enables the self-determinism gate that "
+             "downgrades self-inconsistent drivers to state.nondeterministic "
+             "instead of reporting phantom cross-driver frame failures",
     )
     return parser.parse_args()
 
@@ -285,18 +432,42 @@ def main() -> int:
     command = [
         "matrix_compare.py", f"--maps={arguments.maps}",
         f"--ticks={arguments.ticks}", f"--tolerance={arguments.tolerance}",
+        f"--runs={arguments.runs}",
     ]
-    xopengl_output = _leg_output(arguments.output, "xopengl")
-    vulkan_output = _leg_output(arguments.output, "vulkan")
-    artifacts = [str(xopengl_output), str(vulkan_output)]
+
+    def leg_output(driver: str, run_index: int) -> Path:
+        name = driver if run_index == 1 else f"{driver}run{run_index}"
+        return _leg_output(arguments.output, name)
+
+    legs = [
+        (driver, leg_output(driver, run_index))
+        for driver in ("xopengl", "vulkan")
+        for run_index in range(1, arguments.runs + 1)
+    ]
+    artifacts = [str(output) for _, output in legs]
     try:
-        launch_leg(arguments, "xopengl", xopengl_output)
-        launch_leg(arguments, "vulkan", vulkan_output)
-        xopengl_report = json.loads(xopengl_output.read_text(encoding="utf-8"))
-        vulkan_report = json.loads(vulkan_output.read_text(encoding="utf-8"))
+        run_reports: dict[str, list[dict[str, object]]] = {
+            "xopengl": [], "vulkan": [],
+        }
+        for driver, output in legs:
+            launch_leg(arguments, driver, output)
+            run_reports[driver].append(
+                json.loads(output.read_text(encoding="utf-8"))
+            )
         matrix, failures = compare_maps(
-            xopengl_report, vulkan_report, tolerance=arguments.tolerance,
+            run_reports["xopengl"][0], run_reports["vulkan"][0],
+            tolerance=arguments.tolerance,
         )
+        if arguments.runs == 1:
+            compose_selfdiff(matrix, failures, None)
+        else:
+            compose_selfdiff(matrix, failures, {
+                driver: selfdiff_maps(
+                    run_reports[driver][0], run_reports[driver][-1],
+                    tolerance=arguments.tolerance,
+                )
+                for driver in ("xopengl", "vulkan")
+            })
     except MatrixCompareError as error:
         report = build_report(
             {}, [str(error)],

@@ -805,8 +805,9 @@ UBOOL ULevel::FarMoveActor( AActor* Actor, FVector DestLocation,  UBOOL test, UB
 		Actor->OldLocation = newLocation; //to zero velocity
 	}
 
-	if( Actor->bCollideActors && Hash ) 
+	if( Actor->bCollideActors && Hash )
 		Hash->AddActor( Actor );
+	UpdateMovingBrushTracker( BrushTracker, Actor );
 
 	// Set the zone after moving, so that if a ZoneChange or ActorEntered/ActorEntered message
 	// tries to move the actor, the hashing will be correct.

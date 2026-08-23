@@ -14,17 +14,17 @@
     }
   ],
   "command": [
-    "/private/tmp/hp2vk/hp2_game",
+    "/Users/mike/Code/Default/hp2/out/macos-arm64/hp2_game",
     "-datadir=/Users/mike/Code/Default/hp2/HarryPotter2/Unreal",
     "-INI=/Users/mike/Code/Default/hp2/vk-smoke/Engine.ini",
-    "Entry",
+    "PrivetDr",
     "-NOFRONTEND",
     "-window",
     "-nosound",
-    "-testticks=60",
+    "-testticks=120",
     "-log"
   ],
   "exit_reason": "exit_0",
   "device": "Apple M5",
-  "ticks_requested": 60
+  "ticks_requested": 120
 }

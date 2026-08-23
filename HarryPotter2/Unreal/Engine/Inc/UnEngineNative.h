@@ -77,7 +77,7 @@ ENGINE_API void RegisterParticleListPrivateClass();
 	AAmmo::StaticClass();\
 	APickup::StaticClass();\
 	USound::StaticClass();\
-/*	UMusic::StaticClass();*/\
+	UMusic::StaticClass();\
 	UAudioSubsystem::StaticClass();\
 	UClient::StaticClass();\
 	UViewport::StaticClass();\

@@ -231,6 +231,24 @@ class ENGINE_API USound : public UObject
 	virtual UBOOL CompressXA( const TCHAR* SourceFilename );
 };
 
+//
+// A music track. Native-only in this engine: HP1 script packages import
+// Engine.Music and derive from it (Engine.u's JS_HP_Title_Screen_v2 and
+// JS_StoryBook_v2_mx), but no package exports the class itself. The native
+// registry provides it; ULinkerLoad::VerifyImport binds such imports through
+// its RF_Public|RF_Native|RF_Transient fallback. Missing classes still fail
+// with FailedImport - nothing is forgiven.
+//
+class ENGINE_API UMusic : public UObject
+{
+	DECLARE_CLASS(UMusic,UObject,0,Engine)
+
+	// Constructor.
+	UMusic()
+	{}
+};
+
+
 /*-----------------------------------------------------------------------------
 	FWaveModInfo. 
 -----------------------------------------------------------------------------*/

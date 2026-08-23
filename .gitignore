@@ -59,6 +59,12 @@ install_manifest.txt
 /HarryPotter2/Unreal/Music/
 /HarryPotter2/Unreal/Help/
 /HarryPotter2/Unreal/[Ss][Aa][Vv][Ee]/
+/HarryPotter1/Unreal/System/
+/HarryPotter1/Unreal/Maps/
+/HarryPotter1/Unreal/Textures/
+/HarryPotter1/Unreal/Sounds/
+/HarryPotter1/Unreal/Music/
+/HarryPotter1/Unreal/Help/
 /HarryPotter2/Unreal/[Cc][Aa][Cc][Hh][Ee]/
 
 # Extracted, imported, and archived game data
@@ -68,6 +74,7 @@ install_manifest.txt
 /retail-data-full/
 /retail-only/
 /prototype-data/
+hp1-data-manifest.json
 overlay-manifest.json
 
 # Copyrighted Unreal packages, maps, textures, audio, and music

@@ -61,6 +61,13 @@ FMallocAnsi Malloc;
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
+#include <cstdlib>
+
+// POSIX process control for the Vulkan relaunch path below.
+#if MACOSX
+#include <unistd.h>
+#endif
 #include <limits.h>
 #include <string>
 #ifdef __EMSCRIPTEN__
@@ -749,6 +756,31 @@ static void BuildDataSourceOptions(
 	Options.push_back(BuildDataSourceOption(
 		HP2Launcher::DataSource::Prototype, Configuration.prototypeRoot));
 }
+#if MACOSX && HP2_ENABLE_VULKAN_DRIVER
+// MoltenVK loader environment for a user-selected Vulkan launch, mirroring
+// Build/smoke_maps.py _vulkan_environment (Homebrew vulkan-loader and ICD).
+// dyld captures DYLD_* search paths only from the initial process
+// environment, so committing a Vulkan selection re-execs with these set
+// instead of relying on runtime setenv.
+struct MoltenVKEnvironmentPair
+{
+	const ANSICHAR* Key;
+	const ANSICHAR* Value;
+};
+static const MoltenVKEnvironmentPair MoltenVKEnvironment[] =
+{
+	{ "DYLD_LIBRARY_PATH", "/opt/homebrew/lib" },
+	{ "DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/opt/molten-vk/lib" },
+	{ "VK_DRIVER_FILES", "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json" }
+};
+// SDL_VULKAN_LIBRARY is intentionally NOT set: it makes SDL dlopen raw
+// MoltenVK while volk separately loads the Homebrew vulkan-loader, and the
+// two loader instances fail UVulkanRenderDevice::Init. Verified live:
+// without it the Vulkan device initializes; with it the launch segfaults.
+
+static const ANSICHAR* const LauncherRelaunchPrefixVariable = "HP2_LAUNCHER_RELAUNCH_PREFIX";
+#endif
+
 
 //
 // Entry point.
@@ -894,6 +926,32 @@ int main( int argc, char* argv[] )
 			Request.errorMessage = LauncherError;
 		}
 
+		// One-shot Vulkan relaunch: the re-executed image carries the
+		// MoltenVK environment and the already-validated launch prefix, so it
+		// boots the engine from the committed configuration without showing
+		// the window again.
+#if MACOSX && HP2_ENABLE_VULKAN_DRIVER
+		const ANSICHAR* RelaunchPrefix = std::getenv(LauncherRelaunchPrefixVariable);
+		if( RelaunchPrefix && !HasActivePaths )
+		{
+			// The active profile could not be prepared; drop the request and
+			// let the normal window flow relaunch once data is committed.
+			unsetenv(LauncherRelaunchPrefixVariable);
+			RelaunchPrefix = NULL;
+		}
+		if( RelaunchPrefix )
+		{
+			TCHAR Prefix[128];
+			unsetenv(LauncherRelaunchPrefixVariable);
+			if( !appFromUtf8InPlace(Prefix, RelaunchPrefix, ARRAY_COUNT(Prefix))
+				|| !PrependCommandLine(CmdLine, ARRAY_COUNT(CmdLine), Prefix) )
+			{
+				fprintf(stderr, "hp2: the relaunched Vulkan command is invalid or does not fit.\n");
+				return 1;
+			}
+		}
+		else
+#endif
 		for( ;; )
 		{
 			HP2Launcher::LauncherResult Result;
@@ -1011,6 +1069,22 @@ int main( int argc, char* argv[] )
 			}
 
 			appStrcpy(CmdLine, PendingCmdLine);
+#if MACOSX && HP2_ENABLE_VULKAN_DRIVER
+			// dyld reads DYLD_* only from the initial environment, so hand the
+			// MoltenVK loader setup to a fresh image of this binary. The
+			// relaunched run skips the window via LauncherRelaunchPrefixVariable
+			// and boots the engine from the configuration committed above.
+			if( Result.settings.renderBackend == HP2Launcher::RenderBackend::Vulkan
+				&& !std::getenv(LauncherRelaunchPrefixVariable) )
+			{
+				for( INT EnvIndex = 0; EnvIndex < ARRAY_COUNT(MoltenVKEnvironment); ++EnvIndex )
+					setenv(MoltenVKEnvironment[EnvIndex].Key, MoltenVKEnvironment[EnvIndex].Value, 1);
+				setenv(LauncherRelaunchPrefixVariable, SelectedPrefix.c_str(), 1);
+				fflush(NULL);
+				execv(argv[0], argv);
+				fprintf(stderr, "hp2: unable to re-exec for the Vulkan renderer (errno %d); launching in-process.\n", errno);
+			}
+#endif
 			break;
 		}
 	}

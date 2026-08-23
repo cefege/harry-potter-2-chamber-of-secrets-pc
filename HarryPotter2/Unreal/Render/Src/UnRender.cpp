@@ -38,6 +38,20 @@ static FStats						PrevStat;
 #endif
 
 
+
+// HP2 mover diagnostics: HP2_MOVER_DEBUG=1 enables mover-visibility counters/logs.
+static INT GMoverDebugLog = -1;
+static INT GMoverZoneRejects = 0;
+static INT GMoverLumosLogs = 0;
+static INT GMoverDebugEnabled()
+{
+	if( GMoverDebugLog < 0 )
+	{
+		const char* Flag = getenv( "HP2_MOVER_DEBUG" );
+		GMoverDebugLog = (Flag && Flag[0] == '1') ? 1 : 0;
+	}
+	return GMoverDebugLog;
+}
 // Optimization globals.
 INT         GFrameStamp=0;
 FSceneNode* GFrame;
@@ -2532,7 +2546,13 @@ void URender::OccludeBsp( FSceneNode* Frame )
 		if( Pass==PASS_Front )
 		{
 			// Zone mask rejection.
-			if( iViewZone && !(Node->ZoneMask & ActiveZoneMask))
+			// HP2 mover fix: dynamic mover surfaces carry insertion-time zone stamps
+			// (UnDynBsp NewDynamicNode) that do not track a mover sliding between
+			// zones; culling them here renders invisible-but-solid walls. Bound
+			// rejection below already exempts dynamic surfs - mirror that here.
+			if( iViewZone
+			&&	!(Node->ZoneMask & ActiveZoneMask)
+			&&	!(Frame->Level->BrushTracker && Frame->Level->BrushTracker->SurfIsDynamic(Node->iSurf)) )
 			{
 				// Use pure zone rejection.
 				STAT(GStat.MaskRejectZones++);
@@ -2634,13 +2654,14 @@ void URender::OccludeBsp( FSceneNode* Frame )
 		// Pass 2: Process polys within this node and optionally recurse with back.
 		if( Pass == PASS_Plane )
 		{
-			// Zone mask rejection.
-			if( iViewZone && !(Node->ZoneMask & ActiveZoneMask) )
+			// Zone mask rejection (dynamic-surf exemption, see PASS_Front site above).
+			if( iViewZone
+			&&	!(Node->ZoneMask & ActiveZoneMask)
+			&&	!(Frame->Level->BrushTracker && Frame->Level->BrushTracker->SurfIsDynamic(Node->iSurf)) )
 			{
 				STAT(GStat.MaskRejectZones++);
 				goto PopStack;
 			}
-
 			// Setup.
 			iOriginalNode	= iNode;
 			FLOAT Dot		= Node->Plane.PlaneDot(Origin);
@@ -3549,6 +3570,8 @@ void URender::DrawFrame( FSceneNode* Frame )
 				}//end hardware mode
 				
 				// Draw our lumos surface
+				if( GMoverDebugEnabled() && iAlpha < 255 && (GMoverLumosLogs++ < 64 || (GMoverLumosLogs % 512) == 0) )
+					debugf( NAME_Log, TEXT("MoverLumosDraw: surf %i flags=0x%08x alpha=%i lumosOn=%i occlude=%i"), Node->iSurf, GSurfs[Node->iSurf].PolyFlags, iAlpha, (INT)pPlayer->bLumosOn, (INT)((LumosPolyFlags & PF_Occlude) != 0) );
 				Viewport->RenDev->DrawComplexSurface( Frame, Surface, Facet, LumosPolyFlags, (char)iAlpha );
 				
 				}while(0);
@@ -3900,6 +3923,13 @@ void URender::DrawWorld( FSceneNode* Frame )
 	// Occlude and render all scene frames.
 	OccludeFrame( Frame );
 	DrawFrame( Frame );
+
+	// HP2 mover diagnostics: summarize dynamic-surface zone culls this frame.
+	if( GMoverDebugEnabled() && GMoverZoneRejects > 0 )
+	{
+		debugf( NAME_Log, TEXT("MoverDebug frame %i: %i dynamic-surf zone rejects"), (INT)GFrameStamp, GMoverZoneRejects );
+		GMoverZoneRejects = 0;
+	}
 
 	// Have HUD draw the player's weapon on top (and any other overlays which should happen before screen flashes). 
 	AActor* Actor

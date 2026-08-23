@@ -1,5 +1,62 @@
 #!/usr/bin/env python3
-"""Generate a deterministic reference manifest for the six stock HP2 UE1 packages."""
+"""UE1 UnrealScript package reader: HP2 v79 reference goldens + data-root audits.
+
+Naming note (historical misnomer): the file is called ``package79_reference.py``
+because it started life as a version-79-only reader. It now parameterizes the
+package FileVersion over [PACKAGE_MIN_VERSION, PACKAGE_MAX_VERSION] = [60, 79]
+with LicenseeVersion 0, covering both HP2 (v79) and the HP1 disc set
+{61, 68, 69, 72, 73, 75, 76}. The name is kept because CMake registrations,
+docs, and sibling tools reference it.
+
+Per-feature decoding is keyed on the parsed FileVersion exactly as the native
+loader branches do:
+  * summary: >= 68 uses Guid + generation table (unchanged v79 layout);
+    < 68 uses the pre-68 heritage shape (HeritageCount/HeritageOffset i32 pair
+    where the GUID would be, no generation table).
+  * name entries: >= 64 uses the FString form (compact-index char count incl.
+    NUL, ANSI or UTF-16LE payload, u32 flags); < 64 uses the pre-64 form
+    (NUL-terminated ANSI bytes without length prefix, u32 flags) -- mirrors
+    UnName.cpp:236 (Ar.Ver() < 64).
+  * imports, exports, and property tags are byte-compatible across the whole
+    range (probe-verified on the HP1 ISO; see local://hp1-v76-format-facts.md).
+
+Modes
+-----
+reference (default, no ``--data-root``):
+    Regenerate -- or with ``--check``, byte-verify -- the six-package HP2
+    golden ``Tests/Fixtures/package79-reference.json``. Output is frozen;
+    any change to it requires its own acceptance record.
+
+audit (``--data-root ROOT``):
+    Walk ROOT recursively, decode EVERY UE1 package found (any supported
+    version), classify every other file as a non-package entry, and emit an
+    audit JSON (default ``Tests/Fixtures/hp1-package-audit.json``). Top-level
+    ``*.json`` provenance manifests directly inside ROOT are excluded from the
+    walk: they are build artifacts of prepare scripts, not game data. Reuses
+    the exact same PackageReader parsers as reference mode -- there is no
+    second reader implementation.
+
+Audit JSON schema (``schema_version`` 1), keys sorted by canonical_json:
+    accepted_versions        {"max": 79, "min": 60}
+    census.file_count         files examined under the root (excl. excluded manifests)
+    census.format_profiles    map "v<version>/licensee<l>/flags<f>" -> package count
+    census.non_package_count  files that do not start with the package tag
+    census.package_count      packages successfully decoded
+    data_root                 path as passed (repo-relative when possible)
+    format                    "hp1-ue1-package-audit"
+    non_package_files         sorted relative POSIX paths of non-package files
+    packages                  sorted by path; per package:
+      path                    relative POSIX path under the data root
+      version/licensee/package_flags  from the summary header
+      name_count/import_count/export_count from the summary
+      exports                 one entry per export, in table order:
+                              {"class_path": str|null, "object_path": str}
+      native_functions        FUNC_Native ordinals derived exactly like the
+                              reference mode's UFunction terminal-field
+                              derivation (exports whose class_path resolves
+                              to Core.Function / *.Function); entries:
+                              {"native_index": int, "object_path": str}
+    schema_version            1"""
 
 from __future__ import annotations
 
@@ -21,6 +78,10 @@ FUNCTION_FLAG_NET = 0x00000040
 FUNCTION_FLAG_NET_RELIABLE = 0x00000080
 FUNCTION_FLAG_NATIVE = 0x00000400
 FUNCTION_FLAG_MASK = 0x0001FFFF
+PACKAGE_MIN_VERSION = 60
+PACKAGE_MAX_VERSION = 79
+
+DEFAULT_AUDIT_OUTPUT = "Tests/Fixtures/hp1-package-audit.json"
 
 PACKAGE_PATHS = (
     "HarryPotter2/Unreal/System/Core.u",
@@ -166,6 +227,20 @@ class Cursor:
             fail(self.path, start, "empty package name entry")
         return text, encoding, count
 
+    def ansi_cstring(self) -> str:
+        """Pre-64 name entry: NUL-terminated ANSI, no length prefix (UnName.cpp:236)."""
+        start = self.pos
+        end = self.data.find(b"\0", start)
+        if end < 0:
+            fail(self.path, start, "pre-64 ANSI name entry has no NUL terminator")
+        if end - start + 1 > MAX_NAME_UNITS:
+            fail(self.path, start, f"pre-64 ANSI name entry exceeds {MAX_NAME_UNITS} units")
+        raw = self.take(end - start + 1)
+        text = raw[:-1].decode("latin-1")
+        if not text:
+            fail(self.path, start, "empty package name entry")
+        return text
+
 
 @dataclass(frozen=True)
 class NameEntry:
@@ -252,6 +327,20 @@ class ObjectPathResolver:
         return result
 
 
+@dataclass(frozen=True)
+class ParsedPackage:
+    """Structural parse result shared by reference rendering and audit mode."""
+
+    summary: dict[str, Any]
+    names: list[NameEntry]
+    imports: list[ImportEntry]
+    exports: list[ExportEntry]
+    names_end: int
+    imports_end: int
+    exports_end: int
+    resolver: ObjectPathResolver
+
+
 class PackageReader:
     def __init__(self, relative_path: str, data: bytes) -> None:
         self.relative_path = relative_path
@@ -306,30 +395,38 @@ class PackageReader:
         import_count = cursor.i32()
         import_offset_position = cursor.pos
         import_offset = cursor.i32()
-        guid_words = [cursor.u32() for _ in range(4)]
+        version = version_word & 0xFFFF
+        licensee = (version_word >> 16) & 0xFFFF
+        guid_words = [cursor.u32() for _ in range(4)] if version >= 68 else []
         generation_count_offset = cursor.pos
-        generation_count = cursor.i32()
+        generation_count = cursor.i32() if version >= 68 else 0
+        heritage_count_offset = cursor.pos
+        heritage_count = cursor.i32() if version < 68 else 0
+        heritage_offset_position = cursor.pos
+        heritage_offset = cursor.i32() if version < 68 else 0
 
         if tag != PACKAGE_TAG:
             fail(self.relative_path, 0, f"bad package tag 0x{tag:08x}; expected 0x{PACKAGE_TAG:08x}")
-        version = version_word & 0xFFFF
-        licensee = (version_word >> 16) & 0xFFFF
-        if version != PACKAGE_VERSION or licensee != LICENSEE_VERSION:
+        if not PACKAGE_MIN_VERSION <= version <= PACKAGE_MAX_VERSION or licensee != LICENSEE_VERSION:
             fail(
                 self.relative_path,
                 4,
-                f"unsupported version/licensee {version}/{licensee}; expected {PACKAGE_VERSION}/{LICENSEE_VERSION}",
+                f"unsupported version/licensee {version}/{licensee}; supported: FileVersion in "
+                f"[{PACKAGE_MIN_VERSION}, {PACKAGE_MAX_VERSION}] with LicenseeVersion {LICENSEE_VERSION}",
             )
+        if version >= 68:
+            self.validate_count(generation_count, generation_count_offset, "generation count")
+            if generation_count == 0:
+                fail(self.relative_path, generation_count_offset, "package has no generations")
+            if generation_count > (len(self.data) - cursor.pos) // 8:
+                fail(self.relative_path, generation_count_offset, "generation table is truncated")
+        else:
+            self.validate_count(heritage_count, heritage_count_offset, "heritage count")
+            self.validate_offset(heritage_offset, heritage_offset_position, "heritage offset")
 
         self.validate_count(name_count, name_count_offset, "name count")
         self.validate_count(export_count, export_count_offset, "export count")
         self.validate_count(import_count, import_count_offset, "import count")
-        self.validate_count(generation_count, generation_count_offset, "generation count")
-        if generation_count == 0:
-            fail(self.relative_path, generation_count_offset, "package has no generations")
-        if generation_count > (len(self.data) - cursor.pos) // 8:
-            fail(self.relative_path, generation_count_offset, "generation table is truncated")
-
         generations = []
         for index in range(generation_count):
             record_offset = cursor.pos
@@ -345,30 +442,30 @@ class PackageReader:
                 }
             )
 
-        if generations[-1]["export_count"] != export_count or generations[-1]["name_count"] != name_count:
+        if version >= 68 and (
+            generations[-1]["export_count"] != export_count or generations[-1]["name_count"] != name_count
+        ):
             fail(self.relative_path, generation_count_offset, "latest generation counts disagree with summary")
 
         self.validate_offset(name_offset, name_offset_position, "name offset")
         self.validate_offset(export_offset, export_offset_position, "export offset")
         self.validate_offset(import_offset, import_offset_position, "import offset")
-        if name_offset != cursor.pos:
+        if version >= 68 and name_offset != cursor.pos:
             fail(
                 self.relative_path,
                 name_offset_position,
                 f"name table begins at {name_offset}, not immediately after summary at {cursor.pos}",
             )
+        if version < 68 and name_offset < cursor.pos:
+            fail(
+                self.relative_path,
+                name_offset_position,
+                f"name table begins at {name_offset}, before end of heritage summary at {cursor.pos}",
+            )
 
-        return {
+        summary: dict[str, Any] = {
             "export_count": export_count,
             "export_offset": export_offset,
-            "generations": generations,
-            "guid": {
-                "a": guid_words[0],
-                "b": guid_words[1],
-                "c": guid_words[2],
-                "d": guid_words[3],
-                "text": "-".join(f"{word:08x}" for word in guid_words),
-            },
             "header_size": cursor.pos,
             "import_count": import_count,
             "import_offset": import_offset,
@@ -381,13 +478,31 @@ class PackageReader:
             "version": version,
             "version_word": version_word,
         }
+        if version >= 68:
+            summary["generations"] = generations
+            summary["guid"] = {
+                "a": guid_words[0],
+                "b": guid_words[1],
+                "c": guid_words[2],
+                "d": guid_words[3],
+                "text": "-".join(f"{word:08x}" for word in guid_words),
+            }
+        else:
+            summary["heritage"] = {"count": heritage_count, "offset": heritage_offset}
+        return summary
 
     def parse_names(self, summary: dict[str, Any]) -> tuple[list[NameEntry], int]:
         cursor = Cursor(self.data, self.relative_path, summary["name_offset"], "name table")
         names: list[NameEntry] = []
+        pre_64 = summary["version"] < 64
         for _ in range(summary["name_count"]):
             record_offset = cursor.pos
-            text, encoding, serialized_character_count = cursor.name_string()
+            if pre_64:
+                text = cursor.ansi_cstring()
+                encoding = "ansi"
+                serialized_character_count = len(text) + 1
+            else:
+                text, encoding, serialized_character_count = cursor.name_string()
             flags = cursor.u32()
             names.append(
                 NameEntry(
@@ -572,7 +687,7 @@ class PackageReader:
             )
         return candidates[0]
 
-    def read(self) -> dict[str, Any]:
+    def parse(self) -> ParsedPackage:
         summary = self.parse_summary()
         names, names_end = self.parse_names(summary)
         imports, imports_end = self.parse_imports(summary, names)
@@ -591,6 +706,27 @@ class PackageReader:
             resolver.import_path(index)
         for index in range(len(exports)):
             resolver.export_path(index)
+        return ParsedPackage(
+            summary=summary,
+            names=names,
+            imports=imports,
+            exports=exports,
+            names_end=names_end,
+            imports_end=imports_end,
+            exports_end=exports_end,
+            resolver=resolver,
+        )
+
+    def read(self) -> dict[str, Any]:
+        parsed = self.parse()
+        summary = parsed.summary
+        names = parsed.names
+        imports = parsed.imports
+        exports = parsed.exports
+        names_end = parsed.names_end
+        resolver = parsed.resolver
+        imports_end = parsed.imports_end
+        exports_end = parsed.exports_end
 
         names_json = [
             {
@@ -704,6 +840,36 @@ class PackageReader:
             "size": end - start,
         }
 
+    def audit_entry(self, parsed: ParsedPackage) -> dict[str, Any]:
+        """Light per-package projection for --data-root audits (schema in module docstring)."""
+        exports_summary = []
+        native_functions = []
+        for index, entry in enumerate(parsed.exports):
+            class_path = "Core.Class" if entry.class_ref == 0 else parsed.resolver.ref_path(entry.class_ref)
+            object_path = parsed.resolver.export_path(index)
+            exports_summary.append({"class_path": class_path, "object_path": object_path})
+            if class_path is not None and (class_path == "Core.Function" or class_path.endswith(".Function")):
+                function_entry = self.parse_function_terminal(entry)
+                if function_entry["function_flags"] & FUNCTION_FLAG_NATIVE:
+                    native_functions.append(
+                        {
+                            "native_index": function_entry["native_index"],
+                            "object_path": object_path,
+                        }
+                    )
+        summary = parsed.summary
+        return {
+            "export_count": summary["export_count"],
+            "exports": exports_summary,
+            "import_count": summary["import_count"],
+            "licensee": summary["licensee"],
+            "name_count": summary["name_count"],
+            "native_functions": native_functions,
+            "package_flags": summary["package_flags"],
+            "path": self.relative_path,
+            "version": summary["version"],
+        }
+
 
 def generate_reference(repo_root: Path) -> dict[str, Any]:
     packages = []
@@ -723,6 +889,58 @@ def generate_reference(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def generate_audit(data_root: Path, repo_root: Path) -> dict[str, Any]:
+    """Decode every UE1 package under data_root; classify everything else.
+
+    Top-level *.json provenance manifests directly inside the root (written by
+    prepare scripts) are excluded: they are build artifacts, not game data.
+    """
+    root = data_root.resolve()
+    if not root.is_dir():
+        raise PackageFormatError(f"{data_root}: data root is not a directory")
+    files = sorted(
+        source.relative_to(root).as_posix()
+        for source in root.rglob("*")
+        if source.is_file() and not (source.parent == root and source.suffix == ".json")
+    )
+
+    packages = []
+    non_package_files: list[str] = []
+    profiles: dict[str, int] = {}
+    for relative_path in files:
+        try:
+            data = (root / relative_path).read_bytes()
+        except OSError as exc:
+            raise PackageFormatError(f"{relative_path}: cannot read file: {exc}") from exc
+        if len(data) < 4 or struct.unpack_from("<I", data, 0)[0] != PACKAGE_TAG:
+            non_package_files.append(relative_path)
+            continue
+        reader = PackageReader(relative_path, data)
+        entry = reader.audit_entry(reader.parse())
+        packages.append(entry)
+        profile = f"v{entry['version']}/licensee{entry['licensee']}/flags{entry['package_flags']}"
+        profiles[profile] = profiles.get(profile, 0) + 1
+
+    try:
+        data_root_display = str(root.relative_to(repo_root))
+    except ValueError:
+        data_root_display = str(root)
+    return {
+        "accepted_versions": {"max": PACKAGE_MAX_VERSION, "min": PACKAGE_MIN_VERSION},
+        "census": {
+            "file_count": len(files),
+            "format_profiles": profiles,
+            "non_package_count": len(non_package_files),
+            "package_count": len(packages),
+        },
+        "data_root": data_root_display,
+        "format": "hp1-ue1-package-audit",
+        "non_package_files": non_package_files,
+        "packages": packages,
+        "schema_version": 1,
+    }
+
+
 def canonical_json(reference: dict[str, Any]) -> bytes:
     return (json.dumps(reference, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
@@ -730,7 +948,10 @@ def canonical_json(reference: dict[str, Any]) -> bytes:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     script_repo_root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
-        description="Generate the fixed-width UE1 package-79 reference for the six untouched HP2 assets."
+        description=(
+            "UE1 package reader: generate/verify the HP2 v79 reference golden (default) "
+            "or audit every package under a data root (--data-root)."
+        )
     )
     parser.add_argument(
         "--repo-root",
@@ -739,10 +960,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="repository root containing HarryPotter2/Unreal (default: script parent)",
     )
     parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help=(
+            "audit every UE1 package under this data root (e.g. HarryPotter1/Unreal) "
+            "instead of generating the six-package HP2 v79 reference"
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
-        default=Path(DEFAULT_OUTPUT),
-        help=f"output path, relative to repo root unless absolute (default: {DEFAULT_OUTPUT})",
+        default=None,
+        help=(
+            f"output path, relative to repo root unless absolute "
+            f"(default: {DEFAULT_OUTPUT}, or {DEFAULT_AUDIT_OUTPUT} with --data-root)"
+        ),
     )
     parser.add_argument(
         "--check",
@@ -755,9 +988,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     repo_root = args.repo_root.resolve()
-    output = args.output if args.output.is_absolute() else repo_root / args.output
+    if args.output is not None:
+        output_path = args.output
+    else:
+        output_path = Path(DEFAULT_AUDIT_OUTPUT if args.data_root is not None else DEFAULT_OUTPUT)
+    output = output_path if output_path.is_absolute() else repo_root / output_path
     try:
-        encoded = canonical_json(generate_reference(repo_root))
+        if args.data_root is not None:
+            encoded = canonical_json(generate_audit(args.data_root, repo_root))
+        else:
+            encoded = canonical_json(generate_reference(repo_root))
         if args.check:
             try:
                 existing = output.read_bytes()

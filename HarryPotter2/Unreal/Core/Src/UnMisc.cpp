@@ -2444,8 +2444,6 @@ CORE_API const TCHAR* appFromUnicode( const UNICHAR* UCh )
 //
 CORE_API void VARARGS appUnwindf( const TCHAR* Fmt, ... )
 {
-	GIsCriticalError = 1;
-
 	TCHAR TempStr[4096];
 	GET_VARARGS( TempStr, ARRAY_COUNT(TempStr), Fmt );
 

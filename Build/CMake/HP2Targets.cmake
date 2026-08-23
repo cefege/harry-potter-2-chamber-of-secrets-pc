@@ -575,6 +575,37 @@ endif()
 hp2_add_behavior_test(prototype_archive_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/PrototypeArchiveTests.py"
 )
+
+# HP1 loader audit: the version-parameterized package reader in
+# Build/package79_reference.py decodes every package under the HP1 data root
+# (FileVersion 61-76, LicenseeVersion 0) and byte-verifies the committed
+# census/audit golden. Registration follows the renderer-smoke convention:
+# gated at configure time on the HP1 data root; without it the test simply
+# does not exist (a configuration gap, not a skip). The `data-hp1` label
+# extends the OPERATIONS.md data-profile taxonomy; Docs gain it via
+# Docs/HP1_MIGRATION.md Phase 1, not this file.
+if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal/System/Default.ini")
+    hp2_add_behavior_test(hp1_loader_manifest "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
+        "--data-root=${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal"
+        "--output=${PROJECT_SOURCE_DIR}/Tests/Fixtures/hp1-package-audit.json"
+        --check
+    )
+    set_tests_properties(hp1_loader_manifest PROPERTIES LABELS "integration;data-hp1")
+
+    # HP1 class bind: Engine.Music resolves through the native registry
+    # (IMPLEMENT_CLASS(UMusic) + the VerifyImport RF_Native fallback), and a
+    # live hp2_ucc run verifies Engine.u/Editor.u under the HP1 root with zero
+    # unresolved imports. Same data-root gate as hp1_loader_manifest; the
+    # runtime layer needs the already-built ucc binary.
+    hp2_add_behavior_test(hp1_class_bind "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/HP1ClassBindTests.py" -v
+    )
+    set_tests_properties(hp1_class_bind PROPERTIES
+        LABELS "integration;data-hp1"
+        ENVIRONMENT "HP2_UCC_BINARY=${CMAKE_BINARY_DIR}/hp2_ucc"
+    )
+endif()
 hp2_add_behavior_test(save_format_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/SaveFormatTests.py"
 )
@@ -796,6 +827,7 @@ if(HP2_ENABLE_VULKAN_DRIVER)
         "${HP2_VULKANDRV_ROOT}/VulkanDrv/DescriptorSetManager.cpp"
         "${HP2_VULKANDRV_ROOT}/VulkanDrv/FileResource.cpp"
         "${HP2_VULKANDRV_ROOT}/VulkanDrv/FramebufferManager.cpp"
+        "${HP2_VULKANDRV_ROOT}/VulkanDrv/Hp2FrameCapture.cpp"
         "${HP2_VULKANDRV_ROOT}/VulkanDrv/halffloat.cpp"
         "${HP2_VULKANDRV_ROOT}/VulkanDrv/mat.cpp"
         "${HP2_VULKANDRV_ROOT}/VulkanDrv/RenderPassManager.cpp"

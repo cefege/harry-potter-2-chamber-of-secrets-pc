@@ -7,7 +7,7 @@
 =============================================================================*/
 
 #include "CorePrivate.h"
-
+extern void FlushPendingLocalizedDefaults();
 #include <string.h>
 
 
@@ -1078,7 +1078,6 @@ void UClass::Register()
 void UClass::Bind()
 {
 	guard(UClass::Bind);
-	UStruct::Bind();
 	check(GIsEditor || GetSuperClass() || this==UObject::StaticClass());
 	if( !ClassConstructor && (GetFlags() & RF_Native) )
 	{
@@ -1257,6 +1256,9 @@ void UClass::Serialize( FArchive& Ar )
 		ClassUnique = 0;
 		if( Ar.Ver()<=61 )//oldver
 			ClassWithin = UObject::StaticClass();
+		// This class just linked its properties; retry any native classes whose
+		// localized defaults were deferred pending this superclass.
+		FlushPendingLocalizedDefaults();
 	}
 	else if( Ar.IsSaving() )
 	{
@@ -1496,6 +1498,18 @@ EExprToken UStruct::SerializeExpr( INT& iCode, FArchive& Ar )
 	// Get expr token.
 	XFER(BYTE);
 	Expr = (EExprToken)Script(iCode-1);
+	if( Ar.Ver() <= 76 && Expr >= 0x38 && Expr < 0x5B )
+	{
+		// Pre-79 packages number the type-conversion opcodes one lower:
+		// v76 0x39 = EX_RotatorToVector, which collides with v79's
+		// EX_GlobalFunction and desyncs the expression walk (observed as
+		// "Bad name index" inside a bogus EX_LabelTable when loading HP1
+		// Engine.u Teleporter.Accept). Normalize to v79 numbering; Script[]
+		// then holds only v79 tokens, so exec and save are unaffected.
+		// Bounds stay inside [EX_MinConversion-1, last defined conversion)
+		// so a shifted token can never reach EX_ExtendedNative.
+		Expr = (EExprToken)( Expr + 1 );
+	}
 	if( Expr >= EX_MinConversion && Expr < EX_MaxConversion )
 	{
 		// A type conversion.

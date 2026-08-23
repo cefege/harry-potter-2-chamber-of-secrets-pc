@@ -158,6 +158,18 @@ void AActor::physPathing( FLOAT DeltaTime )
 //
 // Moving brush.
 //
+// HP2 mover diagnostics: HP2_MOVER_DEBUG=1 enables mover freeze logging.
+static INT GMoverDebugLog = -1;
+static INT MoverDebugEnabled()
+{
+	if( GMoverDebugLog < 0 )
+	{
+		const char* Flag = getenv( "HP2_MOVER_DEBUG" );
+		GMoverDebugLog = (Flag && Flag[0] == '1') ? 1 : 0;
+	}
+	return GMoverDebugLog;
+}
+
 void AActor::physMovingBrush( FLOAT DeltaTime )
 {
 	guard(physMovingBrush);
@@ -291,6 +303,8 @@ void AActor::physMovingBrush( FLOAT DeltaTime )
 					Mover->bInterpolating = 0;
 					Mover->HitPosition	= Hit.Location;
 					Mover->HitNormal	= Hit.Normal;
+					if( MoverDebugEnabled() )
+						debugf( NAME_Log, TEXT("MoverFreeze: %s froze alpha=%f key %i->%i hit %s"), Mover->GetName(), Mover->PhysAlpha, Mover->PrevKeyNum, Mover->KeyNum, Hit.Actor ? Hit.Actor->GetName() : TEXT("world") );
 				}
 				else if( Mover->PhysAlpha >= 1.0f )
 				{

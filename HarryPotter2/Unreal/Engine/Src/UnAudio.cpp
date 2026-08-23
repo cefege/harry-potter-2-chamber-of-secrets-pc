@@ -767,6 +767,7 @@ void USound::PS2Convert()
 	unguard;
 };
 IMPLEMENT_CLASS(USound);
+IMPLEMENT_CLASS(UMusic);
 
 /*-----------------------------------------------------------------------------
 	WaveModInfo implementation - downsampling of wave files.

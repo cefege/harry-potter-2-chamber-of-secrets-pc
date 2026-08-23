@@ -295,12 +295,9 @@ ULinkerLoad::Verify()
 				VerifyImport( i );
 			unguard;
 		}
-		// !! PSX2 gcc doesn't like catch( TCHAR* Error )
-		#if _MSC_VER
+		// Must match the TCHAR* thrown by appThrowf; a narrower catch type
+		// would leave this partially-built linker registered in GObjLoaders.
 		catch( TCHAR* Error )
-		#else
-		catch( char* Error )
-		#endif
 		{
 			GObjLoaders.RemoveItem( this );
 			throw( Error );

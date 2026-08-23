@@ -141,6 +141,144 @@ class MatrixComparisonContracts(unittest.TestCase):
             self.assertIn("error", matrix["privetdr"])
 
 
+class CueFingerprintContracts(unittest.TestCase):
+    def test_returns_location_of_the_last_flyto_line(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "000001.log"
+            log.write_text(
+                "[020]DevCmd: FlyTo LOCATION: 12.5, -3.0, 0.0\n"
+                "unrelated engine chatter\n"
+                "[090]DevCmd: FlyTo LOCATION: 40.25, 8.5, -2.75\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                matrix_compare.cue_fingerprint(log), "40.25, 8.5, -2.75"
+            )
+
+    def test_missing_cue_line_yields_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "000001.log"
+            log.write_text("no cues in this log\n", encoding="utf-8")
+            self.assertIsNone(matrix_compare.cue_fingerprint(log))
+
+    def test_unreadable_log_yields_none(self) -> None:
+        missing = Path(tempfile.gettempdir()) / "hp2-definitely-missing.log"
+        self.assertIsNone(matrix_compare.cue_fingerprint(missing))
+
+
+class SelfDiffMapsContracts(unittest.TestCase):
+    def _run_reports(self, root: Path, *, first_shade: int, second_shade: int,
+                     logs: tuple[str, str] | None = None):
+        reports = []
+        for position, (label, shade) in enumerate(
+            (("first", first_shade), ("second", second_shade))
+        ):
+            frames = root / f"{label}-frames"
+            frames.mkdir(exist_ok=True)
+            _write_frame(matrix_compare._frame_path(frames, 0), 4, 4, shade)
+            report: dict[str, object] = {
+                "maps": [_capture_record(frames, 1)],
+            }
+            if logs is not None:
+                log_directory = root / f"logs-{label}"
+                log_directory.mkdir(exist_ok=True)
+                (log_directory / "000001.log").write_text(
+                    logs[position], encoding="utf-8"
+                )
+                report["log_directory"] = str(log_directory)
+            reports.append(report)
+        return reports
+
+    def test_self_inconsistent_runs_differ(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            first, second = self._run_reports(
+                Path(temporary), first_shade=40, second_shade=200,
+            )
+            result = matrix_compare.selfdiff_maps(first, second, tolerance=8)
+            self.assertEqual(result["privetdr"]["verdict"], "differs")
+            self.assertGreater(result["privetdr"]["max_channel_delta"], 8)
+
+    def test_self_consistent_runs_match_and_pick_up_cues(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            first, second = self._run_reports(
+                Path(temporary), first_shade=40, second_shade=40,
+                logs=(
+                    "[020]FlyTo LOCATION: 1.5, 2.0, 3.0\n",
+                    "[021]FlyTo LOCATION: 1.5, 2.0, 3.0\n",
+                ),
+            )
+            result = matrix_compare.selfdiff_maps(first, second, tolerance=8)
+            entry = result["privetdr"]
+            self.assertEqual(entry["verdict"], "same")
+            self.assertEqual(entry["cue_a"], "1.5, 2.0, 3.0")
+            self.assertEqual(entry["cue_b"], "1.5, 2.0, 3.0")
+
+    def test_missing_or_failed_records_yield_error_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first, second = self._run_reports(
+                root, first_shade=40, second_shade=40,
+            )
+            failed = dict(second["maps"][0], passed=False)
+            second["maps"][0] = failed
+            result = matrix_compare.selfdiff_maps(first, second, tolerance=8)
+            self.assertIn("error", result["privetdr"])
+            self.assertIn("did not pass", result["privetdr"]["error"])
+            empty: dict[str, object] = {"maps": []}
+            result = matrix_compare.selfdiff_maps(empty, second, tolerance=8)
+            self.assertIn("missing from", result["privetdr"]["error"])
+
+
+class SelfDiffCompositionContracts(unittest.TestCase):
+    def _report(self, root: Path, name: str, shade: int) -> dict[str, object]:
+        frames = root / f"{name}-frames"
+        frames.mkdir(exist_ok=True)
+        _write_frame(matrix_compare._frame_path(frames, 0), 4, 4, shade)
+        return {"maps": [_capture_record(frames, 1)]}
+
+    def test_self_inconsistent_driver_suppresses_cross_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            xopengl_first = self._report(root, "xog-first", 40)
+            xopengl_second = self._report(root, "xog-second", 40)
+            vulkan_first = self._report(root, "vlg-first", 200)
+            vulkan_second = self._report(root, "vlg-second", 40)
+            matrix, failures = matrix_compare.compare_maps(
+                xopengl_first, vulkan_first, tolerance=8,
+            )
+            self.assertEqual(failures, ["privetdr: renderer.frame_differs"])
+            matrix_compare.compose_selfdiff(matrix, failures, {
+                "xopengl": matrix_compare.selfdiff_maps(
+                    xopengl_first, xopengl_second, tolerance=8,
+                ),
+                "vulkan": matrix_compare.selfdiff_maps(
+                    vulkan_first, vulkan_second, tolerance=8,
+                ),
+            })
+            self.assertEqual(failures, ["privetdr: state.nondeterministic"])
+            entry = matrix["privetdr"]
+            self.assertEqual(
+                entry["selfdiff"]["xopengl"]["verdict"], "same",
+            )
+            self.assertEqual(
+                entry["selfdiff"]["vulkan"]["verdict"], "differs",
+            )
+            # Cross-driver evidence stays recorded, just informational.
+            self.assertIn("delta", entry)
+
+    def test_single_run_marks_selfdiff_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            xopengl = self._report(root, "xog", 40)
+            vulkan = self._report(root, "vlg", 40)
+            matrix, failures = matrix_compare.compare_maps(
+                xopengl, vulkan, tolerance=8,
+            )
+            matrix_compare.compose_selfdiff(matrix, failures, None)
+            self.assertEqual(failures, [])
+            self.assertEqual(matrix["privetdr"]["selfdiff"], "skipped")
+
+
 class MatrixReportContracts(unittest.TestCase):
     def test_status_and_reason_codes_track_failures(self) -> None:
         passed = matrix_compare.build_report(
