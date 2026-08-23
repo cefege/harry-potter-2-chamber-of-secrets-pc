@@ -406,6 +406,26 @@ void Set(Document& document, const std::string& wantedSection, const std::string
 	document.lines.push_back({wantedKey + "=" + value, document.newline});
 }
 
+// Removes every key row matching section+key (case-insensitive), leaving the
+// section header and surrounding formatting untouched. Used by selection
+// commits so replaced generations cannot leave stale coordinate rows behind.
+void Erase(Document& document, const std::string& wantedSection, const std::string& wantedKey)
+{
+	std::string section;
+	std::vector<Line> kept;
+	kept.reserve(document.lines.size());
+	for (Line& line : document.lines)
+	{
+		std::string next;
+		if (Section(line.text, next)) { section = next; kept.push_back(std::move(line)); continue; }
+		ParsedKey key;
+		if (Same(section, wantedSection) && Key(line.text, key) && Same(key.key, wantedKey))
+			continue;
+		kept.push_back(std::move(line));
+	}
+	document.lines = std::move(kept);
+}
+
 bool Integer(const std::string& text, int& value)
 {
 	const std::string source = Trim(text);
@@ -2243,6 +2263,14 @@ bool CommitLaunchSelection(
 	mode_t mode;
 	std::string original;
 	if (!LoadLauncherDocument(launcherRoot, document, exists, mode, original, error)) return false;
+	// A commit replaces the WHOLE selection, not individual rows: clear every
+	// persisted selection key first so a non-Continue selection (or a Continue
+	// without a slot) can never inherit stale save-coordinate rows from the
+	// previous generation. Last-writer-wins and backup semantics are handled
+	// by PublishLauncherDocument below and stay untouched.
+	static const char* const SelectionKeys[] = {"Action", "HasSave", "SaveIndex", "SaveSlot"};
+	for (const char* selectionKey : SelectionKeys)
+		Erase(document, "LastLaunch", selectionKey);
 	for (const LaunchSelectionField& field : fields)
 		Set(document, "LastLaunch", field.key.c_str(), field.value);
 	return PublishLauncherDocument(launcherRoot, document, exists, mode, original, error);

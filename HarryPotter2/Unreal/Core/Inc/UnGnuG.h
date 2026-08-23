@@ -133,63 +133,231 @@ enum {CACHE_LINE_SIZE   = 32}; // Cache line size.
 #define ZEROARRAY 0 /* Zero-length arrays in structs */
 #define __cdecl
 
-// MSVC's wide printf treats an unqualified %s as a wide string. The original
-// engine relies on that contract throughout config, paths, and logging, while
-// POSIX vswprintf requires %ls. Translate only unqualified string conversions.
-static inline int appVswprintfCompat(wchar_t* Dest, std::size_t Count, const wchar_t* Format, va_list Args)
+// MSVC's wide printf treats an unqualified %s as a wide string, and the
+// original engine relies on that contract throughout config, paths, and
+// logging. POSIX vswprintf cannot honor it: %ls/%lc convert through the
+// current LC_CTYPE, so any codepoint above U+00FF fails (EILSEQ) under the C
+// locale and vswprintf returns -1 leaving the destination unspecified —
+// FString::Printf then silently propagates stale buffer bytes (the root cause
+// of ANSI-folded ini Flush output). This formatter therefore never routes
+// strings or chars through the locale: wide strings/chars are spliced
+// verbatim into the destination; only numeric conversions are delegated to
+// vswprintf, one conversion at a time through a va_copy snapshot.
+enum AppVswLength { APPVSW_NONE, APPVSW_H, APPVSW_HH, APPVSW_L, APPVSW_LL, APPVSW_Z, APPVSW_J, APPVSW_T, APPVSW_BIGL };
+
+static inline bool appVswprintfPut( wchar_t* Dest, std::size_t Count, std::size_t& Out, wchar_t Ch )
 {
-	wchar_t Converted[4096];
-	std::size_t Out = 0;
-	for (std::size_t In = 0; Format[In];)
+	if( Out + 1 >= Count )
+		return false;
+	Dest[Out++] = Ch;
+	return true;
+}
+static inline bool appVswprintfAppendText( wchar_t* Dest, std::size_t Count, std::size_t& Out, const wchar_t* Text )
+{
+	for( std::size_t Index = 0; Text[Index]; ++Index )
+		if( !appVswprintfPut(Dest, Count, Out, Text[Index]) )
+			return false;
+	return true;
+}
+static inline bool appVswprintfAppendInt( wchar_t* Dest, std::size_t Count, std::size_t& Out, int Value )
+{
+	wchar_t Digits[16];
+	std::size_t DigitCount = 0;
+	unsigned int Magnitude = Value < 0 ? 0u - static_cast<unsigned int>(Value) : static_cast<unsigned int>(Value);
+	do
 	{
-		if (Out + 2 >= sizeof(Converted) / sizeof(Converted[0]))
+		Digits[DigitCount++] = static_cast<wchar_t>(L'0' + Magnitude % 10u);
+		Magnitude /= 10u;
+	} while( Magnitude );
+	if( Value < 0 && !appVswprintfPut(Dest, Count, Out, L'-') )
+		return false;
+	while( DigitCount )
+		if( !appVswprintfPut(Dest, Count, Out, Digits[--DigitCount]) )
+			return false;
+	return true;
+}
+// Advances Args past exactly one argument of the promoted type the pending
+// numeric conversion consumes (mirrors the single-conversion va_copy handed
+// to vswprintf above).
+static inline void appVswprintfSkipNumeric( va_list& Args, AppVswLength Length, wchar_t Conversion )
+{
+	switch( Conversion )
+	{
+		case L'd': case L'i': case L'o': case L'u': case L'x': case L'X':
+			switch( Length )
+			{
+				case APPVSW_LL: (void)va_arg(Args, long long);      break;
+				case APPVSW_L:  (void)va_arg(Args, long);           break;
+				case APPVSW_Z:  (void)va_arg(Args, std::size_t);    break;
+				case APPVSW_J:  (void)va_arg(Args, std::intmax_t);  break;
+				case APPVSW_T:  (void)va_arg(Args, std::ptrdiff_t); break;
+				default:        (void)va_arg(Args, int);            break;
+			}
+			break;
+		case L'f': case L'F': case L'e': case L'E': case L'g': case L'G': case L'a': case L'A':
+			(void)va_arg(Args, double);
+			break;
+		case L'p':
+			(void)va_arg(Args, void*);
+			break;
+		case L'n':
+			(void)va_arg(Args, int*);
+			break;
+		default:
+			break;
+	}
+}
+static inline int appVswprintfCompat( wchar_t* Dest, std::size_t Count, const wchar_t* Format, va_list Args )
+{
+	if( !Count )
+		return -1;
+	std::size_t Out = 0;
+	for( std::size_t In = 0; Format[In]; )
+	{
+		if( Format[In] != L'%' )
 		{
-			if (Count) Dest[0] = 0;
-			return -1;
-		}
-		if (Format[In] != L'%')
-		{
-			Converted[Out++] = Format[In++];
+			if( !appVswprintfPut(Dest, Count, Out, Format[In++]) )
+				goto Overflow;
 			continue;
 		}
-		Converted[Out++] = Format[In++];
-		if (Format[In] == L'%')
+		++In;
+		if( Format[In] == L'%' )
 		{
-			Converted[Out++] = Format[In++];
+			if( !appVswprintfPut(Dest, Count, Out, L'%') )
+				goto Overflow;
+			++In;
 			continue;
 		}
-		bool HasNarrowModifier = false;
-		bool HasLongModifier = false;
-		for (;;)
 		{
-			const wchar_t Ch = Format[In++];
-			if (!Ch)
+			wchar_t Segment[64];
+			std::size_t SegOut = 0;
+			auto PutSeg = [&](wchar_t Ch)
 			{
-				if (Count) Dest[0] = 0;
-				return -1;
+				if( SegOut + 1 < sizeof(Segment) / sizeof(Segment[0]) )
+					Segment[SegOut++] = Ch;
+			};
+			PutSeg( L'%' );
+			// Flags.
+			for(;; ++In)
+			{
+				const wchar_t Ch = Format[In];
+				if( Ch != L'-' && Ch != L'+' && Ch != L' ' && Ch != L'#' && Ch != L'0' )
+					break;
+				PutSeg( Ch );
 			}
-			const bool IsConversion = std::wcschr(L"diouxXfFeEgGaAcspn", Ch) != nullptr;
-			if (IsConversion)
+			// Width ('*' consumes an int argument and is resolved literally).
+			if( Format[In] == L'*' )
 			{
-				if (Ch == L's' && !HasLongModifier && !HasNarrowModifier)
-					Converted[Out++] = L'l';
-				Converted[Out++] = Ch;
-				break;
+				++In;
+				const int Width = va_arg(Args, int);
+				if( Width < 0 )
+					PutSeg( L'-' );
+				if( !appVswprintfAppendInt(Segment, sizeof(Segment)/sizeof(Segment[0]), SegOut, Width < 0 ? -Width : Width) )
+					goto Overflow;
 			}
-			if (Ch == L'l')
-				HasLongModifier = true;
-			if (Ch == L'h')
-				HasNarrowModifier = true;
-			Converted[Out++] = Ch;
-			if (Out + 2 >= sizeof(Converted) / sizeof(Converted[0]))
+			else for(; Format[In] >= L'0' && Format[In] <= L'9'; ++In)
+				PutSeg( Format[In] );
+			// Precision ('*' likewise; a negative precision means "none").
+			if( Format[In] == L'.' )
 			{
-				if (Count) Dest[0] = 0;
-				return -1;
+				++In;
+				PutSeg( L'.' );
+				if( Format[In] == L'*' )
+				{
+					++In;
+					const int Precision = va_arg(Args, int);
+					if( Precision >= 0
+						&& !appVswprintfAppendInt(Segment, sizeof(Segment)/sizeof(Segment[0]), SegOut, Precision) )
+						goto Overflow;
+				}
+				else for(; Format[In] >= L'0' && Format[In] <= L'9'; ++In)
+					PutSeg( Format[In] );
+			}
+			// Length modifier.
+			AppVswLength Length = APPVSW_NONE;
+			for(;; ++In)
+			{
+				const wchar_t Ch = Format[In];
+				if( Ch == L'l' ) { if( Length == APPVSW_L ) Length = APPVSW_LL; else Length = APPVSW_L; }
+				else if( Ch == L'h' ) { if( Length == APPVSW_H ) Length = APPVSW_HH; else Length = APPVSW_H; }
+				else if( Ch == L'z' ) Length = APPVSW_Z;
+				else if( Ch == L'j' ) Length = APPVSW_J;
+				else if( Ch == L't' ) Length = APPVSW_T;
+				else if( Ch == L'L' ) Length = APPVSW_BIGL;
+				else break;
+				PutSeg( Ch );
+			}
+			const wchar_t Conversion = Format[In];
+			if( !Conversion )
+				goto Overflow;
+			PutSeg( Conversion );
+			Segment[SegOut] = 0;
+			++In;
+			switch( Conversion )
+			{
+				case L's':
+					if( Length == APPVSW_H || Length == APPVSW_HH )
+					{
+						// Narrow string widened byte-for-byte (ASCII contract,
+						// no locale): matches MSVC %hs semantics closely enough
+						// for this engine's ASCII-only narrow literals.
+						for( const char* Narrow = va_arg(Args, const char*); Narrow && *Narrow; ++Narrow )
+							if( !appVswprintfPut(Dest, Count, Out, static_cast<wchar_t>(*Narrow)) )
+								goto Overflow;
+					}
+					else
+					{
+						const wchar_t* Wide = va_arg(Args, const wchar_t*);
+						if( !Wide )
+							Wide = L"(null)";
+						if( !appVswprintfAppendText(Dest, Count, Out, Wide) )
+							goto Overflow;
+					}
+					break;
+				case L'c':
+				{
+					const int Code = va_arg(Args, int);
+					wchar_t Wide = 0;
+					if( Length == APPVSW_H || Length == APPVSW_HH )
+						Wide = static_cast<wchar_t>(static_cast<char>(Code));
+					else
+						Wide = static_cast<wchar_t>(Code);
+					if( !appVswprintfPut(Dest, Count, Out, Wide) )
+						goto Overflow;
+					break;
+				}
+				case L'd': case L'i': case L'u': case L'o': case L'x': case L'X':
+				case L'f': case L'F': case L'e': case L'E': case L'g': case L'G':
+				case L'a': case L'A': case L'p': case L'n':
+				{
+					wchar_t Number[512];
+					va_list Snapshot;
+					va_copy(Snapshot, Args);
+					const int Written = std::vswprintf(Number, sizeof(Number)/sizeof(Number[0]), Segment, Snapshot);
+					va_end(Snapshot);
+					if( Written < 0 || !appVswprintfAppendText(Dest, Count, Out, Number) )
+						goto Overflow;
+					appVswprintfSkipNumeric(Args, Length, Conversion);
+					break;
+				}
+				default:
+					// Unknown conversion: pass it through untouched rather than
+					// consuming arguments we cannot classify.
+					if( !appVswprintfPut(Dest, Count, Out, L'%') )
+						goto Overflow;
+					if( SegOut > 1 && !appVswprintfAppendText(Dest, Count, Out, Segment + 1) )
+						goto Overflow;
+					if( !appVswprintfPut(Dest, Count, Out, Conversion) )
+						goto Overflow;
+					break;
 			}
 		}
 	}
-	Converted[Out] = 0;
-	return std::vswprintf(Dest, Count, Converted, Args);
+	Dest[Out] = 0;
+	return static_cast<int>(Out);
+Overflow:
+	Dest[0] = 0;
+	return -1;
 }
 
 #if defined(__MACOS__)

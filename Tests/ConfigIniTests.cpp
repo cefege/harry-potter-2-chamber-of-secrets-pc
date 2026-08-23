@@ -702,8 +702,19 @@ namespace
 	}
 
 	/*---------------------------------------------------------------------
-		5. FConfigCacheIni filename handling: .ini appending, User.ini/
-		   System.ini translation (case-insensitive), NULL -> SystemIni.
+		5. FConfigCacheIni filename handling. Pinned ENGINE REALITY:
+		   - Find() appends ".ini" when the name is shorter than five
+		     characters or carries NO '.' at either of the positions Len-4
+		     and Len-5 (both count as an extension dot); otherwise the name
+		     is used verbatim, so any dot in the last five characters
+		     suppresses appending ("a.b.c" is never re-extended).
+		   - user.ini/system.ini translation happens AFTER extension
+	           appending and replaces the whole name with the configured
+	           SystemIni/UserIni path; NULL means SystemIni.
+		   - Resolved names hit the filesystem relative to the process CWD,
+		     so file-backed assertions below use ABSOLUTE fixture paths;
+		     the pure string-resolution rule is pinned through SetString's
+		     cache keys, which need no filesystem backing.
 	---------------------------------------------------------------------*/
 
 	void TestCacheFilenames()
@@ -733,18 +744,45 @@ namespace
 		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, NULL ) == 1, "NULL filename must default to SystemIni" );
 		Require( appStrcmp( Buf, TEXT("from_sys") ) == 0, "NULL filename must read SystemIni" );
 
-		// Extension appending: a name without a dot in its last four
-		// characters gets ".ini" appended.
-		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, TEXT("PlainName") ) == 1, "extension must be appended to PlainName" );
-		Require( appStrcmp( Buf, TEXT("from_plain") ) == 0, "PlainName must resolve to PlainName.ini" );
+		// Extension appending on a real lookup: the extension-less absolute
+		// fixture path gains ".ini" and resolves.
+		const FString Plain = PathAsFString( "PlainName" );
+		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, *Plain ) == 1, "extension must be appended to the extension-less path" );
+		Require( appStrcmp( Buf, TEXT("from_plain") ) == 0, "extension-less path must resolve to PlainName.ini" );
 
-		// A name that already ends in ".ini" is used verbatim.
-		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, TEXT("CfgUserX.ini") ) == 1, "explicit .ini name must be used verbatim" );
+		// A name that already ends in ".ini" is used verbatim (absolute path).
+		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, *Usr ) == 1, "explicit .ini name must be used verbatim" );
 		Require( appStrcmp( Buf, TEXT("from_user") ) == 0, "explicit .ini name must not be re-extended" );
+
+		// Pure string-resolution rule, pinned through SetString's cache keys
+		// (SetString always materializes the entry under the RESOLVED name,
+		// even when no file exists). Every entry is detached afterwards so
+		// the cache destructor never writes these scratch keys anywhere.
+		{
+			FConfigCacheIni Rules;
+			Rules.Init( *Sys, *Usr, 0 );
+			Rules.SetString( TEXT("R"), TEXT("K"), TEXT("v"), TEXT("ab") );
+			Require( Rules.TMap<FString,FConfigFile>::Find( TEXT("ab.ini") ) != NULL, "names shorter than five characters get .ini appended" );
+			Rules.SetString( TEXT("R"), TEXT("K"), TEXT("v"), TEXT("abcde") );
+			Require( Rules.TMap<FString,FConfigFile>::Find( TEXT("abcde.ini") ) != NULL, "five-character name without a dot gets .ini appended" );
+			Rules.SetString( TEXT("R"), TEXT("K"), TEXT("v"), TEXT("a.b.c") );
+			Require( Rules.TMap<FString,FConfigFile>::Find( TEXT("a.b.c") ) != NULL &&
+				Rules.TMap<FString,FConfigFile>::Find( TEXT("a.b.c.ini") ) == NULL,
+				"a dot at position Len-4 counts as an existing extension" );
+			Rules.SetString( TEXT("R"), TEXT("K"), TEXT("v"), TEXT("wxyz.ini") );
+			Require( Rules.TMap<FString,FConfigFile>::Find( TEXT("wxyz.ini") ) != NULL &&
+				Rules.TMap<FString,FConfigFile>::Find( TEXT("wxyz.ini.ini") ) == NULL,
+				"explicit .ini names are used verbatim" );
+			Rules.Detach( TEXT("ab.ini") );
+			Rules.Detach( TEXT("abcde.ini") );
+			Rules.Detach( TEXT("a.b.c") );
+			Rules.Detach( TEXT("wxyz.ini") );
+		}
 
 		// A missing file yields return 0 (and no file is created because
 		// GetString uses CreateIfNotFound=0).
-		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, TEXT("NopeMissing.ini") ) == 0, "missing file must return 0" );
+		const FString Missing = PathAsFString( "NopeMissing.ini" );
+		Require( Cache.GetString( TEXT("S"), TEXT("A"), Buf, 32, *Missing ) == 0, "missing file must return 0" );
 		Require( !FileExists( "NopeMissing.ini" ), "GetString must not create missing files" );
 
 		// The cache is keyed by the RESOLVED filename: "user.ini" and the
@@ -876,28 +914,12 @@ int main( int ArgC, char** ArgV )
 	};
 
 	bool Matched = false;
-	int KnownGapFailures = 0;
 	for( const Group& G : Groups )
 	{
-		// KNOWN GAP: these two groups pin OBSERVED engine behavior that still
-		// diverges from their written expectations (cache filename extension
-		// resolution and the ANSI-folded unicode Flush path). They execute and
-		// print diagnostics, but their failures are quarantined here instead of
-		// failing the suite. Root-cause as an engine finding, then restore.
-		const bool KnownGap = std::strcmp( G.Name, "cache_filenames" ) == 0
-			|| std::strcmp( G.Name, "unicode_roundtrip" ) == 0;
-		const int Before = GFailures;
 		if( RunAll || std::strcmp( Test, G.Name ) == 0 )
 		{
 			Matched = true;
 			G.Fn();
-			if( KnownGap && GFailures != Before )
-			{
-				KnownGapFailures += GFailures - Before;
-				std::printf( "%s: KNOWN GAP in %s (%i pinned divergence(s)); see TODO in source\n",
-					GTestName, G.Name, GFailures - Before );
-				GFailures = Before;
-			}
 		}
 	}
 	if( !Matched )
@@ -909,11 +931,6 @@ int main( int ArgC, char** ArgV )
 	{
 		std::printf( "%s: %i failure(s)\n", GTestName, GFailures );
 		return 1;
-	}
-	if( KnownGapFailures != 0 )
-	{
-		std::printf( "%s: passed with %i known-gap divergence(s) quarantined\n",
-			GTestName, KnownGapFailures );
 	}
 	std::printf( "Config ini contract tests passed\n" );
 	return 0;

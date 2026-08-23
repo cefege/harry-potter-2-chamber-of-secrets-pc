@@ -35,19 +35,6 @@ void Expect(bool condition, const std::string& message)
 	}
 }
 
-// KNOWN GAP: records a divergence from expected store behavior without
-// failing the suite. These pin observed CommitLaunchSelection output until
-// the minimal-row/coordinate-staleness root cause is fixed in the store.
-static int KnownGapFailures = 0;
-void ExpectKnownGap(bool condition, const std::string& message)
-{
-	if (!condition)
-	{
-		std::fprintf(stderr, "KNOWN GAP: %s\n", message.c_str());
-		++KnownGapFailures;
-	}
-}
-
 struct TemporaryRoots
 {
 	fs::path root;
@@ -1474,9 +1461,7 @@ void TestLaunchSelectionPersistenceRoundTrip()
 	// The store stays minimal: a NewGame catalog carries no save rows at all.
 	Expect(CommitLaunchSelection(roots.user.string(), newGame, error), "minimal selection commits");
 	const std::string minimalStore = ReadBytes(catalog);
-	// KNOWN GAP: observed store still emits stale save-coordinate rows here;
-	// pinned without failing the suite until the store writer is fixed.
-	ExpectKnownGap(minimalStore.find("[LastLaunch]") != std::string::npos &&
+	Expect(minimalStore.find("[LastLaunch]") != std::string::npos &&
 		minimalStore.find("Action=NewGame") != std::string::npos &&
 		minimalStore.find("SaveIndex") == std::string::npos &&
 		minimalStore.find("HasSave") == std::string::npos,
@@ -1573,8 +1558,7 @@ void TestDuplicateLaunchSelectionCommitKeepsLastWriter()
 	Expect(secondStore != firstStore, "the second commit rewrote the catalog");
 	Expect(CountOccurrences(secondStore, "Action=") == 1,
 		"exactly one canonical action row survives duplicate writes");
-	// KNOWN GAP: same store-writer divergence as above; pinned, not failing.
-	ExpectKnownGap(secondStore.find("SaveIndex") == std::string::npos && secondStore.find("HasSave") == std::string::npos,
+	Expect(secondStore.find("SaveIndex") == std::string::npos && secondStore.find("HasSave") == std::string::npos,
 		"the replaced generation leaves no stale save coordinates");
 	Expect(fs::exists(catalog.string() + ".bak") && ReadBytes(catalog.string() + ".bak") == firstStore,
 		"the previous generation is preserved exactly as the backup");
