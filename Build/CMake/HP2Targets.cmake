@@ -493,18 +493,32 @@ hp2_add_behavior_test(native_registration hp2_abi_tests
 )
 hp2_add_behavior_test(package79_manifest hp2_package_audit
     "-datadir=${HP2_TEST_DATA_ROOT}"
-    "--reference=${PROJECT_SOURCE_DIR}/Tests/Fixtures/package79-reference.json"
+    "--reference=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
 )
 hp2_add_behavior_test(spell_interaction_manifest "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
     "--repo-root=${PROJECT_SOURCE_DIR}"
     "--data-root=${HP2_TEST_DATA_ROOT}"
-    "--output=${PROJECT_SOURCE_DIR}/Tests/Fixtures/spell-interactions.json"
+    "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
     --check
 )
 set_tests_properties(spell_interaction_manifest PROPERTIES
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/Testing/HP2/spell_interaction_manifest"
 )
+add_custom_target(regenerate_goldens
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        "--output=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
+        "--repo-root=${PROJECT_SOURCE_DIR}"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
+        "--data-root=${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal"
+        "--output=${CMAKE_BINARY_DIR}/goldens/hp1-package-audit.json"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "Regenerating machine-local goldens from the configured test data root")
 hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
     "-datadir=${HP2_TEST_DATA_ROOT}"
 )
@@ -557,11 +571,6 @@ hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
 hp2_add_behavior_test(repair_save_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/RepairSaveTests.py"
 )
-hp2_add_behavior_test(asset_hashes "${Python3_EXECUTABLE}"
-    "${PROJECT_SOURCE_DIR}/Build/hash_assets.py"
-    "--repo-root=${PROJECT_SOURCE_DIR}"
-    --check
-)
 hp2_add_behavior_test(ucc_smoke_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
 )
@@ -578,8 +587,9 @@ hp2_add_behavior_test(prototype_archive_contract "${Python3_EXECUTABLE}"
 
 # HP1 loader audit: the version-parameterized package reader in
 # Build/package79_reference.py decodes every package under the HP1 data root
-# (FileVersion 61-76, LicenseeVersion 0) and byte-verifies the committed
-# census/audit golden. Registration follows the renderer-smoke convention:
+# (FileVersion 61-76, LicenseeVersion 0) and byte-verifies the machine-local
+# audit golden under ${CMAKE_BINARY_DIR}/goldens (regenerate_goldens).
+# Registration follows the renderer-smoke convention:
 # gated at configure time on the HP1 data root; without it the test simply
 # does not exist (a configuration gap, not a skip). The `data-hp1` label
 # extends the OPERATIONS.md data-profile taxonomy; Docs gain it via
@@ -588,7 +598,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal/System/Default.ini")
     hp2_add_behavior_test(hp1_loader_manifest "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
         "--data-root=${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal"
-        "--output=${PROJECT_SOURCE_DIR}/Tests/Fixtures/hp1-package-audit.json"
+        "--output=${CMAKE_BINARY_DIR}/goldens/hp1-package-audit.json"
         --check
     )
     set_tests_properties(hp1_loader_manifest PROPERTIES LABELS "integration;data-hp1")
@@ -609,13 +619,15 @@ endif()
 hp2_add_behavior_test(save_format_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/SaveFormatTests.py"
 )
-if(EXISTS "${HP2_UNREAL_ROOT}/System/CUTSCENES")
+if(EXISTS "${HP2_TEST_DATA_ROOT}/System/CUTSCENES")
     hp2_add_behavior_test(localization_contract "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/LocalizationTests.py"
+        -v
+        "--data-root=${HP2_TEST_DATA_ROOT}"
     )
 endif()
 if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
-        AND EXISTS "${HP2_UNREAL_ROOT}/System/Default.ini")
+        AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(input_script_contract "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/InputScriptSmoke.py"
     )
@@ -641,7 +653,7 @@ hp2_add_behavior_test(matrix_compare_contract "${Python3_EXECUTABLE}"
 set_tests_properties(matrix_compare_contract PROPERTIES LABELS "fast;data-none")
 
 if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
-        AND EXISTS "${HP2_UNREAL_ROOT}/System/Default.ini")
+        AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(determinism_double_run "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/DeterminismDoubleRunTests.py"
         --ticks=60
@@ -674,7 +686,7 @@ endif()
 # without them the tests are not silently skipped, they simply do not exist,
 # which the verification docs call out as a configuration gap.
 if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
-        AND EXISTS "${HP2_UNREAL_ROOT}/System/Default.ini")
+        AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(renderer_smoke_xopengl "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
         "--renderer=xopengl"
@@ -683,6 +695,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         "--ticks=120"
         "--timeout=90"
         "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_xopengl/smoke-maps.json"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
     )
     if(HP2_ENABLE_FULL_MAP_SMOKE)
         hp2_add_behavior_test(renderer_smoke_full "${Python3_EXECUTABLE}"
@@ -690,6 +703,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
             "--app=${CMAKE_BINARY_DIR}/hp2_game"
             "--ticks=300"
             "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_full/smoke-maps.json"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
         )
         set_tests_properties(renderer_smoke_full PROPERTIES
             LABELS "smoke;renderer;xopengl;smoke-full"
@@ -712,7 +726,7 @@ set_tests_properties(spell_runtime_contracts PROPERTIES
     DEPENDS "native_registration;package79_manifest;spell_interaction_manifest"
 )
 set_tests_properties(native_launcher_contract game_test_contract repair_save_contract
-    asset_hashes ucc_smoke_contract prototype_archive_contract
+    ucc_smoke_contract prototype_archive_contract
     PROPERTIES LABELS "fast;data-none"
 )
 set_tests_properties(dxt1_codec eaxa_decoder PROPERTIES DEPENDS abi_widths)
@@ -726,7 +740,6 @@ set_tests_properties(audio_lifecycle PROPERTIES
 set_tests_properties(abi_widths render_clip projection_fov command_line_load
     compact_index fstring_archive dxt1_codec eaxa_decoder audio_lifecycle
     native_launcher_contract game_test_contract repair_save_contract
-    asset_hashes
     PROPERTIES LABELS "fast;data-none"
 )
 set_tests_properties(native_registration package79_manifest

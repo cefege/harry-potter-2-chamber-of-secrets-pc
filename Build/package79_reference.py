@@ -894,6 +894,9 @@ def generate_audit(data_root: Path, repo_root: Path) -> dict[str, Any]:
 
     Top-level *.json provenance manifests directly inside the root (written by
     prepare scripts) are excluded: they are build artifacts, not game data.
+    Transient engine crash reports (crash-report.json, written into System/ by
+    the crash handler at runtime) are excluded for the same reason: they are
+    debris that would otherwise make audits nondeterministic across runs.
     """
     root = data_root.resolve()
     if not root.is_dir():
@@ -901,7 +904,9 @@ def generate_audit(data_root: Path, repo_root: Path) -> dict[str, Any]:
     files = sorted(
         source.relative_to(root).as_posix()
         for source in root.rglob("*")
-        if source.is_file() and not (source.parent == root and source.suffix == ".json")
+        if source.is_file()
+        and not (source.parent == root and source.suffix == ".json")
+        and source.name != "crash-report.json"
     )
 
     packages = []

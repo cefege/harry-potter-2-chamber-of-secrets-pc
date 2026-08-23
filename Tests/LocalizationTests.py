@@ -24,11 +24,14 @@ Engine ground truth (read-only references):
   until a lookup is empty or contains ``<?``; any gap or ``<?`` inside a value
   makes every later line unreachable. ``lineArray[4096]`` bounds lines.
 
-Inventory constants are pinned to the prototype (data-prototype profile):
-185 cutscene localization files. The 214 figure quoted by the audit is the
-retail-only cutscene payload contract enforced by ``Build/prepare_retail_data.py``
-(full/retail-only profiles); the prototype tree ships 185, matching the
-safe-profile cutscene contract in the same script.
+Inventory constants are pinned per overlay profile, detected from
+``<data-root>/overlay-manifest.json``: profile "retail-only" expects
+RETAIL_ONLY_CUTSCENE_COUNT (214) cutscene localization files under
+``System/Cutscenes``, while a missing/corrupt manifest or any other profile
+keeps the legacy prototype contract of EXPECTED_PROTOTYPE_CUTSCENE_COUNT
+(185 files). The prototype-specific ``CutScenes/*.txt`` reference-stem
+cross-check is skipped when that script tree is absent (legitimate for
+retail-only imports).
 
 Pure stdlib. Deterministic: sorted iteration everywhere, no network, no
 wall-clock dependence. When ``HP2_ARTIFACT_DIR`` is set, a report-schema-v1
@@ -57,6 +60,11 @@ EXPECTED_PROTOTYPE_CUTSCENE_COUNT = 185
 # prototype tree intentionally ships fewer files.
 RETAIL_ONLY_CUTSCENE_COUNT = 214
 
+# Overlay-manifest profiles. prepare_retail_data.py writes the JSON value
+# "retail-only"; detection accepts either spelling, case-insensitively.
+PROTOTYPE_PROFILE = "prototype"
+RETAIL_ONLY_PROFILE = "retail-only"
+
 # HGame/Classes/CutScene.uc and CutScriptDisk.uc bounds.
 MAX_THREADS = 20
 MAX_DISK_LINES = 4096
@@ -66,8 +74,10 @@ LINE_RE = re.compile(r"line_(\d+)\Z", re.IGNORECASE)
 
 REPORT_SCHEMA = 1
 REPORT_INVARIANT = (
-    "prototype cutscene localization parses under the engine INI reader "
-    "and matches the pinned prototype inventory"
+    "cutscene localization parses under the engine INI reader and matches "
+    "the pinned inventory for the detected overlay-manifest profile "
+    f"({EXPECTED_PROTOTYPE_CUTSCENE_COUNT} prototype, "
+    f"{RETAIL_ONLY_CUTSCENE_COUNT} retail-only)"
 )
 
 
@@ -79,10 +89,49 @@ def resolve_data_root() -> Path:
     return DEFAULT_DATA_ROOT
 
 
+def detect_overlay_profile(data_root: Path) -> str:
+    """'retail-only' when overlay-manifest.json declares it, else 'prototype'.
+
+    A missing or corrupt manifest falls back to legacy prototype behavior.
+    """
+    manifest = data_root / "overlay-manifest.json"
+    try:
+        profile = json.loads(manifest.read_text(encoding="utf-8"))["profile"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return PROTOTYPE_PROFILE
+    normalized = str(profile).strip().lower().replace("_", "-")
+    if normalized == RETAIL_ONLY_PROFILE:
+        return RETAIL_ONLY_PROFILE
+    return PROTOTYPE_PROFILE
+
+
+def expected_cutscene_count(profile: str) -> int:
+    """Pinned cutscene localization inventory size for the given profile."""
+    if profile == RETAIL_ONLY_PROFILE:
+        return RETAIL_ONLY_CUTSCENE_COUNT
+    return EXPECTED_PROTOTYPE_CUTSCENE_COUNT
+
+
+def cutscene_directory(data_root: Path) -> Path | None:
+    """Runtime cutscene localization directory (System/CUTSCENES), if any."""
+    system = data_root / "System"
+    if not system.is_dir():
+        return None
+    for entry in sorted(system.iterdir()):
+        if entry.name.lower() == "cutscenes" and entry.is_dir():
+            return entry
+    return None
+
+
+def has_reference_scripts(data_root: Path) -> bool:
+    """True when the prototype CutScenes/*.txt script tree is present."""
+    return (data_root / "CutScenes").is_dir()
+
+
 def enumerate_cutscene_files(data_root: Path) -> list[Path]:
     """Sorted *.int files under System/CUTSCENES (deterministic order)."""
-    directory = data_root / "System" / "CUTSCENES"
-    if not directory.is_dir():
+    directory = cutscene_directory(data_root)
+    if directory is None:
         return []
     return sorted(directory.glob("*.int"), key=lambda path: path.name)
 
@@ -158,11 +207,16 @@ def parse_ini(text: str) -> list[tuple[str, list[tuple[str, str]]]]:
     return sections
 
 
-def audit_cutscene_file(path: Path) -> dict[str, object]:
+def audit_cutscene_file(path: Path, allow_empty: bool = False) -> dict[str, object]:
     """Run every contract check on one cutscene localization file.
 
     Issue codes are dotted lowercase; each is prefixed with the file name in
-    aggregated diagnostics so failures point at exact offenders.
+    aggregated diagnostics so failures point at exact offenders. When
+    ``allow_empty`` is set (retail-only profile), a zero-byte file counts as
+    an intentional placeholder rather than a violation: the retail payload
+    ships a few empty cutscene localization files and the engine's thread
+    probes simply miss, spawning nothing (same semantics as the keyless
+    Thread sections tolerated below).
     """
     issues: list[str] = []
     data = path.read_bytes()
@@ -177,7 +231,7 @@ def audit_cutscene_file(path: Path) -> dict[str, object]:
     issues.extend(eol_issues)
 
     sections = parse_ini(text)
-    if not sections:
+    if not sections and not (allow_empty and not data):
         issues.append("sections.none")
     thread_lines: dict[int, dict[int, str]] = {}
     for name, pairs in sections:
@@ -231,31 +285,39 @@ def audit_cutscene_file(path: Path) -> dict[str, object]:
 
 def audit_inventory(data_root: Path) -> dict[str, object]:
     """Audit the whole cutscene localization inventory under data_root."""
+    profile = detect_overlay_profile(data_root)
+    expected = expected_cutscene_count(profile)
     files = enumerate_cutscene_files(data_root)
-    results = [audit_cutscene_file(path) for path in files]
+    allow_empty = profile == RETAIL_ONLY_PROFILE
+    results = [audit_cutscene_file(path, allow_empty) for path in files]
 
     inventory_issues: list[str] = []
-    if len(files) != EXPECTED_PROTOTYPE_CUTSCENE_COUNT:
+    if len(files) != expected:
         inventory_issues.append(
-            f"inventory.count: expected {EXPECTED_PROTOTYPE_CUTSCENE_COUNT} "
+            f"inventory.count: expected {expected} "
             f"cutscene localization files, found {len(files)}"
         )
-    references = enumerate_reference_stems(data_root)
-    runtime_names = [path.name for path in files]
-    if references != runtime_names:
-        only_references = sorted(set(references) - set(runtime_names))
-        only_runtime = sorted(set(runtime_names) - set(references))
-        if only_references:
-            inventory_issues.append(
-                f"inventory.references_without_runtime: {only_references}"
-            )
-        if only_runtime:
-            inventory_issues.append(
-                f"inventory.runtime_without_references: {only_runtime}"
-            )
+    # The CutScenes/*.txt reference-stem cross-check is prototype-specific:
+    # retail-only imports carry no script tree, so it is skipped when the
+    # directory is absent rather than treated as an empty reference set.
+    if has_reference_scripts(data_root):
+        references = enumerate_reference_stems(data_root)
+        runtime_names = [path.name for path in files]
+        if references != runtime_names:
+            only_references = sorted(set(references) - set(runtime_names))
+            only_runtime = sorted(set(runtime_names) - set(references))
+            if only_references:
+                inventory_issues.append(
+                    f"inventory.references_without_runtime: {only_references}"
+                )
+            if only_runtime:
+                inventory_issues.append(
+                    f"inventory.runtime_without_references: {only_runtime}"
+                )
 
     return {
         "data_root": str(data_root),
+        "profile": profile,
         "files": results,
         "count": len(files),
         "inventory_issues": inventory_issues,
@@ -282,12 +344,13 @@ def build_report(
 ) -> dict[str, object]:
     """Report schema v1 document for this runner."""
     status, reason_code = report_status(audit, data_root)
+    profile = detect_overlay_profile(data_root)
     report: dict[str, object] = {
         "schema": REPORT_SCHEMA,
         "name": "localization_contract",
         "status": status,
         "invariant": REPORT_INVARIANT,
-        "data": {"profile": "prototype"},
+        "data": {"profile": profile},
         "artifacts": [],
         "command": " ".join(command),
         "exit_reason": "",
@@ -306,7 +369,7 @@ def build_report(
             else f"all {audit['count']} cutscene localization files satisfy the contract"
         )
         report["details"] = {
-            "expected_count": EXPECTED_PROTOTYPE_CUTSCENE_COUNT,
+            "expected_count": expected_cutscene_count(audit["profile"]),
             "retail_only_count": RETAIL_ONLY_CUTSCENE_COUNT,
             "count": audit["count"],
             "inventory_issues": audit["inventory_issues"],
@@ -337,8 +400,8 @@ def write_report(report: dict[str, object], path: Path) -> None:
 
 
 def run_audit(data_root: Path) -> dict[str, object] | None:
-    """Full audit, or None when the prototype tree is absent."""
-    if not (data_root / "System" / "CUTSCENES").is_dir():
+    """Full audit, or None when no cutscene payload is present."""
+    if cutscene_directory(data_root) is None:
         return None
     return audit_inventory(data_root)
 
@@ -356,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--data-root",
-        help="prototype data root (default: $HP2_UNREAL_ROOT or repo tree)",
+        help="data root (default: $HP2_UNREAL_ROOT or repo tree)",
     )
     args, _ = parser.parse_known_args(argv)
     data_root = Path(args.data_root) if args.data_root else resolve_data_root()
@@ -484,25 +547,32 @@ class IniDecoderContracts(unittest.TestCase):
         )
 
 
-class PrototypeCutsceneInventory(unittest.TestCase):
-    """Contracts over the real prototype cutscene localization inventory."""
+class CutsceneInventoryContracts(unittest.TestCase):
+    """Contracts over the real cutscene localization inventory."""
 
     def setUp(self) -> None:
         self.data_root = resolve_data_root()
-        if not (self.data_root / "System" / "CUTSCENES").is_dir():
+        self.profile = detect_overlay_profile(self.data_root)
+        if cutscene_directory(self.data_root) is None:
             self.skipTest(f"data.prototype_missing: {self.data_root}")
 
     def test_inventory_count_matches_pinned_constant(self) -> None:
+        expected = expected_cutscene_count(self.profile)
         files = enumerate_cutscene_files(self.data_root)
         self.assertEqual(
             len(files),
-            EXPECTED_PROTOTYPE_CUTSCENE_COUNT,
-            f"expected {EXPECTED_PROTOTYPE_CUTSCENE_COUNT} files in "
-            f"{self.data_root / 'System' / 'CUTSCENES'}, found {len(files)}: "
+            expected,
+            f"expected {expected} files ({self.profile} profile) in "
+            f"{cutscene_directory(self.data_root)}, found {len(files)}: "
             f"{[path.name for path in files][:10]}...",
         )
 
     def test_runtime_files_match_cutscene_script_references(self) -> None:
+        if not has_reference_scripts(self.data_root):
+            self.skipTest(
+                "prototype CutScenes script tree absent "
+                "(legitimate for retail-only imports)"
+            )
         runtime = [path.name for path in enumerate_cutscene_files(self.data_root)]
         references = enumerate_reference_stems(self.data_root)
         self.assertEqual(
@@ -532,7 +602,7 @@ class PrototypeCutsceneInventory(unittest.TestCase):
         )
         self.assertEqual(report["schema"], REPORT_SCHEMA)
         self.assertEqual(report["name"], "localization_contract")
-        self.assertEqual(report["data"], {"profile": "prototype"})
+        self.assertEqual(report["data"], {"profile": detect_overlay_profile(self.data_root)})
         self.assertIn(report["status"], {"pass", "fail"})
         self.assertTrue(report["invariant"])
         self.assertTrue(report["command"])
@@ -540,7 +610,7 @@ class PrototypeCutsceneInventory(unittest.TestCase):
 
 
 class BlockedInventoryContracts(unittest.TestCase):
-    """Blocked-path behavior when the prototype tree is absent."""
+    """Blocked-path behavior when no cutscene payload is present."""
 
     def test_missing_tree_reports_blocked_with_reason(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

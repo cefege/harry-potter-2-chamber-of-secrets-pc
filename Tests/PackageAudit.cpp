@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -42,6 +43,8 @@ namespace
 
 constexpr std::uint32_t PackageTag = 0x9e2a83c1u;
 constexpr std::uint32_t PackageVersion = 79u;
+constexpr std::uint32_t AuditMinimumPackageVersion = 60u;
+constexpr std::uint32_t AuditMaximumPackageVersion = 79u;
 constexpr std::uint32_t LicenseeVersion = 0u;
 constexpr std::uint32_t FunctionFlagNet = 0x00000040u;
 constexpr std::uint32_t FunctionFlagNetReliable = 0x00000080u;
@@ -479,6 +482,30 @@ public:
 		return Result;
 	}
 
+	std::string AnsiCString()
+	{
+		// Pre-64 name entry: NUL-terminated ANSI, no length prefix (UnName.cpp era).
+		const std::size_t Start = Position;
+		for (;;)
+		{
+			Require(1);
+			if (!Data[Position])
+				break;
+			++Position;
+		}
+		const std::size_t Units = Position - Start + 1u;
+		if (Units > MaximumNameUnits)
+			Fail(Start, "pre-64 ANSI name entry exceeds NAME_SIZE");
+		std::string Result;
+		Result.reserve(Units);
+		for (std::size_t Index = Start; Index < Position; ++Index)
+			AppendUtf8(Result, Data[Index]);
+		if (Result.empty())
+			Fail(Start, "empty package name entry");
+		++Position;
+		return Result;
+	}
+
 	[[noreturn]] void Fail(std::size_t Offset, const std::string& Message) const
 	{
 		throw AuditError(Path + ": offset " + std::to_string(Offset) + ": " + Message);
@@ -592,8 +619,11 @@ struct NativeRecord
 class PackageData
 {
 public:
-	PackageData(const PackageSpec& InSpec, std::vector<std::uint8_t> InBytes)
+	PackageData(const PackageSpec& InSpec, std::vector<std::uint8_t> InBytes,
+		std::uint32_t InMinimumPackageVersion = PackageVersion,
+		std::uint32_t InMaximumPackageVersion = PackageVersion)
 		: Spec(InSpec), Bytes(std::move(InBytes))
+		, MinimumPackageVersion(InMinimumPackageVersion), MaximumPackageVersion(InMaximumPackageVersion)
 	{}
 
 	void Parse()
@@ -704,7 +734,6 @@ public:
 		return Entry.ClassRef == 0 ? "Core.Class" : RefPath(Entry.ClassRef).value();
 	}
 
-private:
 	void ParseSummary()
 	{
 		Cursor Input(Bytes, Spec.ManifestPath, 0, "package summary");
@@ -717,19 +746,41 @@ private:
 		Summary.ExportOffset = Input.I32();
 		Summary.ImportCount = Input.I32();
 		Summary.ImportOffset = Input.I32();
-		for (std::uint32_t& Word : Summary.Guid)
-			Word = Input.U32();
-		const std::int32_t GenerationCount = Input.I32();
+		const std::uint32_t Version = Summary.VersionWord & 0xffffu;
+		const bool HasGenerations = Version >= 68u;
+		if (HasGenerations)
+			for (std::uint32_t& Word : Summary.Guid)
+				Word = Input.U32();
+		const std::int32_t GenerationCount = HasGenerations ? Input.I32() : 0;
+		const std::size_t GenerationCountOffset = Input.Tell() - 4u;
+		std::int32_t HeritageCount = 0;
+		std::int32_t HeritageOffset = 0;
+		if (!HasGenerations)
+		{
+			HeritageCount = Input.I32();
+			HeritageOffset = Input.I32();
+		}
 		if (Summary.Tag != PackageTag)
 			Input.Fail(0, "bad package tag");
-		if ((Summary.VersionWord & 0xffffu) != PackageVersion || (Summary.VersionWord >> 16) != LicenseeVersion)
+		if (Version < MinimumPackageVersion || Version > MaximumPackageVersion
+			|| (Summary.VersionWord >> 16) != LicenseeVersion)
 			Input.Fail(4, "unsupported package version/licensee");
+		if (HasGenerations)
+		{
+			ValidateCount(Input, GenerationCount, GenerationCountOffset, "generation count");
+			if (!GenerationCount)
+				Input.Fail(GenerationCountOffset, "package has no generations");
+			if (static_cast<std::uint64_t>(GenerationCount) > (Bytes.size() - Input.Tell()) / 8u)
+				Input.Fail(GenerationCountOffset, "generation table is truncated");
+		}
+		else
+		{
+			ValidateCount(Input, HeritageCount, Input.Tell() - 8u, "heritage count");
+			ValidateOffset(Input, HeritageOffset, Input.Tell() - 4u, "heritage offset");
+		}
 		ValidateCount(Input, Summary.NameCount, 12, "name count");
 		ValidateCount(Input, Summary.ExportCount, 20, "export count");
 		ValidateCount(Input, Summary.ImportCount, 28, "import count");
-		ValidateCount(Input, GenerationCount, 52, "generation count");
-		if (!GenerationCount)
-			Input.Fail(52, "package has no generations");
 		for (std::int32_t Index = 0; Index < GenerationCount; ++Index)
 		{
 			GenerationRecord Record{ Input.I32(), Input.I32() };
@@ -738,25 +789,38 @@ private:
 			Summary.Generations.push_back(Record);
 		}
 		Summary.HeaderSize = Input.Tell();
-		if (Summary.Generations.back().ExportCount != Summary.ExportCount
-			|| Summary.Generations.back().NameCount != Summary.NameCount)
-			Input.Fail(52, "latest generation counts disagree with summary");
+		if (HasGenerations
+			&& (Summary.Generations.back().ExportCount != Summary.ExportCount
+				|| Summary.Generations.back().NameCount != Summary.NameCount))
+			Input.Fail(GenerationCountOffset, "latest generation counts disagree with summary");
 		ValidateOffset(Input, Summary.NameOffset, 16, "name offset");
 		ValidateOffset(Input, Summary.ExportOffset, 24, "export offset");
 		ValidateOffset(Input, Summary.ImportOffset, 32, "import offset");
-		if (static_cast<std::size_t>(Summary.NameOffset) != Summary.HeaderSize)
+		if (HasGenerations && static_cast<std::size_t>(Summary.NameOffset) != Summary.HeaderSize)
 			Input.Fail(16, "name table does not immediately follow summary");
+		if (!HasGenerations && static_cast<std::size_t>(Summary.NameOffset) < Summary.HeaderSize)
+			Input.Fail(16, "name table begins before end of heritage summary");
 	}
 
 	void ParseNames()
 	{
+		const bool Pre64Names = (Summary.VersionWord & 0xffffu) < 64u;
 		Cursor Input(Bytes, Spec.ManifestPath, static_cast<std::size_t>(Summary.NameOffset), "name table");
 		Names.reserve(static_cast<std::size_t>(Summary.NameCount));
 		for (std::int32_t Index = 0; Index < Summary.NameCount; ++Index)
 		{
 			NameRecord Record;
 			Record.RecordOffset = Input.Tell();
-			Record.Text = Input.NameString(Record.Encoding, Record.SerializedCount);
+			if (Pre64Names)
+			{
+				Record.Text = Input.AnsiCString();
+				Record.Encoding = "ansi";
+				Record.SerializedCount = static_cast<std::int32_t>(Record.Text.size() + 1u);
+			}
+			else
+			{
+				Record.Text = Input.NameString(Record.Encoding, Record.SerializedCount);
+			}
 			Record.Flags = Input.U32();
 			Record.RecordSize = Input.Tell() - Record.RecordOffset;
 			Names.push_back(std::move(Record));
@@ -1004,6 +1068,8 @@ private:
 	}
 
 	const PackageSpec& Spec;
+	std::uint32_t MinimumPackageVersion;
+	std::uint32_t MaximumPackageVersion;
 	std::vector<std::uint8_t> Bytes;
 	SummaryRecord Summary{};
 	std::vector<NameRecord> Names;
@@ -1057,6 +1123,29 @@ public:
 	void Number(std::int64_t Value) { BeforeValue(); Output += std::to_string(Value); }
 	void Unsigned(std::uint64_t Value) { BeforeValue(); Output += std::to_string(Value); }
 	void Null() { BeforeValue(); Output += "null"; }
+	// Emits a pre-serialized JSON value produced by an independent JsonWriter at
+	// depth zero. Structural newlines only (string escapes never emit raw '\n'),
+	// so re-indenting every continuation line by the target depth is exact.
+	void RawValue(const std::string& Fragment)
+	{
+		Require(!Stack.empty(), "raw JSON value outside a container");
+		const std::size_t Depth = Stack.size();
+		BeforeValue();
+		std::size_t Start = 0;
+		for (;;)
+		{
+			const std::size_t Line = Fragment.find('\n', Start);
+			if (Line == std::string::npos)
+			{
+				Output.append(Fragment, Start, std::string::npos);
+				break;
+			}
+			Output.append(Fragment, Start, Line - Start);
+			Output += '\n';
+			Output.append(Depth * 2u, ' ');
+			Start = Line + 1u;
+		}
+	}
 	std::string Finish()
 	{
 		Require(Stack.empty(), "unfinished JSON document");
@@ -1678,6 +1767,250 @@ void DumpAudio(const std::filesystem::path& Directory, ULinkerLoad* GeneralLinke
 		Entries.size(), CompactJsonString(Directory.string()).c_str());
 }
 
+enum class DataProfile
+{
+	LegacyPrototype,
+	RetailOnly,
+};
+
+std::string FoldProfileToken(std::string Value)
+{
+	for (char& Character : Value)
+	{
+		if (Character >= 'A' && Character <= 'Z')
+			Character = static_cast<char>(Character - 'A' + 'a');
+		else if (Character == '_')
+			Character = '-';
+	}
+	return Value;
+}
+
+std::optional<std::string> ExtractManifestProfileField(const std::string& Text)
+{
+	static constexpr char Key[] = "\"profile\"";
+	std::size_t Offset = Text.find(Key);
+	while (Offset != std::string::npos)
+	{
+		std::size_t Scan = Offset + sizeof(Key) - 1u;
+		while (Scan < Text.size() && (Text[Scan] == ' ' || Text[Scan] == '\t'
+			|| Text[Scan] == '\n' || Text[Scan] == '\r'))
+			++Scan;
+		if (Scan < Text.size() && Text[Scan] == ':')
+		{
+			++Scan;
+			while (Scan < Text.size() && (Text[Scan] == ' ' || Text[Scan] == '\t'
+				|| Text[Scan] == '\n' || Text[Scan] == '\r'))
+				++Scan;
+			if (Scan < Text.size() && Text[Scan] == '"')
+			{
+				++Scan;
+				std::string Value;
+				bool Terminated = false;
+				while (Scan < Text.size())
+				{
+					if (Text[Scan] == '"' && Text[Scan - 1u] != '\\')
+					{
+						Terminated = true;
+						break;
+					}
+					if (Text[Scan] == '\\' && Scan + 1u < Text.size())
+						Value += Text[++Scan];
+					else
+						Value += Text[Scan];
+					++Scan;
+				}
+				if (Terminated)
+					return Value;
+			}
+		}
+		Offset = Text.find(Key, Offset + sizeof(Key) - 1u);
+	}
+	return std::nullopt;
+}
+
+// Tests/LocalizationTests.py::detect_overlay_profile convention: a data root
+// carrying overlay-manifest.json with profile "retail-only" (case-insensitive,
+// '_' folds to '-') audits as a retail import; anything else, including a
+// missing or unreadable manifest, keeps the legacy prototype behavior.
+DataProfile DetectDataProfile(const std::filesystem::path& DataRoot)
+{
+	try
+	{
+		const std::string Manifest = ReadTextFile(DataRoot / "overlay-manifest.json");
+		const std::optional<std::string> Profile = ExtractManifestProfileField(Manifest);
+		if (Profile && FoldProfileToken(*Profile) == "retail-only")
+			return DataProfile::RetailOnly;
+	}
+	catch (const std::exception&)
+	{
+	}
+	return DataProfile::LegacyPrototype;
+}
+
+struct AuditExportSummary
+{
+	std::string ClassPath;
+	std::string ObjectPath;
+};
+
+struct AuditPackageEntry
+{
+	std::int32_t ExportCount = 0;
+	std::vector<AuditExportSummary> Exports;
+	std::int32_t ImportCount = 0;
+	std::uint32_t Licensee = 0;
+	std::int32_t NameCount = 0;
+	std::vector<NativeRecord> NativeFunctions;
+	std::uint32_t PackageFlags = 0;
+	std::string Path;
+	std::uint32_t Version = 0;
+};
+
+// Required payload surface for the retail-only profile, verified against the
+// prepared overlay layout: every prototype-census package that also exists in
+// the retail tree stays mandatory, and General.uax is replaced by the retail
+// localization bundle. Category floors catch truncated imports loudly.
+void ValidateRetailSurface(const std::vector<AuditPackageEntry>& Packages)
+{
+	static constexpr const char* RequiredPackages[] =
+	{
+		"Maps/startup.unr",
+		"Sounds/AllDialog.USA_uax",
+		"System/Core.u",
+		"System/Engine.u",
+		"System/HGame.u",
+		"Textures/HP2_Master.utx",
+	};
+	static constexpr const char* RequiredCategories[] =
+	{
+		"Maps/", "Sounds/", "System/", "Textures/",
+	};
+	if (Packages.empty())
+		throw AuditError("retail-only profile: data root contains no UE1 packages");
+	for (const char* Required : RequiredPackages)
+	{
+		const bool Present = std::any_of(Packages.begin(), Packages.end(),
+			[Required](const AuditPackageEntry& Entry) { return Entry.Path == Required; });
+		if (!Present)
+			throw AuditError(std::string("retail-only profile: required package is absent: ") + Required);
+	}
+	for (const char* Prefix : RequiredCategories)
+	{
+		const bool Any = std::any_of(Packages.begin(), Packages.end(),
+			[Prefix](const AuditPackageEntry& Entry) { return Entry.Path.rfind(Prefix, 0) == 0; });
+		if (!Any)
+			throw AuditError(std::string("retail-only profile: no packages under ") + Prefix);
+	}
+}
+
+AuditPackageEntry AuditSinglePackage(const std::string& RelativePath, const std::vector<std::uint8_t>& Bytes)
+{
+	// Mirror Python Path(relative_path).stem: strip one final suffix only.
+	std::string PackageName = RelativePath.substr(RelativePath.find_last_of('/') + 1u);
+	const std::size_t Dot = PackageName.find_last_of('.');
+	if (Dot != std::string::npos)
+		PackageName.resize(Dot);
+	PackageSpec Spec{ RelativePath.c_str(), PackageName.c_str(), "" };
+	PackageData Package(Spec, Bytes, AuditMinimumPackageVersion, AuditMaximumPackageVersion);
+	Package.Parse();
+	AuditPackageEntry Entry;
+	Entry.Path = RelativePath;
+	const SummaryRecord& Summary = Package.GetSummary();
+	Entry.Version = Summary.VersionWord & 0xffffu;
+	Entry.Licensee = Summary.VersionWord >> 16;
+	Entry.PackageFlags = Summary.PackageFlags;
+	Entry.ExportCount = Summary.ExportCount;
+	Entry.ImportCount = Summary.ImportCount;
+	Entry.NameCount = Summary.NameCount;
+	Entry.Exports.reserve(Package.GetExports().size());
+	for (std::size_t Index = 0; Index < Package.GetExports().size(); ++Index)
+		Entry.Exports.push_back({ Package.ClassPath(Index), Package.ExportPath(Index) });
+	for (const NativeRecord& Record : Package.GetNativeRecords())
+		if (Record.FunctionFlags & FunctionFlagNative)
+			Entry.NativeFunctions.push_back(Record);
+	return Entry;
+}
+
+std::string WriteAuditPackageEntry(const AuditPackageEntry& Entry)
+{
+	JsonWriter Json;
+	Json.BeginObject();
+	Json.Key("export_count"); Json.Number(Entry.ExportCount);
+	Json.Key("exports"); Json.BeginArray();
+	for (const AuditExportSummary& Export : Entry.Exports)
+	{
+		Json.BeginObject();
+		Json.Key("class_path"); Json.String(Export.ClassPath);
+		Json.Key("object_path"); Json.String(Export.ObjectPath);
+		Json.EndObject();
+	}
+	Json.EndArray();
+	Json.Key("import_count"); Json.Number(Entry.ImportCount);
+	Json.Key("licensee"); Json.Unsigned(Entry.Licensee);
+	Json.Key("name_count"); Json.Number(Entry.NameCount);
+	Json.Key("native_functions"); Json.BeginArray();
+	for (const NativeRecord& Function : Entry.NativeFunctions)
+	{
+		Json.BeginObject();
+		Json.Key("native_index"); Json.Unsigned(Function.NativeIndex);
+		Json.Key("object_path"); Json.String(Function.ObjectPath);
+		Json.EndObject();
+	}
+	Json.EndArray();
+	Json.Key("package_flags"); Json.Unsigned(Entry.PackageFlags);
+	Json.Key("path"); Json.String(Entry.Path);
+	Json.Key("version"); Json.Unsigned(Entry.Version);
+	Json.EndObject();
+	std::string Fragment = Json.Finish();
+	if (!Fragment.empty() && Fragment.back() == '\n')
+		Fragment.pop_back();
+	return Fragment;
+}
+
+// Byte-identical to Build/package79_reference.py --data-root output:
+// json.dumps(..., ensure_ascii=False, indent=2, sort_keys=True) + "\n", keys
+// emitted in sorted order.
+std::string BuildAuditDocument(const std::filesystem::path& DataRoot,
+	const std::vector<AuditPackageEntry>& Packages,
+	const std::vector<std::string>& NonPackageFiles,
+	const std::map<std::string, std::uint64_t>& FormatProfiles)
+{
+	JsonWriter Json;
+	Json.BeginObject();
+	Json.Key("accepted_versions"); Json.BeginObject();
+	Json.Key("max"); Json.Unsigned(AuditMaximumPackageVersion);
+	Json.Key("min"); Json.Unsigned(AuditMinimumPackageVersion);
+	Json.EndObject();
+	Json.Key("census"); Json.BeginObject();
+	Json.Key("file_count"); Json.Unsigned(Packages.size() + NonPackageFiles.size());
+	Json.Key("format_profiles"); Json.BeginObject();
+	for (const std::pair<const std::string, std::uint64_t>& Profile : FormatProfiles)
+	{
+		Json.Key(Profile.first.c_str());
+		Json.Unsigned(Profile.second);
+	}
+	Json.EndObject();
+	Json.Key("non_package_count"); Json.Unsigned(NonPackageFiles.size());
+	Json.Key("package_count"); Json.Unsigned(Packages.size());
+	Json.EndObject();
+	// The generator emits str(root.relative_to(repo_root)) when the root lives
+	// inside --repo-root and the absolute path otherwise; retail imports live
+	// outside the repository by construction.
+	Json.Key("data_root"); Json.String(DataRoot.generic_string());
+	Json.Key("format"); Json.String("hp1-ue1-package-audit");
+	Json.Key("non_package_files"); Json.BeginArray();
+	for (const std::string& File : NonPackageFiles)
+		Json.String(File);
+	Json.EndArray();
+	Json.Key("packages"); Json.BeginArray();
+	for (const AuditPackageEntry& Package : Packages)
+		Json.RawValue(WriteAuditPackageEntry(Package));
+	Json.EndArray();
+	Json.Key("schema_version"); Json.Unsigned(1u);
+	Json.EndObject();
+	return Json.Finish();
+}
+
 struct Options
 {
 	const char* Reference = nullptr;
@@ -1733,9 +2066,84 @@ bool ParseOptions(int ArgC, char* ArgV[], Options& Result, const char*& ErrorMes
 	return true;
 }
 
+// byte-for-byte. Every file under the data root is enumerated (sorted by
+// relative POSIX path; top-level provenance *.json and transient engine
+// crash-report.json artifacts are excluded); UE1 packages are
+// decoded structurally with the same v60-79 rules as the generator, everything
+// else is censused as a non-package file. The golden comparison afterwards is
+// unchanged and stays byte-exact.
+int RunRetailOnlyAudit(const Options& OptionsValue, const std::filesystem::path& DataRoot)
+{
+	if (OptionsValue.DumpAudioDirectory)
+		throw AuditError("--dump-audio requires the legacy prototype audio corpus;"
+			" it is unsupported for the retail-only data profile");
+
+	std::vector<std::string> RelativeFiles;
+	for (std::filesystem::recursive_directory_iterator It(DataRoot, std::filesystem::directory_options::skip_permission_denied), End;
+		It != End; ++It)
+	{
+		std::error_code Ignored;
+		if (!It->is_regular_file(Ignored) || Ignored)
+			continue;
+		const std::string Key = It->path().lexically_relative(DataRoot).generic_string();
+		if ((Key.find('/') == std::string::npos && It->path().extension() == ".json")
+				|| It->path().filename() == "crash-report.json")
+			continue;
+		RelativeFiles.push_back(Key);
+	}
+	std::sort(RelativeFiles.begin(), RelativeFiles.end());
+
+	std::vector<AuditPackageEntry> Packages;
+	std::vector<std::string> NonPackageFiles;
+	std::map<std::string, std::uint64_t> FormatProfiles;
+	Packages.reserve(RelativeFiles.size());
+	for (const std::string& Relative : RelativeFiles)
+	{
+		CurrentAuditStage = Relative.c_str();
+		const std::vector<std::uint8_t> Bytes = ReadFile(DataRoot / Relative);
+		if (Bytes.size() < 4u
+			|| (static_cast<std::uint32_t>(Bytes[0])
+				| (static_cast<std::uint32_t>(Bytes[1]) << 8)
+				| (static_cast<std::uint32_t>(Bytes[2]) << 16)
+				| (static_cast<std::uint32_t>(Bytes[3]) << 24)) != PackageTag)
+		{
+			NonPackageFiles.push_back(Relative);
+			continue;
+		}
+		AuditPackageEntry Entry = AuditSinglePackage(Relative, Bytes);
+		char Profile[48];
+		std::snprintf(Profile, sizeof(Profile), "v%u/licensee%u/flags%u",
+			Entry.Version, Entry.Licensee, Entry.PackageFlags);
+		++FormatProfiles[Profile];
+		Packages.push_back(std::move(Entry));
+	}
+
+	ValidateRetailSurface(Packages);
+
+	CurrentAuditStage = "package79-reference.json";
+	const std::filesystem::path ReferencePath = FindReference(
+		OptionsValue.Reference, OptionsValue.StartupDirectory);
+	const std::string Expected = ReadTextFile(ReferencePath);
+	const std::string Actual = BuildAuditDocument(DataRoot, Packages, NonPackageFiles, FormatProfiles);
+	if (Actual != Expected)
+	{
+		ReportMismatch(Expected, Actual);
+		return 2;
+	}
+	std::printf("{\"status\":\"manifest_ok\",\"packages\":%zu}\n", Packages.size());
+	return 0;
+}
+
 int RunAudit(const Options& OptionsValue)
 {
-	const std::filesystem::path BaseDirectory(TcharToUtf8(appBaseDir()));
+	// appBaseDir() is the canonical "<data root>/System" directory (with a
+	// trailing separator from PrepareHP2Paths); trim it before taking the parent.
+	std::string BaseText = TcharToUtf8(appBaseDir());
+	while (BaseText.size() > 1u && BaseText.back() == '/')
+		BaseText.pop_back();
+	const std::filesystem::path BaseDirectory(BaseText);
+	if (DetectDataProfile(BaseDirectory.parent_path()) == DataProfile::RetailOnly)
+		return RunRetailOnlyAudit(OptionsValue, BaseDirectory.parent_path());
 	std::vector<PackageData> Packages;
 	std::vector<ULinkerLoad*> Linkers;
 	Packages.reserve(std::size(PackageSpecs));

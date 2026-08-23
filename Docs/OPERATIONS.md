@@ -16,6 +16,7 @@ Python 3 interpreter (found via `find_package(Python3)`).
 | `macos-arm64-asan-ubsan` | RelWithDebInfo | ASan + UBSan (`HP2_ENABLE_ASAN_UBSAN=ON`) | off | `out/macos-arm64-asan-ubsan` |
 | `macos-arm64-tsan` | RelWithDebInfo | TSan (`HP2_ENABLE_TSAN=ON`) | off | `out/macos-arm64-tsan` |
 | `macos-arm64-full-smoke` | Release | off | on (`HP2_ENABLE_FULL_MAP_SMOKE=ON`) | `out/macos-arm64-full-smoke` |
+| `macos-arm64-retail` | Release | off | off | `out/macos-arm64-retail` |
 
 ASan+UBSan and TSan are mutually exclusive; configuring with both enabled fails
 at configure time.
@@ -58,6 +59,29 @@ ctest --preset macos-arm64-asan-ubsan
 cmake --preset macos-arm64-full-smoke
 cmake --build --preset macos-arm64-full-smoke --target hp2_verification_binaries
 ctest --preset macos-arm64-full-smoke
+```
+
+## Retail-only test data
+
+The behavioral suite targets an imported retail-only data overlay, not the
+committed prototype tree. Import once from media you own (see
+`RETAIL_IMPORT.md`):
+
+```sh
+cmake --preset macos-arm64 -DHP2_TEST_DATA_ROOT="$HOME/Library/Application Support/Harry Potter 2/Data/Retail"
+```
+
+or use the `macos-arm64-retail` preset, which points
+`HP2_TEST_DATA_ROOT` at that default location.
+
+Data-derived goldens (`package79-reference.json`, `spell-interactions.json`)
+are machine-local under `<binary-dir>/goldens/` and no longer committed.
+Regenerate them for your data root before the first suite run:
+
+```sh
+cmake --build --preset macos-arm64 --target regenerate_goldens
+cmake --build --preset macos-arm64 --target hp2_verification_binaries
+ctest --preset macos-arm64
 ```
 
 ## Test environment contract

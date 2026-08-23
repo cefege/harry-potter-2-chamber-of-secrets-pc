@@ -1,4 +1,4 @@
-set(HP2_UNREAL_ROOT "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal")
+set(HP2_UNREAL_ROOT "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal" CACHE PATH "Engine data root")
 set(HP2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/ThirdParty")
 
 # Core.dsp runtime units plus UnCoreNative.cpp for the static native lookup

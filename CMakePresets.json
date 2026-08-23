@@ -77,6 +77,20 @@
         "CMAKE_BUILD_TYPE": "Release",
         "HP2_ENABLE_VULKAN_DRIVER": "ON"
       }
+    },
+    {
+      "name": "macos-arm64-retail",
+      "displayName": "macOS 15 arm64 Release + retail-only test data",
+      "inherits": "macos-arm64-base",
+      "binaryDir": "${sourceDir}/out/macos-arm64-retail",
+      "installDir": "${sourceDir}/out/install/macos-arm64-retail",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/macos-arm64-retail",
+        "HP2_ENABLE_ASAN_UBSAN": "OFF",
+        "HP2_ENABLE_TSAN": "OFF",
+        "HP2_TEST_DATA_ROOT": "$env{HOME}/Library/Application Support/Harry Potter 2/Data/Retail"
+      }
     }
   ],
   "buildPresets": [
@@ -99,6 +113,10 @@
     {
       "name": "macos-arm64-vulkan",
       "configurePreset": "macos-arm64-vulkan"
+    },
+    {
+      "name": "macos-arm64-retail",
+      "configurePreset": "macos-arm64-retail"
     }
   ],
   "testPresets": [
@@ -134,6 +152,13 @@
       "name": "macos-arm64-vulkan",
       "displayName": "macOS 15 arm64 Vulkan tests",
       "configurePreset": "macos-arm64-vulkan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "macos-arm64-retail",
+      "displayName": "macOS 15 arm64 retail-only tests",
+      "configurePreset": "macos-arm64-retail",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     }
