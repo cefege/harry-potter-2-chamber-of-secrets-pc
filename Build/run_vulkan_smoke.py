@@ -67,6 +67,7 @@ def main() -> int:
         "HOME": str(home), "TMPDIR": str(work),
         "LC_ALL": "C", "TZ": "UTC",
         "DYLD_LIBRARY_PATH": "/opt/homebrew/lib",
+        "DYLD_FALLBACK_LIBRARY_PATH": "/opt/homebrew/opt/molten-vk/lib",
         "VK_DRIVER_FILES": str(icd),
     })
     cmd = [str(binary), f"-datadir={data_root}", f"-INI={ini_path}",
