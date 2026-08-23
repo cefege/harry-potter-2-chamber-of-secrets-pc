@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Nightly full-map renderer sweep owner for HP2.
+
+  Install (per user, runs only when this Mac is awake at the listed hour):
+    cp Build/com.hp2.smoke-full.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hp2.smoke-full.plist
+
+  Manual run:            launchctl start gui/$(id -u)/com.hp2.smoke-full
+  Latest report:         out/macos-arm64-full-smoke/Testing/HP2/renderer_smoke_full/smoke-maps.json
+  Logs + last-run state: StandardOutPath/StandardErrorPath below.
+
+  The job invokes Build/run_vulkan_smoke-style discipline through ctest:
+  configure+build+ctest on the macos-arm64-full-smoke preset via
+  Build/verify_all.sh, so a red run always leaves the per-stage logs.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hp2.smoke-full</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd "$HOME/Code/Default/hp2" &amp;&amp; Build/verify_all.sh macos-arm64-full-smoke --with-full-smoke</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/YOURUSER/Code/Default/hp2</string>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/hp2-smoke-full.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hp2-smoke-full.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
