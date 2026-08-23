@@ -1,0 +1,11 @@
+[package]
+name = "hp-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+wgpu.workspace = true
+png.workspace = true
+image.workspace = true

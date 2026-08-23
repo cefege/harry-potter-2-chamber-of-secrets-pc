@@ -1,0 +1,4 @@
+# Clippy configuration for the hp2rs workspace.
+# Lint denial itself lives in CI/invocations (-D warnings); this file only
+# tunes thresholds and MSRV-aware lints.
+msrv = "1.97"

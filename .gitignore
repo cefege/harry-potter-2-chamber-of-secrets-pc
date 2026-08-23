@@ -137,3 +137,6 @@ htmlcov/
 *.swp
 *.swo
 *~
+
+# Rust cargo workspace products (Cargo.lock is committed on purpose)
+/target/

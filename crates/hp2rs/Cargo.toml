@@ -1,0 +1,19 @@
+[package]
+name = "hp2rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "hp2rs"
+path = "src/main.rs"
+
+[dependencies]
+hp-format.workspace = true
+hp-ini.workspace = true
+hp-uobject.workspace = true
+hp-engine.workspace = true
+hp-render.workspace = true
+hp-audio.workspace = true
+hp-app.workspace = true

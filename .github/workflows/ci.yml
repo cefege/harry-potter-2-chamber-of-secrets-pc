@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: fmt
+        run: cargo fmt --check
+      - name: test
+        run: cargo test --workspace
