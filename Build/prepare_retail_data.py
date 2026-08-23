@@ -24,6 +24,7 @@ from typing import Iterable, NoReturn
 
 CHUNK_SIZE = 1024 * 1024
 MANIFEST_NAME = "overlay-manifest.json"
+CHECKSUMS_NAME = "overlay-checksums.txt"
 CANONICAL_ROOTS = ("System", "Maps", "Textures", "Sounds", "Music", "Help")
 PROHIBITED_EXTENSIONS = {
     ".bat",
@@ -1331,6 +1332,22 @@ def manifest_bytes(planned: list[PlannedAsset], profile: str) -> bytes:
     return (json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def checksums_bytes(planned: list[PlannedAsset]) -> bytes:
+    """Render the compact sidecar index: '<path>\t<size>\t<sha256>' lines.
+
+    Sorted by path bytes (not casefolded), LF-terminated, with a trailing
+    newline. The runtime bootstrap consumes this file to stream-verify every
+    overlay entry without trusting the JSON manifest alone.
+    """
+    rows = sorted(planned, key=lambda asset: asset.output_path.encode("utf-8"))
+    lines = [
+        f"{asset.output_path}\t{asset.size}\t{asset.sha256}" for asset in rows
+    ]
+    if not lines:
+        return b""
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def hash_bytes(path: Path) -> tuple[int, str]:
     return hash_file(path)
 
@@ -1377,6 +1394,7 @@ def validate_output(output: Path, planned: list[PlannedAsset], expected_manifest
     found = walk_output(output)
     expected_paths = {asset.output_path.casefold(): asset for asset in planned}
     expected_paths[MANIFEST_NAME.casefold()] = None  # type: ignore[assignment]
+    expected_paths[CHECKSUMS_NAME.casefold()] = None  # type: ignore[assignment]
     missing = sorted(key for key in expected_paths if key not in found)
     extra = sorted(key for key in found if key not in expected_paths)
     if missing or extra:
@@ -1387,6 +1405,13 @@ def validate_output(output: Path, planned: list[PlannedAsset], expected_manifest
         error(
             f"manifest has incorrect canonical case: {manifest_relative}, "
             f"expected {MANIFEST_NAME}"
+        )
+    checksums_path = found[CHECKSUMS_NAME.casefold()]
+    checksums_relative = checksums_path.relative_to(output).as_posix()
+    if checksums_relative != CHECKSUMS_NAME:
+        error(
+            f"checksums index has incorrect canonical case: {checksums_relative}, "
+            f"expected {CHECKSUMS_NAME}"
         )
     for asset in planned:
         path = found[asset.output_path.casefold()]
@@ -1404,6 +1429,13 @@ def validate_output(output: Path, planned: list[PlannedAsset], expected_manifest
         error(f"cannot read manifest {manifest_path}: {exc}")
     if actual_manifest != expected_manifest:
         error(f"manifest is out of date or non-deterministic: {manifest_path}")
+
+    try:
+        actual_checksums = checksums_path.read_bytes()
+    except OSError as exc:
+        error(f"cannot read checksums index {checksums_path}: {exc}")
+    if actual_checksums != checksums_bytes(planned):
+        error(f"checksums index is out of date or non-deterministic: {checksums_path}")
 
     for asset in planned:
         path = found[asset.output_path.casefold()]
@@ -1439,8 +1471,10 @@ def materialize(stage: Path, planned: list[PlannedAsset], manifest: bytes) -> No
     try:
         with (stage / MANIFEST_NAME).open("xb") as stream:
             stream.write(manifest)
+        with (stage / CHECKSUMS_NAME).open("xb") as stream:
+            stream.write(checksums_bytes(planned))
     except OSError as exc:
-        error(f"cannot write overlay manifest: {exc}")
+        error(f"cannot write overlay identity files: {exc}")
 
 
 def commit_stage(stage: Path, output: Path) -> None:
