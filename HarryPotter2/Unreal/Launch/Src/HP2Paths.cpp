@@ -1172,6 +1172,43 @@ bool Utf8ToTchar(const char* Input, TCHAR*& Output)
 	Output = Buffer;
 	return true;
 }
+
+// Bootstrap allocations must never depend on the engine allocator. The
+// launch binaries call PrepareHP2Paths before installing their FMalloc, so
+// GMalloc still points at the placeholder that refuses every request; any
+// C++ container growth inside the bootstrap then operates on a null buffer
+// and faults. Route every global new/delete issued inside the guarded
+// region through plain malloc/free instead, matching the header contract
+// that PrepareHP2Paths is safe before GMalloc and appInit.
+class FBootstrapMalloc final : public FMalloc
+{
+public:
+	void* Malloc( DWORD Count, const TCHAR* ) override { return std::malloc(Count); }
+	void* Realloc( void* Original, DWORD Count, const TCHAR* ) override { return std::realloc(Original, Count); }
+	void Free( void* Original ) override { std::free(Original); }
+	void DumpAllocs() override {}
+	void HeapCheck() override {}
+	void Init() override {}
+	void Exit() override {}
+};
+
+FBootstrapMalloc GBootstrapMalloc;
+
+struct FScopedBootstrapAllocator
+{
+	FMalloc* const Saved;
+
+	FScopedBootstrapAllocator()
+		: Saved(GMalloc)
+	{
+		GMalloc = &GBootstrapMalloc;
+	}
+
+	~FScopedBootstrapAllocator()
+	{
+		GMalloc = Saved;
+	}
+};
 }
 const char* HP2DataDirectoryArgumentValue(const char* Argument)
 {
@@ -1354,6 +1391,10 @@ bool InstallHP2Paths(
 
 bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 {
+	// First statement: every allocation below, including C++ container
+	// growth, must bypass the not-yet-installed engine allocator.
+	const FScopedBootstrapAllocator BootstrapAllocatorGuard;
+
 	const char* ExplicitDataDir = nullptr;
 	for (int Index = 1; Index < ArgC; ++Index)
 	{

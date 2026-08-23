@@ -463,6 +463,7 @@ def run_command(
     timeout_seconds: float,
     log_path: Path,
     displayed_command: Sequence[str] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Run one isolated process group and return its complete lifecycle facts."""
     _positive_float(timeout_seconds)
@@ -480,8 +481,11 @@ def run_command(
         isolated_home = Path(home_name)
         process: subprocess.Popen[bytes] | None = None
         try:
+            child_environment = _isolated_environment(isolated_home)
+            if extra_env:
+                child_environment.update(extra_env)
             process = subprocess.Popen(
-                command, cwd=repo_root, env=_isolated_environment(isolated_home),
+                command, cwd=repo_root, env=child_environment,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
@@ -553,6 +557,7 @@ def run_command(
     _write_atomic(log_path, output)
     result: dict[str, object] = {
         "command": list(displayed_command or command), "log": _display_path(log_path, repo_root),
+        "extra_environment": dict(sorted((extra_env or {}).items())),
         "captured_output_bytes": len(output), "duration_seconds": round(time.monotonic() - started, 6),
         "exit_status": exit_status, "timed_out": timed_out, "launch_error": launch_error,
         "failure_markers": markers, "orphaned_process_group": orphaned_process_group,
@@ -566,6 +571,7 @@ def run_command(
 def run_game(
     *, app: Path, data_root: Path, selected_map: str, renderer: str, ticks: int,
     timeout_seconds: float, log_path: Path, no_sound: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Validate a real app, then launch one exact listed map."""
     repo_root = _repo_root()
@@ -582,7 +588,7 @@ def run_game(
         _display_path(executable, repo_root), f"-datadir={_display_path(data_root, repo_root)}",
         map_token, *command[3:],
     ]
-    result = run_command(command, repo_root=repo_root, timeout_seconds=timeout_seconds, log_path=log_path, displayed_command=displayed_command)
+    result = run_command(command, repo_root=repo_root, timeout_seconds=timeout_seconds, log_path=log_path, displayed_command=displayed_command, extra_env=extra_env)
     result.update({"map": selected_map, "map_token": map_token})
     return result
 

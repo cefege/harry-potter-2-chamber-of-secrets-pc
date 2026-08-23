@@ -98,18 +98,73 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
         "$<$<COMPILE_LANGUAGE:CXX>:-Wno-error=function-effects>")
 endif()
 
+# ---------------------------------------------------------------------------
+# Native text backend provider model.
+#
+# Providers are ordered candidates: hp2_declare_text_provider records one,
+# selection below picks the first whose CONDITION evaluates true at configure
+# time and exports for callers (never hardcoded paths):
+#   HP2_HAS_NATIVE_TEXT_BACKEND  ON when a provider was selected
+#   HP2_TEXT_PROVIDER_NAME       selected provider name ("" when none)
+#   HP2_TEXT_PROVIDER_SOURCES    provider translation units
+#   HP2_TEXT_PROVIDER_LINK_LIBS  libraries the owning driver links PUBLIC
+# Adding a backend (DirectWrite, Pango, ...) is one more declare call; no
+# caller changes. Capability here only means "compilable", never
+# "default-enabled" — runtime gating stays in feature-gates.json.
+# ---------------------------------------------------------------------------
+set_property(GLOBAL PROPERTY HP2_TEXT_PROVIDERS "")
+
+function(hp2_declare_text_provider name)
+    cmake_parse_arguments(PARSE_ARGV 1 _hp2_provider "" "" "SOURCES;LINK_LIBS;CONDITION")
+    set_property(GLOBAL APPEND PROPERTY HP2_TEXT_PROVIDERS "${name}")
+    set_property(GLOBAL PROPERTY HP2_TEXT_PROVIDER_${name}_SOURCES "${_hp2_provider_SOURCES}")
+    set_property(GLOBAL PROPERTY HP2_TEXT_PROVIDER_${name}_LINK_LIBS "${_hp2_provider_LINK_LIBS}")
+    set_property(GLOBAL PROPERTY HP2_TEXT_PROVIDER_${name}_CONDITION "${_hp2_provider_CONDITION}")
+endfunction()
+
+# Framework probes run unconditionally so each CONDITION is a pure variable
+# test; on hosts without the frameworks find_library simply reports NOTFOUND.
+find_library(HP2_CORETEXT_FRAMEWORK CoreText)
+find_library(HP2_COREGRAPHICS_FRAMEWORK CoreGraphics)
+
+hp2_declare_text_provider(CoreText
+    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeText.cpp"
+    LINK_LIBS "${HP2_CORETEXT_FRAMEWORK}" "${HP2_COREGRAPHICS_FRAMEWORK}"
+    CONDITION "APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK"
+)
+
 set(HP2_HAS_NATIVE_TEXT_BACKEND OFF)
-if(APPLE)
-    find_library(HP2_CORETEXT_FRAMEWORK CoreText)
-    find_library(HP2_COREGRAPHICS_FRAMEWORK CoreGraphics)
-    if(HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK)
+set(HP2_TEXT_PROVIDER_NAME "")
+get_property(_hp2_text_provider_candidates GLOBAL PROPERTY HP2_TEXT_PROVIDERS)
+foreach(_hp2_text_provider IN LISTS _hp2_text_provider_candidates)
+    get_property(_hp2_text_provider_condition GLOBAL
+        PROPERTY HP2_TEXT_PROVIDER_${_hp2_text_provider}_CONDITION)
+    # Plain if(${condition}) would not re-dereference expanded non-boolean
+    # tokens (e.g. framework paths), so evaluate the stored expression with
+    # full variable semantics instead.
+    set(_hp2_text_provider_matched OFF)
+    cmake_language(EVAL CODE "
+if(${_hp2_text_provider_condition})
+    set(_hp2_text_provider_matched ON)
+endif()")
+    if(_hp2_text_provider_matched)
+        get_property(HP2_TEXT_PROVIDER_SOURCES GLOBAL
+            PROPERTY HP2_TEXT_PROVIDER_${_hp2_text_provider}_SOURCES)
+        get_property(HP2_TEXT_PROVIDER_LINK_LIBS GLOBAL
+            PROPERTY HP2_TEXT_PROVIDER_${_hp2_text_provider}_LINK_LIBS)
         set(HP2_HAS_NATIVE_TEXT_BACKEND ON)
-        list(APPEND HP2_XOPENGLDRV_SOURCES
-            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeText.cpp"
-        )
-    else()
-        message(STATUS "Native text backend unavailable: CoreText/CoreGraphics not found")
+        set(HP2_TEXT_PROVIDER_NAME "${_hp2_text_provider}")
+        list(APPEND HP2_XOPENGLDRV_SOURCES ${HP2_TEXT_PROVIDER_SOURCES})
+        break()
     endif()
+endforeach()
+unset(_hp2_text_provider_candidates)
+unset(_hp2_text_provider_matched)
+unset(_hp2_text_provider)
+unset(_hp2_text_provider_condition)
+
+if(NOT HP2_HAS_NATIVE_TEXT_BACKEND)
+    message(STATUS "Native text backend unavailable: no text provider condition matched")
 endif()
 
 find_package(OpenGL REQUIRED)

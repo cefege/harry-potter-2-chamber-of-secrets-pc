@@ -189,10 +189,9 @@ target_link_libraries(hp2_xopengldrv PUBLIC
 )
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    target_link_libraries(hp2_xopengldrv PUBLIC
-        "${HP2_CORETEXT_FRAMEWORK}"
-        "${HP2_COREGRAPHICS_FRAMEWORK}"
-    )
+    # Link libraries exported by the selected native text provider
+    # (HP2Dependencies.cmake), not provider-specific framework paths.
+    target_link_libraries(hp2_xopengldrv PUBLIC ${HP2_TEXT_PROVIDER_LINK_LIBS})
 endif()
 
 function(hp2_add_executable target)
@@ -333,6 +332,21 @@ hp2_add_executable(hp2_replay_roundtrip_tests
     ${HP2_REPLAY_ROUNDTRIP_TEST_SOURCE}
 )
 target_link_libraries(hp2_replay_roundtrip_tests PRIVATE hp2_core)
+
+# Input freeze + mouse-capture policy + normalization mapping contracts.
+hp2_add_executable(hp2_input_contract_tests
+    ${HP2_INPUT_CONTRACT_TEST_SOURCE}
+    ${HP2_STATIC_PACKAGE_SOURCE}
+    ${HP2_PATH_SOURCE}
+)
+target_link_libraries(hp2_input_contract_tests PRIVATE
+    hp2_core
+    hp2_engine
+    hp2_render
+    hp2_fire
+    hp2_editor_runtime
+    hp2_sdldrv
+)
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_executable(hp2_native_typography_tests
         ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
@@ -371,6 +385,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_launcher_tests
     hp2_config_ini_tests
     hp2_replay_roundtrip_tests
+    hp2_input_contract_tests
 )
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
@@ -515,6 +530,26 @@ hp2_add_behavior_test(config_ini_unicode_roundtrip hp2_config_ini_tests
     --test=unicode_roundtrip
 )
 hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
+hp2_add_behavior_test(input_edge_contracts hp2_input_contract_tests
+    --test=input_edge
+    "-datadir=${HP2_TEST_DATA_ROOT}"
+)
+hp2_add_behavior_test(input_axis_order hp2_input_contract_tests
+    --test=input_axis_order
+    "-datadir=${HP2_TEST_DATA_ROOT}"
+)
+hp2_add_behavior_test(input_release_all hp2_input_contract_tests
+    --test=input_release_all
+    "-datadir=${HP2_TEST_DATA_ROOT}"
+)
+hp2_add_behavior_test(mouse_capture_policy hp2_input_contract_tests
+    --test=mouse_capture_policy
+    "-datadir=${HP2_TEST_DATA_ROOT}"
+)
+hp2_add_behavior_test(input_event_mapping hp2_input_contract_tests
+    --test=input_event_mapping
+    "-datadir=${HP2_TEST_DATA_ROOT}"
+)
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"
@@ -548,6 +583,40 @@ if(EXISTS "${HP2_UNREAL_ROOT}/System/CUTSCENES")
         "${PROJECT_SOURCE_DIR}/Tests/LocalizationTests.py"
     )
 endif()
+if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
+        AND EXISTS "${HP2_UNREAL_ROOT}/System/Default.ini")
+    hp2_add_behavior_test(input_script_contract "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/InputScriptSmoke.py"
+    )
+    hp2_add_behavior_test(input_script_smoke "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/InputScriptSmoke.py"
+        --smoke
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        --ticks=240
+        --timeout=120
+    )
+    set_tests_properties(input_script_smoke PROPERTIES
+        LABELS "integration;data-prototype"
+        RESOURCE_LOCK hp2_gpu
+    )
+endif()
+hp2_add_behavior_test(framing_baseline_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/FramingBaselineTests.py"
+)
+set_tests_properties(framing_baseline_contract PROPERTIES LABELS "fast;data-none")
+
+if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
+        AND EXISTS "${HP2_UNREAL_ROOT}/System/Default.ini")
+    hp2_add_behavior_test(determinism_double_run "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/DeterminismDoubleRunTests.py"
+        --ticks=60
+    )
+    set_tests_properties(determinism_double_run PROPERTIES
+        LABELS "integration;data-prototype"
+        RESOURCE_LOCK hp2_gpu
+    )
+endif()
+
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     # Data-backed contracts pass their root explicitly (never CWD discovery),

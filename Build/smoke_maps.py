@@ -533,7 +533,8 @@ def _log_directory(output: Path) -> Path:
     return output.with_name(f"{stem}-logs")
 
 
-def _replace_log_directory(directory: Path) -> None:
+def _replace_directory(directory: Path) -> None:
+    """Replace a scratch directory (log or frame-capture root) atomically."""
     try:
         if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
             directory.unlink()
@@ -541,8 +542,55 @@ def _replace_log_directory(directory: Path) -> None:
             shutil.rmtree(directory)
         directory.mkdir(parents=True, exist_ok=False)
     except OSError as error:
-        raise SmokeError(f"cannot replace log directory {directory}: {error}") from error
+        raise SmokeError(f"cannot replace directory {directory}: {error}") from error
 
+
+def _frames_directory(output: Path) -> Path:
+    name = output.name
+    stem = name[:-5] if name.lower().endswith(".json") else name
+    return output.with_name(f"{stem}-frames")
+
+
+def _capture_record(
+    frames_dir: Path | None, repo_root: Path
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Summarize engine frame captures into capture + artifacts records.
+
+    The engine writes frame_<6d>.png files plus a frame_meta.json sidecar
+    ({"captures": [...]}) into the per-map frames directory. count reflects
+    the number of captured entries and scale_factor the last observed HiDPI
+    backing scale factor (null when capture was disabled or produced none).
+    """
+    if frames_dir is None:
+        return (
+            {"count": 0, "scale_factor": None},
+            {"frames_dir": None, "frame_meta": None},
+        )
+    meta_path = frames_dir / "frame_meta.json"
+    captures: list[dict[str, object]] = []
+    try:
+        decoded = json.loads(meta_path.read_text(encoding="utf-8"))
+        if isinstance(decoded, dict) and isinstance(decoded.get("captures"), list):
+            captures = [
+                entry
+                for entry in decoded["captures"]
+                if isinstance(entry, dict)
+            ]
+    except (OSError, ValueError):
+        captures = []
+    scale_factor: float | None = None
+    for capture in reversed(captures):
+        candidate = capture.get("backing_scale_factor")
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            scale_factor = float(candidate)
+            break
+    return (
+        {"count": len(captures), "scale_factor": scale_factor},
+        {
+            "frames_dir": game_test._display_path(frames_dir, repo_root),
+            "frame_meta": game_test._display_path(meta_path, repo_root),
+        },
+    )
 
 def _run_map(
     *,
@@ -558,7 +606,16 @@ def _run_map(
     repo_root: Path,
     log_path: Path,
     inspection: dict[str, object],
+    capture_frames_dir: Path | None = None,
 ) -> dict[str, object]:
+    extra_env = None
+    if capture_frames_dir is not None:
+        _replace_directory(capture_frames_dir)
+        extra_env = {
+            "HP2_CAPTURE_FRAMES": str(capture_frames_dir),
+            "HP2_CAPTURE_MAP": Path(map_relative).stem,
+            "HP2_CAPTURE_TICKS": str(ticks),
+        }
     result = game_test.run_game(
         app=executable,
         data_root=data_root,
@@ -568,6 +625,7 @@ def _run_map(
         timeout_seconds=timeout_seconds,
         log_path=log_path,
         no_sound=True,
+        extra_env=extra_env,
     )
     result.update(
         {
@@ -581,6 +639,9 @@ def _run_map(
             "map": game_test._display_path(map_path, repo_root),
             "map_relative_to_data_root": map_relative,
         }
+    )
+    result["capture"], result["artifacts"] = _capture_record(
+        capture_frames_dir, repo_root
     )
     _apply_budget_contract(
         result,
@@ -907,6 +968,17 @@ def _arguments() -> argparse.Namespace:
             "case-insensitively against map file stems (default: every map)"
         ),
     )
+    parser.add_argument(
+        "--capture-frames",
+        action="store_true",
+        default=False,
+        help=(
+            "enable engine end-of-frame capture (HP2_CAPTURE_FRAMES): every "
+            "launched map writes frame_<6d>.png files plus frame_meta.json "
+            "under <output-stem>-frames/<index>-<map>/ and its report record "
+            "gains capture {count, scale_factor} fields"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -990,12 +1062,20 @@ def main() -> int:
         if not output.name:
             raise SmokeError(f"output path must name a JSON file: {output_argument}")
         logs = _log_directory(output)
-        _replace_log_directory(logs)
+        _replace_directory(logs)
+        frames_root = (
+            _frames_directory(output) if arguments.capture_frames else None
+        )
         records: list[dict[str, object]] = []
         for index, ((map_path, map_relative), inspection) in enumerate(
             zip(maps, inspections), start=1
         ):
             log_path = logs / f"{index:06d}.log"
+            capture_frames_dir = (
+                frames_root / f"{index:06d}-{Path(map_relative).stem}"
+                if frames_root is not None
+                else None
+            )
             if inspection["verification_mode"] == "game_launch":
                 record = _run_map(
                     executable=executable,
@@ -1010,6 +1090,7 @@ def main() -> int:
                     inspection=inspection,
                     max_frame_ms=arguments.max_frame_ms,
                     max_map_seconds=arguments.max_map_seconds,
+                    capture_frames_dir=capture_frames_dir,
                 )
             else:
                 record = _verify_map_package(
@@ -1053,6 +1134,7 @@ def main() -> int:
             "data_root": game_test._display_path(data_root, repo_root),
             "renderer": arguments.renderer,
             "ticks": arguments.ticks,
+            "capture_frames": arguments.capture_frames,
             "timeout_seconds": arguments.timeout,
             "max_frame_ms": arguments.max_frame_ms,
             "max_map_seconds": arguments.max_map_seconds,

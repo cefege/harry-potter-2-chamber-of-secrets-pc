@@ -1,0 +1,58 @@
+# HP2 scripted-input smoke fixture.
+#
+# Compiled by Tests/InputScriptSmoke.py into an FReplay .rep input stream
+# (HarryPotter2/Unreal/Engine/Src/UnReplay.cpp) and executed by the engine
+# itself via `-REPLAY=... -TESTTICKS=...`. Every event below travels the
+# production input path: UGameEngine::InputEvent -> UEngine::InputEvent ->
+# UInput::Process -> keybinding -> Viewport exec chain.
+#
+# Grammar (blank lines and #-comments are ignored):
+#   tick <float>     Per-frame delta seconds. Exactly one, must be first.
+#   idle <N>         N frames without input.
+#   press <Key>      IST_Press this frame, IST_Release the next (2 frames).
+#   hold <Key> <N>   IST_Press, then N-1 IST_Hold frames, then IST_Release
+#                    (N+1 frames total).
+#   Key is an EInputKey name minus the "IK_" prefix (see
+#   HarryPotter2/Unreal/Engine/Inc/EngineClasses.h).
+#
+# Determinism: FReplay seeds srand(1), feeds every tick delta from this
+# file, and suppresses all real (SDL) input while replaying, so the run
+# depends only on this script.
+#
+# Probe: the runner rewrites the empty `K=` binding in the isolated
+# User.ini to `K=SHOT`, so each `press K` saves Shot%04i.bmp into the
+# user directory. Those files are hard evidence that scripted input
+# flowed through the full keybind pipeline before and after gameplay
+# input (movement, rotation, jump, fire, spell switching).
+tick 0.033333335
+
+# Settle after map load.
+idle 8
+
+# Probe 1: input pipeline alive before any gameplay input.
+press K
+
+# Movement: walk forward, then backpedal.
+hold W 40
+hold S 20
+
+# Rotation: turn left, then right.
+hold Left 15
+hold Right 15
+
+# Jump.
+press Ctrl
+
+# Combat inputs: broom/spell-cycle mouse button, duel spell slots,
+# wand fire.
+press RightMouse
+press 1
+press 2
+press 3
+press LeftMouse
+
+# Probe 2: input pipeline still alive after gameplay input.
+press K
+
+# Settle before the tick budget ends the run.
+idle 8

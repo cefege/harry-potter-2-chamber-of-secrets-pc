@@ -27,7 +27,20 @@
 #include "XOpenGL.h"
 
 #ifndef _WIN32
+// HP2 end-of-frame capture (HP2_CAPTURE_FRAMES): PNG encoding via the vendored
+// single-header stb_image_write; the implementation is compiled into this
+// translation unit only.
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../ThirdParty/stb/stb_image_write.h"
+#endif
+
+#ifndef _WIN32
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <vector>
 #else
 # if !OLDUNREAL_WINXP
 #  include <d3d11.h>
@@ -2539,6 +2552,162 @@ void UXOpenGLRenderDevice::BeginUI(FSceneNode* Frame)
 	unguard;
 }
 
+
+#ifndef _WIN32
+/*-----------------------------------------------------------------------------
+	HP2 end-of-frame capture.
+	When HP2_CAPTURE_FRAMES names a directory, every presented frame is read
+	back from the default framebuffer and written as frame_<6d>.png plus a
+	frame_meta.json sidecar (width/height, HiDPI backing scale factor, renderer,
+	requested ticks, map). The harness may refine the metadata through
+	HP2_CAPTURE_MAP and HP2_CAPTURE_TICKS. With HP2_CAPTURE_FRAMES unset the
+	hook costs a single getenv for the whole process lifetime.
+-----------------------------------------------------------------------------*/
+namespace
+{
+	struct FFrameCaptureState
+	{
+		bool Initialized = false;
+		bool Enabled = false;
+		INT FrameIndex = 0;
+		INT RequestedTicks = -1;
+		std::string Directory;
+		std::string MapName;
+		std::vector<std::string> MetaEntries;
+	};
+
+	FFrameCaptureState GFrameCapture;
+
+	const char* HPCaptureEnv(const char* Name)
+	{
+		const char* Value = getenv(Name);
+		return (Value && Value[0]) ? Value : NULL;
+	}
+
+	void HPAppendJsonString(std::string& Out, const char* Text)
+	{
+		Out.push_back('"');
+		for (const char* Cursor = Text ? Text : ""; *Cursor; ++Cursor)
+		{
+			const unsigned char Character = (unsigned char)*Cursor;
+			if (Character == '"' || Character == '\\')
+			{
+				Out.push_back('\\');
+				Out.push_back((char)Character);
+			}
+			else if (Character < 0x20)
+			{
+				char Escape[8];
+				snprintf(Escape, sizeof(Escape), "\\u%04x", (unsigned)Character);
+				Out += Escape;
+			}
+			else
+			{
+				Out.push_back((char)Character);
+			}
+		}
+		Out.push_back('"');
+	}
+
+	void HPRewriteFrameMeta()
+	{
+		std::string Path = GFrameCapture.Directory + "/frame_meta.json";
+		std::string Json = "{\"captures\":[";
+		for (size_t Index = 0; Index < GFrameCapture.MetaEntries.size(); ++Index)
+		{
+			if (Index)
+				Json += ",";
+			Json += GFrameCapture.MetaEntries[Index];
+		}
+		Json += "]}\n";
+		if (FILE* Stream = fopen(Path.c_str(), "wb"))
+		{
+			fwrite(Json.data(), 1, Json.size(), Stream);
+			fclose(Stream);
+		}
+	}
+
+	void HPInitFrameCapture()
+	{
+		GFrameCapture.Initialized = true;
+		const char* Directory = HPCaptureEnv("HP2_CAPTURE_FRAMES");
+		if (!Directory)
+			return;
+		GFrameCapture.Directory = Directory;
+		if (const char* MapName = HPCaptureEnv("HP2_CAPTURE_MAP"))
+			GFrameCapture.MapName = MapName;
+		if (const char* Ticks = HPCaptureEnv("HP2_CAPTURE_TICKS"))
+			GFrameCapture.RequestedTicks = atoi(Ticks);
+		// Best effort; the harness normally pre-creates the directory.
+		mkdir(GFrameCapture.Directory.c_str(), 0775);
+		GFrameCapture.Enabled = true;
+		debugf(NAME_Init, TEXT("XOpenGL: frame capture enabled in %ls"), appFromAnsi(GFrameCapture.Directory.c_str()));
+	}
+
+	void HPCapturePresentedFrame(SDL_Window* Window, INT Width, INT Height)
+	{
+		if (!GFrameCapture.Initialized)
+			HPInitFrameCapture();
+		if (!GFrameCapture.Enabled || Width <= 0 || Height <= 0)
+			return;
+
+		const SIZE_T Stride = (SIZE_T)Width * 3;
+		std::vector<unsigned char> Pixels(Stride * (SIZE_T)Height);
+		GLint PreviousPackAlignment = 4;
+		glGetIntegerv(GL_PACK_ALIGNMENT, &PreviousPackAlignment);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadPixels(0, 0, Width, Height, GL_RGB, GL_UNSIGNED_BYTE, Pixels.data());
+		glPixelStorei(GL_PACK_ALIGNMENT, PreviousPackAlignment);
+
+		// OpenGL returns bottom-up rows while PNG scanlines run top-down.
+		std::vector<unsigned char> TopDown(Pixels.size());
+		for (INT Row = 0; Row < Height; ++Row)
+			memcpy(&TopDown[Stride * (SIZE_T)(Height - 1 - Row)], &Pixels[Stride * (SIZE_T)Row], Stride);
+
+		// HiDPI backing scale: drawable pixels per logical window pixel.
+		int LogicalWidth = 0, LogicalHeight = 0, DrawableWidth = 0, DrawableHeight = 0;
+		SDL_GetWindowSize(Window, &LogicalWidth, &LogicalHeight);
+		SDL_GL_GetDrawableSize(Window, &DrawableWidth, &DrawableHeight);
+		const DOUBLE BackingScale = LogicalHeight > 0 ? (DOUBLE)DrawableHeight / (DOUBLE)LogicalHeight : 1.0;
+
+		char Path[1024];
+		snprintf(Path, sizeof(Path), "%s/frame_%06d.png", GFrameCapture.Directory.c_str(), GFrameCapture.FrameIndex);
+		if (!stbi_write_png(Path, Width, Height, 3, TopDown.data(), (int)Stride))
+		{
+			debugf(NAME_Warning, TEXT("XOpenGL: frame capture write failed for %ls; disabling capture"), appFromAnsi(Path));
+			GFrameCapture.Enabled = false;
+			return;
+		}
+
+		char EntryHead[256];
+		snprintf(EntryHead, sizeof(EntryHead),
+			"{\"width_px\":%i,\"height_px\":%i,\"backing_scale_factor\":%.6f,\"renderer\":",
+			Width, Height, BackingScale);
+		std::string Entry(EntryHead);
+		HPAppendJsonString(Entry, (const char*)glGetString(GL_RENDERER));
+		Entry += ",\"ticks\":";
+		if (GFrameCapture.RequestedTicks >= 0)
+		{
+			char TickText[32];
+			snprintf(TickText, sizeof(TickText), "%d", GFrameCapture.RequestedTicks);
+			Entry += TickText;
+		}
+		else
+		{
+			Entry += "null";
+		}
+		Entry += ",\"map\":";
+		HPAppendJsonString(Entry, GFrameCapture.MapName.c_str());
+		Entry += "}";
+		GFrameCapture.MetaEntries.push_back(Entry);
+		HPRewriteFrameMeta();
+
+		debugf(NAME_Log, TEXT("XOpenGL: captured frame_%06i.png %ix%i backing_scale=%.3f"), GFrameCapture.FrameIndex, Width, Height, BackingScale);
+		++GFrameCapture.FrameIndex;
+	}
+}
+#endif
+
 void UXOpenGLRenderDevice::Unlock(UBOOL Blit)
 {
 	guard(UXOpenGLRenderDevice::Unlock);
@@ -2596,6 +2765,11 @@ void UXOpenGLRenderDevice::Unlock(UBOOL Blit)
 			static_cast<PostProcessProgram*>(Shaders[PostProcess_Prog])->Draw(PresentTexture, PresentWidth, PresentHeight);
 			SetProgram(No_Prog);
 			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+#ifndef _WIN32
+			// End-of-frame capture: present-prep is done and the default
+			// framebuffer holds the finished frame; run before the swap.
+			HPCapturePresentedFrame(Window, PresentWidth, PresentHeight);
+#endif
 
 #if !_WIN32
 			SDL_GL_SwapWindow(Window);

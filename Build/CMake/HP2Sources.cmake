@@ -180,6 +180,7 @@ set(HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/NativeTypogra
 set(HP2_CANVAS_COMPATIBILITY_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/CanvasCompatibilityTests.cpp")
 set(HP2_CONFIG_INI_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ConfigIniTests.cpp")
 set(HP2_REPLAY_ROUNDTRIP_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ReplayRoundTripTests.cpp")
+set(HP2_INPUT_CONTRACT_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/InputContractTests.cpp")
 
 # Every source below is required by the completed native test graph. Keep the
 # list explicit so HP2_REQUIRE_IMPLEMENTED_SOURCES reports a focused error at

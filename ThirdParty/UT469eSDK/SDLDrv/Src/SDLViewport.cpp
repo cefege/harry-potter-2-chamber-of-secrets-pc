@@ -18,6 +18,7 @@ Revision history:
 #include <ctype.h>
 #include <dlfcn.h>
 #include "SDLDrv.h"
+#include "HP2MouseCapturePolicy.h"
 #include "FConfigCacheIni.h"
 
 // Duplicated here for convenience.
@@ -1462,7 +1463,9 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 					&& Window != NULL
 					&& Event.window.windowID == SDL_GetWindowID(Window))
 				{
-					if (!LostGrab && MouseIsGrabbed)
+					const HP2Capture::FState CaptureState =
+						{ MouseIsGrabbed != 0, LostGrab != 0, GetOuterUSDLClient()->CaptureMouse != 0 };
+					if (HP2Capture::OnLoss(CaptureState).Action == HP2Capture::Action_Release)
 					{
 						LostGrab = 1;
 						UpdateMouseGrabState(0);
@@ -1482,9 +1485,12 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 					&& Event.window.windowID == SDL_GetWindowID(Window))
 				{
 					const Uint32 WindowFlags = SDL_GetWindowFlags(Window);
-					if (LostGrab
-						&& (WindowFlags & SDL_WINDOW_INPUT_FOCUS) != 0
-						&& (WindowFlags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) == 0)
+					const HP2Capture::FWindowFlags WindowSnapshot =
+						{ (WindowFlags & SDL_WINDOW_INPUT_FOCUS) != 0,
+						  (WindowFlags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0 };
+					const HP2Capture::FState CaptureState =
+						{ MouseIsGrabbed != 0, LostGrab != 0, GetOuterUSDLClient()->CaptureMouse != 0 };
+					if (HP2Capture::OnRestore(CaptureState, WindowSnapshot).Action == HP2Capture::Action_Restore)
 					{
 						UpdateMouseGrabState(GetOuterUSDLClient()->CaptureMouse);
 						LostGrab = 0;

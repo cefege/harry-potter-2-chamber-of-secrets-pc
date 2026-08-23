@@ -544,6 +544,125 @@ int main()
 			"PrepareHP2Paths accepts an explicit legacy data root");
 	}
 
+	// ------------------------------------------------------------------
+	// Discovery mode: no -datadir. A cwd inside a checkout whose
+	// out/retail-data is a complete overlay root must be accepted through
+	// the same ValidateDataRoot path the explicit -datadir uses.
+	// ------------------------------------------------------------------
+	{
+		const char* ArtifactDir = std::getenv("HP2_ARTIFACT_DIR");
+		const std::string Base = JoinPath(
+			ArtifactDir ? ArtifactDir : ".", "tmp/data-identity/discovery");
+		const FileList Files = StandardFiles();
+		const std::string RetailRoot = JoinPath(Base, "out/retail-data");
+		WriteFile(JoinPath(RetailRoot, "System/Default.ini"), Files[0].second);
+		WriteFile(JoinPath(RetailRoot, "Maps/Entry.unr"), Files[1].second);
+		WriteFile(JoinPath(RetailRoot, "overlay-checksums.txt"),
+			ChecksumsText(Files));
+		WriteFile(JoinPath(RetailRoot, "overlay-manifest.json"),
+			ManifestJson(Files, "safe", 3));
+
+		const std::string Home = JoinPath(Base, "Home");
+		WriteFile(JoinPath(Home, ".keep"), "");
+		char PreviousHome[4096];
+		const bool HadHome = std::getenv("HOME") != nullptr;
+		if (HadHome)
+			std::snprintf(PreviousHome, sizeof(PreviousHome), "%s",
+				std::getenv("HOME"));
+		char PreviousCwd[4096];
+		const bool HadCwd = getcwd(PreviousCwd, sizeof(PreviousCwd)) != nullptr;
+
+		setenv("HOME", Home.c_str(), 1);
+		const bool ChdirOk = chdir(Base.c_str()) == 0;
+		Expect(ChdirOk, "discovery test chdir into the checkout parent");
+		if (ChdirOk)
+		{
+			char* Arguments[1] = {const_cast<char*>("hp2-data-identity-tests")};
+			Expect(PrepareHP2Paths(1, Arguments),
+				"PrepareHP2Paths discovers out/retail-data from the cwd");
+		}
+
+		if (HadCwd)
+			chdir(PreviousCwd);
+		if (HadHome)
+			setenv("HOME", PreviousHome, 1);
+		else
+			unsetenv("HOME");
+	}
+
+	// ------------------------------------------------------------------
+	// Pre-init allocator contract: the launch binaries enter
+	// PrepareHP2Paths while GMalloc is still the placeholder that refuses
+	// every request. The bootstrap must not fault (it used to memmove into
+	// a null buffer inside VerifyOverlayIdentity) and must restore the
+	// caller's allocator afterwards.
+	// ------------------------------------------------------------------
+	{
+		class FRefusingMalloc final : public FMalloc
+		{
+		public:
+			void* Malloc( DWORD, const TCHAR* ) override { return nullptr; }
+			void* Realloc( void*, DWORD, const TCHAR* ) override { return nullptr; }
+			void Free( void* ) override {}
+			void DumpAllocs() override {}
+			void HeapCheck() override {}
+			void Init() override {}
+			void Exit() override {}
+		};
+		static FRefusingMalloc RefusingMalloc;
+
+		const std::string Base = JoinPath(
+			std::getenv("HP2_ARTIFACT_DIR")
+				? std::getenv("HP2_ARTIFACT_DIR") : ".",
+			"tmp/data-identity/pre-init");
+		const FileList Files = StandardFiles();
+		const std::string RetailRoot = JoinPath(Base, "out/retail-data");
+		WriteFile(JoinPath(RetailRoot, "System/Default.ini"), Files[0].second);
+		WriteFile(JoinPath(RetailRoot, "Maps/Entry.unr"), Files[1].second);
+		WriteFile(JoinPath(RetailRoot, "overlay-checksums.txt"),
+			ChecksumsText(Files));
+		WriteFile(JoinPath(RetailRoot, "overlay-manifest.json"),
+			ManifestJson(Files, "safe", 3));
+		const std::string Home = JoinPath(Base, "Home");
+		WriteFile(JoinPath(Home, ".keep"), "");
+
+		FMalloc* const SavedMalloc = GMalloc;
+		char PreviousCwd[4096];
+		const bool HadCwd = getcwd(PreviousCwd, sizeof(PreviousCwd)) != nullptr;
+		setenv("HOME", Home.c_str(), 1);
+
+		GMalloc = &RefusingMalloc;
+		bool DiscoveryOk = false;
+		if (chdir(Base.c_str()) == 0)
+		{
+			char* Arguments[1] = {const_cast<char*>("hp2-data-identity-tests")};
+			DiscoveryOk = PrepareHP2Paths(1, Arguments);
+		}
+		GMalloc = SavedMalloc;
+
+		Expect(DiscoveryOk,
+			"PrepareHP2Paths survives a refusing pre-init allocator");
+		if (HadCwd)
+			chdir(PreviousCwd);
+
+		// Explicit -datadir through the same bootstrap under the same
+		// refusing allocator, plus proof the caller's allocator still works.
+		std::string ExplicitArgument = "-datadir=" + RetailRoot;
+		GMalloc = &RefusingMalloc;
+		char* ExplicitArguments[2] = {
+			const_cast<char*>("hp2-data-identity-tests"), &ExplicitArgument[0]};
+		const bool ExplicitOk = PrepareHP2Paths(2, ExplicitArguments);
+		GMalloc = SavedMalloc;
+		Expect(ExplicitOk,
+			"explicit -datadir overlay root survives the refusing allocator");
+
+		std::string PostRestoreProbe(1 << 16, 'x');
+		Expect(PostRestoreProbe.size() == (size_t)(1 << 16),
+			"caller allocator works after bootstrap restore");
+	}
+
+
+
 	if (GFailures == 0)
 	{
 		std::printf("data identity contracts passed\n");
