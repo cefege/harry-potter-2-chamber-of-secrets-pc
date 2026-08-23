@@ -243,6 +243,13 @@ target_link_libraries(hp2_game PRIVATE
     "${HP2_APPKIT_FRAMEWORK}"
 )
 
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    # Object libraries do not propagate their objects through other object
+    # libraries: consume the shared native-text core directly wherever
+    # hp2_xopengldrv is linked (mirrors the hp2_zvulkan idiom).
+    target_sources(hp2_game PRIVATE $<TARGET_OBJECTS:hp2_nativetextcore>)
+endif()
+
 hp2_add_executable(hp2_ucc
     ${HP2_UCC_SOURCES}
     ${HP2_STATIC_PACKAGE_SOURCE}
@@ -363,11 +370,17 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
         ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
         ${HP2_PATH_SOURCE}
     )
+    # hp2_nativetextcore is an OBJECT library: its objects do not survive
+    # transitively through hp2_xopengldrv, so consume them directly here.
+    target_sources(hp2_native_typography_tests PRIVATE
+        $<TARGET_OBJECTS:hp2_nativetextcore>
+    )
     target_link_libraries(hp2_native_typography_tests PRIVATE
         hp2_core
         hp2_engine
         hp2_render
         hp2_xopengldrv
+        ${HP2_TEXT_PROVIDER_LINK_LIBS}
     )
 endif()
 
@@ -376,11 +389,16 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
         ${HP2_CANVAS_COMPATIBILITY_TEST_SOURCE}
         ${HP2_PATH_SOURCE}
     )
+    # Same object-library propagation rule as the typography tests above.
+    target_sources(hp2_canvas_compatibility_tests PRIVATE
+        $<TARGET_OBJECTS:hp2_nativetextcore>
+    )
     target_link_libraries(hp2_canvas_compatibility_tests PRIVATE
         hp2_core
         hp2_engine
         hp2_render
         hp2_xopengldrv
+        ${HP2_TEXT_PROVIDER_LINK_LIBS}
     )
 endif()
 
@@ -911,6 +929,9 @@ if(HP2_ENABLE_VULKAN_DRIVER)
         )
         target_include_directories(hp2_vulkandrv PUBLIC "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc")
         target_link_libraries(hp2_vulkandrv PUBLIC hp2_nativetextcore)
+        # Objects do not flow through the object-library chain: register the
+        # shared native-text core next to hp2_vulkandrv, mirroring hp2_zvulkan.
+        target_link_libraries(hp2_game PRIVATE hp2_nativetextcore)
     endif()
 
     # Static registration: adding the objects to hp2_game puts
