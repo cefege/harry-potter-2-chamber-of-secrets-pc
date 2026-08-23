@@ -138,6 +138,20 @@ void VulkanInstance::CreateInstance()
 		}
 	}
 
+#if defined(__APPLE__)
+	// The portability-enumeration flag is only valid together with this
+	// instance extension (VUID-VkInstanceCreateInfo-flags-06559). MoltenVK
+	// is a portability driver: without flag + extension it never enumerates.
+	for (const auto& ext : AvailableExtensions)
+	{
+		if (std::strcmp(ext.extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0)
+		{
+			EnabledExtensions.insert(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+			break;
+		}
+	}
+#endif
+
 	std::vector<const char*> enabledLayersCStr;
 	for (const std::string& layer : EnabledLayers)
 		enabledLayersCStr.push_back(layer.c_str());
@@ -167,7 +181,7 @@ void VulkanInstance::CreateInstance()
 		createInfo.ppEnabledExtensionNames = enabledExtensionsCStr.data();
 		// MoltenVK presents itself as a portability implementation on macOS; without
 		// this flag it does not enumerate any physical devices at all.
-		#if defined(__APPLE__) && defined(VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR)
+		#if defined(__APPLE__)
 		createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 		#endif
 

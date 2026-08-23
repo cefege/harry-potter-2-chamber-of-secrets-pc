@@ -27,8 +27,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/macos-arm64",
         "HP2_ENABLE_ASAN_UBSAN": "OFF",
-        "HP2_ENABLE_TSAN": "OFF",
-        "HP2_ENABLE_FULL_MAP_SMOKE": "OFF"
+        "HP2_ENABLE_TSAN": "OFF"
       }
     },
     {
@@ -67,6 +66,17 @@
         "CMAKE_BUILD_TYPE": "Release",
         "HP2_ENABLE_FULL_MAP_SMOKE": "ON"
       }
+    },
+    {
+      "name": "macos-arm64-vulkan",
+      "displayName": "macOS 15 arm64 Release + Vulkan driver",
+      "inherits": "macos-arm64-base",
+      "binaryDir": "${sourceDir}/out/macos-arm64-vulkan",
+      "installDir": "${sourceDir}/out/install/macos-arm64-vulkan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HP2_ENABLE_VULKAN_DRIVER": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -85,6 +95,10 @@
     {
       "name": "macos-arm64-full-smoke",
       "configurePreset": "macos-arm64-full-smoke"
+    },
+    {
+      "name": "macos-arm64-vulkan",
+      "configurePreset": "macos-arm64-vulkan"
     }
   ],
   "testPresets": [
@@ -92,45 +106,36 @@
       "name": "macos-arm64",
       "displayName": "macOS 15 arm64 Release tests",
       "configurePreset": "macos-arm64",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
     },
     {
       "name": "macos-arm64-asan-ubsan",
       "displayName": "macOS 15 arm64 ASan+UBSan tests",
       "configurePreset": "macos-arm64-asan-ubsan",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
     },
     {
       "name": "macos-arm64-tsan",
       "displayName": "macOS 15 arm64 TSan tests",
       "configurePreset": "macos-arm64-tsan",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
     },
     {
       "name": "macos-arm64-full-smoke",
       "displayName": "macOS 15 arm64 full sweep tests",
       "configurePreset": "macos-arm64-full-smoke",
-      "output": {
-        "outputOnFailure": true
-      },
-      "execution": {
-        "noTestsAction": "error"
-      }
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "macos-arm64-vulkan",
+      "displayName": "macOS 15 arm64 Vulkan tests",
+      "configurePreset": "macos-arm64-vulkan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
     }
   ]
 }

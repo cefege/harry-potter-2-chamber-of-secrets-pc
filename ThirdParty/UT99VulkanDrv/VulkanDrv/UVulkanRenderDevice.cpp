@@ -2133,3 +2133,14 @@ void UVulkanRenderDevice::DrawPresentTexture(int width, int height)
 		.AddImage(Commands->SwapChain->GetImage(Commands->PresentImageIndex), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0)
 		.Execute(cmdbuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 }
+
+/*-----------------------------------------------------------------------------
+	Static registrant: HP2StaticPackages calls this for statically linked
+	drivers (mirrors autoInitializeRegistrantsXOpenGLDrv). Forces the class
+	object to construct so the engine registry finds
+	VulkanDrv.VulkanRenderDevice without a DLL load.
+-----------------------------------------------------------------------------*/
+extern "C" void autoInitializeRegistrantsVulkanDrv(void)
+{
+	UVulkanRenderDevice::StaticClass();
+}

@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "name": "renderer_smoke_vulkan",
+  "status": "pass",
+  "invariant": "vulkan_renderer_boots_and_ticks_a_map",
+  "reason_code": null,
+  "data": {
+    "profile": "prototype"
+  },
+  "artifacts": [
+    {
+      "kind": "log",
+      "path": "/Users/mike/Code/Default/hp2/vk-smoke/vulkan-smoke.log"
+    }
+  ],
+  "command": [
+    "/private/tmp/hp2vk/hp2_game",
+    "-datadir=/Users/mike/Code/Default/hp2/HarryPotter2/Unreal",
+    "-INI=/Users/mike/Code/Default/hp2/vk-smoke/Engine.ini",
+    "Entry",
+    "-NOFRONTEND",
+    "-window",
+    "-nosound",
+    "-testticks=60",
+    "-log"
+  ],
+  "exit_reason": "exit_0",
+  "device": "Apple M5",
+  "ticks_requested": 60
+}

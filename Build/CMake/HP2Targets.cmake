@@ -749,9 +749,25 @@ if(HP2_ENABLE_VULKAN_DRIVER)
     # Static registration: adding the objects to hp2_game puts
     # VulkanDrv.VulkanRenderDevice into the engine class registry next to
     # XOpenGLDrv.XOpenGLRenderDevice; config/-flag selection stays lead-owned.
+    # The define gates RegisterHP2ClientClasses' registrant call.
     target_link_libraries(hp2_game PRIVATE
         hp2_vulkandrv
         hp2_zvulkan
+    )
+    target_compile_definitions(hp2_game PRIVATE HP2_ENABLE_VULKAN_DRIVER=1)
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME renderer_smoke_vulkan
+        COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/Build/run_vulkan_smoke.py"
+            "--build-dir=${CMAKE_BINARY_DIR}"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    )
+    set_tests_properties(renderer_smoke_vulkan PROPERTIES
+        LABELS "smoke;renderer;vulkan"
+        RESOURCE_LOCK hp2_gpu
+        TIMEOUT 600
     )
 
 endif()
