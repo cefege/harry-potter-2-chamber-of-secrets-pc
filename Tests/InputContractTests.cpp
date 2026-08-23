@@ -729,6 +729,10 @@ bool InitializeRuntime( int ArgC, char** ArgV )
 	// Engine package is linked into the object space.
 	if( !UObject::LoadPackage( NULL, TEXT("Engine.u"), LOAD_NoFail ) )
 		return false;
+	// OPEN FINDING: even with Engine.u loaded, UInput::StaticInitInput()'s
+	// FindObjectChecked<UEnum>(AActor::StaticClass(), "EInputKey") aborts
+	// (SIGIOT) under an isolated first-run HOME. The three world groups stay
+	// quarantined until that object-space delta vs AbiTests is understood.
 	return true;
 }
 
