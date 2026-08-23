@@ -188,9 +188,21 @@ target_link_libraries(hp2_xopengldrv PUBLIC
 )
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    # Driver-neutral CoreText shaping/rasterization core (NativeTextShared.*)
+    # compiled once and consumed as objects by every render driver with a
+    # native text leg, so the provider link libraries reach both consumers.
+    hp2_add_engine_object(hp2_nativetextcore XOpenGLDrv
+        "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextShared.cpp"
+    )
+    target_include_directories(hp2_nativetextcore PUBLIC ${HP2_XOPENGLDRV_INCLUDE_DIRS})
+    target_link_libraries(hp2_nativetextcore PUBLIC ${HP2_TEXT_PROVIDER_LINK_LIBS})
+
     # Link libraries exported by the selected native text provider
     # (HP2Dependencies.cmake), not provider-specific framework paths.
-    target_link_libraries(hp2_xopengldrv PUBLIC ${HP2_TEXT_PROVIDER_LINK_LIBS})
+    target_link_libraries(hp2_xopengldrv PUBLIC
+        ${HP2_TEXT_PROVIDER_LINK_LIBS}
+        hp2_nativetextcore
+    )
 endif()
 
 function(hp2_add_executable target)
@@ -556,7 +568,15 @@ hp2_add_behavior_test(config_ini_cache_filenames hp2_config_ini_tests
 hp2_add_behavior_test(config_ini_unicode_roundtrip hp2_config_ini_tests
     --test=unicode_roundtrip
 )
-hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
+# Audio lifecycle exercises a prototype music file that ships as untracked
+# local reference data; without it the test cannot exist (configuration gap).
+if(EXISTS "${HP2_UNREAL_ROOT}/Music/sm_bur_PlayfulFail_01.ogg")
+    hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
+    set_tests_properties(audio_lifecycle PROPERTIES
+        DEPENDS "eaxa_decoder;native_registration"
+        LABELS "fast;data-none"
+    )
+endif()
 hp2_add_behavior_test(input_edge_contracts hp2_input_contract_tests
     --test=input_edge
     "-datadir=${HP2_TEST_DATA_ROOT}"
@@ -687,9 +707,18 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
 endif()
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
+    # The immutability canaries hash three prototype code packages that ship
+    # as untracked local reference data; gate exactly like the data itself.
+    if(EXISTS "${HP2_UNREAL_ROOT}/System/Engine.u"
+            AND EXISTS "${HP2_UNREAL_ROOT}/System/HGame.u"
+            AND EXISTS "${HP2_UNREAL_ROOT}/System/UWindow.u")
+        hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests
+            "-datadir=${HP2_TEST_DATA_ROOT}"
+        )
+        set_tests_properties(canvas_compatibility_contracts
+            PROPERTIES LABELS "integration;data-prototype"
+        )
+    endif()
 endif()
 
 # Deterministic renderer smoke tiers. The commit gate runs a fixed three-map
@@ -743,15 +772,12 @@ set_tests_properties(native_launcher_contract game_test_contract repair_save_con
     PROPERTIES LABELS "fast;data-none"
 )
 set_tests_properties(dxt1_codec eaxa_decoder PROPERTIES DEPENDS abi_widths)
-set_tests_properties(audio_lifecycle PROPERTIES
-    DEPENDS "eaxa_decoder;native_registration"
-)
 
 # Label taxonomy: layer labels (fast|integration|smoke|visual|manual) plus a
 # data-profile label (data-none|data-prototype|data-retail). Smoke tests keep
 # the labels assigned in the smoke block above.
 set_tests_properties(abi_widths render_clip projection_fov command_line_load
-    compact_index fstring_archive dxt1_codec eaxa_decoder audio_lifecycle
+    compact_index fstring_archive dxt1_codec eaxa_decoder
     native_launcher_contract game_test_contract repair_save_contract
     PROPERTIES LABELS "fast;data-none"
 )
@@ -762,9 +788,6 @@ set_tests_properties(native_registration package79_manifest
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     set_tests_properties(native_typography_contracts
         PROPERTIES LABELS "fast;data-none"
-    )
-    set_tests_properties(canvas_compatibility_contracts
-        PROPERTIES LABELS "integration;data-prototype"
     )
 endif()
 # ---------------------------------------------------------------------------
@@ -877,6 +900,18 @@ if(HP2_ENABLE_VULKAN_DRIVER)
         SDL2BUILD=1
     )
     target_link_libraries(hp2_vulkandrv PUBLIC SDL2::SDL2-static)
+
+    if(HP2_HAS_NATIVE_TEXT_BACKEND)
+        # The experimental Vulkan driver shares the driver-neutral CoreText
+        # core with XOpenGL: inject its objects, the shared header include
+        # path, and the Vulkan-side native text translation unit authored
+        # against Inc/NativeTextShared.h.
+        target_sources(hp2_vulkandrv PRIVATE
+            "${HP2_VULKANDRV_ROOT}/VulkanDrv/VulkanNativeText.cpp"
+        )
+        target_include_directories(hp2_vulkandrv PUBLIC "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc")
+        target_link_libraries(hp2_vulkandrv PUBLIC hp2_nativetextcore)
+    endif()
 
     # Static registration: adding the objects to hp2_game puts
     # VulkanDrv.VulkanRenderDevice into the engine class registry next to
