@@ -1720,8 +1720,24 @@ UBOOL appFindPackageFile( const TCHAR* In, const FGuid* Guid, TCHAR* Out )
 	// If using non-default language, search for internationalized version.
 	UBOOL International = (appStricmp(UObject::GetLanguage(),TEXT("int"))!=0);
 
+	// Universal path form: callers may pass Windows- or POSIX-style names
+	// ("Maps\X.unr", "Maps/X.unr", "X.unr"). Normalize separators to the
+	// platform character and remember the bare filename so directory
+	// patterns never duplicate an embedded directory.
+	TCHAR NormIn[256];
+	{
+		INT CopyLen = 0;
+		for( ; In[CopyLen] && CopyLen<ARRAY_COUNT(NormIn)-1; ++CopyLen )
+			NormIn[CopyLen] = (In[CopyLen]==TEXT('\\')) ? TEXT('/') : In[CopyLen];
+		NormIn[CopyLen] = 0;
+	}
+	TCHAR* BaseIn = NormIn;
+	for( TCHAR* Scan=NormIn; *Scan; ++Scan )
+		if( *Scan==TEXT('/') )
+			BaseIn = Scan+1;
+
 	// Try file as specified.
-	appStrcpy( Out, In );
+	appStrcpy( Out, NormIn );
 	if( GFileManager->FileSize( Out ) >= 0 )
 		return 1;
 
@@ -1733,7 +1749,7 @@ UBOOL appFindPackageFile( const TCHAR* In, const FGuid* Guid, TCHAR* Out )
 		{
 			for( INT j=0; j<International+1; j++ )
 			{
-				// Get directory only.
+				// Directory prefix from the pattern (or CD/cache path).
 				const TCHAR* Ext;
 				*Temp = 0;
 				if( DoCd )
@@ -1748,37 +1764,45 @@ UBOOL appFindPackageFile( const TCHAR* In, const FGuid* Guid, TCHAR* Out )
 					if( Ext2 )
 						*Ext2++ = 0;
 					Ext = Ext2;
-					appStrcpy( Out, Temp );
-					appStrcat( Out, In );
 				}
 				else
 				{
 					appStrcat( Temp, *GSys->CachePath );
 					appStrcat( Temp, PATH_SEPARATOR );
 					Ext = *GSys->CacheExt;
-					appStrcpy( Out, Temp );
-					appStrcat( Out, Guid->String() );
 				}
 
-				// Check for file.
-				UBOOL Found = 0;
-				Found = (GFileManager->FileSize(Out)>=0);
-				if( !Found && Ext )
+				// Candidate names: normalized input first, then its bare
+				// filename so a pattern's directory is not duplicated
+				// ("../Maps/*.unr" + "Maps\X.unr" -> "../Maps/X.unr").
+				const TCHAR* Variants[2] = { NormIn, BaseIn };
+				const INT VariantCount = (BaseIn==NormIn) ? 1 : 2;
+				for( INT V=0; V<VariantCount; ++V )
 				{
-					appStrcat( Out, TEXT(".") );
-					if( International-j )
+					appStrcpy( Out, Temp );
+					if( i<GSys->Paths.Num() )
+						appStrcat( Out, Variants[V] );
+					else
+						appStrcat( Out, Guid->String() );
+
+					UBOOL Found = (GFileManager->FileSize(Out)>=0);
+					if( !Found && Ext )
 					{
-						appStrcat( Out, UObject::GetLanguage() );
-						appStrcat( Out, TEXT("_") );
+						appStrcat( Out, TEXT(".") );
+						if( International-j )
+						{
+							appStrcat( Out, UObject::GetLanguage() );
+							appStrcat( Out, TEXT("_") );
+						}
+						appStrcat( Out, Ext+1 );
+						Found = (GFileManager->FileSize( Out )>=0);
 					}
-					appStrcat( Out, Ext+1 );
-					Found = (GFileManager->FileSize( Out )>=0);
-				}
-				if( Found )
-				{
-					if( i==GSys->Paths.Num() )
-						appUpdateFileModTime( Out );
-					return 1;
+					if( Found )
+					{
+						if( i==GSys->Paths.Num() )
+							appUpdateFileModTime( Out );
+						return 1;
+					}
 				}
 			}
 		}
@@ -1805,7 +1829,7 @@ UBOOL appFindPackageFile( const TCHAR* In, const FGuid* Guid, TCHAR* Out )
 					*Ext2++ = 0;
 				Ext = Ext2;
 				appStrcpy( Out, Temp );
-				appStrcat( Out, In );
+				appStrcat( Out, BaseIn );
 			}
 			else
 			{
@@ -1832,13 +1856,22 @@ UBOOL appFindPackageFile( const TCHAR* In, const FGuid* Guid, TCHAR* Out )
 			*InExt = 0;
 			if( Ext )
 			{
-				appStrcpy( InExt, In );
+				appStrcpy( InExt, NormIn );
 				appStrcat( InExt, Ext );
+			}
+			TCHAR BaseExt[256];
+			*BaseExt = 0;
+			if( Ext )
+			{
+				appStrcpy( BaseExt, BaseIn );
+				appStrcat( BaseExt, Ext );
 			}
 			for( INT j=0; Files.IsValidIndex(j); j++ )
 			{
-				if( (appStricmp( *(Files(j)), In )==0) ||
-					(appStricmp( *(Files(j)), InExt)==0) )
+				if( (appStricmp( *(Files(j)), NormIn )==0) ||
+					(appStricmp( *(Files(j)), InExt )==0) ||
+					(appStricmp( *(Files(j)), BaseIn )==0) ||
+					(appStricmp( *(Files(j)), BaseExt )==0) )
 				{
 					appStrcpy( Out, Temp );
 					appStrcat( Out, *(Files(j)));

@@ -18,6 +18,7 @@
 #include "HP2LaunchPolicy.h"
 #include "HP2LauncherModel.h"
 #include "HP2LauncherStore.h"
+#include "HP2CrashReporter.h"
 #include "HP2MacLauncher.h"
 #include "HP2Paths.h"
 #include "HP2StaticPackages.h"
@@ -501,10 +502,26 @@ void CleanUpOnExit( UEngine* Engine )
 
 int main( int ArgC, char* ArgV[] )
 {
+	// Install the real process allocator before anything else can touch
+	// engine containers: every FString/TArray allocation routes through
+	// GMalloc, and the FMallocError stub installed at static init returns
+	// NULL. PrepareHP2Paths' scoped bootstrap allocator saves and restores
+	// this value, so its deliberate std-only window still works; appInit
+	// later reassigns and initializes the same instance.
+	GMalloc = &Malloc;
+
 	// Validate and install the initial data/user roots before anything else
 	// touches the filesystem.
 	if( !PrepareHP2Paths( ArgC, ArgV ) )
 		return 1;
+
+	// Crash reporter: signal handlers plus atexit marker; watchdog unused
+	// here. Writes crash-report.json (frames + log tail) into the working
+	// directory, prints "HP2_CRASH <code> <path>" on stderr, then re-raises.
+	HP2CrashReporterConfig CrashConfig = {};
+	CrashConfig.ProcessName = "hp2_game";
+	CrashConfig.LogFileBase = "HarryPotter2.log";
+	HP2InstallCrashReporter(&CrashConfig);
 
 	// An explicit -datadir=<path> overrides stored launcher configuration;
 	// its first recognized occurrence wins.
@@ -521,6 +538,9 @@ int main( int ArgC, char* ArgV[] )
 		}
 	}
 
+	// Forwarded command line and chooser flow build engine FStrings; the
+	// real process allocator was installed right after PrepareHP2Paths
+	// returned, so every append below allocates through it.
 	const FString ForwardedArguments = ForwardedCommandLine( ArgC, ArgV );
 	FString EngineCommandLine = ForwardedArguments;
 
@@ -548,9 +568,13 @@ int main( int ArgC, char* ArgV[] )
 	GIsStarted = 1;
 #if !_MSC_VER
 	__Context::StaticInit();
+	// Re-install the crash reporter: StaticInit's guard longjmp handlers
+	// replaced the ones installed above, and the reporter must own fatal
+	// signals to capture frames before the guard unwinds.
+	HP2InstallCrashReporter(&CrashConfig);
 	strncpy( GModule, ArgV[0], sizeof(GModule) - 1 );
 	GModule[sizeof(GModule) - 1] = 0;
-#endif
+#endif // !_MSC_VER
 #ifndef _DEBUG
 	try
 #endif
