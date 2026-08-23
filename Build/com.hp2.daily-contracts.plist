@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daily fast-contract owner: determinism double-run + input contracts,
+     keeping the last report under out/macos-arm64/Testing/HP2/.
+     Install: cp Build/com.hp2.daily-contracts.plist ~/Library/LaunchAgents/ &&
+              launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.hp2.daily-contracts.plist
+     Manual:  launchctl start gui/$(id -u)/com.hp2.daily-contracts -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hp2.daily-contracts</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>cd "$HOME/Code/Default/hp2" &amp;&amp; cmake --build --preset macos-arm64 --target hp2_verification_binaries &amp;&amp; ctest --preset macos-arm64 -R "determinism_double_run|input_edge_contracts|input_axis_order|input_release_all|mouse_capture_policy|input_event_mapping" --output-on-failure</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/tmp/hp2-daily.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/hp2-daily.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>
