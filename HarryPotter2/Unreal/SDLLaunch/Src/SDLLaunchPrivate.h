@@ -1,25 +1,26 @@
 /*=============================================================================
-	SDLLaunchPrivate.h: Unreal launcher for X.
-	Copyright 1999 Epic Games, Inc. All Rights Reserved.
-
-Revision history:
-	* Created by Daniel Vogel (based on XLaunch).
+	SDLLaunchPrivate.h: Private definitions for the HP2 SDL launcher.
 =============================================================================*/
+
+#ifndef SDLLAUNCHPRIVATE_H
+#define SDLLAUNCHPRIVATE_H
+
+/*----------------------------------------------------------------------------
+	Standard library.
+----------------------------------------------------------------------------*/
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
-#include <sys/stat.h>
-#include <time.h>
+#include <string.h>
 
-#if !MACOSX
-#include <malloc.h>
-#endif
+#include <string>
+#include <vector>
 
-#include <fcntl.h>
+/*----------------------------------------------------------------------------
+	Engine pulls.
+----------------------------------------------------------------------------*/
+
 #include "Engine.h"
 #include "UnRender.h"
 
-/*-----------------------------------------------------------------------------
-	The End.
------------------------------------------------------------------------------*/
+#endif

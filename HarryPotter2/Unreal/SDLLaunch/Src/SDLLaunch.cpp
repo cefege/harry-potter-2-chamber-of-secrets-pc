@@ -1,1196 +1,622 @@
 /*=============================================================================
-	Launch.cpp: Game launcher.
-	Copyright 1997-1999 Epic Games, Inc. All Rights Reserved.
-
-Revision history:
-	* Created by Daniel Vogel (based on XLaunch).
-
+	SDLLaunch.cpp: Harry Potter 2 SDL launcher and engine entry point.
 =============================================================================*/
 
-// Keep the portable C++ launcher model outside the legacy engine's reflected
-// pack(4) regions so every translation unit agrees on its standard-library
-// member layout.
+#include "SDLLaunchPrivate.h"
+
+#include <SDL2/SDL.h>
+
+#include "FConfigCacheIni.h"
+#include "FFileManagerUnix.h"
+#include "FMallocAnsi.h"
+#include "FOutputDeviceFile.h"
+#include "FOutputDeviceStdout.h"
+
+#include "FFeedbackContextSDL.h"
+#include "FOutputDeviceSDLError.h"
+
 #include "HP2LaunchPolicy.h"
+#include "HP2LauncherModel.h"
 #include "HP2LauncherStore.h"
 #include "HP2MacLauncher.h"
-
-// Engine/platform includes.
-#include "SDLLaunchPrivate.h"
 #include "HP2Paths.h"
-#include "NativeText.h"
-#include "HP2CrashReporter.h"
+#include "HP2StaticPackages.h"
 
+using namespace HP2Launcher;
 
 /*-----------------------------------------------------------------------------
 	Global variables.
 -----------------------------------------------------------------------------*/
 
-extern "C" { TCHAR GPackage[64] = TEXT("Game"); }
-
-// Log file.
-#include "FOutputDeviceFile.h"
+// Engine service singletons, handed to appInit below.
+FMallocAnsi Malloc;
 FOutputDeviceFile Log;
-
-// Error handler.
-#include "FOutputDeviceSDLError.h"
 FOutputDeviceSDLError Error;
-
-// Feedback.
-#include "FFeedbackContextSDL.h"
 FFeedbackContextSDL Warn;
-
-// File manager.
-#include "FFileManagerUnix.h"
 FFileManagerUnix FileManager;
 
-// Memory allocator.
-#include "FMallocAnsi.h"
-FMallocAnsi Malloc;
+// Optional stdout mirror installed for -log runs so harness scripts can
+// scrape progress markers from captured output.
+FOutputDeviceStdout StdoutEcho;
 
-// Config.
-#undef _INC_EDITOR
-#include "FConfigCacheIni.h"
-
-#if __STATIC_LINK
-#include "HP2StaticPackages.h"
-#endif
-
-// SDL
-#include <SDL2/SDL.h>
-
-#include <cstddef>
-#include <cstdio>
-#include <cstring>
-#include <cerrno>
-#include <cstdlib>
-
-// POSIX process control for the Vulkan relaunch path below.
-#if MACOSX
-#include <unistd.h>
-#endif
-#include <limits.h>
-#include <string>
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
-
-
-// Splash screen.
-SDL_Renderer*	SplashRenderer = NULL;
-SDL_Surface*    SplashImage    = NULL;
-SDL_Texture*    SplashTexture  = NULL;
-SDL_Window*		SplashWindow   = NULL;
-
-static void InitSplash( const TCHAR* Filename )
+namespace
 {
-	guard(InitSplash);
 
+/*-----------------------------------------------------------------------------
+	Helpers.
+-----------------------------------------------------------------------------*/
+
+bool FrontendSuppressed()
+{
+	return ParseParam( appCmdLine(), TEXT("NOFRONTEND") ) != 0;
+}
+
+FString SdlStatusText( const char* Raw )
+{
+	TCHAR Buffer[512];
+	if( !Raw || !appFromUtf8InPlace( Buffer, Raw, ARRAY_COUNT(Buffer) ) )
+		return FString( TEXT("<unavailable>") );
+	return FString( Buffer );
+}
+
+// Builds the forwarded engine command line: every argument except the
+// launcher-owned data-root bootstrap options, converted from UTF-8.
+FString ForwardedCommandLine( int ArgC, char* ArgV[] )
+{
+	FString CommandLine;
+	for( int Index = 1; Index < ArgC; ++Index )
+	{
+		if( IsHP2DataDirectoryArgument( ArgV[Index] ) )
+			continue;
+		TCHAR Argument[1024];
+		if( !appFromUtf8InPlace( Argument, ArgV[Index], ARRAY_COUNT(Argument) ) )
+		{
+			fprintf( stderr, "hp2: argument %d is not valid UTF-8 or is too long\n", Index );
+			continue;
+		}
+		if( CommandLine.Len() )
+			CommandLine += TEXT(" ");
+		CommandLine += Argument;
+	}
+	return CommandLine;
+}
+
+void ShowLauncherError( const std::string& Detail, const char* Context )
+{
+	const std::string Text = Context + std::string("\n\n") + (Detail.empty() ? "Unknown error." : Detail);
+	fprintf( stderr, "hp2-launcher: %s\n", Text.c_str() );
+	SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Launcher Error", Text.c_str(), NULL );
+}
+
+/*-----------------------------------------------------------------------------
+	Native launcher integration.
+-----------------------------------------------------------------------------*/
+
+struct LauncherFlowResult
+{
+	bool RunEngine = false;
+	FString EnginePrefix;
+};
+
+// Resolves one playable data root, honoring the explicit -datadir override,
+// the stored launcher catalog, and conventional-import discovery in that
+// order of authority. On failure FailureReason carries a user-facing detail.
+bool ResolveSourceRoot(
+	const DataSourceConfiguration& Configuration,
+	DataSource Source,
+	bool HasOverride,
+	const std::string& OverrideRoot,
+	std::string& Root,
+	std::string& FailureReason )
+{
+	if( HasOverride )
+	{
+		std::string CanonicalRoot;
+		std::string Error;
+		if( !ValidateHP2DataRoot( OverrideRoot, CanonicalRoot, Error ) )
+		{
+			FailureReason = Error.empty()
+				? ("The data root is unusable: " + OverrideRoot)
+				: Error;
+			return false;
+		}
+		Root = CanonicalRoot;
+		return true;
+	}
+
+	std::string Candidate = Source == DataSource::Retail
+		? Configuration.retailRoot
+		: Configuration.prototypeRoot;
+	if( Candidate.empty() )
+	{
+		const bool Found = Source == DataSource::Retail
+			? DiscoverHP2RetailDataRoot( Candidate )
+			: DiscoverHP2PrototypeDataRoot( Candidate );
+		if( !Found )
+		{
+			FailureReason = Source == DataSource::Retail
+				? "No imported retail game data was found."
+				: "No prototype game data was found.";
+			return false;
+		}
+	}
+
+	std::string CanonicalRoot;
+	std::string Error;
+	if( !ValidateHP2DataRoot( Candidate, CanonicalRoot, Error ) )
+	{
+		FailureReason = Error.empty()
+			? ("The configured data root is unusable: " + Candidate)
+			: Error;
+		return false;
+	}
+	Root = CanonicalRoot;
+	return true;
+}
+
+// One chooser round-trip: prepares the launcher home and per-source profile,
+// shows the native chooser, persists everything it decided, and installs the
+// chosen roots for the engine. Returns false when the process must stop;
+// Outcome.RunEngine says whether the engine should start afterwards.
+bool RunNativeLauncherRound(
+	int ArgC,
+	char* ArgV[],
+	bool HasOverride,
+	const std::string& OverrideRoot,
+	LauncherFlowResult& Outcome )
+{
+	Outcome = LauncherFlowResult();
+
+	std::string LauncherRoot;
+	std::string StepError;
+	if( !PrepareHP2LauncherHome( LauncherRoot, StepError ) )
+	{
+		ShowLauncherError( StepError, "Could not prepare the launcher folder." );
+		return false;
+	}
+
+	DataSourceConfiguration Configuration;
+	LoadDataSourceConfiguration( LauncherRoot, Configuration, StepError );
+
+	const DataSource SelectedSource = Configuration.selected;
+	std::string ProfileRoot;
+	if( !PrepareDataSourceProfile( LauncherRoot, SelectedSource, ProfileRoot, StepError ) )
+	{
+		ShowLauncherError( StepError, "Could not prepare the profile for the selected data source." );
+		return false;
+	}
+
+	std::string DataRoot;
+	std::string ResolveFailure;
+	if( !ResolveSourceRoot( Configuration, SelectedSource, HasOverride, OverrideRoot, DataRoot, ResolveFailure ) )
+	{
+		ShowLauncherError( ResolveFailure, "Could not resolve a playable data root." );
+		return false;
+	}
+
+	const LauncherPaths Paths{ ProfileRoot, DataRoot + "/System" };
+	LauncherState State;
+	if( !LoadLauncherState( Paths, State, StepError ) )
+		State = LauncherState();
+
+	LauncherRequest Request;
+	Request.settings = State.settings;
+	Request.saves = State.saves;
+	Request.userRoot = ProfileRoot;
+	Request.logPath = LauncherRoot + "/Launcher.log";
+	Request.dataSources = Configuration;
+	Request.hasExplicitDataRootOverride = HasOverride;
+	Request.explicitDataRoot = OverrideRoot;
+	for( const DataSource OptionSource : { DataSource::Retail, DataSource::Prototype } )
+	{
+		DataSourceOption Option;
+		Option.source = OptionSource;
+		std::string OptionRoot;
+		std::string OptionFailure;
+		if( ResolveSourceRoot( Configuration, OptionSource, HasOverride && OptionSource == SelectedSource, OverrideRoot, OptionRoot, OptionFailure ) )
+		{
+			Option.available = true;
+			Option.root = OptionRoot;
+		}
+		else
+		{
+			Option.error = OptionFailure;
+		}
+		Request.dataSourceOptions.push_back( Option );
+	}
+
+	LauncherResult Result;
+	const LaunchAction Action = RunHP2MacLauncher( Request, Result, StepError );
+	if( Action == LaunchAction::Error )
+	{
+		ShowLauncherError( StepError, "The launcher reported an error." );
+		return false;
+	}
+	if( Action == LaunchAction::Quit )
+		return false;
+
+	// Persist every chooser decision before touching the engine so a failed
+	// launch still resumes from the same state next time.
+	if( !CommitDataSourceConfiguration( LauncherRoot, Result.dataSources, StepError )
+		|| !CommitLaunchSelection( LauncherRoot, Result.selection, StepError ) )
+	{
+		ShowLauncherError( StepError, "Could not save the launcher selection." );
+		return false;
+	}
+
+	const DataSource FinalSource = Result.dataSources.selected;
+	if( FinalSource != SelectedSource
+		&& !PrepareDataSourceProfile( LauncherRoot, FinalSource, ProfileRoot, StepError ) )
+	{
+		ShowLauncherError( StepError, "Could not prepare the newly selected data source." );
+		return false;
+	}
+
+	std::string FinalDataRoot;
+	std::string FinalFailure;
+	if( !ResolveSourceRoot( Result.dataSources, FinalSource, HasOverride, OverrideRoot, FinalDataRoot, FinalFailure ) )
+	{
+		ShowLauncherError( FinalFailure, "The selected data source has no usable game data." );
+		return false;
+	}
+
+	if( !ValidateLauncherSettings( Result.settings, StepError ) )
+	{
+		ShowLauncherError( StepError, "The selected settings are invalid." );
+		return false;
+	}
+	const LauncherPaths FinalPaths{ ProfileRoot, FinalDataRoot + "/System" };
+	if( !CommitLauncherSettings( FinalPaths, Result.settings, StepError ) )
+	{
+		ShowLauncherError( StepError, "Could not save the selected settings." );
+		return false;
+	}
+
+	if( !InstallHP2Paths( FinalDataRoot, ProfileRoot, StepError ) )
+	{
+		ShowLauncherError( StepError, "Could not install the selected paths." );
+		return false;
+	}
+
+	std::string PrefixUtf8;
+	if( !BuildSelectedCommand( Result.selection, PrefixUtf8, StepError ) )
+	{
+		ShowLauncherError( StepError, "The launcher selection cannot be started." );
+		return false;
+	}
+	if( Result.selection.action == LaunchAction::Quit || PrefixUtf8.empty() )
+		return false;
+
+	TCHAR Prefix[1024];
+	if( !appFromUtf8InPlace( Prefix, PrefixUtf8.c_str(), ARRAY_COUNT(Prefix) ) )
+	{
+		ShowLauncherError( PrefixUtf8, "The launch command is invalid." );
+		return false;
+	}
+
+	Outcome.RunEngine = true;
+	Outcome.EnginePrefix = Prefix;
+	return true;
+}
+
+/*-----------------------------------------------------------------------------
+	Splash screen.
+-----------------------------------------------------------------------------*/
+
+SDL_Window* SplashWindow = NULL;
+SDL_Renderer* SplashRenderer = NULL;
+SDL_Texture* SplashTexture = NULL;
+SDL_Surface* SplashImage = NULL;
+
+void HideSplash()
+{
+	if( SplashTexture )
+	{
+		SDL_DestroyTexture( SplashTexture );
+		SplashTexture = NULL;
+	}
+	if( SplashRenderer )
+	{
+		SDL_DestroyRenderer( SplashRenderer );
+		SplashRenderer = NULL;
+	}
+	if( SplashImage )
+	{
+		SDL_FreeSurface( SplashImage );
+		SplashImage = NULL;
+	}
+	if( SplashWindow )
+	{
+		SDL_DestroyWindow( SplashWindow );
+		SplashWindow = NULL;
+	}
+}
+
+// Loads one BMP from memory and presents it until HideSplash. Any failure is
+// silent: the splash is cosmetic and must never block startup.
+void ShowSplash( const TCHAR* Filename )
+{
 	TArray<BYTE> SplashData;
-	if( !appLoadFileToArray(SplashData, Filename) || SplashData.Num()==0 )
-	{
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Splash screen error", "Could not read splash screen data.", NULL);
+	if( !appLoadFileToArray( SplashData, Filename ) || SplashData.Num() == 0 )
 		return;
-	}
 
-	SDL_RWops* SplashStream = SDL_RWFromConstMem(SplashData.GetData(), SplashData.Num());
-	SplashImage = SplashStream ? SDL_LoadBMP_RW(SplashStream, 1) : NULL;
+	SDL_RWops* Stream = SDL_RWFromConstMem( SplashData.GetData(), SplashData.Num() );
+	SplashImage = Stream ? SDL_LoadBMP_RW( Stream, 1 ) : NULL;
 	if( !SplashImage )
-	{
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Splash screen error", SDL_GetError(), NULL);
 		return;
-	}
 
 	SplashWindow = SDL_CreateWindow(
-		"Harry Potter 2 is starting...",
+		"Harry Potter 2",
 		SDL_WINDOWPOS_CENTERED,
 		SDL_WINDOWPOS_CENTERED,
 		SplashImage->w,
 		SplashImage->h,
-		SDL_WINDOW_BORDERLESS
-	);
+		0 );
 	if( !SplashWindow )
 	{
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Splash screen error", SDL_GetError(), NULL);
+		HideSplash();
 		return;
 	}
 
-	SplashRenderer = SDL_CreateRenderer(SplashWindow, -1, 0);
-	if( !SplashRenderer )
+	SplashRenderer = SDL_CreateRenderer( SplashWindow, -1, 0 );
+	SplashTexture = SplashRenderer ? SDL_CreateTextureFromSurface( SplashRenderer, SplashImage ) : NULL;
+	if( !SplashRenderer || !SplashTexture )
 	{
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Splash screen error", SDL_GetError(), SplashWindow);
+		HideSplash();
 		return;
 	}
 
-	SplashTexture = SDL_CreateTextureFromSurface(SplashRenderer, SplashImage);
-	if( !SplashTexture )
+	SDL_RenderClear( SplashRenderer );
+	SDL_RenderCopy( SplashRenderer, SplashTexture, NULL, NULL );
+	SDL_RenderPresent( SplashRenderer );
+}
+
+/*-----------------------------------------------------------------------------
+	Portability config migrations.
+-----------------------------------------------------------------------------*/
+
+// Stock-UE driver bindings cannot work in this tree: WinDrv, D3D, Glide, and
+// Soft drivers are not shipped. Rewrite stale bindings to their portable
+// equivalents before the engine loads its classes.
+void ApplyPortableConfig()
+{
+	auto IsLegacyRenderDevice = []( const TCHAR* Value )
 	{
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Splash screen error", SDL_GetError(), SplashWindow);
-		return;
+		static const TCHAR* LegacyPrefixes[] =
+		{
+			TEXT("D3DDrv."),
+			TEXT("GlideDrv."),
+			TEXT("SoftDrv."),
+			TEXT("OpenGLDrv."),
+			TEXT("WinDrv.")
+		};
+		for( const TCHAR* Prefix : LegacyPrefixes )
+		{
+			if( appStrnicmp( Value, Prefix, appStrlen(Prefix) ) == 0 )
+				return true;
+		}
+		return false;
+	};
+
+	TCHAR Current[256];
+
+	// The only shipped viewport manager is SDLDrv.SDLClient; make sure it is
+	// bound even if the key was dropped entirely.
+	if( !GConfig->GetString( TEXT("Engine.Engine"), TEXT("ViewportManager"), Current, ARRAY_COUNT(Current), TEXT("System") )
+		|| appStricmp( Current, TEXT("SDLDrv.SDLClient") ) != 0 )
+	{
+		GConfig->SetString( TEXT("Engine.Engine"), TEXT("ViewportManager"), TEXT("SDLDrv.SDLClient"), TEXT("System") );
+		debugf( NAME_Init, TEXT("Bound [Engine.Engine] ViewportManager=SDLDrv.SDLClient") );
 	}
 
-	SDL_RenderClear(SplashRenderer);
-	SDL_RenderCopy(SplashRenderer, SplashTexture, NULL, NULL);
-	SDL_RenderPresent(SplashRenderer);
-
-	unguard;
-}
-
-static void ExitSplash()
-{
-	guard(ExitSplash);
-
-	// stijn: destroying the texture or renderer causes other SDL windows to render only black pixels
-	// idk why...
-
-//	if (SplashTexture)
-//		SDL_DestroyTexture(SplashTexture);
-	if (SplashImage)
-        SDL_FreeSurface(SplashImage);
-//	if (SplashRenderer)
-//        SDL_DestroyRenderer(SplashRenderer);
-	if (SplashWindow)
-		SDL_DestroyWindow(SplashWindow);
-
-    unguard;
-}
-
-static void ApplyPortableConfig()
-{
-	guard(ApplyPortableConfig);
-
-	const TCHAR* VideoKeys[] =
+	static const TCHAR* RenderKeys[] = { TEXT("GameRenderDevice"), TEXT("WindowedRenderDevice") };
+	for( const TCHAR* Key : RenderKeys )
 	{
-		TEXT("GameRenderDevice"),
-		TEXT("WindowedRenderDevice"),
-		TEXT("RenderDevice")
-	};
-	const TCHAR* LegacyVideoDevices[] =
-	{
-		TEXT("D3DDrv.D3DRenderDevice"),
-		TEXT("D3D8Drv.D3D8RenderDevice"),
-		TEXT("D3D9Drv.D3D9RenderDevice"),
-		TEXT("D3D10Drv.D3D10RenderDevice"),
-		TEXT("D3D11Drv.D3D11RenderDevice"),
-		TEXT("GlideDrv.GlideRenderDevice"),
-		TEXT("SDLGLDrv.SDLGLRenderDevice"),
-		TEXT("SoftDrv.SoftwareRenderDevice"),
-		TEXT("SDLSoftDrv.SDLSoftwareRenderDevice")
-	};
-	const TCHAR* LegacyAudioDevices[] =
-	{
-		TEXT("Audio.GenericAudioSubsystem"),
-		TEXT("Galaxy.GalaxyAudioSubsystem")
-	};
-
-	if( !GConfig || !GSys || !GFileManager )
-		appErrorf(TEXT("Portable user configuration is unavailable"));
-	const TCHAR* UserDir = appUserDir();
-	if( !UserDir || !*UserDir )
-		appErrorf(TEXT("Portable user directory is unavailable"));
-
-	// Remove only networking actors whose packages are not part of this
-	// runtime. Keep unrelated and locally configured ServerActors intact.
-	TMultiMap<FString,FString>* GameEngineSection
-		= GConfig->GetSectionPrivate(TEXT("Engine.GameEngine"), 0, 0);
-	if( GameEngineSection )
-	{
-		TArray<FString> ServerActors;
-		GameEngineSection->MultiFind(TEXT("ServerActors"), ServerActors);
-		for( INT ActorIndex = 0; ActorIndex < ServerActors.Num(); ++ActorIndex )
+		if( GConfig->GetString( TEXT("Engine.Engine"), Key, Current, ARRAY_COUNT(Current), TEXT("System") )
+			&& IsLegacyRenderDevice( Current ) )
 		{
-			const TCHAR* ActorSpec = *ServerActors(ActorIndex);
-			TCHAR ActorClass[256];
-			if
-			(	ParseToken(ActorSpec, ActorClass, ARRAY_COUNT(ActorClass), 1)
-			&&	(	appStrnicmp(ActorClass, TEXT("IpDrv."), appStrlen(TEXT("IpDrv."))) == 0
-				||	appStrnicmp(ActorClass, TEXT("IpServer."), appStrlen(TEXT("IpServer."))) == 0 ) )
-			{
-				debugf(TEXT("Removing unavailable Engine.GameEngine.ServerActors=%s"), *ServerActors(ActorIndex));
-				GameEngineSection->RemovePair(TEXT("ServerActors"), *ServerActors(ActorIndex));
-			}
+			GConfig->SetString( TEXT("Engine.Engine"), Key, TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("System") );
+			debugf( NAME_Init, TEXT("Migrated [Engine.Engine] %s=%s to XOpenGLDrv.XOpenGLRenderDevice"), Key, Current );
 		}
 	}
 
-	// appInit creates the writable user configuration from the stock defaults
-	// on first run. Migrate only unavailable platform devices so valid custom
-	// selections remain intact.
-	if( !ParseParam(appCmdLine(), TEXT("NoForceSDLDrv")) )
+	// ALAudio is the only shipped audio subsystem; any other binding is a
+	// legacy leftover.
+	if( GConfig->GetString( TEXT("Engine.Engine"), TEXT("AudioDevice"), Current, ARRAY_COUNT(Current), TEXT("System") )
+		&& appStricmp( Current, TEXT("ALAudio.ALAudioSubsystem") ) != 0 )
 	{
-		const TCHAR* ViewportManager = GConfig->GetStr(TEXT("Engine.Engine"), TEXT("ViewportManager"));
-		if( appStricmp(ViewportManager, TEXT("WinDrv.WindowsClient")) == 0 )
-			GConfig->SetString(TEXT("Engine.Engine"), TEXT("ViewportManager"), TEXT("SDLDrv.SDLClient"));
-
-		for( INT KeyIndex = 0; KeyIndex < ARRAY_COUNT(VideoKeys); ++KeyIndex )
-		{
-			const TCHAR* ConfiguredDevice = GConfig->GetStr(TEXT("Engine.Engine"), VideoKeys[KeyIndex]);
-			for( INT DeviceIndex = 0; DeviceIndex < ARRAY_COUNT(LegacyVideoDevices); ++DeviceIndex )
-			{
-				if( appStricmp(ConfiguredDevice, LegacyVideoDevices[DeviceIndex]) == 0 )
-				{
-					debugf(TEXT("Engine.Engine.%s was %s; selecting XOpenGLDrv."), VideoKeys[KeyIndex], ConfiguredDevice);
-					GConfig->SetString(TEXT("Engine.Engine"), VideoKeys[KeyIndex], TEXT("XOpenGLDrv.XOpenGLRenderDevice"));
-					break;
-				}
-			}
-		}
+		GConfig->SetString( TEXT("Engine.Engine"), TEXT("AudioDevice"), TEXT("ALAudio.ALAudioSubsystem"), TEXT("System") );
+		debugf( NAME_Init, TEXT("Migrated [Engine.Engine] AudioDevice=%s to ALAudio.ALAudioSubsystem"), Current );
 	}
-
-	if( !ParseParam(appCmdLine(), TEXT("NoForceALAudio")) )
-	{
-		const TCHAR* ConfiguredDevice = GConfig->GetStr(TEXT("Engine.Engine"), TEXT("AudioDevice"));
-		for( INT DeviceIndex = 0; DeviceIndex < ARRAY_COUNT(LegacyAudioDevices); ++DeviceIndex )
-		{
-			if( appStricmp(ConfiguredDevice, LegacyAudioDevices[DeviceIndex]) == 0 )
-			{
-				debugf(TEXT("Engine.Engine.AudioDevice was %s; selecting ALAudio."), ConfiguredDevice);
-				GConfig->SetString(TEXT("Engine.Engine"), TEXT("AudioDevice"), TEXT("ALAudio.ALAudioSubsystem"));
-				break;
-			}
-		}
-	}
-
-	// appUserDir is canonical and trailing-slashed. Keep the writable roots
-	// trailing-slashed as well because callers append filenames directly.
-	const FString SavePath      = FString(UserDir) * TEXT("Save") * TEXT("");
-	const FString SaveCachePath = SavePath * TEXT("cache") * TEXT("");
-	const FString CachePath     = FString(UserDir) * TEXT("Cache") * TEXT("");
-	if
-	(	!GFileManager->MakeDirectory(*SavePath, 0)
-	||	!GFileManager->MakeDirectory(*SaveCachePath, 0)
-	||	!GFileManager->MakeDirectory(*CachePath, 0) )
-		appErrorf(TEXT("Unable to establish portable paths under %s"), UserDir);
-
-	GSys->SavePath     = SavePath;
-	GSys->SaveSlotPath = SavePath;
-	GSys->CachePath    = CachePath;
-
-	// USystem exposes SavePath and CachePath (not SaveSlotPath) as config keys.
-	GConfig->SetString(TEXT("Core.System"), TEXT("SavePath"), *GSys->SavePath);
-	GConfig->SetString(TEXT("Core.System"), TEXT("CachePath"), *GSys->CachePath);
-
-	INT RunCount = 0;
-	GConfig->GetInt(TEXT("Engine.Engine"), TEXT("RunCount"), RunCount);
-	GConfig->SetInt(TEXT("Engine.Engine"), TEXT("RunCount"), RunCount + 1);
-
-	// Commit migration and path changes before StaticLoadClass constructs the
-	// engine from this writable user configuration.
-	GConfig->Flush(0);
-
-	unguard;
 }
 
+/*-----------------------------------------------------------------------------
+	Engine bootstrap.
+-----------------------------------------------------------------------------*/
 
-//
-// Creates a UEngine object.
-//
-static UEngine* InitEngine()
+UEngine* InitEngine()
 {
-	guard(InitEngine);
-	FTime LoadTime = appSeconds();
-
-	// Set exec hook.
-	GExec = NULL;
-
 	ApplyPortableConfig();
 
-	// Create the global engine object.
 	UClass* EngineClass = UObject::StaticLoadClass(
 		UGameEngine::StaticClass(),
 		NULL,
 		TEXT("ini:Engine.Engine.GameEngine"),
 		NULL,
 		LOAD_NoFail,
-		NULL
-	);
-	UEngine* Engine = ConstructObject<UEngine>(EngineClass);
-	Engine->Init();
+		NULL );
+	if( !EngineClass )
+		return NULL;
 
-	debugf(TEXT("Startup time: %f seconds."), appSeconds() - LoadTime);
-
+	UGameEngine* Engine = ConstructObject<UGameEngine>( EngineClass );
+	if( Engine )
+		Engine->Init();
 	return Engine;
-	unguard;
 }
 
-/*-----------------------------------------------------------------------------
-	Main Loop
------------------------------------------------------------------------------*/
-
-//
-// Exit wound.
-// 
-static void CleanUpOnExit( UEngine* Engine )
+void MainLoop( UEngine* Engine )
 {
-	guard(CleanUpOnExit);
+	check( Engine );
 
-	GIsRunning = 0;
-	if( Engine && Engine->Audio )
-		Engine->Audio->SetViewport(NULL);
-
-	const FString RunningIni = FString(appUserDir()) * TEXT("Running.ini");
-	GFileManager->Delete(*RunningIni, 0, 0);
-	debugf(NAME_Title, LocalizeGeneral(TEXT("Exit")));
-
-	appPreExit();
-	GIsGuarded = 0;
-
-	unguard;
-}
-
-// just in case.  :)  --ryan.
-static void sdl_atexit_handler()
-{
-	static UBOOL AlreadyCalled = 0;
-	if( !AlreadyCalled )
-	{
-		AlreadyCalled = 1;
-		SDL_Quit();
-	}
-}
-
-struct MainLoopArgs
-{
-	FTime OldTime;
-	FTime SecondStartTime;
-	INT TickCount;
-	UEngine* Engine;
-	INT RemainingTestTicks;
-};
-
-static bool MainLoopIteration( MainLoopArgs* Args )
-{
-	guard(MainLoopIteration);
-
-	if( !GIsRunning || GIsRequestingExit )
-	{
-		GIsRunning = 0;
-		return false;
-	}
-
-	FTime NewTime = appSeconds();
-	FLOAT DeltaTime = Max(0.0f, NewTime - Args->OldTime);
-	Args->Engine->Tick(DeltaTime);
-	if( GWindowManager )
-		GWindowManager->Tick(DeltaTime);
-	Args->OldTime = NewTime;
-	const ENativeTextRuntimeSmokeState SmokeState = GetNativeTextRuntimeSmokeState();
-	if( SmokeState == NativeTextRuntimeSmokePassed || SmokeState == NativeTextRuntimeSmokeFailed )
-		appRequestExit(0);
-	else if( Args->RemainingTestTicks > 0 && --Args->RemainingTestTicks == 0 )
-		appRequestExit(0);
-
-	++Args->TickCount;
-	const FLOAT RatePeriod = Args->OldTime - Args->SecondStartTime;
-	if( RatePeriod > 1.0f )
-	{
-		Args->Engine->CurrentTickRate = Args->TickCount / RatePeriod;
-		Args->SecondStartTime = Args->OldTime;
-		Args->TickCount = 0;
-	}
-
-	return true;
-	unguard;
-}
-
-#ifdef __EMSCRIPTEN__
-static void EmscriptenMainLoopIteration( void* OpaqueArgs )
-{
-	MainLoopArgs* Args = static_cast<MainLoopArgs*>(OpaqueArgs);
-	try
-	{
-		if( MainLoopIteration(Args) )
-			return;
-
-		UEngine* Engine = Args->Engine;
-		CleanUpOnExit(Engine);
-		delete Args;
-		Args = NULL;
-		appExit();
-		GIsStarted = 0;
-		SDL_Quit();
-	}
-	catch( ... )
-	{
-		delete Args;
-		Error.HandleError();
-		appExit();
-		GIsStarted = 0;
-		SDL_Quit();
-	}
-	emscripten_cancel_main_loop();
-}
-#endif
-
-
-//
-// game message loop.
-//
-static void MainLoop( UEngine* Engine, INT TestTicks )
-{
-	guard(MainLoop);
-	check(Engine);
-
+	// Loop while running.
 	GIsRunning = 1;
-
-#ifdef __EMSCRIPTEN__
-	MainLoopArgs* Args = new MainLoopArgs;
-	Args->OldTime = appSeconds();
-	Args->SecondStartTime = Args->OldTime;
-	Args->TickCount = 0;
-	Args->Engine = Engine;
-	Args->RemainingTestTicks = TestTicks;
-	emscripten_set_main_loop_arg(EmscriptenMainLoopIteration, Args, 0, 1);
-#else
-	MainLoopArgs Args;
-	Args.OldTime = appSeconds();
-	Args.SecondStartTime = Args.OldTime;
-	Args.TickCount = 0;
-	Args.Engine = Engine;
-	Args.RemainingTestTicks = TestTicks;
-
-	while( MainLoopIteration(&Args) )
+	FTime OldTime = appSeconds();
+	FTime SecondStartTime = OldTime;
+	INT TickCount = 0;
+	while( GIsRunning && !GIsRequestingExit )
 	{
-		guard(EnforceTickRate);
-
-		FLOAT TargetTickRate = Engine->GetMaxTickRate();
-		if( SDL_GetKeyboardFocus() == NULL )
-			TargetTickRate = TargetTickRate > 0.0f ? Min(TargetTickRate, 10.0f) : 10.0f;
-
-		if( TargetTickRate > 0.0f )
+		// Update the world.
+		FTime NewTime = appSeconds();
+		FLOAT DeltaSeconds = Max( (FLOAT)(NewTime - OldTime), 0.0001f );
+		Engine->Tick( DeltaSeconds );
+		OldTime = NewTime;
+		++TickCount;
+		if( OldTime - SecondStartTime > 1 )
 		{
-			const FLOAT Remaining = (1.0f / TargetTickRate) - (appSeconds() - Args.OldTime);
-			if( Remaining > 0.0f )
-				appSleep(Remaining);
+			Engine->CurrentTickRate = (FLOAT)TickCount / (FLOAT)(OldTime - SecondStartTime);
+			SecondStartTime = OldTime;
+			TickCount = 0;
 		}
 
-		unguard;
+		// Enforce optional maximum tick rate.
+		const FLOAT MaxTickRate = Engine->GetMaxTickRate();
+		if( MaxTickRate > 0.f )
+			appSleep( Max( 0.f, (1.f / MaxTickRate) - (FLOAT)(appSeconds() - OldTime) ) );
 	}
-#endif
-
-	unguard;
+	GIsRunning = 0;
 }
+
+void CleanUpOnExit( UEngine* Engine )
+{
+	if( Engine )
+		Engine->Exit();
+	appPreExit();
+}
+
+} // namespace
 
 /*-----------------------------------------------------------------------------
 	Main.
 -----------------------------------------------------------------------------*/
 
-//
-// Simple copy.
-// 
-
-static bool BuildCommandLine( int ArgC, char* ArgV[], TCHAR* Out, INT OutCapacity )
+int main( int ArgC, char* ArgV[] )
 {
-	if( !Out || OutCapacity <= 0 )
-		return false;
-
-	INT OutLength = 0;
-	Out[0] = 0;
-
-	for( int ArgIndex = 1; ArgIndex < ArgC; ++ArgIndex )
-	{
-		if( IsHP2DataDirectoryArgument(ArgV[ArgIndex]) )
-			continue;
-		TCHAR Argument[4096];
-		if( !appFromUtf8InPlace(Argument, ArgV[ArgIndex], ARRAY_COUNT(Argument)) )
-			return false;
-
-		const INT ArgumentLength = appStrlen(Argument);
-		INT EqualsIndex = INDEX_NONE;
-		UBOOL HasWhitespace = 0;
-		for( INT CharIndex = 0; CharIndex < ArgumentLength; ++CharIndex )
-		{
-			if( Argument[CharIndex] == TEXT('=') && EqualsIndex == INDEX_NONE )
-				EqualsIndex = CharIndex;
-			if( Argument[CharIndex] == TEXT(' ') || Argument[CharIndex] == TEXT('\t') )
-				HasWhitespace = 1;
-			if( Argument[CharIndex] == TEXT('"') )
-				return false;
-		}
-
-		const INT ExtraCharacters = (OutLength ? 1 : 0) + ArgumentLength + (HasWhitespace ? 2 : 0);
-		if( OutLength + ExtraCharacters >= OutCapacity )
-			return false;
-
-		if( OutLength )
-			Out[OutLength++] = TEXT(' ');
-
-		if( HasWhitespace && EqualsIndex != INDEX_NONE )
-		{
-			for( INT CharIndex = 0; CharIndex <= EqualsIndex; ++CharIndex )
-				Out[OutLength++] = Argument[CharIndex];
-			Out[OutLength++] = TEXT('"');
-			for( INT CharIndex = EqualsIndex + 1; CharIndex < ArgumentLength; ++CharIndex )
-				Out[OutLength++] = Argument[CharIndex];
-			Out[OutLength++] = TEXT('"');
-		}
-		else
-		{
-			if( HasWhitespace )
-				Out[OutLength++] = TEXT('"');
-			for( INT CharIndex = 0; CharIndex < ArgumentLength; ++CharIndex )
-				Out[OutLength++] = Argument[CharIndex];
-			if( HasWhitespace )
-				Out[OutLength++] = TEXT('"');
-		}
-		Out[OutLength] = 0;
-	}
-
-	return true;
-}
-
-static bool BuildLauncherPaths(
-	const std::string& UserRoot,
-	const std::string& SystemRoot,
-	HP2Launcher::LauncherPaths& Paths,
-	std::string& ErrorMessage )
-{
-	if( UserRoot.empty() || SystemRoot.empty() )
-	{
-		ErrorMessage = "The selected game data source is not installed.";
-		return false;
-	}
-	Paths.userRoot = UserRoot;
-	Paths.systemRoot = SystemRoot;
-	return true;
-}
-static UBOOL EqualLauncherOptionName( const ANSICHAR* Text, std::ptrdiff_t Length, const ANSICHAR* Wanted )
-{
-	std::ptrdiff_t Index = 0;
-	for( ; Index < Length && Wanted[Index]; ++Index )
-	{
-		ANSICHAR A = Text[Index];
-		ANSICHAR B = Wanted[Index];
-		if( A >= 'a' && A <= 'z' )
-			A = static_cast<ANSICHAR>(A - 'a' + 'A');
-		if( B >= 'a' && B <= 'z' )
-			B = static_cast<ANSICHAR>(B - 'a' + 'A');
-		if( A != B )
-			return 0;
-	}
-	return Index == Length && Wanted[Index] == 0;
-}
-
-static const ANSICHAR* LauncherOptionValue(
-	INT ArgC,
-	char* ArgV[],
-	const ANSICHAR* Wanted )
-{
-	for( INT ArgIndex = 1; ArgIndex < ArgC; ++ArgIndex )
-	{
-		const ANSICHAR* Option = ArgV[ArgIndex];
-		while( *Option == '-' )
-			++Option;
-		const ANSICHAR* Equals = Option;
-		while( *Equals && *Equals != '=' )
-			++Equals;
-		if( *Equals == '=' && EqualLauncherOptionName(Option, Equals - Option, Wanted) )
-			return Equals + 1;
-	}
-	return NULL;
-}
-
-// Parses the optional hang-watchdog timeout. Accepts
-// "--watchdog-seconds=<n>" / "-watchdog-seconds=<n>" and the two-token form
-// "--watchdog-seconds <n>". Returns 0 (disabled) when absent or invalid.
-static int ParseWatchdogSeconds( INT ArgC, char* ArgV[] )
-{
-	const ANSICHAR* Value = LauncherOptionValue(ArgC, ArgV, "watchdog-seconds");
-	if( !Value )
-	{
-		for( INT ArgIndex = 1; ArgIndex + 1 < ArgC; ++ArgIndex )
-		{
-			const ANSICHAR* Option = ArgV[ArgIndex];
-			while( *Option == '-' )
-				++Option;
-			const ANSICHAR* End = Option;
-			while( *End )
-				++End;
-			if( EqualLauncherOptionName(Option, End - Option, "watchdog-seconds") )
-			{
-				Value = ArgV[ArgIndex + 1];
-				break;
-			}
-		}
-	}
-	if( !Value || !*Value )
-		return 0;
-	int Seconds = 0;
-	for( const ANSICHAR* Digit = Value; *Digit; ++Digit )
-	{
-		if( *Digit < '0' || *Digit > '9' )
-			return 0;
-		Seconds = Seconds * 10 + ( *Digit - '0' );
-		if( Seconds > 3600 * 24 )
-			return 0;
-	}
-	return Seconds;
-}
-
-static std::string LauncherLogPath(
-	const HP2Launcher::LauncherPaths& Paths,
-	INT ArgC,
-	char* ArgV[] )
-{
-	const ANSICHAR* Relative = LauncherOptionValue(ArgC, ArgV, "LOG");
-	if( Relative )
-	{
-		std::string Path = Paths.userRoot;
-		if( !Path.empty() && Path.back() != '/' )
-			Path += '/';
-		Path += Relative;
-		return Path;
-	}
-	const ANSICHAR* Absolute = LauncherOptionValue(ArgC, ArgV, "ABSLOG");
-	if( Absolute )
-		return Absolute;
-
-	std::string Path = Paths.userRoot;
-	if( !Path.empty() && Path.back() != '/' )
-		Path += '/';
-	Path += "HarryPotter2.log";
-	return Path;
-}
-
-
-static bool PrependCommandLine( TCHAR* CommandLine, INT Capacity, const TCHAR* Prefix )
-{
-	if( !CommandLine || !Prefix || Capacity <= 0 )
-		return false;
-
-	const INT ExistingLength = appStrlen(CommandLine);
-	const INT PrefixLength = appStrlen(Prefix);
-	const INT SeparatorLength = ExistingLength > 0 ? 1 : 0;
-	if( PrefixLength >= Capacity
-		|| ExistingLength >= Capacity - PrefixLength - SeparatorLength )
-		return false;
-
-	const INT ExistingOffset = PrefixLength + SeparatorLength;
-	for( INT Index = ExistingLength; Index >= 0; --Index )
-		CommandLine[ExistingOffset + Index] = CommandLine[Index];
-	for( INT Index = 0; Index < PrefixLength; ++Index )
-		CommandLine[Index] = Prefix[Index];
-	if( SeparatorLength )
-		CommandLine[PrefixLength] = TEXT(' ');
-	return true;
-}
-
-static const char* DataSourceName( HP2Launcher::DataSource Source )
-{
-	switch( Source )
-	{
-		case HP2Launcher::DataSource::Retail:
-			return "Retail";
-		case HP2Launcher::DataSource::Prototype:
-			return "Prototype";
-	}
-	return NULL;
-}
-
-static std::string JoinLauncherPath( const std::string& Parent, const char* Child )
-{
-	return Parent + (Parent.empty() || Parent.back() == '/' ? "" : "/") + Child;
-}
-
-static std::string ConfiguredDataRoot(
-	const HP2Launcher::DataSourceConfiguration& Configuration )
-{
-	return Configuration.selected == HP2Launcher::DataSource::Retail
-		? Configuration.retailRoot
-		: Configuration.prototypeRoot;
-}
-
-static bool SameDataSourceConfiguration(
-	const HP2Launcher::DataSourceConfiguration& A,
-	const HP2Launcher::DataSourceConfiguration& B )
-{
-	return A.selected == B.selected
-		&& A.retailRoot == B.retailRoot
-		&& A.prototypeRoot == B.prototypeRoot;
-}
-
-static bool SameActiveDataSource(
-	const HP2Launcher::DataSourceConfiguration& A,
-	const HP2Launcher::DataSourceConfiguration& B )
-{
-	return A.selected == B.selected
-		&& ConfiguredDataRoot(A) == ConfiguredDataRoot(B);
-}
-
-static void PrefillDataSourceRoots(
-	HP2Launcher::DataSourceConfiguration& Configuration )
-{
-	if( Configuration.retailRoot.empty() )
-		GetHP2ConventionalRetailDataRoot(Configuration.retailRoot);
-	if( Configuration.prototypeRoot.empty() )
-		GetHP2ConventionalPrototypeDataRoot(Configuration.prototypeRoot);
-}
-
-static HP2Launcher::DataSourceOption BuildDataSourceOption(
-	HP2Launcher::DataSource Source,
-	const std::string& Root )
-{
-	HP2Launcher::DataSourceOption Option;
-	Option.source = Source;
-	Option.root = Root;
-	if( Root.empty() )
-	{
-		Option.error = "Choose a folder containing System/Default.ini.";
-		return Option;
-	}
-	std::string CanonicalRoot;
-	std::string Error;
-	Option.available = ValidateHP2DataRoot(Root, CanonicalRoot, Error);
-	if( Option.available )
-		Option.root = CanonicalRoot;
-	else
-		Option.error = "The selected folder must contain System/Default.ini.";
-	return Option;
-}
-
-static void BuildDataSourceOptions(
-	const HP2Launcher::DataSourceConfiguration& Configuration,
-	std::vector<HP2Launcher::DataSourceOption>& Options )
-{
-	Options.clear();
-	Options.push_back(BuildDataSourceOption(
-		HP2Launcher::DataSource::Retail, Configuration.retailRoot));
-	Options.push_back(BuildDataSourceOption(
-		HP2Launcher::DataSource::Prototype, Configuration.prototypeRoot));
-}
-#if MACOSX && HP2_ENABLE_VULKAN_DRIVER
-// MoltenVK loader environment for a user-selected Vulkan launch, mirroring
-// Build/smoke_maps.py _vulkan_environment (Homebrew vulkan-loader and ICD).
-// dyld captures DYLD_* search paths only from the initial process
-// environment, so committing a Vulkan selection re-execs with these set
-// instead of relying on runtime setenv.
-struct MoltenVKEnvironmentPair
-{
-	const ANSICHAR* Key;
-	const ANSICHAR* Value;
-};
-static const MoltenVKEnvironmentPair MoltenVKEnvironment[] =
-{
-	{ "DYLD_LIBRARY_PATH", "/opt/homebrew/lib" },
-	{ "DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/opt/molten-vk/lib" },
-	{ "VK_DRIVER_FILES", "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json" }
-};
-// SDL_VULKAN_LIBRARY is intentionally NOT set: it makes SDL dlopen raw
-// MoltenVK while volk separately loads the Homebrew vulkan-loader, and the
-// two loader instances fail UVulkanRenderDevice::Init. Verified live:
-// without it the Vulkan device initializes; with it the launch segfaults.
-
-static const ANSICHAR* const LauncherRelaunchPrefixVariable = "HP2_LAUNCHER_RELAUNCH_PREFIX";
-#endif
-
-
-//
-// Entry point.
-//
-int main( int argc, char* argv[] )
-{
-	const bool RunNativeLauncher = HP2Launcher::ShouldRunNativeLauncher(argc, argv);
-	if( !RunNativeLauncher && !PrepareHP2Paths(argc, argv) )
+	// Validate and install the initial data/user roots before anything else
+	// touches the filesystem.
+	if( !PrepareHP2Paths( ArgC, ArgV ) )
 		return 1;
 
-	TCHAR CmdLine[1024];
-	if( !BuildCommandLine(argc, argv, CmdLine, ARRAY_COUNT(CmdLine)) )
+	// An explicit -datadir=<path> overrides stored launcher configuration;
+	// its first recognized occurrence wins.
+	std::string OverrideRoot;
+	bool HasOverride = false;
+	for( int Index = 1; Index < ArgC; ++Index )
 	{
-		fprintf(stderr, "The command line is too long, contains an unsupported quote, or is not valid UTF-8.\n");
-		return 1;
-	}
-
-	// Crash reporter covers the whole process, including the native launcher
-	// UI. The hang watchdog is opt-in via --watchdog-seconds.
-	HP2CrashReporterConfig CrashConfig = {};
-	CrashConfig.ProcessName = "HarryPotter2";
-	CrashConfig.LogFileBase = "HarryPotter2.log";
-	CrashConfig.WatchdogSeconds = ParseWatchdogSeconds(argc, argv);
-	HP2InstallCrashReporter(&CrashConfig);
-
-	// The launcher owns standard-library objects before appInit. This process
-	// overrides global new/delete with GMalloc, so install the launcher's ANSI
-	// allocator first; FMallocAnsi::Init is intentionally idempotent when
-	// appInit performs the normal engine initialization below.
-	GMalloc = &Malloc;
-	GMalloc->Init();
-
-
-	if( RunNativeLauncher )
-	{
-		std::string LauncherRoot;
-		std::string LauncherError;
-		if( !PrepareHP2LauncherHome(LauncherRoot, LauncherError) )
+		const char* Value = HP2DataDirectoryArgumentValue( ArgV[Index] );
+		if( Value )
 		{
-			fprintf(stderr, "hp2: unable to prepare the native launcher: %s\n", LauncherError.c_str());
-			return 1;
-		}
-
-		HP2Launcher::DataSourceConfiguration DataSources;
-		if( !HP2Launcher::LoadDataSourceConfiguration(LauncherRoot, DataSources, LauncherError) )
-		{
-			fprintf(stderr, "hp2: unable to load launcher data sources: %s\n", LauncherError.c_str());
-			return 1;
-		}
-		const HP2Launcher::DataSourceConfiguration StoredDataSources = DataSources;
-		PrefillDataSourceRoots(DataSources);
-		bool DataSourceCatalogDirty =
-			!SameDataSourceConfiguration(StoredDataSources, DataSources);
-
-		const char* ExplicitDataRoot = NULL;
-		for( int ArgIndex = 1; ArgIndex < argc; ++ArgIndex )
-		{
-			ExplicitDataRoot = HP2DataDirectoryArgumentValue(argv[ArgIndex]);
-			if( ExplicitDataRoot )
-				break;
-		}
-
-		HP2Launcher::LauncherPaths Paths;
-		HP2Launcher::LauncherState State;
-		std::string ActiveDataRoot;
-		std::string ActiveProfileRoot;
-		HP2Launcher::DataSourceConfiguration ActiveDataSources = DataSources;
-		bool HasActivePaths = false;
-		bool HasExplicitDataRoot = ExplicitDataRoot != NULL;
-
-		if( HasExplicitDataRoot )
-		{
-			if( !ValidateHP2DataRoot(ExplicitDataRoot, ActiveDataRoot, LauncherError) )
-			{
-				fprintf(stderr, "hp2: invalid -datadir '%s': %s\n",
-					ExplicitDataRoot, LauncherError.c_str());
-				return 1;
-			}
-			ActiveProfileRoot = JoinLauncherPath(
-				JoinLauncherPath(LauncherRoot, "Profiles"), "Explicit");
-			if( !InstallHP2Paths(ActiveDataRoot, ActiveProfileRoot, LauncherError)
-				|| !BuildLauncherPaths(
-					ActiveProfileRoot,
-					JoinLauncherPath(ActiveDataRoot, "System"),
-					Paths,
-					LauncherError)
-				|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
-			{
-				fprintf(stderr, "hp2: unable to prepare the explicit data source: %s\n",
-					LauncherError.c_str());
-				return 1;
-			}
-			HasActivePaths = true;
-		}
-		else
-		{
-			const char* SourceName = DataSourceName(DataSources.selected);
-			if( !SourceName
-				|| !ValidateHP2DataRoot(
-					ConfiguredDataRoot(DataSources), ActiveDataRoot, LauncherError) )
-			{
-				LauncherError = std::string("The selected ")
-					+ (SourceName ? SourceName : "game data")
-					+ " folder must contain System/Default.ini.";
-			}
-			else if( !HP2Launcher::PrepareDataSourceProfile(
-					LauncherRoot,
-					DataSources.selected,
-					ActiveProfileRoot,
-					LauncherError)
-				|| !InstallHP2Paths(ActiveDataRoot, ActiveProfileRoot, LauncherError)
-				|| !BuildLauncherPaths(
-					ActiveProfileRoot,
-					JoinLauncherPath(ActiveDataRoot, "System"),
-					Paths,
-					LauncherError)
-				|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
-			{
-				LauncherError = std::string("The selected ")
-					+ SourceName + " source could not be prepared: " + LauncherError;
-			}
-			else
-				HasActivePaths = true;
-		}
-
-		HP2Launcher::LauncherRequest Request;
-		Request.dataSources = DataSources;
-		Request.hasExplicitDataRootOverride = HasExplicitDataRoot;
-		Request.explicitDataRoot = HasExplicitDataRoot ? ActiveDataRoot : "";
-		BuildDataSourceOptions(DataSources, Request.dataSourceOptions);
-		if( HasActivePaths )
-		{
-			Request.settings = State.settings;
-			Request.saves = State.saves;
-			Request.userRoot = Paths.userRoot;
-			Request.logPath = LauncherLogPath(Paths, argc, argv);
-		}
-		else
-		{
-			Paths.userRoot = LauncherRoot;
-			Request.userRoot = LauncherRoot;
-			Request.logPath = LauncherLogPath(Paths, argc, argv);
-			Request.errorMessage = LauncherError;
-		}
-
-		// One-shot Vulkan relaunch: the re-executed image carries the
-		// MoltenVK environment and the already-validated launch prefix, so it
-		// boots the engine from the committed configuration without showing
-		// the window again.
-#if MACOSX && HP2_ENABLE_VULKAN_DRIVER
-		const ANSICHAR* RelaunchPrefix = std::getenv(LauncherRelaunchPrefixVariable);
-		if( RelaunchPrefix && !HasActivePaths )
-		{
-			// The active profile could not be prepared; drop the request and
-			// let the normal window flow relaunch once data is committed.
-			unsetenv(LauncherRelaunchPrefixVariable);
-			RelaunchPrefix = NULL;
-		}
-		if( RelaunchPrefix )
-		{
-			TCHAR Prefix[128];
-			unsetenv(LauncherRelaunchPrefixVariable);
-			if( !appFromUtf8InPlace(Prefix, RelaunchPrefix, ARRAY_COUNT(Prefix))
-				|| !PrependCommandLine(CmdLine, ARRAY_COUNT(CmdLine), Prefix) )
-			{
-				fprintf(stderr, "hp2: the relaunched Vulkan command is invalid or does not fit.\n");
-				return 1;
-			}
-		}
-		else
-#endif
-		for( ;; )
-		{
-			HP2Launcher::LauncherResult Result;
-			const HP2Launcher::LaunchAction Action
-				= HP2Launcher::RunHP2MacLauncher(Request, Result, LauncherError);
-			if( Action == HP2Launcher::LaunchAction::Quit )
-				return 0;
-			if( Action == HP2Launcher::LaunchAction::Error )
-			{
-				fprintf(stderr, "hp2: native launcher failed: %s\n", LauncherError.c_str());
-				return 1;
-			}
-			Result.selection.action = Action;
-
-			if( !HasExplicitDataRoot
-				&& HasActivePaths
-				&& SameActiveDataSource(ActiveDataSources, Result.dataSources)
-				&& DataSourceCatalogDirty )
-			{
-				if( !HP2Launcher::CommitDataSourceConfiguration(
-						LauncherRoot, Result.dataSources, LauncherError) )
-				{
-					Request.settings = Result.settings;
-					Request.dataSources = Result.dataSources;
-					Request.errorMessage = std::string("The game data folders were not saved: ")
-						+ LauncherError;
-					continue;
-				}
-				DataSources = Result.dataSources;
-				ActiveDataSources = DataSources;
-				DataSourceCatalogDirty = false;
-			}
-
-			if( !HasExplicitDataRoot
-				&& (!HasActivePaths || !SameActiveDataSource(ActiveDataSources, Result.dataSources)) )
-			{
-				const char* SourceName = DataSourceName(Result.dataSources.selected);
-				std::string RequestedDataRoot;
-				if( !SourceName
-					|| !ValidateHP2DataRoot(
-						ConfiguredDataRoot(Result.dataSources), RequestedDataRoot, LauncherError) )
-				{
-					Request.settings = Result.settings;
-					Request.dataSources = Result.dataSources;
-					Request.errorMessage = std::string("The selected ")
-						+ (SourceName ? SourceName : "game data")
-						+ " folder must contain System/Default.ini.";
-					continue;
-				}
-				if( Result.dataSources.selected == HP2Launcher::DataSource::Retail )
-					Result.dataSources.retailRoot = RequestedDataRoot;
-				else
-					Result.dataSources.prototypeRoot = RequestedDataRoot;
-				if( !HP2Launcher::CommitDataSourceConfiguration(
-						LauncherRoot, Result.dataSources, LauncherError)
-					|| !HP2Launcher::PrepareDataSourceProfile(
-						LauncherRoot,
-						Result.dataSources.selected,
-						ActiveProfileRoot,
-						LauncherError)
-					|| !InstallHP2Paths(RequestedDataRoot, ActiveProfileRoot, LauncherError)
-					|| !BuildLauncherPaths(
-						ActiveProfileRoot,
-						JoinLauncherPath(RequestedDataRoot, "System"),
-						Paths,
-						LauncherError)
-					|| !HP2Launcher::LoadLauncherState(Paths, State, LauncherError) )
-				{
-					Request.settings = Result.settings;
-					Request.dataSources = Result.dataSources;
-					Request.errorMessage = std::string("The selected source could not be prepared: ")
-						+ LauncherError;
-					continue;
-				}
-
-				DataSources = Result.dataSources;
-				ActiveDataSources = DataSources;
-				ActiveDataRoot = RequestedDataRoot;
-				HasActivePaths = true;
-				DataSourceCatalogDirty = false;
-				Request.settings = State.settings;
-				Request.saves = State.saves;
-				Request.userRoot = Paths.userRoot;
-				Request.logPath = LauncherLogPath(Paths, argc, argv);
-				Request.dataSources = DataSources;
-				BuildDataSourceOptions(DataSources, Request.dataSourceOptions);
-				Request.errorMessage =
-					"Game data source changed. Review its saves and settings, then choose New Game or Continue.";
-				continue;
-			}
-
-			std::string SelectedPrefix;
-			TCHAR Selection[128];
-			TCHAR PendingCmdLine[ARRAY_COUNT(CmdLine)];
-			appStrcpy(PendingCmdLine, CmdLine);
-			if( !HP2Launcher::BuildSelectedCommand(Result.selection, SelectedPrefix, LauncherError)
-				|| !appFromUtf8InPlace(Selection, SelectedPrefix.c_str(), ARRAY_COUNT(Selection))
-				|| !PrependCommandLine(PendingCmdLine, ARRAY_COUNT(PendingCmdLine), Selection) )
-			{
-				fprintf(stderr, "hp2: the selected launch command is invalid or does not fit: %s\n",
-					LauncherError.c_str());
-				return 1;
-			}
-			if( !HP2Launcher::ValidateLauncherSettings(Result.settings, LauncherError) )
-			{
-				Request.settings = Result.settings;
-				Request.errorMessage = LauncherError;
-				continue;
-			}
-			if( !HP2Launcher::CommitLauncherSettings(Paths, Result.settings, LauncherError) )
-			{
-				Request.settings = Result.settings;
-				Request.errorMessage = std::string("The settings were not saved: ") + LauncherError;
-				continue;
-			}
-
-			appStrcpy(CmdLine, PendingCmdLine);
-#if MACOSX && HP2_ENABLE_VULKAN_DRIVER
-			// dyld reads DYLD_* only from the initial environment, so hand the
-			// MoltenVK loader setup to a fresh image of this binary. The
-			// relaunched run skips the window via LauncherRelaunchPrefixVariable
-			// and boots the engine from the configuration committed above.
-			if( Result.settings.renderBackend == HP2Launcher::RenderBackend::Vulkan
-				&& !std::getenv(LauncherRelaunchPrefixVariable) )
-			{
-				for( INT EnvIndex = 0; EnvIndex < ARRAY_COUNT(MoltenVKEnvironment); ++EnvIndex )
-					setenv(MoltenVKEnvironment[EnvIndex].Key, MoltenVKEnvironment[EnvIndex].Value, 1);
-				setenv(LauncherRelaunchPrefixVariable, SelectedPrefix.c_str(), 1);
-				fflush(NULL);
-				execv(argv[0], argv);
-				fprintf(stderr, "hp2: unable to re-exec for the Vulkan renderer (errno %d); launching in-process.\n", errno);
-			}
-#endif
+			OverrideRoot = Value;
+			HasOverride = true;
 			break;
 		}
 	}
 
+	const FString ForwardedArguments = ForwardedCommandLine( ArgC, ArgV );
+	FString EngineCommandLine = ForwardedArguments;
+
+	// Interactive chooser rounds: repeat after recoverable errors until the
+	// player quits or selects a launchable target. Explicit maps, URLs, and
+	// bypass options skip the chooser entirely.
+	if( ShouldRunNativeLauncher( ArgC, ArgV ) )
+	{
+		for( ;; )
+		{
+			LauncherFlowResult Outcome;
+			if( !RunNativeLauncherRound( ArgC, ArgV, HasOverride, OverrideRoot, Outcome ) )
+				return 0;
+			if( Outcome.RunEngine )
+			{
+				EngineCommandLine = Outcome.EnginePrefix.Len()
+					? Outcome.EnginePrefix + TEXT(" ") + ForwardedArguments
+					: ForwardedArguments;
+				break;
+			}
+		}
+	}
+
+	INT ExitCode = 0;
+	GIsStarted = 1;
+#if !_MSC_VER
+	__Context::StaticInit();
+	strncpy( GModule, ArgV[0], sizeof(GModule) - 1 );
+	GModule[sizeof(GModule) - 1] = 0;
+#endif
+#ifndef _DEBUG
+	try
+#endif
+	{
+		GIsGuarded = 1;
+
 #if __STATIC_LINK
-	InstallHP2NativeLookups();
+		InstallHP2NativeLookups();
 #endif
 
-	INT ErrorLevel = 0;
-	UEngine* Engine = NULL;
+		// Init engine core.
+		appInit(
+			TEXT("Game"),
+			*EngineCommandLine,
+			&Malloc,
+			&Log,
+			&Error,
+			&Warn,
+			&FileManager,
+			FConfigCacheIni::Factory,
+			1 );
 
-	guard(main);
-	try
-	{
-		GIsStarted = 1;
-
-		// GModule is an ANSI process-module identifier in HP2's Unix platform.
-		strncpy(GModule, "HarryPotter2", sizeof(GModule) - 1);
-		GModule[sizeof(GModule) - 1] = 0;
-
-		GIsClient = 1;
-		GIsGuarded = 1;
-		appInit(TEXT("Game"), CmdLine, &Malloc, &Log, &Error, &Warn, &FileManager, FConfigCacheIni::Factory, 1);
-
-		const UBOOL NativeTextSmoke = ParseParam(CmdLine, TEXT("TESTNATIVETEXT"));
-		if( NativeTextSmoke )
-			BeginNativeTextRuntimeSmoke();
-
-#if __STATIC_LINK
-		// UObject::StaticInit, including Core classes, is owned by appInit.
+		// Register all statically linked packages.
 		RegisterHP2RuntimeClasses();
 		RegisterHP2ClientClasses();
-#endif
 
-		if( SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0 )
+		if( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_JOYSTICK ) != 0 )
+			debugf( NAME_Warning, TEXT("SDL_Init failed: %s"), *SdlStatusText( SDL_GetError() ) );
+
+		// Optional splash: shown before the engine initializes, hidden once
+		// the main loop starts.
+		if( !FrontendSuppressed() )
 		{
-			TCHAR SDLError[1024];
-			if( !appFromUtf8InPlace(SDLError, SDL_GetError(), ARRAY_COUNT(SDLError)) )
-				appStrcpy(SDLError, TEXT("Unknown SDL initialization error"));
-			appErrorf(TEXT("Couldn't initialize SDL: %s"), SDLError);
-		}
-		atexit(sdl_atexit_handler);
-
-		GIsServer = 1;
-		GIsClient = !ParseParam(appCmdLine(), TEXT("SERVER"));
-		GIsEditor = 0;
-		GIsScriptable = 1;
-		GLazyLoad = !GIsClient || ParseParam(appCmdLine(), TEXT("LAZY"));
-
-		FString Filename = FString::Printf(TEXT("../Help/Splash%s.bmp"), UObject::GetLanguage());
-		if( GFileManager->FileSize(*Filename) < 0 )
-			Filename = FString(TEXT("../Help")) * TEXT("Logo.bmp");
-		if( GFileManager->FileSize(*Filename) < 0 )
-			Filename = TEXT("../Help/Logo.bmp");
-
-		if( !NativeTextSmoke && !ParseParam(CmdLine, TEXT("NOFRONTEND")) && GFileManager->FileSize(*Filename) > 0 )
-			InitSplash(*Filename);
-
-		if( ParseParam(CmdLine, TEXT("LOG")) )
-		{
-			Warn.AuxOut = GLog;
-			GLog = &Warn;
+			FString SplashName( TEXT("../Help/Splash.bmp") );
+			if( GFileManager->FileSize( *SplashName ) < 0 )
+				SplashName = FString( TEXT("../Help/Logo.bmp") );
+			if( GFileManager->FileSize( *SplashName ) >= 0 )
+				ShowSplash( *SplashName );
 		}
 
-		Engine = InitEngine();
-		if( Engine )
-		{
-			debugf(NAME_Title, LocalizeGeneral(TEXT("Run")));
-			ExitSplash();
+		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
+			GLogHook = &StdoutEcho;
 
-			FString Temp;
-			if( Parse(CmdLine, TEXT("EXEC="), Temp) )
-			{
-				Temp = FString(TEXT("exec ")) + Temp;
-				if( Engine->Client && Engine->Client->Viewports.Num() && Engine->Client->Viewports(0) )
-					Engine->Client->Viewports(0)->Exec(*Temp, *GLog);
-			}
+		UEngine* Engine = InitEngine();
+		if( !Engine )
+			appErrorf( TEXT("Could not initialize the game engine") );
 
-			INT TestTicks = 0;
-			Parse(CmdLine, TEXT("TESTTICKS="), TestTicks);
-			if( NativeTextSmoke )
-				TestTicks = 180;
-			debugf(TEXT("Entering main loop."));
-			if( !GIsRequestingExit )
-				MainLoop(Engine, Max(0, TestTicks));
-		}
-		if( NativeTextSmoke && GetNativeTextRuntimeSmokeState() != NativeTextRuntimeSmokePassed )
-		{
-			std::fprintf(stderr, "Native text runtime smoke failed; state=%d stage=%d\n", (INT)GetNativeTextRuntimeSmokeState(), (INT)GetNativeTextRuntimeSmokeStage());
-			ErrorLevel = 1;
-		}
+		debugf( TEXT("Entering main loop.") );
+		HideSplash();
 
-
-		CleanUpOnExit(Engine);
+		MainLoop( Engine );
+		CleanUpOnExit( Engine );
 	}
+#ifndef _DEBUG
 	catch( ... )
 	{
-		ErrorLevel = 1;
-		Error.HandleError();
+		ExitCode = 1;
+		if( GError )
+			GError->HandleError();
 	}
+#endif
 
+	GIsGuarded = 0;
+	HideSplash();
 	appExit();
-	GIsStarted = 0;
 	SDL_Quit();
-
-	return ErrorLevel;
-	unguard;
+	GIsStarted = 0;
+	return ExitCode;
 }
-

@@ -1,43 +1,67 @@
 /*=============================================================================
 	FOutputDeviceSDLError.h: SDL error output device.
-	Copyright 1997-1999 Epic Games, Inc. All Rights Reserved.
-
-	Revision history:
-		* Created by Stijn Volckaert
 =============================================================================*/
 
-#include "Core.h"
+#ifndef _FOUTPUTDEVICESDLERROR_H
+#define _FOUTPUTDEVICESDLERROR_H
+
 #include <SDL2/SDL.h>
-#include <cstring>
+
+#include <string>
+
+#include "Core.h"
 
 //
-// SDL output device.
+// Fatal-error device. Mirrors the core ANSI error flow while surfacing the
+// error history as a UTF-8 message box on top of the plain-text stderr dump.
+// Headless runs (-NOFRONTEND) never open a window so scripted sessions stay
+// unattended; the text output always happens.
 //
 class FOutputDeviceSDLError : public FOutputDeviceError
 {
+private:
 	INT ErrorPos;
 	EName ErrorType;
+
+	// Converts engine text to UTF-8 for SDL's narrow-char interfaces.
+	static std::string ToUtf8( const TCHAR* Text )
+	{
+		ANSICHAR Buffer[8192];
+		Buffer[0] = 0;
+		if( !Text || !appToUtf8InPlace( Buffer, Text, ARRAY_COUNT(Buffer) ) )
+			return std::string();
+		return std::string( Buffer );
+	}
+
 	void LocalPrint( const TCHAR* Str )
 	{
-		wprintf(TEXT("%ls"),Str);
+#if UNICODE
+		wprintf( TEXT("%ls"), Str );
+#else
+		printf( TEXT("%s"), Str );
+#endif
 	}
+
+	void ShowErrorBox( const TCHAR* Message )
+	{
+		if( ParseParam( appCmdLine(), TEXT("NOFRONTEND") ) )
+			return;
+		const std::string Utf8 = ToUtf8( Message );
+		SDL_ShowSimpleMessageBox(
+			SDL_MESSAGEBOX_ERROR,
+			"Runtime Error",
+			Utf8.c_str(),
+			NULL );
+	}
+
 public:
 	FOutputDeviceSDLError()
-	: ErrorPos(0)
-	, ErrorType(NAME_None)
+	: ErrorPos( 0 )
+	, ErrorType( NAME_None )
 	{}
+
 	void Serialize( const TCHAR* Msg, enum EName Event )
 	{
-#if defined(_DEBUG) && 0
-		// Just display info and break the debugger.
-  		debugf( NAME_Critical, TEXT("appError called while debugging:") );
-		debugf( NAME_Critical, Msg );
-		UObject::StaticShutdownAfterError();
-  		debugf( NAME_Critical, TEXT("Breaking debugger") );
-		// stijn: the pointer needs to be volatile, otherwise the compiler can
-		// remove the null deref even at low optimization levels.
-		*(volatile BYTE*)NULL=0;
-#else
 		if( !GIsCriticalError )
 		{
 			// First appError.
@@ -51,15 +75,8 @@ public:
 			appStrncpy( GErrorHist, Msg, ARRAY_COUNT(GErrorHist) );
 			appStrncat( GErrorHist, TEXT("\r\n\r\n"), ARRAY_COUNT(GErrorHist) );
 			ErrorPos = appStrlen(GErrorHist);
-			if( GIsGuarded )
-			{
-				appStrncat( GErrorHist, LocalizeError("History",TEXT("Core")), ARRAY_COUNT(GErrorHist) );
-				appStrncat( GErrorHist, TEXT(": "), ARRAY_COUNT(GErrorHist) );
-			}
-			else
-			{
+			if( !GIsGuarded )
 				HandleError();
-			}
 		}
 		else debugf( NAME_Critical, TEXT("Error reentered: %s"), Msg );
 
@@ -68,8 +85,8 @@ public:
 			throw( 1 );
 		else
 			appRequestExit( 1 );
-#endif
 	}
+
 	void HandleError()
 	{
 		try
@@ -79,29 +96,19 @@ public:
 			GIsCriticalError = 1;
 			GLogHook         = NULL;
 			UObject::StaticShutdownAfterError();
-
-			debugf(TEXT("HandleError"));
-
-			GErrorHist[ErrorType==NAME_FriendlyError ? ErrorPos : ARRAY_COUNT(GErrorHist)-1]=0;
-			LocalPrint(GErrorHist);
-			ANSICHAR Title[256];
-			ANSICHAR Message[ARRAY_COUNT(GErrorHist) * 4];
-			if( !appToUtf8InPlace(Title, LocalizeError("Warning",TEXT("Core")), ARRAY_COUNT(Title)) )
-			{
-				std::strncpy(Title, "Error", sizeof(Title));
-				Title[sizeof(Title)-1] = 0;
-			}
-			if( !appToUtf8InPlace(Message, GErrorHist, ARRAY_COUNT(Message)) )
-			{
-				std::strncpy(Message, "Unreal runtime error", sizeof(Message));
-				Message[sizeof(Message)-1] = 0;
-			}
-			if( !ParseParam(appCmdLine(), TEXT("NOFRONTEND")) )
-				SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, Title, Message, NULL);
-
+			GErrorHist[ErrorType==NAME_FriendlyError ? ErrorPos : ARRAY_COUNT(GErrorHist)-1] = 0;
+			LocalPrint( GErrorHist );
 			LocalPrint( TEXT("\n\nExiting due to error\n") );
+			fflush( stdout );
+			ShowErrorBox( GErrorHist );
 		}
 		catch( ... )
 		{}
 	}
 };
+
+/*-----------------------------------------------------------------------------
+	The End.
+-----------------------------------------------------------------------------*/
+
+#endif
