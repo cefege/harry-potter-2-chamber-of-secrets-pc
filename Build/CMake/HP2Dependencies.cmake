@@ -133,8 +133,13 @@ hp2_declare_text_provider(CoreText
     CONDITION "APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK"
 )
 
+option(HP2_DISABLE_NATIVE_TEXT_BACKEND
+    "Force the native text backend off regardless of platform detection \
+(escape hatch while a provider implementation is in flight)" OFF)
+
 set(HP2_HAS_NATIVE_TEXT_BACKEND OFF)
 set(HP2_TEXT_PROVIDER_NAME "")
+if(NOT HP2_DISABLE_NATIVE_TEXT_BACKEND)
 get_property(_hp2_text_provider_candidates GLOBAL PROPERTY HP2_TEXT_PROVIDERS)
 foreach(_hp2_text_provider IN LISTS _hp2_text_provider_candidates)
     get_property(_hp2_text_provider_condition GLOBAL
@@ -158,6 +163,7 @@ endif()")
         break()
     endif()
 endforeach()
+endif()
 unset(_hp2_text_provider_candidates)
 unset(_hp2_text_provider_matched)
 unset(_hp2_text_provider)
