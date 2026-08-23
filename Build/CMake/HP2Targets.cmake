@@ -504,20 +504,34 @@ hp2_add_behavior_test(spell_interaction_manifest "${Python3_EXECUTABLE}"
 set_tests_properties(spell_interaction_manifest PROPERTIES
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/Testing/HP2/spell_interaction_manifest"
 )
-add_custom_target(regenerate_goldens
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
-    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
-        "--data-root=${HP2_TEST_DATA_ROOT}"
-        "--output=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
-    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
-        "--repo-root=${PROJECT_SOURCE_DIR}"
-        "--data-root=${HP2_TEST_DATA_ROOT}"
-        "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
-    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
-        "--data-root=${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal"
-        "--output=${CMAKE_BINARY_DIR}/goldens/hp1-package-audit.json"
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-    COMMENT "Regenerating machine-local goldens from the configured test data root")
+if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal/System/Default.ini")
+    add_custom_target(regenerate_goldens
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
+            "--output=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
+            "--repo-root=${PROJECT_SOURCE_DIR}"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
+            "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
+            "--data-root=${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal"
+            "--output=${CMAKE_BINARY_DIR}/goldens/hp1-package-audit.json"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        COMMENT "Regenerating machine-local goldens from the configured test data root")
+else()
+    add_custom_target(regenerate_goldens
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
+            "--output=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
+        COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
+            "--repo-root=${PROJECT_SOURCE_DIR}"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
+            "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        COMMENT "Regenerating machine-local goldens from the configured test data root (no HP1 data root present)")
+endif()
 hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
     "-datadir=${HP2_TEST_DATA_ROOT}"
 )
