@@ -248,13 +248,43 @@ fn run() -> Result<(), EngineError> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = parse_args(argv)?;
 
-    let Some(data_root) = args.data_root else {
+    // Zero-argument launch (double-click / `open`): fall back to the user's
+    // retail install and its New Game entry map so the bundle opens without
+    // a terminal. Explicit arguments always win. Tracked refinement: the
+    // launcher profile store + folder picker replace these defaults.
+    let data_root = args.data_root.clone().or_else(|| {
+        let retail = dirs_home().join("Library/Application Support/Harry Potter 2/Data/Retail");
+        if retail.join("System/Default.ini").is_file() {
+            eprintln!("hp2rs: [app.datadir_default] using {}", retail.display());
+            Some(retail)
+        } else {
+            None
+        }
+    });
+    let Some(data_root) = data_root else {
         return Err(EngineError::new(
             "engine.arg_datadir",
             format!("-datadir=<root> is required; {}", usage()),
         ));
     };
-    let Some(map_token) = args.map_token else {
+    let map_token = args.map_token.clone().or_else(|| {
+        let entry = data_root.join("Maps/Entry.unr");
+        if entry.is_file() {
+            eprintln!("hp2rs: [app.map_autoselected] Maps\\Entry.unr");
+            return Some("Maps\\Entry.unr".to_string());
+        }
+        let mut maps = std::fs::read_dir(data_root.join("Maps"))
+            .ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.to_lowercase().ends_with(".unr"))
+            .collect::<Vec<_>>();
+        maps.sort();
+        let first = maps.into_iter().next()?;
+        eprintln!("hp2rs: [app.map_autoselected] Maps\\{first}");
+        Some(format!("Maps\\{first}"))
+    });
+    let Some(map_token) = map_token else {
         return Err(EngineError::new(
             "engine.arg_map",
             format!("a map token is required; {}", usage()),
@@ -597,4 +627,12 @@ mod tests {
             "malformed -LOAD value is loud"
         );
     }
+}
+
+/// Home directory for default-path fallbacks (double-click launches have no
+/// CLI context).
+fn dirs_home() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
 }
