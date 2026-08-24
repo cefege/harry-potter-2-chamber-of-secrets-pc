@@ -7,4 +7,5 @@ publish.workspace = true
 
 [dependencies]
 rodio.workspace = true
+hp-format.workspace = true
 symphonia.workspace = true
