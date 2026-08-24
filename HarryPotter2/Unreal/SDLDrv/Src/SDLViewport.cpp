@@ -200,8 +200,12 @@ UBOOL USDLViewport::ResizeViewport( DWORD BlitType, INT NewX, INT NewY, INT NewC
 void USDLViewport::Unlock( UBOOL Blit )
 {
 	guard(USDLViewport::Unlock);
-	if( FrameCount > 0 )
-		FrameCount--;
+	// Mirror UViewport::Unlock: release the render-device lock taken in
+	// Lock(). Skipping it left RenDev locked after the first presented
+	// frame, failing every subsequent Lock assertion.
+	RenDev->Unlock( Blit );
+	if( Blit )
+		LastUpdateTime = CurrentTime;
 	unguard;
 }
 

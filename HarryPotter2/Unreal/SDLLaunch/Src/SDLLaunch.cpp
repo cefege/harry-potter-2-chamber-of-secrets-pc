@@ -455,7 +455,7 @@ UEngine* InitEngine()
 	return Engine;
 }
 
-void MainLoop( UEngine* Engine )
+void MainLoop( UEngine* Engine, INT TestTicks )
 {
 	check( Engine );
 
@@ -464,6 +464,7 @@ void MainLoop( UEngine* Engine )
 	FTime OldTime = appSeconds();
 	FTime SecondStartTime = OldTime;
 	INT TickCount = 0;
+	INT RemainingTestTicks = TestTicks;
 	while( GIsRunning && !GIsRequestingExit )
 	{
 		// Update the world.
@@ -472,6 +473,8 @@ void MainLoop( UEngine* Engine )
 		Engine->Tick( DeltaSeconds );
 		OldTime = NewTime;
 		++TickCount;
+		if( RemainingTestTicks > 0 && --RemainingTestTicks == 0 )
+			appRequestExit( 0 );
 		if( OldTime - SecondStartTime > 1 )
 		{
 			Engine->CurrentTickRate = (FLOAT)TickCount / (FLOAT)(OldTime - SecondStartTime);
@@ -479,10 +482,13 @@ void MainLoop( UEngine* Engine )
 			TickCount = 0;
 		}
 
-		// Enforce optional maximum tick rate.
-		const FLOAT MaxTickRate = Engine->GetMaxTickRate();
-		if( MaxTickRate > 0.f )
-			appSleep( Max( 0.f, (1.f / MaxTickRate) - (FLOAT)(appSeconds() - OldTime) ) );
+		// Enforce optional maximum tick rate; an unfocused window (harness
+		// and background runs) caps at 10 fps for deterministic pacing.
+		FLOAT TargetTickRate = Engine->GetMaxTickRate();
+		if( SDL_GetKeyboardFocus() == NULL )
+			TargetTickRate = TargetTickRate > 0.f ? Min( TargetTickRate, 10.f ) : 10.f;
+		if( TargetTickRate > 0.f )
+			appSleep( Max( 0.f, (1.f / TargetTickRate) - (FLOAT)(appSeconds() - OldTime) ) );
 	}
 	GIsRunning = 0;
 }
@@ -617,15 +623,28 @@ int main( int ArgC, char* ArgV[] )
 
 		if( ParseParam( appCmdLine(), TEXT("LOG") ) )
 			GLogHook = &StdoutEcho;
+		// Client/server context globals. The old launcher set these between
+		// SDL_Init and engine init; they are load-bearing far beyond display
+		// selection: ULinker derives _ContextFlags from them, and a zero
+		// value maps every package name-table entry to NAME_None during
+		// load, breaking all export resolution ("Failed to find object
+		// 'Level None.MyLevel'"). Restore before any package loads.
+		GIsServer = 1;
+		GIsClient = !ParseParam( appCmdLine(), TEXT("SERVER") );
+		GIsEditor = 0;
+		GIsScriptable = 1;
+		GLazyLoad = !GIsClient || ParseParam( appCmdLine(), TEXT("LAZY") );
 
 		UEngine* Engine = InitEngine();
 		if( !Engine )
 			appErrorf( TEXT("Could not initialize the game engine") );
-
 		debugf( TEXT("Entering main loop.") );
 		HideSplash();
 
-		MainLoop( Engine );
+		INT TestTicks = 0;
+		Parse( appCmdLine(), TEXT("TESTTICKS="), TestTicks );
+		if( !GIsRequestingExit )
+			MainLoop( Engine, Max( 0, TestTicks ) );
 		CleanUpOnExit( Engine );
 	}
 #ifndef _DEBUG
@@ -634,13 +653,27 @@ int main( int ArgC, char* ArgV[] )
 		ExitCode = 1;
 		if( GError )
 			GError->HandleError();
+		// HandleError prints the History via stdout's wprintf; mirror it on
+		// stderr so harnesses capturing only stderr still see the cause.
+		fprintf( stderr, "%ls", GErrorHist );
 	}
 #endif
 
 	GIsGuarded = 0;
-	HideSplash();
-	appExit();
-	SDL_Quit();
+	try
+	{
+		HideSplash();
+		appExit();
+		SDL_Quit();
+	}
+	catch( ... )
+	{
+		// A guard error raised during teardown sits outside the guarded
+		// engine region above; letting it escape main would terminate the
+		// process with an uncaught exception instead of exiting cleanly.
+		GIsStarted = 0;
+		return 1;
+	}
 	GIsStarted = 0;
 	return ExitCode;
 }

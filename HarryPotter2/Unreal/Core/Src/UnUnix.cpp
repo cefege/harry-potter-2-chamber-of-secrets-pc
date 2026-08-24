@@ -1370,9 +1370,16 @@ void __Context::HandleSignal( int Sig )
 	{
 		printf("Requesting Exit.\n");
 		appRequestExit( 0 );
+		// Recover into the innermost live guard only while the guarded
+		// engine region is active. Outside that window (early startup,
+		// launcher rounds, or the teardown tail) __Context::Env is either
+		// zeroed or points at an already-exited frame; resuming there
+		// cascades into SIGSEGV/SIGIOT terminate noise instead of exiting.
+		// A second arrival takes the exit(1) branch above.
+		if( GIsGuarded )
+			longjmp( Env, 1 );
+		return;
 	}
-
-	longjmp( Env, 1 );
 }
 
 #endif

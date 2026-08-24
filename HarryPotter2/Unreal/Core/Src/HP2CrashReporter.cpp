@@ -255,46 +255,56 @@ namespace
 //-----------------------------------------------------------------------------
 void HP2InstallCrashReporter( const HP2CrashReporterConfig* Config )
 {
-	if( g_Installed ) return;
-	g_Installed = 1;
+	// Configuration, install time, and the watchdog thread are set up once;
+	// signal DISPOSITIONS are refreshed on every call. The launcher installs
+	// the reporter early, then __Context::StaticInit overwrites these
+	// signals with its guard longjmp handlers; the post-StaticInit reinstall
+	// must actually restore them or fatal signals bypass the reporter and
+	// cascade through HandleSignal's exit-from-signal-handler path.
+	const bool FirstInstall = !g_Installed;
 
-	if( Config )
+	if( FirstInstall )
 	{
-		size_t N = StrLen( Config->ProcessName );
-		if( N >= sizeof( g_ProcessName ) ) N = sizeof( g_ProcessName ) - 1;
-		MemCopy( g_ProcessName, Config->ProcessName ? Config->ProcessName : "", N );
-		g_ProcessName[N] = 0;
+		g_Installed = 1;
 
-		double Watchdog = Config->WatchdogSeconds;
-		if( Watchdog < 0.0 ) Watchdog = 0.0;
-		if( Watchdog > 86400.0 ) Watchdog = 86400.0;
-		g_WatchdogSeconds = Watchdog;
-
-		// Default engine-log discovery: <user root>/<LogFileBase>. The user
-		// root layout matches HP2Paths (Application Support/Harry Potter 2).
-		if( !g_LogHint[0] && Config->LogFileBase )
+		if( Config )
 		{
-			const char* Home = getenv( "HOME" );
-			if( Home )
+			size_t N = StrLen( Config->ProcessName );
+			if( N >= sizeof( g_ProcessName ) ) N = sizeof( g_ProcessName ) - 1;
+			MemCopy( g_ProcessName, Config->ProcessName ? Config->ProcessName : "", N );
+			g_ProcessName[N] = 0;
+
+			double Watchdog = Config->WatchdogSeconds;
+			if( Watchdog < 0.0 ) Watchdog = 0.0;
+			if( Watchdog > 86400.0 ) Watchdog = 86400.0;
+			g_WatchdogSeconds = Watchdog;
+
+			// Default engine-log discovery: <user root>/<LogFileBase>. The user
+			// root layout matches HP2Paths (Application Support/Harry Potter 2).
+			if( !g_LogHint[0] && Config->LogFileBase )
 			{
-				static const char UserRoot[] =
-					"/Library/Application Support/Harry Potter 2/User/";
-				size_t HN = StrLen( Home );
-				size_t BN = StrLen( Config->LogFileBase );
-				size_t Total = HN + sizeof(UserRoot) - 1 + BN;
-				if( Total < sizeof( g_LogHint ) - 1 )
+				const char* Home = getenv( "HOME" );
+				if( Home )
 				{
-					MemCopy( g_LogHint, Home, HN );
-					MemCopy( g_LogHint + HN, UserRoot, sizeof(UserRoot) - 1 );
-					MemCopy( g_LogHint + HN + sizeof(UserRoot) - 1,
-						Config->LogFileBase, BN );
-					g_LogHint[Total] = 0;
+					static const char UserRoot[] =
+						"/Library/Application Support/Harry Potter 2/User/";
+					size_t HN = StrLen( Home );
+					size_t BN = StrLen( Config->LogFileBase );
+					size_t Total = HN + sizeof(UserRoot) - 1 + BN;
+					if( Total < sizeof( g_LogHint ) - 1 )
+					{
+						MemCopy( g_LogHint, Home, HN );
+						MemCopy( g_LogHint + HN, UserRoot, sizeof(UserRoot) - 1 );
+						MemCopy( g_LogHint + HN + sizeof(UserRoot) - 1,
+							Config->LogFileBase, BN );
+						g_LogHint[Total] = 0;
+					}
 				}
 			}
 		}
-	}
 
-	g_InstallTime = NowMonotonic();
+		g_InstallTime = NowMonotonic();
+	}
 
 	struct sigaction Sa;
 	memset( &Sa, 0, sizeof( Sa ) );
@@ -303,14 +313,15 @@ void HP2InstallCrashReporter( const HP2CrashReporterConfig* Config )
 	for( int I = 0; I < kMaxSignals; ++I )
 		sigaction( kWatchedSignals[I], &Sa, NULL );
 
-	if( g_WatchdogSeconds > 0.0 )
+	if( g_WatchdogSeconds > 0.0 && FirstInstall )
 	{
 		static pthread_t WatchdogThreadHandle;
 		pthread_create( &WatchdogThreadHandle, NULL, WatchdogThread, NULL );
 	}
 
 	static const char Installed[] = "HP2_CRASH installed\n";
-	write( 2, Installed, sizeof(Installed) - 1 );
+	if( FirstInstall )
+		write( 2, Installed, sizeof(Installed) - 1 );
 }
 void HP2SetCrashReporterLogHint( const char* Utf8Path )
 {

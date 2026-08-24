@@ -187,6 +187,25 @@ void USDLClient::Tick()
 	for( INT Index = 0; Index < Viewports.Num(); ++Index )
 		if( Viewports(Index) )
 			Viewports(Index)->UpdateInput( 0 );
+
+	// Present frames: repaint the most stale realtime viewport each tick.
+	// UGameEngine::Tick delegates all drawing here, so a client that only
+	// pumps input never presents anything (blank window; render-device
+	// Unlock/present hooks never run).
+	UViewport* BestViewport = NULL;
+	for( INT Index = 0; Index < Viewports.Num(); ++Index )
+	{
+		UViewport* Viewport = Viewports(Index);
+		if
+		(	Viewport
+		&&	Viewport->IsRealtime()
+		&&	Viewport->SizeX
+		&&	Viewport->SizeY
+		&&	(!BestViewport || BestViewport->LastUpdateTime > Viewport->LastUpdateTime) )
+			BestViewport = Viewport;
+	}
+	if( BestViewport )
+		BestViewport->Repaint( 1 );
 	unguard;
 }
 

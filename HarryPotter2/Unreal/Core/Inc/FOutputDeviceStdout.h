@@ -14,7 +14,11 @@ class FOutputDeviceStdout : public FOutputDevice
 public:
 	void Serialize( const TCHAR* V, EName Event )
 	{
-		printf( "%s\n", V );
+		// TCHAR is wchar_t on this platform: "%s" would print only the
+		// first character and stop at its zero byte. "%ls" converts the
+		// whole wide string to multibyte output.
+		fprintf( stdout, "%ls\n", V );
+		fflush( stdout );
 	}
 };
 

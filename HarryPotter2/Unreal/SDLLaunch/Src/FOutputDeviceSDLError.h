@@ -8,6 +8,7 @@
 #include <SDL2/SDL.h>
 
 #include <string>
+#include <unistd.h>
 
 #include "Core.h"
 
@@ -45,6 +46,11 @@ private:
 	void ShowErrorBox( const TCHAR* Message )
 	{
 		if( ParseParam( appCmdLine(), TEXT("NOFRONTEND") ) )
+			return;
+		// The modal box needs a human to dismiss it; unattended sessions
+		// (harness, CI) would hang here forever. Skip it whenever stdin is
+		// not a terminal so fatal errors exit deterministically.
+		if( !isatty( STDIN_FILENO ) )
 			return;
 		const std::string Utf8 = ToUtf8( Message );
 		SDL_ShowSimpleMessageBox(
