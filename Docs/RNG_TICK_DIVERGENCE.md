@@ -107,3 +107,14 @@ at cleanup; the probe methodology lives in this paragraph.
 - `--fixed-dt=<secs>` (finite, positive) freezes the tick cadence.
 - `HP2_FRAME_TIMING=1` enables per-tick `<HP2_RES> frame_ms=` lines;
   unset keeps output fully deterministic so log hashing works.
+
+## 6. Fidelity follow-up reference (added 2026-08-24)
+
+Community resource for the deferred-construct work:
+https://github.com/metallicafan212/HP2UScriptDecompile/ — working decompiles
+of the shipped obfuscated UScript (HGame classes incl. InterpolationPoint,
+Harry pawn, bosses). Use as READ-ONLY behavioral reference for the faithful
+foreach/code-stream ABI rework; never vendored. Its decompiles recompile
+through ucc make, reinforcing that the shipped token stream follows stock
+compiler conventions (the presumed '0x61 fork opcode' remains under
+investigation as a probable anchor artifact).
