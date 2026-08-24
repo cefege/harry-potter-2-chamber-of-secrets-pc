@@ -112,9 +112,10 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
     // brush transform. Returns the poly count.
     let push_model_polys = |archive: &PackageArchive,
                             model_index: usize,
+                            matrix: &[[f32; 3]; 3],
                             location: [f32; 3],
-                            rotation: [i32; 3],
-                            scale: [f32; 3],
+                            pre_pivot: [f32; 3],
+                            mirrored: bool,
                             polys: &mut Vec<ScenePoly>|
      -> Result<usize> {
         let entry = archive
@@ -137,16 +138,22 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
         let parsed = parse_upolys(polys_payload, archive)?;
         let count = parsed.len();
         for raw_poly in parsed {
+            let mut vertices: Vec<[f32; 3]> = raw_poly
+                .vertices
+                .iter()
+                .map(|v| transform_vertex(matrix, location, pre_pivot, *v))
+                .collect();
+            // A mirrored scale flips handedness: reverse the winding so
+            // faces keep fronting the empty region.
+            if mirrored {
+                vertices.reverse();
+            }
             polys.push(ScenePoly {
-                base: transform_vertex(location, rotation, scale, raw_poly.base),
-                vertices: raw_poly
-                    .vertices
-                    .iter()
-                    .map(|v| transform_vertex(location, rotation, scale, *v))
-                    .collect(),
-                normal: rotate_only(rotation, raw_poly.normal),
-                tex_u: rotate_only(rotation, raw_poly.tex_u),
-                tex_v: rotate_only(rotation, raw_poly.tex_v),
+                base: transform_vertex(matrix, location, pre_pivot, raw_poly.base),
+                vertices,
+                normal: rotate_only(matrix, raw_poly.normal),
+                tex_u: rotate_only(matrix, raw_poly.tex_u),
+                tex_v: rotate_only(matrix, raw_poly.tex_v),
                 pan_uv: raw_poly.pan_uv,
                 poly_flags: raw_poly.poly_flags,
                 texture: resolve_texture_key(archive, raw_poly.texture_ref),
@@ -165,7 +172,10 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
         };
         let location = struct_vec3(store, arena, "Location").unwrap_or([0.0; 3]);
         let rotation = struct_ints(store, arena, "Rotation").unwrap_or([0; 3]);
-        let scale = struct_vec3(store, arena, "MainScale").unwrap_or([1.0; 3]);
+        let main_scale = struct_vec3(store, arena, "MainScale").unwrap_or([1.0; 3]);
+        let post_scale = struct_vec3(store, arena, "PostScale").unwrap_or([1.0; 3]);
+        let pre_pivot = struct_vec3(store, arena, "PrePivot").unwrap_or([0.0; 3]);
+        let (matrix, mirrored) = brush_matrix(rotation, main_scale, post_scale);
         // 'Brush' object property -> Model export (raw package ref).
         let brush_prop = arena.names.find_index("Brush").and_then(|n| store.get(n));
         let Some(PropValue::Object(Some(raw))) = brush_prop else {
@@ -181,7 +191,17 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
         }
         brushes += 1;
         referenced_models.insert(model_index);
-        if push_model_polys(archive, model_index, location, rotation, scale, &mut polys).is_ok() {
+        if push_model_polys(
+            archive,
+            model_index,
+            &matrix,
+            location,
+            pre_pivot,
+            mirrored,
+            &mut polys,
+        )
+        .is_ok()
+        {
             linked += 1;
         }
     }
@@ -214,7 +234,20 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
         };
         if parsed.nodes.is_empty() {
             // No BSP topology — fall back to the Polys path (identity brush).
-            match push_model_polys(archive, index, [0.0; 3], [0; 3], [1.0; 3], &mut polys) {
+            const IDENTITY: [[f32; 3]; 3] = [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ];
+            match push_model_polys(
+                archive,
+                index,
+                &IDENTITY,
+                [0.0; 3],
+                [0.0; 3],
+                false,
+                &mut polys,
+            ) {
                 Ok(_) => level_models += 1,
                 Err(error) => {
                     eprintln!(
@@ -293,20 +326,56 @@ fn push_bsp_polys(model: &ParsedModel, archive: &PackageArchive, polys: &mut Vec
     }
 }
 
-/// Brush-local point -> world: MainScale, then rotator, then Location.
-fn transform_vertex(
-    location: [f32; 3],
+/// Brush LocalToWorld, replicating the C++ brush transform
+/// (TrackDiff's C++-source-verified form):
+///
+/// `M = diag(PostScale) · Rz(yaw) · Ry(−pitch) · Rx(−roll) · diag(MainScale)`
+///
+/// `world = M · (v − PrePivot) + Location`; directions (normals, texU/V)
+/// transform as `normalize(M · d)`. A mirrored scale (`det(M) < 0`) flips
+/// handedness — callers reverse poly vertex order to keep faces fronting.
+fn brush_matrix(
     rotation: [i32; 3],
-    scale: [f32; 3],
-    v: [f32; 3],
-) -> [f32; 3] {
-    let scaled = [v[0] * scale[0], v[1] * scale[1], v[2] * scale[2]];
-    translate(apply_rotator(rotation, scaled), location)
+    main_scale: [f32; 3],
+    post_scale: [f32; 3],
+) -> ([[f32; 3]; 3], bool) {
+    let mut m = crate::render_bridge::rotation_matrix(rotation);
+    for row in &mut m {
+        for (col, value) in row.iter_mut().enumerate() {
+            *value *= main_scale[col]; // diag(MainScale) on the right
+        }
+        for (i, value) in row.iter_mut().enumerate() {
+            *value *= post_scale[i]; // diag(PostScale) on the left
+        }
+    }
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    (m, det < 0.0)
 }
 
-/// Direction vector -> world (rotation only).
-fn rotate_only(rotation: [i32; 3], v: [f32; 3]) -> [f32; 3] {
-    apply_rotator(rotation, v)
+/// Brush-local point -> world through the brush LocalToWorld matrix.
+fn transform_vertex(
+    matrix: &[[f32; 3]; 3],
+    location: [f32; 3],
+    pre_pivot: [f32; 3],
+    v: [f32; 3],
+) -> [f32; 3] {
+    let t = [
+        v[0] - pre_pivot[0],
+        v[1] - pre_pivot[1],
+        v[2] - pre_pivot[2],
+    ];
+    let r = crate::render_bridge::mat_vec(matrix, &t);
+    [r[0] + location[0], r[1] + location[1], r[2] + location[2]]
+}
+
+/// Direction vector -> world through the brush LocalToWorld matrix.
+/// Deliberately NOT normalized: FPoly/FBspSurf texture bases carry the
+/// texel scale in their magnitude (|TexU| = 1/UScale, observed 0.5..2.0
+/// on PrivetDr BSP surfs); normalizing destroys texture alignment.
+fn rotate_only(matrix: &[[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
+    crate::render_bridge::mat_vec(matrix, &v)
 }
 
 /// Name text for a local name-table index.
@@ -434,39 +503,6 @@ fn struct_ints(store: &PropStore, arena: &ObjectArena, prop: &str) -> Option<[i3
     Some(out)
 }
 
-/// Rotate a direction vector by a UE1 rotator (65536 units = one turn),
-/// yaw then pitch then roll, column-vector convention. Kept as one small
-/// isolated function so a mirrored-world fix is a one-line flip here.
-fn apply_rotator(rotation: [i32; 3], v: [f32; 3]) -> [f32; 3] {
-    const UNITS_PER_TURN: f64 = 65536.0;
-    let v = [v[0] as f64, v[1] as f64, v[2] as f64];
-    let (sin_yaw, cos_yaw) =
-        (rotation[1] as f64 / UNITS_PER_TURN * std::f64::consts::TAU).sin_cos();
-    let (sin_pitch, cos_pitch) =
-        (rotation[0] as f64 / UNITS_PER_TURN * std::f64::consts::TAU).sin_cos();
-    let (sin_roll, cos_roll) =
-        (rotation[2] as f64 / UNITS_PER_TURN * std::f64::consts::TAU).sin_cos();
-    // Yaw about Z.
-    let (x, y) = (
-        cos_yaw * v[0] - sin_yaw * v[1],
-        sin_yaw * v[0] + cos_yaw * v[1],
-    );
-    // Pitch about Y.
-    let (x, z) = (
-        cos_pitch * x + sin_pitch * v[2],
-        -sin_pitch * x + cos_pitch * v[2],
-    );
-    // Roll about X.
-    let (y, z) = (cos_roll * y - sin_roll * z, sin_roll * y + cos_roll * z);
-    [x as f32, y as f32, z as f32]
-}
-
-/// Translate a point by a brush location.
-fn translate(v: [f32; 3], by: [f32; 3]) -> [f32; 3] {
-    [v[0] + by[0], v[1] + by[1], v[2] + by[2]]
-}
-
-/// Read three little-endian f32s.
 fn read_f32x3(cur: &mut ByteCursor<'_>) -> PackageResult<[f32; 3]> {
     let mut out = [0.0f32; 3];
     for slot in &mut out {
@@ -928,9 +964,15 @@ mod tests {
     /// Rotator math: identity keeps vectors; quarter yaw moves X onto Y.
     #[test]
     fn rotator_basics() {
-        let v = apply_rotator([0, 0, 0], [1.0, 0.0, 0.0]);
+        let v = crate::render_bridge::mat_vec(
+            &crate::render_bridge::rotation_matrix([0, 0, 0]),
+            &[1.0, 0.0, 0.0],
+        );
         assert!((v[0] - 1.0).abs() < 1e-5);
-        let v = apply_rotator([0, 16384, 0], [1.0, 0.0, 0.0]); // 90 degrees yaw
+        let v = crate::render_bridge::mat_vec(
+            &crate::render_bridge::rotation_matrix([0, 16384, 0]),
+            &[1.0, 0.0, 0.0],
+        ); // 90 degrees yaw
         assert!((v[0]).abs() < 1e-5 && (v[1] - 1.0).abs() < 1e-5);
     }
 
@@ -1285,25 +1327,37 @@ mod g4_structural {
         }
     }
 
-    /// Independent brush-transform reimplementation (documented rule:
-    /// world = Location + R(yaw,pitch,roll) · (MainScale ∘ v)) used to
-    /// cross-check `transform_vertex`.
+    /// Independent brush-transform reimplementation (C++-verified rule,
+    /// TrackDiff probe ground truth):
+    /// `cpp = M·(v − PrePivot) + Location` with
+    /// `M = diag(Post) · Rz(yaw) · Ry(−pitch) · Rx(−roll) · diag(Main)`.
+    /// Used to cross-check `transform_vertex` / `brush_matrix`.
     fn hand_transform(
         location: [f32; 3],
         rotation: [i32; 3],
-        scale: [f32; 3],
+        main_scale: [f32; 3],
+        post_scale: [f32; 3],
+        pre_pivot: [f32; 3],
         v: [f32; 3],
     ) -> [f32; 3] {
         let rad = |u: i32| u as f32 * std::f32::consts::TAU / 65536.0;
         let (sy, cy) = rad(rotation[1]).sin_cos();
-        let (sp, cp) = rad(rotation[0]).sin_cos();
-        let (sr, cr) = rad(rotation[2]).sin_cos();
-        let s = [v[0] * scale[0], v[1] * scale[1], v[2] * scale[2]];
-        // Rz(yaw) · Ry(pitch) · Rx(roll), column-vector convention.
+        let (sp, cp) = (-rad(rotation[0])).sin_cos();
+        let (sr, cr) = (-rad(rotation[2])).sin_cos();
+        let s = [
+            (v[0] - pre_pivot[0]) * main_scale[0],
+            (v[1] - pre_pivot[1]) * main_scale[1],
+            (v[2] - pre_pivot[2]) * main_scale[2],
+        ];
+        // Rz(yaw) · Ry(−pitch) · Rx(−roll), column-vector convention.
         let x = cy * cp * s[0] + (cy * sp * sr - sy * cr) * s[1] + (cy * sp * cr + sy * sr) * s[2];
         let y = sy * cp * s[0] + (sy * sp * sr + cy * cr) * s[1] + (sy * sp * cr - cy * sr) * s[2];
         let z = -sp * s[0] + cp * sr * s[1] + cp * cr * s[2];
-        [x + location[0], y + location[1], z + location[2]]
+        [
+            x * post_scale[0] + location[0],
+            y * post_scale[1] + location[1],
+            z * post_scale[2] + location[2],
+        ]
     }
 
     fn close(a: [f32; 3], b: [f32; 3], eps: f32) -> bool {
@@ -1343,9 +1397,10 @@ mod g4_structural {
             };
             let location = struct_vec3(store, arena, "Location").unwrap();
             let rotation = struct_ints(store, arena, "Rotation").unwrap_or([0; 3]);
-            let scale = struct_vec3(store, arena, "MainScale").unwrap_or([1.0; 3]);
+            let main_scale = struct_vec3(store, arena, "MainScale").unwrap_or([1.0; 3]);
+            let post_scale = struct_vec3(store, arena, "PostScale").unwrap_or([1.0; 3]);
+            let pre_pivot = struct_vec3(store, arena, "PrePivot").unwrap_or([0.0; 3]);
             if name == "Brush423" {
-                // Documented retail placement for Brush423.
                 assert!(
                     close(location, [7760.0, 352.0, 208.0], 0.5),
                     "Brush423 Location {location:?}"
@@ -1369,7 +1424,7 @@ mod g4_structural {
                 let world_verts: Vec<[f32; 3]> = raw
                     .vertices
                     .iter()
-                    .map(|v| hand_transform(location, rotation, scale, *v))
+                    .map(|v| hand_transform(location, rotation, main_scale, post_scale, pre_pivot, *v))
                     .collect();
                 let all_found = world_verts.iter().all(|wv| {
                     scene
@@ -1648,5 +1703,57 @@ mod g4_structural {
         assert!(sampled >= 2, "sampled a known poly's UVs");
         assert!(uv_max < 64.0, "UV magnitude {uv_max} out of sane range");
         println!("[g4] UVs: Brush423 first-poly |uv|max={uv_max} (sampled {sampled})");
+    }
+}
+
+#[cfg(test)]
+mod surfprobe {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Inspect Model1 BSP surf basis vectors: magnitudes tell whether the
+    /// stored Vectors carry texel scale or are unit directions.
+    #[test]
+    fn surf_basis_magnitudes() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let archive = hp_format::package79::read_package(&bytes).unwrap();
+        let payload = archive.export_payload(822).unwrap();
+        let model = parse_model(payload, &archive, archive.exports[822].class_ref).unwrap();
+        let mut mags: Vec<f32> = Vec::new();
+        for surf in model.surfs.iter().take(400) {
+            for idx in [surf.tex_u, surf.tex_v] {
+                if let Some(v) = model.vectors.get(idx) {
+                    mags.push((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt());
+                }
+            }
+        }
+        mags.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        println!(
+            "surf basis mags: n={} min={:.4} med={:.4} max={:.4}",
+            mags.len(),
+            mags.first().unwrap_or(&0.0),
+            mags[mags.len() / 2],
+            mags.last().unwrap_or(&0.0)
+        );
+        let mut hist = [0usize; 6];
+        for m in &mags {
+            let band = (*m * 2.0).clamp(0.0, 5.0) as usize;
+            hist[band] += 1;
+        }
+        println!("hist (0.5-unit bands 0..3): {hist:?}");
+        // Also: pan values distribution.
+        let mut pans: Vec<(i16, i16)> = model
+            .surfs
+            .iter()
+            .filter(|s| s.pan_u != 0 || s.pan_v != 0)
+            .map(|s| (s.pan_u, s.pan_v))
+            .collect();
+        println!("nonzero pans: {}", pans.len());
+        pans.sort();
+        pans.dedup();
+        for p in pans.iter().take(8) {
+            println!("  pan {p:?}");
+        }
     }
 }

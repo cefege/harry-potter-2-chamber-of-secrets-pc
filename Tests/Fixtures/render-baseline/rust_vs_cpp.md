@@ -13,6 +13,22 @@ level model carrying the static world. Scene extraction covers both:
   from node vertex pools, textured via surf records (openhp1
   `Model::triangulate` approach).
 
+### Root-cause fixes landed this session (second package: brush LocalToWorld)
+
+0. **Brush LocalToWorld was wrong** (TrackDiff C++-source-verified):
+   PrePivot was dropped (275 PrivetDr brushes displaced), pitch/roll
+   rotation signs were inverted (C++ builds Ry(−pitch)·Rx(−roll)), and
+   PostScale was unapplied. Now: `world = M·(v − PrePivot) + Location`
+   with `M = diag(Post)·Rz(yaw)·Ry(−pitch)·Rx(−roll)·diag(Main)`;
+   normals/texU/V = `M·d` (scale-preserving — BSP surf bases carry texel
+   scale 0.5..2.0, normalizing destroyed texture alignment); mirrored
+   scale (det<0) reverses winding. Camera + brushes share ONE rotation
+   helper (`render_bridge::rotation_matrix`); camera forward is now the
+   UE1 `FRotator::Vector` convention (pitch + = up). TrackDiff probe:
+   30/30 vertex deltas zero, 5/5 brushes 100% match incl. rotated
+   Brush502/80/82. USER-VISIBLE RESULT: the Privet Drive street renders —
+   house row, roofs, chimneys, windows, lawns.
+
 ### Root-cause fixes landed this session
 
 1. **View-projection matrix was transposed** (`render_bridge::pass_uniforms`):
@@ -123,15 +139,18 @@ Two runs, Ch2Skurge (heaviest scene), seed `0x08f4c815`,
 58eb5c2b888e2a7a27f7d4f357a1d01a38fde2c88fc64b7edf7417a32136898d  runB/frame_000119.png
 ```
 
-`cmp` clean — byte-identical.
+`cmp` clean — byte-identical (sha256
+79af3cf8a8ccc3469f43659864a8e9991bb47403b841f29aa4b6e488362c3d05).
 
 ### Visual evidence
 
 `/tmp/g4_stats_PrivetDr_frame.png` (also
 `/tmp/g4_vis_PrivetDr/frame_000119.png`): PlayerStart view of PrivetDr —
-recognizable room interior (red ceiling band, gray wall band, floor with
-furniture-scale blocks, correct perspective). Top-down sweep during
-development showed the house row / street / lawns plan view.
+THE PRIVET DRIVE STREET: recognizable row of two-story houses with
+pitched roofs, chimneys, windows, lawns and a walkway, correct
+placement/orientation (user-confirmed 3D forms; texture alignment on
+static surfaces fixed by the scale-preserving basis fix). Submission
+proof test: 6483 scene polys → 6456 draws (27 invisible/untextured).
 
 ### Gate (d) — suites and lint
 
