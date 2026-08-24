@@ -8,8 +8,18 @@ use crate::arena::{ObjectArena, ObjectId};
 use crate::error::{Fail, Result};
 use crate::natives::NativeRegistry;
 
-/// Load order mirrors the engine: parents before children.
-pub const PACKAGE_LOAD_ORDER: [&str; 5] = ["Core", "Engine", "UWindow", "HPParticle", "HGame"];
+/// Load order mirrors the engine: parents before children. `HPModels`
+/// precedes `HGame` because retail `HGame` classes (e.g. `HGame.QuidArmor`)
+/// declare their superclass in `HPModels`, and import stitching only
+/// resolves against already-loaded packages.
+pub const PACKAGE_LOAD_ORDER: [&str; 6] = [
+    "Core",
+    "Engine",
+    "UWindow",
+    "HPParticle",
+    "HPModels",
+    "HGame",
+];
 
 /// A fully loaded and bound object space plus its native dispatch table.
 pub struct World {

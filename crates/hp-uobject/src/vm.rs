@@ -246,6 +246,18 @@ impl<'a> Frame<'a> {
         while self.pc < self.code.len() {
             let opcode = self.code[self.pc];
             self.pc += 1;
+            if (0x61..=0x6F).contains(&opcode) {
+                // Opcodes above EX_ExtendedNative are its high nibble: the
+                // native slot is `(opcode - 0x60)*0x100 + B` (SerializeExpr,
+                // UnClass.cpp: `else if( Expr >= EX_ExtendedNative )`).
+                let low = self.u8_at()?;
+                self.eval_parms_and_dispatch()?;
+                let body = self
+                    .registry
+                    .get(u16::from(opcode - 0x60) * 0x100 + u16::from(low))?;
+                self.result = body(self)?;
+                continue;
+            }
             if (0x70..=0xFF).contains(&opcode) {
                 // Opcodes at or above EX_FirstNative ARE native slots:
                 // GNatives[opcode] with a normal parameter list.
@@ -333,10 +345,15 @@ impl<'a> Frame<'a> {
                 self.result = instance_value(self, name);
             }
             USToken::BoolVariable => {
-                let name = self.name_ci()? as u32;
-                let mask = self.u8_at()?;
-                let value = instance_value(self, name);
-                self.result = Bool(matches!(value, Bool(true)) && mask != 0);
+                // Fork semantics (UnCorSc.cpp `execBoolVariable`): consume
+                // ONE byte and re-dispatch `GNatives[B]`; the compiler
+                // always writes EX_BoolVariable before a plain variable
+                // load or struct-member access (UnScrCom.cpp), so the bool
+                // bitmask lives in property metadata, never in code. The
+                // nested load's value folds to the result.
+                let sub = self.u8_at()?;
+                self.expr_opcode(sub)?;
+                self.result = Bool(self.result.truthy());
             }
 
             // ---- Constants ----------------------------------------------
@@ -375,12 +392,10 @@ impl<'a> Frame<'a> {
                 self.result = Str(String::from_utf16_lossy(&units));
             }
             USToken::VectorConst | USToken::RotationConst => {
-                let components = if matches!(token, USToken::VectorConst) {
-                    3
-                } else {
-                    4
-                };
-                for _ in 0..components {
+                // Both constants carry exactly three components
+                // (UnClass.cpp `case EX_VectorConst`: FLOAT x3;
+                // `case EX_RotationConst`: INT pitch/yaw/roll x3).
+                for _ in 0..3 {
                     self.i32_at()?;
                 }
                 self.result = Int(0);
@@ -422,15 +437,19 @@ impl<'a> Frame<'a> {
                 self.pc = skip_end.max(self.pc);
             }
             USToken::Assert => {
+                // Runtime layout (UnClass.cpp `case EX_Assert`): a _WORD
+                // line number then the assert expression — no guard byte.
                 let _line = self.u16_at()?;
-                let _guard = self.u8_at()?;
                 self.expr()?;
             }
             USToken::GotoLabel => {
-                // Function context has no state frame, so like
-                // `UObject::GotoLabel` outside a state this cannot jump;
-                // consume the label operand and keep executing.
-                let _label = self.name_ci()?;
+                // Compiler emission (UnScrCom.cpp:5036): `Writer <<
+                // EX_GotoLabel` then CompileExpr of the label name — a
+                // full expression (typically EX_NameConst), not a bare
+                // compact index. Function context has no state frame, so
+                // like `UObject::GotoLabel` outside a state this cannot
+                // jump; consume the operand expression and keep executing.
+                self.expr()?;
             }
             USToken::Switch => {
                 // `execSwitch`: size byte, switch expression, then a chain
@@ -480,10 +499,14 @@ impl<'a> Frame<'a> {
                 }
             }
             USToken::DebugInfo => {
-                return Err(Fail::new(
-                    "vm.token_unsupported",
-                    format!("{token:?}: debug info is deferred"),
-                ));
+                // Runtime layout (UnClass.cpp `case EX_DebugInfo`): INT
+                // version + INT line + INT char pos + a NUL-terminated BYTE
+                // string. `HANDLE_OPTIONAL_DEBUG_INFO` can emit one after
+                // every call site, so it executes as a consumed no-op.
+                let _version = self.i32_at()?;
+                let _line = self.i32_at()?;
+                let _pos = self.i32_at()?;
+                let _label = self.nul_terminated_string()?;
             }
 
             // ---- Calls ---------------------------------------------------
@@ -509,11 +532,13 @@ impl<'a> Frame<'a> {
                 self.expr()?;
                 self.result = Int(0);
             }
-
-            // ---- Contexts & casts ---------------------------------------
             USToken::Context | USToken::ClassContext => {
+                // Runtime layout (UnClass.cpp `case EX_Context`): the
+                // OBJECT expression first, then a _WORD null-jump offset,
+                // then a BYTE zero-fill size, then the member expression.
+                self.expr()?;
                 let _offset = self.u16_at()?;
-                let _context_name = self.name_ci()?;
+                let _zero_fill = self.u8_at()?;
                 self.expr()?;
             }
             USToken::MetaCast | USToken::DynamicCast => {
@@ -523,8 +548,10 @@ impl<'a> Frame<'a> {
 
             // ---- Iterators ----------------------------------------------
             USToken::Iterator => {
-                let _offset = self.u16_at()?;
+                // Runtime layout (UnClass.cpp `case EX_Iterator`): the
+                // iterator expression FIRST, then a _WORD loop-back offset.
                 self.expr()?;
+                let _offset = self.u16_at()?;
                 return Err(Fail::new(
                     "vm.token_unsupported",
                     "Iterator: foreach iteration state is deferred",
@@ -545,29 +572,41 @@ impl<'a> Frame<'a> {
                     .unwrap_or(PropValue::Object(None));
             }
             USToken::StructCmpEq | USToken::StructCmpNe => {
+                // Loader layout (UnClass.cpp `case EX_StructCmpEq/Ne`) and
+                // compiler emission (UnScrCom.cpp:2413): the compared
+                // UStruct reference first, then left and right expressions.
+                let _struct_ref = self.name_ci()?;
                 self.expr()?;
                 self.expr()?;
                 let equal = matches!(token, USToken::StructCmpEq);
                 self.result = PropValue::Bool(equal);
             }
 
-            // ---- Conversions --------------------------------------------
-
             // ---- Misc ---------------------------------------------------
             USToken::LineNumber => {
-                let _line = self.name_ci()?;
+                // Compiler emission (UnScrCom.cpp: `_WORD wLine =
+                // InputLine; Writer << EX_LineNumber; Writer << wLine;`): a
+                // _WORD line number, not a compact index.
+                let _line = self.u16_at()?;
             }
             USToken::EatString => {
                 self.expr()?;
             }
             USToken::New => {
+                // Loader walk (UnClass.cpp `case EX_New`) consumes four
+                // expressions — parent, name, flags, class — before
+                // allocation. Allocation stays deferred, but the operands
+                // must be consumed so a deferral keeps streams aligned
+                // (same policy as EX_Iterator).
+                self.expr()?; // parent
+                self.expr()?; // name
+                self.expr()?; // flags
+                self.expr()?; // class
                 return Err(Fail::new(
                     "vm.token_unsupported",
                     "New: object allocation is deferred",
                 ));
             }
-
-            // ---- Conversions --------------------------------------------
             USToken::ByteToInt
             | USToken::ByteToBool
             | USToken::ByteToFloat
@@ -606,11 +645,15 @@ impl<'a> Frame<'a> {
             }
 
             // ---- Extended natives ---------------------------------------
+            // Fork runtime (`UnCorSc.cpp` / `UnClass.cpp` SerializeExpr):
+            // `Expr >= EX_ExtendedNative` transfers exactly ONE extra BYTE
+            // and the native id spans `(Expr - EX_ExtendedNative)*0x100 +
+            // B`, giving slots 0..0xFFF across opcodes 0x60..0x6F. The
+            // parameter list follows up to `EX_EndFunctionParms`.
             USToken::ExtendedNative => {
-                // Two-byte extended-native encoding n*0x100+B.
-                let native_hi = self.u8_at()?;
-                let native_lo = self.u8_at()?;
-                let slot = u16::from(native_hi) * 0x100 + u16::from(native_lo);
+                let low = self.u8_at()?;
+                let slot = u16::from(low);
+                self.eval_parms_and_dispatch()?;
                 let body = self.registry.get(slot)?;
                 self.result = body(self)?;
             }
@@ -636,6 +679,24 @@ impl<'a> Frame<'a> {
     fn expr(&mut self) -> VmResult<()> {
         let opcode = *self.code.get(self.pc).ok_or_else(truncated)?;
         self.pc += 1;
+        self.expr_opcode(opcode)
+    }
+
+    /// Dispatch one already-consumed expression opcode. Shared by
+    /// [`Frame::expr`] and tokens that embed a nested expression opcode in
+    /// their stream (the fork's `EX_BoolVariable`).
+    fn expr_opcode(&mut self, opcode: u8) -> VmResult<()> {
+        if (0x61..=0x6F).contains(&opcode) {
+            // Same nibble-group encoding as run(): slot spans
+            // (opcode-0x60)*0x100 + B (UnClass.cpp SerializeExpr).
+            let low = self.u8_at()?;
+            self.eval_parms_and_dispatch()?;
+            let body = self
+                .registry
+                .get(u16::from(opcode - 0x60) * 0x100 + u16::from(low))?;
+            self.result = body(self)?;
+            return Ok(());
+        }
         if (0x70..=0xFF).contains(&opcode) {
             return self.dispatch_native(u16::from(opcode));
         }
@@ -710,7 +771,7 @@ impl<'a> Frame<'a> {
 /// hitting one means shipped bytecode uses an encoding this VM does not
 /// model yet — loud, but distinguishable from genuine corruption.
 fn is_undocumented_gap(opcode: u8) -> bool {
-    matches!(opcode, 0x03 | 0x35 | 0x5B..=0x6F)
+    matches!(opcode, 0x03 | 0x35 | 0x5B..=0x5F)
 }
 
 /// Unknown-opcode failure with a deferral-specific reason when the byte
@@ -951,7 +1012,7 @@ mod tests {
     }
 
     #[test]
-    fn extended_native_dispatches_two_byte_slot() {
+    fn extended_native_slot_spans_opcode_nibble_and_byte() {
         use crate::value::PropValue as PV;
         let arena = ObjectArena::new();
         let mut registry = registry();
@@ -959,31 +1020,282 @@ mod tests {
             let seeded = matches!(frame.locals.get(7), Some(PV::Int(5)));
             Ok(PV::Int(i32::from(seeded)))
         }
+        // Slot 2983 = 0xBA7: opcode 0x6B (group 0xB) + byte 0xA7, dispatched
+        // through run()'s interception path.
         registry
-            .register(0x0B_A7, 0, body, "probe.extended")
+            .register(0x0BA7, 0, body, "probe.extended")
             .expect("register");
-        // LocalVariable(7) seeds the probe input; ExtendedNative(0x0B,0xA7)
-        // dispatches n*0x100+B = 2983; Return.
         let code = [
-            USToken::ExtendedNative as u8,
-            0x0B,
+            0x6B,
             0xA7,
+            USToken::EndFunctionParms as u8,
             USToken::Return as u8,
             USToken::Nothing as u8,
         ];
         let mut frame = Frame::new(&arena, &registry, &code, None);
         frame.locals.set(7, PropValue::Int(5));
         assert_eq!(frame.run().expect("run"), PropValue::Int(1));
+
+        // Slot 167 = 0xA7 via the EX_ExtendedNative token itself
+        // (opcode 0x60, group 0), reached through expr() nesting.
+        registry
+            .register(167, 0, body, "probe.group0")
+            .expect("register");
+        let code = [
+            USToken::EatString as u8,
+            0x60,
+            0xA7,
+            USToken::EndFunctionParms as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        frame.locals.set(7, PropValue::Int(5));
+        assert_eq!(frame.run().expect("run"), PropValue::Int(1));
+
         // An unregistered slot fails loudly at dispatch.
         let code = [
-            USToken::ExtendedNative as u8,
-            0x0C,
+            0x6C,
             0x00,
+            USToken::EndFunctionParms as u8,
             USToken::Return as u8,
             USToken::Nothing as u8,
         ];
         let mut frame = Frame::new(&arena, &registry, &code, None);
         let fail = frame.run().expect_err("unbound slot");
         assert_eq!(fail.reason_code, "native.slot_unbound");
+    }
+
+    #[test]
+    fn operand_widths_match_fork_runtime() {
+        let arena = ObjectArena::new();
+        let registry = registry();
+
+        // Assert: _WORD line then expression — no guard byte. If a guard
+        // byte were consumed, True would be eaten and the Return would read
+        // Nothing with a stale result instead of Bool(true).
+        let code = [
+            USToken::Assert as u8,
+            0x10,
+            0x00,
+            USToken::True as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+
+        // LineNumber: _WORD line. A compact-index misread would swallow one
+        // byte and desync into LocalVariable.
+        let code = [
+            USToken::LineNumber as u8,
+            0x02,
+            0x00,
+            USToken::True as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+
+        // DebugInfo: INT version + INT line + INT pos + NUL-terminated tag;
+        // executes as a consumed no-op (HANDLE_OPTIONAL_DEBUG_INFO).
+        let code = [
+            USToken::DebugInfo as u8,
+            100,
+            0,
+            0,
+            0, // version = 100
+            7,
+            0,
+            0,
+            0, // line
+            3,
+            0,
+            0,
+            0, // pos
+            b'O',
+            b'K',
+            0,
+            USToken::True as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+
+        // Context/ClassContext: object expr, _WORD offset, BYTE size, member
+        // expr. With the old (offset,name) misread the second IntZero byte
+        // pattern would desync and the wrong result would surface.
+        let code = [
+            USToken::Context as u8,
+            USToken::IntZero as u8,
+            5,
+            0,
+            1,
+            USToken::IntOne as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Int(1));
+
+        // Iterator: expression FIRST, then the _WORD loop offset; execution
+        // stays a loud deferral but the operands must be consumed in this
+        // order (a reversed order would decode 0x00 0x05 as an opcode).
+        let code = [USToken::Iterator as u8, USToken::IntZero as u8, 0x05, 0x00];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        let fail = frame.run().expect_err("iterator is deferred");
+        assert_eq!(fail.reason_code, "vm.token_unsupported");
+    }
+
+    #[test]
+    fn fork_bool_variable_redispatches_the_following_expr() {
+        // `execBoolVariable` (UnCorSc.cpp:429) consumes ONE byte and calls
+        // `GNatives[B]`; the compiler writes EX_BoolVariable before a plain
+        // variable load (UnScrCom.cpp:1637). The bitmask lives in the bound
+        // UBoolProperty, never in code — the old compact-index + mask-byte
+        // reading desynced shipped bodies (retail Mover.Tick crash).
+        let arena = ObjectArena::new();
+        let registry = registry();
+        let code = [
+            USToken::BoolVariable as u8,
+            USToken::LocalVariable as u8,
+            7,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        frame.locals.set(7, PropValue::Int(5));
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        frame.locals.set(7, PropValue::Int(0));
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(false));
+    }
+
+    #[test]
+    fn goto_label_consumes_a_full_name_expression() {
+        // UnScrCom.cpp:5036 emits `EX_GotoLabel` then CompileExpr of the
+        // label name — an EX_NameConst expression, not a bare compact index.
+        let arena = ObjectArena::new();
+        let registry = registry();
+        let code = [
+            USToken::GotoLabel as u8,
+            USToken::NameConst as u8,
+            5,
+            USToken::True as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+    }
+
+    #[test]
+    fn struct_compare_consumes_struct_ref_then_both_sides() {
+        // UnClass.cpp `case EX_StructCmpEq/Ne`: XFER_OBJECT(UStruct) first,
+        // then left and right expressions. The old two-expression-only walk
+        // would have read the 0x03 reference byte as a deferrable-gap opcode.
+        let arena = ObjectArena::new();
+        let registry = registry();
+        let code = [
+            USToken::StructCmpEq as u8,
+            3,
+            USToken::IntZero as u8,
+            USToken::IntOne as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        // The comparison itself stays a placeholder (constant per token);
+        // this pins the operand walk: ref byte, left expr, right expr, then
+        // a clean Return — any misread would abort loudly instead.
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+    }
+
+    #[test]
+    fn rotation_constant_carries_three_components() {
+        // UnClass.cpp: `case EX_RotationConst: XFER(INT) x3` (pitch/yaw/
+        // roll), exactly like EX_VectorConst's FLOAT x3 — not four words.
+        let arena = ObjectArena::new();
+        let registry = registry();
+        let code = [
+            USToken::RotationConst as u8,
+            1,
+            0,
+            0,
+            0, //
+            2,
+            0,
+            0,
+            0, //
+            3,
+            0,
+            0,
+            0, //
+            USToken::True as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Bool(true));
+    }
+
+    #[test]
+    fn new_defers_after_consuming_four_operand_exprs() {
+        // UnClass.cpp `case EX_New` walks parent/name/flags/class exprs;
+        // allocation stays deferred but the operands must be consumed.
+        let arena = ObjectArena::new();
+        let registry = registry();
+        let code = [
+            USToken::New as u8,
+            USToken::IntZero as u8,
+            USToken::IntZero as u8,
+            USToken::IntZero as u8,
+            USToken::IntOne as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        let fail = frame.run().expect_err("New is deferred");
+        assert_eq!(fail.reason_code, "vm.token_unsupported");
+    }
+
+    #[test]
+    fn mover_tick_head_shape_executes_through_native_parms() {
+        // Byte-for-byte head of retail Engine.Mover.Tick. Before the
+        // BoolVariable fix the native-129 parameter walk recursed into its
+        // own EX_EndFunctionParms and aborted the whole run with
+        // vm.token_unexpected_end_parms on PrivetDr.Mover0.
+        let arena = ObjectArena::new();
+        let mut registry = registry();
+        fn native129(_frame: &mut Frame<'_>) -> crate::error::Result<PropValue> {
+            Ok(PropValue::Int(1))
+        }
+        registry
+            .register(0x81, 0, native129, "probe.mover.tick")
+            .expect("register");
+        let code = [
+            USToken::FinalFunction as u8,
+            0x5f,
+            0x02, // compact function ref
+            USToken::IntZero as u8,
+            USToken::LocalVariable as u8,
+            0x55,
+            0x37, // multi-byte local ref
+            USToken::EndFunctionParms as u8,
+            USToken::JumpIfNot as u8,
+            0x18,
+            0x00, // jump target lands on the Return below
+            0x81, // native slot 129
+            USToken::BoolVariable as u8,
+            USToken::InstanceVariable as u8,
+            0x4b,
+            0x37, // multi-byte instance ref
+            USToken::EndFunctionParms as u8,
+            USToken::Return as u8,
+            USToken::Nothing as u8,
+        ];
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        assert_eq!(frame.run().expect("run"), PropValue::Int(1));
     }
 }

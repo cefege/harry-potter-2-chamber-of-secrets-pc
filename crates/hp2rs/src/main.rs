@@ -42,7 +42,11 @@ struct Args {
     /// `--smoke`: the headless harness path. Its ABSENCE (with no other
     /// headless marker) selects interactive windowed mode.
     smoke: bool,
-    /// `-NOFRONTEND`: harness switch that also pins the headless path.
+    /// `-LOAD=<n>` / `-LOAD=Save<N>.usa`: startup save slot, loaded through
+    /// the hp-engine save reader before bootstrap (`appConsumeCommandLine-
+    /// LoadSlot`, UnGame.cpp:169; save naming `Save%i.usa`, UnGame.cpp:822).
+    /// Absent or corrupt files report loudly without aborting the launch.
+    load_slot: Option<i32>,
     no_front_end: bool,
     /// `-nosound` / `--nosound`: boot without audio (default ENABLED).
     nosound: bool,
@@ -55,12 +59,11 @@ struct Args {
 fn usage() -> String {
     "usage: hp2rs -datadir=<root> <map_token> [options]\n\
      interactive windowed mode (default): [--nosound] [--null-render] \
-     [-xopengl|-vulkan] -window -testticks=N -log\n\
+     [-xopengl|-vulkan] -window -testticks=N -log -LOAD=<n>|Save<N>.usa\n\
      headless harness mode: add --smoke [-nosound] [--render-every=N] \
      [--rng-seed=<u64>] [--fixed-dt=<secs>] [--input-script=<file>]"
         .to_string()
 }
-
 fn parse_args(argv: Vec<String>) -> Result<Args, EngineError> {
     let mut args = Args {
         data_root: None,
@@ -70,6 +73,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, EngineError> {
         fixed_dt: None,
         input_script: None,
         smoke: false,
+        load_slot: None,
         no_front_end: false,
         nosound: false,
         null_render: false,
@@ -81,6 +85,13 @@ fn parse_args(argv: Vec<String>) -> Result<Args, EngineError> {
         } else if let Some(value) = arg.strip_prefix("-testticks=") {
             args.test_ticks = Some(value.parse::<u64>().map_err(|_| {
                 EngineError::new("engine.arg_ticks", format!("bad tick count {value:?}"))
+            })?);
+        } else if let Some(value) = load_switch_value(&arg) {
+            args.load_slot = Some(parse_load_slot(value).ok_or_else(|| {
+                EngineError::new(
+                    "engine.arg_load",
+                    format!("bad -LOAD value {value:?}; expected digits or Save<N>.usa"),
+                )
             })?);
         } else if let Some(value) = arg.strip_prefix("--rng-seed=") {
             let text = value
@@ -150,6 +161,62 @@ fn parse_args(argv: Vec<String>) -> Result<Args, EngineError> {
     }
     Ok(args)
 }
+/// Value of a `-LOAD=` switch (case-insensitive, like the C++ token scan),
+/// else `None`.
+fn load_switch_value(arg: &str) -> Option<&str> {
+    let rest = arg.strip_prefix('-')?;
+    if rest.len() >= 5 && rest[..5].eq_ignore_ascii_case("load=") {
+        Some(&rest[5..])
+    } else {
+        None
+    }
+}
+
+/// Accepts the C++ digits-only form (`-LOAD=0`) and the spelled file form
+/// (`-LOAD=Save0.usa`, case-insensitive); both resolve to slot N.
+fn parse_load_slot(value: &str) -> Option<i32> {
+    let base = if value.len() >= 4 && value[value.len() - 4..].eq_ignore_ascii_case(".usa") {
+        &value[..value.len() - 4]
+    } else {
+        value
+    };
+    let base = if base.len() >= 4 && base[..4].eq_ignore_ascii_case("save") {
+        &base[4..]
+    } else {
+        base
+    };
+    if base.is_empty() || !base.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    base.parse::<i32>().ok()
+}
+
+/// Load the startup save through the hp-engine save reader before the
+/// object bootstrap (`appConsumeCommandLineLoadSlot` feeds `LoadGameSlot`;
+/// files live at `<datadir>/Save/Save<N>.usa`). Absent, unreadable, or
+/// corrupt saves report loudly but never abort the launch.
+fn consume_load_save(data_root: &Path, slot: i32) {
+    let path = data_root.join("Save").join(format!("Save{slot}.usa"));
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!(
+                "hp2rs: [engine.save_unreadable] {}: {error}",
+                path.display()
+            );
+            return;
+        }
+    };
+    match hp_engine::save::read_save(&bytes) {
+        Ok(archive) => println!(
+            "hp2rs: loaded {} ({} names, {} exports)",
+            path.display(),
+            archive.names.len(),
+            archive.exports.len()
+        ),
+        Err(error) => eprintln!("hp2rs: [engine.save_reject] {error}"),
+    }
+}
 
 fn load_ini_set(data_root: &Path) -> Result<hp_ini::IniSet, EngineError> {
     let system = data_root.join("System");
@@ -195,6 +262,11 @@ fn run() -> Result<(), EngineError> {
     };
     let ticks = args.test_ticks.unwrap_or(0);
 
+    // `-LOAD=<n>`: consume the startup save before the object bootstrap so
+    // the game boots into its slot (both headless and interactive paths).
+    if let Some(slot) = args.load_slot {
+        consume_load_save(&data_root, slot);
+    }
     // Interactive windowed mode is the default for a plain invocation
     // (e.g. `-window -testticks=0`): a live window over the rendered level
     // with the audio subsystem initialized. The headless path below is the
@@ -489,4 +561,40 @@ fn render_tick_end(
         session.capture_frame(capture, tick as u32, map_name)?;
     }
     Ok(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_switch_accepts_digits_and_spelled_save_names() {
+        // C++ digits form and the spelled file form both resolve to slot N;
+        // matching is case-insensitive like ParseCommandLineSaveSlot.
+        assert_eq!(load_switch_value("-LOAD=0"), Some("0"));
+        assert_eq!(load_switch_value("-load=3"), Some("3"));
+        assert_eq!(parse_load_slot("0"), Some(0));
+        assert_eq!(parse_load_slot("Save0.usa"), Some(0));
+        assert_eq!(parse_load_slot("SAVE12"), Some(12));
+        assert_eq!(parse_load_slot("save7.usa"), Some(7));
+        assert_eq!(parse_load_slot("bogus"), None);
+        assert_eq!(parse_load_slot(""), None);
+        assert_eq!(parse_load_slot("+1"), None);
+        assert_eq!(parse_load_slot("1x"), None);
+    }
+
+    #[test]
+    fn parse_args_records_first_load_slot() {
+        let args = parse_args(vec![
+            "-datadir=x".to_string(),
+            "-LOAD=Save2.usa".to_string(),
+            "-window".to_string(),
+        ])
+        .expect("parses");
+        assert_eq!(args.load_slot, Some(2));
+        assert!(
+            parse_args(vec!["-LOAD=later".to_string()]).is_err(),
+            "malformed -LOAD value is loud"
+        );
+    }
 }

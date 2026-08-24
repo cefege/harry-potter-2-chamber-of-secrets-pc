@@ -208,3 +208,46 @@ fn native_registration() {
         "duplicate registration probe changed slot 330"
     );
 }
+
+/// Regression for the retail PrivetDr launch: an actor class without any
+/// scripted `Tick` in its inheritance chain must resolve to `None` so the
+/// engine skips it silently — no phantom body may ever enter VM exec (the
+/// original failure executed a misdecoded payload as `Mover.Tick`).
+#[test]
+fn unscripted_tick_resolves_to_none_and_actor_stub_is_noop() {
+    let Some(root) = data_root() else {
+        eprintln!("data-prototype root absent; skipping");
+        return;
+    };
+    let world = hp_uobject::bootstrap::World::load(&root).expect("bootstrap");
+
+    // Non-actor classes declare no Tick anywhere up their chain.
+    let model = world.arena.find_by_path("Engine.Model").expect("Engine.Model");
+    assert_eq!(
+        world.arena.find_function(model, "Tick").expect("lookup"),
+        None,
+        "Engine.Model must not resolve a phantom Tick body"
+    );
+
+    // Where a scripted Tick does exist (Engine.Actor), its body is exactly
+    // the Return/Nothing stub — executing it can never fault.
+    let actor = world
+        .arena
+        .find_by_path("Engine.Actor")
+        .expect("Engine.Actor");
+    let tick = world
+        .arena
+        .find_function(actor, "Tick")
+        .expect("lookup")
+        .expect("Engine.Actor.Tick exists");
+    match &world.arena.get(tick).expect("object").data {
+        ObjectData::Function(function) => {
+            assert_eq!(
+                function.code.as_slice(),
+                &[USToken::Return as u8, USToken::Nothing as u8],
+                "Actor.Tick stub changed shape"
+            );
+        }
+        other => panic!("Tick export is not a Function: {other:?}"),
+    }
+}

@@ -83,8 +83,11 @@ pub fn bind_world(
 
     // Engine-side intrinsic slots (C++-only natives such as
     // AActor.GetCurrentKeyState at 330).
+    // Pins fill only vacant slots: retail packages declare some pinned
+    // natives (AActor.GetCurrentKeyState at 330) in script, and the script
+    // registration must win.
     for (slot, subject) in crate::natives::ENGINE_INTRINSIC_SLOTS {
-        registry.register(slot, 2, crate::natives::deferred_native, subject)?;
+        registry.register_if_absent(slot, 2, crate::natives::deferred_native, subject)?;
     }
 
     // Sweep every remaining package native into the table (the equivalent of

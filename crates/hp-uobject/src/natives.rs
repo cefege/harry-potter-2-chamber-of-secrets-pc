@@ -8,6 +8,7 @@
 
 use crate::arena::{ObjectArena, ObjectData, ObjectId};
 use crate::error::{Fail, Result};
+use std::collections::HashMap;
 
 /// Highest legal `iNative` slot (packages reject anything above this).
 pub const MAX_NATIVE_INDEX: u32 = 0x1000;
@@ -57,6 +58,8 @@ pub struct NativeRegistry {
     slots: [Option<NativeImpl>; MAX_NATIVE_INDEX as usize],
     /// Slot → owning group index (diagnostics for unbound-slot reports).
     owners: [Option<u8>; MAX_NATIVE_INDEX as usize],
+    /// Slot → dotted path of the registered function (duplicate identity).
+    subjects: HashMap<u16, String>,
 }
 
 impl Default for NativeRegistry {
@@ -64,6 +67,7 @@ impl Default for NativeRegistry {
         Self {
             slots: [const { None }; 4096],
             owners: [const { None }; 4096],
+            subjects: HashMap::new(),
         }
     }
 }
@@ -73,7 +77,13 @@ impl NativeRegistry {
         Self::default()
     }
 
-    /// Install a body at `slot`, rejecting duplicates loudly.
+    /// Install a body at `slot`. Mirrors the engine's `GRegisterNative`
+    /// duplicate policy: re-registering the *same* native implementation is
+    /// tolerated as a no-op (the stock fork re-declares inherited natives
+    /// down a class chain, and one script function can be reachable from two
+    /// lookup groups), while two different functions claiming one slot stay a
+    /// loud ABI conflict. Identity proxy is the case-folded leaf function
+    /// name — bodies are placeholders, so pointer equality cannot decide.
     pub fn register(
         &mut self,
         slot: u16,
@@ -89,14 +99,42 @@ impl NativeRegistry {
             ));
         }
         if let Some(previous) = self.owners[index] {
+            let same_implementation = self.subjects.get(&slot).is_some_and(|existing| {
+                leaf_name(existing).eq_ignore_ascii_case(leaf_name(subject))
+            });
+            if same_implementation {
+                return Ok(());
+            }
             return Err(Fail::new(
                 "native.slot_duplicate",
-                format!("{subject}: slot {slot} already owned by group {}", previous),
+                format!(
+                    "{subject}: slot {slot} already owned by group {previous} as {:?}",
+                    self.subjects.get(&slot)
+                ),
             ));
         }
         self.slots[index] = Some(body);
         self.owners[index] = Some(group_index as u8);
+        self.subjects.insert(slot, subject.to_string());
         Ok(())
+    }
+
+    /// Fill a vacant slot only; an occupied slot is left untouched. Used for
+    /// engine-side intrinsic pins, which must never displace a script
+    /// function the packages actually declare (retail declares
+    /// `AActor.GetCurrentKeyState` at slot 330 in script).
+    pub fn register_if_absent(
+        &mut self,
+        slot: u16,
+        group_index: usize,
+        body: NativeImpl,
+        subject: &str,
+    ) -> Result<bool> {
+        if self.is_registered(slot) {
+            return Ok(false);
+        }
+        self.register(slot, group_index, body, subject)?;
+        Ok(true)
     }
 
     /// Dispatch lookup; a missing entry is a loud error.
@@ -192,4 +230,73 @@ pub fn native_census(arena: &ObjectArena, class_id: ObjectId) -> Result<Vec<(u16
         }
     }
     Ok(out)
+}
+
+/// Case-folded leaf function name of a dotted subject path — the duplicate
+/// identity proxy for slot registration.
+fn leaf_name(subject: &str) -> &str {
+    subject.rsplit('.').next().unwrap_or(subject)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn body_a(_frame: &mut crate::vm::Frame<'_>) -> Result<crate::value::PropValue> {
+        Ok(crate::value::PropValue::Int(1))
+    }
+
+    fn body_b(_frame: &mut crate::vm::Frame<'_>) -> Result<crate::value::PropValue> {
+        Err(Fail::new("native.body_deferred", "b"))
+    }
+
+    /// GRegisterNative semantics: the same native implementation reaching the
+    /// registry twice (inherited re-declaration, two lookup groups) is a
+    /// tolerated no-op; two different implementations on one slot stay loud.
+    #[test]
+    fn duplicate_registration_of_same_function_is_tolerated() {
+        let mut registry = NativeRegistry::new();
+        registry
+            .register(330, 2, body_a, "Engine.Actor.GetCurrentKeyState")
+            .expect("first registration");
+        // Same function re-reached via another group (case-insensitive path).
+        registry
+            .register(330, 4, body_b, "engine.actor.getcurrentkeystate")
+            .expect("same-function duplicate must be tolerated");
+        assert!(std::ptr::fn_addr_eq(
+            registry.get(330).expect("slot intact"),
+            body_a as NativeImpl
+        ));
+        assert_eq!(registry.registered_count(), 1);
+
+        // A different function claiming the same slot is an ABI conflict.
+        let conflict = registry.register(330, 6, body_b, "Engine.Pawn.OtherNative");
+        match conflict {
+            Err(fail) => assert_eq!(fail.reason_code, "native.slot_duplicate"),
+            Ok(()) => panic!("conflicting slot registration was not rejected"),
+        }
+    }
+
+    /// Intrinsic pins fill only vacant slots and never displace a
+    /// script-declared native (retail declares GetCurrentKeyState at 330).
+    #[test]
+    fn register_if_absent_never_displaces() {
+        let mut registry = NativeRegistry::new();
+        registry
+            .register(330, 2, body_a, "Engine.Actor.GetCurrentKeyState")
+            .expect("script registration");
+        let pinned = registry
+            .register_if_absent(330, 2, deferred_native, "pin.330")
+            .expect("pin probe");
+        assert!(!pinned, "pin must not overwrite an occupied slot");
+        assert!(std::ptr::fn_addr_eq(
+            registry.get(330).expect("slot intact"),
+            body_a as NativeImpl
+        ));
+        let vacant = registry
+            .register_if_absent(47, 0, deferred_native, "pin.47")
+            .expect("vacant pin");
+        assert!(vacant);
+        assert!(registry.is_registered(47));
+    }
 }
