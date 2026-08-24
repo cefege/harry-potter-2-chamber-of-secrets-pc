@@ -32,6 +32,11 @@ missing code is represented as JSON `null`.
 | renderer.binary_missing | gate-on hp2_game/icd not present | run_vulkan_smoke |
 | renderer.icd_missing | MoltenVK ICD json missing | run_vulkan_smoke |
 | engine.vulkan_device_absent | launch log lacks Vulkan device line | run_vulkan_smoke |
+| renderer.adapter_unavailable | no Metal/wgpu adapter on this host | hp-render device |
+| renderer.device_request_failed | wgpu device request rejected | hp-render device |
+| renderer.capture_write_failed | frame PNG/meta write failed | hp-render capture |
+| renderer.texture_unknown | texture handle not in manager | hp-render textures |
+| renderer.texture_double_destroy | destroy called twice for one handle | hp-render textures |
 
 ## process.*
 
@@ -63,6 +68,19 @@ missing code is represented as JSON `null`.
 | settings.<transform> | migration journal entries (boolean_spelling, screen_mode_consolidated, viewport_consolidated, range_*, enum_*, ...) | launcher store migrations |
 | crash.signal | fatal signal delivered | HP2CrashReporter |
 | crash.watchdog.timeout | watchdog deadline exceeded | HP2CrashReporter |
+
+## audio.*
+
+| Code | Meaning | Emitted by |
+|---|---|---|
+| audio.open_failed | media unreadable, unprobed, or lacking a Vorbis track | hp-audio stream sources |
+| audio.decode_failed | decoder hit unrecoverable corruption mid-stream | hp-audio stream sources |
+| audio.loop_stalled | looping stream wrapped without producing samples | hp-audio stream sources |
+| audio.stream_not_alive | operation on a destroyed or exhausted stream slot | hp-audio StreamManager |
+| audio.slot_exhausted | no free stream slot in the manager | hp-audio StreamManager |
+| audio.sink_unavailable | output device could not be opened | hp-audio OutputGraph sinks |
+| audio.bad_request | invalid argument (empty buffer, zero chunk, wrong kind) | hp-audio stream sources/manager |
+| audio.eaxa_feed_failed | EA-XA encoded stream rejected by the block decoder | hp-audio XA source (wraps `eaxa.*`) |
 
 ## blocked reasons (status=blocked)
 

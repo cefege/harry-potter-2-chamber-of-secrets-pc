@@ -1239,6 +1239,7 @@ dependencies = [
 name = "hp-audio"
 version = "0.1.0"
 dependencies = [
+ "hp-format",
  "rodio",
  "symphonia 0.6.1",
 ]
@@ -1247,6 +1248,7 @@ dependencies = [
 name = "hp-engine"
 version = "0.1.0"
 dependencies = [
+ "hp-format",
  "rand_chacha 0.10.0",
  "sha2",
 ]
@@ -1268,6 +1270,7 @@ version = "0.1.0"
 name = "hp-render"
 version = "0.1.0"
 dependencies = [
+ "hp-format",
  "image",
  "png",
  "wgpu",
@@ -1277,6 +1280,7 @@ dependencies = [
 name = "hp-uobject"
 version = "0.1.0"
 dependencies = [
+ "hp-format",
  "sha2",
 ]
 

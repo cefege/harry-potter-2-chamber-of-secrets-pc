@@ -7,5 +7,6 @@ publish.workspace = true
 
 [dependencies]
 wgpu.workspace = true
+hp-format.workspace = true
 png.workspace = true
 image.workspace = true
