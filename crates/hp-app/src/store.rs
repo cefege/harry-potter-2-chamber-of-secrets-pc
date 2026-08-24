@@ -329,9 +329,8 @@ fn prepare_profile(launcher_root: &Path, name: &str, migrate_legacy: bool) -> Re
     let temporary = profiles_root.join(format!(".{name}.tmp"));
     let _ = std::fs::remove_dir_all(&temporary);
     if copy_legacy {
-        std::fs::create_dir_all(&temporary).map_err(|error| {
-            failed(format!("Unable to stage profile: {error}"))
-        })?;
+        std::fs::create_dir_all(&temporary)
+            .map_err(|error| failed(format!("Unable to stage profile: {error}")))?;
         for item in ["Game.ini", "User.ini", "Save", "Cache"] {
             let source_path = launcher_root.join(item);
             if std::fs::symlink_metadata(&source_path).is_err() {

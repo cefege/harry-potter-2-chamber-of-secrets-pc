@@ -93,7 +93,8 @@ pub fn backup(destination: &Path, bytes: &[u8], mode: u32) -> Result<(), AppErro
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(io("Unable to inspect backup", &backup_path, error)),
     }
-    std::fs::write(&backup_path, bytes).map_err(|error| io("Unable to write backup", &backup_path, error))?;
+    std::fs::write(&backup_path, bytes)
+        .map_err(|error| io("Unable to write backup", &backup_path, error))?;
     set_mode(&backup_path, mode);
     Ok(())
 }

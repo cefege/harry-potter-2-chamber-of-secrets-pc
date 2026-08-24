@@ -59,7 +59,12 @@ pub fn get_ranged_float(
 
 /// Lookup + discrete membership check; returns the accepted value itself
 /// (`LoadDiscreteNumber`).
-pub fn get_discrete_float(doc: &LauncherDoc, section: &str, key: &str, accepted: &[f64]) -> Option<f64> {
+pub fn get_discrete_float(
+    doc: &LauncherDoc,
+    section: &str,
+    key: &str,
+    accepted: &[f64],
+) -> Option<f64> {
     let parsed = parse_number(doc.get(section, key)?)?;
     accepted.iter().copied().find(|value| *value == parsed)
 }
@@ -72,8 +77,8 @@ pub fn get_discrete_integer(
     accepted: &[i32],
 ) -> Option<i32> {
     let parsed = parse_number(doc.get(section, key)?)?;
-    let integral = parsed == parsed.trunc()
-        && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&parsed);
+    let integral =
+        parsed == parsed.trunc() && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&parsed);
     let discrete = integral.then_some(parsed as i32)?;
     accepted.iter().copied().find(|value| *value == discrete)
 }
@@ -130,10 +135,7 @@ fn is_space_byte(byte: u8) -> bool {
 }
 
 fn is_space_char(character: char) -> bool {
-    matches!(
-        character,
-        ' ' | '\t' | '\u{0b}' | '\u{0c}' | '\r' | '\n'
-    )
+    matches!(character, ' ' | '\t' | '\u{0b}' | '\u{0c}' | '\r' | '\n')
 }
 
 /// Ports `Key`: rejects blank and comment lines, requires a non-empty
@@ -199,15 +201,9 @@ impl LauncherDoc {
     /// are loud errors so callers can fall back to immutable templates.
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         let (text, encoding) = if bytes.starts_with(&[0xFF, 0xFE]) {
-            (
-                decode_utf16(&bytes[2..], true)?,
-                IniEncoding::Utf16Le,
-            )
+            (decode_utf16(&bytes[2..], true)?, IniEncoding::Utf16Le)
         } else if bytes.starts_with(&[0xFE, 0xFF]) {
-            (
-                decode_utf16(&bytes[2..], false)?,
-                IniEncoding::Utf16Be,
-            )
+            (decode_utf16(&bytes[2..], false)?, IniEncoding::Utf16Be)
         } else if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
             (
                 std::str::from_utf8(&bytes[3..])
@@ -236,10 +232,7 @@ impl LauncherDoc {
     /// name free of nested brackets.
     fn header_name(line: &str) -> Option<&str> {
         let trimmed = line.trim_matches(is_space_char);
-        if trimmed.len() < 3
-            || !trimmed.starts_with('[')
-            || !trimmed.ends_with(']')
-        {
+        if trimmed.len() < 3 || !trimmed.starts_with('[') || !trimmed.ends_with(']') {
             return None;
         }
         let name = &trimmed[1..trimmed.len() - 1];
@@ -459,7 +452,10 @@ fn split_doc_lines(text: &str) -> Vec<DocLine> {
 /// Dominant newline style: CRLF only when strictly more common than LF
 /// (`Decode`'s `newline` rule).
 fn dominant_terminator(lines: &[DocLine]) -> &'static str {
-    let crlf = lines.iter().filter(|line| line.terminator == "\r\n").count();
+    let crlf = lines
+        .iter()
+        .filter(|line| line.terminator == "\r\n")
+        .count();
     let lf = lines.iter().filter(|line| line.terminator == "\n").count();
     if crlf > lf { "\r\n" } else { "\n" }
 }
@@ -504,19 +500,18 @@ mod tests {
               [Engine.GameEngine]\nFrameRateLimit=30\nFrameRateLimit = 60 ; final\n",
         )
         .expect("decodable");
+        assert_eq!(document.get("ENGINE.ENGINE", "KeepMe"), Some("Untouched"));
         assert_eq!(
-            document.get("ENGINE.ENGINE", "KeepMe"),
-            Some("Untouched")
+            document.get("Engine.GameEngine", "FrameRateLimit"),
+            Some("60")
         );
-        assert_eq!(document.get("Engine.GameEngine", "FrameRateLimit"), Some("60"));
         assert_eq!(document.get("Engine.GameEngine", "Missing"), None);
         assert_eq!(LauncherDoc::header_name("[Engine.GameEngine "), None);
     }
 
     #[test]
     fn set_value_preserves_surrounding_bytes_exactly() {
-        let original =
-            b"a=1\r\n[Section]\r\nKey=old ; keep me\r\nmalformed line\r\n[Next]\r\nX=Y";
+        let original = b"a=1\r\n[Section]\r\nKey=old ; keep me\r\nmalformed line\r\n[Next]\r\nX=Y";
         let mut document = LauncherDoc::decode(original).expect("decodable");
         document.set_value("SECTION", "key", "new");
         assert_eq!(

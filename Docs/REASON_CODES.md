@@ -82,6 +82,20 @@ missing code is represented as JSON `null`.
 | audio.bad_request | invalid argument (empty buffer, zero chunk, wrong kind) | hp-audio stream sources/manager |
 | audio.eaxa_feed_failed | EA-XA encoded stream rejected by the block decoder | hp-audio XA source (wraps `eaxa.*`) |
 
+## app.* (zero-argument launch resolution)
+
+| Code | Meaning | Emitted by |
+|---|---|---|
+| app.datadir_from_store | data root taken from the Launcher.ini Retail assignment | hp2rs zero-arg launch |
+| app.picker_shown | no usable stored assignment; the first-run folder picker is displayed | hp2rs zero-arg launch |
+| app.datadir_persisted | picker choice validated and committed to the profile store | hp2rs zero-arg launch |
+| app.datadir_invalid | chosen or stored folder lacks System/Default.ini | hp2rs zero-arg launch |
+| app.datadir_missing | the user cancelled the folder picker; nothing persisted | hp2rs zero-arg launch |
+| app.map_autoselected | no map token given; New Game entry map (`PrivetDr.unr`) preferred, else first alphabetical `*.unr` via `[Paths]` | hp2rs zero-arg launch |
+| app.map_missing | no `*.unr` maps found under the resolved data root | hp2rs zero-arg launch |
+| app.store_unreadable | Launcher.ini present but unparseable | hp2rs zero-arg launch |
+| app.store_unwritable | launcher root cannot be created / store commit failed | hp2rs zero-arg launch |
+
 ## engine.* (Phase 3 headless simulation)
 
 | Code | Meaning | Emitted by |
@@ -94,7 +108,7 @@ missing code is represented as JSON `null`.
 | engine.actor_tag_size | negative tagged-property size in an actor payload | hp-engine actor decode note |
 | engine.actor_tag_raw | tag kept raw: template missing or width mismatch (note-class, non-fatal) | hp-engine actor decode notes |
 | engine.script_event_deferred | actor BeginPlay/Tick skipped under the accepted Phase-3 deferral policy (see Docs/RNG_TICK_DIVERGENCE.md) | hp-engine tick orchestration |
-| engine.arg_datadir / arg_map / arg_ticks / arg_seed / arg_fixed_dt / arg_map_twice / arg_unknown | CLI contract rejections with usage text | hp2rs main |
+| engine.arg_ticks / arg_seed / arg_fixed_dt / arg_map_twice / arg_unknown / arg_load | CLI contract rejections with usage text | hp2rs main |
 | engine.ini_missing / ini_parse | config layer absent or unparseable at bootstrap | hp2rs main |
 | engine.input_script_* | recorded-script grammar violations (`_field`, `_tick_twice`, `_float`, `_count`, `_key`, `_op`, `_no_tick`, `_unreadable`) | hp-engine input parser |
 | engine.io | unexpected filesystem failure outside map/config paths | hp-engine |

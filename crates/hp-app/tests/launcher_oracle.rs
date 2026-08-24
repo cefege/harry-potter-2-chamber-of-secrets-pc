@@ -13,15 +13,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use hp_app::atomic_file::set_publish_failure_for_testing;
-use hp_app::migration::{migrate_legacy_settings, LegacyRow, MigrationChange};
+use hp_app::migration::{LegacyRow, MigrationChange, migrate_legacy_settings};
 use hp_app::policy::{
-    build_selected_command, deserialize_launch_selection, serialize_launch_selection,
-    should_run_launcher, LaunchAction, LaunchSelection, SelectionField,
+    LaunchAction, LaunchSelection, SelectionField, build_selected_command,
+    deserialize_launch_selection, serialize_launch_selection, should_run_launcher,
 };
 use hp_app::settings;
 use hp_app::settings_model::{
-    AA_SAMPLE_VALUES, ANISOTROPY_VALUES, ControlMode, Difficulty, FRAME_RATE_LIMITS,
-    ObjectDetail, RENDER_SCALES, Resolution, ScreenMode, Settings, TextureDetail, UI_SCALES,
+    AA_SAMPLE_VALUES, ANISOTROPY_VALUES, ControlMode, Difficulty, FRAME_RATE_LIMITS, ObjectDetail,
+    RENDER_SCALES, Resolution, ScreenMode, Settings, TextureDetail, UI_SCALES,
 };
 use hp_app::store::{self, DataSource, DataSourceConfiguration};
 
@@ -99,20 +99,12 @@ fn read_text(path: &Path) -> String {
 
 fn unix_mode(path: &Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .expect("stat")
-        .permissions()
-        .mode()
-        & 0o7777
+    std::fs::metadata(path).expect("stat").permissions().mode() & 0o7777
 }
 
 fn set_unix_mode(path: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(
-        path,
-        std::fs::Permissions::from_mode(mode),
-    )
-    .expect("chmod");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).expect("chmod");
 }
 
 fn symlink(target: &Path, link: &Path) {
@@ -131,7 +123,10 @@ fn only_crlf(bytes: &[u8]) -> bool {
 }
 
 fn utf16_ascii(text: &str, little: bool) -> Vec<u8> {
-    let mut bytes = vec![if little { 0xFF } else { 0xFE }, if little { 0xFE } else { 0xFF }];
+    let mut bytes = vec![
+        if little { 0xFF } else { 0xFE },
+        if little { 0xFE } else { 0xFF },
+    ];
     for character in text.bytes() {
         bytes.push(if little { character } else { 0 });
         bytes.push(if little { 0 } else { character });
@@ -255,7 +250,10 @@ fn create_data_root(roots: &TemporaryRoots, name: &str, sentinel: &str) -> PathB
     std::fs::create_dir_all(data_root.join("System")).expect("System");
     std::fs::create_dir_all(data_root.join("Maps")).expect("Maps");
     std::fs::create_dir_all(data_root.join("Textures")).expect("Textures");
-    write_text(&data_root.join("System").join("Default.ini"), &format!("[Sentinel]\nName={sentinel}\n"));
+    write_text(
+        &data_root.join("System").join("Default.ini"),
+        &format!("[Sentinel]\nName={sentinel}\n"),
+    );
     write_text(&data_root.join("Maps").join("PrivetDr.unr"), sentinel);
     write_text(&data_root.join("Maps").join("Startup.unr"), sentinel);
     write_text(&data_root.join("Textures").join("Shared.utx"), sentinel);
@@ -265,14 +263,20 @@ fn create_data_root(roots: &TemporaryRoots, name: &str, sentinel: &str) -> PathB
 // -------------------------------------------------- TestPolicyClassification
 
 fn runs_launcher(arguments: &[&str]) -> bool {
-    let owned: Vec<String> = arguments.iter().map(|argument| argument.to_string()).collect();
+    let owned: Vec<String> = arguments
+        .iter()
+        .map(|argument| argument.to_string())
+        .collect();
     should_run_launcher(&owned)
 }
 
 #[test]
 fn policy_classification() {
     assert!(runs_launcher(&[]), "empty command line opens launcher");
-    assert!(runs_launcher(&["-datadir=/Retail"]), "-datadir alone opens launcher");
+    assert!(
+        runs_launcher(&["-datadir=/Retail"]),
+        "-datadir alone opens launcher"
+    );
     assert!(
         runs_launcher(&["-DaTaDiR=/Retail", "-unknown"]),
         "datadir is case-insensitive and unknown options stay interactive"
@@ -281,18 +285,37 @@ fn policy_classification() {
         runs_launcher(&["--datadir=/Retail"]),
         "double-dash datadir remains an unrelated interactive option"
     );
-    assert!(runs_launcher(&["-unknown"]), "unrelated option stays interactive");
+    assert!(
+        runs_launcher(&["-unknown"]),
+        "unrelated option stays interactive"
+    );
 
-    assert!(!runs_launcher(&["PrivetDr.unr"]), "explicit map bypasses launcher");
-    assert!(!runs_launcher(&["unreal://127.0.0.1/Map"]), "explicit URL bypasses launcher");
+    assert!(
+        !runs_launcher(&["PrivetDr.unr"]),
+        "explicit map bypasses launcher"
+    );
+    assert!(
+        !runs_launcher(&["unreal://127.0.0.1/Map"]),
+        "explicit URL bypasses launcher"
+    );
     assert!(
         !runs_launcher(&["-datadir=/Retail", "Startup.unr"]),
         "datadir does not hide explicit map"
     );
 
     const NAMES: [&str; 12] = [
-        "LOAD", "NOFRONTEND", "TESTTICKS", "TESTRENDEV", "TESTNATIVETEXT", "SERVER", "REPLAY",
-        "RECORD", "BENCHMARK", "COMMANDLET", "MAKE", "EXEC",
+        "LOAD",
+        "NOFRONTEND",
+        "TESTTICKS",
+        "TESTRENDEV",
+        "TESTNATIVETEXT",
+        "SERVER",
+        "REPLAY",
+        "RECORD",
+        "BENCHMARK",
+        "COMMANDLET",
+        "MAKE",
+        "EXEC",
     ];
     for name in NAMES {
         let upper = format!("-{name}=value");
@@ -389,7 +412,10 @@ fn validation_boundaries() {
     settings.sound_volume = 0.0;
     settings.music_volume = 1.0;
     settings.frame_rate_limit = 0;
-    assert!(valid(&settings), "all lower validation boundaries are accepted");
+    assert!(
+        valid(&settings),
+        "all lower validation boundaries are accepted"
+    );
     settings.resolution = Resolution {
         width: 16384,
         height: 16384,
@@ -400,7 +426,10 @@ fn validation_boundaries() {
     settings.sound_volume = 1.0;
     settings.music_volume = 0.0;
     settings.frame_rate_limit = 144;
-    assert!(valid(&settings), "all upper validation boundaries are accepted");
+    assert!(
+        valid(&settings),
+        "all upper validation boundaries are accepted"
+    );
 
     // NOTE: the oracle's out-of-range enum casts (screenMode 99, texture
     // detail -1, ...) are unrepresentable in Rust's closed enums; the type
@@ -470,13 +499,23 @@ fn validation_boundaries() {
 fn scale_defaults_and_validation() {
     let roots = TemporaryRoots::new();
     default_templates(&roots);
-    let loaded =
-        settings::load(&roots.system(), &roots.user()).expect("scale defaults load when keys are absent");
-    assert_eq!(loaded.render_scale, 1.0, "missing RenderScale defaults to 1.0");
+    let loaded = settings::load(&roots.system(), &roots.user())
+        .expect("scale defaults load when keys are absent");
+    assert_eq!(
+        loaded.render_scale, 1.0,
+        "missing RenderScale defaults to 1.0"
+    );
     assert_eq!(loaded.ui_scale, 1.0, "missing UIScale defaults to 1.0");
-    assert!(loaded.native_text, "available native renderer is enabled by default");
+    assert!(
+        loaded.native_text,
+        "available native renderer is enabled by default"
+    );
     assert!(!loaded.show_fps, "FPS counter is disabled by default");
-    assert_eq!(loaded.control_mode, ControlMode::Classic, "Classic controls are the default");
+    assert_eq!(
+        loaded.control_mode,
+        ControlMode::Classic,
+        "Classic controls are the default"
+    );
 
     let mut settings = Settings::default();
     for value in RENDER_SCALES {
@@ -489,18 +528,52 @@ fn scale_defaults_and_validation() {
         assert!(valid(&settings), "accepted UI scale validates");
     }
 
-    for value in [-1.0, 0.0, 0.49, 0.51, 0.66, 0.68, 0.74, 0.76, 0.84, 0.86, 1.01, f64::INFINITY, f64::NAN] {
+    for value in [
+        -1.0,
+        0.0,
+        0.49,
+        0.51,
+        0.66,
+        0.68,
+        0.74,
+        0.76,
+        0.84,
+        0.86,
+        1.01,
+        f64::INFINITY,
+        f64::NAN,
+    ] {
         let mut bad = Settings::default();
         bad.render_scale = value;
-        assert!(!valid(&bad), "render scale outside the discrete choices is rejected");
+        assert!(
+            !valid(&bad),
+            "render scale outside the discrete choices is rejected"
+        );
     }
     for value in [
-        -1.0, 0.0, 0.74, 0.76, 0.99, 1.01, 1.24, 1.26, 1.49, 1.51, 1.74, 1.76, 1.99, 2.01,
-        f64::INFINITY, f64::NAN,
+        -1.0,
+        0.0,
+        0.74,
+        0.76,
+        0.99,
+        1.01,
+        1.24,
+        1.26,
+        1.49,
+        1.51,
+        1.74,
+        1.76,
+        1.99,
+        2.01,
+        f64::INFINITY,
+        f64::NAN,
     ] {
         let mut bad = Settings::default();
         bad.ui_scale = value;
-        assert!(!valid(&bad), "UI scale outside the discrete choices is rejected");
+        assert!(
+            !valid(&bad),
+            "UI scale outside the discrete choices is rejected"
+        );
     }
 }
 
@@ -553,14 +626,25 @@ fn config_round_trip_and_backups() {
         );
     }
 
-    settings::commit(&roots.system(), &roots.user(), &selected)
-        .expect("settings commit succeeds");
+    settings::commit(&roots.system(), &roots.user(), &selected).expect("settings commit succeeds");
     let game = read_text(&game_path);
     let user = read_text(&user_path);
-    assert!(game.contains("; Preserve This Comment"), "game comment is preserved");
-    assert!(game.contains("CustomCase=KeepMe"), "unrelated game key is preserved");
-    assert!(game.contains("MiXeDKey=MiXeDValue"), "unrelated key case is preserved");
-    assert!(game.contains("malformed line without equals"), "malformed line is preserved");
+    assert!(
+        game.contains("; Preserve This Comment"),
+        "game comment is preserved"
+    );
+    assert!(
+        game.contains("CustomCase=KeepMe"),
+        "unrelated game key is preserved"
+    );
+    assert!(
+        game.contains("MiXeDKey=MiXeDValue"),
+        "unrelated key case is preserved"
+    );
+    assert!(
+        game.contains("malformed line without equals"),
+        "malformed line is preserved"
+    );
     assert!(
         game.contains("FrameRateLimit=30"),
         "earlier repeated owned key remains untouched"
@@ -625,7 +709,10 @@ fn config_round_trip_and_backups() {
         only_crlf(game.as_bytes()),
         "Game.ini CRLF newline style is preserved"
     );
-    assert!(!user.contains('\r'), "User.ini LF newline style is preserved");
+    assert!(
+        !user.contains('\r'),
+        "User.ini LF newline style is preserved"
+    );
     assert_eq!(
         read_bytes(&roots.user().join("Game.ini.bak")),
         original_game.as_bytes(),
@@ -636,11 +723,22 @@ fn config_round_trip_and_backups() {
         original_user.as_bytes(),
         "first User.ini backup is exact"
     );
-    assert_eq!(unix_mode(&game_path), 0o640, "Game.ini destination mode is retained");
-    assert_eq!(unix_mode(&user_path), 0o604, "User.ini destination mode is retained");
+    assert_eq!(
+        unix_mode(&game_path),
+        0o640,
+        "Game.ini destination mode is retained"
+    );
+    assert_eq!(
+        unix_mode(&user_path),
+        0o604,
+        "User.ini destination mode is retained"
+    );
 
     let loaded = settings::load(&roots.system(), &roots.user()).expect("committed settings reload");
-    assert_eq!(loaded.screen_mode, selected.screen_mode, "screen mode round-trips");
+    assert_eq!(
+        loaded.screen_mode, selected.screen_mode,
+        "screen mode round-trips"
+    );
     assert_eq!(
         (loaded.resolution.width, loaded.resolution.height),
         (1440, 900),
@@ -669,27 +767,37 @@ fn config_round_trip_and_backups() {
         "detail levels round-trip"
     );
     assert!(
-        !loaded.sound_enabled
-            && loaded.sound_volume == 0.25
-            && loaded.music_volume == 0.5,
+        !loaded.sound_enabled && loaded.sound_volume == 0.25 && loaded.music_volume == 0.5,
         "audio settings round-trip"
     );
     assert!(
         loaded.mouse_sensitivity == 7.25 && loaded.invert_mouse,
         "mouse settings round-trip"
     );
-    assert_eq!(loaded.control_mode, ControlMode::Modern, "Modern control mode round-trips");
-    assert_eq!(loaded.difficulty, Difficulty::Hard, "difficulty round-trips");
+    assert_eq!(
+        loaded.control_mode,
+        ControlMode::Modern,
+        "Modern control mode round-trips"
+    );
+    assert_eq!(
+        loaded.difficulty,
+        Difficulty::Hard,
+        "difficulty round-trips"
+    );
     assert!(
         !loaded.auto_center_camera && !loaded.move_while_casting && !loaded.auto_quaff,
         "gameplay toggles round-trip"
     );
-    assert!(!loaded.screen_flashes, "screen flash preference round-trips");
+    assert!(
+        !loaded.screen_flashes,
+        "screen flash preference round-trips"
+    );
 
     let mut second = selected.clone();
     second.frame_rate_limit = 30;
     second.control_mode = ControlMode::Classic;
-    settings::commit(&roots.system(), &roots.user(), &second).expect("second settings commit succeeds");
+    settings::commit(&roots.system(), &roots.user(), &second)
+        .expect("second settings commit succeeds");
     assert!(
         read_text(&user_path).contains("bModernThirdPersonControls=False"),
         "Classic control mode rewrites the engine preference to False"
@@ -718,8 +826,8 @@ fn every_scale_round_trip() {
         settings_model.render_scale = value;
         settings::commit(&roots.system(), &roots.user(), &settings_model)
             .expect("accepted render scale commits");
-        let loaded = settings::load(&roots.system(), &roots.user())
-            .expect("accepted render scale reloads");
+        let loaded =
+            settings::load(&roots.system(), &roots.user()).expect("accepted render scale reloads");
         assert_eq!(
             loaded.render_scale, value,
             "accepted render scale round-trips exactly"
@@ -732,7 +840,10 @@ fn every_scale_round_trip() {
             .expect("accepted UI scale commits");
         let loaded =
             settings::load(&roots.system(), &roots.user()).expect("accepted UI scale reloads");
-        assert_eq!(loaded.ui_scale, value, "accepted UI scale round-trips exactly");
+        assert_eq!(
+            loaded.ui_scale, value,
+            "accepted UI scale round-trips exactly"
+        );
     }
 }
 
@@ -749,8 +860,8 @@ fn modern_option_round_trips() {
         settings_model.anti_aliasing_samples = samples;
         settings::commit(&roots.system(), &roots.user(), &settings_model)
             .expect("accepted MSAA setting commits");
-        let loaded = settings::load(&roots.system(), &roots.user())
-            .expect("accepted MSAA setting reloads");
+        let loaded =
+            settings::load(&roots.system(), &roots.user()).expect("accepted MSAA setting reloads");
         assert_eq!(
             loaded.anti_aliasing_samples, samples,
             "accepted MSAA setting round-trips exactly"
@@ -782,7 +893,10 @@ fn modern_option_round_trips() {
             loaded.maintain_vertical_fov, enabled,
             "widescreen preference round-trips exactly"
         );
-        assert_eq!(loaded.show_fps, enabled, "FPS counter preference round-trips exactly");
+        assert_eq!(
+            loaded.show_fps, enabled,
+            "FPS counter preference round-trips exactly"
+        );
         assert_eq!(
             loaded.screen_flashes, enabled,
             "screen flash preference round-trips exactly"
@@ -813,7 +927,10 @@ fn modern_option_round_trips() {
         loaded.native_text,
         "enabled native text preference loads from Game.ini"
     );
-    assert!(loaded.show_fps, "enabled FPS counter preference loads from Game.ini");
+    assert!(
+        loaded.show_fps,
+        "enabled FPS counter preference loads from Game.ini"
+    );
 
     write_text(
         &roots.user().join("Game.ini"),
@@ -880,7 +997,11 @@ fn read_only_cancellation_and_materialization() {
         !roots.user().join("Game.ini.bak").exists() && !roots.user().join("User.ini.bak").exists(),
         "materializing absent INIs does not invent backups"
     );
-    assert_eq!(unix_mode(&roots.user().join("Game.ini")), 0o600, "new writable INI is mode 0600");
+    assert_eq!(
+        unix_mode(&roots.user().join("Game.ini")),
+        0o600,
+        "new writable INI is mode 0600"
+    );
 }
 
 // ------------------------------------------------------- TestMalformedRecovery
@@ -977,16 +1098,8 @@ fn utf16_and_invalid_encoding_recovery() {
         .expect("UTF-16 LE/BE settings commit succeeds");
     let game = read_bytes(&game_path);
     let user = read_bytes(&user_path);
-    assert_eq!(
-        &game[..2],
-        &[0xFF, 0xFE],
-        "UTF-16 LE encoding is preserved"
-    );
-    assert_eq!(
-        &user[..2],
-        &[0xFE, 0xFF],
-        "UTF-16 BE encoding is preserved"
-    );
+    assert_eq!(&game[..2], &[0xFF, 0xFE], "UTF-16 LE encoding is preserved");
+    assert_eq!(&user[..2], &[0xFE, 0xFF], "UTF-16 BE encoding is preserved");
     assert!(
         decode_utf16_ascii(&game, true).contains("; UTF16 game comment"),
         "UTF-16 comment survives round-trip"
@@ -1109,8 +1222,8 @@ fn data_source_catalog_persistence() {
         "launcher catalog serializes its selected source and both canonical roots"
     );
 
-    let loaded =
-        store::load_data_source_configuration(&roots.user()).expect("saved launcher catalog reloads");
+    let loaded = store::load_data_source_configuration(&roots.user())
+        .expect("saved launcher catalog reloads");
     assert!(
         loaded.selected == Some(DataSource::Prototype)
             && loaded.retail_root == canonical_retail.display().to_string()
@@ -1222,15 +1335,20 @@ fn data_source_profiles_and_migration() {
     std::fs::create_dir_all(roots.user().join("Save").join("cache")).expect("save cache dir");
     std::fs::create_dir_all(roots.user().join("Cache")).expect("cache dir");
     write_text(&roots.user().join("Save").join("Save1.usa"), "retail save");
-    write_text(&roots.user().join("Save").join("cache").join("Thumb1.bmp"), "cache");
-    write_text(&roots.user().join("Cache").join("Engine.cache"), "engine cache");
+    write_text(
+        &roots.user().join("Save").join("cache").join("Thumb1.bmp"),
+        "cache",
+    );
+    write_text(
+        &roots.user().join("Cache").join("Engine.cache"),
+        "engine cache",
+    );
 
     let retail_profile = store::prepare_data_source_profile(&roots.user(), DataSource::Retail)
         .expect("first Retail profile prepares and migrates legacy state");
     let expected_retail = roots.user().join("Profiles").join("Retail");
     assert_eq!(
-        retail_profile,
-        expected_retail,
+        retail_profile, expected_retail,
         "Retail profile is source-specific"
     );
     assert!(
@@ -1239,7 +1357,8 @@ fn data_source_profiles_and_migration() {
         "legacy settings and saves migrate into the selected profile"
     );
     assert!(
-        roots.user().join("Game.ini").exists() && roots.user().join("Save").join("Save1.usa").exists(),
+        roots.user().join("Game.ini").exists()
+            && roots.user().join("Save").join("Save1.usa").exists(),
         "legacy mutable state remains intact after durable profile migration"
     );
     assert!(
@@ -1252,14 +1371,17 @@ fn data_source_profiles_and_migration() {
     settings::commit(&roots.system(), &retail_profile, &retail_settings)
         .expect("Retail profile settings commit");
     std::fs::create_dir_all(expected_retail.join("Save")).expect("retail save dir");
-    write_text(&expected_retail.join("Save").join("Save2.usa"), "retail profile save");
+    write_text(
+        &expected_retail.join("Save").join("Save2.usa"),
+        "retail profile save",
+    );
 
-    let prototype_profile = store::prepare_data_source_profile(&roots.user(), DataSource::Prototype)
-        .expect("Prototype profile prepares after Retail migration");
+    let prototype_profile =
+        store::prepare_data_source_profile(&roots.user(), DataSource::Prototype)
+            .expect("Prototype profile prepares after Retail migration");
     let expected_prototype = roots.user().join("Profiles").join("Prototype");
     assert_eq!(
-        prototype_profile,
-        expected_prototype,
+        prototype_profile, expected_prototype,
         "Prototype profile is source-specific"
     );
     assert!(
@@ -1282,7 +1404,10 @@ fn data_source_profiles_and_migration() {
     let prototype_state = settings::load(&roots.system(), &prototype_profile)
         .expect("Prototype profile settings reload");
     assert_eq!(
-        (retail_state.frame_rate_limit, prototype_state.frame_rate_limit),
+        (
+            retail_state.frame_rate_limit,
+            prototype_state.frame_rate_limit
+        ),
         (30, 120),
         "profile settings remain isolated"
     );
@@ -1358,7 +1483,11 @@ fn legacy_settings_migration() {
             row("SDLDrv.SDLClient", "UIScale", "1.25"),
             row("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "1"),
             row("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "4"),
-            row("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16.000000"),
+            row(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "MaxAnisotropy",
+                "16.000000",
+            ),
             row("SDLDrv.SDLClient", "Brightness", "0.400000"),
             row("ALAudio.ALAudioSubsystem", "SoundVolume", "0.900000"),
             row("ALAudio.ALAudioSubsystem", "MusicVolume", "0.53"),
@@ -1394,21 +1523,111 @@ fn legacy_settings_migration() {
             row("Unrelated.Section", "KeepMe", "Untouched"),
         ],
         journal: vec![
-            change("SDLDrv.SDLClient", "StartupFullscreen", "On", "True", "settings.boolean_spelling"),
-            change("SDLDrv.SDLClient", "BorderlessWindow", "yes", "True", "settings.boolean_spelling"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "1", "True", "settings.boolean_spelling"),
-            change("HGame.Harry", "bAutoQuaff", "No", "False", "settings.boolean_spelling"),
-            change("SDLDrv.SDLClient", "StartupFullscreen", "True", "False", "settings.screen_mode_consolidated"),
-            change("SDLDrv.SDLClient", "WindowedViewportX", "1024", "640", "settings.viewport_consolidated"),
-            change("SDLDrv.SDLClient", "WindowedViewportY", "768", "480", "settings.viewport_consolidated"),
-            change("Engine.GameEngine", "FrameRateLimit", "30.000000", "30", "settings.frame_rate_limit_normalized"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.850000", "0.85", "settings.scale_normalized"),
-            change("SDLDrv.SDLClient", "Brightness", "0.400000", "0.4", "settings.range_normalized"),
-            change("ALAudio.ALAudioSubsystem", "SoundVolume", "0.900000", "0.9", "settings.range_normalized"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16.000000", "16", "settings.anisotropy_normalized"),
-            change("SDLDrv.SDLClient", "TextureDetail", "LOW", "Low", "settings.enum_normalized"),
-            change("Engine.PlayerPawn", "ObjectDetail", "objectdetailhigh", "ObjectDetailHigh", "settings.enum_normalized"),
-            change("Engine.PlayerPawn", "Difficulty", "difficultyhard", "DifficultyHard", "settings.enum_normalized"),
+            change(
+                "SDLDrv.SDLClient",
+                "StartupFullscreen",
+                "On",
+                "True",
+                "settings.boolean_spelling",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "BorderlessWindow",
+                "yes",
+                "True",
+                "settings.boolean_spelling",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "UseAA",
+                "1",
+                "True",
+                "settings.boolean_spelling",
+            ),
+            change(
+                "HGame.Harry",
+                "bAutoQuaff",
+                "No",
+                "False",
+                "settings.boolean_spelling",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "StartupFullscreen",
+                "True",
+                "False",
+                "settings.screen_mode_consolidated",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "WindowedViewportX",
+                "1024",
+                "640",
+                "settings.viewport_consolidated",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "WindowedViewportY",
+                "768",
+                "480",
+                "settings.viewport_consolidated",
+            ),
+            change(
+                "Engine.GameEngine",
+                "FrameRateLimit",
+                "30.000000",
+                "30",
+                "settings.frame_rate_limit_normalized",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "RenderScale",
+                "0.850000",
+                "0.85",
+                "settings.scale_normalized",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "Brightness",
+                "0.400000",
+                "0.4",
+                "settings.range_normalized",
+            ),
+            change(
+                "ALAudio.ALAudioSubsystem",
+                "SoundVolume",
+                "0.900000",
+                "0.9",
+                "settings.range_normalized",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "MaxAnisotropy",
+                "16.000000",
+                "16",
+                "settings.anisotropy_normalized",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "TextureDetail",
+                "LOW",
+                "Low",
+                "settings.enum_normalized",
+            ),
+            change(
+                "Engine.PlayerPawn",
+                "ObjectDetail",
+                "objectdetailhigh",
+                "ObjectDetailHigh",
+                "settings.enum_normalized",
+            ),
+            change(
+                "Engine.PlayerPawn",
+                "Difficulty",
+                "difficultyhard",
+                "DifficultyHard",
+                "settings.enum_normalized",
+            ),
         ],
     });
 
@@ -1447,19 +1666,97 @@ fn legacy_settings_migration() {
             row("SDLDrv.SDLClient", "NativeText", "True"),
         ],
         journal: vec![
-            change("SDLDrv.SDLClient", "NativeText", "garbage", "True", "settings.boolean_invalid_defaulted"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "maybe", "False", "settings.boolean_invalid_defaulted"),
-            change("SDLDrv.SDLClient", "StartupFullscreen", "True", "False", "settings.screen_mode_consolidated"),
-            change("SDLDrv.SDLClient", "WindowedViewportX", "12", "800", "settings.viewport_consolidated"),
-            change("SDLDrv.SDLClient", "WindowedViewportY", "768", "600", "settings.viewport_consolidated"),
-            change("Engine.GameEngine", "FrameRateLimit", "59", "60", "settings.frame_rate_limit_invalid_defaulted"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.9", "1", "settings.scale_invalid_defaulted"),
-            change("SDLDrv.SDLClient", "UIScale", "abc", "1", "settings.scale_invalid_defaulted"),
-            change("SDLDrv.SDLClient", "Brightness", "nan", "0.4", "settings.range_invalid_defaulted"),
-            change("Engine.PlayerPawn", "MouseSensitivity", "not-a-number", "3", "settings.range_invalid_defaulted"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "8", "0", "settings.antialiasing_normalized"),
-            change("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "32", "4", "settings.anisotropy_invalid_defaulted"),
-            change("Engine.PlayerPawn", "Difficulty", "Ultra", "DifficultyEasy", "settings.enum_invalid_defaulted"),
+            change(
+                "SDLDrv.SDLClient",
+                "NativeText",
+                "garbage",
+                "True",
+                "settings.boolean_invalid_defaulted",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "UseAA",
+                "maybe",
+                "False",
+                "settings.boolean_invalid_defaulted",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "StartupFullscreen",
+                "True",
+                "False",
+                "settings.screen_mode_consolidated",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "WindowedViewportX",
+                "12",
+                "800",
+                "settings.viewport_consolidated",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "WindowedViewportY",
+                "768",
+                "600",
+                "settings.viewport_consolidated",
+            ),
+            change(
+                "Engine.GameEngine",
+                "FrameRateLimit",
+                "59",
+                "60",
+                "settings.frame_rate_limit_invalid_defaulted",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "RenderScale",
+                "0.9",
+                "1",
+                "settings.scale_invalid_defaulted",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "UIScale",
+                "abc",
+                "1",
+                "settings.scale_invalid_defaulted",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "Brightness",
+                "nan",
+                "0.4",
+                "settings.range_invalid_defaulted",
+            ),
+            change(
+                "Engine.PlayerPawn",
+                "MouseSensitivity",
+                "not-a-number",
+                "3",
+                "settings.range_invalid_defaulted",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "NumAASamples",
+                "8",
+                "0",
+                "settings.antialiasing_normalized",
+            ),
+            change(
+                "XOpenGLDrv.XOpenGLRenderDevice",
+                "MaxAnisotropy",
+                "32",
+                "4",
+                "settings.anisotropy_invalid_defaulted",
+            ),
+            change(
+                "Engine.PlayerPawn",
+                "Difficulty",
+                "Ultra",
+                "DifficultyEasy",
+                "settings.enum_invalid_defaulted",
+            ),
         ],
     });
 
@@ -1480,14 +1777,30 @@ fn legacy_settings_migration() {
             row("SDLDrv.SDLClient", "FullscreenViewportY", "800"),
         ],
         journal: vec![
-            change("SDLDrv.SDLClient", "FullscreenViewportX", "640", "1280", "settings.viewport_consolidated"),
-            change("SDLDrv.SDLClient", "FullscreenViewportY", "480", "800", "settings.viewport_consolidated"),
+            change(
+                "SDLDrv.SDLClient",
+                "FullscreenViewportX",
+                "640",
+                "1280",
+                "settings.viewport_consolidated",
+            ),
+            change(
+                "SDLDrv.SDLClient",
+                "FullscreenViewportY",
+                "480",
+                "800",
+                "settings.viewport_consolidated",
+            ),
         ],
     });
 
     {
         let input = vec![
-            row("Engine.Engine", "GameRenderDevice", "D3DDrv.D3DRenderDevice"),
+            row(
+                "Engine.Engine",
+                "GameRenderDevice",
+                "D3DDrv.D3DRenderDevice",
+            ),
             row("SDLDrv.SDLClient", "ShowFPS", "True"),
             row("Unrelated.Section", "MiXeDKey", "MiXeDValue"),
         ];
@@ -1575,12 +1888,18 @@ fn launch_selection_serialization_contract() {
     let serializable = [
         ("quit selection serializes", quit.clone()),
         ("new game selection serializes", new_game),
-        ("flat continue selection serializes", continue_selection(12, -1)),
-        ("slotted continue selection serializes", continue_selection(12, 3)),
+        (
+            "flat continue selection serializes",
+            continue_selection(12, -1),
+        ),
+        (
+            "slotted continue selection serializes",
+            continue_selection(12, 3),
+        ),
     ];
     for (description, selection) in &serializable {
-        let fields =
-            serialize_launch_selection(selection).unwrap_or_else(|error| panic!("{description}: {error}"));
+        let fields = serialize_launch_selection(selection)
+            .unwrap_or_else(|error| panic!("{description}: {error}"));
         let parsed = deserialize_launch_selection(&fields);
         assert!(
             parsed.error.is_none(),
@@ -1593,8 +1912,7 @@ fn launch_selection_serialization_contract() {
         );
     }
 
-    let fields =
-        serialize_launch_selection(&quit).expect("quit serializes");
+    let fields = serialize_launch_selection(&quit).expect("quit serializes");
     assert!(
         fields.len() == 1 && fields[0].key == "Action" && fields[0].value == "Quit",
         "quit serializes to a single Action row"
@@ -1620,9 +1938,18 @@ fn launch_selection_serialization_contract() {
     let mut error_action = LaunchSelection::default();
     error_action.action = LaunchAction::Error;
     let rejected = [
-        ("continue without a save is not serializable", unsaved_continue),
-        ("continue with a negative save index is not serializable", continue_selection(-1, -1)),
-        ("slotted continue with a negative slot is not serializable", negative_slot),
+        (
+            "continue without a save is not serializable",
+            unsaved_continue,
+        ),
+        (
+            "continue with a negative save index is not serializable",
+            continue_selection(-1, -1),
+        ),
+        (
+            "slotted continue with a negative slot is not serializable",
+            negative_slot,
+        ),
         ("error action is not serializable", error_action),
     ];
     for (description, selection) in &rejected {
@@ -1634,14 +1961,21 @@ fn launch_selection_serialization_contract() {
 
     let malformed: Vec<(&str, Vec<SelectionField>)> = vec![
         ("empty store falls back to quit", vec![]),
-        ("unknown action falls back to quit", vec![field("Action", "Bogus")]),
+        (
+            "unknown action falls back to quit",
+            vec![field("Action", "Bogus")],
+        ),
         (
             "continue without a save marker falls back to quit",
             vec![field("Action", "Continue")],
         ),
         (
             "continue with an explicit false save marker falls back to quit",
-            vec![field("Action", "Continue"), field("HasSave", "False"), field("SaveIndex", "5")],
+            vec![
+                field("Action", "Continue"),
+                field("HasSave", "False"),
+                field("SaveIndex", "5"),
+            ],
         ),
         (
             "continue with a missing save index falls back to quit",
@@ -1649,11 +1983,19 @@ fn launch_selection_serialization_contract() {
         ),
         (
             "continue with a nonnumeric save index falls back to quit",
-            vec![field("Action", "Continue"), field("HasSave", "True"), field("SaveIndex", "nope")],
+            vec![
+                field("Action", "Continue"),
+                field("HasSave", "True"),
+                field("SaveIndex", "nope"),
+            ],
         ),
         (
             "continue with a negative save index falls back to quit",
-            vec![field("Action", "Continue"), field("HasSave", "True"), field("SaveIndex", "-5")],
+            vec![
+                field("Action", "Continue"),
+                field("HasSave", "True"),
+                field("SaveIndex", "-5"),
+            ],
         ),
         (
             "slotted continue with a bad slot falls back to quit",
@@ -1664,7 +2006,10 @@ fn launch_selection_serialization_contract() {
                 field("SaveSlot", "x"),
             ],
         ),
-        ("unrelated rows alone fall back to quit", vec![field("RetailRoot", "/Retail")]),
+        (
+            "unrelated rows alone fall back to quit",
+            vec![field("RetailRoot", "/Retail")],
+        ),
     ];
     for (description, fields) in &malformed {
         let parsed = deserialize_launch_selection(fields);
@@ -1731,14 +2076,20 @@ fn launch_selection_persistence_round_trip() {
     let persisted = [
         ("quit selection persists", quit.clone()),
         ("new game selection persists", new_game.clone()),
-        ("flat continue selection persists", continue_selection(12, -1)),
-        ("slotted continue selection persists", continue_selection(12, 3)),
+        (
+            "flat continue selection persists",
+            continue_selection(12, -1),
+        ),
+        (
+            "slotted continue selection persists",
+            continue_selection(12, 3),
+        ),
     ];
     for (description, selection) in &persisted {
         store::commit_launch_selection(&roots.user(), selection)
             .unwrap_or_else(|error| panic!("{description}: {error}"));
-        let outcome =
-            store::load_launch_selection(&roots.user()).unwrap_or_else(|error| panic!("{description}: {error}"));
+        let outcome = store::load_launch_selection(&roots.user())
+            .unwrap_or_else(|error| panic!("{description}: {error}"));
         assert!(
             outcome.ok(),
             "{description} reloads cleanly: {:?}",
@@ -1762,7 +2113,10 @@ fn launch_selection_persistence_round_trip() {
 
     let malformed: Vec<(&str, &str)> = vec![
         ("an empty catalog falls back to quit", ""),
-        ("an unknown action falls back to quit", "[LastLaunch]\nAction=Bogus\n"),
+        (
+            "an unknown action falls back to quit",
+            "[LastLaunch]\nAction=Bogus\n",
+        ),
         (
             "continue without a save index falls back to quit",
             "[LastLaunch]\nAction=Continue\nHasSave=True\n",
@@ -1827,8 +2181,8 @@ fn launch_selection_persistence_round_trip() {
         Some(DataSource::Prototype),
         "selection commit preserves the data source section"
     );
-    let combined =
-        store::load_launch_selection(&roots.user()).expect("both catalogs coexist after a selection commit");
+    let combined = store::load_launch_selection(&roots.user())
+        .expect("both catalogs coexist after a selection commit");
     assert!(
         combined.ok() && same_selection_core(&combined.selection, &continue_selection(7, -1)),
         "both catalogs coexist after a selection commit"
@@ -1856,15 +2210,17 @@ fn duplicate_launch_selection_commit_keeps_last_writer() {
 
     store::commit_launch_selection(&roots.user(), &second)
         .expect("duplicate-write second commit succeeds");
-    let reloaded =
-        store::load_launch_selection(&roots.user()).expect("second generation reloads");
+    let reloaded = store::load_launch_selection(&roots.user()).expect("second generation reloads");
     assert!(
         reloaded.ok() && same_selection_core(&reloaded.selection, &second),
         "the last writer's selection is the persisted one"
     );
 
     let second_store = read_text(&catalog);
-    assert_ne!(second_store, first_store, "the second commit rewrote the catalog");
+    assert_ne!(
+        second_store, first_store,
+        "the second commit rewrote the catalog"
+    );
     assert_eq!(
         count_occurrences(&second_store, "Action="),
         1,
@@ -1875,8 +2231,7 @@ fn duplicate_launch_selection_commit_keeps_last_writer() {
         "the replaced generation leaves no stale save coordinates"
     );
     assert!(
-        catalog.with_extension("ini.bak").exists()
-            && read_text(&bak_path(&catalog)) == first_store,
+        catalog.with_extension("ini.bak").exists() && read_text(&bak_path(&catalog)) == first_store,
         "the previous generation is preserved exactly as the backup"
     );
 

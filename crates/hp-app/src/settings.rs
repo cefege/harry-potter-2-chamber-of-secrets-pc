@@ -12,8 +12,8 @@ use std::path::Path;
 use crate::atomic_file::{backup, publish, read_regular, restore_published};
 use crate::error::AppError;
 use crate::ini_text::{
-    bool_text, double_text, get, get_bool, get_discrete_float, get_discrete_integer, get_integer,
-    get_number, get_ranged_float, LauncherDoc,
+    LauncherDoc, bool_text, double_text, get, get_bool, get_discrete_float, get_discrete_integer,
+    get_integer, get_number, get_ranged_float,
 };
 use crate::settings_model::{
     AA_SAMPLE_VALUES, ANISOTROPY_VALUES, FRAME_RATE_LIMITS, RENDER_SCALES, UI_SCALES,
@@ -260,7 +260,10 @@ fn select_document(user_path: &Path, default_path: &Path) -> Result<SelectedDocu
         LauncherDoc::decode(&bytes).map_err(|message| {
             AppError::new(
                 "app.settings_io_failed",
-                format!("Unable to decode template '{}': {message}", default_path.display()),
+                format!(
+                    "Unable to decode template '{}': {message}",
+                    default_path.display()
+                ),
             )
         })
     };
@@ -744,10 +747,16 @@ pub fn commit(system_root: &Path, profile_root: &Path, settings: &Settings) -> R
             ("User.ini", &user_path, &user),
             ("Game.ini", &game_path, &game),
         ] {
-            if let Err(restoration) =
-                restore_published(destination, snapshot.existed, snapshot.original.as_deref(), snapshot.mode)
-            {
-                combined.push_str(&format!(" {name} rollback failed: {}", restoration.message()));
+            if let Err(restoration) = restore_published(
+                destination,
+                snapshot.existed,
+                snapshot.original.as_deref(),
+                snapshot.mode,
+            ) {
+                combined.push_str(&format!(
+                    " {name} rollback failed: {}",
+                    restoration.message()
+                ));
             }
         }
         return Err(AppError::new("app.settings_io_failed", combined));

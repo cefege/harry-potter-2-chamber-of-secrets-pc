@@ -18,8 +18,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+mod resolve;
 mod windowed;
-
 use hp_engine::error::EngineError;
 use hp_engine::input::InputScript;
 use hp_engine::rng::DEFAULT_SEED;
@@ -57,7 +57,7 @@ struct Args {
 }
 
 fn usage() -> String {
-    "usage: hp2rs -datadir=<root> <map_token> [options]\n\
+    "usage: hp2rs [-datadir=<root>] [<map_token>] [options]\n\
      interactive windowed mode (default): [--nosound] [--null-render] \
      [-xopengl|-vulkan] -window -testticks=N -log -LOAD=<n>|Save<N>.usa\n\
      headless harness mode: add --smoke [-nosound] [--render-every=N] \
@@ -248,47 +248,19 @@ fn run() -> Result<(), EngineError> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = parse_args(argv)?;
 
-    // Zero-argument launch (double-click / `open`): fall back to the user's
-    // retail install and its New Game entry map so the bundle opens without
-    // a terminal. Explicit arguments always win. Tracked refinement: the
-    // launcher profile store + folder picker replace these defaults.
-    let data_root = args.data_root.clone().or_else(|| {
-        let retail = dirs_home().join("Library/Application Support/Harry Potter 2/Data/Retail");
-        if retail.join("System/Default.ini").is_file() {
-            eprintln!("hp2rs: [app.datadir_default] using {}", retail.display());
-            Some(retail)
-        } else {
-            None
+    // Zero-argument launch (double-click / `open`): resolve the data root
+    // through the launcher profile store (first-run folder picker fallback,
+    // validated choice persisted back) and the map token from the New Game
+    // entry map. Explicit arguments always win and are never persisted.
+    let data_root = match args.data_root.clone() {
+        Some(root) => root,
+        None => {
+            resolve::resolve_datadir(&resolve::launcher_root(&dirs_home()), &resolve::RfdChooser)?
         }
-    });
-    let Some(data_root) = data_root else {
-        return Err(EngineError::new(
-            "engine.arg_datadir",
-            format!("-datadir=<root> is required; {}", usage()),
-        ));
     };
-    let map_token = args.map_token.clone().or_else(|| {
-        let entry = data_root.join("Maps/Entry.unr");
-        if entry.is_file() {
-            eprintln!("hp2rs: [app.map_autoselected] Maps\\Entry.unr");
-            return Some("Maps\\Entry.unr".to_string());
-        }
-        let mut maps = std::fs::read_dir(data_root.join("Maps"))
-            .ok()?
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().to_string())
-            .filter(|n| n.to_lowercase().ends_with(".unr"))
-            .collect::<Vec<_>>();
-        maps.sort();
-        let first = maps.into_iter().next()?;
-        eprintln!("hp2rs: [app.map_autoselected] Maps\\{first}");
-        Some(format!("Maps\\{first}"))
-    });
-    let Some(map_token) = map_token else {
-        return Err(EngineError::new(
-            "engine.arg_map",
-            format!("a map token is required; {}", usage()),
-        ));
+    let map_token = match args.map_token.clone() {
+        Some(token) => token,
+        None => resolve::autoselect_map_token(&data_root)?,
     };
     let ticks = args.test_ticks.unwrap_or(0);
 
@@ -593,7 +565,6 @@ fn render_tick_end(
     Ok(1)
 }
 
-
 /// Home directory for default-path fallbacks (double-click launches have no
 /// CLI context).
 fn dirs_home() -> std::path::PathBuf {
@@ -637,4 +608,3 @@ mod tests {
         );
     }
 }
-
