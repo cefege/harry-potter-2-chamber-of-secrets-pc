@@ -1,0 +1,29 @@
+{
+ "name": "range_sweep",
+ "source": "Tests/EaxaTests.cpp TestPredictorsAndRanges range loop (lifted verbatim)",
+ "note": "C++ oracle pins FNV-1a sample hashes for each range at predictor 2, history (1234,-2345)",
+ "packed_hex": "817f2ed34cb56a9908f127c45bae",
+ "predictor": 2,
+ "reset_history": [
+  1234,
+  -2345
+ ],
+ "fnv1a_hashes_hex": [
+  "24008d8bfa76a702",
+  "5b496f03455e289e",
+  "f306b510eee84cad",
+  "d55aa8c6a0c5307b",
+  "bd3cd8fd81e6e714",
+  "1bfeb30f52abaef8",
+  "34e35e16af45a6ba",
+  "44caadc237c42569",
+  "e9995113c19309e2",
+  "3451f93f91e3fb33",
+  "0875316c8af38477",
+  "f71e3b82b7b3faa4",
+  "45356193c385e75c",
+  "c0fc29ea3a6b1bec",
+  "544f877b02a3e15b",
+  "ce17f56323960c72"
+ ]
+}

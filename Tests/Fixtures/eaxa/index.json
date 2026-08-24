@@ -1,0 +1,29 @@
+{
+ "format": "hp2-eaxa-fixtures",
+ "schema_version": 1,
+ "provenance": "Vectors lifted verbatim from the minimal-TU ctest eaxa_decoder source Tests/EaxaTests.cpp; never regenerated from an engine implementation.",
+ "hash_note": "fnv1a_hashes_hex are FNV-1a 64 over the little-endian byte pair of each i16 sample, low byte first (same byte order as HashSamples in EaxaTests.cpp).",
+ "entries": [
+  {
+   "file": "signed_nibbles.json"
+  },
+  {
+   "file": "partial_requests.json"
+  },
+  {
+   "file": "clipping_positive.json"
+  },
+  {
+   "file": "clipping_negative.json"
+  },
+  {
+   "file": "history_two_feeds.json"
+  },
+  {
+   "file": "predictor_sweep.json"
+  },
+  {
+   "file": "range_sweep.json"
+  }
+ ]
+}
