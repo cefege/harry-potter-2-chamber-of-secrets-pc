@@ -9,10 +9,11 @@
 
 use std::path::Path;
 
+use crate::atomic_file::{backup, publish, read_regular, restore_published};
 use crate::error::AppError;
 use crate::ini_text::{
     bool_text, double_text, get, get_bool, get_discrete_float, get_discrete_integer, get_integer,
-    get_number, get_ranged_float, parse_ini,
+    get_number, get_ranged_float, LauncherDoc,
 };
 use crate::settings_model::{
     AA_SAMPLE_VALUES, ANISOTROPY_VALUES, FRAME_RATE_LIMITS, RENDER_SCALES, UI_SCALES,
@@ -225,29 +226,61 @@ fn io_error(path: &Path, error: std::io::Error) -> AppError {
     )
 }
 
+/// A document selected for load or commit: the decoded content, whether
+/// the writable file existed, its retained permission mode, and the exact
+/// original bytes when it did (`SelectDocument`).
+struct SelectedDocument {
+    doc: LauncherDoc,
+    existed: bool,
+    mode: u32,
+    original: Option<Vec<u8>>,
+}
+
 /// Selects the writable user document when present, else the immutable
-/// system template (`SelectDocument`). Errors loudly when neither exists.
-fn select_document(user_path: &Path, default_path: &Path) -> Result<crate::ini_text::IniDoc> {
-    match std::fs::read(user_path) {
-        Ok(bytes) => Ok(parse_ini(&bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let bytes = std::fs::read(default_path).map_err(|default_error| {
-                if default_error.kind() == std::io::ErrorKind::NotFound {
-                    AppError::new(
-                        "app.settings_io_failed",
-                        format!(
-                            "Neither '{}' nor template '{}' exists",
-                            user_path.display(),
-                            default_path.display()
-                        ),
-                    )
-                } else {
-                    io_error(default_path, default_error)
-                }
-            })?;
-            Ok(parse_ini(&bytes))
+/// system template. An undecodable writable file falls back to the
+/// template in memory without touching it, keeping the original bytes so
+/// a later commit can back them up exactly. Errors loudly when neither
+/// document exists.
+fn select_document(user_path: &Path, default_path: &Path) -> Result<SelectedDocument> {
+    let template = || -> Result<LauncherDoc> {
+        let bytes = std::fs::read(default_path).map_err(|default_error| {
+            if default_error.kind() == std::io::ErrorKind::NotFound {
+                AppError::new(
+                    "app.settings_io_failed",
+                    format!(
+                        "Neither '{}' nor template '{}' exists",
+                        user_path.display(),
+                        default_path.display()
+                    ),
+                )
+            } else {
+                io_error(default_path, default_error)
+            }
+        })?;
+        LauncherDoc::decode(&bytes).map_err(|message| {
+            AppError::new(
+                "app.settings_io_failed",
+                format!("Unable to decode template '{}': {message}", default_path.display()),
+            )
+        })
+    };
+    match read_regular(user_path) {
+        Ok(Some((bytes, mode))) => {
+            let doc = LauncherDoc::decode(&bytes).or_else(|_| template())?;
+            Ok(SelectedDocument {
+                doc,
+                existed: true,
+                mode,
+                original: Some(bytes),
+            })
         }
-        Err(error) => Err(io_error(user_path, error)),
+        Ok(None) => Ok(SelectedDocument {
+            doc: template()?,
+            existed: false,
+            mode: 0o600,
+            original: None,
+        }),
+        Err(error) => Err(error),
     }
 }
 
@@ -258,11 +291,13 @@ pub fn load(system_root: &Path, profile_root: &Path) -> Result<Settings> {
     let game = select_document(
         &profile_root.join("Game.ini"),
         &system_root.join("Default.ini"),
-    )?;
+    )?
+    .doc;
     let user = select_document(
         &profile_root.join("User.ini"),
         &system_root.join("DefUser.ini"),
-    )?;
+    )?
+    .doc;
 
     let mut settings = Settings::default();
 
@@ -417,14 +452,14 @@ pub fn load(system_root: &Path, profile_root: &Path) -> Result<Settings> {
     Ok(settings)
 }
 
-fn get_dimension(doc: &crate::ini_text::IniDoc, key: &str) -> Option<i32> {
+fn get_dimension(doc: &crate::ini_text::LauncherDoc, key: &str) -> Option<i32> {
     let parsed = get_integer(doc, "SDLDrv.SDLClient", key)?;
     (320..=16384).contains(&parsed).then_some(parsed)
 }
 
 /// `LoadAntiAliasing`: a missing or unrecognized `UseAA` leaves any stale
 /// sample count behind; disabled clears to zero.
-fn load_anti_aliasing(doc: &crate::ini_text::IniDoc, settings: &mut Settings) {
+fn load_anti_aliasing(doc: &crate::ini_text::LauncherDoc, settings: &mut Settings) {
     let section = "XOpenGLDrv.XOpenGLRenderDevice";
     let enabled = match get_bool(doc, section, "UseAA") {
         Some(enabled) => enabled,
@@ -441,7 +476,7 @@ fn load_anti_aliasing(doc: &crate::ini_text::IniDoc, settings: &mut Settings) {
     }
 }
 
-fn frame_cap(doc: &crate::ini_text::IniDoc) -> Option<i32> {
+fn frame_cap(doc: &crate::ini_text::LauncherDoc) -> Option<i32> {
     let cap = get_number(doc, "Engine.GameEngine", "FrameRateLimit")?;
     let integral = cap == cap.trunc() && (0.0..=f64::from(i32::MAX)).contains(&cap);
     let cap = integral.then_some(cap as i32)?;
@@ -449,7 +484,7 @@ fn frame_cap(doc: &crate::ini_text::IniDoc) -> Option<i32> {
 }
 
 fn enum_index(
-    doc: &crate::ini_text::IniDoc,
+    doc: &crate::ini_text::LauncherDoc,
     section: &str,
     key: &str,
     spellings: &[&str],
@@ -497,19 +532,19 @@ fn render_device_class(value: RenderBackend) -> &'static str {
 }
 
 /// `ApplyGame`: every launcher-owned renderer-era key.
-fn apply_game(doc: &mut crate::ini_text::IniDoc, settings: &Settings) {
-    doc.set_string("Engine.Engine", "ViewportManager", "SDLDrv.SDLClient");
+fn apply_game(doc: &mut crate::ini_text::LauncherDoc, settings: &Settings) {
+    doc.set_value("Engine.Engine", "ViewportManager", "SDLDrv.SDLClient");
     let device = render_device_class(settings.render_backend);
-    doc.set_string("Engine.Engine", "GameRenderDevice", device);
-    doc.set_string("Engine.Engine", "WindowedRenderDevice", device);
-    doc.set_string("Engine.Engine", "RenderDevice", device);
-    doc.set_string("Engine.Engine", "AudioDevice", "ALAudio.ALAudioSubsystem");
-    doc.set_string(
+    doc.set_value("Engine.Engine", "GameRenderDevice", device);
+    doc.set_value("Engine.Engine", "WindowedRenderDevice", device);
+    doc.set_value("Engine.Engine", "RenderDevice", device);
+    doc.set_value("Engine.Engine", "AudioDevice", "ALAudio.ALAudioSubsystem");
+    doc.set_value(
         "Engine.GameEngine",
         "UseSound",
         bool_text(settings.sound_enabled),
     );
-    doc.set_string(
+    doc.set_value(
         "Engine.GameEngine",
         "FrameRateLimit",
         settings.frame_rate_limit.to_string().as_str(),
@@ -517,95 +552,95 @@ fn apply_game(doc: &mut crate::ini_text::IniDoc, settings: &Settings) {
     let width = settings.resolution.width.to_string();
     let height = settings.resolution.height.to_string();
     for key in ["WindowedViewportX", "FullscreenViewportX"] {
-        doc.set_string("SDLDrv.SDLClient", key, width.as_str());
+        doc.set_value("SDLDrv.SDLClient", key, width.as_str());
     }
     for key in ["WindowedViewportY", "FullscreenViewportY"] {
-        doc.set_string("SDLDrv.SDLClient", key, height.as_str());
+        doc.set_value("SDLDrv.SDLClient", key, height.as_str());
     }
-    doc.set_string("SDLDrv.SDLClient", "WindowedColorBits", "32");
-    doc.set_string("SDLDrv.SDLClient", "FullscreenColorBits", "32");
-    doc.set_string(
+    doc.set_value("SDLDrv.SDLClient", "WindowedColorBits", "32");
+    doc.set_value("SDLDrv.SDLClient", "FullscreenColorBits", "32");
+    doc.set_value(
         "SDLDrv.SDLClient",
         "StartupFullscreen",
         bool_text(settings.screen_mode != ScreenMode::Windowed),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "BorderlessWindow",
         bool_text(settings.screen_mode == ScreenMode::BorderlessDesktop),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "UseDesktopResolution",
         bool_text(settings.screen_mode == ScreenMode::BorderlessDesktop),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "Brightness",
         double_text(settings.brightness).as_str(),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "TextureDetail",
         texture_value(settings.texture_detail),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "UseJoystick",
         bool_text(settings.joystick_enabled),
     );
-    doc.set_string(
+    doc.set_value(
         "XOpenGLDrv.XOpenGLRenderDevice",
         "UseVSync",
         if settings.vertical_sync { "On" } else { "Off" },
     );
-    doc.set_string(
+    doc.set_value(
         "XOpenGLDrv.XOpenGLRenderDevice",
         "RenderScale",
         double_text(settings.render_scale).as_str(),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "UIScale",
         double_text(settings.ui_scale).as_str(),
     );
-    doc.set_string("SDLDrv.SDLClient", "ShowFPS", bool_text(settings.show_fps));
-    doc.set_string(
+    doc.set_value("SDLDrv.SDLClient", "ShowFPS", bool_text(settings.show_fps));
+    doc.set_value(
         "SDLDrv.SDLClient",
         "MaintainVerticalFOV",
         bool_text(settings.maintain_vertical_fov),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "NativeText",
         bool_text(settings.native_text),
     );
-    doc.set_string(
+    doc.set_value(
         "SDLDrv.SDLClient",
         "ScreenFlashes",
         bool_text(settings.screen_flashes),
     );
-    doc.set_string(
+    doc.set_value(
         "XOpenGLDrv.XOpenGLRenderDevice",
         "UseAA",
         bool_text(settings.anti_aliasing_samples != 0),
     );
-    doc.set_string(
+    doc.set_value(
         "XOpenGLDrv.XOpenGLRenderDevice",
         "NumAASamples",
         settings.anti_aliasing_samples.to_string().as_str(),
     );
-    doc.set_string(
+    doc.set_value(
         "XOpenGLDrv.XOpenGLRenderDevice",
         "MaxAnisotropy",
         settings.anisotropy.to_string().as_str(),
     );
-    doc.set_string(
+    doc.set_value(
         "ALAudio.ALAudioSubsystem",
         "MusicVolume",
         double_text(settings.music_volume).as_str(),
     );
-    doc.set_string(
+    doc.set_value(
         "ALAudio.ALAudioSubsystem",
         "SoundVolume",
         double_text(settings.sound_volume).as_str(),
@@ -613,49 +648,53 @@ fn apply_game(doc: &mut crate::ini_text::IniDoc, settings: &Settings) {
 }
 
 /// `ApplyUser`: every launcher-owned player key.
-fn apply_user(doc: &mut crate::ini_text::IniDoc, settings: &Settings) {
-    doc.set_string(
+fn apply_user(doc: &mut crate::ini_text::LauncherDoc, settings: &Settings) {
+    doc.set_value(
         "Engine.PlayerPawn",
         "MouseSensitivity",
         double_text(settings.mouse_sensitivity).as_str(),
     );
-    doc.set_string(
+    doc.set_value(
         "Engine.PlayerPawn",
         "bInvertMouse",
         bool_text(settings.invert_mouse),
     );
-    doc.set_string(
+    doc.set_value(
         "Engine.PlayerPawn",
         "bModernThirdPersonControls",
         bool_text(settings.control_mode == ControlMode::Modern),
     );
-    doc.set_string(
+    doc.set_value(
         "Engine.PlayerPawn",
         "Difficulty",
         difficulty_value(settings.difficulty),
     );
-    doc.set_string(
+    doc.set_value(
         "Engine.PlayerPawn",
         "ObjectDetail",
         object_value(settings.object_detail),
     );
-    doc.set_string(
+    doc.set_value(
         "HGame.Harry",
         "bAutoCenterCamera",
         bool_text(settings.auto_center_camera),
     );
-    doc.set_string(
+    doc.set_value(
         "HGame.Harry",
         "bMoveWhileCasting",
         bool_text(settings.move_while_casting),
     );
-    doc.set_string("HGame.Harry", "bAutoQuaff", bool_text(settings.auto_quaff));
+    doc.set_value("HGame.Harry", "bAutoQuaff", bool_text(settings.auto_quaff));
 }
 
 /// Commits settings for a profile: validates, then rewrites the launcher-
 /// owned keys of `Game.ini`/`User.ini` (seeding from the system templates
 /// when the writable documents do not exist yet) with one-time `.bak`
 /// backups and atomic staged publication (`CommitLauncherSettings`).
+///
+/// Both documents are backed up and staged before either publishes; a
+/// failed second publication rolls BOTH destinations back to their exact
+/// pre-commit state (or absence), so a partial commit is unobservable.
 pub fn commit(system_root: &Path, profile_root: &Path, settings: &Settings) -> Result<()> {
     validate(settings)?;
     if !crate::atomic_file::is_directory(profile_root) {
@@ -667,51 +706,51 @@ pub fn commit(system_root: &Path, profile_root: &Path, settings: &Settings) -> R
             ),
         ));
     }
-    commit_one(
-        &profile_root.join("Game.ini"),
-        &system_root.join("Default.ini"),
-        |doc| apply_game(doc, settings),
-    )?;
-    commit_one(
-        &profile_root.join("User.ini"),
-        &system_root.join("DefUser.ini"),
-        |doc| apply_user(doc, settings),
-    )?;
-    Ok(())
-}
+    let game_path = profile_root.join("Game.ini");
+    let user_path = profile_root.join("User.ini");
+    let mut game = select_document(&game_path, &system_root.join("Default.ini"))?;
+    let mut user = select_document(&user_path, &system_root.join("DefUser.ini"))?;
 
-fn commit_one(
-    destination: &Path,
-    template: &Path,
-    apply: impl FnOnce(&mut crate::ini_text::IniDoc),
-) -> Result<()> {
-    let existing = std::fs::read(destination).ok().map(|bytes| {
-        let mode = std::fs::metadata(destination)
-            .map(|meta| std::os::unix::fs::PermissionsExt::mode(&meta.permissions()))
-            .unwrap_or(0o600);
-        (bytes, mode)
-    });
-    let (original_bytes, mode, mut doc, existed) = match existing {
-        Some((bytes, mode)) => {
-            let doc = parse_ini(&bytes);
-            (Some(bytes), mode, doc, true)
+    // Back up originals before publishing anything so a backup failure can
+    // never leave a half-committed pair behind.
+    if let Some(original) = &game.original {
+        backup(&game_path, original, game.mode)?;
+    }
+    if let Some(original) = &user.original {
+        backup(&user_path, original, user.mode)?;
+    }
+
+    apply_game(&mut game.doc, settings);
+    apply_user(&mut user.doc, settings);
+    let game_bytes = game.doc.render();
+    let user_bytes = user.doc.render();
+
+    publish(
+        &game_path,
+        &game_bytes,
+        game.existed,
+        game.original.as_deref(),
+        game.mode,
+    )?;
+    if let Err(error) = publish(
+        &user_path,
+        &user_bytes,
+        user.existed,
+        user.original.as_deref(),
+        user.mode,
+    ) {
+        let mut combined = error.message().to_string();
+        for (name, destination, snapshot) in [
+            ("User.ini", &user_path, &user),
+            ("Game.ini", &game_path, &game),
+        ] {
+            if let Err(restoration) =
+                restore_published(destination, snapshot.existed, snapshot.original.as_deref(), snapshot.mode)
+            {
+                combined.push_str(&format!(" {name} rollback failed: {}", restoration.message()));
+            }
         }
-        None => {
-            let bytes = std::fs::read(template).map_err(|error| io_error(template, error))?;
-            let doc = parse_ini(&bytes);
-            (None, 0o600, doc, false)
-        }
-    };
-    apply(&mut doc);
-    doc.force_dirty();
-    let rendered = doc
-        .render_if_dirty()
-        .expect("forced-dirty document always renders");
-    crate::atomic_file::publish(
-        destination,
-        &rendered,
-        existed,
-        original_bytes.as_deref(),
-        mode,
-    )
+        return Err(AppError::new("app.settings_io_failed", combined));
+    }
+    Ok(())
 }

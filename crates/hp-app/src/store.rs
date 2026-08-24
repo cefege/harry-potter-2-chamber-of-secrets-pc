@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use hp_ini::IniFile;
+use crate::ini_text::LauncherDoc;
 
 use crate::atomic_file::{is_directory, publish, read_regular};
 use crate::error::AppError;
@@ -63,7 +63,7 @@ pub struct DataSourceConfiguration {
 // ------------------------------------------------------------ catalog io
 
 struct Catalog {
-    doc: IniFile,
+    doc: LauncherDoc,
     existed: bool,
     original: Option<Vec<u8>>,
     mode: u32,
@@ -86,13 +86,18 @@ fn load_catalog(launcher_root: &Path) -> Result<Catalog> {
     let path = launcher_root.join(LAUNCHER_INI);
     match read_regular(&path)? {
         Some((bytes, mode)) => Ok(Catalog {
-            doc: IniFile::parse(&bytes),
+            doc: LauncherDoc::decode(&bytes).map_err(|message| {
+                catalog_error(
+                    "app.catalog_malformed",
+                    format!("Unable to decode '{}': {message}", path.display()),
+                )
+            })?,
             existed: true,
             original: Some(bytes),
             mode,
         }),
         None => Ok(Catalog {
-            doc: IniFile::default(),
+            doc: LauncherDoc::decode(&[]).expect("empty document always decodes"),
             existed: false,
             original: None,
             mode: 0o600,
@@ -100,12 +105,8 @@ fn load_catalog(launcher_root: &Path) -> Result<Catalog> {
     }
 }
 
-fn publish_catalog(launcher_root: &Path, mut catalog: Catalog) -> Result<()> {
-    catalog.doc.force_dirty();
-    let rendered = catalog
-        .doc
-        .render_if_dirty()
-        .expect("forced-dirty catalog always renders");
+fn publish_catalog(launcher_root: &Path, catalog: Catalog) -> Result<()> {
+    let rendered = catalog.doc.render();
     publish(
         &launcher_root.join(LAUNCHER_INI),
         &rendered,
@@ -167,10 +168,10 @@ pub fn commit_data_source_configuration(
     }
     let mut doc = load_catalog(launcher_root)?;
     doc.doc
-        .set_string("DataSources", "Selected", selected.name());
+        .set_value("DataSources", "Selected", selected.name());
     doc.doc
-        .set_string("DataSources", "RetailRoot", &configuration.retail_root);
-    doc.doc.set_string(
+        .set_value("DataSources", "RetailRoot", &configuration.retail_root);
+    doc.doc.set_value(
         "DataSources",
         "PrototypeRoot",
         &configuration.prototype_root,
@@ -188,10 +189,12 @@ pub fn commit_launch_selection(launcher_root: &Path, selection: &LaunchSelection
         .map_err(|error| catalog_error("app.catalog_invalid", error))?;
     let catalog = load_catalog(launcher_root)?;
     let mut doc = catalog;
-    doc.doc.empty_section("LastLaunch");
+    for key in ["Action", "HasSave", "SaveIndex", "SaveSlot"] {
+        doc.doc.erase("LastLaunch", key);
+    }
     let fields = serialize_launch_selection(selection).expect("validated above");
     for field in fields {
-        doc.doc.set_string("LastLaunch", field.key, &field.value);
+        doc.doc.set_value("LastLaunch", field.key, &field.value);
     }
     publish_catalog(launcher_root, doc)
 }
@@ -326,6 +329,9 @@ fn prepare_profile(launcher_root: &Path, name: &str, migrate_legacy: bool) -> Re
     let temporary = profiles_root.join(format!(".{name}.tmp"));
     let _ = std::fs::remove_dir_all(&temporary);
     if copy_legacy {
+        std::fs::create_dir_all(&temporary).map_err(|error| {
+            failed(format!("Unable to stage profile: {error}"))
+        })?;
         for item in ["Game.ini", "User.ini", "Save", "Cache"] {
             let source_path = launcher_root.join(item);
             if std::fs::symlink_metadata(&source_path).is_err() {
@@ -348,7 +354,7 @@ fn prepare_profile(launcher_root: &Path, name: &str, migrate_legacy: bool) -> Re
     if copy_legacy {
         catalog
             .doc
-            .set_string("DataSources", "LegacyProfile", source_marker(name));
+            .set_value("DataSources", "LegacyProfile", source_marker(name));
         if let Err(error) = publish_catalog(launcher_root, catalog) {
             // Roll the freshly published profile back so neither a profile
             // nor a marker survives a failed publication.

@@ -7,8 +7,34 @@
 //! directory staged write followed by an atomic rename.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use crate::error::AppError;
+
+static PUBLICATION_COUNT: AtomicU32 = AtomicU32::new(0);
+static FAIL_AFTER_PUBLICATION: AtomicI32 = AtomicI32::new(-1);
+
+/// Test-only fault injection mirroring
+/// `SetLauncherPublishFailureForTesting`: the `publication_index`-th
+/// [`publish`] call fails right after its rename, exactly like the native
+/// oracle hook. Honored only under `HP2_LAUNCHER_TESTING=1`; any other
+/// value disables injection.
+pub fn set_publish_failure_for_testing(publication_index: i32) {
+    if std::env::var("HP2_LAUNCHER_TESTING").is_ok_and(|value| value == "1") {
+        FAIL_AFTER_PUBLICATION.store(publication_index, Ordering::SeqCst);
+        PUBLICATION_COUNT.store(0, Ordering::SeqCst);
+    }
+}
+
+/// True exactly once when the injected failure index is reached
+/// (`Publish`'s post-rename counter).
+fn publication_failure_injected() -> bool {
+    let target = FAIL_AFTER_PUBLICATION.load(Ordering::SeqCst);
+    if target < 0 {
+        return false;
+    }
+    PUBLICATION_COUNT.fetch_add(1, Ordering::SeqCst) + 1 == target as u32
+}
 
 fn io(reason: &'static str, path: &Path, error: std::io::Error) -> AppError {
     AppError::new(
@@ -48,10 +74,76 @@ pub fn is_directory(path: &Path) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
 }
 
+/// Preserves `bytes` as `<destination>.bak` on first use only: an
+/// existing regular backup is never overwritten, and a symlinked or
+/// irregular backup target aborts without being touched (`Backup`).
+pub fn backup(destination: &Path, bytes: &[u8], mode: u32) -> Result<(), AppError> {
+    let backup_path = append_extension(destination, ".bak");
+    match std::fs::symlink_metadata(&backup_path) {
+        Ok(metadata) if metadata.is_file() => return Ok(()),
+        Ok(_) => {
+            return Err(AppError::new(
+                "app.settings_io_failed",
+                format!(
+                    "Backup path is not a regular non-symlink file: '{}'",
+                    backup_path.display()
+                ),
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(io("Unable to inspect backup", &backup_path, error)),
+    }
+    std::fs::write(&backup_path, bytes).map_err(|error| io("Unable to write backup", &backup_path, error))?;
+    set_mode(&backup_path, mode);
+    Ok(())
+}
+
+/// Restores the exact pre-publication state of `destination`: the
+/// `original` bytes when it existed, otherwise removal
+/// (`RestorePublishedFile`).
+pub fn restore_published(
+    destination: &Path,
+    existed: bool,
+    original: Option<&[u8]>,
+    mode: u32,
+) -> Result<(), AppError> {
+    if !existed {
+        return match std::fs::remove_file(destination) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(io("Unable to remove published file", destination, error)),
+        };
+    }
+    let bytes = original.ok_or_else(|| {
+        AppError::new(
+            "app.settings_io_failed",
+            format!(
+                "Cannot roll back '{}' without its original bytes",
+                destination.display()
+            ),
+        )
+    })?;
+    let temporary = append_extension(destination, ".rollback.tmp");
+    std::fs::write(&temporary, bytes)
+        .and_then(|()| std::fs::rename(&temporary, destination))
+        .map_err(|error| {
+            let _ = std::fs::remove_file(&temporary);
+            io("Unable to restore", destination, error)
+        })?;
+    set_mode(destination, mode);
+    Ok(())
+}
+
 /// Publishes `bytes` to `destination`. When `existed`, the exact
 /// `original` bytes are preserved as `<destination>.bak` on first
-/// publication only (later publications never overwrite that backup), and a
-/// symlinked backup target aborts the whole operation untouched.
+/// publication only (later publications never overwrite that backup), and
+/// a symlinked backup target aborts the whole operation untouched.
+///
+/// Publication is a same-directory staged write followed by an atomic
+/// rename. An injected test failure (see
+/// [`set_publish_failure_for_testing`]) fires after that rename and rolls
+/// the destination back before reporting, so callers only ever observe a
+/// failed publication whose filesystem effect is invisible.
 pub fn publish(
     destination: &Path,
     bytes: &[u8],
@@ -60,25 +152,16 @@ pub fn publish(
     mode: u32,
 ) -> Result<(), AppError> {
     if existed {
-        let backup_path = append_extension(destination, ".bak");
-        if let Some(backup_bytes) = original {
-            // Reject unsafe backup targets before touching anything.
-            if let Ok(metadata) = std::fs::symlink_metadata(&backup_path) {
-                if metadata.is_symlink() || !metadata.is_file() {
-                    return Err(AppError::new(
-                        "app.settings_io_failed",
-                        format!(
-                            "Backup target '{}' exists and is not a regular file",
-                            backup_path.display()
-                        ),
-                    ));
-                }
-            } else {
-                std::fs::write(&backup_path, backup_bytes)
-                    .map_err(|error| io("Unable to write backup", &backup_path, error))?;
-                set_mode(&backup_path, mode);
-            }
-        }
+        let Some(backup_bytes) = original else {
+            return Err(AppError::new(
+                "app.settings_io_failed",
+                format!(
+                    "Cannot publish '{}' over an existing file without its original bytes",
+                    destination.display()
+                ),
+            ));
+        };
+        backup(destination, backup_bytes, mode)?;
     }
 
     let temporary = append_extension(destination, ".tmp");
@@ -87,6 +170,16 @@ pub fn publish(
     if let Err(error) = std::fs::rename(&temporary, destination) {
         let _ = std::fs::remove_file(&temporary);
         return Err(io("Unable to publish", destination, error));
+    }
+    if publication_failure_injected() {
+        let mut message = format!(
+            "Injected failure after replacing '{}'",
+            destination.display()
+        );
+        if let Err(restoration) = restore_published(destination, existed, original, mode) {
+            message.push_str(&format!(" Rollback failed: {}", restoration.message()));
+        }
+        return Err(AppError::new("app.settings_io_failed", message));
     }
     Ok(())
 }

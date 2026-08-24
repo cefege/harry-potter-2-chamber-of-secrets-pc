@@ -36,11 +36,23 @@ impl LaunchAction {
 /// Minimal save coordinate carried by a launch selection. Runtime-derived
 /// metadata (paths, labels, timestamps) is deliberately not part of the
 /// persistence contract.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveCoordinate {
     pub save_index: i32,
     pub uses_slot_directory: bool,
+    /// `-1` when the save does not live in a slot directory
+    /// (`HP2LauncherModel.h`).
     pub slot: i32,
+}
+
+impl Default for SaveCoordinate {
+    fn default() -> Self {
+        Self {
+            save_index: 0,
+            uses_slot_directory: false,
+            slot: -1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

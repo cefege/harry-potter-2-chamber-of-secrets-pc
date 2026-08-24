@@ -1,21 +1,23 @@
-//! INI text helpers over `hp-ini` for the launcher store's strict
-//! full-value parsers (`Integer`, `Number`, `Boolean` from
-//! `HP2LauncherStore.cpp`).
+//! Byte-preserving launcher INI documents and strict value parsers,
+//! mirroring the document model in
+//! `HarryPotter2/Unreal/SDLLaunch/Src/HP2LauncherStore.cpp`
+//! (`Decode`/`Encode`/`Section`/`Key`/`Get`/`Set`/`Erase` and the
+//! `Integer`/`Number`/`Boolean` readers).
 //!
-//! The engine's typed readers differ from the launcher's: the launcher
-//! requires whole-value parses and treats unknown spellings as absent so
-//! callers fall back to model defaults. These helpers pin that contract.
+//! The engine's canonical rewriter in `hp-ini` would destroy comments,
+//! malformed lines, per-line newline styles, and file encodings; the
+//! launcher edits documents in place, so every unrelated byte must
+//! survive a commit untouched. [`LauncherDoc`] pins that contract.
 
-pub use hp_ini::IniFile as IniDoc;
-
-/// Parses an INI document applying every pinned hp-ini quirk.
-pub fn parse_ini(bytes: &[u8]) -> IniDoc {
-    IniDoc::parse(bytes)
+/// Strict whole-value float parse (`Number`: C locale, finite, entire
+/// value consumed; callers range-check).
+pub fn parse_number(text: &str) -> Option<f64> {
+    text.trim().parse::<f64>().ok()
 }
 
-/// Case-insensitive newest-wins raw lookup.
-pub fn get<'a>(doc: &'a IniDoc, section: &str, key: &str) -> Option<&'a str> {
-    doc.get(section, key)
+/// Lookup + [`parse_number`].
+pub fn get_number(doc: &LauncherDoc, section: &str, key: &str) -> Option<f64> {
+    parse_number(doc.get(section, key)?)
 }
 
 /// `Boolean`: true/on/yes/1 vs false/off/no/0, case-insensitive; anything
@@ -29,77 +31,56 @@ pub fn parse_boolean(text: &str) -> Option<bool> {
 }
 
 /// Lookup + [`parse_boolean`].
-pub fn get_bool(doc: &IniDoc, section: &str, key: &str) -> Option<bool> {
-    get(doc, section, key).and_then(parse_boolean)
+pub fn get_bool(doc: &LauncherDoc, section: &str, key: &str) -> Option<bool> {
+    parse_boolean(doc.get(section, key)?)
 }
 
 /// `Integer`: optional sign then digits only, whole value consumed.
 pub fn parse_integer(text: &str) -> Option<i32> {
-    let text = text.trim();
-    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    text.parse::<i32>().ok()
+    text.trim().parse::<i32>().ok()
 }
 
-/// Lookup + [`parse_number`].
-pub fn get_number(doc: &IniDoc, section: &str, key: &str) -> Option<f64> {
-    parse_number(get(doc, section, key)?)
+/// Lookup + strict integer parse.
+pub fn get_integer(doc: &LauncherDoc, section: &str, key: &str) -> Option<i32> {
+    parse_integer(doc.get(section, key)?)
 }
 
-/// Lookup + [`parse_integer`] with a range check.
-pub fn get_integer_ranged(
-    doc: &IniDoc,
-    section: &str,
-    key: &str,
-    range: std::ops::RangeInclusive<i32>,
-) -> Option<i32> {
-    parse_integer(get(doc, section, key)?).filter(|value| range.contains(value))
-}
-
-/// Plain lookup + strict integer parse.
-pub fn get_integer(doc: &IniDoc, section: &str, key: &str) -> Option<i32> {
-    parse_integer(get(doc, section, key)?)
-}
-
-/// `Number`: C-locale whole-value float parse (accepts inf/nan spellings
-/// like `strtod`; callers range-check).
-pub fn parse_number(text: &str) -> Option<f64> {
-    text.trim().parse::<f64>().ok()
-}
-
-/// Lookup + [`parse_number`] with an inclusive range check.
+/// Lookup + [`parse_number`] with an inclusive range check (`LoadNumber`).
 pub fn get_ranged_float(
-    doc: &IniDoc,
+    doc: &LauncherDoc,
     section: &str,
     key: &str,
     minimum: f64,
     maximum: f64,
 ) -> Option<f64> {
-    parse_number(get(doc, section, key)?)
-        .filter(|value| value.is_finite() && (minimum..=maximum).contains(value))
+    let parsed = get_number(doc, section, key)?;
+    (minimum..=maximum).contains(&parsed).then_some(parsed)
 }
 
-/// Lookup + discrete membership check; returns the accepted value itself.
-pub fn get_discrete_float(doc: &IniDoc, section: &str, key: &str, accepted: &[f64]) -> Option<f64> {
-    let parsed = parse_number(get(doc, section, key)?)?;
+/// Lookup + discrete membership check; returns the accepted value itself
+/// (`LoadDiscreteNumber`).
+pub fn get_discrete_float(doc: &LauncherDoc, section: &str, key: &str, accepted: &[f64]) -> Option<f64> {
+    let parsed = parse_number(doc.get(section, key)?)?;
     accepted.iter().copied().find(|value| *value == parsed)
 }
 
-/// Lookup + strict integer + discrete membership check.
+/// Lookup + integral discrete membership check (`LoadDiscreteInteger`).
 pub fn get_discrete_integer(
-    doc: &IniDoc,
+    doc: &LauncherDoc,
     section: &str,
     key: &str,
     accepted: &[i32],
 ) -> Option<i32> {
-    let parsed = parse_integer(get(doc, section, key)?)?;
-    accepted.iter().copied().find(|value| *value == parsed)
+    let parsed = parse_number(doc.get(section, key)?)?;
+    let integral = parsed == parsed.trunc()
+        && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&parsed);
+    let discrete = integral.then_some(parsed as i32)?;
+    accepted.iter().copied().find(|value| *value == discrete)
 }
 
-/// Canonical double rendering used by commits: shortest round-trip form
-/// (`DoubleText`, e.g. `1`, `0.4`, `0.85`, `0.53`).
+/// Canonical double rendering used by commits (`DoubleText`, e.g. `1`,
+/// `0.4`, `0.85`, `0.53`; every accepted discrete choice has an exact
+/// short decimal form, so shortest round-trip matches `%g` precision 15).
 pub fn double_text(value: f64) -> String {
     format!("{value}")
 }
@@ -109,13 +90,20 @@ pub fn bool_text(value: bool) -> &'static str {
     if value { "True" } else { "False" }
 }
 
+/// Free-function form of [`LauncherDoc::get`] used by the reader helpers.
+pub fn get<'a>(doc: &'a LauncherDoc, section: &str, key: &str) -> Option<&'a str> {
+    doc.get(section, key)
+}
+
 // ------------------------------------------------- launcher text documents
 
-/// Byte-preserving launcher INI encoding.
+/// Byte-preserving launcher INI encoding (`Encoding`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IniEncoding {
     /// No BOM; strict UTF-8 bytes.
     Utf8,
+    /// `EF BB BF` BOM followed by UTF-8 bytes.
+    Utf8Bom,
     /// `FF FE` BOM, little-endian UTF-16 units.
     Utf16Le,
     /// `FE FF` BOM, big-endian UTF-16 units.
@@ -128,35 +116,104 @@ struct DocLine {
     terminator: &'static str,
 }
 
+/// One parsed `key=value` row: the trimmed key, the comment-stripped
+/// trailing-space-trimmed value token, and that token's span inside the
+/// line so in-place rewrites can preserve everything around it.
+struct Pair<'a> {
+    key: &'a str,
+    value: &'a str,
+    value_span: std::ops::Range<usize>,
+}
+
+fn is_space_byte(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\x0b' | b'\x0c' | b'\r' | b'\n')
+}
+
+fn is_space_char(character: char) -> bool {
+    matches!(
+        character,
+        ' ' | '\t' | '\u{0b}' | '\u{0c}' | '\r' | '\n'
+    )
+}
+
+/// Ports `Key`: rejects blank and comment lines, requires a non-empty
+/// trimmed key before the first `=`, and slices the value token at the
+/// first whitespace-preceded `;` or `#`.
+fn parse_pair(line: &str) -> Option<Pair<'_>> {
+    let bytes = line.as_bytes();
+    let mut begin = 0;
+    while begin < bytes.len() && is_space_byte(bytes[begin]) {
+        begin += 1;
+    }
+    if begin == bytes.len() || bytes[begin] == b';' || bytes[begin] == b'#' {
+        return None;
+    }
+    let equals = begin + line[begin..].bytes().position(|byte| byte == b'=')?;
+    let key = line[begin..equals].trim_matches(is_space_char);
+    if key.is_empty() {
+        return None;
+    }
+    let mut value_begin = equals + 1;
+    while value_begin < bytes.len() && is_space_byte(bytes[value_begin]) {
+        value_begin += 1;
+    }
+    let mut comment = bytes.len();
+    for index in value_begin..bytes.len() {
+        if (bytes[index] == b';' || bytes[index] == b'#')
+            && (index == value_begin || is_space_byte(bytes[index - 1]))
+        {
+            comment = index;
+            break;
+        }
+    }
+    let mut value_end = comment;
+    while value_end > value_begin && is_space_byte(bytes[value_end - 1]) {
+        value_end -= 1;
+    }
+    Some(Pair {
+        key,
+        value: &line[value_begin..value_end],
+        value_span: value_begin..value_end,
+    })
+}
+
 /// A launcher-owned INI document that preserves unrelated content exactly:
 /// comments, malformed lines, inline comments, per-line newline style, and
-/// the file encoding (`HP2LauncherStore.cpp` edits documents in place; the
-/// engine's canonical rewriter in [`IniFile`] would destroy them).
+/// the file encoding (`HP2LauncherStore.cpp` edits documents in place).
 ///
-/// Lookup semantics mirror the loader: case-insensitive section headers
-/// require a leading `[` and trailing `]`, pairs are last-wins on the
-/// trimmed key, and values keep their raw text (numeric readers apply
-/// `strtod`/`atoi` longest-prefix parsing).
+/// Lookup semantics mirror the loader: valid section headers require a
+/// non-empty bracketed name without nested brackets, pairs are last-wins
+/// on the case-insensitive trimmed key, and values are returned with any
+/// inline comment stripped ([`Key`] semantics), so the strict readers see
+/// exactly the token the native store would parse.
 #[derive(Debug, Clone)]
 pub struct LauncherDoc {
     lines: Vec<DocLine>,
     encoding: IniEncoding,
+    newline: &'static str,
 }
 
 impl LauncherDoc {
-    /// Decodes raw bytes (UTF-16 LE/BE by BOM, else strict UTF-8). Odd
-    /// UTF-16 unit counts, lone surrogates, and invalid UTF-8 are loud
-    /// errors so callers can fall back to immutable templates.
+    /// Decodes raw bytes (UTF-16 LE/BE by BOM, UTF-8 BOM, else strict
+    /// UTF-8). Odd UTF-16 unit counts, lone surrogates, and invalid UTF-8
+    /// are loud errors so callers can fall back to immutable templates.
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
-        let (text, encoding) = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let (text, encoding) = if bytes.starts_with(&[0xFF, 0xFE]) {
             (
                 decode_utf16(&bytes[2..], true)?,
                 IniEncoding::Utf16Le,
             )
-        } else if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        } else if bytes.starts_with(&[0xFE, 0xFF]) {
             (
                 decode_utf16(&bytes[2..], false)?,
                 IniEncoding::Utf16Be,
+            )
+        } else if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            (
+                std::str::from_utf8(&bytes[3..])
+                    .map_err(|_| "document is not valid UTF-8".to_string())?
+                    .to_string(),
+                IniEncoding::Utf8Bom,
             )
         } else {
             (
@@ -166,118 +223,159 @@ impl LauncherDoc {
                 IniEncoding::Utf8,
             )
         };
-        Ok(Self {
+        let mut document = Self {
             lines: split_doc_lines(&text),
             encoding,
-        })
+            newline: "\n",
+        };
+        document.newline = dominant_terminator(&document.lines);
+        Ok(document)
     }
 
+    /// Ports `Section`: a valid header trims to `[name]` with a non-empty
+    /// name free of nested brackets.
     fn header_name(line: &str) -> Option<&str> {
-        let trimmed = line.trim();
-        (trimmed.len() >= 2 && trimmed.starts_with('[') && trimmed.ends_with(']'))
-            .then(|| &trimmed[1..trimmed.len() - 1])
+        let trimmed = line.trim_matches(is_space_char);
+        if trimmed.len() < 3
+            || !trimmed.starts_with('[')
+            || !trimmed.ends_with(']')
+        {
+            return None;
+        }
+        let name = &trimmed[1..trimmed.len() - 1];
+        let name = name.trim_matches(is_space_char);
+        (!name.is_empty() && !name.contains('[') && !name.contains(']')).then_some(name)
     }
 
-    fn pair_key(line: &str) -> Option<&str> {
-        line.split_once('=').map(|(key, _)| key)
-    }
-
-    fn matches_pair(&self, line: &DocLine, section: &str, key: &str) -> bool {
-        Self::pair_key(&line.text).is_some_and(|pair_key| pair_key.trim().eq_ignore_ascii_case(key))
-            && self.in_section(line, section)
-    }
-
-    fn in_section(&self, line: &DocLine, section: &str) -> bool {
-        // Walk backwards to the nearest header; a malformed pseudo-header
-        // like "[Engine.GameEngine" never opens a section.
-        let mut seen = false;
-        for candidate in self.lines.iter().rev() {
-            if candidate.text == line.text && candidate.terminator == line.terminator {
-                if seen {
-                    break;
-                }
-                seen = true;
+    /// Case-insensitive last-wins lookup returning the comment-stripped
+    /// value token (`Get`).
+    pub fn get(&self, section: &str, key: &str) -> Option<&str> {
+        let mut current_section = "";
+        let mut found = None;
+        for line in &self.lines {
+            if let Some(name) = Self::header_name(&line.text) {
+                current_section = name;
                 continue;
             }
-            if let Some(name) = Self::header_name(&candidate.text) {
-                return name.eq_ignore_ascii_case(section);
+            if current_section.eq_ignore_ascii_case(section)
+                && let Some(pair) = parse_pair(&line.text)
+                && pair.key.eq_ignore_ascii_case(key)
+            {
+                found = Some(pair.value);
             }
         }
-        false
+        found
     }
 
-    /// Case-insensitive last-wins raw value lookup.
-    pub fn get(&self, section: &str, key: &str) -> Option<&str> {
-        self.lines
-            .iter()
-            .rev()
-            .find(|line| self.matches_pair(line, section, key))
-            .and_then(|line| line.text.split_once('='))
-            .map(|(_, value)| value)
+    /// Index of the final row matching `section/key` with forward section
+    /// tracking (`Set`'s scan).
+    fn find_last_pair(&self, section: &str, key: &str) -> Option<usize> {
+        let mut current_section = "";
+        let mut found = None;
+        for (index, line) in self.lines.iter().enumerate() {
+            if let Some(name) = Self::header_name(&line.text) {
+                current_section = name;
+                continue;
+            }
+            if current_section.eq_ignore_ascii_case(section)
+                && let Some(pair) = parse_pair(&line.text)
+                && pair.key.eq_ignore_ascii_case(key)
+            {
+                found = Some(index);
+            }
+        }
+        found
     }
 
     /// Rewrites the final occurrence of `section/key` in place, preserving
-    /// the key text and anything after the value token (inline comments).
-    /// A missing pair is appended inside the matching section group, or
-    /// under a fresh header at the end of the document.
+    /// the key text, spacing, and anything after the value token (inline
+    /// comments). A missing pair is appended inside the matching section
+    /// group, or under a fresh header at the end of the document (`Set`).
     pub fn set_value(&mut self, section: &str, key: &str, value: &str) {
-        if let Some(index) = self
-            .lines
-            .iter()
-            .rposition(|line| self.matches_pair(line, section, key))
-        {
-            let line = &mut self.lines[index];
-            let (before, rest) = line.text.split_once('=').expect("matched pair");
-            line.text = format!(
-                "{before}={}",
-                replace_value_token(rest, value)
-            );
+        if let Some(index) = self.find_last_pair(section, key) {
+            if let Some(pair) = parse_pair(&self.lines[index].text.clone()) {
+                let line = &mut self.lines[index];
+                line.text.replace_range(pair.value_span, value);
+            }
             return;
         }
         self.append_pair(section, key, value);
     }
 
+    /// Appends `key=value` under the last group of `section`, or under a
+    /// fresh header at the end of the document, terminating any previously
+    /// unterminated final line first (`Set`'s append path).
     fn append_pair(&mut self, section: &str, key: &str, value: &str) {
-        // End of the LAST case-variant group for this section.
-        let mut insert_at = None;
-        for index in 0..self.lines.len() {
-            if Self::header_name(&self.lines[index].text)
-                .is_some_and(|name| name.eq_ignore_ascii_case(section))
+        let mut header = None;
+        for (index, line) in self.lines.iter().enumerate() {
+            if Self::header_name(&line.text).is_some_and(|name| name.eq_ignore_ascii_case(section))
             {
-                let mut end = index + 1;
-                while end < self.lines.len() && Self::header_name(&self.lines[end].text).is_none() {
-                    end += 1;
-                }
-                insert_at = Some(end);
+                header = Some(index);
             }
         }
-        match insert_at {
-            Some(at) => {
-                let terminator = insertion_terminator(&self.lines, at);
-                self.lines.insert(
-                    at,
-                    DocLine {
-                        text: format!("{key}={value}"),
-                        terminator,
-                    },
-                );
+        let insertion = match header {
+            Some(header) => (header + 1..self.lines.len())
+                .find(|&index| Self::header_name(&self.lines[index].text).is_some())
+                .unwrap_or(self.lines.len()),
+            None => self.lines.len(),
+        };
+        if header.is_some() {
+            if insertion > 0 && self.lines[insertion - 1].terminator.is_empty() {
+                self.lines[insertion - 1].terminator = self.newline;
             }
-            None => {
-                let terminator = dominant_terminator(&self.lines);
-                self.lines.push(DocLine {
-                    text: format!("[{section}]"),
-                    terminator,
-                });
-                self.lines.push(DocLine {
+            self.lines.insert(
+                insertion,
+                DocLine {
                     text: format!("{key}={value}"),
-                    terminator,
+                    terminator: self.newline,
+                },
+            );
+            return;
+        }
+        if !self.lines.is_empty() {
+            let last = self.lines.len() - 1;
+            if self.lines[last].terminator.is_empty() {
+                self.lines[last].terminator = self.newline;
+            }
+            if !self.lines[last].text.is_empty() {
+                self.lines.push(DocLine {
+                    text: String::new(),
+                    terminator: self.newline,
                 });
             }
         }
+        self.lines.push(DocLine {
+            text: format!("[{section}]"),
+            terminator: self.newline,
+        });
+        self.lines.push(DocLine {
+            text: format!("{key}={value}"),
+            terminator: self.newline,
+        });
+    }
+
+    /// Removes every row matching `section/key`, leaving headers and
+    /// surrounding formatting untouched (`Erase`).
+    pub fn erase(&mut self, section: &str, key: &str) {
+        let mut current_section = String::new();
+        let mut kept = Vec::with_capacity(self.lines.len());
+        for line in self.lines.drain(..) {
+            if let Some(name) = Self::header_name(&line.text) {
+                current_section = name.to_string();
+                kept.push(line);
+                continue;
+            }
+            let matches = current_section.eq_ignore_ascii_case(section)
+                && parse_pair(&line.text).is_some_and(|pair| pair.key.eq_ignore_ascii_case(key));
+            if !matches {
+                kept.push(line);
+            }
+        }
+        self.lines = kept;
     }
 
     /// Re-encodes the document in its original encoding (BOM included for
-    /// the UTF-16 variants).
+    /// the BOM variants) with per-line terminators intact (`Encode`).
     pub fn render(&self) -> Vec<u8> {
         let mut text = String::new();
         for line in &self.lines {
@@ -286,6 +384,12 @@ impl LauncherDoc {
         }
         match self.encoding {
             IniEncoding::Utf8 => text.into_bytes(),
+            IniEncoding::Utf8Bom => {
+                let mut out = Vec::with_capacity(text.len() + 3);
+                out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+                out.extend_from_slice(text.as_bytes());
+                out
+            }
             IniEncoding::Utf16Le => encode_utf16(&text, true),
             IniEncoding::Utf16Be => encode_utf16(&text, false),
         }
@@ -293,6 +397,9 @@ impl LauncherDoc {
 }
 
 fn decode_utf16(bytes: &[u8], little: bool) -> Result<String, String> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err("UTF-16 body ends between units".to_string());
+    }
     let mut units = Vec::with_capacity(bytes.len() / 2);
     for chunk in bytes.chunks_exact(2) {
         let unit = if little {
@@ -301,9 +408,6 @@ fn decode_utf16(bytes: &[u8], little: bool) -> Result<String, String> {
             u16::from_be_bytes([chunk[0], chunk[1]])
         };
         units.push(unit);
-    }
-    if !bytes.len().is_multiple_of(2) {
-        return Err("UTF-16 body ends between units".to_string());
     }
     String::from_utf16(&units).map_err(|_| "UTF-16 body contains a lone surrogate".to_string())
 }
@@ -352,77 +456,12 @@ fn split_doc_lines(text: &str) -> Vec<DocLine> {
     lines
 }
 
-fn replace_value_token(rest: &str, value: &str) -> String {
-    let lead = rest.len() - rest.trim_start().len();
-    let after = &rest[lead..];
-    let token_end = after.find(char::is_whitespace).unwrap_or(after.len());
-    format!("{}{}{}", &rest[..lead], value, &after[token_end..])
-}
-
-fn insertion_terminator(lines: &[DocLine], at: usize) -> &'static str {
-    match lines[..at].iter().rev().find(|line| !line.terminator.is_empty()) {
-        Some(line) => line.terminator,
-        None => "\r\n",
-    }
-}
-
+/// Dominant newline style: CRLF only when strictly more common than LF
+/// (`Decode`'s `newline` rule).
 fn dominant_terminator(lines: &[DocLine]) -> &'static str {
-    insertion_terminator(lines, lines.len())
-}
-
-/// `strtod`-style longest-prefix float parse over a trimmed value
-/// (`" 144 ; comment"` parses as `144`).
-pub fn prefix_number(text: &str) -> Option<f64> {
-    let rest = text.trim_start();
-    let bytes = rest.as_bytes();
-    let mut end = usize::from(matches!(bytes.first(), Some(b'+') | Some(b'-')));
-    let mut digits = false;
-    while end < bytes.len() && bytes[end].is_ascii_digit() {
-        end += 1;
-        digits = true;
-    }
-    if end < bytes.len() && bytes[end] == b'.' {
-        let mut fraction = end + 1;
-        while fraction < bytes.len() && bytes[fraction].is_ascii_digit() {
-            fraction += 1;
-            digits = true;
-        }
-        if digits {
-            end = fraction;
-        }
-    }
-    if !digits {
-        return None;
-    }
-    if end < bytes.len() && (bytes[end] == b'e' || bytes[end] == b'E') {
-        let mut exponent = end + 1;
-        if matches!(bytes.get(exponent), Some(b'+' | b'-')) {
-            exponent += 1;
-        }
-        let exponent_start = exponent;
-        while exponent < bytes.len() && bytes[exponent].is_ascii_digit() {
-            exponent += 1;
-        }
-        if exponent > exponent_start {
-            end = exponent;
-        }
-    }
-    rest[..end].parse::<f64>().ok()
-}
-
-/// `atoi`-style longest-prefix integer parse over a trimmed value.
-pub fn prefix_integer(text: &str) -> Option<i64> {
-    let rest = text.trim_start();
-    let bytes = rest.as_bytes();
-    let mut end = usize::from(matches!(bytes.first(), Some(b'+') | Some(b'-')));
-    let start = end;
-    while end < bytes.len() && bytes[end].is_ascii_digit() {
-        end += 1;
-    }
-    if end == start {
-        return None;
-    }
-    rest[..end].parse::<i64>().ok()
+    let crlf = lines.iter().filter(|line| line.terminator == "\r\n").count();
+    let lf = lines.iter().filter(|line| line.terminator == "\n").count();
+    if crlf > lf { "\r\n" } else { "\n" }
 }
 
 #[cfg(test)]
@@ -456,5 +495,56 @@ mod tests {
         assert_eq!(parse_integer("12x"), None);
         assert_eq!(parse_integer(""), None);
         assert_eq!(parse_integer("99999999999"), None);
+    }
+
+    #[test]
+    fn lookups_strip_inline_comments_and_are_last_wins() {
+        let document = LauncherDoc::decode(
+            b"; note\n[engine.engine]\nKeepMe=Untouched ; trailing\n\
+              [Engine.GameEngine]\nFrameRateLimit=30\nFrameRateLimit = 60 ; final\n",
+        )
+        .expect("decodable");
+        assert_eq!(
+            document.get("ENGINE.ENGINE", "KeepMe"),
+            Some("Untouched")
+        );
+        assert_eq!(document.get("Engine.GameEngine", "FrameRateLimit"), Some("60"));
+        assert_eq!(document.get("Engine.GameEngine", "Missing"), None);
+        assert_eq!(LauncherDoc::header_name("[Engine.GameEngine "), None);
+    }
+
+    #[test]
+    fn set_value_preserves_surrounding_bytes_exactly() {
+        let original =
+            b"a=1\r\n[Section]\r\nKey=old ; keep me\r\nmalformed line\r\n[Next]\r\nX=Y";
+        let mut document = LauncherDoc::decode(original).expect("decodable");
+        document.set_value("SECTION", "key", "new");
+        assert_eq!(
+            String::from_utf8(document.render()).expect("utf-8"),
+            "a=1\r\n[Section]\r\nKey=new ; keep me\r\nmalformed line\r\n[Next]\r\nX=Y"
+        );
+    }
+
+    #[test]
+    fn append_under_fresh_header_uses_dominant_newline() {
+        let mut document = LauncherDoc::decode(b"[Other]\nA=B").expect("decodable");
+        document.set_value("Fresh", "K", "V");
+        assert_eq!(
+            String::from_utf8(document.render()).expect("utf-8"),
+            "[Other]\nA=B\n\n[Fresh]\nK=V\n"
+        );
+    }
+
+    #[test]
+    fn utf16_encodings_round_trip() {
+        let text = "; comment\n[K]\nV=1\n";
+        for (encoding, little) in [(IniEncoding::Utf16Le, true), (IniEncoding::Utf16Be, false)] {
+            let bytes = encode_utf16(text, little);
+            let document = LauncherDoc::decode(&bytes).expect("decodable");
+            assert_eq!(document.encoding, encoding);
+            assert_eq!(document.get("K", "V"), Some("1"));
+            assert_eq!(document.render(), bytes);
+        }
+        assert!(LauncherDoc::decode(&[0xFF, 0xFE, 0x00]).is_err());
     }
 }
