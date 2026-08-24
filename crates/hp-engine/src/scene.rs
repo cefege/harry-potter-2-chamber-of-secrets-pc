@@ -89,9 +89,6 @@ struct RawPoly {
     pan_uv: [f32; 2],
 }
 
-/// Brush placement read off its actor (`Location` plus UE1 rotator).
-type BrushTransform = ([f32; 3], [i32; 3]);
-
 /// Build the renderable scene for one loaded map.
 ///
 /// Every `Model` export's `Polys` child carries the brush polygons; each
@@ -107,47 +104,95 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
     };
 
     let mut polys = Vec::new();
+    let mut brushes = 0usize;
+    let mut linked = 0usize;
 
-    for (index, entry) in archive.exports.iter().enumerate() {
-        let Some(class_text) = ref_class_text(archive, entry.class_ref) else {
-            continue;
-        };
-        if !class_text.eq_ignore_ascii_case("Model") {
+    for &actor in &level.actors {
+        if !class_label(arena, actor).eq_ignore_ascii_case("Brush") {
             continue;
         }
-        let (location, rotation) = brush_transform(arena, level, entry.outer_ref);
-        let Some(payload) = archive.export_payload(index) else {
+        let Ok(obj) = arena.get(actor) else { continue };
+        let Some(store) = obj.properties() else {
             continue;
         };
-        let polys_ref = model_polys_ref(payload, archive)?;
+        let location = struct_vec3(store, arena, "Location").unwrap_or([0.0; 3]);
+        let rotation = struct_ints(store, arena, "Rotation").unwrap_or([0; 3]);
+        let scale = struct_vec3(store, arena, "MainScale").unwrap_or([1.0; 3]);
+        // 'Brush' object property -> Model export (raw package ref).
+        let brush_prop = arena.names.find_index("Brush").and_then(|n| store.get(n));
+        let Some(PropValue::Object(Some(raw))) = brush_prop else {
+            continue;
+        };
+        let raw = *raw;
+        if raw <= 0 {
+            continue;
+        }
+        let model_index = raw as usize - 1;
+        let Some(entry) = archive.exports.get(model_index) else {
+            continue;
+        };
+        if ref_class_text(archive, entry.class_ref) != Some("Model") {
+            continue;
+        }
+        let Some(payload) = archive.export_payload(model_index) else {
+            continue;
+        };
+        brushes += 1;
+        let Ok(polys_ref) = model_polys_ref(payload, archive, entry.class_ref) else {
+            continue;
+        };
         if polys_ref <= 0 {
             continue;
         }
         let Some(polys_payload) = archive.export_payload(polys_ref as usize - 1) else {
             continue;
         };
-        for raw in parse_upolys(polys_payload, archive)? {
+        let Ok(parsed) = parse_upolys(polys_payload, archive) else {
+            continue;
+        };
+        linked += 1;
+        for raw_poly in parsed {
             polys.push(ScenePoly {
-                base: translate(apply_rotator(rotation, raw.base), location),
-                vertices: raw
+                base: transform_vertex(location, rotation, scale, raw_poly.base),
+                vertices: raw_poly
                     .vertices
                     .iter()
-                    .map(|v| translate(apply_rotator(rotation, *v), location))
+                    .map(|v| transform_vertex(location, rotation, scale, *v))
                     .collect(),
-                normal: apply_rotator(rotation, raw.normal),
-                tex_u: apply_rotator(rotation, raw.tex_u),
-                tex_v: apply_rotator(rotation, raw.tex_v),
-                pan_uv: raw.pan_uv,
-                poly_flags: raw.poly_flags,
-                texture: resolve_texture_key(archive, raw.texture_ref),
+                normal: rotate_only(rotation, raw_poly.normal),
+                tex_u: rotate_only(rotation, raw_poly.tex_u),
+                tex_v: rotate_only(rotation, raw_poly.tex_v),
+                pan_uv: raw_poly.pan_uv,
+                poly_flags: raw_poly.poly_flags,
+                texture: resolve_texture_key(archive, raw_poly.texture_ref),
             });
         }
     }
+    println!(
+        "hp-engine: scene extraction brushes={brushes} linked={linked} polys={}",
+        polys.len()
+    );
 
     Ok(RenderScene {
         polys,
         camera: find_camera(arena, level),
     })
+}
+
+/// Brush-local point -> world: MainScale, then rotator, then Location.
+fn transform_vertex(
+    location: [f32; 3],
+    rotation: [i32; 3],
+    scale: [f32; 3],
+    v: [f32; 3],
+) -> [f32; 3] {
+    let scaled = [v[0] * scale[0], v[1] * scale[1], v[2] * scale[2]];
+    translate(apply_rotator(rotation, scaled), location)
+}
+
+/// Direction vector -> world (rotation only).
+fn rotate_only(rotation: [i32; 3], v: [f32; 3]) -> [f32; 3] {
+    apply_rotator(rotation, v)
 }
 
 /// Name text for a local name-table index.
@@ -221,24 +266,6 @@ fn resolve_texture_key(archive: &PackageArchive, texture_ref: i32) -> Option<Tex
         package: names.into_iter().next()?,
         object_path,
     })
-}
-
-/// Read the owning brush actor's placement; missing properties mean identity.
-fn brush_transform(arena: &ObjectArena, level: &Level, model_outer_ref: i32) -> BrushTransform {
-    const IDENTITY: BrushTransform = ([0.0; 3], [0; 3]);
-    if model_outer_ref <= 0 {
-        return IDENTITY;
-    }
-    let Some(actor_id) = level.export_ids.get(model_outer_ref as usize - 1).copied() else {
-        return IDENTITY;
-    };
-    let Some(store) = arena.get(actor_id).ok().and_then(|o| o.properties()) else {
-        return IDENTITY;
-    };
-    (
-        struct_vec3(store, arena, "Location").unwrap_or([0.0; 3]),
-        struct_ints(store, arena, "Rotation").unwrap_or([0; 3]),
-    )
 }
 
 /// Extract named float fields out of a `Vector`-shaped struct property.
@@ -375,13 +402,28 @@ fn parse_one_poly(cur: &mut ByteCursor<'_>) -> PackageResult<RawPoly> {
 /// Decode a `UPolys` payload: optional tagged-property prologue, then
 /// `(DbNum, DbMax)`, then `DbNum` brush polygons.
 fn parse_upolys(payload: &[u8], archive: &PackageArchive) -> Result<Vec<RawPoly>> {
-    // Most payloads carry an empty tagged-property prologue (one terminator
-    // byte); a handful ship none at all. Try both alignments.
-    if let Ok(polys) = parse_upolys_at(payload, archive, true) {
-        return Ok(polys);
+    // Alignments seen in retail maps: tagged-property terminator only
+    // (layout A), HP2 object header + terminator (layout B), or no prologue
+    // at all. Try the canonical alignments first, then brute-force small
+    // offsets; accept the first decode that consumes the payload exactly.
+    for skip_tags in [true, false] {
+        if let Ok(polys) = parse_upolys_at(payload, archive, skip_tags) {
+            return Ok(polys);
+        }
     }
-    parse_upolys_at(payload, archive, false)
-        .map_err(|error| EngineError::new("engine.scene_polys", error.to_string()))
+    for start in 1usize..48 {
+        if start >= payload.len() {
+            break;
+        }
+        let mut cur = ByteCursor::at(payload, start);
+        if let Ok(polys) = parse_upolys_from(&mut cur, payload) {
+            return Ok(polys);
+        }
+    }
+    Err(EngineError::new(
+        "engine.scene_polys",
+        "no UPolys alignment consumed the payload exactly",
+    ))
 }
 
 fn parse_upolys_at(
@@ -389,35 +431,42 @@ fn parse_upolys_at(
     archive: &PackageArchive,
     skip_tags: bool,
 ) -> PackageResult<Vec<RawPoly>> {
-    let decoded: PackageResult<Vec<RawPoly>> = (|| {
-        let mut cur = ByteCursor::new(payload);
-        if skip_tags {
-            read_property_tags(&mut cur, &archive.names)?;
-        }
-        let count = cur.i32()?;
-        let _db_max = cur.i32()?;
-        if count < 0 {
-            return Err(PackageError::BadLayout {
-                detail: format!("negative UPolys count {count}"),
-            });
-        }
-        let mut polys = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            polys.push(parse_one_poly(&mut cur)?);
-        }
-        // Alignment gate: a correct decode consumes the payload exactly.
-        if !polys.is_empty() && cur.position() != payload.len() {
-            return Err(PackageError::BadLayout {
-                detail: format!(
-                    "UPolys trailing bytes: {} of {} consumed",
-                    cur.position(),
-                    payload.len()
-                ),
-            });
-        }
-        Ok(polys)
-    })();
-    decoded
+    let mut cur = ByteCursor::new(payload);
+    if skip_tags {
+        read_property_tags(&mut cur, &archive.names)?;
+    }
+    let _ = archive;
+    parse_upolys_stream(&mut cur, payload)
+}
+
+fn parse_upolys_from(cur: &mut ByteCursor<'_>, payload: &[u8]) -> Result<Vec<RawPoly>> {
+    parse_upolys_stream(cur, payload)
+        .map_err(|error| EngineError::new("engine.scene_polys", error.to_string()))
+}
+
+fn parse_upolys_stream(cur: &mut ByteCursor<'_>, payload: &[u8]) -> PackageResult<Vec<RawPoly>> {
+    let count = cur.i32()?;
+    let _db_max = cur.i32()?;
+    if !(0..=4096).contains(&count) {
+        return Err(PackageError::BadLayout {
+            detail: format!("implausible UPolys count {count}"),
+        });
+    }
+    let mut polys = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        polys.push(parse_one_poly(cur)?);
+    }
+    // Alignment gate: a correct decode consumes the payload exactly.
+    if !polys.is_empty() && cur.position() != payload.len() {
+        return Err(PackageError::BadLayout {
+            detail: format!(
+                "UPolys trailing bytes: {} of {} consumed",
+                cur.position(),
+                payload.len()
+            ),
+        });
+    }
+    Ok(polys)
 }
 
 /// Object reference a `UModel` export payload carries for its `Polys`
@@ -426,29 +475,104 @@ fn parse_upolys_at(
 /// `NumSharedSides`, raw `NumZones`, `NumZones` × `FZoneProperties`
 /// (compact ref, u64 connectivity, u64 visibility — `LastRenderTime` is
 /// dead code in the C++ serializer), then the `Polys` object ref.
-fn model_polys_ref(payload: &[u8], archive: &PackageArchive) -> Result<i32> {
-    const MAX_ZONES: i32 = 64;
+pub(crate) fn model_polys_ref(
+    payload: &[u8],
+    _archive: &PackageArchive,
+    class_ref: i32,
+) -> Result<i32> {
     let decoded: PackageResult<i32> = (|| {
         let mut cur = ByteCursor::new(payload);
-        read_property_tags(&mut cur, &archive.names)?;
-        for _ in 0..5 {
-            read_compact_index(&mut cur)?;
+        crate::level::skip_object_header(&mut cur, class_ref);
+        // Tagged-property terminator ("None"); models carry no properties.
+        let _none = read_compact_index(&mut cur)?;
+        // Bounds FBox (6 x f32).
+        for _ in 0..6 {
+            let _ = read_f32_scalar(&mut cur)?;
+        }
+        let _a = cur.i32()?;
+        let _b9_reserved = cur.take(9)?;
+        let _c_radius = read_f32_scalar(&mut cur)?;
+        // Vectors / Points TArray<FVector>.
+        for _ in 0..2 {
+            let n = read_compact_index(&mut cur)?;
+            for _ in 0..n {
+                for _ in 0..3 {
+                    let _ = read_f32_scalar(&mut cur)?;
+                }
+            }
+        }
+        // Nodes TArray<FBspNode>.
+        let nodes = read_compact_index(&mut cur)?;
+        for _ in 0..nodes {
+            for _ in 0..4 {
+                let _ = read_f32_scalar(&mut cur)?; // Plane f32x4
+            }
+            let _zone_mask = cur.i32()?;
+            let _node_flags = cur.i32()?;
+            let _izones_mystery = cur.take(3)?; // iZone[0], iZone[1], mystery byte
+            for _ in 0..7 {
+                let _ = read_compact_index(&mut cur)?;
+            }
+            let _num_vertices = cur.u8()?;
+            let _leaf_back = cur.i32()?;
+            let _leaf_front = cur.i32()?;
+        }
+        // Surfs TArray<FBspSurf>.
+        let surfs = read_compact_index(&mut cur)?;
+        for _ in 0..surfs {
+            let _texture = read_compact_index(&mut cur)?;
+            let _poly_flags = cur.u32()?;
+            for _ in 0..6 {
+                let _ = read_compact_index(&mut cur)?;
+            }
+            let _pan_u = cur.u16()?;
+            let _pan_v = cur.u16()?;
+            let _actor = read_compact_index(&mut cur)?;
+        }
+        // Verts TArray<FVert>: two compact indices each.
+        let verts = read_compact_index(&mut cur)?;
+        for _ in 0..verts {
+            let _p_vertex = read_compact_index(&mut cur)?;
+            let _i_side = read_compact_index(&mut cur)?;
         }
         let _num_shared_sides = cur.i32()?;
         let num_zones = cur.i32()?;
-        if !(0..=MAX_ZONES).contains(&num_zones) {
+        if !(0..=64).contains(&num_zones) {
             return Err(PackageError::BadLayout {
                 detail: format!("absurd UModel zone count {num_zones}"),
             });
         }
         for _ in 0..num_zones {
             let _zone_actor = read_compact_index(&mut cur)?;
-            let _connectivity: [u8; 8] = cur.take(8)?.try_into().expect("eight bytes");
-            let _visibility: [u8; 8] = cur.take(8)?.try_into().expect("eight bytes");
+            let conn: [u8; 8] = cur
+                .take(8)?
+                .try_into()
+                .map_err(|_| PackageError::BadLayout {
+                    detail: "zone connectivity".into(),
+                })?;
+            let vis: [u8; 8] = cur
+                .take(8)?
+                .try_into()
+                .map_err(|_| PackageError::BadLayout {
+                    detail: "zone visibility".into(),
+                })?;
+            let _ = (conn, vis);
         }
+        // THE LINKAGE FIELD.
         read_compact_index(&mut cur)
     })();
     decoded.map_err(|error| EngineError::new("engine.scene_model", error.to_string()))
+}
+
+/// Read one little-endian f32 scalar.
+fn read_f32_scalar(cur: &mut ByteCursor<'_>) -> PackageResult<f32> {
+    let b: [u8; 4] = cur
+        .take(4)?
+        .try_into()
+        .map_err(|_| PackageError::BadLayout {
+            detail: "f32".into(),
+        })?;
+    Ok(f32::from_le_bytes(b))
 }
 
 /// Class label of an arena object (`PlayerStart`, `Brush`, ...).
@@ -733,6 +857,142 @@ mod actorprobe {
                 }
             }
             break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod structprobe {
+    #[test]
+    fn vector_struct_fields() {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let arena = &world.arena;
+        let obj16 = arena.get(hp_uobject::arena::ObjectId(16)).unwrap();
+        println!(
+            "ObjectId(16) name={:?} data_is_script_struct={}",
+            arena.names.text(obj16.name_index).unwrap_or("?"),
+            matches!(obj16.data, hp_uobject::arena::ObjectData::ScriptStruct(_))
+        );
+        if let Ok(Some((sname, fields))) =
+            hp_uobject::loader::flatten_struct_fields(arena, hp_uobject::arena::ObjectId(16))
+        {
+            println!(
+                "struct {:?} fields={}",
+                arena.names.text(sname).unwrap_or("?"),
+                fields.len()
+            );
+        } else {
+            println!("flatten returned None");
+        }
+        // find the real Vector script struct by name
+        for (id, o) in arena.objects_iter() {
+            if let hp_uobject::arena::ObjectData::ScriptStruct(_) = o.data {
+                let t = arena.names.text(o.name_index).unwrap_or("");
+                if t.eq_ignore_ascii_case("Vector") {
+                    println!("Vector struct at ObjectId({:?})", id.0);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod brushprobe {
+    use super::*;
+    #[test]
+    fn brush_store_keys() {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let level =
+            crate::level::load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes).unwrap();
+        let arena = &world.arena;
+        let mut shown = 0;
+        for &id in &level.actors {
+            if !class_label(arena, id).eq_ignore_ascii_case("Brush") {
+                continue;
+            }
+            if shown >= 2 {
+                break;
+            }
+            shown += 1;
+            let obj = arena.get(id).unwrap();
+            println!(
+                "== brush {:?} props:",
+                arena.display_name(id).unwrap_or_default()
+            );
+            {
+                let arch = level.archive.as_ref().unwrap();
+                // find its model export payload via raw ref
+                if let Some(store) = obj.properties() {
+                    println!("   store_len={}", store.len());
+                }
+                let _ = arch;
+            }
+            if let Some(store) = obj.properties() {
+                for (n, v) in store.iter() {
+                    println!("   {} = {:?}", arena.names.text(n).unwrap_or("?"), v);
+                }
+            } else {
+                println!("   <no store>")
+            }
+        }
+        // also PlayerStart
+        for &id in &level.actors {
+            if !class_label(arena, id).eq_ignore_ascii_case("PlayerStart") {
+                continue;
+            }
+            let obj = arena.get(id).unwrap();
+            if let Some(store) = obj.properties() {
+                for (n, v) in store.iter() {
+                    println!("PS {} = {:?}", arena.names.text(n).unwrap_or("?"), v);
+                }
+            }
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tagprobe {
+    use super::*;
+    use hp_format::package79::ByteCursor;
+    #[test]
+    fn brush_tags_dump() {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let archive = hp_format::package79::read_package(&bytes).unwrap();
+        // find export named Brush423
+        for (i, e) in archive.exports.iter().enumerate() {
+            if archive_name_text(&archive, e.object_name_index) == Some("Brush423") {
+                let payload = archive.export_payload(i).unwrap();
+                let mut cur = ByteCursor::at(payload, 0);
+                crate::level::skip_object_header(&mut cur, e.class_ref);
+                println!("after header pos={} len={}", cur.position(), payload.len());
+                match crate::level::read_actor_tags(&mut cur, &archive.names) {
+                    Ok(tags) => {
+                        for t in &tags {
+                            println!(
+                                "tag {} kind={} size={} payload={:02x?}",
+                                archive
+                                    .names
+                                    .get(t.name_index as usize)
+                                    .map(|n| n.text.as_str())
+                                    .unwrap_or("?"),
+                                t.kind,
+                                t.payload.len(),
+                                &t.payload[..t.payload.len().min(16)]
+                            );
+                        }
+                    }
+                    Err(e) => println!("ERR {e}"),
+                }
+                break;
+            }
         }
     }
 }

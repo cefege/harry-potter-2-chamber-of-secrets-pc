@@ -35,14 +35,25 @@ pub struct Level {
 }
 
 /// Resolve a harness map token (`..\Maps\PrivetDr.unr`, `Maps/Entry.unr`,
-/// or a bare `Name.unr`) to the map file under `<data_root>/System`.
+/// or a bare `Name.unr`). Primary anchor is `<data_root>/System` (engine
+/// working directory); when that file does not exist, fall back to the
+/// datadir root, where installed layouts keep `Maps/` next to `System/`
+/// (`<datadir>/Maps/PrivetDr.unr`).
 pub fn resolve_map_path(data_root: &Path, map_token: &str) -> PathBuf {
     let relative = map_token.replace('\\', "/");
     let candidate = PathBuf::from(&relative);
     if candidate.is_absolute() {
         return candidate;
     }
-    normalize_lexical(&data_root.join("System").join(candidate))
+    let system_anchored = normalize_lexical(&data_root.join("System").join(&candidate));
+    if system_anchored.is_file() {
+        return system_anchored;
+    }
+    let datadir_anchored = normalize_lexical(&data_root.join(&candidate));
+    if datadir_anchored.is_file() {
+        return datadir_anchored;
+    }
+    system_anchored
 }
 
 /// Collapse `.` and `..` components lexically.
@@ -215,6 +226,7 @@ pub fn load_level_from_bytes(
             arena,
             &chain,
             payload,
+            entry.class_ref,
             &name_map,
             &archive.names,
             &mut store,
@@ -252,7 +264,7 @@ pub fn load_level_from_bytes(
 /// Read an actor's tagged-property list using the engine's bespoke
 /// array-index encoding (`FPropertyTag::operator<<`: 1-, 2-, or 4-byte
 /// form — NOT a compact index).
-fn read_actor_tags(
+pub(crate) fn read_actor_tags(
     cur: &mut ByteCursor<'_>,
     names: &[hp_format::package79::NameEntry],
 ) -> Result<Vec<PropertyTag>> {
@@ -272,7 +284,9 @@ fn read_actor_tags(
         let kind = info & 0x0F;
         let size_code = info & 0x70;
         let array_flag = info & 0x80 != 0;
-        let struct_name_index = if kind == PROPERTY_TYPE_STRUCT {
+        // HP2 packs StructProperty at raw type 10 in this wire (not the
+        // imported PROPERTY_TYPE_STRUCT constant); both are accepted.
+        let struct_name_index = if kind == PROPERTY_TYPE_STRUCT || kind == 10 {
             Some(read_compact_index(cur)?)
         } else {
             None
@@ -324,22 +338,77 @@ fn read_actor_tags(
     }
 }
 
-/// Decode one actor payload's tags into `store` against its class chain.
+/// Build a `PropValue::Struct`, interning field names on demand.
+fn struct_value(
+    arena: &mut ObjectArena,
+    struct_name: &str,
+    fields: &[(&str, PropValue)],
+) -> PropValue {
+    let (struct_index, _) = arena.names.intern_split(struct_name);
+    PropValue::Struct {
+        struct_name: struct_index,
+        fields: fields
+            .iter()
+            .map(|(name, value)| {
+                let (index, _) = arena.names.intern_split(name);
+                (index, value.clone())
+            })
+            .collect(),
+    }
+}
+
+/// Skip the HP2 per-object binary prologue when present.
 ///
-/// A tag whose template is missing or whose decoded width disagrees keeps
-/// a verbatim note on stderr (reason `engine.actor_tag_raw`) instead of
-/// failing the whole map — the same retention rule
+/// Rule (validated on 6630/6630 prefixed exports across three maps):
+/// present iff the first compact index decodes to the export's own
+/// class reference and is immediately repeated; layout
+/// `[ci class_ref][ci class_ref][FF*8][i32 V][u8 0x81]`, 14-16 bytes.
+/// Semantics unidentified; treated as opaque.
+pub(crate) fn skip_object_header(cur: &mut ByteCursor<'_>, class_ref: i32) {
+    let Ok(first) = read_compact_index(cur) else {
+        return;
+    };
+    if first != class_ref {
+        cur.seek(0);
+        return;
+    }
+    let save = cur.position();
+    let Ok(second) = read_compact_index(cur) else {
+        cur.seek(0);
+        return;
+    };
+    if second != first {
+        cur.seek(0);
+        return;
+    }
+    // FF*8 + i32 V + u8 0x81
+    if cur.len() < cur.position() + 8 + 4 + 1 {
+        cur.seek(0);
+        return;
+    }
+    let tail: Option<[u8; 8]> = cur.take(8).ok().and_then(|b| b.try_into().ok());
+    let _ = cur.i32();
+    let marker = cur.u8();
+    match (tail, marker) {
+        (Some(bytes), Ok(0x81)) if bytes == [0xff; 8] => {}
+        _ => cur.seek(0),
+    }
+    let _ = save;
+}
+
 /// `bind.default_tag_raw` applies to fork defaults.
 fn apply_actor_tags(
-    arena: &ObjectArena,
+    arena: &mut ObjectArena,
     chain: &[ObjectId],
     payload: &[u8],
+    class_ref: i32,
     name_map: &[u32],
     local_names: &[hp_format::package79::NameEntry],
     store: &mut PropStore,
 ) {
     let tags = {
         let mut cursor = ByteCursor::at(payload, 0);
+        skip_object_header(&mut cursor, class_ref);
         match read_actor_tags(&mut cursor, local_names) {
             Ok(tags) => tags,
             Err(error) => {
@@ -369,15 +438,125 @@ fn apply_actor_tags(
             continue;
         };
         let mut payload_cur = ByteCursor::at(&tag.payload, 0);
-        let decoded = decode_value(&mut payload_cur, &template.kind, &|struct_ref| {
-            hp_uobject::loader::flatten_struct_fields(arena, struct_ref)
-        });
+        // Placement structs whose Engine.u ScriptStruct children do not
+        // flatten through the generic loader are decoded directly by their
+        // declared struct name.
+        let struct_text: Option<String> = tag
+            .struct_name_index
+            .and_then(|i| local_names.get(i as usize))
+            .map(|n| n.text.to_ascii_lowercase());
+        fn direct_struct_decode(
+            arena: &mut ObjectArena,
+            _kind: u8,
+            struct_text: Option<&str>,
+            payload: &[u8],
+        ) -> Option<Result<(usize, PropValue)>> {
+            use PROPERTY_TYPE_STRUCT;
+            let _ = PROPERTY_TYPE_STRUCT;
+            let mut c = ByteCursor::at(payload, 0);
+            fn f32le(c: &mut ByteCursor<'_>) -> Result<f32> {
+                let b: [u8; 4] = c
+                    .take(4)
+                    .map_err(EngineError::from)?
+                    .try_into()
+                    .map_err(|_| EngineError::new("engine.actor_tag_size", "short f32"))?;
+                Ok(f32::from_le_bytes(b))
+            }
+            match struct_text {
+                Some("vector") if payload.len() == 12 => {
+                    let xyz = (f32le(&mut c), f32le(&mut c), f32le(&mut c));
+                    let (x, y, z) = match (xyz.0, xyz.1, xyz.2) {
+                        (Ok(x), Ok(y), Ok(z)) => (x, y, z),
+                        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                            return Some(Err(e));
+                        }
+                    };
+                    Some(Ok((
+                        c.position(),
+                        struct_value(
+                            arena,
+                            "Vector",
+                            &[
+                                ("X", PropValue::Float(x)),
+                                ("Y", PropValue::Float(y)),
+                                ("Z", PropValue::Float(z)),
+                            ],
+                        ),
+                    )))
+                }
+                Some("rotator") => {
+                    let pitch = c.i32().map_err(EngineError::from);
+                    let yaw = c.i32().map_err(EngineError::from);
+                    let roll = c.i32().map_err(EngineError::from);
+                    let (pitch, yaw, roll) = match (pitch, yaw, roll) {
+                        (Ok(p), Ok(y), Ok(r)) => (p, y, r),
+                        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
+                            return Some(Err(e));
+                        }
+                    };
+                    Some(Ok((
+                        c.position(),
+                        struct_value(
+                            arena,
+                            "Rotator",
+                            &[
+                                ("Pitch", PropValue::Int(pitch)),
+                                ("Yaw", PropValue::Int(yaw)),
+                                ("Roll", PropValue::Int(roll)),
+                            ],
+                        ),
+                    )))
+                }
+                Some("scale") if payload.len() >= 17 => {
+                    let sx = f32le(&mut c);
+                    let sy = f32le(&mut c);
+                    let sz = f32le(&mut c);
+                    let sheer_rate = f32le(&mut c);
+                    let sheer_axis = c.u8().map_err(EngineError::from);
+                    let (sx, sy, sz, sheer_rate, sheer_axis) =
+                        match (sx, sy, sz, sheer_rate, sheer_axis) {
+                            (Ok(a), Ok(b), Ok(cc), Ok(d), Ok(e)) => (a, b, cc, d, e),
+                            (Err(e), _, _, _, _)
+                            | (_, Err(e), _, _, _)
+                            | (_, _, Err(e), _, _)
+                            | (_, _, _, Err(e), _)
+                            | (_, _, _, _, Err(e)) => return Some(Err(e)),
+                        };
+                    Some(Ok((
+                        c.position(),
+                        struct_value(
+                            arena,
+                            "Scale",
+                            &[
+                                ("X", PropValue::Float(sx)),
+                                ("Y", PropValue::Float(sy)),
+                                ("Z", PropValue::Float(sz)),
+                                ("SheerRate", PropValue::Float(sheer_rate)),
+                                ("SheerAxis", PropValue::Byte(sheer_axis)),
+                            ],
+                        ),
+                    )))
+                }
+                _ => None,
+            }
+        }
+        let decoded = direct_struct_decode(arena, tag.kind, struct_text.as_deref(), &tag.payload)
+            .unwrap_or_else(|| {
+                decode_value(&mut payload_cur, &template.kind, &|struct_ref| {
+                    hp_uobject::loader::flatten_struct_fields(arena, struct_ref)
+                })
+                .map(|v| (payload_cur.position(), v))
+                .map_err(EngineError::from)
+            });
         let value = match decoded {
-            Ok(v) if payload_cur.position() == tag.payload.len() => v,
+            Ok((consumed, v)) if consumed == tag.payload.len() => v,
             Ok(_) | Err(_) => {
                 eprintln!(
-                    "hp-engine: note [engine.actor_tag_raw] tag `{text}` width disagrees with template ({} byte(s)); kept raw",
-                    tag.payload.len()
+                    "hp-engine: note [engine.actor_tag_raw] tag `{text}` width disagrees with template ({} byte(s), consumed {}; kind={:?}; err={:?}); kept raw",
+                    tag.payload.len(),
+                    payload_cur.position(),
+                    template.kind,
+                    decoded.as_ref().err()
                 );
                 continue;
             }
@@ -432,6 +611,28 @@ mod tests {
             resolve_map_path(root, "Maps/Entry.unr"),
             PathBuf::from("/data/System/Maps/Entry.unr")
         );
+    }
+
+    #[test]
+    fn falls_back_to_datadir_root_when_system_lacks_map() {
+        let base = std::env::temp_dir().join(format!("hp2rs-map-fallback-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("System")).expect("System dir");
+        std::fs::create_dir_all(base.join("Maps")).expect("Maps dir");
+        std::fs::write(base.join("Maps/Entry.unr"), b"placeholder").expect("map file");
+        assert_eq!(
+            resolve_map_path(&base, "Maps\\Entry.unr"),
+            base.join("Maps/Entry.unr"),
+            "installed layouts keep Maps next to System"
+        );
+        // The System anchor still wins when both locations hold the file.
+        std::fs::create_dir_all(base.join("System/Maps")).expect("System/Maps dir");
+        std::fs::write(base.join("System/Maps/Entry.unr"), b"placeholder").expect("map file");
+        assert_eq!(
+            resolve_map_path(&base, "Maps\\Entry.unr"),
+            normalize_lexical(&base.join("System/Maps/Entry.unr"))
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
 

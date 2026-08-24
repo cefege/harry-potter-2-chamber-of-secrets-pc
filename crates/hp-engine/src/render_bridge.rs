@@ -239,6 +239,32 @@ impl RendererSession {
     }
 
     fn upload_texture(&mut self, key: &TextureKey) -> Result<ResolvedTexture> {
+        // Missing/unreadable packages degrade to a neutral checkerboard so
+        // geometry stays visible; the reason-coded note fires once per key.
+        if let Err(error) = self.store.resolve(key) {
+            eprintln!(
+                "hp-engine: note [renderer.texture_unavailable] {}: {error}",
+                key.package
+            );
+            const W: u32 = 8;
+            let mut pixels = Vec::with_capacity((W * W * 4) as usize);
+            for v in 0..W {
+                for u in 0..W {
+                    let shade = if (u / 4 + v / 4) % 2 == 0 { 128 } else { 64 };
+                    pixels.extend_from_slice(&[shade, shade, shade, 255]);
+                }
+            }
+            let id = self
+                .textures
+                .create_bgra8(&self.ctx, "missing-texture", W, W, &pixels);
+            let view = self.textures.view(&self.ctx, id).clone();
+            return Ok(ResolvedTexture {
+                index_or_color: id,
+                base_view: view,
+                lut_view: None,
+                size: [W as f32, W as f32],
+            });
+        }
         let decoded = self.store.resolve(key)?;
         let (width, height) = (decoded.width, decoded.height);
         let label = key.object_path.replace('.', "/");
