@@ -38,9 +38,7 @@ impl MeshVert {
     }
 
     pub fn to_packed(self) -> u32 {
-        (self.x as u32 & 0x7ff)
-            | ((self.y as u32 & 0x7ff) << 11)
-            | ((self.z as u32 & 0x3ff) << 22)
+        (self.x as u32 & 0x7ff) | ((self.y as u32 & 0x7ff) << 11) | ((self.z as u32 & 0x3ff) << 22)
     }
 }
 

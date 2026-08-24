@@ -6,10 +6,22 @@ use hp_format::mesh::{MeshFace, MeshVert, MeshVertConnect};
 #[test]
 fn mesh_vert_positive_and_negative_extremes() {
     // X=-1024 (11-bit min), Y=1023 (11-bit max), Z=-512 (10-bit min).
-    let packed = MeshVert { x: -1024, y: 1023, z: -512 }.to_packed();
+    let packed = MeshVert {
+        x: -1024,
+        y: 1023,
+        z: -512,
+    }
+    .to_packed();
     assert_eq!(packed, (512u32 << 22) | (1023u32 << 11) | 0x400);
     let decoded = MeshVert::from_packed(packed);
-    assert_eq!(decoded, MeshVert { x: -1024, y: 1023, z: -512 });
+    assert_eq!(
+        decoded,
+        MeshVert {
+            x: -1024,
+            y: 1023,
+            z: -512
+        }
+    );
 }
 
 #[test]

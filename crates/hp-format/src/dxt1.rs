@@ -48,11 +48,7 @@ pub fn decoded_size(width: u32, height: u32) -> usize {
 ///
 /// Dimensions may be non-multiples of four; edge texels come from the same
 /// block grid exactly as the engine crops them.
-pub fn decode_dxt1_to_bgra(
-    blocks: &[u8],
-    width: u32,
-    height: u32,
-) -> Result<Vec<u8>, DxtError> {
+pub fn decode_dxt1_to_bgra(blocks: &[u8], width: u32, height: u32) -> Result<Vec<u8>, DxtError> {
     if width == 0 || height == 0 {
         return Err(DxtError::EmptyDimensions);
     }

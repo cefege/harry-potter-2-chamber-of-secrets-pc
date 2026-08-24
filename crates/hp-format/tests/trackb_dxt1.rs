@@ -1,6 +1,6 @@
 //! Ports of the decode-side cases in Tests/Dxt1Tests.cpp (dxt1_codec).
 
-use hp_format::dxt1::{decode_dxt1_to_bgra, decoded_size, encoded_size, DxtError};
+use hp_format::dxt1::{DxtError, decode_dxt1_to_bgra, decoded_size, encoded_size};
 
 #[test]
 fn known_four_colour_block_channel_and_index_order() {
