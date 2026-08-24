@@ -1,12 +1,79 @@
 # Operations: build, test, and verification
 
-This is the single source of truth for configuring, building, and verifying HP2.
-Every command below matches a preset in `CMakePresets.json`, a target in
-`Build/CMake/HP2Targets.cmake`, or a registered CTest test name. Nothing here is
-invented; if a knob is not listed, it does not exist yet.
+This is the single source of truth for configuring, building, and verifying
+HP2 across both eras: the legacy C++ tree (CMake/CTest, below) and the Rust
+rewrite (`crates/`, "Cargo era" section). Every command below matches a preset
+in `CMakePresets.json`, a target in `Build/CMake/HP2Targets.cmake`, a cargo
+workspace member, or a registered CTest test name. Nothing here is invented;
+if a knob is not listed, it does not exist yet.
 
 Platform: macOS 15+ on arm64 only. Requirements: CMake >= 3.24, Ninja, and a
 Python 3 interpreter (found via `find_package(Python3)`).
+
+## Cargo era (hp2rs)
+
+The repository now carries two eras side by side: the legacy C++ tree
+(everything below) and the Rust rewrite under `crates/`. Both stay documented
+until the cutover removes the C++ content; until then a command from one era
+must never be mixed with a preset or target from the other.
+
+Configure/build (cargo has no configure step; this replaces the CMake presets
+for the Rust era):
+
+```sh
+cargo build --release --workspace
+```
+
+Run the full Rust verification suite (the commit gate for `crates/`):
+
+```sh
+cargo test --workspace
+```
+
+Launcher-store tests are opt-in via their env marker:
+
+```sh
+HP2_LAUNCHER_TESTING=1 cargo test -p hp-app
+```
+
+Per-map runs reuse the scripted harness, pointed at the Rust engine binary
+instead of an app bundle (native arm64 Mach-O validation still applies):
+
+```sh
+python3 Build/game_test.py run <map> --data-root <data root> \
+    --renderer xopengl --ticks 120 --timeout 90 --log <log path> \
+    --engine-bin target/release/hp2rs
+```
+
+Renderer smoke sweeps accept the same override:
+
+```sh
+python3 Build/smoke_maps.py --renderer xopengl --output <report.json> \
+    --engine-bin target/release/hp2rs
+```
+
+Packaging and bundle integrity replace the CMake `hp2_macos_app` target and
+`check_bundle.py` for the Rust era:
+
+```sh
+python3 Build/package_rust_app.py   # cargo build + recreate dist/macos-arm64-rs/HarryPotter2.app
+python3 Build/check_bundle_rs.py    # exit 0 pass / 1 fail / 2 blocked
+```
+
+The save reader/writer and native save-repair contract is pinned entirely by
+in-crate tests; no scripted launch is needed:
+
+```sh
+cargo test -p hp-engine
+```
+
+Retail-flow smoke automates the scriptable portion of the product gate: a
+windowed launch against the retail data root with sounds (process alive +
+`presented_frames > 0`), and the continue-flag step when a save exists:
+
+```sh
+python3 Build/retail_flow_smoke.py
+```
 
 ## Configure/build/test presets
 

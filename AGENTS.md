@@ -8,17 +8,26 @@ behavior and boundaries, not procedure detail.
 
 | Subsystem | Path | Notes |
 | --- | --- | --- |
-| Core | `HarryPotter2/Unreal/Core/` | Object model, serialization (`FName`/`FString`, package79 archives), memory, names |
-| Engine | `HarryPotter2/Unreal/Engine/` | Game loop, `UEngine::InputEvent` dispatch, level flow |
-| Render | `HarryPotter2/Unreal/Render/` | Scene rendering shared by driver backends |
-| XOpenGLDrv | `ThirdParty/XOpenGLDrv/` | GL driver + text seam (`FCanvasTextRequest`, `FNativeTextPlatformBackend`). Pinned upstream; see ThirdParty rules below |
-| SDLDrv | `HarryPotter2/Unreal/SDLLaunch/` | SDL2 window/input (`USDLViewport` → `CauseInputEvent`), launch policy/store, `HP2MacLauncher.mm` |
-| Launcher | `HarryPotter2/Unreal/Launch/` | Bootstrap paths, static packages, editor runtime entry |
-| ALAudio / codecs | `HarryPotter2/Unreal/ALAudio/`, `EAAudioCodec/`, `Vorbis/`, `OpenAL/` | Sound pipeline |
-| Build scripts | `Build/*.py` | `game_test.py`, `smoke_maps.py`, `check_bundle.py`, `prepare_retail_data.py`, `repair_save.py`, `abi_inventory.py`; CMake modules in `Build/CMake/` |
-| Tests | `Tests/` | C++ `*Tests.cpp` (`main()`-style, minimal TU), Python `*Tests.py` (`unittest`, no app launch), fixtures in `Tests/Fixtures/` |
+| Core | `HarryPotter2/Unreal/Core/` | Object model, serialization (`FName`/`FString`, package79 archives), memory, names (legacy era — slated for cutover removal) |
+| Engine | `HarryPotter2/Unreal/Engine/` | Game loop, `UEngine::InputEvent` dispatch, level flow (legacy era — slated for cutover removal) |
+| Render | `HarryPotter2/Unreal/Render/` | Scene rendering shared by driver backends (legacy era — slated for cutover removal) |
+| XOpenGLDrv | `ThirdParty/XOpenGLDrv/` | GL driver + text seam (`FCanvasTextRequest`, `FNativeTextPlatformBackend`). Pinned upstream; see ThirdParty rules below (legacy era — slated for cutover removal) |
+| SDLDrv | `HarryPotter2/Unreal/SDLLaunch/` | SDL2 window/input (`USDLViewport` → `CauseInputEvent`), launch policy/store, `HP2MacLauncher.mm` (legacy era — slated for cutover removal) |
+| Launcher | `HarryPotter2/Unreal/Launch/` | Bootstrap paths, static packages, editor runtime entry (legacy era — slated for cutover removal) |
+| ALAudio / codecs | `HarryPotter2/Unreal/ALAudio/`, `EAAudioCodec/`, `Vorbis/`, `OpenAL/` | Sound pipeline (legacy era — slated for cutover removal) |
+| hp-format | `crates/hp-format/` | Package79 archive read/write, FName/FString byte forms, tagged properties, EA-XA decoder, DXT1 decode, mesh structs, font glyph blits |
+| hp-ini | `crates/hp-ini/` | UE1 INI parse/merge/write contract (`FConfigFile`/`FConfigCacheIni`) plus launcher path resolution |
+| hp-uobject | `crates/hp-uobject/` | Name pool, object arena, classes-from-data, tagged-property access, UnrealScript VM, world snapshot hashing |
+| hp-render | `crates/hp-render/` | wgpu renderer: headless/offscreen and windowed swapchain targets, surface draw pipelines, texture manager, bitmap-glyph canvas |
+| hp-audio | `crates/hp-audio/` | rodio output graph, Ogg-loop and XA stream types mirroring the ALAudio streaming path |
+| hp-engine | `crates/hp-engine/` | Level bootstrap, actor projection, tick orchestration, byte-exact save reader/writer + native repair, camera math, seeded determinism RNG |
+| hp-app | `crates/hp-app/` | winit event-loop ownership, CLI parsing, launcher profile store, input normalization, egui-wgpu app shell |
+| hp2rs | `crates/hp2rs/` | Engine binary: frozen headless harness protocol (`game_test.py`) plus interactive windowed mode |
+| Build scripts | `Build/*.py` | `game_test.py`, `smoke_maps.py`, `check_bundle.py` / `check_bundle_rs.py`, `prepare_retail_data.py`, `repair_save.py`, `abi_inventory.py`, `package_rust_app.py`, `retail_flow_smoke.py`; CMake modules in `Build/CMake/` |
+| Tests | `Tests/` | C++ `*Tests.cpp` (`main()`-style, minimal TU), Python `*Tests.py` (`unittest`, no app launch), fixtures in `Tests/Fixtures/`; Rust contracts live in-crate under `crates/*/src` (+ `tests/` where present) |
 | Data roots | `HarryPotter2/Unreal/` (prototype), retail overlay via `Build/prepare_retail_data.py` | Prototype root is `HP2_UNREAL_ROOT` in `Build/CMake/HP2Sources.cmake` |
-| Dist bundle | `dist/macos-arm64/HarryPotter2.app` | Installed app; verify with `Build/check_bundle.py` |
+| Dist bundle | `dist/macos-arm64/HarryPotter2.app` | Installed C++ app; verify with `Build/check_bundle.py` (legacy era — slated for cutover removal) |
+| Dist bundle (Rust) | `dist/macos-arm64-rs/HarryPotter2.app` | Installed Rust app; package with `Build/package_rust_app.py`, verify with `Build/check_bundle_rs.py` |
 
 ## Non-Negotiables
 
@@ -44,6 +53,9 @@ behavior and boundaries, not procedure detail.
 6. **MACOSX macro caution.** Apple platform code uses UE1-era `MACOSX` guards
    (not `__APPLE__` alone). New platform conditionals must match surrounding
    convention or `TCHAR`/UTF-32 assumptions silently diverge.
+7. **Rust gates: never claim done from compile alone.** Same discipline as
+   ctest: a green `cargo build` proves nothing about behavior — cite the
+   `cargo test`/`cargo clippy` output for the crates the change touches.
 
 ## Command Cheatsheet
 
@@ -51,13 +63,17 @@ Full procedure, presets, and interpretation: `Docs/OPERATIONS.md`. Quick map:
 
 | Task | Command |
 | --- | --- |
-| Configure + build | `cmake --preset macos-arm64 && cmake --build --preset macos-arm64` |
-| Run verification suite | `ctest --preset macos-arm64` (sanitizer variants: `macos-arm64-asan-ubsan`, `macos-arm64-tsan`) |
-| Single test | `ctest --preset macos-arm64 -R <name>` — e.g. `abi_widths`, `package79_manifest`, `game_test_contract`, `renderer_smoke_xopengl` |
+| Configure + build (C++, legacy era) | `cmake --preset macos-arm64 && cmake --build --preset macos-arm64` |
+| Run verification suite (C++, legacy era) | `ctest --preset macos-arm64` (sanitizer variants: `macos-arm64-asan-ubsan`, `macos-arm64-tsan`) |
+| Single test (C++, legacy era) | `ctest --preset macos-arm64 -R <name>` — e.g. `abi_widths`, `package79_manifest`, `game_test_contract`, `renderer_smoke_xopengl` |
+| Configure + build (Rust) | `cargo build --release --workspace` |
+| Run Rust verification suite | `cargo test --workspace`; launcher store: `HP2_LAUNCHER_TESTING=1 cargo test -p hp-app`; save-repair contract: `cargo test -p hp-engine` |
 | List maps | `python3 Build/game_test.py maps --data-root HarryPotter2/Unreal` |
-| Launch one map | `python3 Build/game_test.py run <map> ...` (see `Docs/OPERATIONS.md`) |
-| Renderer smoke | `python3 Build/smoke_maps.py --renderer=xopengl --output=<report.json> [--maps=...]` |
-| Bundle integrity | `python3 Build/check_bundle.py` (exit 0 pass / 1 fail / 2 blocked) |
+| Launch one map | `python3 Build/game_test.py run <map> ...` (see `Docs/OPERATIONS.md`); Rust engine: append `--engine-bin target/release/hp2rs` |
+| Renderer smoke | `python3 Build/smoke_maps.py --renderer=xopengl --output=<report.json> [--maps=...] [--engine-bin=target/release/hp2rs]` |
+| Bundle integrity | C++: `python3 Build/check_bundle.py`; Rust: `python3 Build/check_bundle_rs.py` (both exit 0 pass / 1 fail / 2 blocked) |
+| Package Rust bundle | `python3 Build/package_rust_app.py` → recreates `dist/macos-arm64-rs/HarryPotter2.app` |
+| Retail-flow smoke (Rust) | `python3 Build/retail_flow_smoke.py` (windowed retail launch + continue-flag step; manual steps printed at end) |
 | Retail data overlay | `python3 Build/prepare_retail_data.py` → writes `overlay-manifest.json` |
 
 Test registration: C++/script tests are registered in
@@ -65,6 +81,10 @@ Test registration: C++/script tests are registered in
 `HP2_ARTIFACT_DIR` per test). Renderer smoke requires the installed bundle and
 prototype data at configure time; without them the tests do not exist — that
 is a configuration gap, not a skip.
+
+Rust-era tests are not registered anywhere: they run through cargo
+(`cargo test --workspace`, plus the `hp-app` launcher-store variant) and the
+scripted harness invocations in `Docs/OPERATIONS.md` "Cargo era (hp2rs)".
 
 ## PR / Change Checklist
 
