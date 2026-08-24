@@ -82,6 +82,31 @@ missing code is represented as JSON `null`.
 | audio.bad_request | invalid argument (empty buffer, zero chunk, wrong kind) | hp-audio stream sources/manager |
 | audio.eaxa_feed_failed | EA-XA encoded stream rejected by the block decoder | hp-audio XA source (wraps `eaxa.*`) |
 
+## engine.* (Phase 3 headless simulation)
+
+| Code | Meaning | Emitted by |
+|---|---|---|
+| engine.map_unreadable | map file missing or unreadable at the resolved token path | hp-engine level bootstrap |
+| engine.map_parse | package79 parse rejected the map archive | hp-engine level bootstrap |
+| engine.map_name_index | name-table index out of range while loading a map | hp-engine level bootstrap |
+| engine.map_export_gap | map exports failed to instantiate (summary after per-export notes) | hp-engine level bootstrap |
+| engine.actor_tag_range | actor property tag name index out of range; payload kept raw | hp-engine actor decode note |
+| engine.actor_tag_size | negative tagged-property size in an actor payload | hp-engine actor decode note |
+| engine.actor_tag_raw | tag kept raw: template missing or width mismatch (note-class, non-fatal) | hp-engine actor decode notes |
+| engine.script_event_deferred | actor BeginPlay/Tick skipped under the accepted Phase-3 deferral policy (see Docs/RNG_TICK_DIVERGENCE.md) | hp-engine tick orchestration |
+| engine.arg_datadir / arg_map / arg_ticks / arg_seed / arg_fixed_dt / arg_map_twice / arg_unknown | CLI contract rejections with usage text | hp2rs main |
+| engine.ini_missing / ini_parse | config layer absent or unparseable at bootstrap | hp2rs main |
+| engine.input_script_* | recorded-script grammar violations (`_field`, `_tick_twice`, `_float`, `_count`, `_key`, `_op`, `_no_tick`, `_unreadable`) | hp-engine input parser |
+| engine.io | unexpected filesystem failure outside map/config paths | hp-engine |
+
+## vm.* additions (hp-uobject, Phase 3)
+
+| Code | Meaning | Emitted by |
+|---|---|---|
+| vm.unknown_token_deferrable | unknown opcode inside a fork-undocumented gap (0x03/0x35/0x5B-0x6F); loud, and deferral-eligible for script events | hp-uobject VM |
+| vm.switch_case_expected | EX_Switch case chain walked off a non-EX_Case token | hp-uobject VM |
+| native.slot_unbound / native.body_deferred | numbered-native dispatch found no registered body / a registered-but-deferred body (existing codes, now reachable from script events) | hp-uobject natives registry |
+
 ## blocked reasons (status=blocked)
 
 `binary_missing`, `data.prototype_missing`, `data.archive_missing`,

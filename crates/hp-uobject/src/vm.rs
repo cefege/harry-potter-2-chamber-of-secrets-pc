@@ -246,11 +246,14 @@ impl<'a> Frame<'a> {
         while self.pc < self.code.len() {
             let opcode = self.code[self.pc];
             self.pc += 1;
+            if (0x70..=0xFF).contains(&opcode) {
+                // Opcodes at or above EX_FirstNative ARE native slots:
+                // GNatives[opcode] with a normal parameter list.
+                self.dispatch_native(u16::from(opcode))?;
+                continue;
+            }
             let Some(token) = USToken::from_opcode(opcode) else {
-                return Err(Fail::new(
-                    "vm.unknown_token",
-                    format!("opcode {opcode:#04x} at {} has no token", self.pc - 1),
-                ));
+                return Err(unknown_token(opcode, self.pc - 1));
             };
             if self.exec(token)? {
                 break; // EX_Return executed.
@@ -423,14 +426,63 @@ impl<'a> Frame<'a> {
                 let _guard = self.u8_at()?;
                 self.expr()?;
             }
-            USToken::GotoLabel
-            | USToken::Switch
-            | USToken::Case
-            | USToken::LabelTable
-            | USToken::DebugInfo => {
+            USToken::GotoLabel => {
+                // Function context has no state frame, so like
+                // `UObject::GotoLabel` outside a state this cannot jump;
+                // consume the label operand and keep executing.
+                let _label = self.name_ci()?;
+            }
+            USToken::Switch => {
+                // `execSwitch`: size byte, switch expression, then a chain
+                // of EX_Case records; each carries the address of the next
+                // record (MAXWORD = default) plus its compare expression.
+                let _size = self.u8_at()?; // raw-width vs string compare
+                self.expr()?;
+                let switch_value = std::mem::replace(&mut self.result, PropValue::Int(0));
+                loop {
+                    let peek = *self.code.get(self.pc).ok_or_else(truncated)?;
+                    if peek != USToken::Case as u8 {
+                        return Err(Fail::new(
+                            "vm.switch_case_expected",
+                            format!("expected EX_Case at {}, found {peek:#04x}", self.pc),
+                        ));
+                    }
+                    self.pc += 1;
+                    let next = self.u16_at()? as usize;
+                    if next == 0xFFFF {
+                        break; // default body starts here.
+                    }
+                    self.expr()?;
+                    let case_value = std::mem::replace(&mut self.result, PropValue::Int(0));
+                    if switch_value == case_value {
+                        break; // matched body starts here.
+                    }
+                    self.pc = next;
+                }
+            }
+            USToken::Case => {
+                // Reached by falling through an unmatched body: skip this
+                // record's compare expression (C-style fallthrough).
+                let next = self.u16_at()? as usize;
+                if next != 0xFFFF {
+                    self.expr()?;
+                }
+            }
+            USToken::LabelTable => {
+                // Entries of (name, code offset) terminated by NAME_None,
+                // parsed so state payloads stay decodable headlessly.
+                loop {
+                    let name = self.name_ci()?;
+                    let _offset = self.i32_at()?;
+                    if name == 0 {
+                        break;
+                    }
+                }
+            }
+            USToken::DebugInfo => {
                 return Err(Fail::new(
                     "vm.token_unsupported",
-                    format!("{token:?}: label/state/debug control flow is deferred"),
+                    format!("{token:?}: debug info is deferred"),
                 ));
             }
 
@@ -584,11 +636,11 @@ impl<'a> Frame<'a> {
     fn expr(&mut self) -> VmResult<()> {
         let opcode = *self.code.get(self.pc).ok_or_else(truncated)?;
         self.pc += 1;
+        if (0x70..=0xFF).contains(&opcode) {
+            return self.dispatch_native(u16::from(opcode));
+        }
         let Some(token) = USToken::from_opcode(opcode) else {
-            return Err(Fail::new(
-                "vm.unknown_token",
-                format!("opcode {opcode:#04x} at {} has no token", self.pc - 1),
-            ));
+            return Err(unknown_token(opcode, self.pc - 1));
         };
         self.exec(token)?;
         Ok(())
@@ -612,6 +664,22 @@ impl<'a> Frame<'a> {
     }
 
     /// Consume parameters up to `EX_EndFunctionParms`.
+    /// Dispatch a numbered-native call: evaluate the parameter list up to
+    /// `EX_EndFunctionParms`, then run the registered slot body.
+    fn dispatch_native(&mut self, slot: u16) -> VmResult<()> {
+        loop {
+            let peek = *self.code.get(self.pc).ok_or_else(truncated)?;
+            if peek == USToken::EndFunctionParms as u8 {
+                self.pc += 1;
+                break;
+            }
+            self.expr()?;
+        }
+        let body = self.registry.get(slot)?;
+        self.result = body(self)?;
+        Ok(())
+    }
+
     fn eval_parms_and_dispatch(&mut self) -> VmResult<()> {
         loop {
             let peek = *self.code.get(self.pc).ok_or_else(truncated)?;
@@ -636,6 +704,24 @@ impl<'a> Frame<'a> {
         self.pc = end + 1;
         Ok(String::from_utf8_lossy(&self.code[start..end]).into_owned())
     }
+}
+
+/// Fork-undocumented opcode gaps (`UnStack.h` defines nothing here):
+/// hitting one means shipped bytecode uses an encoding this VM does not
+/// model yet — loud, but distinguishable from genuine corruption.
+fn is_undocumented_gap(opcode: u8) -> bool {
+    matches!(opcode, 0x03 | 0x35 | 0x5B..=0x6F)
+}
+
+/// Unknown-opcode failure with a deferral-specific reason when the byte
+/// sits in a fork-undocumented gap.
+fn unknown_token(opcode: u8, at: usize) -> Fail {
+    let code = if is_undocumented_gap(opcode) {
+        "vm.unknown_token_deferrable"
+    } else {
+        "vm.unknown_token"
+    };
+    Fail::new(code, format!("opcode {opcode:#04x} at {at} has no token"))
 }
 
 fn truncated() -> Fail {
@@ -745,17 +831,55 @@ mod tests {
 
     #[test]
     fn unknown_token_fails_loudly() {
-        // 0xFF has no EExprToken; running into it must be a reason-coded
-        // error, never silent progress.
+        // Opcodes at/above EX_FirstNative are numbered-native slots; a
+        // dangling call still fails loudly, never silent progress.
         let arena = ObjectArena::new();
         let registry = registry();
         let mut frame = Frame::new(&arena, &registry, &[0xFF], None);
-        let fail = frame.run().expect_err("0xFF must not execute");
-        assert_eq!(fail.reason_code, "vm.unknown_token");
-        // Same verdict mid-stream, after a valid constant load.
+        let fail = frame
+            .run()
+            .expect_err("dangling native call must not execute");
+        assert_eq!(fail.reason_code, "vm.code_truncated");
+        // A fork-undocumented gap opcode (UnStack.h defines nothing at
+        // 0x03/0x35/0x5B..0x6F) is loud under its deferrable reason.
         let mut frame = Frame::new(&arena, &registry, &[USToken::IntZero as u8, 0x03], None);
         let fail = frame.run().expect_err("0x03 must not execute");
-        assert_eq!(fail.reason_code, "vm.unknown_token");
+        assert_eq!(fail.reason_code, "vm.unknown_token_deferrable");
+    }
+
+    #[test]
+    fn switch_dispatches_to_matched_case_body() {
+        // switch (2) { case 1: return 10; case 2: return 20; }
+        // Record layout: [Case][next u16 pointing at the NEXT Case][expr].
+        let arena = ObjectArena::new();
+        let registry = registry();
+        let mut code = vec![USToken::Switch as u8, 4]; // raw-width compare
+        code.push(USToken::IntConst as u8);
+        code.extend_from_slice(&2i32.to_le_bytes());
+        let case1_at = code.len();
+        code.push(USToken::Case as u8);
+        code.extend_from_slice(&[0, 0]); // patched below
+        code.push(USToken::IntConst as u8);
+        code.extend_from_slice(&1i32.to_le_bytes());
+        code.push(USToken::Return as u8); // case 1 body
+        code.push(USToken::IntConst as u8);
+        code.extend_from_slice(&10i32.to_le_bytes());
+        let case2_at = code.len();
+        code.push(USToken::Case as u8);
+        code.extend_from_slice(&[0xFF, 0xFF]); // default terminator
+        code.push(USToken::IntConst as u8);
+        code.extend_from_slice(&2i32.to_le_bytes());
+        code.push(USToken::Return as u8); // case 2 body (default here)
+        code.push(USToken::IntConst as u8);
+        code.extend_from_slice(&20i32.to_le_bytes());
+        let patch = |c: &mut Vec<u8>, at: usize, next: usize| {
+            c[at + 1..at + 3].copy_from_slice(&(next as u16).to_le_bytes());
+        };
+        patch(&mut code, case1_at, case2_at);
+
+        let mut frame = Frame::new(&arena, &registry, &code, None);
+        let value = frame.run().expect("switch executes");
+        assert_eq!(value, PropValue::Int(20));
     }
 
     #[test]
