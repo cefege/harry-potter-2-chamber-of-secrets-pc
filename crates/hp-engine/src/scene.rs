@@ -106,6 +106,54 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
     let mut polys = Vec::new();
     let mut brushes = 0usize;
     let mut linked = 0usize;
+    let mut referenced_models: std::collections::HashSet<usize> = Default::default();
+
+    // One model export's UPolys -> world-space scene polys under the given
+    // brush transform. Returns the poly count.
+    let push_model_polys = |archive: &PackageArchive,
+                            model_index: usize,
+                            location: [f32; 3],
+                            rotation: [i32; 3],
+                            scale: [f32; 3],
+                            polys: &mut Vec<ScenePoly>|
+     -> Result<usize> {
+        let entry = archive
+            .exports
+            .get(model_index)
+            .ok_or_else(|| EngineError::new("engine.scene_model", "model export missing"))?;
+        if ref_class_text(archive, entry.class_ref) != Some("Model") {
+            return Err(EngineError::new("engine.scene_model", "not a Model export"));
+        }
+        let payload = archive
+            .export_payload(model_index)
+            .ok_or_else(|| EngineError::new("engine.scene_model", "model has no payload"))?;
+        let polys_ref = model_polys_ref(payload, archive, entry.class_ref)?;
+        if polys_ref <= 0 {
+            return Err(EngineError::new("engine.scene_model", "no Polys ref"));
+        }
+        let polys_payload = archive
+            .export_payload(polys_ref as usize - 1)
+            .ok_or_else(|| EngineError::new("engine.scene_model", "Polys payload missing"))?;
+        let parsed = parse_upolys(polys_payload, archive)?;
+        let count = parsed.len();
+        for raw_poly in parsed {
+            polys.push(ScenePoly {
+                base: transform_vertex(location, rotation, scale, raw_poly.base),
+                vertices: raw_poly
+                    .vertices
+                    .iter()
+                    .map(|v| transform_vertex(location, rotation, scale, *v))
+                    .collect(),
+                normal: rotate_only(rotation, raw_poly.normal),
+                tex_u: rotate_only(rotation, raw_poly.tex_u),
+                tex_v: rotate_only(rotation, raw_poly.tex_v),
+                pan_uv: raw_poly.pan_uv,
+                poly_flags: raw_poly.poly_flags,
+                texture: resolve_texture_key(archive, raw_poly.texture_ref),
+            });
+        }
+        Ok(count)
+    };
 
     for &actor in &level.actors {
         if !class_label(arena, actor).eq_ignore_ascii_case("Brush") {
@@ -128,48 +176,65 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
             continue;
         }
         let model_index = raw as usize - 1;
-        let Some(entry) = archive.exports.get(model_index) else {
+        if archive.exports.get(model_index).is_none() {
             continue;
-        };
+        }
+        brushes += 1;
+        referenced_models.insert(model_index);
+        if push_model_polys(archive, model_index, location, rotation, scale, &mut polys).is_ok() {
+            linked += 1;
+        }
+    }
+
+    // The static level geometry: the CSG'd level model is world-space and is
+    // owned by the level itself, not by any Brush actor. Every Model export
+    // no brush references carries level (or orphaned) geometry — add it with
+    // an identity transform.
+    let mut level_models = 0usize;
+    for index in 0..archive.exports.len() {
+        if referenced_models.contains(&index) {
+            continue;
+        }
+        let entry = &archive.exports[index];
         if ref_class_text(archive, entry.class_ref) != Some("Model") {
             continue;
         }
-        let Some(payload) = archive.export_payload(model_index) else {
-            continue;
+        let payload = match archive.export_payload(index) {
+            Some(payload) => payload,
+            None => continue,
         };
-        brushes += 1;
-        let Ok(polys_ref) = model_polys_ref(payload, archive, entry.class_ref) else {
-            continue;
+        let parsed = match parse_model(payload, archive, entry.class_ref) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                eprintln!(
+                    "hp-engine: note [engine.scene_level_model] model export {index}: {error}"
+                );
+                continue;
+            }
         };
-        if polys_ref <= 0 {
+        if parsed.nodes.is_empty() {
+            // No BSP topology — fall back to the Polys path (identity brush).
+            match push_model_polys(archive, index, [0.0; 3], [0; 3], [1.0; 3], &mut polys) {
+                Ok(_) => level_models += 1,
+                Err(error) => {
+                    eprintln!(
+                        "hp-engine: note [engine.scene_level_model] model export {index}: {error}"
+                    );
+                }
+            }
             continue;
         }
-        let Some(polys_payload) = archive.export_payload(polys_ref as usize - 1) else {
-            continue;
-        };
-        let Ok(parsed) = parse_upolys(polys_payload, archive) else {
-            continue;
-        };
-        linked += 1;
-        for raw_poly in parsed {
-            polys.push(ScenePoly {
-                base: transform_vertex(location, rotation, scale, raw_poly.base),
-                vertices: raw_poly
-                    .vertices
-                    .iter()
-                    .map(|v| transform_vertex(location, rotation, scale, *v))
-                    .collect(),
-                normal: rotate_only(rotation, raw_poly.normal),
-                tex_u: rotate_only(rotation, raw_poly.tex_u),
-                tex_v: rotate_only(rotation, raw_poly.tex_v),
-                pan_uv: raw_poly.pan_uv,
-                poly_flags: raw_poly.poly_flags,
-                texture: resolve_texture_key(archive, raw_poly.texture_ref),
-            });
-        }
+        let before = polys.len();
+        push_bsp_polys(&parsed, archive, &mut polys);
+        level_models += 1;
+        println!(
+            "hp-engine: level model {index}: {} nodes -> {} polys",
+            parsed.nodes.len(),
+            polys.len() - before
+        );
     }
     println!(
-        "hp-engine: scene extraction brushes={brushes} linked={linked} polys={}",
+        "hp-engine: scene extraction brushes={brushes} linked={linked} level_models={level_models} polys={}",
         polys.len()
     );
 
@@ -177,6 +242,55 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
         polys,
         camera: find_camera(arena, level),
     })
+}
+
+/// Build world-space scene polys from a CSG'd level model's BSP topology:
+/// each node's vertex pool slices the shared `verts` pool into `points`
+/// positions; its surface carries the texture binding and UV basis (indices
+/// into the model's Vectors/Points). Mirrors openhp1 `Model::triangulate`.
+fn push_bsp_polys(model: &ParsedModel, archive: &PackageArchive, polys: &mut Vec<ScenePoly>) {
+    for node in &model.nodes {
+        if node.vertex_count < 3 {
+            continue;
+        }
+        if node.surface < 0 {
+            continue;
+        }
+        let Some(surf) = model.surfs.get(node.surface as usize) else {
+            continue;
+        };
+        let pool_end = node.vertex_pool + node.vertex_count as usize;
+        if pool_end > model.verts.len() {
+            continue;
+        }
+        let Some(base) = model.points.get(surf.base_point).copied() else {
+            continue;
+        };
+        let (Some(tex_u), Some(tex_v), Some(normal)) = (
+            model.vectors.get(surf.tex_u).copied(),
+            model.vectors.get(surf.tex_v).copied(),
+            model.vectors.get(surf.normal).copied(),
+        ) else {
+            continue;
+        };
+        let vertices: Vec<[f32; 3]> = model.verts[node.vertex_pool..pool_end]
+            .iter()
+            .filter_map(|&p| model.points.get(p).copied())
+            .collect();
+        if vertices.len() < 3 {
+            continue;
+        }
+        polys.push(ScenePoly {
+            base,
+            vertices,
+            normal,
+            tex_u,
+            tex_v,
+            pan_uv: [surf.pan_u as f32, surf.pan_v as f32],
+            poly_flags: surf.poly_flags,
+            texture: resolve_texture_key(archive, surf.texture_ref),
+        });
+    }
 }
 
 /// Brush-local point -> world: MainScale, then rotator, then Location.
@@ -399,16 +513,33 @@ fn parse_one_poly(cur: &mut ByteCursor<'_>) -> PackageResult<RawPoly> {
     })
 }
 
-/// Decode a `UPolys` payload: optional tagged-property prologue, then
-/// `(DbNum, DbMax)`, then `DbNum` brush polygons.
+/// Decode a `UPolys` payload under any observed retail alignment:
+/// optional prologue/terminator, then `(DbNum, DbMax)`, then `DbNum`
+/// brush polygons.
 fn parse_upolys(payload: &[u8], archive: &PackageArchive) -> Result<Vec<RawPoly>> {
-    // Alignments seen in retail maps: tagged-property terminator only
-    // (layout A), HP2 object header + terminator (layout B), or no prologue
-    // at all. Try the canonical alignments first, then brute-force small
-    // offsets; accept the first decode that consumes the payload exactly.
+    // Alignments seen in retail maps: HP2 object-stack prologue (payload
+    // bit 0x80 set: [ci][ci][FF×8][i32][u8 0x81]), tagged-property
+    // terminator only, no prologue at all, or a small constant offset.
+    // Prefer the first NON-EMPTY exact-consumption decode; a wrong
+    // alignment can legitimately decode zero polys and must not mask the
+    // right one.
+    let mut fallback: Option<Vec<RawPoly>> = None;
+    if payload.first().is_some_and(|b| b & 0x80 != 0) {
+        let mut cur = ByteCursor::new(payload);
+        if skip_upolys_prologue(&mut cur) {
+            match parse_upolys_stream(&mut cur, payload) {
+                Ok(polys) if !polys.is_empty() => return Ok(polys),
+                Ok(polys) => fallback = fallback.or(Some(polys)),
+                Err(_) => {}
+            }
+        }
+    }
     for skip_tags in [true, false] {
         if let Ok(polys) = parse_upolys_at(payload, archive, skip_tags) {
-            return Ok(polys);
+            if !polys.is_empty() {
+                return Ok(polys);
+            }
+            fallback = fallback.or(Some(polys));
         }
     }
     for start in 1usize..48 {
@@ -417,13 +548,37 @@ fn parse_upolys(payload: &[u8], archive: &PackageArchive) -> Result<Vec<RawPoly>
         }
         let mut cur = ByteCursor::at(payload, start);
         if let Ok(polys) = parse_upolys_from(&mut cur, payload) {
-            return Ok(polys);
+            if !polys.is_empty() {
+                return Ok(polys);
+            }
+            fallback = fallback.or(Some(polys));
         }
     }
-    Err(EngineError::new(
-        "engine.scene_polys",
-        "no UPolys alignment consumed the payload exactly",
-    ))
+    fallback.ok_or_else(|| {
+        EngineError::new(
+            "engine.scene_polys",
+            "no UPolys alignment consumed the payload exactly",
+        )
+    })
+}
+
+/// Skip the HP2 object-stack prologue on a `UPolys` payload:
+/// `[ci][ci][FF×8][i32][u8 0x81]` (wire spec item 1). Restores the cursor
+/// and returns false when the marker does not match.
+fn skip_upolys_prologue(cur: &mut ByteCursor<'_>) -> bool {
+    let save = cur.position();
+    if read_compact_index(cur).is_err() || read_compact_index(cur).is_err() {
+        cur.seek(save);
+        return false;
+    }
+    let ff8 = cur
+        .take(8)
+        .is_ok_and(|b| b.len() == 8 && b.iter().all(|&x| x == 0xff));
+    let ok = ff8 && cur.i32().is_ok() && cur.u8().is_ok_and(|m| m == 0x81);
+    if !ok {
+        cur.seek(save);
+    }
+    ok
 }
 
 fn parse_upolys_at(
@@ -469,18 +624,60 @@ fn parse_upolys_stream(cur: &mut ByteCursor<'_>, payload: &[u8]) -> PackageResul
     Ok(polys)
 }
 
-/// Object reference a `UModel` export payload carries for its `Polys`
-/// subobject. Per `UModel::Serialize` (Ver>61): tagged-property prologue,
-/// then compact signed refs for Vectors/Points/Nodes/Surfs/Verts, raw
-/// `NumSharedSides`, raw `NumZones`, `NumZones` × `FZoneProperties`
-/// (compact ref, u64 connectivity, u64 visibility — `LastRenderTime` is
-/// dead code in the C++ serializer), then the `Polys` object ref.
+/// One decoded `FBspNode` record: the fields scene extraction needs.
+#[derive(Debug, Clone)]
+pub(crate) struct BspNodeData {
+    pub vertex_pool: usize,
+    pub vertex_count: u8,
+    pub surface: i32,
+}
+
+/// One decoded `FBspSurf` record: texture binding and UV basis as indices
+/// into the model's Vectors/Points arrays.
+#[derive(Debug, Clone)]
+pub(crate) struct BspSurfData {
+    pub texture_ref: i32,
+    pub poly_flags: u32,
+    pub base_point: usize,
+    pub normal: usize,
+    pub tex_u: usize,
+    pub tex_v: usize,
+    pub pan_u: i16,
+    pub pan_v: i16,
+}
+
+/// A fully decoded `UModel` payload: the BSP topology arrays plus the
+/// `Polys` subobject reference. Brush models carry empty BSP arrays and all
+/// geometry in `Polys`; the CSG'd level model carries its world geometry in
+/// the BSP arrays and an (often empty) `Polys`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ParsedModel {
+    pub vectors: Vec<[f32; 3]>,
+    pub points: Vec<[f32; 3]>,
+    pub nodes: Vec<BspNodeData>,
+    pub surfs: Vec<BspSurfData>,
+    /// Vertex pool: `FVert.pVertex` index into `points` (the `iSide` is
+    /// topology-only and unused for rendering).
+    pub verts: Vec<usize>,
+    pub polys_ref: i32,
+}
+
 pub(crate) fn model_polys_ref(
+    payload: &[u8],
+    archive: &PackageArchive,
+    class_ref: i32,
+) -> Result<i32> {
+    parse_model(payload, archive, class_ref).map(|model| model.polys_ref)
+}
+
+/// Decode one `UModel` export payload (grammar per `UModel::Serialize`,
+/// HP2 deltas validated by exact consumption across the shipped maps).
+pub(crate) fn parse_model(
     payload: &[u8],
     _archive: &PackageArchive,
     class_ref: i32,
-) -> Result<i32> {
-    let decoded: PackageResult<i32> = (|| {
+) -> Result<ParsedModel> {
+    let decoded: PackageResult<ParsedModel> = (|| {
         let mut cur = ByteCursor::new(payload);
         crate::level::skip_object_header(&mut cur, class_ref);
         // Tagged-property terminator ("None"); models carry no properties.
@@ -492,48 +689,94 @@ pub(crate) fn model_polys_ref(
         let _a = cur.i32()?;
         let _b9_reserved = cur.take(9)?;
         let _c_radius = read_f32_scalar(&mut cur)?;
+        let mut model = ParsedModel::default();
         // Vectors / Points TArray<FVector>.
-        for _ in 0..2 {
+        for sink in [&mut model.vectors, &mut model.points] {
             let n = read_compact_index(&mut cur)?;
+            sink.reserve(n.max(0) as usize);
             for _ in 0..n {
-                for _ in 0..3 {
-                    let _ = read_f32_scalar(&mut cur)?;
-                }
+                sink.push(read_f32x3(&mut cur)?);
             }
         }
-        // Nodes TArray<FBspNode>.
+
+        // Nodes TArray<FBspNode>: Plane f32x4, ZoneMask u32, NodeFlags u32,
+        // 1 reserved byte, then SEVEN compact refs (iVertPool, iSurf, back,
+        // front, plane, collision_bound, render_bound), iZone 2 bytes,
+        // NumVertices u8, iLeaf 2 x i32. Layout brute-force-validated on
+        // Model1 (3306 nodes: unique per-node pools, surf refs in range,
+        // exact stream alignment).
         let nodes = read_compact_index(&mut cur)?;
+        model.nodes.reserve(nodes.max(0) as usize);
         for _ in 0..nodes {
             for _ in 0..4 {
-                let _ = read_f32_scalar(&mut cur)?; // Plane f32x4
+                let _ = read_f32_scalar(&mut cur)?;
             }
-            let _zone_mask = cur.i32()?;
-            let _node_flags = cur.i32()?;
-            let _izones_mystery = cur.take(3)?; // iZone[0], iZone[1], mystery byte
-            for _ in 0..7 {
-                let _ = read_compact_index(&mut cur)?;
+            let _zone_mask_and_flags: [u8; 9] =
+                cur.take(9)?
+                    .try_into()
+                    .map_err(|_| PackageError::BadLayout {
+                        detail: "node zone mask".into(),
+                    })?;
+            let mut refs = [0i32; 7];
+            for slot in &mut refs {
+                *slot = read_compact_index(&mut cur)?;
             }
-            let _num_vertices = cur.u8()?;
+            let _izones: [u8; 2] =
+                cur.take(2)?
+                    .try_into()
+                    .map_err(|_| PackageError::BadLayout {
+                        detail: "node izones".into(),
+                    })?;
+            let vertex_count = cur.u8()?;
             let _leaf_back = cur.i32()?;
             let _leaf_front = cur.i32()?;
+            model.nodes.push(BspNodeData {
+                vertex_pool: refs[0].max(0) as usize,
+                vertex_count,
+                surface: refs[1],
+            });
         }
-        // Surfs TArray<FBspSurf>.
+        // Surfs TArray<FBspSurf>: compact texture ref, u32 PolyFlags, six
+        // compact refs (base_point, normal, tex_u, tex_v, light_map,
+        // brush_poly), i16 PanU/PanV, compact actor ref.
         let surfs = read_compact_index(&mut cur)?;
+        model.surfs.reserve(surfs.max(0) as usize);
         for _ in 0..surfs {
-            let _texture = read_compact_index(&mut cur)?;
-            let _poly_flags = cur.u32()?;
-            for _ in 0..6 {
-                let _ = read_compact_index(&mut cur)?;
+            let texture = read_compact_index(&mut cur)?;
+            let poly_flags = cur.u32()?;
+            let mut refs = [0i32; 6];
+            for slot in &mut refs {
+                *slot = read_compact_index(&mut cur)?;
             }
-            let _pan_u = cur.u16()?;
-            let _pan_v = cur.u16()?;
+            let pan_u = i16::from_le_bytes(cur.take(2)?.try_into().map_err(|_| {
+                PackageError::BadLayout {
+                    detail: "surf pan u".into(),
+                }
+            })?);
+            let pan_v = i16::from_le_bytes(cur.take(2)?.try_into().map_err(|_| {
+                PackageError::BadLayout {
+                    detail: "surf pan v".into(),
+                }
+            })?);
             let _actor = read_compact_index(&mut cur)?;
+            model.surfs.push(BspSurfData {
+                texture_ref: texture,
+                poly_flags,
+                base_point: refs[0].max(0) as usize,
+                normal: refs[1].max(0) as usize,
+                tex_u: refs[2].max(0) as usize,
+                tex_v: refs[3].max(0) as usize,
+                pan_u,
+                pan_v,
+            });
         }
         // Verts TArray<FVert>: two compact indices each.
         let verts = read_compact_index(&mut cur)?;
+        model.verts.reserve(verts.max(0) as usize);
         for _ in 0..verts {
-            let _p_vertex = read_compact_index(&mut cur)?;
+            let p_vertex = read_compact_index(&mut cur)?;
             let _i_side = read_compact_index(&mut cur)?;
+            model.verts.push(p_vertex.max(0) as usize);
         }
         let _num_shared_sides = cur.i32()?;
         let num_zones = cur.i32()?;
@@ -559,7 +802,8 @@ pub(crate) fn model_polys_ref(
             let _ = (conn, vis);
         }
         // THE LINKAGE FIELD.
-        read_compact_index(&mut cur)
+        model.polys_ref = read_compact_index(&mut cur)?;
+        Ok(model)
     })();
     decoded.map_err(|error| EngineError::new("engine.scene_model", error.to_string()))
 }
@@ -705,7 +949,6 @@ mod tests {
         assert_eq!(error.reason_code, "engine.scene_no_map");
     }
 }
-
 #[cfg(test)]
 mod linkprobe {
     use super::*;
@@ -763,6 +1006,24 @@ mod linkprobe {
         }
         println!("small_models={small_total} windowed_polys_hits={small_hit}");
         println!("big(level)models={big}");
+    }
+
+    #[test]
+    fn giant_poly_vertices() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let level =
+            crate::level::load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes).unwrap();
+        let scene = build_render_scene(&world.arena, &level).unwrap();
+        for i in [883usize, 884, 2268] {
+            let p = &scene.polys[i];
+            println!("poly#{i} base={:?} normal={:?}", p.base, p.normal);
+            for v in &p.vertices {
+                println!("  v {v:?}");
+            }
+            println!("  tex_u={:?} tex_v={:?}", p.tex_u, p.tex_v);
+        }
     }
 }
 
@@ -994,5 +1255,398 @@ mod tagprobe {
                 break;
             }
         }
+    }
+}
+
+/// G4 structural acceptance: numeric correctness of scene extraction,
+/// per the phase gate. These tests encode the wire facts directly and do
+/// not depend on pixels.
+#[cfg(test)]
+mod g4_structural {
+    use super::*;
+    use std::path::PathBuf;
+
+    struct Loaded {
+        world: hp_uobject::bootstrap::World,
+        level: Level,
+        scene: RenderScene,
+    }
+
+    fn load(map: &str) -> Loaded {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let bytes = std::fs::read(root.join(format!("Maps/{map}.unr"))).unwrap();
+        let level = crate::level::load_level_from_bytes(&mut world.arena, map, &bytes).unwrap();
+        let scene = build_render_scene(&world.arena, &level).unwrap();
+        Loaded {
+            world,
+            level,
+            scene,
+        }
+    }
+
+    /// Independent brush-transform reimplementation (documented rule:
+    /// world = Location + R(yaw,pitch,roll) · (MainScale ∘ v)) used to
+    /// cross-check `transform_vertex`.
+    fn hand_transform(
+        location: [f32; 3],
+        rotation: [i32; 3],
+        scale: [f32; 3],
+        v: [f32; 3],
+    ) -> [f32; 3] {
+        let rad = |u: i32| u as f32 * std::f32::consts::TAU / 65536.0;
+        let (sy, cy) = rad(rotation[1]).sin_cos();
+        let (sp, cp) = rad(rotation[0]).sin_cos();
+        let (sr, cr) = rad(rotation[2]).sin_cos();
+        let s = [v[0] * scale[0], v[1] * scale[1], v[2] * scale[2]];
+        // Rz(yaw) · Ry(pitch) · Rx(roll), column-vector convention.
+        let x = cy * cp * s[0] + (cy * sp * sr - sy * cr) * s[1] + (cy * sp * cr + sy * sr) * s[2];
+        let y = sy * cp * s[0] + (sy * sp * sr + cy * cr) * s[1] + (sy * sp * cr - cy * sr) * s[2];
+        let z = -sp * s[0] + cp * sr * s[1] + cp * cr * s[2];
+        [x + location[0], y + location[1], z + location[2]]
+    }
+
+    fn close(a: [f32; 3], b: [f32; 3], eps: f32) -> bool {
+        a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() <= eps)
+    }
+
+    /// (1) Brush transforms: hand-computed world vertices for five brushes
+    /// (including Brush423 with non-default placement) must appear in the
+    /// scene output.
+    #[test]
+    fn brush_transforms_match_hand_computed_world_vertices() {
+        let Loaded {
+            world,
+            level,
+            scene,
+        } = load("PrivetDr");
+        let arena = &world.arena;
+        let archive = level.archive.as_ref().unwrap();
+
+        let mut checked = 0usize;
+        let mut matched_polys = 0usize;
+        let mut saw_423 = false;
+        let mut total_polys = 0usize;
+        for &actor in &level.actors {
+            if !class_label(arena, actor).eq_ignore_ascii_case("Brush") {
+                continue;
+            }
+            let name = arena.display_name(actor).unwrap_or_default().to_string();
+            if name == "Brush423" {
+                saw_423 = true;
+            } else if checked >= 4 {
+                continue;
+            }
+            let obj = arena.get(actor).unwrap();
+            let Some(store) = obj.properties() else {
+                continue;
+            };
+            let location = struct_vec3(store, arena, "Location").unwrap();
+            let rotation = struct_ints(store, arena, "Rotation").unwrap_or([0; 3]);
+            let scale = struct_vec3(store, arena, "MainScale").unwrap_or([1.0; 3]);
+            if name == "Brush423" {
+                // Documented retail placement for Brush423.
+                assert!(
+                    close(location, [7760.0, 352.0, 208.0], 0.5),
+                    "Brush423 Location {location:?}"
+                );
+            }
+            let Some(PropValue::Object(Some(raw))) =
+                arena.names.find_index("Brush").and_then(|n| store.get(n))
+            else {
+                continue;
+            };
+            let model_index = *raw as usize - 1;
+            let payload = archive.export_payload(model_index).unwrap();
+            let model = parse_model(payload, archive, archive.exports[model_index].class_ref)
+                .expect("brush model parses");
+            let polys_payload = archive
+                .export_payload(model.polys_ref as usize - 1)
+                .unwrap();
+            let raw_polys = parse_upolys(polys_payload, archive).unwrap();
+            total_polys += raw_polys.len();
+            for raw in &raw_polys {
+                let world_verts: Vec<[f32; 3]> = raw
+                    .vertices
+                    .iter()
+                    .map(|v| hand_transform(location, rotation, scale, *v))
+                    .collect();
+                let all_found = world_verts.iter().all(|wv| {
+                    scene
+                        .polys
+                        .iter()
+                        .any(|sp| sp.vertices.iter().any(|sv| close(*sv, *wv, 0.5)))
+                });
+                if all_found {
+                    matched_polys += 1;
+                }
+            }
+            checked += 1;
+        }
+        assert!(saw_423, "Brush423 checked");
+        assert!(checked >= 4, "four ordinary brushes checked, got {checked}");
+        assert!(
+            matched_polys >= total_polys * 9 / 10,
+            "hand-computed polys matched {matched_polys}/{total_polys}"
+        );
+        println!(
+            "[g4] brush transforms: {checked} brushes, {matched_polys}/{total_polys} polys matched hand-computed world vertices"
+        );
+    }
+
+    /// (2) Camera: the scene camera is the PlayerStart placement, exactly.
+    #[test]
+    fn camera_is_playerstart_placement() {
+        let Loaded {
+            world,
+            level,
+            scene,
+        } = load("PrivetDr");
+        let arena = &world.arena;
+        let mut expected = None;
+        for &actor in &level.actors {
+            if class_label(arena, actor).eq_ignore_ascii_case("PlayerStart") {
+                let store = arena.get(actor).unwrap().properties().unwrap();
+                expected = Some((
+                    struct_vec3(store, arena, "Location").unwrap_or([0.0; 3]),
+                    struct_ints(store, arena, "Rotation").unwrap_or([0; 3]),
+                ));
+                break;
+            }
+        }
+        let (location, rotation) = expected.expect("PlayerStart present");
+        let cam = scene.camera.expect("camera resolved");
+        assert!(
+            close(cam.location, location, 0.01),
+            "camera {:?} != PlayerStart {:?}",
+            cam.location,
+            location
+        );
+        assert_eq!(
+            cam.rotation, rotation,
+            "camera rotation != PlayerStart rotation"
+        );
+        println!(
+            "[g4] camera: PlayerStart Location={location:?} Rotation={rotation:?} == scene camera {:?}/{:?}",
+            cam.location, cam.rotation
+        );
+    }
+
+    /// (3) Coverage: every Model export is either brush-referenced or a
+    /// level model, and the scene poly total equals the sum of per-model
+    /// decoded poly counts.
+    #[test]
+    fn coverage_all_models_present() {
+        let Loaded {
+            world,
+            level,
+            scene,
+        } = load("PrivetDr");
+        let arena = &world.arena;
+        let archive = level.archive.as_ref().unwrap();
+
+        let mut referenced: std::collections::HashSet<usize> = Default::default();
+        for &actor in &level.actors {
+            if !class_label(arena, actor).eq_ignore_ascii_case("Brush") {
+                continue;
+            }
+            let Some(store) = arena.get(actor).unwrap().properties() else {
+                continue;
+            };
+            if let Some(PropValue::Object(Some(raw))) =
+                arena.names.find_index("Brush").and_then(|n| store.get(n))
+                && *raw > 0
+            {
+                referenced.insert(*raw as usize - 1);
+            }
+        }
+
+        let mut model_exports = 0usize;
+        let mut expected_polys = 0usize;
+        for index in 0..archive.exports.len() {
+            let entry = &archive.exports[index];
+            if ref_class_text(archive, entry.class_ref) != Some("Model") {
+                continue;
+            }
+            model_exports += 1;
+            let Some(payload) = archive.export_payload(index) else {
+                continue;
+            };
+            let Ok(model) = parse_model(payload, archive, entry.class_ref) else {
+                continue;
+            };
+            if !model.nodes.is_empty() {
+                // Level model: one scene poly per renderable node.
+                expected_polys += model
+                    .nodes
+                    .iter()
+                    .filter(|n| {
+                        n.vertex_count >= 3
+                            && n.surface >= 0
+                            && (n.surface as usize) < model.surfs.len()
+                            && n.vertex_pool + n.vertex_count as usize <= model.verts.len()
+                    })
+                    .count();
+            } else if model.polys_ref > 0
+                && let Some(polys_payload) =
+                    archive.export_payload(model.polys_ref as usize - 1)
+                && let Ok(raw) = parse_upolys(polys_payload, archive)
+            {
+                expected_polys += raw.len();
+            }
+        }
+
+        let unreferenced = model_exports - referenced.len();
+        assert!(
+            unreferenced <= 8,
+            "unexpected orphan models: {unreferenced} of {model_exports}"
+        );
+        assert_eq!(
+            scene.polys.len(),
+            expected_polys,
+            "scene poly total != sum of per-model decoded counts"
+        );
+        println!(
+            "[g4] coverage: {model_exports} model exports, {} brush-referenced, {unreferenced} level/orphan, scene polys={} == decoded sum {expected_polys}",
+            referenced.len(),
+            scene.polys.len()
+        );
+    }
+
+    /// (4) Winding: each ScenePoly's stored normal agrees with the vertex
+    /// order (cross(v1-v0, v2-v0) · normal > 0).
+    #[test]
+    fn winding_matches_normal_everywhere() {
+        let Loaded {
+            world,
+            level,
+            scene,
+        } = load("PrivetDr");
+        let _ = (&world, &level);
+        let mut agree = 0usize;
+        for poly in &scene.polys {
+            if poly.vertices.len() < 3 {
+                continue;
+            }
+            // Newell's method: robust for near-collinear leading vertices
+            // (fan-triangulated records often start with collinear edges).
+            let mut n = [0.0f32; 3];
+            for i in 0..poly.vertices.len() {
+                let a = poly.vertices[i];
+                let b = poly.vertices[(i + 1) % poly.vertices.len()];
+                n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+                n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+                n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+            }
+            let mag2 = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
+            if mag2 < 1.0 {
+                // Degenerate (zero-area) records carry no winding contract.
+                continue;
+            }
+            let d = n[0] * poly.normal[0] + n[1] * poly.normal[1] + n[2] * poly.normal[2];
+            if d <= 0.0 {
+                panic!(
+                    "winding disagrees: normal={:?} newell={:?} verts={:?} flags={:08x}",
+                    poly.normal, n, poly.vertices, poly.poly_flags
+                );
+            }
+            agree += 1;
+        }
+        println!("[g4] winding: {agree} polys cross==normal, 0 disagree");
+    }
+
+    /// (5) Textures: every poly's texture ref resolves or is loudly
+    /// counted; UVs on one known poly stay in a sane texel range.
+    #[test]
+    fn textures_resolve_and_uv_sane() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Loaded {
+            world,
+            level,
+            scene,
+        } = load("PrivetDr");
+        let arena = &world.arena;
+        let none_count = scene.polys.iter().filter(|p| p.texture.is_none()).count();
+        let mut store = crate::utx::TextureStore::new(&root);
+        let mut resolved = 0usize;
+        let mut loud: std::collections::HashMap<String, usize> = Default::default();
+        for key in scene.polys.iter().filter_map(|p| p.texture.as_ref()) {
+            if store.resolve(key).is_ok() {
+                resolved += 1;
+            } else {
+                *loud.entry(key.package.clone()).or_insert(0) += 1;
+            }
+        }
+        assert!(none_count <= 8, "{none_count} polys carry no texture ref");
+        assert!(
+            resolved > scene.polys.len() * 9 / 10,
+            "only {resolved}/{} textures resolve",
+            scene.polys.len()
+        );
+        println!(
+            "[g4] textures: {resolved}/{} resolved, loud fallbacks {loud:?}, no-ref {none_count}",
+            scene.polys.len()
+        );
+
+        // UV sanity on Brush423's first poly: dot(P-Base, TexU/V)/size - pan
+        // must be finite and bounded for a real wall texture.
+        let archive = level.archive.as_ref().unwrap();
+        let mut uv_max = 0.0f32;
+        let mut sampled = 0usize;
+        'outer: for &actor in &level.actors {
+            if !class_label(arena, actor).eq_ignore_ascii_case("Brush") {
+                continue;
+            }
+            if arena.display_name(actor).unwrap_or_default() != "Brush423" {
+                continue;
+            }
+            let store = arena.get(actor).unwrap().properties().unwrap();
+            let raw = match arena.names.find_index("Brush").and_then(|n| store.get(n)) {
+                Some(PropValue::Object(Some(raw))) => *raw,
+                _other => {
+                    break;
+                }
+            };
+            let payload = archive.export_payload(raw as usize - 1).unwrap();
+            let model = parse_model(
+                payload,
+                archive,
+                archive.exports[raw as usize - 1].class_ref,
+            )
+            .unwrap();
+            let polys_payload = archive
+                .export_payload(model.polys_ref as usize - 1)
+                .unwrap();
+            let parsed = parse_upolys(polys_payload, archive).unwrap();
+            for raw_poly in &parsed {
+                let size = 256.0f32; // mip-0 wall texture size class
+                for v in raw_poly.vertices.iter().take(2) {
+                    let d = [
+                        v[0] - raw_poly.base[0],
+                        v[1] - raw_poly.base[1],
+                        v[2] - raw_poly.base[2],
+                    ];
+                    let u = (d[0] * raw_poly.tex_u[0]
+                        + d[1] * raw_poly.tex_u[1]
+                        + d[2] * raw_poly.tex_u[2]
+                        - raw_poly.pan_uv[0])
+                        / size;
+                    let w = (d[0] * raw_poly.tex_v[0]
+                        + d[1] * raw_poly.tex_v[1]
+                        + d[2] * raw_poly.tex_v[2]
+                        - raw_poly.pan_uv[1])
+                        / size;
+                    assert!(u.is_finite() && w.is_finite(), "UV not finite");
+                    uv_max = uv_max.max(u.abs()).max(w.abs());
+                    sampled += 1;
+                }
+                if sampled >= 2 {
+                    break 'outer;
+                }
+            }
+        }
+        assert!(sampled >= 2, "sampled a known poly's UVs");
+        assert!(uv_max < 64.0, "UV magnitude {uv_max} out of sane range");
+        println!("[g4] UVs: Brush423 first-poly |uv|max={uv_max} (sampled {sampled})");
     }
 }

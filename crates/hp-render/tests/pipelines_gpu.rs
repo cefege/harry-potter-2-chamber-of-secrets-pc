@@ -55,7 +55,8 @@ fn quad_mesh(ctx: &GpuContext, color: [f32; 4], unfogged: f32) -> MeshGpu {
             unfogged,
         })
         .collect();
-    let indices: Vec<u16> = vec![0, 1, 2, 0, 2, 3];
+    // Front = CW under the left-handed screen basis (see PipelineSet).
+    let indices: Vec<u16> = vec![0, 2, 1, 0, 3, 2];
     MeshGpu {
         vertex_buffer: upload_pod(ctx, pod_bytes(&verts), wgpu::BufferUsages::VERTEX),
         index_buffer: upload_pod(ctx, pod_bytes(&indices), wgpu::BufferUsages::INDEX),

@@ -374,18 +374,30 @@ fn pass_uniforms(camera: &SceneCamera) -> PassUniforms {
     let a = FAR_PLANE / (FAR_PLANE - NEAR_PLANE);
     let b = -NEAR_PLANE * FAR_PLANE / (FAR_PLANE - NEAR_PLANE);
 
-    // Row-major composition of P * V; transposed into WGSL's column-major
-    // array below.
+    // Row-major clip matrix applied by the shader as clip[j] = row_j · v.
+    // Row i is the full dot-product row of the i-th clip component:
+    // x' = right·(v-eye)/tan_h, y' = up·(v-eye)/tan_v,
+    // z' = a·(f·v-eye)+b, w' = f·(v-eye).
     let row_major: [[f32; 4]; 4] = [
-        [right[0] / tan_h, up[0] / tan_v, forward[0] * a, 0.0],
-        [right[1] / tan_h, up[1] / tan_v, forward[1] * a, 0.0],
-        [right[2] / tan_h, up[2] / tan_v, forward[2] * a, 0.0],
         [
+            right[0] / tan_h,
+            right[1] / tan_h,
+            right[2] / tan_h,
             -dot(&right, &eye) / tan_h,
-            -dot(&up, &eye) / tan_v,
-            b - a * dot(&forward, &eye),
-            1.0,
         ],
+        [
+            up[0] / tan_v,
+            up[1] / tan_v,
+            up[2] / tan_v,
+            -dot(&up, &eye) / tan_v,
+        ],
+        [
+            forward[0] * a,
+            forward[1] * a,
+            forward[2] * a,
+            b - a * dot(&forward, &eye),
+        ],
+        [forward[0], forward[1], forward[2], -dot(&forward, &eye)],
     ];
     let mut view_proj = [0.0f32; 16];
     for (row, values) in row_major.iter().enumerate() {
@@ -460,19 +472,25 @@ mod tests {
             }),
         };
         // A wall at x=+128 facing the camera, 4 verts, P8-indexed texture.
-        let quad = |x: f32| {
-            vec![
+        // Vertex order must satisfy cross(v1-v0, v2-v0) == normal (the
+        // wire convention; front = CW under the left-handed screen basis).
+        let quad = |x: f32, flip: bool| {
+            let mut v = vec![
                 [x, -64.0, -64.0],
                 [x, 64.0, -64.0],
                 [x, 64.0, 64.0],
                 [x, -64.0, 64.0],
-            ]
+            ];
+            if flip {
+                v.reverse();
+            }
+            v
         };
-        for x in [0.0f32, 256.0] {
+        for (x, normal_x, flip) in [(0.0f32, 1.0, false), (256.0, -1.0, true)] {
             scene.polys.push(crate::scene::ScenePoly {
                 base: [x, -64.0, -64.0],
-                vertices: quad(x),
-                normal: [if x == 0.0 { 1.0 } else { -1.0 }, 0.0, 0.0],
+                vertices: quad(x, flip),
+                normal: [normal_x, 0.0, 0.0],
                 tex_u: [0.0, 1.0 / 16.0, 0.0],
                 tex_v: [0.0, 0.0, 1.0 / 16.0],
                 pan_uv: [0.0, 0.0],
@@ -551,9 +569,16 @@ mod tests {
         session.render_frame();
         let first = session.read_pixels_bgra();
         assert_eq!(first.len(), (VIEWPORT_WIDTH * VIEWPORT_HEIGHT * 4) as usize);
+        // Non-vacuous: count pixels whose RGB differs from the black
+        // backdrop (the alpha byte is always 255 and must not satisfy
+        // this check).
+        let lit_pixels = first
+            .chunks_exact(4)
+            .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+            .count();
         assert!(
-            first.iter().any(|&b| b != 0),
-            "frame must contain lit pixels"
+            lit_pixels > (VIEWPORT_WIDTH * VIEWPORT_HEIGHT) as usize / 50,
+            "frame must contain a substantial lit region, got {lit_pixels} pixels"
         );
 
         session.render_frame();

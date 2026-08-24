@@ -393,7 +393,10 @@ impl PipelineSet {
                         },
                         primitive: wgpu::PrimitiveState {
                             topology: wgpu::PrimitiveTopology::TriangleList,
-                            front_face: wgpu::FrontFace::Ccw,
+                            // Screen basis (right, up, forward) is left-handed
+                            // (UE1/D3D style): a surface whose normal faces the
+                            // camera projects CLOCKWISE, so front = CW.
+                            front_face: wgpu::FrontFace::Cw,
                             cull_mode: Some(wgpu::Face::Back),
                             ..Default::default()
                         },

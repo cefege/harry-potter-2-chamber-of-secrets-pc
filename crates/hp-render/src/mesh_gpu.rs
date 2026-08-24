@@ -130,11 +130,12 @@ pub fn build_mesh(
             }
         }
     }
-    // Faces are wound as authored (UE1 CCW front faces); index order is a
-    // straight wedge-list expansion per triangle.
+    // Front faces are CLOCKWISE in screen space under the left-handed
+    // (right, up, forward) view basis — same convention as PipelineSet.
+    // Wire faces are authored CCW-front, so expand reversed.
     let mut indices: Vec<u16> = Vec::with_capacity(faces.len() * 3);
     for face in faces {
-        indices.extend_from_slice(&face.i_wedge);
+        indices.extend_from_slice(&[face.i_wedge[0], face.i_wedge[2], face.i_wedge[1]]);
     }
 
     let vertex_label = format!("{label} vertices");
@@ -203,7 +204,8 @@ pub fn billboard_quad(
         corner(1.0, 1.0, uv_rect[2]),
         corner(-1.0, 1.0, uv_rect[3]),
     ];
-    (corners, [0, 1, 2, 0, 2, 3])
+    // Front = CW under the left-handed screen basis (see PipelineSet).
+    (corners, [0, 2, 1, 0, 3, 2])
 }
 
 #[cfg(test)]
@@ -247,7 +249,7 @@ mod tests {
             [1.0, 1.0, 1.0, 0.5],
             1.0,
         );
-        assert_eq!(idx, [0, 1, 2, 0, 2, 3]);
+        assert_eq!(idx, [0, 2, 1, 0, 3, 2]);
         assert_eq!(verts[0].position, [8.0, 19.0, 30.0]);
         assert_eq!(verts[1].position, [12.0, 19.0, 30.0]);
         assert_eq!(verts[2].position, [12.0, 21.0, 30.0]);

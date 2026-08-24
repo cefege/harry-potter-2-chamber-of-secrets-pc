@@ -291,25 +291,6 @@ impl Engine {
                 Some(found) => *found,
                 None => {
                     let found = arena.find_function(class_id, event)?;
-                    if event == "Tick" {
-                        match &found {
-                            Some(fid) => {
-                                let obj = arena.get(*fid)?;
-                                if let ObjectData::Function(f) = &obj.data {
-                                    eprintln!(
-                                        "PROBE res class={:?} fn={:?} len={} head={:02x?}",
-                                        arena.path_of(class_id),
-                                        arena.path_of(*fid),
-                                        f.code.len(),
-                                        &f.code[..f.code.len().min(16)]
-                                    );
-                                } else {
-                                    eprintln!("PROBE res class={:?} fn={:?} NOT-FUNCTION", arena.path_of(class_id), arena.path_of(*fid));
-                                }
-                            }
-                            None => eprintln!("PROBE res class={:?} fn=None", arena.path_of(class_id)),
-                        }
-                    }
                     self.script_lookup.insert(key.clone(), found);
                     found
                 }
@@ -317,20 +298,6 @@ impl Engine {
             let Some(function_id) = function_id else {
                 continue;
             };
-            if event == "Tick" && arena.path_of(function_id).map(|p| p.contains("Mover.Tick")).unwrap_or(false) {
-                let obj = arena.get(function_id)?;
-                eprintln!(
-                    "PROBE Tick fn={} path={:?} class={:?}",
-                    function_id.0,
-                    arena.path_of(function_id),
-                    arena.path_of(class_id)
-                );
-                if let ObjectData::Function(f) = &obj.data {
-                    eprintln!("PROBE code_len={} full={:02x?}", f.code.len(), f.code);
-                } else {
-                    eprintln!("PROBE data={:?}", std::mem::discriminant(&obj.data));
-                }
-            }
             let ObjectData::Function(function) = &arena.get(function_id)?.data else {
                 continue;
             };

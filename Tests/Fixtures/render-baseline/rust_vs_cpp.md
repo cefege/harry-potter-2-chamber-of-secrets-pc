@@ -1,91 +1,97 @@
-# Rust vs C++ render baseline — G4 status (TrackG2, verified)
+# Rust vs C++ render baseline — G4 status (TrackG2, verified post-fix)
 
 ## Status: G4 COMPLETE — real rendering in hp2rs smoke mode, all gates
-## evidenced by direct runs on this branch (option-a-publishable)
+## re-evidenced after three root-cause fixes (2026-08-25 session)
 
-Retail HP2 maps ship **editor-template geometry**: ~518 `Engine.Model`
-exports and **zero** prebuilt BSP (`Nodes`/`Surfs`/`Verts` exports absent).
-Each brush's polygons live in root-level `UPolys` exports (`outer=0`,
-names like `Polys76`). World geometry = brush polygons transformed by the
-owning brush actor's `Location`/`Rotation`/`MainScale`.
+Retail HP2 maps ship editor-template geometry for brushes PLUS one CSG'd
+level model carrying the static world. Scene extraction covers both:
 
-### Verified wire facts (this branch)
+- Brush actors → `Brush` object property → Model export → `Polys` ci →
+  UPolys/FPoly wire decode → brush-transformed world polys.
+- The unreferenced level model (e.g. Model1, 713 KB in PrivetDr) → full
+  BSP topology (Vectors/Points/Nodes/Surfs/Verts) → world-space polys
+  from node vertex pools, textured via surf records (openhp1
+  `Model::triangulate` approach).
 
-- `FPoly` wire (HP2 deltas vs stock): compact NumVertices; Base/Normal/
-  TexU/TexV f32×3; verts; u32 PolyFlags; compact Actor ref; compact
-  Texture ref; **one compact ItemName index (no number word)**; compact
-  iLink/iBrushPoly; i16 PanU/PanV. Validated by exact-payload-consumption
-  (`parse_upolys`, gated on consuming the payload exactly).
-- UModel → Polys linkage (validated on all 517 brush models across the
-  trio, 100% linkage): optional binary object-stack prologue (present iff
-  `payload[0] & 0x80`): `[ci class_ref][ci class_ref][FF×8][i32 V][u8
-  0x81]`; then tagged properties to `None`; then Bounds f32×6, i32,
-  9 reserved bytes, f32 C, five empty TArray counts (Vectors/Points/
-  Nodes/Surfs/Verts — retail maps ship no BSP), `NumSharedSides` i32,
-  `NumZones` i32 (+ 17 B/zone), then **one compact object reference to
-  the root-level `Polys` export** (1-based, 1:1 model↔polys).
-- Texture refs resolve through import outer chains to shipped `.utx`
-  packages (HP2_Master, PrivetDrive, SkyBox, CVresearch, GenFX);
-  2374/2374 shipped content textures decode as P8+palette or DXT1.
-- Brush `Location`/`Rotation`/`MainScale`/`PostScale` live on the brush
-  actor's tagged properties (`Brush` object property → Model export →
-  Polys ci → geometry); placement structs decode by declared struct name.
+### Root-cause fixes landed this session
+
+1. **View-projection matrix was transposed** (`render_bridge::pass_uniforms`):
+   rows were built from basis-vector COMPONENTS (`[right.x, up.x,
+   forward.x·a, 0]`) with the translation in the wrong row, so the shader's
+   `clip[j] = row_j · v` produced `w = (b − a·f·eye)·v.z + 1` — every world
+   collapsed into wedges radiating from a vanishing point; only huge polys
+   survived. Rows are now the full dot-product rows
+   (`x' = right·(v−eye)/tan_h`, `y' = up·(v−eye)/tan_v`,
+   `z' = a·(f·v−eye)+b`, `w' = f·(v−eye)`).
+2. **Winding/cull convention**: under the (now correct) left-handed screen
+   basis a surface whose normal faces the camera projects CLOCKWISE, so the
+   pipelines use `FrontFace::Cw` + `cull_mode: Back` (UE1/D3D-style).
+   Verified empirically: interiors show wall faces, top-down shows
+   roofs/ground. hp-render's own GPU tests and billboard/build_mesh
+   geometry were re-wound to the same convention.
+3. **Level-model extraction + two wire-format gaps**: (a) `FBspNode` is
+   `Plane f32×4 + ZoneMask u32 + NodeFlags u32 + 1 reserved byte + SEVEN
+   compact refs (iVertPool, iSurf, back, front, plane, collision_bound,
+   render_bound) + iZone 2B + NumVertices u8 + iLeaf 2×i32`
+   (brute-force-validated on Model1's 3306 nodes; the openhp1 9-ci reading
+   and the earlier "mystery byte" reading were both misparses);
+   (b) some `UPolys` payloads carry the HP2 object-stack prologue
+   (`[ci][ci][FF×8][i32][u8 0x81]`, wire-spec item 1) and `parse_upolys`
+   now tries that alignment first and prefers non-empty exact-consumption
+   decodes (an earlier empty-Ok short-circuit silently dropped 721 polys
+   incl. all of Brush423).
 
 ### openhp1 cross-check (SplittyDev/openhp1, read-only reference)
 
-`crates/openhp1-map/src/model.rs::Model::decode` independently confirms
-the same grammar on HP1-era data: tagged props → bounds →
-Vectors/Points/Nodes/Surfs/Verts TArrays → `shared_side_count` i32 →
-zones (ref + u64 connectivity + u64 visibility = 17 B) → **Polys object
-reference**. Divergences observed (HP1 vs HP2 or interpretation):
-
-- FBspNode: openhp1 reads `zone_mask: u64` + `flags: u8` and **9**
-  compact refs (incl. `zones[2]`) before `vertex_count: u8`; we read
-  `i32 + i32 + 3 mystery bytes` and 7 refs. Same byte budget; moot for
-  retail HP2 maps (node arrays are empty). Left as-is, documented.
-- Prologue gating: openhp1 gates its object-stack read on export flag
-  `0x0200_0000` and models it as UE1 `FObjectStack` (function/state
-  refs, ProbeMask u64, LatentAction i32, ByteCodeOffset u8). We gate on
-  `payload[0] & 0x80` and treat the block as opaque — the `FF×8` is an
-  all-ones ProbeMask, so both readings agree structurally.
-- openhp1 validates trailing LightMaps/LightBits/leaf data to exact
-  consumption; we stop after the Polys ci (retail trailing bytes are
-  zeros + G/H filler, not needed for brush extraction).
-
-## What renders today
-
-The full pipeline runs on retail maps: brush-polygon meshes built once
-per map from FPoly wire facts (FPoly-basis UVs, fan-triangulated),
-textured via P8 LUT palette pipeline or DXT1, camera view-projection
-from `PlayerStart` placement with authored 90° horizontal FOV at
-1024×768, offscreen Metal target, PNG + `frame_meta.json` capture.
-hp2rs defaults to tick-end rendering with `--null-render` opt-out,
-`--render-every=N`, `HP2_CAPTURE_FRAMES` capture, and loud reason-coded
-degradation (`renderer.scene_unavailable`) when scene extraction fails —
-which fired **zero** times across the gate trio.
+`Model::decode` confirms the shared grammar (tagged props → bounds → five
+TArrays → NumSharedSides i32 → zones → Polys ref). Divergences: their
+FBspNode reads `zone_mask u64 + flags u8` and 9 cis — same byte budget as
+our validated `u32 + u32 + u8 + 7 cis + iZone 2B`, different split; their
+prologue gating uses export flag `0x0200_0000` vs our `payload[0] & 0x80`
+(same FObjectStack structure: ProbeMask FF×8, LatentAction, ByteCodeOffset
+0x81). Their triangulation (node vertex pool fans) is what our level-model
+path mirrors.
 
 ## Honesty table
 
 | Feature | State |
 | --- | --- |
-| Brush-polygon world geometry (trio: 100% model→Polys linkage) | REAL |
-| UPolys/FPoly binary decode | REAL (byte-exact, exact-consumption gated) |
-| .utx P8/DXT1 textures | REAL (2374 validated; see texture notes below) |
-| Texture mapping via FPoly basis + P8 LUT / DXT1 | REAL |
-| wgpu passes incl. Palette LUT / Masked / Translucent / Modulate | REAL |
-| Camera projection (authored FOV, PlayerStart placement) | REAL |
+| Brush-polygon world geometry (100% model linkage) | REAL |
+| Static level geometry from CSG'd level model BSP | REAL (3306 polys in PrivetDr Model1) |
+| UPolys/FPoly binary decode (all alignments incl. object-stack prologue) | REAL (exact-consumption gated) |
+| .utx P8/DXT1 textures | REAL (2374 validated; procedural classes loud-checkered) |
+| Texture mapping via FPoly/surf basis + P8 LUT / DXT1 | REAL |
+| wgpu pipelines (Palette LUT / Masked / Translucent / Modulate / Opaque) | REAL |
+| Camera view-projection (fixed matrix; authored 90° hFOV at 1024×768) | REAL |
+| Camera placement from PlayerStart | REAL (exact, structural test) |
 | Offscreen render, PNG+meta capture, resource-balance protocol | REAL |
 | Determinism (same seed/fixed-dt ⇒ byte-identical captures) | REAL |
+| Winding/cull (Cw front, back-culled; Newell-verified normals) | REAL |
 | Lightmaps / gouraud lighting | APPROXIMATED (fullbright white) |
 | Zone fog | NOT RENDERED |
 | Sprites, movers, particles | NOT RENDERED |
-| Procedural textures (FireTexture/WaveTexture/IceTexture/WetTexture) | APPROXIMATED (loud checkerboard; UE1 generates these at runtime, shipped mips are empty) |
-| Missing packages (`HGame.utx` — not shipped in retail) | APPROXIMATED (loud checkerboard) |
+| Procedural textures (Fire/Wave/Ice/Wet) | APPROXIMATED (loud checkerboard; shipped mips empty, C++ generates at runtime) |
+| Missing packages (`HGame.utx` not shipped in retail) | APPROXIMATED (loud checkerboard) |
+| Pixel comparison vs C++ baselines | DEFERRED to post-G6 fidelity backlog (C++ frame differs due to missing systems: cutscene spline camera, lightmaps, skybox, emissives, fog — not a render bug) |
 
-## G4 gate evidence — raw outputs from the verifying run (2026-08-24)
+## G4 gate evidence — raw outputs from the verifying run
 
-Release build: `cargo build --release -p hp2rs -p hp-engine -p hp-render`
-(fresh, no stale binary; rebuilt before the runs).
+Release build rebuilt fresh before all runs.
+
+### Structural acceptance (numeric, `cargo test -p hp-engine g4_structural`)
+
+```text
+[g4] brush transforms: 4 brushes, 92/92 polys matched hand-computed world vertices
+[g4] camera: PlayerStart Location=[-1664.0, 624.0, 720.0] Rotation=[0, 0, 0]
+     == scene camera [-1664.0, 624.0, 720.0]/[0, 0, 0]
+[g4] coverage: 518 model exports, 516 brush-referenced, 2 level/orphan,
+     scene polys=6483 == decoded sum 6483
+[g4] winding: 6483 polys cross==normal, 0 disagree
+[g4] textures: 6357/6483 resolved, loud fallbacks {"HGame": 123, "CVresearch": 2}, no-ref 1
+[g4] UVs: Brush423 first-poly |uv|max=0.3333335 (sampled 2)
+```
+
+(5 tests, all passing. Brush423 Location asserted == (7760, 352, 208).)
 
 ### Gate (a) — trio WITH rendering (no --null-render, no fallback)
 
@@ -94,56 +100,43 @@ Release build: `cargo build --release -p hp2rs -p hp-engine -p hp-render`
 --ticks 120 --timeout 180 --log /tmp/g4_<M>.log --engine-bin
 target/release/hp2rs`
 
-| Map | scene | camera (PlayerStart) | gl_textures_created/destroyed | passed | failure_markers |
+| Map | scene | gl_textures_created/destroyed | passed | failure_markers | scene_unavailable |
 | --- | --- | --- | --- | --- | --- |
-| PrivetDr | 2450 polys | (-1664, 624, 720) | 183 / 183 | true | [] |
-| Entry | 12 polys | (48, -16, -80) | 2 / 2 | true | [] |
-| Ch2Skurge | 9766 polys | (-1.32, 1309.45, 819.04) | 78 / 78 | true | [] |
+| PrivetDr | 6483 polys (516 brushes + Model1 3306 + Model484 6) | 189 / 189 | true | [] | 0 |
+| Entry | 18 polys | 2 / 2 | true | [] | 0 |
+| Ch2Skurge | level models + brushes | 102 / 102 | true | [] | 0 |
 
-`grep -c renderer.scene_unavailable` across all three logs: **0** (real
-GPU rendering, no null degradation). Texture notes (loud, by design):
-PrivetDr only — 12× `HGame.utx` absent from retail Textures/ (verified:
-not among the 73 shipped packages), 1× CVresearch P8 with empty stored
-mip. A probe over CVresearch.utx shows every failing export is a UE1
-procedural class — FireTexture/WaveTexture/IceTexture/WetTexture
-(firetut1, WaveT, wet155, ICE2, …) whose shipped base mips are 0 bytes;
-the C++ engine synthesizes them at runtime. Entry/Ch2Skurge: zero notes.
+`grep -c renderer.scene_unavailable` across all three logs: **0**.
+Loud texture notes (by design): `HGame.utx` absent from retail Textures/
+(verified: not among the 73 shipped packages); CVresearch failures are
+UE1 procedural classes (FireTexture/WaveTexture/IceTexture/WetTexture —
+probe-verified: every failing export is one of those classes with 0-byte
+stored mips; C++ generates them at runtime).
 
 ### Gate (b) — determinism
 
-Two runs, Ch2Skurge (heaviest scene), same seed `0x08f4c815`,
+Two runs, Ch2Skurge (heaviest scene), seed `0x08f4c815`,
 `--fixed-dt=0.03333334`, 120 ticks, `HP2_CAPTURE_FRAMES` set:
 
+```text
+58eb5c2b888e2a7a27f7d4f357a1d01a38fde2c88fc64b7edf7417a32136898d  runA/frame_000119.png
+58eb5c2b888e2a7a27f7d4f357a1d01a38fde2c88fc64b7edf7417a32136898d  runB/frame_000119.png
 ```
-1e9775e5514f3fbdb97f6d056778585549fb9a30a2138a11f38a5c951ddf6ed6  runA/frame_000119.png
-1e9775e5514f3fbdb97f6d056778585549fb9a30a2138a11f38a5c951ddf6ed6  runB/frame_000119.png
-```
 
-Byte-identical (`cmp` clean; frames 000000 identical too — geometry is
-static under the smoke tick loop).
+`cmp` clean — byte-identical.
 
-### Pixel comparison vs C++ baselines (advisory)
+### Visual evidence
 
-`python3 Tools/baseline_compare.py
-Tests/Fixtures/render-baseline/<M>/frame_000119.png <rust
-frame_000119.png>` (final frames, 1024×768 both sides):
-
-| Map | max_channel_delta | verdict |
-| --- | --- | --- |
-| PrivetDr | 219 | differs |
-| Entry | 255 | differs |
-| Ch2Skurge | 255 | differs |
-
-Expected to differ: the Rust path renders fullbright unlit brush
-geometry with loud checkerboards for procedural/missing textures, while
-the C++ baseline includes lightmaps, gouraud lighting, sprites, movers
-and runtime-generated procedural textures. Advisory for human review,
-per plan.
+`/tmp/g4_stats_PrivetDr_frame.png` (also
+`/tmp/g4_vis_PrivetDr/frame_000119.png`): PlayerStart view of PrivetDr —
+recognizable room interior (red ceiling band, gray wall band, floor with
+furniture-scale blocks, correct perspective). Top-down sweep during
+development showed the house row / street / lawns plan view.
 
 ### Gate (d) — suites and lint
 
-- `cargo test -p hp-render -p hp-engine -p hp2rs`: all suites pass
-  (hp-engine 34 lib + integration, hp-render 21 unit + 11 GPU pipeline
-  tests, hp2rs clean).
+- `cargo test -p hp-render -p hp-engine -p hp2rs`: all 7 suites green
+  (hp-engine 40 lib incl. 5 structural + 2 integration, hp-render 21 unit
+  + 11 GPU, hp2rs clean).
 - `cargo clippy -p hp-render -p hp-engine -p hp2rs --all-targets --
   -D warnings`: clean.
