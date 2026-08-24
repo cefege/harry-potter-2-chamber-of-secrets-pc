@@ -593,6 +593,15 @@ fn render_tick_end(
     Ok(1)
 }
 
+
+/// Home directory for default-path fallbacks (double-click launches have no
+/// CLI context).
+fn dirs_home() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -629,10 +638,3 @@ mod tests {
     }
 }
 
-/// Home directory for default-path fallbacks (double-click launches have no
-/// CLI context).
-fn dirs_home() -> std::path::PathBuf {
-    std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default()
-}
