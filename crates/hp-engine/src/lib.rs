@@ -1,5 +1,8 @@
 //! Level bootstrap, actor projection, tick orchestration, save
-//! orchestration, camera/projection math, seeded determinism RNG policy.
+//! orchestration (byte-exact save reader/writer and native repair), camera
+//! projection math, seeded determinism RNG policy.
+
+pub mod save;
 
 /// Day-one identity marker; replaced by simulation tests from Phase 3.
 pub const CRATE_NAME: &str = "hp-engine";
