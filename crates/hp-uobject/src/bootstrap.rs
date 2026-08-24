@@ -51,10 +51,17 @@ impl World {
             exports.insert(name.to_string(), loaded.export_ids);
         }
 
+        // Iterate the export audit set in PACKAGE_LOAD_ORDER, never in
+        // HashMap order: a per-process RandomState would reorder bind's
+        // class processing and native group registration, making binding
+        // outcomes non-deterministic across processes (observed as
+        // intermittent QuidArmor class_cycle and slot-330 duplicates).
         let mut registry = NativeRegistry::new();
         let mut all_exports = Vec::new();
-        for ids in exports.values() {
-            all_exports.extend(ids.iter().copied());
+        for name in PACKAGE_LOAD_ORDER {
+            if let Some(ids) = exports.get(name) {
+                all_exports.extend(ids.iter().copied());
+            }
         }
         crate::bind::bind_world(&arena, &mut registry, &all_exports)?;
 

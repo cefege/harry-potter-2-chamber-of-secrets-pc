@@ -47,11 +47,15 @@ fn retail_world_loads_and_binds() {
         "HGame.QuidArmor does not descend from Core.Object"
     );
 
-    // Re-binding reports zero residuals across the retail package set.
     hp_uobject::bind::verify_inheritance_chains(&world.arena).expect("inheritance chains hold");
+    // Re-binding reports zero residuals across the retail package set.
+    // Walk packages in load order — iterating the World's HashMap directly
+    // would make this audit per-process nondeterministic.
     let mut exported_ids = Vec::new();
-    for ids in world.exports.values() {
-        exported_ids.extend(ids.iter().copied());
+    for name in hp_uobject::bootstrap::PACKAGE_LOAD_ORDER {
+        if let Some(ids) = world.exports.get(name) {
+            exported_ids.extend(ids.iter().copied());
+        }
     }
     let mut fresh = hp_uobject::natives::NativeRegistry::new();
     let report =

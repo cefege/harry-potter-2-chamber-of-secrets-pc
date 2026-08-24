@@ -222,7 +222,10 @@ fn unscripted_tick_resolves_to_none_and_actor_stub_is_noop() {
     let world = hp_uobject::bootstrap::World::load(&root).expect("bootstrap");
 
     // Non-actor classes declare no Tick anywhere up their chain.
-    let model = world.arena.find_by_path("Engine.Model").expect("Engine.Model");
+    let model = world
+        .arena
+        .find_by_path("Engine.Model")
+        .expect("Engine.Model");
     assert_eq!(
         world.arena.find_function(model, "Tick").expect("lookup"),
         None,

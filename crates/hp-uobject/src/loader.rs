@@ -1216,10 +1216,12 @@ fn parse_tagged_defaults(
     let tags: Vec<PropertyTag> = read_script_tags(cur, ctx.local_names)?;
     let mut store = PropStore::new();
     // Group fixed-array fragments by name before storing.
-    let mut fixed_arrays: std::collections::HashMap<
+    // BTreeMap so the drain order (and thus PropStore insertion order) is
+    // key-sorted, not per-process HashMap order.
+    let mut fixed_arrays: std::collections::BTreeMap<
         u32,
         std::collections::BTreeMap<i32, PropValue>,
-    > = std::collections::HashMap::new();
+    > = std::collections::BTreeMap::new();
 
     for tag in tags {
         let name_global = ctx.global_name(tag.name_index)?;
