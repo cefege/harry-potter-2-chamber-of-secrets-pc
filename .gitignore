@@ -140,3 +140,6 @@ htmlcov/
 
 # Rust cargo workspace products (Cargo.lock is committed on purpose)
 /target/
+
+# Generated bulk audit artifacts (regenerable via package79_reference.py / p79audit)
+Tests/Fixtures/hp1-package-audit.json
