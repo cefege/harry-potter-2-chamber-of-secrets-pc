@@ -17,3 +17,5 @@ hp-engine.workspace = true
 hp-render.workspace = true
 hp-audio.workspace = true
 hp-app.workspace = true
+winit.workspace = true
+rodio.workspace = true

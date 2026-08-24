@@ -150,6 +150,29 @@ pub fn build_mesh(
     }
 }
 
+/// Build GPU buffers from already-expanded [`MeshVertex`]s and a u16 index
+/// list. Additive entry point for callers that author vertices directly
+/// (e.g. the engine's brush-poly path) without going through the packed
+/// `hp_format::mesh` readers.
+pub fn build_mesh_manual(
+    ctx: &GpuContext,
+    label: &str,
+    vertices: &[MeshVertex],
+    indices: &[u16],
+) -> MeshGpu {
+    let vertex_label = format!("{label} vertices");
+    let index_label = format!("{label} indices");
+    let vertex_buffer =
+        create_buffer_from_pod(ctx, &vertex_label, wgpu::BufferUsages::VERTEX, vertices);
+    let index_buffer =
+        create_buffer_from_pod(ctx, &index_label, wgpu::BufferUsages::INDEX, indices);
+    MeshGpu {
+        vertex_buffer,
+        index_buffer,
+        num_indices: indices.len() as u32,
+    }
+}
+
 /// Camera-facing quad (sprite/particle billboard): four vertices plus two
 /// triangles in strip order. `size` is (width, height) in world units.
 pub fn billboard_quad(

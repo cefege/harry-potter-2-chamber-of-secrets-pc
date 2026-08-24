@@ -540,15 +540,18 @@ pub struct DrawItem<'a> {
     pub second_view: Option<&'a wgpu::TextureView>,
 }
 
-/// Record all draws into one pass over `target`: one `Clear` to `backdrop`,
-/// then opaque classes first, then translucent/modulate classes in list
-/// order. Deterministic submission order; caller reads pixels back after.
-pub fn encode_frame<'a>(
-    ctx: &'a GpuContext,
-    target: &OffscreenTarget,
-    set: &'a PipelineSet,
-    draws: &'a [DrawItem<'a>],
+/// Record all draws into one pass over the given color+depth attachments:
+/// one `Clear` to `backdrop`, then opaque classes first, then
+/// translucent/modulate classes in list order. Deterministic submission
+/// order; the window path presents after, the offscreen path reads pixels
+/// back.
+pub fn encode_frame_views(
+    ctx: &GpuContext,
+    set: &PipelineSet,
+    draws: &[DrawItem<'_>],
     backdrop: wgpu::Color,
+    color_view: &wgpu::TextureView,
+    depth_view: &wgpu::TextureView,
 ) {
     let mut encoder = ctx.device.create_command_encoder(&Default::default());
     let opaque_first =
@@ -559,12 +562,10 @@ pub fn encode_frame<'a>(
     let mut second_groups: Vec<wgpu::BindGroup> = Vec::new();
 
     {
-        let color_view = target.color_view();
-        let depth_view = target.depth_view();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("hp-render frame"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &color_view,
+                view: color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(backdrop),
@@ -573,7 +574,7 @@ pub fn encode_frame<'a>(
                 depth_slice: None,
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &depth_view,
+                view: depth_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
@@ -608,6 +609,26 @@ pub fn encode_frame<'a>(
     }
 
     ctx.queue.submit(Some(encoder.finish()));
+}
+
+/// Record all draws into one pass over `target`: one `Clear` to `backdrop`,
+/// then opaque classes first, then translucent/modulate classes in list
+/// order. Deterministic submission order; caller reads pixels back after.
+pub fn encode_frame<'a>(
+    ctx: &'a GpuContext,
+    target: &OffscreenTarget,
+    set: &'a PipelineSet,
+    draws: &'a [DrawItem<'a>],
+    backdrop: wgpu::Color,
+) {
+    encode_frame_views(
+        ctx,
+        set,
+        draws,
+        backdrop,
+        &target.color_view(),
+        &target.depth_view(),
+    );
     let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
 }
 

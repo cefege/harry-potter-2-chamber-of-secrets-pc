@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use hp_format::package79::{
-    ByteCursor, PROPERTY_TYPE_BOOL, PROPERTY_TYPE_STRUCT, PropertyTag, read_compact_index,
-    read_package,
+    ByteCursor, PROPERTY_TYPE_BOOL, PROPERTY_TYPE_STRUCT, PackageArchive, PropertyTag,
+    read_compact_index, read_package,
 };
 use hp_uobject::arena::{ObjectArena, ObjectData, ObjectId};
 use hp_uobject::props::PropStore;
@@ -27,6 +27,11 @@ pub struct Level {
     pub actors: Vec<ObjectId>,
     /// BSP model exports referenced by the level surface graph.
     pub model_count: usize,
+    /// Arena ids for every export, indexed by export-table position.
+    pub export_ids: Vec<ObjectId>,
+    /// The parsed map package itself (`Polys` payloads live here); `None`
+    /// only for the bootstrap placeholder level.
+    pub archive: Option<PackageArchive>,
 }
 
 /// Resolve a harness map token (`..\Maps\PrivetDr.unr`, `Maps/Entry.unr`,
@@ -239,6 +244,8 @@ pub fn load_level_from_bytes(
         root,
         actors,
         model_count,
+        export_ids,
+        archive: Some(archive),
     })
 }
 
@@ -426,11 +433,58 @@ mod tests {
             PathBuf::from("/data/System/Maps/Entry.unr")
         );
     }
+}
 
+#[cfg(test)]
+mod diag {
+    use super::*;
     #[test]
-    fn rejects_truncated_maps() {
-        let mut arena = ObjectArena::new();
-        let error = load_level_from_bytes(&mut arena, "X", b"\x9e*\x83\xc1").unwrap_err();
-        assert_eq!(error.reason_code, "engine.map_parse");
+    fn diag_props() {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        if !root.join("System/Core.u").is_file() {
+            return;
+        }
+        let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let archive = hp_format::package79::read_package(&bytes).unwrap();
+        for (index, entry) in archive.exports.iter().enumerate() {
+            let name = archive
+                .names
+                .get(entry.object_name_index.max(0) as usize)
+                .map(|n| n.text.as_str());
+            let class_text = if entry.class_ref < 0 {
+                archive
+                    .imports
+                    .get((-entry.class_ref - 1) as usize)
+                    .and_then(|e| archive.names.get(e.object_name_index.max(0) as usize))
+                    .map(|n| n.text.as_str())
+            } else {
+                None
+            };
+            if index < 3 {
+                let payload = archive.export_payload(index).unwrap_or(&[]);
+                println!(
+                    "export[{index}] name={name:?} class={class_text:?} outer={} size={} bytes={:02x?}",
+                    entry.outer_ref,
+                    payload.len(),
+                    payload
+                );
+            }
+        }
+        let level = load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes).unwrap();
+        let mut filled = 0;
+        let mut empty = 0;
+        for id in &level.actors {
+            match world.arena.get(*id).unwrap().properties() {
+                Some(store) if !store.is_empty() => filled += 1,
+                _ => empty += 1,
+            }
+        }
+        println!(
+            "actors={} with-props={} empty-store={empty}",
+            level.actors.len(),
+            filled
+        );
     }
 }

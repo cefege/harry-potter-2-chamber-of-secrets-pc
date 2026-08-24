@@ -6,9 +6,12 @@ pub mod console;
 pub mod error;
 pub mod input;
 pub mod level;
+pub mod render_bridge;
 pub mod rng;
 pub mod save;
+pub mod scene;
 pub mod sim;
+pub mod utx;
 
 /// Day-one identity marker; replaced by simulation tests from Phase 3.
 pub const CRATE_NAME: &str = "hp-engine";

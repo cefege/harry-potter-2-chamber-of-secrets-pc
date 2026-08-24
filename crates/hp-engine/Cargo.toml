@@ -11,3 +11,4 @@ rand_chacha.workspace = true
 sha2.workspace = true
 hp-uobject.workspace = true
 hp-ini.workspace = true
+hp-render.workspace = true

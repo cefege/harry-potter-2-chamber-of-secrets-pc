@@ -7,8 +7,8 @@
 //!   `hp_format::mesh` readers
 //! - [`textures`]: counted texture manager (`gl_textures_*` protocol names)
 //! - [`canvas`]: bitmap glyph-quad canvas over `hp_format::font::GlyphAtlas`
-//! - [`capture`]: `frame_%06d.png` + `frame_meta.json` capture hook
-
+//! - [`window`]: on-window swapchain target (interactive mode)
+//!
 pub mod block_on;
 pub mod canvas;
 pub mod capture;
@@ -18,10 +18,15 @@ pub mod math;
 pub mod mesh_gpu;
 pub mod pipelines;
 pub mod textures;
+pub mod window;
 
 pub use capture::{CaptureMetaEntry, FrameCapture};
 pub use device::{GpuContext, OffscreenTarget};
 pub use error::{RenderError, ResourceLeakError};
+/// Re-export so downstream engine crates can name GPU types without taking
+/// a direct wgpu dependency (single version authority stays here).
+pub use wgpu;
+pub use window::{WindowFrame, WindowTarget};
 
 /// Reason-code prefix for every loud renderer failure
 /// (see Docs/REASON_CODES.md, `renderer.*` domain).

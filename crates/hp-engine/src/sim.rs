@@ -65,6 +65,13 @@ pub struct Engine {
     /// Camera/scripted cues executed through the console path, in order.
     pub cues: Vec<String>,
     counters: RunCounters,
+    /// Sound cues routed through [`Engine::play_sound_cue`], in order
+    /// (interactive mode only; headless paths never enable sounds so the
+    /// deterministic output stays byte-stable).
+    pub sound_cues: Vec<String>,
+    /// Whether interactive audio is wired up (set by the windowed app at
+    /// boot unless `-nosound`). Default `false`.
+    pub sounds_enabled: bool,
     quit_requested: bool,
     /// Memoized `(class, event)` -> function id lookups.
     script_lookup: HashMap<(ObjectId, String), Option<ObjectId>>,
@@ -92,6 +99,8 @@ impl Engine {
                 root: ObjectId(u32::MAX),
                 actors: Vec::new(),
                 model_count: 0,
+                export_ids: Vec::new(),
+                archive: None,
             },
             rng: SimRng::seeded(options.rng_seed),
             fixed_dt: options.fixed_dt.filter(|dt| dt.is_finite() && *dt > 0.0),
@@ -101,6 +110,8 @@ impl Engine {
             ini,
             cues: Vec::new(),
             counters: RunCounters::default(),
+            sound_cues: Vec::new(),
+            sounds_enabled: false,
             quit_requested: false,
             script_lookup: HashMap::new(),
             deferred_scripts: HashSet::new(),
@@ -219,7 +230,33 @@ impl Engine {
                 let _ = rest; // headless store keeps no user vars yet
                 Ok(ConsoleOutcome::Handled)
             }
+            _ if self.sounds_enabled
+                && matches!(
+                    verb.to_ascii_lowercase().as_str(),
+                    "playsound" | "startsound" | "stopsound" | "stopsoundmap"
+                ) =>
+            {
+                // Interactive-only routing: with sounds disabled (headless)
+                // these fall through to `Unhandled`, keeping the
+                // deterministic output byte-stable.
+                let cue = format!("{verb} {rest}").trim_end().to_string();
+                self.play_sound_cue(&cue);
+                Ok(ConsoleOutcome::Handled)
+            }
             _ => Ok(ConsoleOutcome::Unhandled),
+        }
+    }
+
+    /// Interactive-mode sound cue hook. Script-driven cues route here when
+    /// sounds are enabled: the cue name is recorded in
+    /// [`Engine::sound_cues`] and logged with an `[audio.cue]` marker so it
+    /// is observable on stdout/stderr and to whatever sink the host wired
+    /// into the audio graph. With sounds disabled (headless default,
+    /// `-nosound`) this only records — no output, no side effects.
+    pub fn play_sound_cue(&mut self, name: &str) {
+        self.sound_cues.push(name.to_string());
+        if self.sounds_enabled {
+            println!("hp-engine: [audio.cue] {name}");
         }
     }
 
