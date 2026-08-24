@@ -1,0 +1,645 @@
+{
+  "app": "out/macos-arm64/hp2_game",
+  "capture_frames": true,
+  "data_root": "HarryPotter2/Unreal",
+  "executable": "out/macos-arm64/hp2_game",
+  "failure_marker_policy": {
+    "case_sensitive": false,
+    "patterns": {
+      "assert": [
+        "\\bassert(?:ion)?\\s*:",
+        "\\bassert(?:ion)?\\s+(?:failed|failure)\\b",
+        "\\bfailed assertion\\b",
+        "\\bcheck\\s+failed\\b"
+      ],
+      "critical": [
+        "\\bcritical error\\b",
+        "\\bcritical\\s*:",
+        "\\bfatal error\\b",
+        "\\bappErrorf?\\b"
+      ],
+      "native": [
+        "\\bnative(?:error|exception|fatal)\\b",
+        "\\bnative\\s+(?:error|exception|failure|failed)\\b",
+        "\\b(?:segmentation fault|bus error|illegal instruction|abort trap)\\b",
+        "\\buncaught\\s+(?:c\\+\\+\\s+)?exception\\b",
+        "\\bterminate called\\b"
+      ],
+      "package": [
+        "\\bpackage(?:error|exception|fatal)\\b",
+        "\\bpackage\\s+(?:error|exception|failure|failed)\\b",
+        "\\b(?:failed|unable) to (?:load|find) (?:file for )?package\\b",
+        "\\bcan(?:not|'t) (?:find|resolve) (?:file for )?package\\b",
+        "\\bpackage\\b.*\\b(?:not found|is corrupt|version mismatch)\\b"
+      ],
+      "render": [
+        "\\b(?:render|renderer|rendering)(?:error|exception|fatal)\\b",
+        "\\b(?:render|renderer|rendering)\\s+(?:error|exception|failure|failed)\\b",
+        "\\b(?:xopengl|opengl|vulkan|gl)\\s+(?:error|exception|failure|failed)\\b",
+        "\\bfailed to (?:initialize|initialise|create)\\b.*\\b(?:renderer|rendering|opengl|vulkan|context)\\b",
+        "\\bvulkan validation (?:error|failure)\\b",
+        "\\bgl_invalid_(?:enum|value|operation|framebuffer_operation)\\b"
+      ],
+      "script": [
+        "\\bscript(?:error|exception|fatal)\\b",
+        "\\bscript(?:ing)?\\s+(?:error|exception|failure|failed)\\b",
+        "\\bscriptwarning\\s*:",
+        "\\baccessed\\s+none\\b"
+      ]
+    },
+    "success_requires": "runtime verification requires no case-insensitive script/native/package/render/assert/critical marker"
+  },
+  "format_version": 2,
+  "log_directory": "/private/tmp/rb/Ch2Skurge-logs",
+  "maps": [
+    {
+      "artifacts": {
+        "frame_meta": "/private/tmp/rb/Ch2Skurge-frames/000001-Ch2Skurge/frame_meta.json",
+        "frames_dir": "/private/tmp/rb/Ch2Skurge-frames/000001-Ch2Skurge"
+      },
+      "budget_violations": [],
+      "budgets": {
+        "frame_ms": 46.026,
+        "frame_samples": 240,
+        "map_seconds": 16.194595,
+        "max_frame_ms": null,
+        "max_map_seconds": null
+      },
+      "capture": {
+        "count": 120,
+        "scale_factor": 1.0
+      },
+      "captured_output_bytes": 31829,
+      "classification": "playable_level",
+      "classification_evidence": {
+        "active_actor_classes": [
+          {
+            "class": "Engine.AmbientSound",
+            "count": 12
+          },
+          {
+            "class": "Engine.Ambient_light",
+            "count": 3
+          },
+          {
+            "class": "Engine.BlockAll",
+            "count": 14
+          },
+          {
+            "class": "Engine.BlockPlayer",
+            "count": 1
+          },
+          {
+            "class": "Engine.Brush",
+            "count": 1548
+          },
+          {
+            "class": "Engine.Camera",
+            "count": 7
+          },
+          {
+            "class": "Engine.Dispatcher",
+            "count": 16
+          },
+          {
+            "class": "Engine.ElevatorMover",
+            "count": 12
+          },
+          {
+            "class": "Engine.ElevatorTrigger",
+            "count": 11
+          },
+          {
+            "class": "Engine.GridMover",
+            "count": 2
+          },
+          {
+            "class": "Engine.InterpolationPoint",
+            "count": 38
+          },
+          {
+            "class": "Engine.LevelInfo",
+            "count": 4
+          },
+          {
+            "class": "Engine.Light",
+            "count": 326
+          },
+          {
+            "class": "Engine.LoopMover",
+            "count": 6
+          },
+          {
+            "class": "Engine.Mover",
+            "count": 57
+          },
+          {
+            "class": "Engine.MusicTrigger",
+            "count": 1
+          },
+          {
+            "class": "Engine.NavigationPoint",
+            "count": 4
+          },
+          {
+            "class": "Engine.PatrolPoint",
+            "count": 47
+          },
+          {
+            "class": "Engine.PlayerStart",
+            "count": 1
+          },
+          {
+            "class": "Engine.RoundRobin",
+            "count": 1
+          },
+          {
+            "class": "Engine.Sound_FX",
+            "count": 15
+          },
+          {
+            "class": "Engine.SpecialLit",
+            "count": 1
+          },
+          {
+            "class": "Engine.Spotlight",
+            "count": 105
+          },
+          {
+            "class": "Engine.Torch_light",
+            "count": 112
+          },
+          {
+            "class": "Engine.Trigger",
+            "count": 44
+          },
+          {
+            "class": "Engine.ZoneInfo",
+            "count": 3
+          },
+          {
+            "class": "Engine.candleflame",
+            "count": 100
+          },
+          {
+            "class": "HGame.ArmTorch",
+            "count": 28
+          },
+          {
+            "class": "HGame.Armoire",
+            "count": 1
+          },
+          {
+            "class": "HGame.BarkSpawn",
+            "count": 2
+          },
+          {
+            "class": "HGame.BlueJellyBean",
+            "count": 11
+          },
+          {
+            "class": "HGame.BossEncounterTrigger",
+            "count": 1
+          },
+          {
+            "class": "HGame.BossRailMove",
+            "count": 1
+          },
+          {
+            "class": "HGame.CandleF",
+            "count": 27
+          },
+          {
+            "class": "HGame.CandlesFloorSingleCandle",
+            "count": 33
+          },
+          {
+            "class": "HGame.CandlesFloorTrippleCandle",
+            "count": 2
+          },
+          {
+            "class": "HGame.CandlesPlainCandle",
+            "count": 37
+          },
+          {
+            "class": "HGame.CandlesTableSingleCandle",
+            "count": 14
+          },
+          {
+            "class": "HGame.CandlesWallSingleCandle",
+            "count": 13
+          },
+          {
+            "class": "HGame.CandlesWallTripleCandle",
+            "count": 9
+          },
+          {
+            "class": "HGame.ChairsSheetDraped",
+            "count": 3
+          },
+          {
+            "class": "HGame.ChallengeScoreManager",
+            "count": 1
+          },
+          {
+            "class": "HGame.ChallengeStar",
+            "count": 10
+          },
+          {
+            "class": "HGame.ChestGold",
+            "count": 8
+          },
+          {
+            "class": "HGame.ChocolateFrog",
+            "count": 5
+          },
+          {
+            "class": "HGame.CigarBoxSpawn",
+            "count": 1
+          },
+          {
+            "class": "HGame.CoatRack1",
+            "count": 1
+          },
+          {
+            "class": "HGame.CornishPixie",
+            "count": 2
+          },
+          {
+            "class": "HGame.CrystalBall",
+            "count": 1
+          },
+          {
+            "class": "HGame.CutCameraPos",
+            "count": 51
+          },
+          {
+            "class": "HGame.CutMark",
+            "count": 7
+          },
+          {
+            "class": "HGame.CutScene",
+            "count": 18
+          },
+          {
+            "class": "HGame.DecanterSpawn",
+            "count": 2
+          },
+          {
+            "class": "HGame.DeskStudent1",
+            "count": 2
+          },
+          {
+            "class": "HGame.Despawner",
+            "count": 1
+          },
+          {
+            "class": "HGame.DragonSkull",
+            "count": 1
+          },
+          {
+            "class": "HGame.Easel",
+            "count": 1
+          },
+          {
+            "class": "HGame.Ectoblob",
+            "count": 1
+          },
+          {
+            "class": "HGame.Ectoplasma",
+            "count": 15
+          },
+          {
+            "class": "HGame.EctoplasmaBIG",
+            "count": 10
+          },
+          {
+            "class": "HGame.FinalStar",
+            "count": 1
+          },
+          {
+            "class": "HGame.FootStool",
+            "count": 3
+          },
+          {
+            "class": "HGame.FramesEmpty",
+            "count": 5
+          },
+          {
+            "class": "HGame.GNOME",
+            "count": 2
+          },
+          {
+            "class": "HGame.GnomeHome",
+            "count": 1
+          },
+          {
+            "class": "HGame.GreenJellyBean",
+            "count": 11
+          },
+          {
+            "class": "HGame.GreenPurpleCheckerBean",
+            "count": 11
+          },
+          {
+            "class": "HGame.HiddenHPawn",
+            "count": 1
+          },
+          {
+            "class": "HGame.InvisibleSpawn",
+            "count": 1
+          },
+          {
+            "class": "HGame.JewelBoxSpawn",
+            "count": 1
+          },
+          {
+            "class": "HGame.Knightspawn",
+            "count": 2
+          },
+          {
+            "class": "HGame.Ladder",
+            "count": 2
+          },
+          {
+            "class": "HGame.LightRayBig",
+            "count": 4
+          },
+          {
+            "class": "HGame.LumosSparkles",
+            "count": 4
+          },
+          {
+            "class": "HGame.LumosTrigger",
+            "count": 4
+          },
+          {
+            "class": "HGame.MucusSpawn",
+            "count": 2
+          },
+          {
+            "class": "HGame.MusicBoxSpawn",
+            "count": 1
+          },
+          {
+            "class": "HGame.NewMusicTrigger",
+            "count": 12
+          },
+          {
+            "class": "HGame.PopupTrigger",
+            "count": 1
+          },
+          {
+            "class": "HGame.RedBlackStripeBean",
+            "count": 9
+          },
+          {
+            "class": "HGame.Rope",
+            "count": 5
+          },
+          {
+            "class": "HGame.SavePoint",
+            "count": 6
+          },
+          {
+            "class": "HGame.ScrollBox",
+            "count": 2
+          },
+          {
+            "class": "HGame.SecretAreaMarker",
+            "count": 7
+          },
+          {
+            "class": "HGame.SpottedJellyBean",
+            "count": 7
+          },
+          {
+            "class": "HGame.StatueDragon",
+            "count": 1
+          },
+          {
+            "class": "HGame.StatueHunchbackWitch",
+            "count": 2
+          },
+          {
+            "class": "HGame.TableTrestle",
+            "count": 1
+          },
+          {
+            "class": "HGame.TableWoodRectangle1",
+            "count": 1
+          },
+          {
+            "class": "HGame.TableWoodRectangle2",
+            "count": 2
+          },
+          {
+            "class": "HGame.TableWoodRound",
+            "count": 1
+          },
+          {
+            "class": "HGame.TableWoodSquare",
+            "count": 1
+          },
+          {
+            "class": "HGame.TargetPoint",
+            "count": 1
+          },
+          {
+            "class": "HGame.ToolsMinersPick",
+            "count": 1
+          },
+          {
+            "class": "HGame.TriggerChangeLevel",
+            "count": 2
+          },
+          {
+            "class": "HGame.TriggerSetBaseCharOnPatrolPath",
+            "count": 1
+          },
+          {
+            "class": "HGame.Trunk",
+            "count": 2
+          },
+          {
+            "class": "HGame.TrunkHogwarts1",
+            "count": 2
+          },
+          {
+            "class": "HGame.WCGregory",
+            "count": 1
+          },
+          {
+            "class": "HGame.bloodybaron",
+            "count": 2
+          },
+          {
+            "class": "HGame.bronzecauldron",
+            "count": 11
+          },
+          {
+            "class": "HGame.chestbronze",
+            "count": 3
+          },
+          {
+            "class": "HGame.fatfriar",
+            "count": 3
+          },
+          {
+            "class": "HGame.firecrabSmall",
+            "count": 7
+          },
+          {
+            "class": "HGame.gargoyle",
+            "count": 3
+          },
+          {
+            "class": "HGame.harry",
+            "count": 1
+          },
+          {
+            "class": "HGame.navShortcut",
+            "count": 10
+          },
+          {
+            "class": "HGame.orangesnail",
+            "count": 4
+          },
+          {
+            "class": "HGame.spellTrigger",
+            "count": 10
+          },
+          {
+            "class": "HPParticle.DeathTorch",
+            "count": 29
+          }
+        ],
+        "active_actor_count": 3018,
+        "duplicate_payload_count": 1,
+        "export_count": 6256,
+        "level_export_count": 1,
+        "level_summary_export_count": 1,
+        "level_summary_title": "Skurge Challenge",
+        "null_actor_slots": 604,
+        "package_file_size": 5085254,
+        "package_licensee": 0,
+        "package_structure_valid": true,
+        "package_tag": "0x9e2a83c1",
+        "package_version": 79,
+        "player_start_count": 1,
+        "required_package_imports": [
+          "Engine",
+          "FlipendoBlocks",
+          "HGame",
+          "HP2_Master",
+          "HP2_Master.Details",
+          "HP2_Master.Floors",
+          "HP2_Master.doors",
+          "HP2_Master.wall_runners",
+          "HP2_Master.windows",
+          "HPParticle",
+          "HPSounds",
+          "HPSounds.Ch2Skurge",
+          "HPSounds.Critters_sfx",
+          "HP_Portraits2",
+          "HP_Portraits2.APortraits",
+          "Skurge",
+          "Skurge.Arch",
+          "Skurge.Ceiling",
+          "Skurge.Column",
+          "Skurge.Details",
+          "Skurge.Floors",
+          "Skurge.Wall",
+          "UnrealShare",
+          "rictusempra",
+          "rictusempra.Details"
+        ],
+        "rule": "active-player-start",
+        "unresolved_package_imports": []
+      },
+      "cleanup_error": null,
+      "command": [
+        "out/macos-arm64/hp2_game",
+        "-datadir=HarryPotter2/Unreal",
+        "..\\Maps\\Ch2Skurge.unr",
+        "-xopengl",
+        "-NOFRONTEND",
+        "-window",
+        "-nosound",
+        "-testticks=120",
+        "-log"
+      ],
+      "duration_seconds": 16.194595,
+      "exit_status": 0,
+      "expected_player_start": true,
+      "extra_environment": {
+        "HP2_CAPTURE_FRAMES": "/private/tmp/rb/Ch2Skurge-frames/000001-Ch2Skurge",
+        "HP2_CAPTURE_MAP": "Ch2Skurge",
+        "HP2_CAPTURE_TICKS": "120",
+        "HP2_FRAME_TIMING": "1"
+      },
+      "failure_markers": [],
+      "file_sha256": "a66a3f0cce666e778b9331e9cde33863ce7c5fc2c8d8cec69eb920ce284ef09e",
+      "launch_error": null,
+      "log": "/private/tmp/rb/Ch2Skurge-logs/000001.log",
+      "map": "HarryPotter2/Unreal/Maps/Ch2Skurge.unr",
+      "map_relative_to_data_root": "Maps/Ch2Skurge.unr",
+      "map_token": "..\\Maps\\Ch2Skurge.unr",
+      "orphaned_process_group": false,
+      "package_error": null,
+      "passed": true,
+      "process_group_cleanup": "none",
+      "reason_code": null,
+      "resource_leak": null,
+      "resources": {
+        "frame_ms": 0.065,
+        "gl_textures_created": null,
+        "gl_textures_destroyed": null
+      },
+      "status": "pass",
+      "timed_out": false,
+      "verification_error": null,
+      "verification_mode": "game_launch"
+    }
+  ],
+  "max_frame_ms": null,
+  "max_map_seconds": null,
+  "renderer": "xopengl",
+  "script": "Build/smoke_maps.py",
+  "status": "pass",
+  "summary": {
+    "budget_violation_maps": 0,
+    "by_classification": {
+      "editor_template_geometry_study": 0,
+      "legacy_incomplete_dependency": 0,
+      "malformed": 0,
+      "playable_level": 1,
+      "streaming_sublevel": 0
+    },
+    "by_verification_mode": {
+      "game_launch": 1,
+      "package_structure": 0
+    },
+    "failed": 0,
+    "failure_markers_by_category": {
+      "assert": 0,
+      "critical": 0,
+      "native": 0,
+      "package": 0,
+      "render": 0,
+      "script": 0
+    },
+    "passed": 1,
+    "resource_leaks": 0,
+    "total": 1
+  },
+  "ticks": 120,
+  "timeout_seconds": 180.0,
+  "verification_policy": {
+    "game_launch": "exit status 0; no timeout, launch error, failure marker, orphaned process group, or cleanup error",
+    "nonplayable_classification": "requires a positive editor/template actor-and-metadata signature; an unrecognized map without PlayerStart is launched conservatively",
+    "package_structure": "supported package tag/version, internally valid name/import/export/payload tables, exactly one Level and LevelSummary, and a valid active Level actor array"
+  },
+  "vulkan_engine_ini": null,
+  "vulkan_icd": null
+}
