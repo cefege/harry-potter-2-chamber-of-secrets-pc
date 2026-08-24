@@ -74,3 +74,19 @@ Attribution facts (diagnostic session, 2026-08-24):
   behavior; it should mirror the working bundle's behavior.
 - Retail-profile claims above verified by manual launch reproduction only
   (30 ticks, PrivetDr), not the full retail preset suite.
+
+## Addendum 2026-08-24 — baseline upgraded to 41/41
+
+The user fixed the loader regression in commit `353ed22` ("option-a:
+launcher context globals, driver presentation, robust teardown"). After
+rebuilding (`cmake --build --preset macos-arm64`) and re-running
+`ctest --preset macos-arm64`: **100% tests passed out of 41**, including the
+previously red `determinism_double_run` and `renderer_smoke_xopengl`.
+
+Consequences:
+
+- The C++ oracle is fully green again; future gate comparisons expect 41/41.
+- `determinism_double_run` / `renderer_smoke_xopengl` re-enter the parity
+  set; the "excluded tests" caveat above is retired.
+- Phase 4 may use freshly built binaries (current capture hooks) for render
+  baselines instead of the stale bundle.
