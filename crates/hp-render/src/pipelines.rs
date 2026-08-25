@@ -29,6 +29,9 @@ pub enum SurfaceKind {
     Palette,
     Translucent,
     Modulate,
+    /// Fake-backdrop: samples the sky render (second bind group) by screen
+    /// position — UE1 fake backdrop.
+    Backdrop,
 }
 
 /// Matches the WGSL `Uniforms` struct (96 bytes).
@@ -138,6 +141,15 @@ fn fs_main(frag: FsIn) -> @location(0) vec4<f32> {
     let base = sample_base(frag);
     let lm = textureSample(second_texture, second_sampler, frag.uv1);
     return shade(frag, vec4<f32>(base.rgb * lm.rgb * 2.0, base.a));
+}
+";
+
+const FRAG_BACKDROP: &str = r"
+@fragment
+fn fs_main(frag: FsIn) -> @location(0) vec4<f32> {
+    // Screen-space sample of the sky render (u.misc.y/z = target dims).
+    let uv = frag.clip.xy / vec2<f32>(u.misc.y, u.misc.z);
+    return textureSample(second_texture, second_sampler, uv);
 }
 ";
 
@@ -367,6 +379,13 @@ impl PipelineSet {
                 BlendClass::Modulate,
                 false,
             ),
+            (
+                SurfaceKind::Backdrop,
+                "fs_backdrop",
+                FRAG_BACKDROP,
+                BlendClass::Replace,
+                true,
+            ),
         ];
         let mut pipelines = Vec::with_capacity(kinds.len());
         for (kind, label, frag_src, blend, depth_write) in kinds {
@@ -554,6 +573,8 @@ pub fn encode_frame_views(
     backdrop: wgpu::Color,
     color_view: &wgpu::TextureView,
     depth_view: &wgpu::TextureView,
+    // Sky-render override for Backdrop draws: (sky color view, [w, h]).
+    sky: Option<(&wgpu::TextureView, [f32; 2])>,
 ) {
     let mut encoder = ctx.device.create_command_encoder(&Default::default());
     let opaque_first =
@@ -589,24 +610,10 @@ pub fn encode_frame_views(
         });
 
         for draw in draws.iter().filter(|d| opaque_first(d.kind)) {
-            record_draw(
-                ctx,
-                &mut pass,
-                set,
-                draw,
-                &mut base_groups,
-                &mut second_groups,
-            );
+            record_draw(ctx, &mut pass, set, draw, sky, &mut base_groups, &mut second_groups);
         }
         for draw in draws.iter().filter(|d| !opaque_first(d.kind)) {
-            record_draw(
-                ctx,
-                &mut pass,
-                set,
-                draw,
-                &mut base_groups,
-                &mut second_groups,
-            );
+            record_draw(ctx, &mut pass, set, draw, sky, &mut base_groups, &mut second_groups);
         }
     }
 
@@ -630,6 +637,7 @@ pub fn encode_frame<'a>(
         backdrop,
         &target.color_view(),
         &target.depth_view(),
+        None,
     );
     let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
 }
@@ -639,13 +647,19 @@ fn record_draw<'a>(
     pass: &mut wgpu::RenderPass<'a>,
     set: &'a PipelineSet,
     draw: &DrawItem<'a>,
+    sky: Option<(&wgpu::TextureView, [f32; 2])>,
     base_groups: &mut Vec<wgpu::BindGroup>,
     second_groups: &mut Vec<wgpu::BindGroup>,
 ) {
     base_groups.push(set.bind_group_base(ctx, draw.base_view));
     pass.set_pipeline(set.pipeline(draw.kind));
     pass.set_bind_group(0, base_groups.last().unwrap(), &[]);
-    let second_view = draw.second_view.unwrap_or(&set.null_secondary_view);
+    // Backdrop draws sample the sky render, not their own second view.
+    let second_view = match draw.kind {
+        SurfaceKind::Backdrop => sky.map(|(view, _)| view),
+        _ => draw.second_view,
+    }
+    .unwrap_or(&set.null_secondary_view);
     second_groups.push(set.bind_group_secondary(ctx, second_view));
     pass.set_bind_group(1, second_groups.last().unwrap(), &[]);
     pass.set_vertex_buffer(0, draw.mesh.vertex_buffer.slice(..));

@@ -85,6 +85,7 @@ path mirrors.
 | Winding/cull (Cw front, back-culled; Newell-verified normals) | REAL |
 | Baked lightmaps (zone ambient + light contributions + blurred 1bpp shadow masks, x2 overbright) | REAL (1900 lightmaps reconstructed on PrivetDr Model1; 700+ with visible light pools; linear-sampled atlas with replicated-edge gutters) |
 | Gouraud vertex lighting (actor meshes) | NOT RENDERED (brush/bsp only today) |
+| Skybox (fake backdrop, two-pass sky-zone render) | REAL (SkyZoneInfo pose; PF_FakeBackdrop 0x80 portals sample the sky pass screen-space; 64 portal surfaces on PrivetDr) |
 | Zone fog | NOT RENDERED |
 | Sprites, movers, particles | NOT RENDERED |
 | Procedural textures (Fire/Wave/Ice/Wet) | APPROXIMATED (loud checkerboard; shipped mips empty, C++ generates at runtime) |
@@ -152,6 +153,22 @@ pitched roofs, chimneys, windows, lawns and a walkway, correct
 placement/orientation (user-confirmed 3D forms; texture alignment on
 static surfaces fixed by the scale-preserving basis fix). Submission
 proof test: 6483 scene polys → 6456 draws (27 invisible/untextured).
+
+### Skybox milestone evidence (TrackLearn plan item 3)
+
+- Sky zone: PrivetDr SkyZoneInfo at (11901, −5890, 33) — a sealed 254³
+  skybox room at the map edge (zone index 2, 6 BSP nodes); scene carries
+  the pose as `RenderScene::sky_zone`.
+- Fake-backdrop surfaces: PF_FakeBackdrop = 0x00000080 (shipped
+  UnObj.h:232 — NOT the 0x08000000 of later UE versions); 64 portal
+  surfaces on PrivetDr (10 brush + 54 BSP: Forestgrass ground, EctoWet
+  water, ceiling).
+- Render: two submits per frame — pass 1 renders the non-backdrop scene
+  from the SkyZoneInfo pose into a same-size sky target; pass 2 renders
+  everything from the main camera with backdrop polys sampling the sky
+  target in screen space (`frag.clip.xy / misc.yz`), depth-tested like
+  opaque geometry. `update_camera` refreshes the stored main camera so
+  free-fly movement persists across frames.
 
 ### Lightmap milestone evidence (TrackLearn plan item 1)
 

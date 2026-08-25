@@ -74,6 +74,9 @@ pub struct RenderScene {
     pub lightmaps: Vec<crate::lightmap::LightmapImage>,
     pub polys: Vec<ScenePoly>,
     pub camera: Option<SceneCamera>,
+    /// Sky-zone camera pose (first SkyZoneInfo actor) for the fake-backdrop
+    /// two-pass render; `None` when the map has no sky zone.
+    pub sky_zone: Option<SceneCamera>,
 }
 
 impl RenderScene {
@@ -381,6 +384,7 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
         lightmaps: scene_lightmaps,
         polys,
         camera: find_camera(arena, level),
+        sky_zone: find_sky_zone(arena, level),
     })
 }
 
@@ -1087,6 +1091,21 @@ fn class_label(arena: &ObjectArena, id: ObjectId) -> &str {
         .and_then(|class_id| arena.get(class_id).ok())
         .and_then(|class| arena.names.text(class.name_index))
         .unwrap_or("")
+}
+
+/// Sky-zone camera pose: the first SkyZoneInfo actor's placement.
+fn find_sky_zone(arena: &ObjectArena, level: &Level) -> Option<SceneCamera> {
+    for actor in &level.actors {
+        if !class_label(arena, *actor).eq_ignore_ascii_case("SkyZoneInfo") {
+            continue;
+        }
+        let store = arena.get(*actor).ok()?.properties()?;
+        return Some(SceneCamera {
+            location: struct_vec3(store, arena, "Location").unwrap_or([0.0; 3]),
+            rotation: struct_ints(store, arena, "Rotation").unwrap_or([0; 3]),
+        });
+    }
+    None
 }
 
 /// Camera seed: first `PlayerStart` actor, else the first `Camera` actor.
@@ -2103,6 +2122,59 @@ mod lmprobe {
                 amb.map(|a| (a.hue, a.saturation, a.brightness))
             );
         }
+        // SkyZoneInfo placement + sky-zone node bbox.
+        let mut sky_export = None;
+        for &actor in &level.actors {
+            if class_label(arena, actor).eq_ignore_ascii_case("SkyZoneInfo") {
+                let store = arena.get(actor).unwrap().properties().unwrap();
+                println!(
+                    "SkyZoneInfo loc={:?} rot={:?}",
+                    struct_vec3(store, arena, "Location").unwrap_or([0.0; 3]),
+                    struct_ints(store, arena, "Rotation").unwrap_or([0; 3])
+                );
+                sky_export = Some(
+                    level
+                        .export_ids
+                        .iter()
+                        .position(|id| *id == actor)
+                        .map(|i| i as i32 + 1)
+                        .unwrap_or(-1),
+                );
+                break;
+            }
+        }
+        if let Some(sky_export) = sky_export {
+            let sky_zone_idx = model
+                .zone_actors
+                .iter()
+                .position(|za| *za == sky_export);
+            println!("sky zone index: {sky_zone_idx:?} (export {sky_export})");
+            if let Some(zi) = sky_zone_idx {
+                let mut min = [f32::MAX; 3];
+                let mut max = [f32::MIN; 3];
+                let mut count = 0usize;
+                for node in &model.nodes {
+                    let hit = node.izones.iter().any(|z| *z as usize == zi);
+                    if !hit {
+                        continue;
+                    }
+                    count += 1;
+                    let Some(surf) = model.surfs.get(node.surface.max(0) as usize) else {
+                        continue;
+                    };
+                    let Some(base) = model.points.get(surf.base_point) else {
+                        continue;
+                    };
+                    for a in 0..3 {
+                        min[a] = min[a].min(base[a]);
+                        max[a] = max[a].max(base[a]);
+                    }
+                }
+                println!(
+                    "sky zone nodes={count} bbox min={min:?} max={max:?}"
+                );
+            }
+        }
         // izone byte distribution over nodes with lightmapped surfs.
         let mut z0: std::collections::BTreeMap<u8, usize> = Default::default();
         let mut z1: std::collections::BTreeMap<u8, usize> = Default::default();
@@ -2167,6 +2239,44 @@ mod lmprobe {
                     .unwrap_or_else(|| "NONE".into())
             );
             let _ = n;
+        }
+    }
+    #[test]
+    fn fake_backdrop_census() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../HarryPotter2/Unreal");
+        let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let level = crate::level::load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes)
+            .unwrap();
+        let scene = build_render_scene(&world.arena, &level).unwrap();
+        let mut fb_brush = 0usize;
+        let mut fb_bsp = 0usize;
+        let mut samples: Vec<String> = Vec::new();
+        let bsp_start = scene.polys.len().saturating_sub(3312);
+        for (i, p) in scene.polys.iter().enumerate() {
+            if p.poly_flags & 0x80 == 0 {
+                continue;
+            }
+            let bsp = i >= bsp_start;
+            if bsp {
+                fb_bsp += 1;
+            } else {
+                fb_brush += 1;
+            }
+            if samples.len() < 5 {
+                samples.push(format!(
+                    "poly#{i} bsp={bsp} tex={:?} flags={:08x} normal={:?} z={:.0}",
+                    p.texture,
+                    p.poly_flags,
+                    p.normal,
+                    p.base[2]
+                ));
+            }
+        }
+        println!("fake-backdrop polys: brush={fb_brush} bsp={fb_bsp}");
+        for s in &samples {
+            println!("  {s}");
         }
     }
 }

@@ -44,6 +44,8 @@ const PF_INVISIBLE: u32 = 0x0000_0001;
 const PF_MASKED: u32 = 0x0000_0002;
 const PF_TRANSLUCENT: u32 = 0x0000_0004;
 const PF_MODULATED: u32 = 0x0000_0040;
+/// UE1 fake backdrop: the poly displays the sky-zone render.
+const PF_FAKE_BACKDROP: u32 = 0x0000_0080;
 
 /// One resolved texture: ids for protocol counting plus eagerly created
 /// sampleable views for the frame path.
@@ -97,12 +99,20 @@ struct LmUvMapping {
 pub struct RendererSession {
     ctx: GpuContext,
     target: OffscreenTarget,
+    /// Offscreen target for the sky-zone pass (fake backdrop).
+    sky_target: OffscreenTarget,
     set: PipelineSet,
     textures: TextureManager,
     store: TextureStore,
     uploads: HashMap<TextureKey, ResolvedTexture>,
     /// Draw order = archive poly order (deterministic submission).
     draws: Vec<PreparedPoly>,
+    /// Sky-zone camera pose; `None` = no fake-backdrop pass.
+    sky_camera: Option<SceneCamera>,
+    /// The playable camera programmed at load time (for the main pass).
+    main_camera: SceneCamera,
+    /// Whether any draw classifies as Backdrop (drives the two-pass path).
+    has_backdrop: bool,
 }
 
 impl RendererSession {
@@ -111,6 +121,7 @@ impl RendererSession {
         let ctx = GpuContext::headless()
             .map_err(|e| EngineError::new("renderer.adapter_unavailable", e.to_string()))?;
         let target = OffscreenTarget::new(&ctx, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+        let sky_target = OffscreenTarget::new(&ctx, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
         let set = PipelineSet::new(
             &ctx,
             OffscreenTarget::COLOR_FORMAT,
@@ -119,11 +130,15 @@ impl RendererSession {
         Ok(RendererSession {
             ctx,
             target,
+            sky_target,
             set,
             textures: TextureManager::new(),
             store: TextureStore::new(data_root),
             uploads: HashMap::new(),
             draws: Vec::new(),
+            sky_camera: None,
+            main_camera: SceneCamera::default(),
+            has_backdrop: false,
         })
     }
 
@@ -141,8 +156,12 @@ impl RendererSession {
     /// Deterministic: identical scene bytes produce identical buffers in
     /// identical submission order.
     pub fn load_scene(&mut self, scene: &RenderScene) -> Result<()> {
+        self.sky_camera = scene.sky_zone;
+        self.main_camera = scene.camera_or_default();
+        let width = self.target.width as f32;
+        let height = self.target.height as f32;
         self.set
-            .update_uniforms(&self.ctx, &pass_uniforms(&scene.camera_or_default()));
+            .update_uniforms(&self.ctx, &pass_uniforms(&self.main_camera, width, height));
 
         // Baked-lightmap atlas: shelf-pack every scene lightmap with a
         // 1-texel replicated-edge gutter (prevents bilinear seams).
@@ -209,21 +228,34 @@ impl RendererSession {
                     view: view.clone(),
                 })
             });
-            let (kind, base_view, second_view) = match &lm_mapping {
-                Some(mapping) => {
-                    let base = resolved
-                        .color_view
-                        .clone()
-                        .unwrap_or_else(|| resolved.base_view.clone());
-                    (SurfaceKind::Lightmap, base, Some(mapping.view.clone()))
+            // Fake-backdrop polys sample the sky pass (screen space) when a
+            // sky zone exists; otherwise they render as ordinary opaque.
+            let is_backdrop =
+                poly.poly_flags & PF_FAKE_BACKDROP != 0 && self.sky_camera.is_some();
+            let (kind, base_view, second_view) = if is_backdrop {
+                self.has_backdrop = true;
+                let base = resolved
+                    .color_view
+                    .clone()
+                    .unwrap_or_else(|| resolved.base_view.clone());
+                (SurfaceKind::Backdrop, base, None)
+            } else {
+                match &lm_mapping {
+                    Some(mapping) => {
+                        let base = resolved
+                            .color_view
+                            .clone()
+                            .unwrap_or_else(|| resolved.base_view.clone());
+                        (SurfaceKind::Lightmap, base, Some(mapping.view.clone()))
+                    }
+                    None => classify(poly.poly_flags, &resolved),
                 }
-                None => classify(poly.poly_flags, &resolved),
             };
             let mesh = build_poly_mesh(
                 &self.ctx,
                 poly,
                 resolved.size,
-                lm_mapping.as_ref(),
+                if is_backdrop { None } else { lm_mapping.as_ref() },
             )?;
             self.draws.push(PreparedPoly {
                 mesh,
@@ -312,19 +344,63 @@ impl RendererSession {
         depth_view: &wgpu::TextureView,
     ) {
         let draws: Vec<DrawItem<'_>> = self.draw_list();
-        encode_frame_views(
-            &self.ctx,
-            &self.set,
-            &draws,
-            wgpu::Color {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
-            color_view,
-            depth_view,
-        );
+        let clear = wgpu::Color {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        let width = self.target.width as f32;
+        let height = self.target.height as f32;
+
+        // Fake-backdrop two-pass (UE1): pass 1 renders the non-backdrop
+        // scene from the SkyZoneInfo pose into the sky target; pass 2
+        // renders everything from the main camera, with backdrop polys
+        // sampling the sky target in screen space.
+        if self.has_backdrop && let Some(sky_cam) = &self.sky_camera {
+            let rest: Vec<DrawItem<'_>> = {
+                let mut filtered: Vec<DrawItem<'_>> = Vec::with_capacity(draws.len());
+                for d in &draws {
+                    if d.kind != SurfaceKind::Backdrop {
+                        filtered.push(DrawItem {
+                            kind: d.kind,
+                            mesh: d.mesh,
+                            base_view: d.base_view,
+                            second_view: d.second_view,
+                        });
+                    }
+                }
+                filtered
+            };
+            self.set.update_uniforms(
+                &self.ctx,
+                &pass_uniforms(sky_cam, width, height),
+            );
+            encode_frame_views(
+                &self.ctx,
+                &self.set,
+                &rest,
+                clear,
+                &self.sky_target.color_view(),
+                &self.sky_target.depth_view(),
+                None,
+            );
+            self.set.update_uniforms(
+                &self.ctx,
+                &pass_uniforms(&self.main_camera, width, height),
+            );
+            encode_frame_views(
+                &self.ctx,
+                &self.set,
+                &draws,
+                clear,
+                color_view,
+                depth_view,
+                Some((&self.sky_target.color_view(), [width, height])),
+            );
+            return;
+        }
+        encode_frame_views(&self.ctx, &self.set, &draws, clear, color_view, depth_view, None);
     }
 
     pub fn render_frame(&self) {
@@ -352,7 +428,10 @@ impl RendererSession {
 
     pub fn update_camera(&mut self, location: [f32; 3], rotation: [i32; 3]) {
         let camera = SceneCamera { location, rotation };
-        self.set.update_uniforms(&self.ctx, &pass_uniforms(&camera));
+        self.set.update_uniforms(
+            &self.ctx,
+            &pass_uniforms(&camera, self.target.width as f32, self.target.height as f32),
+        );
     }
 
     /// Read back + PNG-encode the last rendered frame through the run's
@@ -534,7 +613,7 @@ fn dot(a: &[f32; 3], b: &[f32; 3]) -> f32 {
 /// View-projection uniform block for one camera: authored horizontal FOV at
 /// the fixed viewport, view rows = (right, up, forward), depth mapped to
 /// [0, 1] with `w = forward . d`.
-fn pass_uniforms(camera: &SceneCamera) -> PassUniforms {
+fn pass_uniforms(camera: &SceneCamera, width: f32, height: f32) -> PassUniforms {
     let r = rotation_matrix(camera.rotation);
     let forward = mat_vec(&r, &[1.0, 0.0, 0.0]);
     let right = mat_vec(&r, &[0.0, 1.0, 0.0]);
@@ -586,7 +665,7 @@ fn pass_uniforms(camera: &SceneCamera) -> PassUniforms {
     PassUniforms {
         view_proj,
         fog_color: [0.0, 0.0, 0.0, 1.0],
-        misc: [0.333, 0.0, 0.0, 0.0],
+        misc: [0.333, width, height, 0.0],
     }
 }
 
@@ -702,6 +781,7 @@ mod tests {
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
         let mut scene = RenderScene {
             lightmaps: Vec::new(),
+            sky_zone: None,
             polys: Vec::new(),
             camera: Some(SceneCamera {
                 location: [-64.0, 0.0, 0.0],
@@ -783,7 +863,7 @@ mod tests {
         // loop here because the synthetic key bypasses TextureStore.
         session
             .set
-            .update_uniforms(&session.ctx, &pass_uniforms(&scene.camera_or_default()));
+            .update_uniforms(&session.ctx, &pass_uniforms(&scene.camera_or_default(), session.target.width as f32, session.target.height as f32));
         for poly in &scene.polys {
             let resolved = ResolvedTexture {
                 color_view: None,
