@@ -83,7 +83,8 @@ path mirrors.
 | Offscreen render, PNG+meta capture, resource-balance protocol | REAL |
 | Determinism (same seed/fixed-dt ⇒ byte-identical captures) | REAL |
 | Winding/cull (Cw front, back-culled; Newell-verified normals) | REAL |
-| Lightmaps / gouraud lighting | APPROXIMATED (fullbright white) |
+| Baked lightmaps (zone ambient + light contributions + blurred 1bpp shadow masks, x2 overbright) | REAL (1900 lightmaps reconstructed on PrivetDr Model1; 700+ with visible light pools; linear-sampled atlas with replicated-edge gutters) |
+| Gouraud vertex lighting (actor meshes) | NOT RENDERED (brush/bsp only today) |
 | Zone fog | NOT RENDERED |
 | Sprites, movers, particles | NOT RENDERED |
 | Procedural textures (Fire/Wave/Ice/Wet) | APPROXIMATED (loud checkerboard; shipped mips empty, C++ generates at runtime) |
@@ -151,6 +152,24 @@ pitched roofs, chimneys, windows, lawns and a walkway, correct
 placement/orientation (user-confirmed 3D forms; texture alignment on
 static surfaces fixed by the scale-preserving basis fix). Submission
 proof test: 6483 scene polys → 6456 draws (27 invisible/untextured).
+
+### Lightmap milestone evidence (TrackLearn plan item 1)
+
+- Parse: Model1 lightmap block decodes exactly — LightMaps=1900,
+  LightBits=115585 (both match the TrackLearn probe), bounds=1338 (25-byte
+  FBox: min+max+valid u8), hulls=11356, leaves=1036, lights=24179.
+- Reconstruction: 1001/1900 lightmaps carry light lists; 700+ reconstructed
+  images show visible light pools (verified by PNG dump:
+  /tmp/g4_lm); zone ambient resolves via node iZone[1] → zone table →
+  ZoneInfo props (zone 1 ambient hue=32 sat=100 bri=50), LevelInfo black
+  fallback; Light actors decode with UE1 class defaults
+  (brightness=64, saturation=255, radius=64, cone=128).
+- GPU: lightmaps shelf-packed into one BGRA atlas (1-texel replicated
+  gutters, linear-sampled); P8 bases palette-expand to color textures for
+  the Lightmap path; FRAG_LIGHTMAP applies the ×2 overbright.
+- Known remaining artifact: the map-top ceiling surfaces (huge, normal
+  -Z, lightmaps 29/30) band under the sky region — under investigation;
+  the skybox milestone (plan item 3) replaces that region's appearance.
 
 ### Gate (d) — suites and lint
 

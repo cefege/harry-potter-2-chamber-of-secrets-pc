@@ -47,8 +47,14 @@ const PF_MODULATED: u32 = 0x0000_0040;
 
 /// One resolved texture: ids for protocol counting plus eagerly created
 /// sampleable views for the frame path.
+#[derive(Clone)]
 struct ResolvedTexture {
-    /// R8 index map id for P8 surfaces, BGRA8 id otherwise.
+    /// Palette-expanded BGRA view for P8 surfaces (lightmap base); `None`
+    /// unless materialized.
+    color_view: Option<wgpu::TextureView>,
+    /// R8 index map id for P8 surfaces, BGRA8 id otherwise (protocol
+    /// counting only).
+    #[allow(dead_code)]
     index_or_color: TextureId,
     /// Sampleable view of [`ResolvedTexture::index_or_color`].
     base_view: wgpu::TextureView,
@@ -64,6 +70,26 @@ struct PreparedPoly {
     kind: SurfaceKind,
     base_view: wgpu::TextureView,
     second_view: Option<wgpu::TextureView>,
+}
+
+/// Shelf-packed lightmap atlas: view, dimensions, per-image rects.
+type LightmapAtlas = (
+    wgpu::TextureView,
+    u32,
+    u32,
+    Vec<(u32, u32, u32, u32)>,
+);
+
+/// Per-poly lightmap UV mapping: raw lm-texel lattice parameters plus the
+/// poly's atlas rectangle (gutter included) and atlas dimensions.
+struct LmUvMapping {
+    pan_u: f32,
+    pan_v: f32,
+    scale_u: f32,
+    scale_v: f32,
+    rect: [f32; 4],
+    atlas: [f32; 2],
+    view: wgpu::TextureView,
 }
 
 /// Offscreen renderer session: one GPU context + target + pipelines +
@@ -118,6 +144,10 @@ impl RendererSession {
         self.set
             .update_uniforms(&self.ctx, &pass_uniforms(&scene.camera_or_default()));
 
+        // Baked-lightmap atlas: shelf-pack every scene lightmap with a
+        // 1-texel replicated-edge gutter (prevents bilinear seams).
+        let atlas = self.build_lightmap_atlas(&scene.lightmaps);
+
         for poly in &scene.polys {
             if poly.poly_flags & PF_INVISIBLE != 0 || poly.vertices.len() < 3 {
                 continue;
@@ -127,30 +157,150 @@ impl RendererSession {
                 None => continue,
             };
             let resolved = match self.uploads.get(&key) {
-                Some(resolved) => ResolvedTexture {
-                    index_or_color: resolved.index_or_color,
-                    base_view: resolved.base_view.clone(),
-                    lut_view: resolved.lut_view.clone(),
-                    size: resolved.size,
-                },
-                None => self.upload_texture(&key)?,
+                Some(resolved) => resolved.clone(),
+                None => {
+                    let resolved = self.upload_texture(&key)?;
+                    self.uploads.entry(key).or_insert(resolved.clone());
+                    resolved
+                }
             };
-            let (kind, base_view, second_view) = classify(poly.poly_flags, &resolved);
-            let mesh = build_poly_mesh(&self.ctx, poly, resolved.size)?;
+            // Lightmap-bearing polys classify ahead of the flag/texture
+            // fallback: they multiply the palette-expanded base color by
+            // the baked light atlas.
+            let lm_mapping = poly.light_map.and_then(|lm| {
+                let (view, atlas_w, atlas_h, rects) = atlas.as_ref()?;
+                let rect = rects.get(lm)?;
+                let image = &scene.lightmaps[lm];
+                // Range guard: if the poly's lm texel coords fall far
+                // outside the image, the attach is mismatched — render
+                // unlit rather than streaking clamp garbage.
+                let dot = |a: [f32; 3], b: [f32; 3]| {
+                    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+                };
+                let pan_u = dot(poly.tex_u, poly.base) + image.pan[0]
+                    - 0.5 * image.scale[0];
+                let pan_v = dot(poly.tex_v, poly.base) + image.pan[1]
+                    - 0.5 * image.scale[1];
+                let in_range = poly.vertices.iter().all(|v| {
+                    let u = (dot(poly.tex_u, *v) - pan_u) / image.scale[0];
+                    let w = image.width as f32;
+                    let vv = (dot(poly.tex_v, *v) - pan_v) / image.scale[1];
+                    let h = image.height as f32;
+                    u > -1.0 && u < w + 1.0 && vv > -1.0 && vv < h + 1.0
+                });
+                if !in_range {
+                    return None;
+                }
+                Some(LmUvMapping {
+                    pan_u: poly.tex_u[0] * poly.base[0]
+                        + poly.tex_u[1] * poly.base[1]
+                        + poly.tex_u[2] * poly.base[2]
+                        + image.pan[0]
+                        - 0.5 * image.scale[0],
+                    pan_v: poly.tex_v[0] * poly.base[0]
+                        + poly.tex_v[1] * poly.base[1]
+                        + poly.tex_v[2] * poly.base[2]
+                        + image.pan[1]
+                        - 0.5 * image.scale[1],
+                    scale_u: image.scale[0],
+                    scale_v: image.scale[1],
+                    rect: [rect.0 as f32, rect.1 as f32, rect.2 as f32, rect.3 as f32],
+                    atlas: [*atlas_w as f32, *atlas_h as f32],
+                    view: view.clone(),
+                })
+            });
+            let (kind, base_view, second_view) = match &lm_mapping {
+                Some(mapping) => {
+                    let base = resolved
+                        .color_view
+                        .clone()
+                        .unwrap_or_else(|| resolved.base_view.clone());
+                    (SurfaceKind::Lightmap, base, Some(mapping.view.clone()))
+                }
+                None => classify(poly.poly_flags, &resolved),
+            };
+            let mesh = build_poly_mesh(
+                &self.ctx,
+                poly,
+                resolved.size,
+                lm_mapping.as_ref(),
+            )?;
             self.draws.push(PreparedPoly {
                 mesh,
                 kind,
                 base_view,
                 second_view,
             });
-            self.uploads.entry(key).or_insert(ResolvedTexture {
-                index_or_color: resolved.index_or_color,
-                base_view: resolved.base_view,
-                lut_view: resolved.lut_view,
-                size: resolved.size,
-            });
         }
         Ok(())
+    }
+
+    /// Shelf-pack the scene's lightmap images into one BGRA atlas with
+    /// 1-texel replicated-edge gutters. Returns the atlas view, its
+    /// dimensions, and per-image rects.
+    fn build_lightmap_atlas(
+        &mut self,
+        images: &[crate::lightmap::LightmapImage],
+    ) -> Option<LightmapAtlas> {
+        if images.is_empty() {
+            return None;
+        }
+        const MAX_DIM: u32 = 4096;
+        let mut order: Vec<usize> = (0..images.len()).collect();
+        order.sort_by_key(|&i| std::cmp::Reverse(images[i].height));
+        let mut rects = vec![(0u32, 0u32, 0u32, 0u32); images.len()];
+        let mut shelf_x = 1u32;
+        let mut shelf_y = 1u32;
+        let mut shelf_h = 0u32;
+        let mut atlas_w = 1u32;
+        for &i in &order {
+            let (w, h) = (images[i].width.min(MAX_DIM - 2) + 2, images[i].height.min(MAX_DIM - 2) + 2);
+            if shelf_x + w > MAX_DIM {
+                atlas_w = atlas_w.max(shelf_x);
+                shelf_y += shelf_h;
+                shelf_x = 1;
+                shelf_h = 0;
+                if shelf_y + h > MAX_DIM {
+                    // Atlas overflow: drop the remainder (loud, countable).
+                    eprintln!(
+                        "hp-engine: note [renderer.lightmap_atlas_overflow] {} of {} lightmaps fit",
+                        i, images.len()
+                    );
+                    break;
+                }
+            }
+            rects[i] = (shelf_x, shelf_y, w - 2, h - 2);
+            shelf_x += w;
+            shelf_h = shelf_h.max(h);
+        }
+        atlas_w = atlas_w.max(shelf_x);
+        let atlas_h = shelf_y + shelf_h;
+        let mut pixels = vec![0u8; (atlas_w * atlas_h * 4) as usize];
+        for (i, image) in images.iter().enumerate() {
+            let (px, py, w, h) = rects[i];
+            if w == 0 {
+                continue;
+            }
+            // Copy with replicated-edge gutter (the +1 border).
+            for gy in 0..h + 2 {
+                let sy = gy.saturating_sub(1).min(image.height - 1);
+                for gx in 0..w + 2 {
+                    let sx = gx.saturating_sub(1).min(image.width - 1);
+                    let src = ((sy * image.width + sx) * 4) as usize;
+                    let dst = (((py + gy - 1) * atlas_w + (px + gx - 1)) * 4) as usize;
+                    // LightmapImage is RGBA; the atlas is Bgra8 — swizzle.
+                    pixels[dst] = image.rgba[src + 2];
+                    pixels[dst + 1] = image.rgba[src + 1];
+                    pixels[dst + 2] = image.rgba[src];
+                    pixels[dst + 3] = image.rgba[src + 3];
+                }
+            }
+        }
+        let id = self
+            .textures
+            .create_bgra8(&self.ctx, "lightmap-atlas", atlas_w, atlas_h, &pixels);
+        let view = self.textures.view(&self.ctx, id).clone();
+        Some((view, atlas_w, atlas_h, rects))
     }
 
     /// Encode one frame of the loaded scene into arbitrary color+depth
@@ -259,6 +409,7 @@ impl RendererSession {
                 .create_bgra8(&self.ctx, "missing-texture", W, W, &pixels);
             let view = self.textures.view(&self.ctx, id).clone();
             return Ok(ResolvedTexture {
+                color_view: None,
                 index_or_color: id,
                 base_view: view,
                 lut_view: None,
@@ -276,6 +427,7 @@ impl RendererSession {
                     .create_bgra8(&self.ctx, &label, width, height, &pixels);
                 let view = self.textures.view(&self.ctx, id).clone();
                 ResolvedTexture {
+                    color_view: None,
                     index_or_color: id,
                     base_view: view,
                     lut_view: None,
@@ -292,7 +444,30 @@ impl RendererSession {
                         .create_palette_lut(&self.ctx, &format!("{label}#lut"), &rgba);
                 let base_view = self.textures.view(&self.ctx, index_map).clone();
                 let lut_view = self.textures.view(&self.ctx, lut).clone();
+                // Palette-expanded color surface: the Lightmap pipeline
+                // multiplies base.rgb directly (no LUT step), so lightmap
+                // polys need the decoded color, not the index map.
+                let mut color_bgra = Vec::with_capacity(indices.len() * 4);
+                for &index in &indices {
+                    let src = index as usize * 4;
+                    // Palette is RGBA; the target is Bgra8.
+                    color_bgra.extend_from_slice(&[
+                        rgba[src + 2],
+                        rgba[src + 1],
+                        rgba[src],
+                        rgba[src + 3],
+                    ]);
+                }
+                let color_id = self.textures.create_bgra8(
+                    &self.ctx,
+                    &format!("{label}#color"),
+                    width,
+                    height,
+                    &color_bgra,
+                );
+                let color_view = self.textures.view(&self.ctx, color_id).clone();
                 ResolvedTexture {
+                    color_view: Some(color_view),
                     index_or_color: index_map,
                     base_view,
                     lut_view: Some(lut_view),
@@ -418,7 +593,12 @@ fn pass_uniforms(camera: &SceneCamera) -> PassUniforms {
 /// Build one polygon's GPU mesh: fan-triangulated, textured via the FPoly
 /// basis (`dot(P - Base, TexU/V)` in texels, panned, normalized by the mip-0
 /// texture size), fullbright white, unfogged.
-fn build_poly_mesh(ctx: &GpuContext, poly: &ScenePoly, tex_size: [f32; 2]) -> Result<MeshGpu> {
+fn build_poly_mesh(
+    ctx: &GpuContext,
+    poly: &ScenePoly,
+    tex_size: [f32; 2],
+    lm: Option<&LmUvMapping>,
+) -> Result<MeshGpu> {
     let n = poly.vertices.len();
     if n < 3 || n >= u16::MAX as usize {
         return Err(EngineError::new(
@@ -432,13 +612,30 @@ fn build_poly_mesh(ctx: &GpuContext, poly: &ScenePoly, tex_size: [f32; 2]) -> Re
     let mut vertices = Vec::with_capacity(n);
     for v in &poly.vertices {
         let d = [v[0] - base[0], v[1] - base[1], v[2] - base[2]];
+        let uv1 = lm
+            .map(|m| {
+                let dot_u =
+                    poly.tex_u[0] * v[0] + poly.tex_u[1] * v[1] + poly.tex_u[2] * v[2];
+                let dot_v =
+                    poly.tex_v[0] * v[0] + poly.tex_v[1] * v[1] + poly.tex_v[2] * v[2];
+                // Raw lm texel coords, clamped into the image, then mapped
+                // through the atlas rect (+1 skips the replicated gutter).
+                let u = (dot_u - m.pan_u) / m.scale_u;
+                let w = m.rect[2].max(1.0);
+                let v_lm = (dot_v - m.pan_v) / m.scale_v;
+                let h = m.rect[3].max(1.0);
+                let cu = (u.clamp(0.0, w) + m.rect[0] + 1.0) / m.atlas[0];
+                let cv = (v_lm.clamp(0.0, h) + m.rect[1] + 1.0) / m.atlas[1];
+                [cu, cv]
+            })
+            .unwrap_or([0.0, 0.0]);
         vertices.push(MeshVertex {
             position: *v,
             uv0: [
                 (dot(&d, &poly.tex_u) - poly.pan_uv[0]) / tw,
                 (dot(&d, &poly.tex_v) - poly.pan_uv[1]) / th,
             ],
-            uv1: [0.0, 0.0],
+            uv1,
             color: [1.0, 1.0, 1.0, 1.0],
             unfogged: 1.0,
         });
@@ -504,6 +701,7 @@ mod tests {
         let data_root =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
         let mut scene = RenderScene {
+            lightmaps: Vec::new(),
             polys: Vec::new(),
             camera: Some(SceneCamera {
                 location: [-64.0, 0.0, 0.0],
@@ -538,6 +736,7 @@ mod tests {
                     package: String::new(),
                     object_path: String::new(),
                 }),
+                light_map: None,
             });
         }
 
@@ -564,6 +763,7 @@ mod tests {
                     .textures
                     .create_r8(&session.ctx, "synthetic", 16, 16, &indices);
                 ResolvedTexture {
+                    color_view: None,
                     index_or_color: id,
                     base_view: session.textures.view(&session.ctx, id).clone(),
                     lut_view: {
@@ -586,6 +786,7 @@ mod tests {
             .update_uniforms(&session.ctx, &pass_uniforms(&scene.camera_or_default()));
         for poly in &scene.polys {
             let resolved = ResolvedTexture {
+                color_view: None,
                 index_or_color: session.uploads[&poly.texture.clone().unwrap()].index_or_color,
                 base_view: session.uploads[&poly.texture.clone().unwrap()]
                     .base_view
@@ -596,7 +797,7 @@ mod tests {
                 size: session.uploads[&poly.texture.clone().unwrap()].size,
             };
             let (kind, base_view, second_view) = classify(poly.poly_flags, &resolved);
-            let mesh = build_poly_mesh(&session.ctx, poly, resolved.size)?;
+            let mesh = build_poly_mesh(&session.ctx, poly, resolved.size, None)?;
             session.draws.push(PreparedPoly {
                 mesh,
                 kind,

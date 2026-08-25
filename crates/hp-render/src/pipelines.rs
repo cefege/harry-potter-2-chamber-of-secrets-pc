@@ -134,11 +134,10 @@ fn fs_main(frag: FsIn) -> @location(0) vec4<f32> {
 const FRAG_LIGHTMAP: &str = r"
 @fragment
 fn fs_main(frag: FsIn) -> @location(0) vec4<f32> {
-    // BGRA8 lightmaps upload byte-verbatim; channel order matches the
-    // capture-baseline verification contract (see textures.rs).
+    // UE1 display-space overbright: base x lightmap x 2.
     let base = sample_base(frag);
     let lm = textureSample(second_texture, second_sampler, frag.uv1);
-    return shade(frag, vec4<f32>(base.rgb * lm.rgb, base.a));
+    return shade(frag, vec4<f32>(base.rgb * lm.rgb * 2.0, base.a));
 }
 ";
 
@@ -512,7 +511,7 @@ impl PipelineSet {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&self.samplers.nearest),
+                    resource: wgpu::BindingResource::Sampler(&self.samplers.linear),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,

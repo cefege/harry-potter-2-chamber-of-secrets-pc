@@ -44,6 +44,10 @@ pub struct ScenePoly {
     /// `EPolyFlags` verbatim (`PF_Masked`, `PF_Translucent`, ...).
     pub poly_flags: u32,
     pub texture: Option<TextureKey>,
+    /// Index into [`RenderScene::lightmaps`] for BSP surfaces with a baked
+    /// lightmap; `None` for brush polys (vertex-lit in UE1, fullbright
+    /// here).
+    pub light_map: Option<usize>,
 }
 
 /// Camera seed resolved from a map actor (`PlayerStart`, else first `Camera`).
@@ -66,6 +70,8 @@ impl Default for SceneCamera {
 /// Everything the renderer needs for one map.
 #[derive(Debug, Clone, Default)]
 pub struct RenderScene {
+    /// Baked lightmap images; `ScenePoly::light_map` indexes this.
+    pub lightmaps: Vec<crate::lightmap::LightmapImage>,
     pub polys: Vec<ScenePoly>,
     pub camera: Option<SceneCamera>,
 }
@@ -104,12 +110,24 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
     };
 
     let mut polys = Vec::new();
+    let mut scene_lightmaps: Vec<crate::lightmap::LightmapImage> = Vec::new();
     let mut brushes = 0usize;
     let mut linked = 0usize;
     let mut referenced_models: std::collections::HashSet<usize> = Default::default();
 
     // One model export's UPolys -> world-space scene polys under the given
     // brush transform. Returns the poly count.
+    // LevelInfo ambient: the fallback lightmap fill for zones without a
+    // ZoneInfo ambient.
+    let level_info_ambient = level
+        .actors
+        .iter()
+        .find(|&&actor| class_label(arena, actor).eq_ignore_ascii_case("LevelInfo"))
+        .and_then(|&actor| arena.get(actor).ok())
+        .and_then(|obj| obj.properties().cloned())
+        .map(|store| crate::lightmap::decode_ambient(&store, &arena.names))
+        .unwrap_or_default();
+
     let push_model_polys = |archive: &PackageArchive,
                             model_index: usize,
                             matrix: &[[f32; 3]; 3],
@@ -157,6 +175,7 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
                 pan_uv: raw_poly.pan_uv,
                 poly_flags: raw_poly.poly_flags,
                 texture: resolve_texture_key(archive, raw_poly.texture_ref),
+                light_map: None,
             });
         }
         Ok(count)
@@ -257,8 +276,95 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
             }
             continue;
         }
+        // Reconstruct the model's baked lightmaps (zone ambient + light
+        // contributions + blurred shadow masks).
+        let lightmap_base = scene_lightmaps.len();
+        if !parsed.light_maps.is_empty() {
+            let names = &arena.names;
+            let export_ids = &level.export_ids;
+            let zone_ambient = |zone: usize| -> Option<crate::lightmap::Ambient> {
+                let export = *parsed.zone_actors.get(zone)?;
+                if export == 0 {
+                    return None;
+                }
+                let id = *export_ids.get(export.unsigned_abs() as usize - 1)?;
+                let store = arena.get(id).ok()?.properties()?;
+                Some(crate::lightmap::decode_ambient(store, names))
+            };
+            let light_actor = |export: i32| -> Option<crate::lightmap::LightActor> {
+                if export == 0 {
+                    return None;
+                }
+                let id = *export_ids.get(export.unsigned_abs() as usize - 1)?;
+                let store = arena.get(id).ok()?.properties()?;
+                crate::lightmap::decode_light(store, names)
+            };
+            let images = crate::lightmap::build_lightmap_images(
+                &parsed,
+                level_info_ambient,
+                &zone_ambient,
+                &light_actor,
+            );
+            if std::env::var("HP2_LM_STATS").is_ok() {
+                let mut means: Vec<f32> = images
+                    .iter()
+                    .map(|im| {
+                        let sum: usize =
+                            im.rgba.chunks_exact(4).map(|px| px[0] as usize + px[1] as usize + px[2] as usize).sum();
+                        sum as f32 / (im.rgba.len() as f32 / 4.0 * 3.0)
+                    })
+                    .collect();
+                means.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                let n = means.len();
+                println!(
+                    "[lmstats] images={} mean-brightness p10={:.1} p50={:.1} p90={:.1} max={:.1} (0-255)",
+                    n,
+                    means[n / 10],
+                    means[n / 2],
+                    means[n * 9 / 10],
+                    means[n - 1]
+                );
+            }
+            if std::env::var("HP2_LM_DUMP").is_ok() {
+                std::fs::create_dir_all("/tmp/g4_lm").ok();
+                for (i, im) in images.iter().enumerate() {
+                    let path = format!("/tmp/g4_lm/lm_{i:04}_{}x{}.png", im.width, im.height);
+                    let _ = image_dump_png(&path, im);
+                }
+            }
+            scene_lightmaps.extend(images);
+        }
         let before = polys.len();
-        push_bsp_polys(&parsed, archive, &mut polys);
+        push_bsp_polys(&parsed, archive, lightmap_base, &mut polys);
+        if std::env::var("HP2_LM_STATS").is_ok() {
+            let mut big: Vec<(f32, usize, [f32; 3])> = polys[before..]
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.light_map.is_some())
+                .map(|(_i, p)| {
+                    let (a, b) = (p.vertices[0], p.vertices[1.min(p.vertices.len() - 1)]);
+                    let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                    let c = p.vertices[p.vertices.len() - 1];
+                    let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                    let n = [
+                        e1[1] * e2[2] - e1[2] * e2[1],
+                        e1[2] * e2[0] - e1[0] * e2[2],
+                        e1[0] * e2[1] - e1[1] * e2[0],
+                    ];
+                    (
+                        0.5 * (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt(),
+                        p.light_map.unwrap(),
+                        p.normal,
+                    )
+                })
+                .collect();
+            big.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+            for (area, lm, normal) in big.iter().take(6) {
+                println!(
+                    "[lmstats] big lm poly: area={area:.0} light_map={lm} normal={normal:?}"
+                );
+            }
+        }
         level_models += 1;
         println!(
             "hp-engine: level model {index}: {} nodes -> {} polys",
@@ -272,6 +378,7 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
     );
 
     Ok(RenderScene {
+        lightmaps: scene_lightmaps,
         polys,
         camera: find_camera(arena, level),
     })
@@ -281,7 +388,12 @@ pub fn build_render_scene(arena: &ObjectArena, level: &Level) -> Result<RenderSc
 /// each node's vertex pool slices the shared `verts` pool into `points`
 /// positions; its surface carries the texture binding and UV basis (indices
 /// into the model's Vectors/Points). Mirrors openhp1 `Model::triangulate`.
-fn push_bsp_polys(model: &ParsedModel, archive: &PackageArchive, polys: &mut Vec<ScenePoly>) {
+fn push_bsp_polys(
+    model: &ParsedModel,
+    archive: &PackageArchive,
+    lightmap_base: usize,
+    polys: &mut Vec<ScenePoly>,
+) {
     for node in &model.nodes {
         if node.vertex_count < 3 {
             continue;
@@ -313,6 +425,14 @@ fn push_bsp_polys(model: &ParsedModel, archive: &PackageArchive, polys: &mut Vec
         if vertices.len() < 3 {
             continue;
         }
+        // UE1 sky (fake-backdrop) surfaces are unlit — never attach a
+        // lightmap to them.
+        const PF_FAKE_BACKDROP: u32 = 0x0800_0000;
+        let light_map = usize::try_from(surf.light_map)
+            .ok()
+            .filter(|lm| *lm < model.light_maps.len())
+            .filter(|_| surf.poly_flags & PF_FAKE_BACKDROP == 0)
+            .map(|lm| lightmap_base + lm);
         polys.push(ScenePoly {
             base,
             vertices,
@@ -322,6 +442,7 @@ fn push_bsp_polys(model: &ParsedModel, archive: &PackageArchive, polys: &mut Vec
             pan_uv: [surf.pan_u as f32, surf.pan_v as f32],
             poly_flags: surf.poly_flags,
             texture: resolve_texture_key(archive, surf.texture_ref),
+            light_map,
         });
     }
 }
@@ -666,6 +787,8 @@ pub(crate) struct BspNodeData {
     pub vertex_pool: usize,
     pub vertex_count: u8,
     pub surface: i32,
+    /// Raw iZone bytes (front, back) — index into the model's zone table.
+    pub izones: [u8; 2],
 }
 
 /// One decoded `FBspSurf` record: texture binding and UV basis as indices
@@ -680,6 +803,8 @@ pub(crate) struct BspSurfData {
     pub tex_v: usize,
     pub pan_u: i16,
     pub pan_v: i16,
+    /// `FBspSurf.iLightMap` — index into the model's LightMaps array.
+    pub light_map: i32,
 }
 
 /// A fully decoded `UModel` payload: the BSP topology arrays plus the
@@ -696,6 +821,28 @@ pub(crate) struct ParsedModel {
     /// topology-only and unused for rendering).
     pub verts: Vec<usize>,
     pub polys_ref: i32,
+    /// Baked-lighting block (level models only; brush models carry none):
+    /// one `FLightMap` record per BSP surface lightmap, the shared 1bpp
+    /// shadow-mask blob, the zone-table actor refs, and the model-wide
+    /// light list (`light_actors` heads a None-terminated run in `lights`).
+    pub light_maps: Vec<LightMapData>,
+    pub light_bits: Vec<u8>,
+    pub zone_actors: Vec<i32>,
+    pub lights: Vec<i32>,
+}
+
+/// One decoded `FLightMap` record.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LightMapData {
+    /// Byte offset of this lightmap's shadow-mask block in `light_bits`.
+    pub data_offset: i32,
+    pub pan: [f32; 3],
+    /// Dimensions (width, height).
+    pub clamp: [i32; 2],
+    /// World units per lightmap texel (u, v).
+    pub scale: [f32; 2],
+    /// Head index into `lights` for this lightmap's None-terminated list.
+    pub light_actors: i32,
 }
 
 pub(crate) fn model_polys_ref(
@@ -757,7 +904,7 @@ pub(crate) fn parse_model(
             for slot in &mut refs {
                 *slot = read_compact_index(&mut cur)?;
             }
-            let _izones: [u8; 2] =
+            let izones: [u8; 2] =
                 cur.take(2)?
                     .try_into()
                     .map_err(|_| PackageError::BadLayout {
@@ -770,6 +917,7 @@ pub(crate) fn parse_model(
                 vertex_pool: refs[0].max(0) as usize,
                 vertex_count,
                 surface: refs[1],
+                izones,
             });
         }
         // Surfs TArray<FBspSurf>: compact texture ref, u32 PolyFlags, six
@@ -784,6 +932,7 @@ pub(crate) fn parse_model(
             for slot in &mut refs {
                 *slot = read_compact_index(&mut cur)?;
             }
+            let light_map = refs[4];
             let pan_u = i16::from_le_bytes(cur.take(2)?.try_into().map_err(|_| {
                 PackageError::BadLayout {
                     detail: "surf pan u".into(),
@@ -804,6 +953,7 @@ pub(crate) fn parse_model(
                 tex_v: refs[3].max(0) as usize,
                 pan_u,
                 pan_v,
+                light_map,
             });
         }
         // Verts TArray<FVert>: two compact indices each.
@@ -822,7 +972,7 @@ pub(crate) fn parse_model(
             });
         }
         for _ in 0..num_zones {
-            let _zone_actor = read_compact_index(&mut cur)?;
+            model.zone_actors.push(read_compact_index(&mut cur)?);
             let conn: [u8; 8] = cur
                 .take(8)?
                 .try_into()
@@ -839,6 +989,79 @@ pub(crate) fn parse_model(
         }
         // THE LINKAGE FIELD.
         model.polys_ref = read_compact_index(&mut cur)?;
+
+        // Baked-lighting block (level models only). Grammar per
+        // UModel::Serialize and openhp1 model.rs: TArray<FLightMap> then
+        // the LightBits blob, then collision bounds / leaf hulls / convex
+        // leaves / the model-wide light list, then two trailing i32s.
+        // OPTIONAL: brush-style payloads end at the Polys ref, and some
+        // small models carry a different tail — a failed decode leaves
+        // lightmaps empty without invalidating the model.
+        let light_map_count = match read_compact_index(&mut cur) {
+            Ok(count) => count,
+            Err(_) => return Ok(model),
+        };
+        if let Err(error) = (|| -> PackageResult<()> {
+        if light_map_count > 0 {
+            for _ in 0..light_map_count {
+                let data_offset = cur.i32()?;
+                let pan = read_f32x3(&mut cur)?;
+                let clamp = [read_compact_index(&mut cur)?, read_compact_index(&mut cur)?];
+                let scale = [read_f32_scalar(&mut cur)?, read_f32_scalar(&mut cur)?];
+                let light_actors = cur.i32()?;
+                model.light_maps.push(LightMapData {
+                    data_offset,
+                    pan,
+                    clamp,
+                    scale,
+                    light_actors,
+                });
+            }
+            let light_bits = read_compact_index(&mut cur)?;
+                if light_bits > 0 {
+                model.light_bits = cur
+                    .take(light_bits as usize)?
+                    .to_vec();
+            }
+            let bounds = read_compact_index(&mut cur)?;
+            // FBox per openhp1 read_box: min + max + valid u8 = 25 bytes.
+            for _ in 0..bounds.max(0) {
+                for _ in 0..6 {
+                    read_f32_scalar(&mut cur)?;
+                }
+                cur.u8()?;
+            }
+            let hulls = read_compact_index(&mut cur)?;
+            eprintln!("[lmprobe] bounds={} hulls={} @{}", bounds, hulls, cur.position());
+            for _ in 0..hulls.max(0) {
+                cur.i32()?;
+            }
+            let leaves = read_compact_index(&mut cur)?;
+            eprintln!("[lmprobe] leaves={} @{} (payload {})", leaves, cur.position(), {
+                // payload length via cursor len
+                0usize
+            });
+            for _ in 0..leaves.max(0) {
+                for _ in 0..3 {
+                    read_compact_index(&mut cur)?;
+                }
+                cur.take(8)?;
+            }
+            let lights = read_compact_index(&mut cur)?;
+            eprintln!("[lmprobe] lights={} @{}", lights, cur.position());
+            for _ in 0..lights.max(0) {
+                model.lights.push(read_compact_index(&mut cur)?);
+            }
+            let _root_outside = cur.i32()?;
+            let _linked = cur.i32()?;
+        }
+        Ok(())
+    })() {
+        model.light_maps.clear();
+        model.light_bits.clear();
+        model.lights.clear();
+        let _ = error;
+    }
         Ok(model)
     })();
     decoded.map_err(|error| EngineError::new("engine.scene_model", error.to_string()))
@@ -1300,6 +1523,71 @@ mod tagprobe {
     }
 }
 
+fn image_dump_png(path: &str, im: &crate::lightmap::LightmapImage) -> std::io::Result<()> {
+    // Minimal grayscale PNG (8-bit, no filtering) — good enough to eyeball
+    // light pools. Reuses the RGB bytes as gray.
+    fn crc32(data: &[u8]) -> u32 {
+        let mut table = [0u32; 256];
+        for (i, t) in table.iter_mut().enumerate() {
+            let mut c = i as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+            *t = c;
+        }
+        let mut c = 0xFFFF_FFFFu32;
+        for &b in data {
+            c = table[((c ^ b as u32) & 0xff) as usize] ^ (c >> 8);
+        }
+        c ^ 0xFFFF_FFFF
+    }
+    fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = (data.len() as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        out.extend_from_slice(&crc32(&out[4..]).to_be_bytes());
+        out
+    }
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut ihdr = im.width.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&im.height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    png.extend(chunk(b"IHDR", &ihdr));
+    let mut raw = Vec::with_capacity((im.width as usize + 1) * im.height as usize);
+    for y in 0..im.height {
+        raw.push(0u8);
+        for x in 0..im.width {
+            let src = ((y * im.width + x) * 4) as usize;
+            raw.push(im.rgba[src]);
+            raw.push(im.rgba[src + 1]);
+            raw.push(im.rgba[src + 2]);
+        }
+    }
+    png.extend(chunk(b"IDAT", &zlib_store(raw)));
+    png.extend(chunk(b"IEND", &[]));
+    std::fs::write(path, png)
+}
+
+fn zlib_store(data: Vec<u8>) -> Vec<u8> {
+    // Stored (uncompressed) zlib deflate blocks.
+    let mut out = vec![0x78, 0x01];
+    for chunk in data.chunks(65535) {
+        let last = if chunk.len() < 65535 { 1u8 } else { 0u8 };
+        out.push(last);
+        out.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(!(chunk.len() as u16)).to_le_bytes());
+        out.extend_from_slice(chunk);
+    }
+    // Adler-32 over the UNCOMPRESSED data.
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in &data {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    out
+}
+
 /// G4 structural acceptance: numeric correctness of scene extraction,
 /// per the phase gate. These tests encode the wire facts directly and do
 /// not depend on pixels.
@@ -1754,6 +2042,131 @@ mod surfprobe {
         pans.dedup();
         for p in pans.iter().take(8) {
             println!("  pan {p:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod lmprobe {
+    use super::*;
+
+    #[test]
+    fn lightmap_data_census() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../HarryPotter2/Unreal");
+        let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
+        let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
+        let level = crate::level::load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes)
+            .unwrap();
+        let arena = &world.arena;
+        let archive = level.archive.as_ref().unwrap();
+        let payload = archive.export_payload(822).unwrap();
+        let model = parse_model(payload, archive, archive.exports[822].class_ref).unwrap();
+        println!(
+            "light_maps={} light_bits={} zone_actors={} lights={} (zero-terminated runs: {})",
+            model.light_maps.len(),
+            model.light_bits.len(),
+            model.zone_actors.len(),
+            model.lights.len(),
+            model.lights.iter().filter(|&&l| l == 0).count()
+        );
+        // LevelInfo ambient.
+        let names = &arena.names;
+        for &actor in &level.actors {
+            if class_label(arena, actor).eq_ignore_ascii_case("LevelInfo") {
+                let store = arena.get(actor).unwrap().properties().unwrap();
+                let amb = crate::lightmap::decode_ambient(store, names);
+                println!("LevelInfo ambient hue={} sat={} bri={}", amb.hue, amb.saturation, amb.brightness);
+                break;
+            }
+        }
+        // Zone actors + their ambients.
+        for (zi, za) in model.zone_actors.iter().enumerate().take(8) {
+            if *za <= 0 {
+                println!("zone {zi}: actor_ref={za} (null)");
+                continue;
+            }
+            let id = level.export_ids.get(*za as usize - 1);
+            let class = id
+                .and_then(|id| arena.get(*id).ok())
+                .and_then(|o| o.class_id)
+                .and_then(|c| arena.get(c).ok())
+                .and_then(|c| arena.names.text(c.name_index))
+                .unwrap_or("?")
+                .to_string();
+            let amb = id
+                .and_then(|id| arena.get(*id).ok())
+                .and_then(|o| o.properties())
+                .map(|s| crate::lightmap::decode_ambient(s, names));
+            println!(
+                "zone {zi}: actor_ref={za} class={class} ambient={:?}",
+                amb.map(|a| (a.hue, a.saturation, a.brightness))
+            );
+        }
+        // izone byte distribution over nodes with lightmapped surfs.
+        let mut z0: std::collections::BTreeMap<u8, usize> = Default::default();
+        let mut z1: std::collections::BTreeMap<u8, usize> = Default::default();
+        for node in &model.nodes {
+            let Some(surf) = model.surfs.get(node.surface.max(0) as usize) else { continue };
+            let Ok(lm) = usize::try_from(surf.light_map) else { continue };
+            if lm >= model.light_maps.len() { continue; }
+            *z0.entry(node.izones[0]).or_default() += 1;
+            *z1.entry(node.izones[1]).or_default() += 1;
+        }
+        println!("izones[0] top: {:?}", z0.iter().take(6).collect::<Vec<_>>());
+        println!("izones[1] top: {:?}", z1.iter().take(6).collect::<Vec<_>>());
+        // Light list census.
+        let mut with_lights = 0usize;
+        let mut light_exports: std::collections::BTreeSet<i32> = Default::default();
+        for lm in &model.light_maps {
+            if lm.light_actors < 0 {
+                continue;
+            }
+            let mut i = lm.light_actors as usize;
+            let mut any = false;
+            while let Some(r) = model.lights.get(i) {
+                i += 1;
+                if *r == 0 {
+                    break;
+                }
+                if *r > 0 {
+                    any = true;
+                    light_exports.insert(*r);
+                }
+            }
+            if any {
+                with_lights += 1;
+            }
+        }
+        println!(
+            "lightmaps with nonzero light lists: {with_lights}/{}; distinct light exports: {}",
+            model.light_maps.len(),
+            light_exports.len()
+        );
+        for (i, lm) in model.light_maps.iter().take(3).enumerate() {
+            println!(
+                "  lm{i}: clamp={:?} scale=({:.2},{:.2}) off={} pan={:?} lights@{}",
+                lm.clamp, lm.scale[0], lm.scale[1], lm.data_offset, lm.pan, lm.light_actors
+            );
+        }
+        // Light actor classes.
+        for (n, export) in light_exports.iter().take(5).enumerate() {
+            let id = level.export_ids.get(*export as usize - 1);
+            let class = id
+                .and_then(|id| arena.get(*id).ok())
+                .and_then(|o| o.class_id)
+                .and_then(|c| arena.get(c).ok())
+                .and_then(|c| arena.names.text(c.name_index))
+                .unwrap_or("?")
+                .to_string();
+            let store = id.and_then(|id| arena.get(*id).ok()).and_then(|o| o.properties());
+            let light = store.and_then(|s| crate::lightmap::decode_light(s, names));
+            println!(
+                "  light export {export}: class={class} decoded={}",
+                light.map(|l| format!("bri={} hue={} rad={} eff={}", l.brightness, l.hue, l.radius, l.effect))
+                    .unwrap_or_else(|| "NONE".into())
+            );
+            let _ = n;
         }
     }
 }

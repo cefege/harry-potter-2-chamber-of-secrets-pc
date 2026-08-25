@@ -238,7 +238,8 @@ fn lightmap_multiplies_base_by_second_uv_set_sample() {
     );
     let mut mgr = TextureManager::new();
     set.update_uniforms(&ctx, &PassUniforms::identity());
-    // White base × half-intensity lightmap.
+    // White base × half-intensity lightmap. The x2 overbright modulation
+    // clamps (255/255 × 128/255 × 2) to 1.0.
     let base = mgr.create_bgra8(&ctx, "base", 1, 1, &[255, 255, 255, 255]);
     let lm = mgr.create_bgra8(&ctx, "lm", 1, 1, &[128, 128, 128, 255]);
     let base_view = mgr.view(&ctx, base).clone();
@@ -251,7 +252,7 @@ fn lightmap_multiplies_base_by_second_uv_set_sample() {
         second_view: Some(&lm_view),
     }];
     let pixels = render(&ctx, &set, &target, &draws, wgpu::Color::BLACK);
-    assert_eq!(center_pixel(&target, &pixels), [128, 128, 128, 255]);
+    assert_eq!(center_pixel(&target, &pixels), [255, 255, 255, 255]);
 }
 
 #[test]

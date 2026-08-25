@@ -5,6 +5,7 @@
 pub mod console;
 pub mod error;
 pub mod input;
+pub mod lightmap;
 pub mod level;
 pub mod render_bridge;
 pub mod rng;
