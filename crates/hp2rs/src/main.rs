@@ -204,16 +204,18 @@ fn consume_load_save(data_root: &Path, slot: i32) {
             .join(format!("Save{slot}.usa")),
         data_root.join("Save").join(format!("Save{slot}.usa")),
     ];
+    let tried: Vec<String> =
+        candidates.iter().map(|p| p.display().to_string()).collect();
     let (path, bytes) = match candidates
-        .iter()
-        .map(|path| path.clone())
-        .map(|path| (path.clone(), std::fs::read(&path)))
+        .into_iter()
+        .map(|path| {
+            let read = std::fs::read(&path);
+            (path, read)
+        })
         .find(|(_, read)| read.is_ok())
     {
         Some((path, Ok(bytes))) => (path, bytes),
         _ => {
-            let tried: Vec<String> =
-                candidates.iter().map(|p| p.display().to_string()).collect();
             eprintln!(
                 "hp2rs: [engine.save_unreadable] no Save{slot}.usa under: {}",
                 tried.join(" | ")
