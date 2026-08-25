@@ -1128,7 +1128,6 @@ fn find_camera(arena: &ObjectArena, level: &Level) -> Option<SceneCamera> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn privet_archive() -> Option<hp_format::package79::PackageArchive> {
         let Some(root) = test_data_root() else {
@@ -1239,7 +1238,6 @@ mod tests {
 #[cfg(test)]
 mod linkprobe {
     use super::*;
-    use std::path::PathBuf;
     fn try_ci(buf: &[u8], pos: usize) -> hp_format::package79::PackageResult<(i32, usize)> {
         let mut cur = ByteCursor::new(buf);
         cur.seek(pos);
@@ -1323,7 +1321,6 @@ mod linkprobe {
 #[cfg(test)]
 mod actorprobe {
     use super::*;
-    use std::path::PathBuf;
 
     /// One HP2 FPropertyTag walk attempt from `start`. Returns Ok(offsets of
     /// Vector struct values) when the stream terminates on NAME_None without
@@ -1650,7 +1647,6 @@ pub(crate) fn test_data_root() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod g4_structural {
     use super::*;
-    use std::path::PathBuf;
 
     struct Loaded {
         world: hp_uobject::bootstrap::World,
@@ -2079,7 +2075,6 @@ mod g4_structural {
 #[cfg(test)]
 mod surfprobe {
     use super::*;
-    use std::path::PathBuf;
 
     /// Inspect Model1 BSP surf basis vectors: magnitudes tell whether the
     /// stored Vectors carry texel scale or are unit directions.
