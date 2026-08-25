@@ -788,6 +788,7 @@ dependencies = [
  "ahash",
  "bytemuck",
  "document-features",
+ "egui",
  "epaint",
  "log",
  "profiling",
@@ -795,6 +796,7 @@ dependencies = [
  "type-map",
  "web-time",
  "wgpu",
+ "winit",
 ]
 
 [[package]]
@@ -1231,6 +1233,7 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "hp-ini",
  "rfd",
  "winit",
 ]
@@ -1249,6 +1252,9 @@ name = "hp-engine"
 version = "0.1.0"
 dependencies = [
  "hp-format",
+ "hp-ini",
+ "hp-render",
+ "hp-uobject",
  "rand_chacha 0.10.0",
  "sha2",
 ]
@@ -1273,6 +1279,7 @@ dependencies = [
  "hp-format",
  "image",
  "png",
+ "raw-window-handle",
  "wgpu",
 ]
 
@@ -1295,6 +1302,9 @@ dependencies = [
  "hp-ini",
  "hp-render",
  "hp-uobject",
+ "rfd",
+ "rodio",
+ "winit",
 ]
 
 [[package]]
