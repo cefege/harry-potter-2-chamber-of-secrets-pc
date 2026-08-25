@@ -57,7 +57,9 @@ impl PassUniforms {
                 0.0, 0.0, 1.0, 0.0, //
                 0.0, 0.0, 0.0, 1.0,
             ],
-            fog_color: [0.0, 0.0, 0.0, 1.0],
+            // Fog disabled for identity (pipeline unit tests render
+            // untransformed quads at the near plane).
+            fog_color: [0.0, 0.0, 0.0, 0.0],
             misc: [0.333, 0.0, 0.0, 0.0],
         }
     }
@@ -102,10 +104,18 @@ fn vs_main(in: VsIn) -> FsIn {
     return out;
 }
 
-// Per-vertex fog: mix toward the scene fog color by the vertex's unfogged
-// factor (0 = fully fogged).
+// Distance fog: mix toward the scene fog color across a linear ramp.
+// u.fog_color.a gates (1 = fog on); u.misc.w is the fog far distance and
+// the ramp starts at 30% of it. frag.clip.w is the view-forward distance
+// (w' = forward · (v − eye)). The per-vertex unfogged factor is an
+// exemption mask: 1 = never fogged, 0 = fogged by distance.
 fn apply_fog(frag: FsIn, rgb: vec3<f32>) -> vec3<f32> {
-    return mix(u.fog_color.rgb, rgb, clamp(frag.unfogged, 0.0, 1.0));
+    let far = max(u.misc.w, 1.0);
+    let near = far * 0.3;
+    let fog = clamp((frag.clip.w - near) / (far - near), 0.0, 1.0)
+        * (1.0 - clamp(frag.unfogged, 0.0, 1.0))
+        * u.fog_color.a;
+    return mix(rgb, u.fog_color.rgb, fog);
 }
 
 fn sample_base(frag: FsIn) -> vec4<f32> {

@@ -86,7 +86,7 @@ path mirrors.
 | Baked lightmaps (zone ambient + light contributions + blurred 1bpp shadow masks, x2 overbright) | REAL (1900 lightmaps reconstructed on PrivetDr Model1; 700+ with visible light pools; linear-sampled atlas with replicated-edge gutters) |
 | Gouraud vertex lighting (actor meshes) | NOT RENDERED (brush/bsp only today) |
 | Skybox (fake backdrop, two-pass sky-zone render) | REAL (SkyZoneInfo pose; PF_FakeBackdrop 0x80 portals sample the sky pass screen-space; 64 portal surfaces on PrivetDr) |
-| Zone fog | NOT RENDERED |
+| Distance fog (linear ramp, night blue-gray, view-depth based) | REAL (authored constants; per-zone fog props absent from retail maps) |
 | Sprites, movers, particles | NOT RENDERED |
 | Procedural textures (Fire/Wave/Ice/Wet) | APPROXIMATED (loud checkerboard; shipped mips empty, C++ generates at runtime) |
 | Missing packages (`HGame.utx` not shipped in retail) | APPROXIMATED (loud checkerboard) |
@@ -166,6 +166,18 @@ proof test: 6483 scene polys → 6456 draws (27 invisible/untextured).
   clamp+linear sampler with replicated gutters).
 - Result: the authored red storm-cloud sky tiles correctly; houses show
   lit windows (baked light pools), tiled roof/brick detail.
+
+### Fog milestone evidence (TrackLearn plan item 2)
+
+- Retail maps carry NO fog props (LevelInfo/ZoneInfo stores audited:
+  ambient + placement only) — fog constants are authored from the C++
+  baseline night look: dark blue-gray (0.047, 0.09, 0.26), linear ramp
+  from 30% of misc.w (22000 = map diagonal) to far.
+- Shader: `apply_fog` mixes by view-forward distance (`frag.clip.w`) with
+  the per-vertex `unfogged` factor as an exemption mask (1 = never
+  fogged, 0 = fogged by distance; world geometry = 0). `PassUniforms
+  ::identity()` disables fog (pipeline unit tests render untransformed
+  quads). Backdrop polys skip fog (sky is the far plane).
 
 ### Skybox milestone evidence (TrackLearn plan item 3)
 

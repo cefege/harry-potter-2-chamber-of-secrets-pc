@@ -2187,6 +2187,22 @@ mod lmprobe {
         }
         println!("izones[0] top: {:?}", z0.iter().take(6).collect::<Vec<_>>());
         println!("izones[1] top: {:?}", z1.iter().take(6).collect::<Vec<_>>());
+        // LevelInfo + ZoneInfo prop keys (fog-relevant props hunt).
+        for &actor in &level.actors {
+            let label = class_label(arena, actor).to_string();
+            if !matches!(label.as_str(), "LevelInfo" | "ZoneInfo" | "SkyZoneInfo") {
+                continue;
+            }
+            let Some(store) = arena.get(actor).unwrap().properties() else { continue };
+            let keys: Vec<String> = store
+                .iter()
+                .map(|(n, _)| arena.names.text(n).unwrap_or("?").to_string())
+                .collect();
+            println!(
+                "{label} props ({}): {keys:?}",
+                keys.len()
+            );
+        }
         // Light list census.
         let mut with_lights = 0usize;
         let mut light_exports: std::collections::BTreeSet<i32> = Default::default();

@@ -667,10 +667,12 @@ fn pass_uniforms(camera: &SceneCamera, width: f32, height: f32) -> PassUniforms 
             view_proj[col * 4 + row] = *value;
         }
     }
+    // HP2 night-exterior fog: dark blue-gray (matches the night sky),
+    // ramping to the far plane over the map diagonal. fog_color.a = on.
     PassUniforms {
         view_proj,
-        fog_color: [0.0, 0.0, 0.0, 1.0],
-        misc: [0.333, width, height, 0.0],
+        fog_color: [0.047, 0.09, 0.26, 1.0],
+        misc: [0.333, width, height, 22000.0],
     }
 }
 
@@ -721,7 +723,8 @@ fn build_poly_mesh(
             ],
             uv1,
             color: [1.0, 1.0, 1.0, 1.0],
-            unfogged: 1.0,
+            // World geometry fogs by distance (unfogged = exemption mask).
+            unfogged: 0.0,
         });
     }
     let mut indices = Vec::with_capacity((n - 2) * 3);
