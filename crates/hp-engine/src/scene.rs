@@ -2280,3 +2280,52 @@ mod lmprobe {
         }
     }
 }
+#[cfg(test)]
+mod skytexprobe {
+    use super::*;
+
+    /// Dump the decoded cloud512Privet sky texture to a PNG.
+    #[test]
+    fn dump_sky_texture() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../HarryPotter2/Unreal");
+        let mut store = crate::utx::TextureStore::new(&root);
+        let decoded = store
+            .resolve(&TextureKey {
+                package: "PrivetDrive".into(),
+                object_path: "Outside.cloud512Privet".into(),
+            })
+            .expect("sky texture decodes");
+        println!(
+            "sky texture {}x{} format={:?}",
+            decoded.width,
+            decoded.height,
+            match &decoded.format {
+                crate::utx::DecodedFormat::Indexed8 { .. } => "P8",
+                crate::utx::DecodedFormat::Bgra8(_) => "DXT1/Bgra8",
+            }
+        );
+        let bgra = match decoded.format {
+            crate::utx::DecodedFormat::Indexed8 { indices, palette } => {
+                println!("P8 with palette; first entries:");
+                for e in palette.chunks_exact(4).take(6) {
+                    println!("  {:?}", e);
+                }
+                indices
+                    .iter()
+                    .flat_map(|&i| {
+                        let s = i as usize * 4;
+                        [palette[s], palette[s + 1], palette[s + 2], 255]
+                    })
+                    .collect::<Vec<u8>>()
+            }
+            crate::utx::DecodedFormat::Bgra8(pixels) => pixels,
+        };
+        std::fs::create_dir_all("/tmp/g4_sky").ok();
+        let _ = std::fs::write(
+            "/tmp/g4_sky/cloud512.rgba",
+            &bgra,
+        );
+        println!("dumped {} bytes to /tmp/g4_sky/cloud512.rgba", bgra.len());
+    }
+}

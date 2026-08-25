@@ -385,6 +385,11 @@ impl RendererSession {
                 &self.sky_target.depth_view(),
                 None,
             );
+            if std::env::var("HP2_SKY_DUMP").is_ok() {
+                let bgra = self.sky_target.read_pixels_bgra(&self.ctx);
+                let _ = std::fs::write("/tmp/g4_sky_target.bgra", &bgra);
+                eprintln!("[skydump] wrote {} bytes", bgra.len());
+            }
             self.set.update_uniforms(
                 &self.ctx,
                 &pass_uniforms(&self.main_camera, width, height),

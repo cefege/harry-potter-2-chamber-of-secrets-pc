@@ -318,6 +318,10 @@ impl PipelineSet {
                 label: Some("hp-render nearest"),
                 mag_filter: wgpu::FilterMode::Nearest,
                 min_filter: wgpu::FilterMode::Nearest,
+                // UE1 world textures tile: uv0 wraps, never clamps.
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                address_mode_w: wgpu::AddressMode::Repeat,
                 ..Default::default()
             }),
             linear: ctx.device.create_sampler(&wgpu::SamplerDescriptor {

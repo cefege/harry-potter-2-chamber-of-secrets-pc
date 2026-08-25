@@ -154,6 +154,19 @@ placement/orientation (user-confirmed 3D forms; texture alignment on
 static surfaces fixed by the scale-preserving basis fix). Submission
 proof test: 6483 scene polys → 6456 draws (27 invisible/untextured).
 
+### Palette/tiling fix (user-reported red sky)
+
+- UE1 `FColor` serializes **R, G, B, A** (shipped UnTex.h:70-72) — the
+  palette bytes are true RGBA and the Rgba8 LUT upload was already
+  correct; the sky's red was NOT a channel swap.
+- Real cause: the base sampler used **ClampToEdge** — UE1 world textures
+  TILE. The huge sky quads' uv0 spans hundreds of tiles; clamping
+  collapsed them onto one edge palette entry (solid red). Base sampler is
+  now `Repeat` on all axes (the lightmap atlas keeps its own
+  clamp+linear sampler with replicated gutters).
+- Result: the authored red storm-cloud sky tiles correctly; houses show
+  lit windows (baked light pools), tiled roof/brick detail.
+
 ### Skybox milestone evidence (TrackLearn plan item 3)
 
 - Sky zone: PrivetDr SkyZoneInfo at (11901, −5890, 33) — a sealed 254³
@@ -184,9 +197,9 @@ proof test: 6483 scene polys → 6456 draws (27 invisible/untextured).
 - GPU: lightmaps shelf-packed into one BGRA atlas (1-texel replicated
   gutters, linear-sampled); P8 bases palette-expand to color textures for
   the Lightmap path; FRAG_LIGHTMAP applies the ×2 overbright.
-- Known remaining artifact: the map-top ceiling surfaces (huge, normal
-  -Z, lightmaps 29/30) band under the sky region — under investigation;
-  the skybox milestone (plan item 3) replaces that region's appearance.
+- Remaining artifact: the map-top-left black wedge with red streaks
+  (the unflagged sky-ceiling brush at grazing angle + zone boundary) —
+  under investigation with the fog milestone.
 
 ### Gate (d) — suites and lint
 
