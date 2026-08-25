@@ -349,16 +349,25 @@ mod tests {
             .to_path_buf()
     }
 
-    fn textures_dir() -> PathBuf {
-        repo_root()
-            .join("HarryPotter2")
-            .join("Unreal")
-            .join("Textures")
+    fn textures_dir() -> Option<PathBuf> {
+        data_root().map(|root| root.join("Textures"))
     }
 
     /// Data root whose `Textures/` subtree backs [`textures_dir`].
-    fn data_root() -> PathBuf {
-        repo_root().join("HarryPotter2").join("Unreal")
+    /// Game data root: `HP2_DATA_ROOT` overrides, else the repo-relative
+    /// retail tree; `None` when the retail `System/Default.ini` is absent
+    /// (fresh clones ship without the gitignored game content).
+    fn data_root() -> Option<PathBuf> {
+        let root = std::env::var("HP2_DATA_ROOT")
+            .map(PathBuf::from)
+            .ok()
+            .unwrap_or_else(|| repo_root().join("HarryPotter2").join("Unreal"));
+        (root.join("System/Default.ini").is_file()).then_some(root)
+    }
+
+    /// Standard blocked-notice for data-dependent tests.
+    fn blocked() {
+        println!("blocked: game data root absent");
     }
 
     fn class_name(archive: &PackageArchive, class_ref: i32) -> Option<&str> {
@@ -432,7 +441,11 @@ mod tests {
 
     #[test]
     fn master_package_parses_with_many_exports() {
-        let bytes = std::fs::read(textures_dir().join("HP2_Master.utx")).expect("master utx");
+        let Some(textures_dir) = textures_dir() else {
+            blocked();
+            return;
+        };
+        let bytes = std::fs::read(textures_dir.join("HP2_Master.utx")).expect("master utx");
         let archive = read_package(&bytes).expect("parse");
         assert!(
             archive.exports.len() > 50,
@@ -447,8 +460,12 @@ mod tests {
     /// [`dxt1_key_decodes_bgra8`], which hand-assembles a minimal package.
     #[test]
     fn real_package_key_decodes_p8() {
+        let Some(textures_dir) = textures_dir() else {
+            blocked();
+            return;
+        };
         let mut p8 = None;
-        for entry in std::fs::read_dir(textures_dir()).expect("textures dir") {
+        for entry in std::fs::read_dir(&textures_dir).expect("textures dir") {
             let path = entry.expect("entry").path();
             if !path
                 .extension()
@@ -483,7 +500,11 @@ mod tests {
         }
         let p8 = p8.expect("some P8 texture across the shipped packages");
 
-        let mut store = TextureStore::new(&data_root());
+        let Some(root) = data_root() else {
+            blocked();
+            return;
+        };
+        let mut store = TextureStore::new(&root);
         let decoded = store.resolve(&p8).expect("P8 decode");
         assert!(is_pow2_at_least_4(decoded.width));
         assert!(is_pow2_at_least_4(decoded.height));
@@ -609,7 +630,11 @@ mod tests {
 
     #[test]
     fn unknown_package_fails_loud() {
-        let mut store = TextureStore::new(&data_root());
+        let Some(root) = data_root() else {
+            blocked();
+            return;
+        };
+        let mut store = TextureStore::new(&root);
         let key = TextureKey {
             package: "DefinitelyNotAShippedPackage".to_string(),
             object_path: "anything".to_string(),

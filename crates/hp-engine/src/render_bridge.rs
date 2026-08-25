@@ -748,9 +748,12 @@ mod tests {
     /// resolvable-or-loud texture becomes exactly one draw.
     #[test]
     fn retail_scene_submits_all_polys_to_draw_list() -> Result<()> {
-        let data_root =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Some(data_root) = crate::scene::test_data_root() else {
+            println!("blocked: game data root absent");
+            return Ok(());
+        };
         if !data_root.join("Maps/PrivetDr.unr").is_file() {
+            println!("blocked: game data root absent");
             return Ok(());
         }
         let mut world = hp_uobject::bootstrap::World::load(&data_root).unwrap();

@@ -1131,7 +1131,10 @@ mod tests {
     use std::path::PathBuf;
 
     fn privet_archive() -> Option<hp_format::package79::PackageArchive> {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return None;
+        };
         if !root.join("Maps/PrivetDr.unr").is_file() {
             return None;
         }
@@ -1245,7 +1248,10 @@ mod linkprobe {
     }
     #[test]
     fn offset55_hits_all_models() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let archive = hp_format::package79::read_package(&bytes).unwrap();
         let polys_set: std::collections::HashSet<usize> = archive
@@ -1294,7 +1300,10 @@ mod linkprobe {
 
     #[test]
     fn giant_poly_vertices() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let level =
@@ -1388,7 +1397,10 @@ mod actorprobe {
 
     #[test]
     fn calibrate_playerstart_walk() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let archive = hp_format::package79::read_package(&bytes).unwrap();
         for (index, entry) in archive.exports.iter().enumerate() {
@@ -1408,10 +1420,13 @@ mod actorprobe {
 
 #[cfg(test)]
 mod structprobe {
+    use crate::scene::test_data_root;
     #[test]
     fn vector_struct_fields() {
-        let root =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+    let Some(root) = test_data_root() else {
+        println!("blocked: game data root absent");
+        return;
+    };
         let world = hp_uobject::bootstrap::World::load(&root).unwrap();
         let arena = &world.arena;
         let obj16 = arena.get(hp_uobject::arena::ObjectId(16)).unwrap();
@@ -1448,8 +1463,10 @@ mod brushprobe {
     use super::*;
     #[test]
     fn brush_store_keys() {
-        let root =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+    let Some(root) = test_data_root() else {
+        println!("blocked: game data root absent");
+        return;
+    };
         let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let level =
@@ -1507,8 +1524,10 @@ mod tagprobe {
     use hp_format::package79::ByteCursor;
     #[test]
     fn brush_tags_dump() {
-        let root =
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+    let Some(root) = test_data_root() else {
+        println!("blocked: game data root absent");
+        return;
+    };
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let archive = hp_format::package79::read_package(&bytes).unwrap();
         // find export named Brush423
@@ -1607,6 +1626,24 @@ fn zlib_store(data: Vec<u8>) -> Vec<u8> {
     out
 }
 
+/// Game data root for tests: `HP2_DATA_ROOT` overrides, else the
+/// repo-relative retail tree; `None` (tests print "blocked" and early-
+/// return) when the retail `System/Default.ini` is absent — fresh clones
+/// ship without the gitignored game content.
+#[cfg(test)]
+pub(crate) fn test_data_root() -> Option<std::path::PathBuf> {
+    let root = std::env::var("HP2_DATA_ROOT")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .map(|p| p.join("HarryPotter2/Unreal"))
+        })?;
+    (root.join("System/Default.ini").is_file()).then_some(root)
+}
+
 /// G4 structural acceptance: numeric correctness of scene extraction,
 /// per the phase gate. These tests encode the wire facts directly and do
 /// not depend on pixels.
@@ -1621,17 +1658,20 @@ mod g4_structural {
         scene: RenderScene,
     }
 
-    fn load(map: &str) -> Loaded {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+    fn load(map: &str) -> Option<Loaded> {
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return None;
+        };
         let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
         let bytes = std::fs::read(root.join(format!("Maps/{map}.unr"))).unwrap();
         let level = crate::level::load_level_from_bytes(&mut world.arena, map, &bytes).unwrap();
         let scene = build_render_scene(&world.arena, &level).unwrap();
-        Loaded {
+        Some(Loaded {
             world,
             level,
             scene,
-        }
+        })
     }
 
     /// Independent brush-transform reimplementation (C++-verified rule,
@@ -1676,11 +1716,15 @@ mod g4_structural {
     /// scene output.
     #[test]
     fn brush_transforms_match_hand_computed_world_vertices() {
-        let Loaded {
+        let Some(Loaded {
             world,
             level,
             scene,
-        } = load("PrivetDr");
+        }) = load("PrivetDr")
+        else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let arena = &world.arena;
         let archive = level.archive.as_ref().unwrap();
 
@@ -1759,11 +1803,15 @@ mod g4_structural {
     /// (2) Camera: the scene camera is the PlayerStart placement, exactly.
     #[test]
     fn camera_is_playerstart_placement() {
-        let Loaded {
+        let Some(Loaded {
             world,
             level,
             scene,
-        } = load("PrivetDr");
+        }) = load("PrivetDr")
+        else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let arena = &world.arena;
         let mut expected = None;
         for &actor in &level.actors {
@@ -1799,11 +1847,15 @@ mod g4_structural {
     /// decoded poly counts.
     #[test]
     fn coverage_all_models_present() {
-        let Loaded {
+        let Some(Loaded {
             world,
             level,
             scene,
-        } = load("PrivetDr");
+        }) = load("PrivetDr")
+        else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let arena = &world.arena;
         let archive = level.archive.as_ref().unwrap();
 
@@ -1879,11 +1931,15 @@ mod g4_structural {
     /// order (cross(v1-v0, v2-v0) · normal > 0).
     #[test]
     fn winding_matches_normal_everywhere() {
-        let Loaded {
+        let Some(Loaded {
             world,
             level,
             scene,
-        } = load("PrivetDr");
+        }) = load("PrivetDr")
+        else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let _ = (&world, &level);
         let mut agree = 0usize;
         for poly in &scene.polys {
@@ -1921,12 +1977,19 @@ mod g4_structural {
     /// counted; UVs on one known poly stay in a sane texel range.
     #[test]
     fn textures_resolve_and_uv_sane() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
-        let Loaded {
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return;
+        };
+        let Some(Loaded {
             world,
             level,
             scene,
-        } = load("PrivetDr");
+        }) = load("PrivetDr")
+        else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let arena = &world.arena;
         let none_count = scene.polys.iter().filter(|p| p.texture.is_none()).count();
         let mut store = crate::utx::TextureStore::new(&root);
@@ -2022,7 +2085,10 @@ mod surfprobe {
     /// stored Vectors carry texel scale or are unit directions.
     #[test]
     fn surf_basis_magnitudes() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../HarryPotter2/Unreal");
+        let Some(root) = test_data_root() else {
+            println!("blocked: game data root absent");
+            return;
+        };
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let archive = hp_format::package79::read_package(&bytes).unwrap();
         let payload = archive.export_payload(822).unwrap();
@@ -2071,8 +2137,10 @@ mod lmprobe {
 
     #[test]
     fn lightmap_data_census() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../HarryPotter2/Unreal");
+    let Some(root) = test_data_root() else {
+        println!("blocked: game data root absent");
+        return;
+    };
         let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let level = crate::level::load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes)
@@ -2259,8 +2327,10 @@ mod lmprobe {
     }
     #[test]
     fn fake_backdrop_census() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../HarryPotter2/Unreal");
+    let Some(root) = test_data_root() else {
+        println!("blocked: game data root absent");
+        return;
+    };
         let mut world = hp_uobject::bootstrap::World::load(&root).unwrap();
         let bytes = std::fs::read(root.join("Maps/PrivetDr.unr")).unwrap();
         let level = crate::level::load_level_from_bytes(&mut world.arena, "PrivetDr", &bytes)
@@ -2303,8 +2373,10 @@ mod skytexprobe {
     /// Dump the decoded cloud512Privet sky texture to a PNG.
     #[test]
     fn dump_sky_texture() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../HarryPotter2/Unreal");
+    let Some(root) = test_data_root() else {
+        println!("blocked: game data root absent");
+        return;
+    };
         let mut store = crate::utx::TextureStore::new(&root);
         let decoded = store
             .resolve(&TextureKey {
