@@ -193,16 +193,30 @@ fn parse_load_slot(value: &str) -> Option<i32> {
 
 /// Load the startup save through the hp-engine save reader before the
 /// object bootstrap (`appConsumeCommandLineLoadSlot` feeds `LoadGameSlot`;
-/// files live at `<datadir>/Save/Save<N>.usa`). Absent, unreadable, or
-/// corrupt saves report loudly but never abort the launch.
+/// files live at the USER root `<home>/Library/Application Support/
+/// Harry Potter 2/User/Save/Save<N>.usa` — where the C++ game writes
+/// them — falling back to the legacy `<datadir>/Save/` location).
+/// Absent, unreadable, or corrupt saves report loudly but never abort
+/// the launch.
 fn consume_load_save(data_root: &Path, slot: i32) {
-    let path = data_root.join("Save").join(format!("Save{slot}.usa"));
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
+    let candidates = [
+        dirs_home().join("Library/Application Support/Harry Potter 2/User/Save")
+            .join(format!("Save{slot}.usa")),
+        data_root.join("Save").join(format!("Save{slot}.usa")),
+    ];
+    let (path, bytes) = match candidates
+        .iter()
+        .map(|path| path.clone())
+        .map(|path| (path.clone(), std::fs::read(&path)))
+        .find(|(_, read)| read.is_ok())
+    {
+        Some((path, Ok(bytes))) => (path, bytes),
+        _ => {
+            let tried: Vec<String> =
+                candidates.iter().map(|p| p.display().to_string()).collect();
             eprintln!(
-                "hp2rs: [engine.save_unreadable] {}: {error}",
-                path.display()
+                "hp2rs: [engine.save_unreadable] no Save{slot}.usa under: {}",
+                tried.join(" | ")
             );
             return;
         }
