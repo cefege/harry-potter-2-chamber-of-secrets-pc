@@ -105,12 +105,10 @@ pub fn bind_world(
         if native_index == 0 || registry.is_registered(native_index) {
             continue;
         }
-        registry.register(
-            native_index,
-            usize::MAX % 16,
-            crate::natives::deferred_native,
-            &arena.path_of(id)?,
-        )?;
+        let subject = arena.path_of(id)?;
+        let body = crate::natives::natives_impl::lookup(&subject)
+            .unwrap_or(crate::natives::deferred_native);
+        registry.register(native_index, usize::MAX % 16, body, &subject)?;
     }
     Ok(report)
 }
@@ -336,8 +334,9 @@ mod tests {
     fn oracle_native_slots_are_bound() {
         let Some(root) = data_root() else { return };
         let world = World::load(&root).expect("bootstrap");
-        // Concat_StrStr=112, GotoState=113, Sleep=256, GetCurrentKeyState=330.
-        for slot in [112u16, 113, 256, 330] {
+        // Concat_StrStr=112, GotoState=113, Sleep=256, GetCurrentKeyState=330,
+        // MakeNoise=512.
+        for slot in [112u16, 113, 256, 330, 512] {
             assert!(
                 world.registry.is_registered(slot),
                 "oracle native slot {slot} is unbound"
