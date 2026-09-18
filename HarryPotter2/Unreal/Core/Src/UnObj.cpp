@@ -868,13 +868,25 @@ void FlushPendingLocalizedDefaults()
 {
 	guard(FlushPendingLocalizedDefaults);
 	// Process the current snapshot once; LoadLocalized() re-queues any entry
-	// whose inherited properties are still not materialized.
+	// whose inherited properties are still not materialized. Loading a
+	// class's defaults can itself trigger loading another class (e.g. via
+	// UClass::Serialize), which reenters this function and drains
+	// GPendingLocalized out from under this loop; re-check Num() every
+	// iteration instead of trusting a snapshot Count that reentrancy can
+	// invalidate, so GPendingLocalized(0) below is never called empty.
 	INT Count = GPendingLocalized.Num();
-	for( INT i=0; i<Count; i++ )
+	for( INT i=0; i<Count && GPendingLocalized.Num()>0; i++ )
 	{
 		UClass* Pending = GPendingLocalized(0);
 		GPendingLocalized.Remove( 0 );
-		if( Pending->Defaults.Num()!=Pending->GetPropertiesSize() )
+		// Defaults.Num()==0 matches an unlinked class as readily as a
+		// linked-but-empty one (0==0); GetDefaultObject() on an empty
+		// Defaults array returns NULL (UnClass.h GetDefaultObject: &Defaults(0)
+		// on an empty TArray dereferences its null backing pointer), and the
+		// subsequent ->LoadLocalized() call then null-derefs on entry. Require
+		// a genuinely allocated Defaults array before treating the class as
+		// ready to flush.
+		if( Pending->Defaults.Num()==0 || Pending->Defaults.Num()!=Pending->GetPropertiesSize() )
 		{
 			// Mid-replacement or reload; retry on a later flush.
 			GPendingLocalized.AddItem( Pending );
@@ -3517,6 +3529,14 @@ void UObject::SerializeRootSet( FArchive& Ar, DWORD KeepFlags, DWORD RequiredFla
 {
 	guard(UObject::SerializeRootSet);
 	Ar << GObjRoot;
+	// Classes awaiting a retry in FlushPendingLocalizedDefaults() must survive
+	// garbage collection until they are flushed or dequeued; otherwise
+	// PurgeGarbage() can delete a queued class out from under
+	// GPendingLocalized, leaving a dangling UClass* that
+	// FlushPendingLocalizedDefaults() dereferences on the next EndLoad
+	// (SIGSEGV during level travel: SpawnPlayActor -> StaticLoadClass ->
+	// EndLoad -> FlushPendingLocalizedDefaults).
+	Ar << GPendingLocalized;
 	for( FObjectIterator It; It; ++It )
 	{
 		if

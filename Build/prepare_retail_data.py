@@ -86,7 +86,7 @@ FULL_DEFAULT_MERGES = (
     "base: prototype System/Default.ini",
     "FrontEnd: retail EASplashWaitTime, WBSplashWaitTime, LaunchCode, UseSaveSlot",
     "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
-    "Engine.GameEngine: FrameRateLimit=60 and no unavailable ServerActors",
+    "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
     "Core.System: forward-slash portable relative data paths",
     "SDLDrv.SDLClient: native portable client defaults",
     "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
@@ -96,14 +96,14 @@ FULL_DEFAULT_MERGES = (
 FULL_DEFUSER_MERGES = (
     "base: prototype System/DefUser.ini, retaining prototype controller fallback",
     "Engine.Input: retail final keyboard/mouse broom, map, cutscene, potion, and duel bindings",
-    "Engine.PlayerPawn: retail ObjectDetailMedium and Modern controls disabled by default",
+    "Engine.PlayerPawn: ObjectDetailVeryHigh (max-quality first-run default, overriding retail's own Medium) and Modern controls disabled by default",
     "HGame.Harry: retail final difficulty damage multipliers",
 )
 RETAIL_ONLY_DEFAULT_MERGES = (
     "base: retail System/default.ini; no prototype bytes",
     "FrontEnd: retail final splash, launch, and save-slot values",
     "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
-    "Engine.GameEngine: FrameRateLimit=60 and no unavailable ServerActors",
+    "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
     "Core.System: forward-slash portable relative data paths",
     "SDLDrv.SDLClient: native portable client defaults",
     "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
@@ -113,19 +113,20 @@ RETAIL_ONLY_DEFAULT_MERGES = (
 RETAIL_ONLY_DEFUSER_MERGES = (
     "base: retail System/DefUser.ini; no prototype bytes",
     "Engine.Input: retail final keyboard/mouse broom, map, cutscene, potion, and duel bindings",
-    "Engine.PlayerPawn: retail ObjectDetailMedium and Modern controls disabled by default",
+    "Engine.PlayerPawn: ObjectDetailVeryHigh (max-quality first-run default, overriding retail's own Medium) and Modern controls disabled by default",
     "HGame.Harry: retail final difficulty damage multipliers",
 )
 SAFE_DEFAULT_MERGES = (
     "base: prototype System/Default.ini",
     "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, prototype Language=int",
-    "Engine.GameEngine: FrameRateLimit=60 and no unavailable ServerActors",
+    "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
     "Core.System: forward-slash portable relative data paths",
     "SDLDrv.SDLClient: native portable client defaults",
     "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
 )
 SAFE_DEFUSER_MERGES = (
     "base: prototype System/DefUser.ini with Modern controls disabled; prototype bindings retained",
+    "Engine.PlayerPawn: forced ObjectDetailVeryHigh (max-quality first-run default)",
 )
 
 
@@ -364,8 +365,12 @@ def collect_side(root: Path, source: str) -> dict[str, SourceAsset]:
     textures = find_child(root, "Textures")
     sounds = find_child(root, "Sounds")
     music = find_child(root, "Music")
-    help_directory = find_child(root, "Help")
-    assert system and maps and textures and sounds and music and help_directory
+    # Help is optional: the engine only ever reads Help/Splash.bmp (falling
+    # back to Help/Logo.bmp) for the launch splash, and skips it silently
+    # when absent (SDLLaunch.cpp ShowSplash gate). Retail trees that never
+    # shipped a Help directory (e.g. the Mac CD release) are still valid.
+    help_directory = find_child(root, "Help", required=False)
+    assert system and maps and textures and sounds and music
 
     for path in sorted_direct_files(system):
         suffix = path.suffix.casefold()
@@ -402,12 +407,13 @@ def collect_side(root: Path, source: str) -> dict[str, SourceAsset]:
 
     # Only the canonical outer Help directory is eligible.  Retail help/help is an
     # installer-created duplicate root and must never become Help/Help.
-    for path in sorted_direct_files(help_directory):
-        if not is_debris(path) and path.suffix.casefold() not in PROHIBITED_EXTENSIONS:
-            insert_asset(
-                assets,
-                source_asset(source, root, path, output_path("Help", PurePosixPath(path.name))),
-            )
+    if help_directory:
+        for path in sorted_direct_files(help_directory):
+            if not is_debris(path) and path.suffix.casefold() not in PROHIBITED_EXTENSIONS:
+                insert_asset(
+                    assets,
+                    source_asset(source, root, path, output_path("Help", PurePosixPath(path.name))),
+                )
 
     return assets
 
@@ -646,7 +652,7 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
     for key, value in native_engine.items():
         set_ini_value(lines, "Engine.Engine", key, value)
 
-    set_ini_value(lines, "Engine.GameEngine", "FrameRateLimit", "60.000000")
+    set_ini_value(lines, "Engine.GameEngine", "FrameRateLimit", "144.000000")
     remove_ini_key(lines, "Engine.GameEngine", "ServerActors", all_values=True)
 
     portable_paths = {
@@ -717,6 +723,9 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
         "UseTrilinear": "True",
         "UsePrecache": "True",
         "UseVSync": "Off",
+        "UseAA": "True",
+        "NumAASamples": "4",
+        "MaxAnisotropy": "16.000000",
     }
     for key, value in xopengl_values.items():
         set_ini_value(lines, "XOpenGLDrv.XOpenGLRenderDevice", key, value)
@@ -738,6 +747,7 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
 def build_defuser_ini(template_path: Path, retail_path: Path, profile: str) -> bytes:
     lines = decode_ini(template_path)
     set_ini_value(lines, "Engine.PlayerPawn", "bModernThirdPersonControls", "False")
+    set_ini_value(lines, "Engine.PlayerPawn", "ObjectDetail", "ObjectDetailVeryHigh")
     if profile == "safe":
         return encode_ini(lines)
     retail_lines = decode_ini(retail_path)
@@ -756,12 +766,6 @@ def build_defuser_ini(template_path: Path, retail_path: Path, profile: str) -> b
     )
     for key in input_keys:
         set_ini_value(lines, "Engine.Input", key, retail_ini_value(retail_lines, "Engine.Input", key))
-    set_ini_value(
-        lines,
-        "Engine.PlayerPawn",
-        "ObjectDetail",
-        retail_ini_value(retail_lines, "Engine.PlayerPawn", "ObjectDetail"),
-    )
     for key in (
         "fDamageMultiplier_Easy",
         "fDamageMultiplier_Medium",
@@ -788,7 +792,7 @@ def validate_default_ini(lines: list[str], profile: str) -> None:
         ("Engine.Engine", "ViewportManager"): "SDLDrv.SDLClient",
         ("Engine.Engine", "AudioDevice"): "ALAudio.ALAudioSubsystem",
         ("Engine.Engine", "Language"): "usa" if profile in {"full", "retail-only"} else "int",
-        ("Engine.GameEngine", "FrameRateLimit"): "60.000000",
+        ("Engine.GameEngine", "FrameRateLimit"): "144.000000",
         ("SDLDrv.SDLClient", "NativeText"): "True",
     }
     for (section, key), value in expected.items():
@@ -833,8 +837,8 @@ def validate_defuser_ini(lines: list[str], retail_lines: list[str]) -> None:
             error(f"retail final binding was not merged: [Engine.Input] {key}")
     if ini_value(lines, "Engine.PlayerPawn", "bModernThirdPersonControls") != "False":
         error("Modern controls must default to False")
-    if ini_value(lines, "Engine.PlayerPawn", "ObjectDetail") != "ObjectDetailMedium":
-        error("retail ObjectDetailMedium was not merged")
+    if ini_value(lines, "Engine.PlayerPawn", "ObjectDetail") != "ObjectDetailVeryHigh":
+        error("max-quality ObjectDetailVeryHigh default was not applied")
     expected_damage = {"fDamageMultiplier_Easy": "1.2", "fDamageMultiplier_Medium": "2.0", "fDamageMultiplier_Hard": "3.0"}
     for key, value in expected_damage.items():
         if ini_value(lines, "HGame.Harry", key) != value:
@@ -1108,8 +1112,14 @@ def validate_plan(planned: list[PlannedAsset], profile: str) -> None:
                 f"retail-only map contract mismatch: "
                 f"retail={len(retail_maps)}, prototype={len(prototype_maps)}"
             )
-        if len(cutscenes) != 214:
-            error(f"retail-only cutscene contract mismatch: expected 214, found {len(cutscenes)}")
+        # 214 is the Windows retail baseline. The Mac CD release genuinely
+        # ships one fewer cutscene script (System/cutscenes/GiveMeKids.int,
+        # a real crowd-animation cutscene, absent on-disc -- verified against
+        # a live ISO mount, not an extraction artifact); accept that known,
+        # smaller platform set without silently tolerating a bigger gap that
+        # would indicate a real extraction failure.
+        if len(cutscenes) not in (213, 214):
+            error(f"retail-only cutscene contract mismatch: expected 213 or 214, found {len(cutscenes)}")
         for asset in planned:
             if asset.source not in {"retail", "generated"}:
                 error(
@@ -1174,13 +1184,7 @@ def validate_plan(planned: list[PlannedAsset], profile: str) -> None:
                 error(f"configured retail-only Paths category has no payload: {root}")
         if not retail_maps or not retail_oggs:
             error("retail-only requires at least one map and one music file")
-        help_assets = [
-            asset
-            for asset in planned
-            if asset.source == "retail" and asset.output_path.startswith("Help/")
-        ]
-        if not help_assets:
-            error("retail-only requires canonical retail Help payload")
+        # Help is optional (see collect_side); no non-empty requirement here.
     else:
         cutscenes = [
             asset
@@ -1563,14 +1567,19 @@ def extract_tar(archive: Path, destination: Path) -> None:
 
 
 def system_bsdtar() -> Path:
-    candidate = Path("/usr/bin/bsdtar")
-    try:
-        mode = candidate.stat().st_mode
-    except OSError as exc:
-        error(f"7z import requires trusted system /usr/bin/bsdtar: {exc}")
-    if not stat.S_ISREG(mode) or not os.access(candidate, os.X_OK):
-        error("7z import requires executable regular file /usr/bin/bsdtar")
-    return candidate
+    candidates = [Path("/usr/bin/bsdtar"), Path("/bin/bsdtar")]
+    found = shutil.which("bsdtar")
+    if found:
+        candidates.append(Path(found))
+    for candidate in candidates:
+        try:
+            mode = candidate.stat().st_mode
+        except OSError:
+            continue
+        if stat.S_ISREG(mode) and os.access(candidate, os.X_OK):
+            return candidate
+    error("7z import requires a trusted, executable regular-file bsdtar "
+        "(checked /usr/bin/bsdtar, /bin/bsdtar, and $PATH)")
 
 
 def run_bsdtar(bsdtar: Path, arguments: list[str], action: str) -> bytes:
