@@ -88,7 +88,6 @@ In the launcher window:
 | `macos-arm64` | Release build with optimizations |
 | `macos-arm64-asan-ubsan` | AddressSanitizer + UndefinedBehaviorSanitizer |
 | `macos-arm64-tsan` | ThreadSanitizer |
-| `macos-arm64-full-smoke` | Full test suite with renderer validation |
 
 Example:
 ```sh
@@ -111,17 +110,19 @@ Run a single test:
 ctest --preset macos-arm64 -R <test_name>
 ```
 
+The suite has 14 tests; `ctest --preset macos-arm64 -N` lists them. Nine run
+without game data; `native_registration`, `package79_manifest`,
+`spell_interaction_manifest`, `spell_runtime_contracts`, and `audio_lifecycle`
+read imported retail packages and fail until step 2 is complete.
+
 Commonly useful tests:
 - `game_test_contract` — baseline game behavior
-- `renderer_smoke_xopengl` — renderer correctness
+- `abi_widths` — engine struct layout and property offsets
 - `package79_manifest` — data serialization
-
-**For complete test documentation, see [Docs/BEHAVIOR_MATRIX.md](Docs/BEHAVIOR_MATRIX.md).**
+- `native_launcher_contract` — launcher state, data-root selection, and save discovery
 
 ## Documentation
 
-- **[Docs/OPERATIONS.md](Docs/OPERATIONS.md)** — Authoritative build, test, and launch reference
-- **[Docs/BEHAVIOR_MATRIX.md](Docs/BEHAVIOR_MATRIX.md)** — Every test, its invariant, and expected behavior
 - **[RETAIL_IMPORT.md](RETAIL_IMPORT.md)** — Game data import security and validation
 - **[NOTICE.md](NOTICE.md)** — Third-party software attribution
 
