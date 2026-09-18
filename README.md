@@ -8,7 +8,7 @@ This is a faithful recreation of the classic 2002 game engine for macOS 15+ on A
 
 - **XOpenGL** (`ThirdParty/XOpenGLDrv`) — OpenGL renderer adapted from UE1
 - **SDL2** — window management and input handling  
-- **Native text rendering** — optional experimental backend for improved font fidelity
+- **OpenAL Soft** — audio mixing, streaming Ogg music, and EA-XA decoding
 
 The codebase is legacy-era UE1-derived C++ with modern platform support.
 
@@ -22,7 +22,7 @@ Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:
 - **macOS 15.0 or later**
 - **Apple silicon** (arm64 / Apple M1, M2, M3, M4, M5, etc.)
 - **Xcode** (Command Line Tools or full IDE)
-- **CMake 3.25+**
+- **CMake 3.24+**
 
 ### Game Data
 **You must own a retail copy of *Harry Potter and the Chamber of Secrets* for Windows or macOS.** This repository does not include game data; you will import it from your own installation.
@@ -51,7 +51,7 @@ If you own a retail installation, import it using the provided script:
 ```sh
 python3 Build/prepare_retail_data.py \
   --archive "/path/to/Harry Potter and the Chamber of Secrets.7z" \
-  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal" \
   --profile retail-only \
   --link-mode copy
 ```
@@ -61,7 +61,7 @@ Or from an extracted installation directory:
 ```sh
 python3 Build/prepare_retail_data.py \
   --retail-root "/path/to/Harry Potter and the Chamber of Secrets" \
-  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal" \
   --profile retail-only \
   --link-mode copy
 ```
