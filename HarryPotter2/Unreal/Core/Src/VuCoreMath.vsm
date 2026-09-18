@@ -1,0 +1,63 @@
+.vu
+
+; vu0TransformPointByCoord
+;
+; Required register allocation!
+; vf0: 0, 0, 0, 1 constant vector
+; vf1: 1, 1, 1, 1 unit vector
+; vf2: Source vector
+; vf3: Frame origin
+; vf4: XAxis
+; vf5: YAxis
+; vf6: ZAxis
+;
+; Stores results in vf11
+;
+; Could be optimized more?  Too much dependency on ACC?
+
+vu0TransformPointByCoord:
+	; Get subtracted vector
+	sub.xyz		vf7xyz, vf2xyz, vf3xyz		NOP		; vf6 <- Temp
+
+	; Perform dot products
+	mul.xyz		vf8xyz, vf7xyz, vf4xyz		NOP		; vf8 <- Temp | XAxis
+	mul.xyz		vf9xyz, vf7xyz, vf5xyz		NOP		; vf9 <- Temp | YAxis
+	mul.xyz		vf10xyz, vf7xyz, vf6xyz		NOP		; vf10 <- Temp | ZAxis
+
+	addax.x		ACCx, vf0x,	vf8x			NOP		; ACCx = vf8.x
+	addax.y		ACCy, vf0y,	vf9x			NOP		; ACCy = vf9.x
+	addax.z		ACCz, vf0z,	vf10x			NOP		; ACCy = vf10.x
+
+	madday.x	ACCx, vf1x, vf8y			NOP		; ACCx = vf8.x + vf8.y
+	madday.y	ACCy, vf1y, vf9y			NOP		; ACCy = vf9.x + vf9.y
+	madday.z	ACCz, vf1z, vf10y			NOP		; ACCy = vf10.x + vf10.y
+
+	maddaz.x	ACCx, vf1x, vf8z			NOP		; ACCx = vf8.x + vf8.y + vf8.z
+	maddaz.y	ACCy, vf1y, vf9z			NOP		; ACCy = vf9.x + vf9.y + vf9.z			
+	maddaz.z	ACCz, vf1z, vf10z			NOP		; ACCy = vf10.x + vf10.y + vf10.z
+
+	madd		vf11, vf0, vf0				NOP		; vf11 = ACC + 0 * 0
+	NOP[E]									NOP
+	NOP										NOP
+
+vu0TransformVectorByCoord:
+	; Perform dot products
+	mul.xyz		vf8xyz, vf2xyz, vf4xyz		NOP		; vf8 <- Temp | XAxis
+	mul.xyz		vf9xyz, vf2xyz, vf5xyz		NOP		; vf9 <- Temp | YAxis
+	mul.xyz		vf10xyz, vf2xyz, vf6xyz		NOP		; vf10 <- Temp | ZAxis
+
+	addax.x		ACCx, vf0x,	vf8x			NOP		; ACCx = vf8.x
+	addax.y		ACCy, vf0y,	vf9x			NOP		; ACCy = vf9.x
+	addax.z		ACCz, vf0z,	vf10x			NOP		; ACCy = vf10.x
+
+	madday.x	ACCx, vf1x, vf8y			NOP		; ACCx = vf8.x + vf8.y
+	madday.y	ACCy, vf1y, vf9y			NOP		; ACCy = vf9.x + vf9.y
+	madday.z	ACCz, vf1z, vf10y			NOP		; ACCy = vf10.x + vf10.y
+
+	maddaz.x	ACCx, vf1x, vf8z			NOP		; ACCx = vf8.x + vf8.y + vf8.z
+	maddaz.y	ACCy, vf1y, vf9z			NOP		; ACCy = vf9.x + vf9.y + vf9.z			
+	maddaz.z	ACCz, vf1z, vf10z			NOP		; ACCy = vf10.x + vf10.y + vf10.z
+
+	madd		vf11, vf0, vf0				NOP		; vf11 = ACC + 0 * 0
+	NOP[E]									NOP
+	NOP										NOP

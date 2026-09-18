@@ -1,0 +1,15 @@
+.global vu0Code
+.global vu0TransformPointByCoord
+.global vu0TransformVectorByCoord
+.DmaPackVif 1
+
+vu0Code:
+DMAcnt *
+MPG 0, *
+.include "VuCoreMath.vsm"
+.EndMPG
+.EndDmaData
+
+DMAend
+VIFnop
+VIFnop

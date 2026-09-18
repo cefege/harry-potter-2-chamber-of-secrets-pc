@@ -47,8 +47,9 @@ install_manifest.txt
 *.crash
 *.ips
 *.stackdump
-core
-core.*
+# Unix core dumps. Anchored and digit-suffixed: a bare `core` pattern matches
+# the engine's Core/ source tree because macOS sets core.ignorecase=true.
+/core.[0-9]*
 
 # Canonical runtime assets and local game state
 /HarryPotter2/Unreal/System/
