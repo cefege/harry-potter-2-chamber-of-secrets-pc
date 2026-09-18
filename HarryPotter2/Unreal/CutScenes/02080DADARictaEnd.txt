@@ -1,0 +1,70 @@
+//02080DADARictaEnd
+
+[Dialog_01]
+
+capture Harry
+capture Lockhart
+capture Basecam
+
+Basecam FlyTo CutCameraPos7 *
+Basecam Target FlyTo CutMark30
+Basecam FlyTo CutCameraPos7 *
+Basecam Target FlyTo CutMark30
+
+Lockhart Turnto Harry follow
+Harry Turnto Lockhart *
+Lockhart say PC_Gil_DADARictaEnd_01
+//You've learned Rictusempra! You didn't do well as I did the first time, but then, who could?
+
+Lockhart say PC_Gil_DADARictaEnd_03
+//Now it's time to test your ability to use Rictusempra by working your way through  my very own Rictusempra Spell Challenge!  Good luck Harry!
+
+//Basecam FlyTo CutCameraPos8 *
+//Basecam Target FlyTo Harry time=0.1 StayLocked
+//Harry RunTo CutMark29
+
+BaseCam FadeOut
+
+//teleport 6 students out of Lockhart's classroom------------------
+capture GOldMaleGry1
+capture GOldMaleGry2
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf2
+
+
+GOldMaleGry1 teleport Cutmark54
+GOldMaleGry2 teleport Cutmark66
+GFemGry0 teleport Cutmark51
+GMaleGry4 teleport Cutmark44
+GFemHuf2 teleport Cutmark25
+GMaleHuf2 teleport Cutmark56
+
+release GOldMaleGry1
+release GOldMaleGry2
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf2
+//end of student placement--------------------------------------
+
+//Put Ron and Hermione back in the people room for safe keeping.
+Capture Ron
+Capture Hermione
+Ron teleport RonLoc
+Hemione Teleport HermioneHidden
+Release Ron
+Release Hermione
+//Done moving Ron & Hermione
+
+Harry changegamestate gstate030
+trigger ChangeLevelCh1Rictusempra
+
+release Harry
+release Lockhart
+release Basecam
+
+
+
+

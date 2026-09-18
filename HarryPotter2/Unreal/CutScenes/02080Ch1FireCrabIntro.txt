@@ -1,0 +1,31 @@
+
+//FireCrabIntro Cut Scene
+
+[Main]
+
+Capture Lockhart
+Capture BaseCam
+Capture Harry
+Capture FireCrab1
+
+BaseCam FlyTo StartCam *
+BaseCam Target FlyTo FireCrab1 StayLocked *
+
+//FireCrab1 TurnTo Harry Follow
+//FireCrab1 Animate Roar *
+
+Lockhart Talk PC_Gil_Chal1Ricta_15
+//Firecrabs are nasty little critters that like to shoot hot flame out of…well, at you.  You can stun them by casting Rictusempra on them.  Then you can use Flipendo to push them around the world!
+
+//Sleep 0.5
+
+BaseCam Target FlyTo Focus1 EaseTo Time=.75
+BaseCam FlyTo PitCam1 EaseTo Time=1.5
+
+Lockhart Talk PC_Gil_Chal1Ricta_16
+//This indicates that a Firecrab placed on or nearby the symbol will cause something to happen in the world, Harry.  Try and use Flipendo to push the firecrab onto this plate.
+
+Release Lockhart
+Release BaseCam
+Release Harry
+Release FireCrab1

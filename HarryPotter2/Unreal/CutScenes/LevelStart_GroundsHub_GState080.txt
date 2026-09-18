@@ -1,0 +1,76 @@
+//LevelStart_GroundsHub_GState080
+
+[Dialog_01]
+
+capture basecam
+
+//ambients---------------------------------------------
+
+//teleports a Ravenclaw Girl to search for a secret by the gates to Quidditch
+capture GFemRav2
+GFemRav2 teleport SlySecretPP2
+GFemRav2 SetOnPatrolPointPath SlySecretPP2 *
+release GFemRav2
+
+//Kids in Herbology
+capture GOldMaleGry1
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf3
+capture GFemRav1
+capture GMaleRav2
+capture GFemRav3
+capture GOldMaleSly1
+capture GFemSly2
+
+GOldMaleGry1 teleport CutMark9
+GFemGry0 teleport CutMark8
+GMaleGry4 teleport CutMark5
+GFemHuf2 teleport CutMark6
+GMaleHuf3 teleport CutMark15
+GFemRav1 teleport CutMark11
+GMaleRav2 teleport CutMark10
+GFemRav3 teleport CutMark7
+GOldMaleSly1 teleport CutMark17
+GFemSly2 teleport CutMark18
+
+GOldMaleGry1 Face CutMark1
+GFemGry0 Face CutMark1
+GMaleGry4 Face CutMark1
+GFemHuf2 Face CutMark1
+GMaleHuf3 Face CutMark1
+GFemRav1 Face CutMark1
+GMaleRav2 Face CutMark1
+GFemRav3 Face CutMark1
+GOldMaleSly1 Face CutMark1
+GFemSly2 Face CutMark1
+
+
+release GOldMaleGry1
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf3
+release GFemRav1
+release GMaleRav2
+release GFemRav3
+release GOldMaleSly1
+release GFemSly2
+
+//Level Set Up-------------------------------------------
+
+capture sprout
+Sprout teleport CutMark1
+Sprout Face CutMark21
+release Sprout
+
+capture Ron
+
+Ron FlyTo GoToHerbStart
+Ron face Harry
+basecam fadein *
+release basecam
+Ron LeadActor Harry GoToHerbStart GoToHerbEnd anim=Talk_ComeHere BumpSet=Gfg_Hub2InBumps *
+Release Ron
+

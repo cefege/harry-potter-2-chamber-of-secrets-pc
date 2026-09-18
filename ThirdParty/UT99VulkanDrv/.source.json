@@ -1,0 +1,37 @@
+{
+  "repository_url": "https://github.com/dpjudas/UT99VulkanDrv",
+  "archive_url": "https://codeload.github.com/dpjudas/UT99VulkanDrv/tar.gz/a29e9ac0df1c60ad302d91bc3a51ab026c1a307c",
+  "commit": "a29e9ac0df1c60ad302d91bc3a51ab026c1a307c",
+  "tree_hashes": {
+    "root": "e3c6add0866e3b00d40c39031a5d46f9ad28d68e",
+    "VulkanDrv": "8cb0b3b8be153ea0c7937ce32826de6969a7e921",
+    "ZVulkan": "92ace6beda68754bc344055ebefd2b22aa2661c4"
+  },
+  "selected_paths": [
+    "LICENSE.md",
+    "VulkanDrv/**",
+    "ZVulkan/**"
+  ],
+  "excluded_roots": [
+    ".gitignore",
+    "D3D11Drv",
+    "D3D11Drv_Settings.int",
+    "D3D11Drv.int",
+    "D3D12Drv",
+    "D3D12Drv_Settings.int",
+    "D3D12Drv.int",
+    "HRTFAudio",
+    "HRTFAudio.int",
+    "README.md",
+    "Thirdparty",
+    "VulkanDrv_Settings.int",
+    "VulkanDrv.int",
+    "VulkanDrv.sln"
+  ],
+  "license_paths": [
+    "LICENSE.md",
+    "ZVulkan/LICENSE.md",
+    "ZVulkan/src/glslang/LICENSE.txt"
+  ],
+  "modified": false
+}

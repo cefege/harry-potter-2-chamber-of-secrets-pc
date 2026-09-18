@@ -1,0 +1,195 @@
+
+//Multiple Ending Spongify Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Lockhart
+Capture challengescoremanager
+Capture basecam
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Lockhart
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeJustWonFirstTime Cue WonFirstTimeThread
+If ChallengeWorseThanBefore Cue WorseThread
+If ChallengeNewBestScore Cue NewBestThread
+If ChallengeJustMastered Cue JustMasteredThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[WonFirstTimeThread]
+
+WaitFor WonFirstTimeThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep 0.1
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Lockhart Talk PC_Gil_Chal4Spong_07 *LockhartDone1
+//Well done, Harry!  You 've completed my Spongify Challenge.  The remaining time now becomes your personal high score.
+
+Waitfor LockhartDone1
+
+challengescoremanager tallychallenge *TallyDone
+
+Harry animate celebrate
+
+Waitfor TallyDone
+
+trigger levelexit
+
+Release challengescoremanager
+Release Lockhart
+Release basecam
+Release Harry
+
+
+
+//----------------------------------------------------------------------
+[WorseThread]
+
+WaitFor WorseThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep 0.1
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Lockhart Talk PC_Gil_Chal4Spong_16 *LockhartDone1
+//I'm sorry Harry, but you will have to do better before I can award you any more House Points.
+
+Waitfor LockhartDone1
+
+challengescoremanager tallychallenge *TallyDone
+
+Harry animate talk_remember
+
+Waitfor TallyDone
+
+trigger levelexit
+
+Release challengescoremanager
+Release Lockhart
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[NewBestThread]
+
+WaitFor NewBestThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep 0.1
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Lockhart Talk PC_Gil_Chal4Spong_12 *LockhartDone1
+//Nice one, Harry!  You have set a new personal high score!
+
+Waitfor LockhartDone1
+
+challengescoremanager tallychallenge *TallyDone
+
+Harry animate celebrate
+
+Waitfor TallyDone
+
+trigger levelexit
+
+Release challengescoremanager
+Release Lockhart
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[JustMasteredThread]
+
+WaitFor JustMasteredThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep 0.1
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Lockhart Talk PC_Gil_Chal4Spong_09 *LockhartDone1
+//Congratulations, Harry Potter, you have mastered my Spongify Spell Challenge!  50 points to Gryffindor!  You are welcome to continue playing this challenge, but you will be awarded no more house points.
+
+Waitfor LockhartDone1
+
+challengescoremanager tallychallenge *TallyDone
+
+Harry animate celebrate
+
+Waitfor TallyDone
+
+trigger levelexit
+
+Release challengescoremanager
+Release Lockhart
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep 0.1
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Lockhart Talk PC_Gil_Chal4Spong_15 *LockhartDone1
+//Good job, Harry!
+
+Waitfor LockhartDone1
+
+challengescoremanager tallychallenge *TallyDone
+
+Harry animate celebrate
+
+Waitfor TallyDone
+
+trigger levelexit
+
+Release challengescoremanager
+Release Lockhart
+Release basecam
+Release Harry

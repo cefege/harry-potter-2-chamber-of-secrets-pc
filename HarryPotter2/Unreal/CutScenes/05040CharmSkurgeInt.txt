@@ -1,0 +1,121 @@
+//05040CharmSkurgeInt
+
+[Harry]
+Capture Harry
+
+SetObjectiveId
+
+Harry RunTo PatrolPoint12
+Harry WalkTo PatrolPoint13
+Harry TurnTo Flitwick Follow
+Cue HarryMadeIt
+
+[Dialog_01]
+Capture Flitwick
+Capture Ron
+Capture BaseCam
+
+BaseCam FlyTo CutCameraPos17
+BaseCam Target FlyTo Flitwick
+BaseCam FlyTo CutCameraPos18 time=5 easeto *
+
+waitfor HarryMadeIt
+sleep .2
+Capture Hermione
+Ron TurnTo Flitwick follow
+Hermione TurnTo Flitwick
+Hermione TurnTo Flitwick
+Flitwick TurnTo CutMark172 *
+Flitwick Talk PC_Flt_CharmSkurgeInt_00 startanim=talk_rhand
+//Welcome to Charms class. Today we shall be learning the Skurge charm.
+Hermione TurnTo Flitwick
+BaseCam FlyTo Hermione z=30 x=-60 y=-20
+BaseCam Target FlyTo FlitWick
+Hermione TurnTo Flitwick
+Hermione TurnTo Flitwick
+Hermione animate wave
+Flitwick Turnto Hermione
+BaseCam FlyTo Flitwick z=10 x=60 y=20
+BaseCam Target FlyTo FLitwick z=10
+Flitwick Talk PC_Flt_CharmSkurgeInt_01 startanim=idle
+//Yes, Miss Granger?
+
+BaseCam FlyTo Hermione z=30 x=60 y=-20
+BaseCam Target FlyTo Hermione z=15
+Hermione Talk PC_Her_CharmSkurgeInt_02 StartAnim=talk_lhand loopanim=idle endanim=idle
+//I was wondering if you could tell us something about the Chamber of Secrets.
+
+BaseCam FlyTo Flitwick z=10 x=50 y=20
+BaseCam Target FlyTo FLitwick z=10
+Flitwick Talk PC_Flt_CharmSkurgeInt_03
+//I deal with charms, Miss Granger, not myths and legends.
+
+ReCapture Harry
+
+BaseCam FlyTo Hermione z=30 x=60 y=-20
+BaseCam Target FlyTo Hermione z=15
+Harry Talk PC_Hry_CharmSkurgeInt_07 startanim=none
+//Please, professor, we all want to hear.
+
+BaseCam FlyTo Flitwick z=10 x=60 y=20
+BaseCam Target FlyTo FLitwick z=10
+Flitwick Talk PC_Flt_CharmSkurgeInt_08
+//Oh, very well…
+
+Flitwick TurnTo CutMark172 *
+BaseCam FlyTo CutCameraPos18
+BaseCam Target FlyTo Flitwick
+BaseCam FlyTo Flitwick z=10 x=50 y=20 time=40 *
+Flitwick Talk PC_Flt_CharmSkurgeInt_09 startanim=talk_bothhands
+//There were four founders of Hogwarts: Godric Gryffindor, Salazar Slytherin, Helga Hufflepuff, and Rowena Ravenclaw.
+
+Flitwick Talk PC_Flt_CharmSkurgeInt_10 startanim=idle
+//Slytherin wanted to admit only the wizard-born students to Hogwarts. The other founders refused and as a result, Slytherin left the school.
+
+Flitwick Talk PC_Hry_CharmSkurgeInt_11 //This was accedently Harry
+//But, unknown to the other founders, Slytherin had built a secret chamber beneath the school…
+
+Flitwick Talk PC_Flt_CharmSkurgeInt_12 startanim=talk_lhand
+//…with a great monster to guard the chamber from within.
+
+Flitwick Talk PC_Flt_CharmSkurgeInt_13 startanim=idle *FlitDoneWithHisCrap
+//The legend states that one day, Slytherin's true heir will return to open the chamber and control the horror within. And then, all who are not wizard-born will be purged from Hogwarts.
+sleep 5
+BaseCam FlyTo Hermione z=30 x=100 y=-20
+BaseCam Target FlyTo Hermione z=15
+
+waitfor FlitDoneWithHisCrap
+BaseCam FlyTo Flitwick z=10 x=50 y=20
+BaseCam Target FlyTo FLitwick z=10
+Flitwick TurnTo Harry Follow
+Flitwick Talk PC_Flt_CharmSkurgeInt_14 *FlitDone2
+//All nonsense, of course. Now, back to magical reality. Mr. Potter, perhaps you'd like to step forward and begin the exercises to learn Skurge?
+
+sleep 4
+BaseCam FlyTo Harry z=20 x=60 y=-20
+BaseCam Target FlyTo Harry z=20
+
+waitfor FlitDone2
+Harry Talk PC_Hry_CharmSkurgeInt_15 startanim=bow
+//Glad to, professor.
+
+sleep .5
+
+Harry WalkTo CutMark173 *HarryDone
+Basecam FlyTo CutCameraPos18 *
+BaseCam Target FlyTo Harry StayLocked *
+waitfor HarryDone
+BaseCam Target FlyTo SpellLessonShape Time=3 *
+Harry RunTo CutMark176
+Harry TurnTo SpellLessonShape
+
+sleep 2
+
+Release Harry
+Release Hermione
+Release Flitwick
+Release Ron
+Release BaseCam
+
+Trigger SpellLessonTrigger
+

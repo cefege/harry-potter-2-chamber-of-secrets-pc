@@ -1,0 +1,117 @@
+
+//14060TransG--------------------------------------------------------
+//15020DiaryStolen----------------------------------------------------
+
+[Harry]
+Capture Harry
+Waitfor HarryShowUp
+Harry teleport Cutmark132
+Harry RunTo Cutmark131 Cutmark130
+Harry TurnTo Hermione
+Cue HarryHasArrived
+
+
+[Main]
+//Capture Narrator
+Capture Ron
+Capture Hermione
+Capture Basilisk
+Capture BaseCam
+
+SetObjectiveId 
+
+//**********moved transition to transition.unr
+
+//Narrator Talk PC_Nar_TransG_08
+//Harry put the diary in his room for safekeeping; he couldn't think of what else to do with it.
+
+//Narrator Talk PC_Nar_TransG_00
+//Harry had always known that Hagrid had an unfortunate liking for large, monstrous creatures.
+
+//Narrator Talk PC_Nar_TransG_06
+//But he was equally certain that Hagrid would never mean to kill anybody…
+
+Hermione Teleport Cutmark128
+Ron Teleport Cutmark129
+
+Hermione Face Ron
+Ron Face Hermione
+BaseCam Target FlyTo Cutmark130
+BaseCam FlyTo CutCameraPos38
+BaseCam FadeIn
+
+Hermione Talk PC_Her_DiaryStolen_00
+//Riddle might have had the wrong person. Maybe some other monster was attacking people.
+
+Ron Talk PC_Ron_DiaryStolen_01
+//How many monsters d'you think this place can hold?
+
+
+
+Hermione Talk PC_Her_DiaryStolen_02 *HermioneDone
+//We always knew Hagrid was expelled, and the attacks must've stopped then. Otherwise, Riddle wouldn't have got his award.
+
+sleep 3
+cue HarryShowUp
+
+waitfor HarryHasArrived
+ReCapture Harry
+
+
+waitfor HermioneDone
+Ron TurnTo Harry *
+Hermione TurnTo Harry *
+Harry Talk PC_Hry_DiaryStolen_03
+//Riddle's diary…it's  gone.
+
+Ron Talk PC_Ron_DiaryStolen_04
+//What?!?
+
+Hermione Talk PC_Her_DiaryStolen_05
+//But… only a Gryffindor could have stolen it. Nobody else knows our password.
+
+Harry Talk PC_Hry_DiaryStolen_06
+//Exactly.
+
+Harry TurnTo Basilisk *
+Basilisk Talk PC_Bas_DiaryStolen_07
+//Kill this time ... let me rip ... tear. .
+
+Harry TurnTo Ron
+Harry Talk PC_Hry_DiaryStolen_08
+//The voice! I just heard it again -- didn't you?
+
+Ron Talk PC_Ron_DiaryStolen_09
+//I didn't hear anything.
+
+Harry TurnTo Hermione
+Hermione Talk PC_Her_DiaryStolen_10
+//Harry -- I think I've just understood something! I've got to go to the library!
+
+//Get Rid of Hermione--
+Hermione RunTo Cutmark133
+Hermione Teleport HermioneLoc
+
+Ron Talk PC_Ron_DiaryStolen_11
+//But McGonagall said we have to stay in here unless we're in class…
+
+Harry TurnTo Ron Follow
+
+Harry say PC_Hry_DiaryStolen_12
+//And I've got to talk to Hagrid. If he set the monster loose last time, he knows how to get inside the Chamber of Secrets.
+
+Ron Talk PC_Ron_DiaryStolen_13
+//Well, I'm not staying here by myself. I'm going with you.
+
+SetObjectiveId PC_Hry_GoToHut_04
+
+Ron LeadActor Harry GryfCom RonToHutEnd *
+
+sleep 1
+
+//Release Narrator
+Release Harry
+Release Ron
+Release Hermione
+Release Basilisk
+Release BaseCam

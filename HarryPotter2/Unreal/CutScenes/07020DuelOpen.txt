@@ -1,0 +1,157 @@
+//07020DuelOpen
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Harry]
+
+SetObjectiveId
+
+Capture Harry
+
+Harry RunTo FAHARRYGETHERE
+Harry TurnTo AfterAdv3HermioneLoc1
+
+WaitFor HarryTalk1
+
+Harry Talk PC_Hry_DuelOpen_10
+//Hi! I found some Bicorn Horn to add to the potion.
+
+Cue HerTalk1
+
+WaitFor HerTakeIngredient
+Harry GiveHermioneBicorn
+
+WaitFor GMaleArrive
+Harry TurnTo GMaleGry4 Follow *
+
+WaitFor CutEnd
+Release Harry
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[Cam]
+
+Capture BaseCam
+
+BaseCam FlyTo AfterAdv3CamLoc1
+BaseCam Target FlyTo AfterAdv3Focus1
+
+WaitFor GMaleComeOnIn
+
+BaseCam FlyTo AfterAdv3CamLoc2 Time=3
+
+Cue RemoveHermione
+
+WaitFor CutEnd
+
+BaseCam GoHome
+
+Release BaseCam
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Hermione]
+
+Capture Hermione
+
+Hermione Teleport AfterAdv3HermioneTelLoc *
+Hermione Face FAHARRYGETHERE *
+
+Hermione RunTo AfterAdv3HermioneLoc1
+
+Hermione TurnTo FAHARRYGETHERE
+
+Hermione Talk PC_Her_DuelOpen_09
+//Hi Harry.
+
+Cue HarryTalk1
+
+WaitFor HerTalk1
+
+Hermione Talk PC_Her_DuelOpen_11
+//Great. I'm still trying to find the location of the next ingredient, I should have it tracked down soon.  In the meantime I'll go add this to the potion.
+
+Cue HerTakeIngredient
+
+Hermione RunTo AfterAdv3HermioneTelLoc *
+
+Cue GMaleComeOnIn
+
+//WaitFor CutEnd
+//Not needed, as it's done in clean up.
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[GmaleGry4]
+
+WaitFor GMaleComeOnIn
+
+Sleep 1.0
+
+Capture GMaleGry4
+
+GMaleGry4 Teleport AfterAdv3GMaleGry4Loc1
+GMaleGry4 RunTo AfterAdv3GMaleGry4Loc2
+GMaleGry4 TurnTo FAHARRYGETHERE
+
+Cue GMaleArrive
+
+GMaleGry4 Talk PC_Grm_DuelOpen_00
+//They're starting a Duelling Club and the first meeting is today!
+
+ReCapture Harry
+
+Harry Talk PC_Hry_DuelOpen_07
+//That could be interesting.
+
+GMaleGry4 Talk PC_Grm_DuelOpen_06
+//Come to the Great Hall if you want to learn how to duel.
+
+SetObjectiveId PC_Hry_GoToDuel_01
+
+//Harry TurnTo CVHarryLookHere
+
+GMaleGry4 LeadActor Harry GoToDuelStart GreatHall * //anim=WaveAnim speech=speechIndex
+Release GMaleGry4
+
+Harry TurnTo GMaleGry4 Follow *
+
+SetObjectiveId PC_Hry_GoToDuel_01
+
+Sleep 2.0
+
+Cue CutEnd
+
+Release Harry
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[CleanUp]
+
+WaitFor RemoveHermione
+
+Capture Hermione
+ReCapture Hermione
+
+Hermione Teleport HermioneLOC
+
+Release Hermione
+
+
+//---------------------------------------------------------------------

@@ -1,0 +1,11 @@
+Feel free to contribute code for any of the following 
+(they're listed in some sort of priority)
+	- updated VBR mode. (improved VBR_a_bit_allocation)
+	- fix LSF mode.  LSF will segfault for unknown reasons unless you use the 
+		-f option. I think there's an infinite loop condition in there 
+		somewhere, but I haven't gone looking for it yet.
+	- reading from stdin could be made less kludgy I suppose.
+	- psy-model speed ups
+	- a_bit_allocation optimization
+	- remove need for atan2 calls in fft.c
+	- plenty of other functions could be merged.

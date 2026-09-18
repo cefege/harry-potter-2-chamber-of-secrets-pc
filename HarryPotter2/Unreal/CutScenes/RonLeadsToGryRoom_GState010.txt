@@ -1,0 +1,42 @@
+
+//RonLeadsToGryRoom_GState010
+
+//Main Cutscene------------------------------------------
+
+
+capture ron
+capture harry
+capture basecam
+
+ron flyto CutMark18
+ron face cutmark1
+Basecam Flyto cutcamerapos0 *
+Basecam target flyto Harry x=70 z=50 staylocked *
+basecam fadein *
+Basecam Flyto Harry x=-70 y=-70 easebetween StayLocked time=4 *
+Ron Runto Cutmark1 *RonDone1
+Harry Walkto Cutmark0 *
+//Harry Turnto Ron Follow
+
+waitfor RonDone1
+Ron turnto Harry
+sleep .5
+Basecam flyto Ron x=50 y=30 z=20 *
+Basecam target flyto Ron z=20
+
+Ron talk PC_Ron_GoToGCR_11 startanim=point_left *RonDone2
+//The Gryffindor dormitory is just over here to the right, Remember?
+
+waitfor RonDone2
+//Ron runto cutmark2 *rondone3
+Ron LeadActor Harry RonToDormStart RonToDormEnd *
+
+sleep 2
+//Harry runto Cutmark0
+
+SetObjectiveId PC_Hry_GoToGCR_01
+release harry
+release basecam
+//Ron turnto Harry follow
+release ron
+

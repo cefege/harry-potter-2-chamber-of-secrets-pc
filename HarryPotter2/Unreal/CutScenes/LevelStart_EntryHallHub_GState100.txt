@@ -1,0 +1,10 @@
+//LevelStart_EntryHallHub_GState100
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+//trigger TakeIngredients

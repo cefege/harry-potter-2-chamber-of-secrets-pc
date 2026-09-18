@@ -1,0 +1,71 @@
+//02060DADARictaInt
+
+[Dialog_01]
+capture Harry
+capture Lockhart
+capture Hermione
+capture Basecam
+
+Basecam Target Flyto Lockhart z=25 *
+Basecam Flyto CutCameraPos3
+Harry Walkto Cutmark7 *HarryDone
+Basecam Flyto CutCameraPos4 EaseTo Time=6 *
+
+Lockhart say PC_Gil_DADARictaInt_00
+//Welcome to Defence Against Dark Arts!  My fame makes an introduction unnecessary, but I'll delight you with one anyway.
+
+Basecam flyto Lockhart z=30 x=70
+Lockhart say PC_Gil_DADARictaInt_01 *LockhartDone0
+//I am Gilderoy Lockhart, Order of Merlin Third Class, Honorary Member of the Dark Force Defense League, and five-time winner of Witch Weekly's Most- Charming-Smile Award!
+
+sleep 4
+Basecam target flyto Hermione *
+Basecam Flyto CutCameraPos5
+
+waitfor LockhartDone0
+Lockhart say PC_Gil_DADARictaInt_02
+//I see you've all bought a complete set of my books. Well done!
+
+Basecam Target Flyto Lockhart z=25 *
+Basecam flyto Lockhart z=30 x=60
+
+Lockhart say PC_Gil_DADARictaInt_03
+//Today we shall be learning the Rictusempra duelling spell.
+
+Basecam Flyto CutCameraPos6
+
+Lockhart say PC_Gil_DADARictaInt_04
+//It is very useful spell that is capable of stunning certain pesky creatures, such as Cornish Pixies…
+
+Basecam flyto Lockhart z=30 x=50
+
+Lockhart say PC_Gil_DADARictaInt_05 *LockhartDone1
+//Who wants to be first? Harry Potter will you step down here please?
+sleep 3
+Basecam target Flyto cutmark27 *
+Basecam Flyto Harry x=50 y=-100 z=50
+
+waitfor LockhartDone1
+
+Hermione turnto Harry Follow
+Harry walkto cutmark27 *HarryDone
+Hermione say PC_Her_DADARictaInt_07
+//Lucky!
+Basecam Flyto CutCameraPos6
+
+
+waitfor HarryDone
+Harry runto cutmark28 
+
+Basecam FlyTo CutCameraPos7 *
+Basecam Target FlyTo CutMark30
+Harry turnto Cutmark 30 *
+LockHart turnto CutMark30 *
+
+release Harry
+release Lockhart
+release Hermione
+release Basecam
+
+
+trigger SpellLessonRictuTrigger

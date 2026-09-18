@@ -1,0 +1,478 @@
+
+//00309QuidditchSlyInter
+
+//Quidditch Slytherin's Interupt Practice, Ending of Tutoral.
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo FocusEnd1 *
+BaseCam FlyTo CamEndLoc1 *
+
+WaitFor HarryCloseUp
+BaseCam Target FlyTo FocusEndHarryHead *
+BaseCam FlyTo CamEndHarryCloseUp *
+Sleep 1.0
+BaseCam Target FlyTo FocusEnd1 *
+BaseCam FlyTo CamEndLoc1 *
+
+WaitFor CamTurn
+BaseCam Target FlyTo Draco Time=4 StayLocked *
+BaseCam FlyTo CamEndLoc2 Time=5 *
+Sleep 1.5
+BaseCam FOV Angle=25 Time=0.5
+Sleep 2.0
+BaseCam FOV Angle=90 Time=4 *
+
+Sleep 4.0
+
+BaseCam Target FlyTo FocusEnd3 *
+BaseCam FlyTo CamEndLoc4 *
+
+WaitFor RonCloseUp
+BaseCam Target FlyTo Ron z=30 *
+BaseCam FlyTo CamEndRonClose1 *
+
+WaitFor DracoCloseUp
+BaseCam Target FlyTo Draco z=40 *
+BaseCam FlyTo CamEndDracoClose1 *
+
+WaitFor HermioneStepUp
+BaseCam Target FlyTo FocusEnd4 *
+BaseCam FlyTo CamEndLoc5 *
+
+WaitFor DracoFlyDown
+BaseCam FlyTo CamEndLoc6 Time=2 *
+
+WaitFor RonStepUp
+BaseCam FlyTo CamEndLoc7 *
+
+Waitfor CutEnd
+
+BaseCam FadeOut 1.0
+
+//Release BaseCam
+
+//Cue RonCloseUp
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Harry]
+
+Capture Harry
+
+Harry ChangeGameState GState040
+//Set's the game state for when you leave the tutorial.
+
+Harry Teleport HarryEndLoc1
+
+Harry Face IP_DracoPath_END
+
+WaitFor HarryCloseUp
+Harry Animate Negative
+Sleep 1.0
+
+Cue FredTalk
+
+WaitFor CutEnd
+//Sleep 1
+Trigger LevelLoad1
+Release Harry
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Hermione]
+
+Capture Hermione
+
+Sleep 0.5
+Hermione Teleport Teleport_In_LOC
+Hermione RunTo RunInPath1 HermioneLoc1
+
+Hermione TurnTo HarryEndLoc1
+
+
+WaitFor CamTurn
+Hermione TurnTo FocusEnd2
+
+//WaitFor HermioneStepUp
+//Hermione RunTo HermioneLoc2
+//Hermione TurnTo IP_DracoPath_END
+//Cue HermioneReady
+
+WaitFor CutEnd
+Release Hermione
+
+
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+
+[Ron]
+
+Trigger OpenPitch
+//Moves the mover sheet so Hermione and Ron can run out onto the pitch.
+
+Capture Ron
+
+Ron Teleport Teleport_In_LOC
+
+Ron RunTo RunInPath1 RonLoc1
+
+Ron TurnTo HarryEndLoc1
+
+WaitFor RonTalk
+Ron Talk PC_Ron_QuidFight_18
+//Aren’t you finished yet, Harry?
+
+Cue HarryCloseUp
+
+WaitFor CamTurn
+Ron TurnTo FocusEnd2
+
+//WaitFor RonStepUp
+//Ron WalkTo RonLoc2
+//Ron TurnTo P_DracoPath_END
+//Cue RonReady
+
+
+WaitFor CutEnd
+Release Ron
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Wood]
+
+Capture BroomWood
+Capture Wood
+
+Wood Teleport GroundWoodOFF
+BroomWood FlyTo WoodEndLoc1
+BroomWood Face HarryEndLoc1
+
+BroomWood Talk PC_Owd_QuidFight_17
+//Excellent work, everyone.  You’re back on form, Potter, which means we’ve got a great chance of winning the cup this year.
+
+Sleep 0.5
+Cue RonTalk
+
+WaitFor CamTurn
+BroomWood TurnTo FocusEnd2
+
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Fred]
+
+Capture Fred
+
+Fred FlyTo FredEndLoc1
+Fred Face WoodEndLoc1
+
+WaitFor FredTalk
+
+Fred Talk PC_Frd_QuidFight_19
+//Don't look now -- but here comes the Slytherin team.
+
+Cue CamTurn
+
+Cue Dialog1
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[George&GryfChasers]
+
+Capture George
+Capture GryffChaser1
+Capture GryffChaser2
+Capture GryffChaser3
+
+George FlyTo GeorgeEndLoc1
+George Face WoodEndLoc1
+
+GryffChaser1 FlyTo Chaser1EndLoc1
+GryffChaser1 Face WoodEndLoc1
+
+GryffChaser2 FlyTo Chaser2EndLoc1
+GryffChaser2 Face WoodEndLoc1
+
+GryffChaser3 FlyTo Chaser3EndLoc1
+GryffChaser3 Face WoodEndLoc1
+
+WaitFor CutEnd
+Release George
+
+
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Draco]
+
+Capture Draco
+
+WaitFor CamTurn
+
+Draco Teleport IP_DracoPath_START
+
+Draco MatchRot IP_DracoPath_START
+
+Draco FollowSpline IP_DracoPath Start=IP_DracoPath_START Dest=IP_DracoPath_END Time=6 Accel=100 Align EaseTo *
+
+Draco Face WoodEndLoc1
+
+Cue Dialog2
+
+//WaitFor DracoFlyDown
+//Draco MatchRot IP_DracoSHORT_START
+//Draco FollowSpline Draco2ndPathShort Start=IP_DracoSHORT_START Dest=IP_DracoSHORT_End Time=1 Accel=50 Align EaseTo *
+//Draco Face HermioneLoc2
+//Cue DracoReady
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[SlythChaser1]
+
+Capture SlythChaser1
+
+WaitFor CamTurn
+
+Sleep 0.25
+
+SlythChaser1 Teleport IP_SlythChase1Path_START
+
+SlythChaser1 MatchRot IP_SlythChase1Path_START
+
+SlythChaser1 FollowSpline IP_SlythChase1Path Start=IP_SlythChase1Path_START Dest=IP_SlythChase1Path_END Time=7 Accel=100 Align EaseTo *
+
+SlythChaser1 Face WoodEndLoc1
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[SlythChaser2]
+
+Capture SlythChaser2
+
+WaitFor CamTurn
+
+Sleep 0.50
+
+SlythChaser2 Teleport IP_SlythChase2Path_START
+
+SlythChaser2 MatchRot IP_SlythChase2Path_START
+
+SlythChaser2 FollowSpline IP_SlythChase2Path Start=IP_SlythChase2Path_START Dest=IP_SlythChase2Path_END Time=7 Accel=100 Align EaseTo *
+
+SlythChaser2 Face WoodEndLoc1
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[SlythChaser3]
+
+Capture SlythChaser3
+
+WaitFor CamTurn
+
+Sleep 0.45
+
+SlythChaser3 Teleport IP_SlythChase3Path_START
+
+SlythChaser3 MatchRot IP_SlythChase3Path_START
+
+SlythChaser3 FollowSpline IP_SlythChase3Path Start=IP_SlythChase3Path_START Dest=IP_SlythChase3Path_END Time=7 Accel=100 Align EaseTo *
+
+SlythChaser3 Face WoodEndLoc1
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[SlythBeater1]
+
+Capture SlythBeater1
+
+WaitFor CamTurn
+
+Sleep 0.10
+
+SlythBeater1 Teleport IP_Beater1Path_START
+
+SlythBeater1 MatchRot IP_Beater1Path_START
+
+SlythBeater1 FollowSpline IP_SlythBeater1Path Start=IP_Beater1Path_START Dest=IP_Beater1Path_END Time=6.3 Accel=100 Align EaseTo *
+
+SlythBeater1 Face WoodEndLoc1
+
+
+//---------------------------------------------------------------------
+[SlythBeater2]
+
+Capture SlythBeater2
+
+WaitFor CamTurn
+
+Sleep 0.15
+
+SlythBeater2 Teleport IP_Beater2Path_START
+
+SlythBeater2 MatchRot IP_Beater2Path_START
+
+SlythBeater2 FollowSpline IP_Beater2Path Start=IP_Beater2Path_START Dest=IP_Beater2Path_END Time=6.5 Accel=100 Align EaseTo *
+
+SlythBeater2 Face WoodEndLoc1
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[SlythKeeper]
+
+Capture SlythKeeper
+
+WaitFor CamTurn
+
+Sleep 0.05
+
+SlythKeeper Teleport IP_KeeperPath_START
+
+SlythKeeper MatchRot IP_KeeperPath_START
+
+SlythKeeper FollowSpline IP_KeeperPath Start=IP_KeeperPath_START Dest=IP_KeeperPath_END Time=7 Accel=100 Align EaseTo *
+
+SlythKeeper Face WoodEndLoc1
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[Dialog]
+
+WaitFor Dialog1
+ReCapture Wood
+ReCapture Ron
+ReCapture Hermione
+ReCapture Harry
+
+Wood Talk PC_Owd_QuidFight_20
+//I don’t believe it!  I booked the pitch for today!
+
+Ron Talk PC_Ron_QuidFight_21
+//Hey, they've got new brooms -- and it looks like... yes they are!  They're Nimbus Two Thousand and Ones!
+
+//Cue WideIncomingShot
+
+Wood Talk PC_Owd_QuidFight_23
+//Yeah, I know.  Apparently Lucius Malfoy made a very generous donation…
+
+WaitFor Dialog2
+ReCapture Draco
+
+Draco Talk PC_Drc_QuidFight_24
+//Like our new brooms, Weasley?
+
+Cue RonCloseUp
+Ron Talk PC_Ron_QuidFight_25
+//What are you doing here, Malfoy?
+
+Cue DracoCloseUp
+Draco Talk PC_Drc_QuidFight_26
+//I’m the Slytherin Seeker, now, didn’t you know?  Perhaps someday Gryffindor will be able to afford new brooms.
+
+Cue HermioneStepUp
+
+Hermione RunTo HermioneLoc2
+Hermione TurnTo IP_DracoPath_END
+
+//WaitFor HermioneReady
+Hermione Talk PC_Her_QuidFight_27
+//Well, at least no one on the Gryffindor team had to buy their way in.  They got in on pure talent.
+
+Cue DracoFlyDown
+
+Draco MatchRot IP_DracoSHORT_START
+Draco FollowSpline Draco2ndPathShort Start=IP_DracoSHORT_START Dest=IP_DracoSHORT_End Time=1 Accel=50 Align EaseTo *
+Draco Face HermioneLoc2
+
+//Waitfor DracoReady
+Draco Talk PC_Drc_QuidFight_28
+//No one asked your opinion, you filthy little Mudblood.
+
+Cue RonStepUp
+
+Ron RunTo RonLoc2
+Ron TurnTo IP_DracoSHORT_End
+
+//WaitFor RonReady
+Ron Talk PC_Ron_QuidFight_29
+//You’ll pay for that one, Malfoy!
+
+Draco Face RonLoc2
+//@@@@@@@@@@@@@@@@@@@ This seems to be the last line that is preformed in this thread
+//@@@@@@@@@@@@@@@@@@@ Don't know WTF is wrong, pissing me off.
+//@@@@@@@@@@@@@@@@@@@ Turns out if I give Draco a TURNTO command it stalls the rest of the
+//@@@@@@@@@@@@@@@@@@@ Cut Scene, SOOO lame!
+
+Draco Talk PC_Drc_QuidFight_30
+//Well, at least I could afford it, Weasley – unlike you.
+
+//Harry MatchRot IP_HarrySHORT_START
+//Harry FollowSpline Harry_Short Start=IP_HarrySHORT_START Dest=IP_HarrySHORT_End Time=1 Accel=50 Align EaseTo *
+
+Harry FlyOnPath Harry_Short Start=IP_HarrySHORT_START
+
+Harry Face Draco
+
+Harry Talk PC_Hry_QuidFight_31
+//Leave it, Ron.  He’s not worth the trouble.
+
+Cue CutEnd
+Trigger LevelLoad1
+
+
+//---------------------------------------------------------------------
+
+WaitFor Ever
+
+Harry Talk PC_Hry_QuidFight_31
+//Leave it, Ron.  He’s not worth the trouble.
+
+
+//---------------------------------------------------------------------
+
+
+

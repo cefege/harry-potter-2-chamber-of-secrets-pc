@@ -1,0 +1,10 @@
+[Thread]
+
+//Set Hermione up for leading you to spongify class.
+
+Capture Hermione
+
+Hermione teleport cutmark1
+Hermione Face Harry Follow
+
+release Hermione

@@ -1,0 +1,128 @@
+
+//Flying Ford End
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+Capture Harry
+
+//Sleep 0.2
+
+BaseCam Target FlyTo FlyingCar StayLocked *
+BaseCam FlyTo CHADS_STARTCAM *
+
+Trigger MusicForCarCrash
+Trigger CarIncomingSound
+
+BaseCam FadeIn 1.0
+
+Sleep 1.5
+BaseCam FlyTo CHADS_DriftCam EaseFrom Time=3 *
+
+
+Sleep 2.4
+//Cue MoveDamagedFord
+//Sleep 0.3
+
+//CameraShake Magnitude=200 Time=5
+BaseCam Shake Magnitude=200 Time=3 *
+Trigger CarCrashSound
+//Trigger CamShakeViaCar
+
+Sleep 0.5
+
+//BaseCam Target FlyTo HarryFallFocus Time=4
+//BaseCam FlyTo Chads_WatchHarryCam EaseTo Time=4
+
+Trigger MusicDie
+
+BaseCam FadeOut Time=1.5
+
+Sleep 3.0
+
+Cue CutEnd
+
+
+
+//Trigger ChangeToWhompingWillow
+
+Release BaseCam
+Release Harry
+ 
+Sleep 0.3
+
+Trigger WWStart
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[FlyingCar]
+
+Capture FlyingCar
+
+FlyingCar FlyTo StartCrashSpline
+
+FlyingCar SetIdle FlyingEratic *
+
+FlyingCar MatchRot StartCrashSpline
+FlyingCar FollowSpline WillowCrashSpline Start=StartCrashSpline Dest=EndCrashSpline Time=4 Accel=200 Align EaseFrom *
+
+
+WaitFor CutEnd
+
+Release FlyingFord
+
+
+//
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[DamagedFord]
+
+//Capture DamagedFord
+
+//WaitFor MoveDamagedFord
+
+//DamagedFord MatchRot DamSplineStart
+
+//DamagedFord FollowSpline MoveDamSpline Start=DamSplineStart Dest=DamSplineEnd Time=0.5 Accel=200 Align EaseFrom *
+
+
+//DamagedFord Face DamnCarFace
+
+
+//WaitFor CutEnd
+
+//Release DamagedFord
+
+
+
+
+
+//---------------------------------------------------------------------
+
+[Dialog]
+
+Capture Ron2
+Capture Harry2
+
+Sleep 0.5
+
+Ron2 Talk PC_Ron_FlyingCar_44
+//Stop! Stop! Stooop!
+
+//Harry2 Say PC_Hry_FlyingCar_45
+//Watch out for that tree!
+
+Release Ron2
+Release Harry2
+
+
+//---------------------------------------------------------------------

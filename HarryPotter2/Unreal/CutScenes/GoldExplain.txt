@@ -1,0 +1,71 @@
+//105000GoldExplain
+//GoldExplain
+
+[Dialog_01]
+
+Capture Harry
+Capture Nick
+Capture BaseCam
+
+Nick TurnTo Harry Follow
+
+Harry WalkTo HarryStart *HarryDone
+
+Nick Talk PC_Nhn_GoldExplain_01 *
+//Hello, Harry!
+
+sleep .5
+
+BaseCam FlyTo Nick z=25 x=50 y=15
+BaseCam Target FlyTo Nick z=25
+
+waitfor HarryDone
+Harry TurnTo Nick
+
+sleep .5
+
+BaseCam FlyTo CameraStart
+BaseCam Target FlyTo GoldDoorCameraTarget
+
+Harry Talk PC_Hry_GoldExplain_02
+//Oh, hello Nick!
+
+Nick Talk PC_Nhn_GoldExplain_03 startanim=talkrighthand *NickDone
+//Even after all these years, I still find new secrets in Hogwarts!
+
+BaseCam FlyTo CameraEnd Time=20 *
+
+sleep 2
+Nick FlyTo NickEnd *NickDone1
+sleep 1
+Harry WalkTo HarryEnd *HarryDone
+
+waitfor NickDone
+
+Nick say PC_Nhn_GoldExplain_04
+//Here's a special area that you can unlock only if you collect all 40 Silver Wizard cards.
+
+sleep 1
+
+Nick say PC_Nhn_GoldExplain_05
+//For every ten Silver Wizard cards you collect, you'll get a key that will allow you to open one of the 4 locks on the door.
+
+
+waitfor NickDone1
+BaseCam FlyTo GoldTwoShot
+Nick TurnTo Harry follow
+
+waitfor HarryDone
+harry TurnTo Nick follow
+
+
+Nick Talk PC_Nhn_GoldExplain_06 StartAnim=fidget1
+//See if you can find all 40 Silver Wizard cards hidden throughout Hogwarts and the Grounds.
+
+Nick FlyTo NickBye
+
+sleep 3
+
+Release Harry
+Release Nick
+Release BaseCam

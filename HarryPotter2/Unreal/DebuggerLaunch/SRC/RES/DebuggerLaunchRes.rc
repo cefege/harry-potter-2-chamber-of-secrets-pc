@@ -1,0 +1,237 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "DebuggerLaunchRes.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "DebuggerLaunchRes.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDICON_MAINFRAME2       ICON    DISCARDABLE     "..\\res\\Unreal.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDDIALOG_Splash DIALOGEX 0, 0, 191, 65
+STYLE DS_SETFOREGROUND | DS_CENTER | WS_POPUP
+EXSTYLE WS_EX_TOOLWINDOW
+FONT 8, "MS Sans Serif", 0, 0, 0x1
+BEGIN
+    CONTROL         "",IDC_Logo,"Static",SS_BITMAP,1,2,15,13
+END
+
+IDDIALOG_SET_VAR DIALOG DISCARDABLE  0, 0, 186, 63
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION
+CAPTION "Set variable value"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,129,7,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,129,24,50,14
+    EDITTEXT        IDC_NEWNAME,13,28,93,12,ES_AUTOHSCROLL
+    LTEXT           "Use with extreme caution.",IDC_STATIC,13,17,98,9
+END
+
+IDDIALOG_Options DIALOG DISCARDABLE  0, 0, 279, 174
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Debugger Options"
+FONT 8, "MS Sans Serif"
+BEGIN
+END
+
+IDD_WHATEVER DIALOG DISCARDABLE  0, 0, 282, 148
+STYLE DS_MODALFRAME | DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP | 
+    WS_CAPTION | WS_SYSMENU
+CAPTION "Object Variable Viewer"
+FONT 8, "MS Sans Serif"
+BEGIN
+    EDITTEXT        IDC_OBJNAME,83,13,117,12,ES_AUTOHSCROLL
+    CONTROL         "List1",IDC_VARLIST,"SysListView32",LVS_REPORT | 
+                    LVS_SHOWSELALWAYS | LVS_SHAREIMAGELISTS | WS_BORDER | 
+                    WS_TABSTOP,9,34,262,104
+    PUSHBUTTON      "Refresh",IDC_REFRESH,207,13,56,12
+    LTEXT           "Target Object Name:",IDC_STATIC,14,14,67,9
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+IDR_DebugMenu MENU DISCARDABLE 
+BEGIN
+    POPUP "File"
+    BEGIN
+        MENUITEM "New Breakpoint Set",          ID_FILE_NEW
+        MENUITEM SEPARATOR
+        MENUITEM "Load Breakpoint Set",         ID_FILE_LOAD
+        MENUITEM "Save Breakpoint Set",         ID_FILE_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "Exit",                        ID_FILE_EXIT
+    END
+    POPUP "Debug"
+    BEGIN
+        MENUITEM "Go",                          ID_DEBUG_GO
+        MENUITEM "Stop Debugging",              ID_DEBUG_STOPDEBUGGING
+        MENUITEM "Break Execution",             ID_DEBUG_BREAKEXECUTION
+        MENUITEM SEPARATOR
+        MENUITEM "Step Into",                   ID_DEBUG_STEPINTO
+        MENUITEM "Step Over",                   ID_DEBUG_STEPOVER
+        MENUITEM "Step Over Function Call",     ID_DEBUG_STEPOVERFUNCTIONCALL
+
+        MENUITEM "Step Out",                    ID_DEBUG_STEPOUT
+        MENUITEM "Run to cursor",               ID_DEBUG_RUNTOCURSOR
+    END
+    POPUP "Tools"
+    BEGIN
+        MENUITEM "Refresh Watch",               ID_TOOLS_REFRESHWATCH
+        MENUITEM "Refresh Class Tree",          ID_TOOLS_REFRESHCLASSTREE
+        MENUITEM "Reload EditPackages",         ID_TOOLS_RELOADEDITPACKAGES
+        MENUITEM SEPARATOR
+        MENUITEM "Show only actor classes",     ID_TOOLS_TOGGLESHOWOBJECTACTORCLASSES
+        , CHECKED
+        MENUITEM SEPARATOR
+        MENUITEM "Options",                     ID_TOOLS_OPTIONS
+        MENUITEM "Object Variable Viewer",      ID_TOOLS_OBJECTVIEW
+    END
+END
+
+IDR_DEBUGCONTEXT MENU DISCARDABLE 
+BEGIN
+    POPUP "DebugPopup"
+    BEGIN
+        MENUITEM "Insert Breakpoint",           ID_DEBUGPOPUP_INSERTBREAKPOINT
+
+        MENUITEM "Remove Breakpoint",           ID_DEBUGPOPUP_REMOVEBREAKPOINT
+
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Cursor
+//
+
+IDC_CURSOR1             CURSOR  DISCARDABLE     "..\\res\\cursor1.cur"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    IDDIALOG_SET_VAR, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 179
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 56
+    END
+
+    IDDIALOG_Options, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 272
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 167
+    END
+
+    IDD_WHATEVER, DIALOG
+    BEGIN
+        LEFTMARGIN, 3
+        RIGHTMARGIN, 276
+        TOPMARGIN, 4
+        BOTTOMMARGIN, 142
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_DEBUG_TOOLBAR       BITMAP  DISCARDABLE     "..\\res\\ID_DEBUG_TOOLBAR.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+IDR_ACCELERATOR1 ACCELERATORS DISCARDABLE 
+BEGIN
+    VK_F10,         ID_DEBUG_STEPOVERFUNCTIONCALL, VIRTKEY, NOINVERT
+    VK_F11,         ID_DEBUG_STEPINTO,      VIRTKEY, NOINVERT
+    VK_F11,         ID_DEBUG_STEPOUT,       VIRTKEY, SHIFT, NOINVERT
+    VK_F5,          ID_DEBUG_GO,            VIRTKEY, NOINVERT
+    VK_F5,          ID_DEBUG_STOPDEBUGGING, VIRTKEY, SHIFT, NOINVERT
+END
+
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

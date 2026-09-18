@@ -1,0 +1,68 @@
+//08020GoToHerb
+
+[Dialog_01]
+
+SetObjectiveId
+
+Capture Ron
+Capture Hermione
+Capture BaseCam
+Capture Harry
+
+Ron FlyTo cutmark21
+Hermione teleport cutmark20
+Hermione Face Ron
+Ron face Hermione
+
+Harry teleport cutmark23
+
+basecam flyto CutCameraPos5 *
+basecam target flyto Harry
+basecam fadein *
+Harry walkto cutmark22 *HarryDone1
+Basecam Target flyto Ron time=2 easebetween *
+
+sleep .5
+Hermione turnto harry follow*
+
+sleep 1
+Ron turnto harry follow *
+
+sleep .5
+Hermione Talk PC_Her_GoToHerb_01 *HermioneDone1
+//I won't be seeing you in Herbology class today. I'll be in Moaning Myrtle's Bathroom working on the Polyjuice Potion.
+
+waitfor HermioneDone1
+Hermione SetOnPatrolPointPath RonToDADAStart *
+
+Harry turnto ron follow *
+
+Ron Talk PC_Ron_GoToHerb_02 *RonDone1
+//I can't believe Hermione is cutting class!  Well, we better get outside to the Herbology, Harry. Come on!
+
+//##############Line changed for the one above, Much more in character favor. -Chad
+//Ron Talk PC_Ron_GoToHerb_02 *RonDone1
+//Herbology class…I almost forgot! We'd better get outside to the greenhouse, Harry. Come on!
+
+sleep 1
+BaseCam FlyTo Ron z=15 x=80 y=40
+BaseCam Target FlyTo Ron z=20
+
+waitfor RonDone1
+
+//put hermione back in people room
+Hermione GotoState stateIdle
+Hermione Teleport HermioneLoc
+
+basecam flyto CutCameraPos5
+Basecam Target flyto Ron
+Ron leadactor harry GoToHerbStart KidsFromGyrfDormEnd *
+
+SetObjectiveId PC_Hry_GoToHerb2_03
+
+sleep .2
+
+Release Ron
+Release Hermione
+Release BaseCam
+Release Harry

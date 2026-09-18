@@ -1,0 +1,134 @@
+//17190WrapUp
+
+[Harry]
+Capture Harry
+Harry teleport CutMark199
+Sleep .5
+Harry RunTo CutMark198
+
+cue DumbledoreTalk
+Harry TurnTo Dumbledore
+sleep 1
+Harry WalkTo CutMark194 *HarryDone1
+waitfor DumbleDoneTalking
+sleep 2
+Harry say PC_Hry_WrapUp_49 *
+//Professor Dumbledore! I thought you'd been suspended.
+
+waitfor HarryDone1
+Harry TurnTo DumbleDore Follow
+Cue HarryDoneRunning
+
+[Ron]
+Capture Ron
+Ron teleport CutMark200
+sleep 4
+Ron RunTo CutMark198
+Ron WalkTo CutMark195
+Ron TurnTo DumbleDore Follow
+
+[Hermione]
+Capture Hermione
+Hermione teleport CutMark201
+sleep 5
+Hermione RunTo CutMark198
+Hermione WalkTo CutMark196
+Hermione TurnTo DumbleDore Follow
+cue HermioneDoneRunning
+
+[Dumbledore]
+Capture Dumbledore
+Dumbledore teleport CutMark197
+Dumbledore Face Harry Follow
+waitfor DumbledoreTalk
+Dumbledore say PC_Dum_WrapUp_54 *
+//Hello, Harry.
+Cue DumbleDoneTalking
+
+
+[MainThread]
+Capture BaseCam
+
+SetObjectiveId
+
+sleep .2
+BaseCam Target FlyTo CutMark198
+BaseCam FlyTo CutCameraPos48
+BaseCam FadeIn
+sleep .5
+BaseCam Target FlyTo CutMark194 Time=5 *
+
+
+waitfor DumbledoreTalk
+sleep 1
+ReCapture Dumbledore
+sleep 1
+Dumbledore WalkTo CutMark182
+Dumbledore TurnTo Harry Follow
+
+waitfor HarryDoneRunning
+ReCapture Harry
+
+waitfor HermioneDoneRunning
+
+ReCapture Ron
+ReCapture Hermione
+
+Dumbledore Talk PC_Dum_WrapUp_52
+//Lucius Malfoy had threatened to curse the board if they didn't remove me. But they decided to stand up to him.
+
+Dumbledore Talk PC_Dum_WrapUp_53
+//Now that the Heir is gone and the Basilisk is destroyed, they know Hagrid is innocent, too. He'll be back in his hut soon.
+
+Ron Talk PC_Ron_WrapUp_58
+//What about Lucius Malfoy? Will he cause any more trouble?
+
+Dumbledore Talk PC_Dum_WrapUp_59
+//I doubt it. We can assume it was him who got the diary to Ginny. He daren't do it again unless he wants the Ministry of Magic after him.
+
+Harry Talk PC_Hry_WrapUp_55
+//About Professor Lockhart…I'm afraid he's lost his memory.
+
+Dumbledore Talk PC_Dum_WrapUp_56
+//Oh dear. What will he think about now that he can't think about himself?
+
+Harry Talk PC_Hry_WrapUp_60
+//Just don't give his job to Professor Snape. He's too…um, valuable as a Potions teacher.
+
+Dumbledore Talk PC_Dum_WrapUp_23
+//You've all performed brilliantly. It must have been a terrible experience.
+
+Ron Talk PC_Ron_WrapUp_50
+//It was. We spent much more time in a girl's toilet than I would have liked.
+
+Hermione Talk PC_Her_WrapUp_51
+//Being petrified was awful, but I learned a great deal while I was a cat. I'm going to write a paper about it for extra credit.
+
+Harry Talk PC_Hry_WrapUp_61
+//When you've got you're friends to help you, you can accomplish anything, and nothing is too awful
+
+Harry Talk PC_Hry_WrapUp_62
+//Well, almost nothing. Looking like Goyle came close.
+
+Dumbledore Talk PC_Dum_WrapUp_63
+//There's a banquet waiting for you downstairs. What do you propose for the first toast?
+
+Ron Talk PC_Ron_WrapUp_64
+//To friendship…
+
+Hermione Talk PC_Her_WrapUp_65
+//…Loyalty…
+
+Harry Talk PC_Hry_WrapUp_66
+//…and courage. But to friendship most of all!
+
+Basecam FadeOut
+//load Entrance Hall
+trigger triggerentrance
+
+Release BaseCam
+Release Harry
+Release Ron
+Release Hermione
+Release Dumbledore
+

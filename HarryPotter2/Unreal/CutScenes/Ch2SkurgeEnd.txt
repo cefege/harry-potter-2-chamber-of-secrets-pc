@@ -1,0 +1,184 @@
+
+//Multiple Ending Skurge Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Flitwick
+Capture challengescoremanager
+Capture basecam
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Flitwick
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeJustWonFirstTime Cue WonFirstTimeThread
+If ChallengeWorseThanBefore Cue WorseThread
+If ChallengeNewBestScore Cue NewBestThread
+If ChallengeJustMastered Cue JustMasteredThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[WonFirstTimeThread]
+
+WaitFor WonFirstTimeThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Flitwick say PC_Flt_Chal2Skurge_41 *
+//Well done, Mr Potter, you have completed my Skurge Challenge!  The remaining time now becomes your personal high score.
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+sleep 2
+challengescoremanager tallychallenge *TallyDone
+harry animate celebrate
+
+waitfor TallyDone
+trigger levelexit
+sleep 1
+
+release Flitwick
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[WorseThread]
+
+WaitFor WorseThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Flitwick Talk PC_Flt_Chal2Skurge_26 *
+//Dear me, Mr. Potter,  I'm afraid that you must do better before I can award you any more House Points.  I encourage you to come back and try again. If you can beat your personal high score, you will be awarded more House Points!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+sleep 2
+challengescoremanager tallychallenge *TallyDone
+harry animate talk_remember
+
+waitfor TallyDone
+trigger levelexit
+sleep 1
+
+release Flitwick
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[NewBestThread]
+
+WaitFor NewBestThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Flitwick Talk PC_Flt_Chal2Skurge_07 *
+//Very well done indeed, Mr. Potter. You have set a new personal high score!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+sleep 2
+challengescoremanager tallychallenge *TallyDone
+harry animate celebrate
+
+waitfor TallyDone
+trigger levelexit
+sleep 1
+
+release Flitwick
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[JustMasteredThread]
+
+WaitFor JustMasteredThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Flitwick Talk PC_Flt_Chal2Skurge_27 *
+//Congratulations, Harry Potter, you have mastered the Skurge Spell Challenge!  50 points to Gryffindor!  You are welcome to continue playing this challenge, but you will be awarded no more House Points.
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+sleep 2
+challengescoremanager tallychallenge *TallyDone
+harry animate celebrate
+
+waitfor TallyDone
+trigger levelexit
+sleep 1
+
+release Flitwick
+release basecam
+release challengescoremanager
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Flitwick
+recapture challengescoremanager
+recapture basecam
+
+Harry walkTo CutMark2 *HarryDone
+
+Flitwick Talk PC_Flt_Chal2Skurge_49 *
+//Well done, Mr. Potter!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+waitfor HarryDone
+sleep 2
+challengescoremanager tallychallenge *TallyDone
+harry animate celebrate
+
+waitfor TallyDone
+trigger levelexit
+sleep 1
+
+release Flitwick
+release basecam
+release challengescoremanager

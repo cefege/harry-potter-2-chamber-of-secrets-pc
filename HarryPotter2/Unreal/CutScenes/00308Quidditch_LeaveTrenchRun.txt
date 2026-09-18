@@ -1,0 +1,50 @@
+
+//00308Quidditch_LeaveTrenchRun
+
+//This is the cut scene that transports the players back onto the Quidditch
+//Pitch.
+
+//It Then asks the question, did Harry Win or Lose and plays the right thread depending.
+
+//******* Need to use this question after getting Draco & Harry back to the pitch
+//******* And then play the typical Harry Loss or play the Quidditch Cup Stuff.
+//Added CutQuestion "GryffindorWon?".  
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Sleep 5.0
+
+Trigger LoadGrounds
+//Loads you back out to the Grounds Hub
+
+
+
+
+
+
+//---------------------------------------------------------------------
+
+
+
+
+//---------------------------------------------------------------------
+
+[Harry]
+
+
+
+
+
+
+
+
+
+
+
+
+//---------------------------------------------------------------------

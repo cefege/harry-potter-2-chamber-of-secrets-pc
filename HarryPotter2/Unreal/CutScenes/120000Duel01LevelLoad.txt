@@ -1,0 +1,24 @@
+//120000Duel01LevelLoad.txt
+[thread]
+
+
+
+
+Capture Harry
+Capture Duellist
+Capture Basecam
+
+
+Basecam Target Flyto DuelTarget *
+Basecam Flyto DuelCam
+Basecam FOV angle=83 time=4 *
+Basecam fadein
+//******music trigger added at the behest of Mr. Co:
+trigger Music
+Harry Animate Bow *
+Duellist animate bow
+
+Release Harry
+Release Duellist
+Release Basecam
+Trigger DuelTrigger

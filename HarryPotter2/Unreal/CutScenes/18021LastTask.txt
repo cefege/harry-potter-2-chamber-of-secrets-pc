@@ -1,0 +1,103 @@
+//17200TransJ & 18021LastTask
+
+
+[Dialog_01]
+
+Capture Narrator
+Capture basecam
+Capture Harry
+Capture Ron
+Capture Hermione
+
+SetObjectiveId
+
+Ron FlyTo RonStart
+Hermione teleport HermioneStart
+Hermione Face Ron
+Ron face Hermione
+Harry teleport HarryStart
+
+basecam flyto CameraStart *
+basecam target flyto CameraTarget1
+BaseCam FlyTo CameraEnd Time=19 linear *
+basecam fadein *
+
+Narrator Talk PC_Nar_TransJ_00
+//The rest of the final term passed in a haze of blazing sunshine. Hogwarts was back to normal with only a few, small differences…
+
+basecam flyto CameraStart3 *
+basecam target flyto CameraTarget3
+BaseCam FlyTo CameraEnd3 Time=12 easeto *
+BaseCam Target FlyTo CameraTarget4 time=12 easeto *
+
+Narrator Talk PC_Nar_TransJ_01
+//Defence Against the Dark Arts classes were cancelled and Lucius Malfoy had been sacked as a school governor.
+
+BaseCam FlyTo CameraStart2
+BaseCam Target FlyTo CameraTarget2
+BaseCam FlyTo CameraEnd2 time=18 easeto *
+BaseCam Target FlyTo RonEnd time=10 easeto *
+
+Harry walkto HarryEnd *HarryDone
+sleep .2
+Hermione WalkTo HermioneEnd *HermioneDone
+Ron WalkTo RonEnd *RonDone
+
+Narrator Talk PC_Nar_TransJ_02
+//Draco was no longer strutting around the school as though he owned the place. On the contrary, he looked resentful and sulky.
+
+Narrator Talk PC_Nar_TransJ_03 *NarDone
+//On the other hand, Ginny Weasley was perfectly happy again.
+
+Waitfor HarryDone
+Harry Turnto Hermione Follow
+
+Waitfor HermioneDone
+Hermione turnto harry follow
+
+Waitfor RonDone
+Ron turnto harry follow
+
+waitfor NarDone
+sleep .5
+
+Hermione talk PC_Her_LastTask_00 //startanim=talk_bothhands
+//This is our last day at Hogwarts.
+
+Harry TurnTo Ron Follow *
+
+Ron Animate talk_remember *
+Ron say PC_Ron_LastTask_01
+//Yeah, the only thing left to do is the House Cup Ceremony in the Great Hall.
+
+sleep .5
+Ron SetOnPatrolPointPath GoToHCCStart *
+
+sleep .5
+
+Hermione Talk PC_Her_LastTask_02 *HermDone
+//If you have anything you want to do at Hogwarts you better do it before you go to the House Cup Ceremony.
+Hermione animate talk_rhand 
+
+Harry TurnTo Hermione Follow *
+sleep 1
+Hermione Animate pointright *
+
+Basecam flyto Hermione x=100 z=25 y=-25
+Basecam target Flyto Hermione z=20
+
+
+waitfor HermDone
+sleep .5
+Hermione SetOnPatrolPointPath GoToHCCStart *
+
+Release Ron
+Release Hermione
+
+SetObjectiveId PC_Hry_LastChance_08
+
+sleep .2
+
+release harry
+release basecam
+Release Narrator

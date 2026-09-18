@@ -1,0 +1,43 @@
+//---------------------------------------------------------------------
+
+//QudditchCamLesson2
+
+//This cut scene is called after Harry Catches the Snitch in the lessons, and 
+//Then sets up the camera to do it's thing while the Director tells Harry where to go
+
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target AttachedTo=Harry z=25
+BaseCam Locked YawStep=-30 Distance=100
+
+//---------------------------------------------------------------------
+
+
+
+
+//---------------------------------------------------------------------
+[Main]
+
+Capture Director
+Director SetEventCue End=SlythInterNow
+
+WaitFor SlythInterNow
+Release Director
+ReCapture BaseCam
+Release BaseCam
+
+Trigger END_SlythInterupt
+
+
+
+
+

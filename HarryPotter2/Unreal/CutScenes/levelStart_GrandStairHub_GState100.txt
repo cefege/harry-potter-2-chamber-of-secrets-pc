@@ -1,0 +1,35 @@
+
+//levelStart_GrandStairHub_GState100
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+//Temporarily get rid of HermioneCauldron. This will go at the end of a cutscene right before GState130 eventually. -Eric
+Capture HermioneCauldron
+HermioneCauldron Teleport HermioneCauldronLoc
+Release HermioneCauldron
+//done
+
+Capture FawkesPerch
+Capture Perch
+Capture NickPetrified
+Capture Hermione
+Capture SortingHat
+
+NickPetrified Teleport cutmark48
+//NickPetrified Face cutmark49
+//NickPetrified setidle mouth_pos_5
+SortingHat teleport CutMark98
+Perch FlyTo CutMark101
+
+sleep 1
+FawkesPerch FlyTo CutMark80
+Hermione Teleport CutMark118
+
+Release Hermione
+Release SortingHat
+Release FawkesPerch
+Release Perch
+Release Nick
+

@@ -1,0 +1,3130 @@
+/*=============================================================================
+	XOpenGL.cpp: Unreal XOpenGL implementation for OpenGL 3.3+ and GL ES 3.0+
+
+	Copyright 2014-2021 Oldunreal
+
+	Revision history:
+	* Created by Smirftsch
+	* lots of experience and ideas from UTGLR OpenGL by Chris Dohnal
+	* improved texture handling code by Sebastian Kaufel
+	* information, ideas, additions by Sebastian Kaufel
+	* UED selection code by Sebastian Kaufel
+	* TOpenGLMap tempate based on TMap template using a far superior hash function by Sebastian Kaufel
+	* Added persistent buffers. However, these seem to be only fast at a given draw buffer size (currently only DrawGouraud).
+	* Bumpmap and Heightmap support
+	* Passing DrawFlags and TextureFormat to shader
+	Todo:
+	* fixes, cleanups, (AZDO) optimizations, etc, etc, etc.
+=============================================================================*/
+
+// Include GLM
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+
+#include "XOpenGLDrv.h"
+#include "XOpenGL.h"
+
+#ifndef _WIN32
+#include <sys/time.h>
+#else
+# if !OLDUNREAL_WINXP
+#  include <d3d11.h>
+#  include <dxgi.h>
+#  include <dxgi1_5.h>
+#  ifndef DXGI_SWAP_EFFECT_FLIP_DISCARD
+#   define DXGI_SWAP_EFFECT_FLIP_DISCARD ((DXGI_SWAP_EFFECT)4)
+#  endif
+# endif
+#define XOPENGL_DXGI_FORMAT DXGI_FORMAT_R8G8B8A8_UNORM
+#endif
+
+#if !defined(_WIN32)
+namespace
+{
+	template <typename TAttribute>
+	inline bool XOpenGLSetGLAttribute(TAttribute Attribute, int Value)
+	{
+		return SDL_GL_SetAttribute(Attribute, Value) == 0;
+	}
+
+	inline bool XOpenGLSetSwapInterval(int Interval)
+	{
+		return SDL_GL_SetSwapInterval(Interval) == 0;
+	}
+
+	inline bool XOpenGLMakeCurrent(SDL_Window* Window, SDL_GLContext Context)
+	{
+		return SDL_GL_MakeCurrent(Window, Context) == 0;
+	}
+
+	inline SDL_Window* XOpenGLCreateHiddenGLWindow(const char* Title, int Width, int Height)
+	{
+		return SDL_CreateWindow(
+			Title,
+			SDL_WINDOWPOS_UNDEFINED,
+			SDL_WINDOWPOS_UNDEFINED,
+			Width,
+			Height,
+			SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
+	}
+
+	inline void XOpenGLDestroyContext(SDL_GLContext Context)
+	{
+		SDL_GL_DeleteContext(Context);
+	}
+}
+#endif
+
+/*-----------------------------------------------------------------------------
+	UXOpenGLDrv.
+-----------------------------------------------------------------------------*/
+
+IMPLEMENT_CLASS(UXOpenGLRenderDevice);
+
+#if !UNREAL_OLDUNREAL && !UNREAL_TOURNAMENT_OLDUNREAL
+# ifdef _WIN32
+#  pragma comment(lib,"Winmm")
+void TimerBegin()
+{
+	// This will increase the precision of the kernel interrupt
+	// timer. Although this will slightly increase resource usage
+	// this will also increase the precision of sleep calls and
+	// this will in turn increase the stability of the framerate
+	timeBeginPeriod(1);
+}
+void TimerEnd()
+{
+	// Restore the kernel timer config
+	timeEndPeriod(1);
+}
+# endif
+#endif
+
+void UXOpenGLRenderDevice::StaticConstructor()
+{
+	guard(UXOpenGLRenderDevice::StaticConstructor);
+	UEnum* VSyncs = new(GetClass(), TEXT("VSyncs"))UEnum(NULL);
+
+	// Enum members.
+	new(VSyncs->Names)FName(TEXT("Off"));
+	new(VSyncs->Names)FName(TEXT("On"));
+	new(VSyncs->Names)FName(TEXT("Adaptive"));
+
+	UEnum* OpenGLVersions = new(GetClass(), TEXT("OpenGLVersions"))UEnum(NULL);
+	new(OpenGLVersions->Names)FName(TEXT("Core"));
+	new(OpenGLVersions->Names)FName(TEXT("ES"));
+
+	UEnum* ParallaxVersions = new(GetClass(), TEXT("Parallax"))UEnum(NULL);
+	new(ParallaxVersions->Names)FName(TEXT("Disabled"));
+	new(ParallaxVersions->Names)FName(TEXT("Basic"));
+	new(ParallaxVersions->Names)FName(TEXT("Occlusion"));
+	new(ParallaxVersions->Names)FName(TEXT("Relief"));
+
+	new(GetClass(), TEXT("OpenGLVersion"), RF_Public)UByteProperty(CPP_PROPERTY(OpenGLVersion), TEXT("Options"), CPF_Config, OpenGLVersions);
+	new(GetClass(), TEXT("UseVSync"), RF_Public)UByteProperty(CPP_PROPERTY(UseVSync), TEXT("Options"), CPF_Config, VSyncs);
+	new(GetClass(), TEXT("RefreshRate"), RF_Public)UIntProperty(CPP_PROPERTY(RefreshRate), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NumAASamples"), RF_Public)UIntProperty(CPP_PROPERTY(NumAASamples), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("DetailMax"), RF_Public)UIntProperty(CPP_PROPERTY(DetailMax), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("GammaOffsetScreenshots"), RF_Public)UFloatProperty(CPP_PROPERTY(GammaOffsetScreenshots), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("LODBias"), RF_Public)UFloatProperty(CPP_PROPERTY(LODBias), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("RenderScale"), RF_Public)UFloatProperty(CPP_PROPERTY(RenderScale), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("MaxAnisotropy"), RF_Public)UFloatProperty(CPP_PROPERTY(MaxAnisotropy), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("GammaMultiplier"), RF_Public)UFloatProperty(CPP_PROPERTY(GammaMultiplier), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("GammaMultiplierUED"), RF_Public)UFloatProperty(CPP_PROPERTY(GammaMultiplierUED), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NoFiltering"), RF_Public)UBoolProperty(CPP_PROPERTY(NoFiltering), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("ShareLists"), RF_Public)UBoolProperty(CPP_PROPERTY(ShareLists), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("AlwaysMipmap"), RF_Public)UBoolProperty(CPP_PROPERTY(AlwaysMipmap), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UsePrecache"), RF_Public)UBoolProperty(CPP_PROPERTY(UsePrecache), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseTrilinear"), RF_Public)UBoolProperty(CPP_PROPERTY(UseTrilinear), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseAA"), RF_Public)UBoolProperty(CPP_PROPERTY(UseAA), TEXT("Options"), CPF_Config);
+	//new(GetClass(), TEXT("UseAASmoothing"), RF_Public)UBoolProperty(CPP_PROPERTY(UseAASmoothing), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("GammaCorrectScreenshots"), RF_Public)UBoolProperty(CPP_PROPERTY(GammaCorrectScreenshots), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("MacroTextures"), RF_Public)UBoolProperty(CPP_PROPERTY(MacroTextures), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("BumpMaps"), RF_Public)UBoolProperty(CPP_PROPERTY(BumpMaps), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("ParallaxVersion"), RF_Public)UByteProperty(CPP_PROPERTY(ParallaxVersion), TEXT("Options"), CPF_Config, ParallaxVersions);
+	new(GetClass(), TEXT("NoAATiles"), RF_Public)UBoolProperty(CPP_PROPERTY(NoAATiles), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("GenerateMipMaps"), RF_Public)UBoolProperty(CPP_PROPERTY(GenerateMipMaps), TEXT("Options"), CPF_Config);
+
+	new(GetClass(), TEXT("OneXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(OneXBlending), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("ActorXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(ActorXBlending), TEXT("Options"), CPF_Config);
+
+	// Experimental stuff (still being worked on).
+	new(GetClass(), TEXT("UseSRGBTextures"), RF_Public)UBoolProperty(CPP_PROPERTY(UseSRGBTextures), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("SimulateMultiPass"), RF_Public)UBoolProperty(CPP_PROPERTY(SimulateMultiPass), TEXT("Options"), CPF_Config);
+
+#if UNREAL_OLDUNREAL
+	new(GetClass(), TEXT("UseHWLighting"), RF_Public)UBoolProperty(CPP_PROPERTY(UseHWLighting), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseHWClipping"), RF_Public)UBoolProperty(CPP_PROPERTY(UseHWClipping), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseEnhancedLightmaps"), RF_Public)UBoolProperty(CPP_PROPERTY(UseEnhancedLightmaps), TEXT("Options"), CPF_Config);
+	//new(GetClass(),TEXT("UseMeshBuffering"),		RF_Public)UBoolProperty	( CPP_PROPERTY(UseMeshBuffering			), TEXT("Options"), CPF_Config);
+#endif
+
+#if UNREAL_OLDUNREAL || UNREAL_TOURNAMENT_OLDUNREAL
+	// OpenGL 4
+	new(GetClass(), TEXT("UsePersistentBuffers"), RF_Public)UBoolProperty(CPP_PROPERTY(UsePersistentBuffers), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseBindlessTextures"), RF_Public)UBoolProperty(CPP_PROPERTY(UseBindlessTextures), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseShaderDrawParameters"), RF_Public)UBoolProperty(CPP_PROPERTY(UseShaderDrawParameters), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseShaderCache"), RF_Public)UBoolProperty(CPP_PROPERTY(UseShaderCache), TEXT("Options"), CPF_Config);
+#if _WIN32
+	new(GetClass(), TEXT("ReduceMouseLag"), RF_Public)UBoolProperty(CPP_PROPERTY(ReduceMouseLag), TEXT("Options"), CPF_Config);
+#endif
+
+	// Debug Options
+	new(GetClass(), TEXT("DebugLevel"), RF_Public)UIntProperty(CPP_PROPERTY(DebugLevel), TEXT("DebugOptions"), CPF_Config);
+	new(GetClass(), TEXT("UseOpenGLDebug"), RF_Public)UBoolProperty(CPP_PROPERTY(UseOpenGLDebug), TEXT("DebugOptions"), CPF_Config);	
+	new(GetClass(), TEXT("NoDrawComplexSurface"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawComplexSurface), TEXT("DebugOptions"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawGouraud"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawGouraud), TEXT("DebugOptions"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawGouraudList"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawGouraudList), TEXT("DebugOptions"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawTile"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawTile), TEXT("DebugOptions"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawSimple"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawSimple), TEXT("DebugOptions"), CPF_Config);
+#else
+	new(GetClass(), TEXT("DebugLevel"), RF_Public)UIntProperty(CPP_PROPERTY(DebugLevel), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseOpenGLDebug"), RF_Public)UBoolProperty(CPP_PROPERTY(UseOpenGLDebug), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawComplexSurface"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawComplexSurface), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawGouraud"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawGouraud), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawTile"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawTile), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NoDrawSimple"), RF_Public)UBoolProperty(CPP_PROPERTY(NoDrawSimple), TEXT("Options"), CPF_Config);
+#endif
+	new(GetClass(), TEXT("UseBufferInvalidation"), RF_Public)UBoolProperty(CPP_PROPERTY(UseBufferInvalidation), TEXT("Options"), CPF_Config);
+
+#if UNREAL_TOURNAMENT_OLDUNREAL && !defined(__LINUX_ARM__)
+	new(GetClass(), TEXT("UseLightmapAtlas"), RF_Public)UBoolProperty(CPP_PROPERTY(UseLightmapAtlas), TEXT("Options"), CPF_Config);
+	FindField<UBoolProperty>(GetClass(), TEXT("UseLightmapAtlas"))->PropertyFlags |= CPF_EditConst; // Do not allow modification in runtime
+#endif
+	//new(GetClass(),TEXT("EnableShadows"),			RF_Public)UBoolProperty ( CPP_PROPERTY(EnableShadows			), TEXT("Options"), CPF_Config);
+
+	// Defaults.
+	RefreshRate = 0;
+	NumAASamples = 4;
+	GammaOffsetScreenshots = 0.7f;
+	LODBias = 0.f;
+	RenderScale = 1.f;
+	MaxAnisotropy = 4.f;
+	UseHWClipping = 1;
+	UsePrecache = 1;
+	ShareLists = 1;
+#if MACOSX
+	UseAA = 0; // stijn: MSAA used to make the game unplayable on macOS so I turned this off by default. However, we now use multisampled FBOs for MSAA. That should make it playable, but it's still noticeably slower than on other platforms
+#else
+	UseAA = 1;
+#endif
+	UseAASmoothing = 0;
+	GammaCorrectScreenshots = 1;
+	MacroTextures = 1;
+	BumpMaps = 1;
+	GammaMultiplier = 1.75f;
+	GammaMultiplierUED  = 1.75f;
+	ParallaxVersion = Parallax_Disabled;
+	UseTrilinear = 1;
+	NoAATiles = 1;
+	UseMeshBuffering = 0;
+	UseBindlessTextures = 0;
+	UsePersistentBuffers = 0;
+	UseShaderDrawParameters = 0;
+	UseBufferInvalidation = 0;
+	UseShaderCache = 0;
+#if _WIN32
+	ReduceMouseLag = 0;
+#endif
+#if UNREAL_OLDUNREAL || UNREAL_TOURNAMENT_OLDUNREAL
+	//UseShaderDrawParameters = 1; // setting this to true slightly improves performance on nvidia cards // stijn: disabled by default because many AMD drivers choke on it
+#endif
+#if UNREAL_OLDUNREAL
+	UseHWLighting = 0;
+#endif
+	AlwaysMipmap = 0;
+	NoFiltering = 0;
+	UseSRGBTextures = 0;
+	EnvironmentMaps = 0;
+	GenerateMipMaps = 0;
+	//EnableShadows = 0;
+
+	OneXBlending = 1;
+	ActorXBlending = 1;
+	MaxTextureSize = 4096;
+
+	OpenGLVersion = GL_Core;
+	UseEnhancedLightmaps = 0;
+
+#if MACOSX || UNREAL_TOURNAMENT_OLDUNREAL
+	UseVSync = VS_Off;
+#else
+	UseVSync = VS_Adaptive;
+#endif
+	
+	DetailMax = 2;
+
+	UseOpenGLDebug = 0;
+	DebugLevel = 2;
+	NoDrawComplexSurface = 0;
+	NoDrawGouraud = 0;
+	NoDrawGouraudList = 0;
+	NoDrawTile = 0;
+	NoDrawSimple = 0;
+
+	DetailTextures = 1;
+	DescFlags |= RDDESCF_Certified;
+	HighDetailActors = 1;
+	Coronas = 1;
+	ShinySurfaces = 1;
+	VolumetricLighting = 1;
+
+#if UNREAL_TOURNAMENT_OLDUNREAL && !defined(__LINUX_ARM__)
+	UseLightmapAtlas = 1;
+	
+	// stijn: Partial updates of the lightmap atlas absolutely kill performance
+	// on mac We went from 16fps to 90fps on our fps1 benchmark map when we
+	// disabled this feature
+	
+    // SupportsUpdateTextureRect = 1;
+#endif
+
+	unguard;
+}
+
+#if _WIN32
+HWND UXOpenGLRenderDevice::CreateTemporaryWindow(HDC& OutDC) 
+{
+	// Create a temporary context so we can load the wgl functions
+	PIXELFORMATDESCRIPTOR temppfd{};
+	temppfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+	temppfd.nVersion = 1;
+	temppfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER;
+	temppfd.iPixelType = PFD_TYPE_RGBA;
+	temppfd.cColorBits = DesiredColorBits;
+	temppfd.cDepthBits = DesiredDepthBits;
+	//temppfd.cStencilBits = DesiredStencilBits;
+	temppfd.cAlphaBits = 0;
+	temppfd.iLayerType = PFD_MAIN_PLANE;
+
+	HWND TemphWnd = CreateWindowExW(0, 
+									TEXT("STATIC"), 
+									TEXT("OpenGLQueryWindow"), 
+									WS_OVERLAPPEDWINDOW, 
+									CW_USEDEFAULT, 
+									CW_USEDEFAULT, 
+									CW_USEDEFAULT, 
+									CW_USEDEFAULT,
+									NULL, 
+									NULL, 
+									GetModuleHandle(NULL), 
+									NULL);
+		
+	HDC TemphDC = GetDC(TemphWnd);
+	INT nPixelFormat = ChoosePixelFormat(TemphDC, &temppfd);
+	if (!nPixelFormat)
+	{
+		pfd.cDepthBits = 24;
+		nPixelFormat = ChoosePixelFormat(TemphDC, &pfd);
+	}
+	if (!nPixelFormat)
+	{
+		pfd.cDepthBits = 16;
+		nPixelFormat = ChoosePixelFormat(TemphDC, &pfd);
+	}
+	check(nPixelFormat);
+	verify(SetPixelFormat(TemphDC, nPixelFormat, &temppfd));
+
+	OutDC = TemphDC;
+	return TemphWnd;
+}
+void UXOpenGLRenderDevice::DestroyTemporaryWindow(HWND TemphWnd, HDC TemphDC) const
+{
+	ReleaseDC(TemphWnd, TemphDC);
+	DestroyWindow(TemphWnd);
+}
+#else
+SDL_Window* UXOpenGLRenderDevice::CreateTemporaryWindow() const
+{
+	return XOpenGLCreateHiddenGLWindow("OpenGLQueryWindow", 2, 2);
+}
+void UXOpenGLRenderDevice::DestroyTemporaryWindow(SDL_Window* Window) const
+{
+	SDL_DestroyWindow(Window);
+}
+#endif
+
+UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
+{
+	guard(UXOpenGLRenderDevice::Init);
+	//it is really a bad habit of the UEngine1 games to call init again each time a fullscreen change is needed.
+
+	Viewport = InViewport;
+	glContext = NULL;
+	iPixelFormat = 0;
+
+	// HP2's macOS renderer is deliberately limited to Apple's OpenGL 4.1 core surface.
+	OpenGLVersion = GL_Core;
+	UseBindlessTextures = 0;
+	UsePersistentBuffers = 0;
+	UseShaderDrawParameters = 0;
+	UseBufferInvalidation = 0;
+	UseOpenGLDebug = 0;
+	DetailMax = Clamp(DetailMax,0,3);
+	if (appIsNan(RenderScale))
+		RenderScale = 1.f;
+	else
+		RenderScale = Clamp(RenderScale, 0.5f, 1.f);
+
+	LastZMode = 255;
+	NumClipPlanes = 0;
+
+#if _WIN32 && !UNREAL_OLDUNREAL && !UNREAL_TOURNAMENT_OLDUNREAL
+	TimerBegin();
+#endif
+
+	// Driver flags.
+	FullscreenOnly = 0;
+	SpanBased = 0;
+	SupportsTC = 1;
+	SupportsFogMaps = 1;
+	SupportsDistanceFog = 1;
+	SupportsLazyTextures = 0;
+	PrefersDeferredLoad = 0;
+	DecompFormat = TEXF_RGBA8;
+
+	// Extensions & other inits.
+	ActiveProgram = No_Prog;
+	SupportsAMDMemoryInfo = false;
+	SupportsNVIDIAMemoryInfo = false;
+	IsAMD = false;
+	SupportsSwapControl = false;
+	SupportsSwapControlTear = false;
+	SupportsClipDistance = true;
+	SupportsS3TC = true; //assume nowadays every hardware setup supports this, but its checked later anyway.
+
+	if (ParallaxVersion != Parallax_Disabled) // Not sure if Parallax makes much sense at all without BumpMaps, but for now we need it enabled to have the necessary informations from the vertex shader.
+        BumpMaps = 1;
+
+#if XOPENGL_TEXTUREHANDLE_SUPPORT
+	BindlessList = NULL;
+#endif
+
+	// Verbose Logging
+	debugf(NAME_DevLoad, TEXT("XOpenGL: Current settings"));
+
+#if UNREAL_OLDUNREAL
+	debugf(NAME_DevLoad, TEXT("UseHWLighting %i"), UseHWLighting);
+#endif
+
+#if UNREAL_OLDUNREAL || UNREAL_TOURNAMENT_OLDUNREAL
+	debugf(NAME_DevLoad, TEXT("UseBindlessTextures %i"), UseBindlessTextures);
+	debugf(NAME_DevLoad, TEXT("UseShaderDrawParameters %i"), UseShaderDrawParameters);
+	debugf(NAME_DevLoad, TEXT("UseHWClipping %i"), UseHWClipping);
+#endif
+	debugf(NAME_DevLoad, TEXT("UseTrilinear %i"), UseTrilinear);
+	debugf(NAME_DevLoad, TEXT("UsePrecache %i"), UsePrecache);
+	debugf(NAME_DevLoad, TEXT("UseAA %i"), UseAA);
+	//debugf(NAME_DevLoad, TEXT("UseAASmoothing %i"), UseAASmoothing);
+	debugf(NAME_DevLoad, TEXT("NumAASamples %i"), NumAASamples);
+
+	debugf(NAME_DevLoad, TEXT("RefreshRate %i"), RefreshRate);
+	debugf(NAME_DevLoad, TEXT("GammaOffsetScreenshots %f"), GammaOffsetScreenshots);
+	debugf(NAME_DevLoad, TEXT("LODBias %f"), LODBias);
+	debugf(NAME_DevLoad, TEXT("MaxAnisotropy %f"), MaxAnisotropy);
+	debugf(NAME_DevLoad, TEXT("RenderScale %f"), RenderScale);
+	debugf(NAME_DevLoad, TEXT("ShareLists %i"), ShareLists);
+	debugf(NAME_DevLoad, TEXT("AlwaysMipmap %i"), AlwaysMipmap);
+	debugf(NAME_DevLoad, TEXT("NoFiltering %i"), NoFiltering);
+	debugf(NAME_DevLoad, TEXT("UseSRGBTextures %i"),UseSRGBTextures);
+	debugf(NAME_DevLoad, TEXT("SimulateMultiPass %i"),SimulateMultiPass);
+	debugf(NAME_DevLoad, TEXT("GammaMultiplier %f"),GammaMultiplier);
+    debugf(NAME_DevLoad, TEXT("GammaMultiplierUED %f"),GammaMultiplierUED);
+
+	debugf(NAME_DevLoad, TEXT("GammaCorrectScreenshots %i"), GammaCorrectScreenshots);
+	debugf(NAME_DevLoad, TEXT("MacroTextures %i"), MacroTextures);
+	debugf(NAME_DevLoad, TEXT("BumpMaps %i"), BumpMaps);
+	debugf(NAME_DevLoad, TEXT("ParallaxVersion %i (%ls)"),ParallaxVersion, ParallaxVersion == Parallax_Basic ? TEXT("Basic") : ParallaxVersion == Parallax_Occlusion ? TEXT("Occlusion") : ParallaxVersion == Parallax_Relief ? TEXT("Relief") : TEXT("Disabled"));
+	debugf(NAME_DevLoad, TEXT("EnvironmentMaps %i"), EnvironmentMaps);
+	debugf(NAME_DevLoad, TEXT("NoAATiles %i"), NoAATiles);
+	debugf(NAME_DevLoad, TEXT("GenerateMipMaps %i"), GenerateMipMaps);
+	//debugf(NAME_DevLoad, TEXT("UseLightmapAtlas %i"), UseLightmapAtlas);
+
+	//debugf(NAME_DevLoad, TEXT("EnableShadows %i"), EnableShadows);
+
+	debugf(NAME_DevLoad, TEXT("DetailTextures %i"), DetailTextures);
+	debugf(NAME_DevLoad, TEXT("DescFlags %i"), DescFlags);
+	debugf(NAME_DevLoad, TEXT("HighDetailActors %i"), HighDetailActors);
+	debugf(NAME_DevLoad, TEXT("Coronas %i"), Coronas);
+	debugf(NAME_DevLoad, TEXT("ShinySurfaces %i"), ShinySurfaces);
+	debugf(NAME_DevLoad, TEXT("VolumetricLighting %i"), VolumetricLighting);
+
+	if (OpenGLVersion == GL_Core)
+		debugf(NAME_DevLoad, TEXT("OpenGL version: GL_Core"));
+	else debugf(NAME_DevLoad, TEXT("OpenGL version: GL_ES"));
+
+	if (UseVSync == VS_Adaptive)
+		debugf(NAME_DevLoad, TEXT("UseVSync: VS_Adaptive"));
+	else if (UseVSync == VS_On)
+		debugf(NAME_DevLoad, TEXT("UseVSync: VS_On"));
+	else if (UseVSync == VS_Off)
+		debugf(NAME_DevLoad, TEXT("UseVSync: VS_Off"));
+
+	debugf(NAME_DevLoad, TEXT("XOpenGL: Debug settings:"));
+	debugf(NAME_DevLoad, TEXT("UseOpenGLDebug %i"), UseOpenGLDebug);
+	debugf(NAME_DevLoad, TEXT("DebugLevel %i"), DebugLevel);
+	debugf(NAME_DevLoad, TEXT("NoDrawComplexSurface %i"), NoDrawComplexSurface);
+	debugf(NAME_DevLoad, TEXT("NoDrawGouraud %i"), NoDrawGouraud);
+	debugf(NAME_DevLoad, TEXT("NoDrawGouraudList %i"), NoDrawGouraudList);
+	debugf(NAME_DevLoad, TEXT("NoDrawTile %i"), NoDrawTile);
+	debugf(NAME_DevLoad, TEXT("NoDrawSimple %i"), NoDrawSimple);
+
+	UseHWClipping = 0;
+	UseMeshBuffering = 0;
+
+	EnvironmentMaps = 0; //not yet implemented.
+
+#if _WIN32
+	// SharedBindMap assumes GL texture IDs are valid across every viewport's context --
+	// true here because CreateOpenGLContext() actually calls wglShareLists() below.
+	if (ShareLists && !SharedBindMap)
+		SharedBindMap = new TOpenGLMap<QWORD, UXOpenGLRenderDevice::FCachedTexture>;
+
+	BindMap = ShareLists ? SharedBindMap : &LocalBindMap;
+#else
+	// stijn: context sharing is not implemented for non-Windows targets right
+	// now, so we need to make sure we don't use another viewport's texture
+	// handles accidentally.
+	BindMap = &LocalBindMap;
+#endif
+
+	// Initialize process-wide GL state
+#if _WIN32
+	// Get list of device modes.
+	for (INT i = 0;; i++)
+	{
+		DEVMODEW Tmp;
+		appMemzero(&Tmp, sizeof(Tmp));
+		Tmp.dmSize = sizeof(Tmp);
+		if (!EnumDisplaySettingsW(NULL, i, &Tmp))
+			break;
+		SupportedDisplayModes.AddUniqueItem(FPlane(Tmp.dmPelsWidth, Tmp.dmPelsHeight, Tmp.dmBitsPerPel, Tmp.dmDisplayFrequency));
+	}
+
+	if (NumDevices == 0)
+	{
+		HDC TemphDC;
+		HWND TemphWnd = CreateTemporaryWindow(TemphDC);
+		HGLRC tempContext = wglCreateContext(TemphDC);
+		wglMakeCurrent(TemphDC, tempContext);
+
+		wglChoosePixelFormatARB = reinterpret_cast<PFNWGLCHOOSEPIXELFORMATARBPROC>(wglGetProcAddress("wglChoosePixelFormatARB"));
+		if (wglChoosePixelFormatARB == nullptr)
+		{
+			appErrorf(TEXT("wglGetProcAddress() for wglChoosePixelFormatARB failed."));
+			return 0;
+		}
+
+		wglCreateContextAttribsARB = reinterpret_cast<PFNWGLCREATECONTEXTATTRIBSARBPROC>(wglGetProcAddress("wglCreateContextAttribsARB"));
+		if (wglCreateContextAttribsARB == nullptr)
+		{
+			appErrorf(TEXT("wglGetProcAddress() for wglCreateContextAttribsARB failed."));
+			return 0;
+		}
+
+		wglGetExtensionsStringARB = reinterpret_cast<PFNWGLGETEXTENSIONSSTRINGARBPROC>(wglGetProcAddress("wglGetExtensionsStringARB"));
+		if (wglGetExtensionsStringARB == nullptr)
+		{
+			appErrorf(TEXT("wglGetProcAddress() for wglGetExtensionsStringARB failed."));
+			return 0;
+		}
+
+		wglMakeCurrent(NULL, NULL);
+		wglDeleteContext(tempContext);
+		DestroyTemporaryWindow(TemphWnd, TemphDC);
+	}
+#endif
+
+	// Figure out which OpenGL version we should use based on our settings.
+	SelectGLVersion();
+
+	if (GIsEditor)
+		ShareLists = 1;
+
+	// Set resolution, also creates context and checks extensions.
+	if (!SetRes(NewX, NewY, NewColorBytes, Fullscreen))
+	{
+		GWarn->Logf(TEXT("XOpenGL: SetRes failed!"));
+		return 0;
+	}
+
+#if UNREAL_OLDUNREAL || UNREAL_TOURNAMENT_OLDUNREAL
+    // Doing after extensions have been checked.
+	UsingPersistentBuffers = UsePersistentBuffers ? true : false;
+	UsingShaderDrawParameters = UseShaderDrawParameters ? true : false;
+
+	if (OpenGLVersion == GL_ES)
+    {
+		if (SimulateMultiPass)
+            GWarn->Logf(TEXT("OpenGL ES does not support SimulateMultiPass at this time, disabling SimulateMultiPass"));
+        SimulateMultiPass = false;
+		SupportsGLSLInt64 = SupportsSSBO = false;
+    }
+
+	// Bindless Textures
+	UsingBindlessTextures = UseBindlessTextures ? true : false;
+#else
+	UsingBindlessTextures = false;
+	UsingPersistentBuffers = false;
+	UsingShaderDrawParameters = false;
+#endif
+
+	if (OpenGLVersion == GL_Core
+#if MACOSX
+		&& 0
+#endif
+		)
+	{
+		// macOS performance tanks when we use these
+		UsingGeometryShaders = true;
+	}
+
+	LogLevel = DebugLevel;
+
+	// For matrix setup in SetSceneNode()
+	bIsOrtho = false;
+	StoredEffectiveFovAngle = 0;
+	StoredFX = 0;
+	StoredFY = 0;
+	StoredOrthoFovAngle = 0;
+	StoredOrthoFX = 0;
+	StoredOrthoFY = 0;
+
+	// Init shaders
+	InitShaders();
+
+	const auto FrameState = FrameStateBuffer.GetElementPtr(0);
+	check(FrameState);
+
+	// Set view matrix.
+	FrameState->viewMat = glm::scale(glm::mat4(1.0f), glm::vec3(1.0f, -1.0f, -1.0f));
+
+	// Initial proj matrix (updated to actual values in SetSceneNode).
+	FrameState->projMat = glm::mat4(1.0f);
+
+	// Identity
+	FrameState->modelMat = glm::mat4(1.0f);
+
+	if (UseHWLighting)
+		InViewport->GetOuterUClient()->NoLighting = 1; // Disable (Engine) lighting.
+
+	ResetDistanceFog();
+
+	SetFrameStateUniforms();
+
+	if (UseAA)
+		glEnable(GL_MULTISAMPLE);
+
+	NumDevices++;
+	return 1;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::PostEditChange()
+{
+	guard(UXOpenGLRenderDevice::PostEditChange);
+	debugf(NAME_Dev, TEXT("XOpenGL: PostEditChange"));
+	if (appIsNan(RenderScale))
+		RenderScale = 1.f;
+	else
+		RenderScale = Clamp(RenderScale, 0.5f, 1.f);
+
+	MakeCurrent();
+	RecompileShaders();
+	Flush(UsePrecache);
+	unguard;
+}
+
+#if _WIN32
+LRESULT CALLBACK WndProc(HWND hWnd, UINT uiMsg, WPARAM wParam, LPARAM lParam)
+{
+	if (uiMsg == WM_CLOSE)
+	{
+		PostQuitMessage(0);
+		return 0;
+	}
+	return DefWindowProc(hWnd, uiMsg, wParam, lParam);
+}
+#endif
+
+#if _WIN32
+UBOOL UXOpenGLRenderDevice::SetWindowPixelFormat(HDC DC)
+{
+	guard(UXOpenGLRenderDevice::SetWindowPixelFormat);
+
+	if (!SetPixelFormat(DC, iPixelFormat, &pfd))
+	{
+		GWarn->Logf(TEXT("XOpenGL: Setting PixelFormat %i failed!"), iPixelFormat);
+		iPixelFormat = ChoosePixelFormat(DC, &pfd);
+		if (!SetPixelFormat(DC, iPixelFormat, &pfd))
+			GWarn->Logf(TEXT("XOpenGL: SetPixelFormat %i failed. Restart may required."), iPixelFormat);
+		return 0;
+	}
+	else debugf(NAME_Dev, TEXT("XOpenGL: Setting PixelFormat: %i"), iPixelFormat);
+	return 1;
+	unguard;
+}
+#endif
+
+UBOOL UXOpenGLRenderDevice::IsSupportedGLVersion(INT MajorVersion, INT MinorVersion)
+{
+	// If we've already verified compatibility with a higher or equal version,
+	// then return TRUE immediately
+	if (SelectedMajorVersion > MajorVersion ||
+		SelectedMinorVersion >= MinorVersion)
+		return 1;
+
+	INT TmpMajorVersion = SelectedMajorVersion;
+	INT TmpMinorVersion = SelectedMinorVersion;
+	SelectedMajorVersion = MajorVersion;
+	SelectedMinorVersion = MinorVersion;
+
+#if _WIN32
+	HDC TemphDC;
+	HWND TempWindow = CreateTemporaryWindow(TemphDC);
+#else
+	SetSDLAttributes();
+	SDL_Window* TempWindow = CreateTemporaryWindow();
+#endif
+
+	UBOOL Result = CreateOpenGLContext(TempWindow, 4, 1);
+
+	SelectedMajorVersion = TmpMajorVersion;
+	SelectedMinorVersion = TmpMinorVersion;
+
+#if _WIN32
+	DestroyTemporaryWindow(TempWindow, TemphDC);
+#else
+	DestroyTemporaryWindow(TempWindow);
+#endif
+
+	return Result;
+}
+
+//
+// Try to create a dummy opengl context that supports all features we've enabled
+// in our settings. If the context creation fails, we gradually disable features
+// and lower the requested GL context version until it succeeds
+//
+void UXOpenGLRenderDevice::SelectGLVersion()
+{
+	if (OpenGLVersion == GL_ES)
+	{
+		SelectedMajorVersion = 3;
+		SelectedMinorVersion = 1;
+	}
+	else
+    {
+#if MACOSX
+		SelectedMajorVersion = 4;
+		SelectedMinorVersion = 1;
+#else
+		SelectedMajorVersion = 3;
+		SelectedMinorVersion = 3;
+		if (UseShaderCache)
+		{
+			if (!IsSupportedGLVersion(4, 1))
+			{
+				debugf(TEXT("XOpenGL: UseShaderCache is enabled, but this device does not support OpenGL 4.1. We will disable this option"));
+				UseShaderCache = false;
+			}
+			else
+			{
+				SelectedMajorVersion = Max<INT>(4, SelectedMajorVersion);
+				SelectedMinorVersion = Max<INT>(1, SelectedMinorVersion);
+			}
+		}
+		if (UseShaderDrawParameters)
+		{
+			if (!IsSupportedGLVersion(4, 6))
+			{
+				debugf(TEXT("XOpenGL: UseShaderDrawParameters is enabled, but this device does not support OpenGL 4.6. We will disable this option"));
+				UseShaderDrawParameters = false;
+			}
+			else
+			{
+				SelectedMajorVersion = Max<INT>(4, SelectedMajorVersion);
+				SelectedMinorVersion = Max<INT>(6, SelectedMinorVersion);
+			}
+		}
+        if (UseBindlessTextures || UsePersistentBuffers)
+        {
+			if (!IsSupportedGLVersion(4, 5))
+			{
+				debugf(TEXT("XOpenGL: UseBindlessTextures or UsePersistentBuffers is enabled, but this device does not support OpenGL 4.5. We will disable these options"));
+				UseBindlessTextures = UsePersistentBuffers = false;
+			}
+			else
+			{
+				SelectedMajorVersion = Max<INT>(4, SelectedMajorVersion);
+				SelectedMinorVersion = Max<INT>(5, SelectedMinorVersion);
+			}
+        }
+		if (UseOpenGLDebug)
+        {
+			if (!IsSupportedGLVersion(4, 3))
+			{
+				debugf(TEXT("XOpenGL: UseOpenGLDebug is enabled, but this device does not support OpenGL 4.3. We will disable this option"));
+				UseOpenGLDebug = false;
+			}
+			else
+			{
+				SelectedMajorVersion = Max<INT>(4, SelectedMajorVersion);
+				SelectedMinorVersion = Max<INT>(3, SelectedMinorVersion);
+			}
+        }
+#endif
+    }
+
+	SelectedGLVersion = true;
+}
+
+#if !_WIN32
+UBOOL UXOpenGLRenderDevice::SetSDLAttributes() const
+{
+    guard(UXOpenGLRenderDevice::SetSDLAttributes);
+    bool SDLSuccess = XOpenGLSetGLAttribute(SDL_GL_DOUBLEBUFFER, 1);
+	SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_BUFFER_SIZE, DesiredColorBits);
+    
+	SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, UseSRGBTextures); // CheckMe!!! Does this work in GL ES?
+	
+	if (UseOpenGLDebug)
+		SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+	
+	SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_CONTEXT_PROFILE_MASK, (OpenGLVersion == GL_ES) ? SDL_GL_CONTEXT_PROFILE_ES : SDL_GL_CONTEXT_PROFILE_CORE);
+	SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, SelectedMajorVersion);
+	SDLSuccess &= XOpenGLSetGLAttribute(SDL_GL_CONTEXT_MINOR_VERSION, SelectedMinorVersion);
+    
+	if (!SDLSuccess)
+        debugf(NAME_DevLoad, TEXT("XOpenGL: SDL Error in SetSDLAttributes (probably non fatal): %ls"), appFromAnsi(SDL_GetError()));
+    
+	return SDLSuccess;
+    unguard;
+}
+#endif
+
+UBOOL UXOpenGLRenderDevice::CreateOpenGLContext(void* Window, INT NewColorBytes, UBOOL QueryOnly)
+{
+	guard(UXOpenGLRenderDevice::CreateOpenGLContext);
+
+	debugfSlow(NAME_Dev, TEXT("XOpenGL: Creating new OpenGL context."));
+
+	if (!Window)
+		appErrorf(TEXT("XOpenGL: No Window found!"));
+
+#if !_WIN32
+    // On non-Windows targets, we need to specify the requested GL version
+    // before creating the window
+	glContext = SDL_GL_CreateContext((SDL_Window*)Window);
+#else
+	HWND TmpWnd = (HWND)Window;
+	hDC = GetDC(TmpWnd);
+	
+	iPixelFormat = 0;
+
+	memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
+	pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
+	pfd.nVersion = 1;
+	pfd.dwFlags = PFD_DOUBLEBUFFER | PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW;
+	pfd.iPixelType = PFD_TYPE_RGBA;
+	pfd.cColorBits = DesiredColorBits;
+	pfd.cDepthBits = DesiredDepthBits;
+	pfd.iLayerType = PFD_MAIN_PLANE;
+
+	// MSAA is now inside RenderFBO; always request a plain single-sample window surface.
+	{
+		UINT NumFormats = 0;
+		INT iPixelFormatAttribList[] =
+			{
+				WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
+				WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
+				WGL_DOUBLE_BUFFER_ARB, GL_TRUE,
+				WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
+				WGL_COLOR_BITS_ARB, DesiredColorBits,
+				WGL_DEPTH_BITS_ARB, DesiredDepthBits,
+				WGL_STENCIL_BITS_ARB, 0,//DesiredStencilBits,
+				0 // End of attributes list
+			};
+		wglChoosePixelFormatARB(hDC, iPixelFormatAttribList, NULL, 1, &iPixelFormat, &NumFormats);
+	}
+
+	INT ContextFlags = 0;
+	if (!GL_KHR_debug)
+	{
+		GWarn->Logf(TEXT("OpenGL debugging extension not found!"));
+		UseOpenGLDebug = 0;
+	}
+	if (UseOpenGLDebug)
+		ContextFlags = WGL_CONTEXT_DEBUG_BIT_ARB;
+
+	INT iContextAttribs[] =
+		{
+			WGL_CONTEXT_MAJOR_VERSION_ARB, SelectedMajorVersion,
+			WGL_CONTEXT_MINOR_VERSION_ARB, SelectedMinorVersion,
+			WGL_CONTEXT_FLAGS_ARB, ContextFlags,
+			WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+			0 // End of attributes list
+		};
+	if (!QueryOnly)
+		SetWindowPixelFormat(hDC);
+	glContext = wglCreateContextAttribsARB(hDC, 0, iContextAttribs);
+#endif
+
+	if (!glContext)
+		return 0;
+
+	if (QueryOnly)
+	{
+#if _WIN32
+		wglDeleteContext(glContext);
+		ReleaseDC(TmpWnd, hDC);
+	#else
+		XOpenGLDestroyContext(glContext);
+	#endif
+		glContext = NULL;
+		return 1;
+	}
+
+	MakeCurrent();
+
+#if _WIN32
+	if (!gladLoadGL())
+		appErrorf(TEXT("XOpenGL: Init failed!"));
+#else
+	int GladStatus;
+	if (OpenGLVersion == GL_ES)
+		GladStatus = gladLoadGLES2Loader((GLADloadproc)SDL_GL_GetProcAddress);
+	else
+		GladStatus = gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
+	// gladLoad detects the GL version, then loads the version-gated core procs. If that fails (context
+	// too old / core-profile version query failed), the core gl* stay NULL and the next use (Flush ->
+	// SetPermanentState -> glEnable) is a null-call SIGSEGV. Fail the device gracefully so TryRenderDevice
+	// falls back, instead of crashing (mirrors the Windows branch's gladLoadGL() check, minus appErrorf).
+	if (!GladStatus)
+	{
+		GWarn->Logf(TEXT("XOpenGL: gladLoad failed (OpenGL %d.%d unavailable) - failing render device"), SelectedMajorVersion, SelectedMinorVersion);
+		XOpenGLDestroyContext(glContext);
+		glContext = NULL;
+		return 0;
+	}
+#endif
+
+	Description = appFromAnsi((const ANSICHAR *)glGetString(GL_RENDERER));
+	FString VendorString = appFromAnsi((const ANSICHAR *)glGetString(GL_VENDOR));
+	IsAMD = VendorString.InStr(TEXT("ATI")) != -1 ||
+		VendorString.InStr(TEXT("AMD")) != -1 ||
+		VendorString.InStr(TEXT("Advanced Micro Devices")) != -1;
+	debugf(NAME_Init, TEXT("GL_VENDOR     : %ls"), *VendorString);
+	debugf(NAME_Init, TEXT("GL_RENDERER   : %ls"), appFromAnsi((const ANSICHAR *)glGetString(GL_RENDERER)));
+	debugf(NAME_Init, TEXT("GL_VERSION    : %ls"), appFromAnsi((const ANSICHAR *)glGetString(GL_VERSION)));
+	debugf(NAME_Init, TEXT("GL_SHADING_LANGUAGE_VERSION    : %ls"), appFromAnsi((const ANSICHAR *)glGetString(GL_SHADING_LANGUAGE_VERSION)));
+
+	AllExtensions = TEXT("");
+	glGetIntegerv(GL_NUM_EXTENSIONS, &NumberOfExtensions);
+	for (INT i = 0; i < NumberOfExtensions; i++)
+	{
+		AllExtensions += appFromAnsi((const ANSICHAR*)glGetStringi(GL_EXTENSIONS, i));
+		AllExtensions += TEXT(" ");
+	}
+
+#if _WIN32
+	if (wglGetExtensionsStringARB)
+		AllExtensions += appFromAnsi(wglGetExtensionsStringARB(hDC));
+#endif
+
+	FString ExtensionString = AllExtensions;
+	FString SplitString;
+	INT i = 0;
+	while (ExtensionString.Split(TEXT(" "), &SplitString, &ExtensionString, 0))
+	{
+		if (SplitString.Len())
+		{
+			debugf(NAME_DevLoad, TEXT("GL_EXTENSIONS(%i): %ls"),i, *SplitString);
+			i++;
+		}
+	}
+	NumberOfExtensions = i;
+
+	if (UseOpenGLDebug)
+	{
+		glEnable(GL_DEBUG_OUTPUT);
+		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+		glDebugMessageCallback(UXOpenGLRenderDevice::DebugCallback, NULL);
+		glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_TRUE);
+		GWarn->Logf(TEXT("XOpenGL: OpenGL debugging enabled, this can cause severe performance drain!"));
+	}
+
+#if _WIN32
+	if (ShareLists && AllContexts.Num())
+		check(wglShareLists(AllContexts(0), glContext) == 1);
+#endif
+	AllContexts.AddItem(glContext);
+
+	// Check and validate extensions & settings.
+	CheckExtensions();
+
+	return 1;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::MakeCurrent()
+{
+	guard(UXOpenGLRenderDevice::MakeCurrent);
+#if !_WIN32
+	// stijn: don't decide whether to skip the real MakeCurrent call based on our own
+	// cached CurrentGLContext. Other SDL windows in this process (e.g., a SoftDrv
+	// viewport doing SDL_GetWindowSurface/SDL_UpdateWindowSurface) can change the actual
+	// current GL context out from under us without going through this function. If we
+	// trust the stale cache, we wrongly skip re-binding and end up issuing GL calls
+	// against no/the wrong context, so nothing gets drawn. Ask SDL what's ACTUALLY
+	// current instead.
+	if (SDL_GL_GetCurrentContext() != glContext)
+	{
+		bool Result = XOpenGLMakeCurrent(Window, glContext);
+		if (!Result)
+			debugf(TEXT("XOpenGL: MakeCurrent failed with: %ls"), appFromAnsi(SDL_GetError()));
+		CurrentGLContext = glContext;
+	}
+#else
+	if (!glContext && !CurrentGLContext)
+		appErrorf(TEXT("No valid GL Context!"));
+
+	if (!glContext && CurrentGLContext)
+		glContext = CurrentGLContext;
+	check(glContext);
+
+	if (CurrentGLContext != glContext || GIsEditor)
+	{
+		check(hDC);
+		if (!wglMakeCurrent(hDC, glContext))
+			debugf(NAME_Warning, TEXT("wglMakeCurrent failed for (%p, %p). GetLastError: %d %s"), hDC, glContext, appGetSystemErrorCode(), appGetSystemErrorMessage());
+		CurrentGLContext = glContext;
+	}
+#endif
+	unguard;
+}
+
+void UXOpenGLRenderDevice::SetPermanentState()
+{
+	// Set permanent state.
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glPolygonOffset(-1.0f, -1.0f);
+	glBlendFunc(GL_ONE, GL_ZERO);
+	glEnable(GL_BLEND);
+	glDisable(GL_CLIP_DISTANCE0);
+
+	/*
+	GLES 3 supports sRGB functionality, but it does not expose the GL_FRAMEBUFFER_SRGB enable/disable bit.
+	*/
+
+#ifndef __EMSCRIPTEN__
+	if (UseSRGBTextures && OpenGLVersion == GL_Core)
+		glEnable(GL_FRAMEBUFFER_SRGB);
+#endif
+
+    if (UseAA && UseAASmoothing)
+    {
+        glEnable( GL_LINE_SMOOTH );
+        glEnable( GL_POLYGON_SMOOTH );
+        glHint( GL_LINE_SMOOTH_HINT, GL_NICEST );
+        glHint( GL_POLYGON_SMOOTH_HINT, GL_NICEST );
+        /*
+        On some implementations, when you call glEnable(GL_POINT_SMOOTH) or glEnable(GL_LINE_SMOOTH) and you use shaders at the same time, your rendering speed goes down to 0.1 FPS.
+        This is because the driver does software rendering. This would happen on AMD/ATI GPUs/drivers.
+        */
+    }
+    if ( GenerateMipMaps ) // Is there really a visible difference at all?
+    {
+        if (OpenGLVersion == GL_ES)
+            glHint(GL_GENERATE_MIPMAP_HINT,GL_NICEST); //this particular setting is GL ES only.
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 16); // set maximum to...? Most common is 8 I think. However if really want to benefit from it maybe using some more here.
+    }
+
+#if UNREAL_OLDUNREAL
+	// Culling
+	/*
+	Can't keep this for other UEngine games despite the performance gain. Most noticeable is that decals are wrong faced in UT and probably in other games as well.
+	However, most gain is when using static meshes anyway, so this shouldn't be much of a problem for the other UEngine games.
+	*/
+	CurrentBlendPolyFlags = 0;
+	glEnable(GL_CULL_FACE);
+	glFrontFace(GL_CW);
+	glCullFace(GL_BACK);
+#endif
+}
+
+UBOOL UXOpenGLRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen)
+{
+	guard(UXOpenGLRenderDevice::SetRes);
+
+	// WinDrv's fullscreen transition (ResizeViewport) calls Window->MoveWindow() before it
+	// updates its own BlitFlags member. MoveWindow synchronously pumps a WM_SIZE, and that
+	// handler - seeing BlitFlags not yet marked fullscreen - calls back into RenDev->SetRes()
+	// as a nested, re-entrant call while this (real) call is still in progress. Reacting to
+	// that nested call as if it were an independent request corrupts the in-progress
+	// transition (observed as an immediate fullscreen->windowed bounce on Alt+Enter), so just
+	// ignore any SetRes call that arrives while we're already inside one.
+	static UBOOL bReentrant = 0;
+	if (bReentrant)
+	{
+		debugf(TEXT("XOpenGL: Ignoring reentrant SetRes call during an in-progress resolution change"));
+		return 1;
+	}
+	struct FReentrancyGuard
+	{
+		FReentrancyGuard()  { bReentrant = 1; }
+		~FReentrancyGuard() { bReentrant = 0; }
+	} ReentrancyGuard;
+
+	DesiredColorBits = NewColorBytes <= 2 ? 16 : 32;
+	DesiredStencilBits = NewColorBytes <= 2 ? 0 : 8;
+	DesiredDepthBits = NewColorBytes <= 2 ? 16 : 24;
+
+	debugf(TEXT("XOpenGL::SetRes %dx%d - Fullscreen %d"), NewX, NewY, Fullscreen);
+
+	// If not fullscreen, and color bytes hasn't changed, do nothing.
+	if (glContext &&
+		CurrentGLContext &&
+		glContext == CurrentGLContext &&
+		!Fullscreen &&
+		!WasFullscreen &&
+		NewColorBytes == static_cast<INT>(Viewport->ColorBytes))
+	{
+		// Change window size.
+		if (!Viewport->ResizeViewport(BLIT_HardwarePaint | BLIT_OpenGL, NewX, NewY, NewColorBytes))
+			return 0;
+
+		// stijn: force a switch to our context if we're in the editor
+#if _WIN32
+		if (GIsEditor)
+		{
+			wglMakeCurrent(NULL, NULL);
+			MakeCurrent();
+		}
+#endif
+		glViewport(0, 0, NewX, NewY);
+		return 1;
+	}
+
+#if _WIN32
+	// Change display settings.
+	if (Fullscreen)
+	{
+		INT FindX = NewX, FindY = NewY, BestError = MAXINT;
+		for (INT i = 0; i < SupportedDisplayModes.Num(); i++)
+		{
+			if (SupportedDisplayModes(i).Z == (NewColorBytes * 8))
+			{
+				INT Error
+					= (SupportedDisplayModes(i).X - FindX)*(SupportedDisplayModes(i).X - FindX)
+					+ (SupportedDisplayModes(i).Y - FindY)*(SupportedDisplayModes(i).Y - FindY);
+				if (Error < BestError)
+				{
+					NewX = SupportedDisplayModes(i).X;
+					NewY = SupportedDisplayModes(i).Y;
+					BestError = Error;
+				}
+			}
+		}
+		DEVMODEA dma;
+		DEVMODEW dmw;
+		bool tryNoRefreshRate = true;
+
+		ZeroMemory(&dma, sizeof(dma));
+		dma.dmSize = sizeof(dma);
+		ZeroMemory(&dmw, sizeof(dmw));
+		dmw.dmSize = sizeof(dmw);
+
+		dma.dmPelsWidth = dmw.dmPelsWidth = NewX;
+		dma.dmPelsHeight = dmw.dmPelsHeight = NewY;
+		dma.dmBitsPerPel = dmw.dmBitsPerPel = NewColorBytes * 8;
+		dma.dmFields = dmw.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_POSITION;// | DM_BITSPERPEL;
+
+		debugf(NAME_Dev, TEXT("XOpenGL: Fullscreen NewX %i NewY %i"), NewX, NewY);
+
+		if (RefreshRate)
+		{
+			dma.dmDisplayFrequency = dmw.dmDisplayFrequency = RefreshRate;
+			dma.dmFields |= DM_DISPLAYFREQUENCY;
+			dmw.dmFields |= DM_DISPLAYFREQUENCY;
+
+			if (ChangeDisplaySettingsW(&dmw, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
+			{
+				GWarn->Logf(TEXT("XOpenGL: ChangeDisplaySettings failed: %ix%i, %i Hz"), NewX, NewY, RefreshRate);
+				dma.dmFields &= ~DM_DISPLAYFREQUENCY;
+				dmw.dmFields &= ~DM_DISPLAYFREQUENCY;
+			}
+			else
+			{
+				debugf(NAME_Dev, TEXT("ChangeDisplaySettings with RefreshRate: %ix%i, %i Hz"), NewX, NewY, RefreshRate);
+				tryNoRefreshRate = false;
+			}
+		}
+		if (tryNoRefreshRate)
+		{
+			if (ChangeDisplaySettingsW(&dmw, CDS_FULLSCREEN) != DISP_CHANGE_SUCCESSFUL)
+			{
+				GWarn->Logf(TEXT("XOpenGL: ChangeDisplaySettings failed: %ix%i"), NewX, NewY);
+				return 0;
+			}
+			debugf(NAME_Dev, TEXT("XOpenGL: ChangeDisplaySettings: %ix%i"), NewX, NewY);
+		}
+	}
+	else UnsetRes();
+#else
+    if (!Window)
+        SetSDLAttributes();
+#endif
+
+	UBOOL Result = Viewport->ResizeViewport(Fullscreen ? (BLIT_Fullscreen | BLIT_OpenGL) : (BLIT_HardwarePaint | BLIT_OpenGL), NewX, NewY, NewColorBytes);
+	if (!Result)
+	{
+		debugf(TEXT("XOpenGL: Change window size failed!"));
+		if (Fullscreen)
+#if _WIN32
+			ChangeDisplaySettingsW(NULL, 0);
+#endif
+		return 0;
+	}
+
+#if _WIN32
+	hWnd = (HWND)Viewport->GetWindow();
+#else
+	Window = (SDL_Window*)Viewport->GetWindow();
+	// On macOS, going fullscreen changes the NSOpenGLContext's underlying drawable.
+	// SDL_GL_MakeCurrent triggers [NSOpenGLContext update] which updates the context
+	// to the new drawable dimensions. Without this, the default framebuffer stays
+	// at the pre-fullscreen size and blitting to PhysicalSizeX/Y fails.
+	CurrentGLContext = NULL;
+#endif
+
+	// (Re)init OpenGL rendering context. A failed create/proc-load must abort SetRes (else Flush ->
+	// SetPermanentState calls a NULL gl* and crashes) so TryRenderDevice falls back to another device.
+	if (glContext)
+		MakeCurrent();
+	else if (!CreateOpenGLContext(Viewport->GetWindow(), NewColorBytes))
+	{
+		debugf(TEXT("XOpenGL: CreateOpenGLContext failed - failing SetRes"));
+		return 0;
+	}
+
+#if _WIN32 && !OLDUNREAL_WINXP
+	if (ReduceMouseLag && !UsingDXGISwapchain)
+		InitDXGISwapchain(Viewport->PhysicalSizeX, Viewport->PhysicalSizeY);
+#endif
+
+	// Flush textures.
+	Flush(1);
+
+	// Set permanent state... (OpenGL Presets)
+	SetPermanentState();
+
+	// Verify hardware defaults.
+	CurrentBlendPolyFlags = static_cast<DWORD>(PF_Occlude);
+
+	// Remember fullscreenness.
+	WasFullscreen = Fullscreen;
+
+	CachedPhysicalSizeX = 0;
+	CachedPhysicalSizeY = 0;
+
+	return 1;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::UnsetRes()
+{
+	guard(UXOpenGLRenderDevice::UnsetRes);
+
+#if _WIN32
+	if (WasFullscreen)
+		ChangeDisplaySettingsW(NULL, 0);
+#endif
+	unguard;
+}
+
+void UXOpenGLRenderDevice::SwapControl()
+{
+#if !_WIN32
+	guard(SwapControl);
+	switch (UseVSync)
+	{
+	case VS_Off:
+		if (!XOpenGLSetSwapInterval(0))
+			debugf(NAME_Init, TEXT("XOpenGL: Setting VSync off has failed."));
+		else
+        {
+            debugf(NAME_Init, TEXT("XOpenGL: VSync Off"));
+        }
+		break;
+	case VS_On:
+		if (!XOpenGLSetSwapInterval(1))
+			debugf(NAME_Init, TEXT("XOpenGL: Setting VSync on has failed."));
+		else
+        {
+            debugf(NAME_Init, TEXT("XOpenGL: VSync On"));
+        }
+		break;
+	case VS_Adaptive:
+		if (!XOpenGLSetSwapInterval(-1))
+        {
+			debugf(NAME_Init, TEXT("XOpenGL: Setting VSync adaptive has failed. Falling back to SwapInterval 0 (VSync Off)."));
+			if (!XOpenGLSetSwapInterval(0))
+                debugf(NAME_Init, TEXT("XOpenGL: Setting VSync off has failed."));
+        }
+		else
+        {
+            debugf(NAME_Init, TEXT("XOpenGL: VSync Adaptive"));
+        }
+		break;
+	default:
+		if (!XOpenGLSetSwapInterval(0))
+			debugf(NAME_Init, TEXT("XOpenGL: Setting default VSync off has failed."));
+		else
+        {
+            debugf(NAME_Init, TEXT("XOpenGL: VSync Off (default)"));
+        }
+	}
+	unguard;
+#else
+	guard(SwapControl);
+	if (SupportsSwapControl)
+	{
+		PFNWGLSWAPINTERVALEXTPROC wglSwapIntervalEXT = NULL;
+		wglSwapIntervalEXT = (PFNWGLSWAPINTERVALEXTPROC)wglGetProcAddress("wglSwapIntervalEXT");
+		if (!wglSwapIntervalEXT)
+			return;
+		if (GIsEditor) // Remove logspam in Editor Window
+		{
+			switch (UseVSync)
+			{
+				case VS_On:
+					wglSwapIntervalEXT(1);
+					break;
+				case VS_Off:
+					wglSwapIntervalEXT(0);
+					break;
+
+				case VS_Adaptive:
+					if (!SupportsSwapControlTear)
+						wglSwapIntervalEXT(0);
+					else
+						wglSwapIntervalEXT(-1);
+					break;
+				default:
+					wglSwapIntervalEXT(0);
+			}
+		}
+		else
+		{
+			switch (UseVSync)
+			{
+				case VS_On:
+					if (wglSwapIntervalEXT(1) != 1)
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync on has failed."));
+					else
+					{
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync: On"));
+					}
+					break;
+				case VS_Off:
+					if (wglSwapIntervalEXT(0) != 1)
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync off has failed."));
+					else
+					{
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync: Off"));
+					}
+					break;
+
+				case VS_Adaptive:
+					if (!SupportsSwapControlTear)
+					{
+						debugf(NAME_Init, TEXT("XOpenGL: WGL_EXT_swap_control_tear is not supported by device. Falling back to SwapInterval 0 (VSync Off)."));
+						if (wglSwapIntervalEXT(0) != 1)
+							debugf(NAME_Init, TEXT("XOpenGL: Setting VSync off has failed."));
+						else
+						{
+							debugf(NAME_Init, TEXT("XOpenGL: Setting VSync: Off"));
+						}
+						break;
+					}
+					if (wglSwapIntervalEXT(-1) != 1)
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync adaptive has failed."));
+					else
+					{
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync: Adaptive"));
+					}
+					break;
+				default:
+					if (wglSwapIntervalEXT(0) != 1)
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync off has failed."));
+					else
+					{
+						debugf(NAME_Init, TEXT("XOpenGL: Setting VSync: Off (default)"));
+					}
+			}
+		}
+	}
+	else
+		debugf(NAME_Init, TEXT("XOpenGL: WGL_EXT_swap_control is not supported."));
+	unguard;
+#endif
+}
+
+void UXOpenGLRenderDevice::Flush(UBOOL AllowPrecache)
+{
+	guard(UXOpenGLRenderDevice::Flush);
+
+	debugf(NAME_Dev, TEXT("XOpenGL: Flush"));
+
+	MakeCurrent();
+
+	// Create a list of lights.
+	if (LightList.Num())
+		LightList.Empty();
+	NumLights = 0;
+
+	TArray<GLuint> Binds;
+	for (TOpenGLMap<QWORD, FCachedTexture>::TIterator It(*BindMap); It; ++It)
+	{
+		glDeleteSamplers(1, &It.Value().Sampler);
+
+		if (UsingBindlessTextures)
+		{
+			if (It.Value().BindlessTexHandle && glIsTextureHandleResidentARB(It.Value().BindlessTexHandle))
+				glMakeTextureHandleNonResidentARB(It.Value().BindlessTexHandle);
+		}
+
+		It.Value().BindlessTexHandle = 0;
+		if (It.Value().Id)
+		{
+			glDeleteTextures(1, &It.Value().Id);
+			Binds.AddItem(It.Value().Id);
+		}
+	}
+	BindMap->Empty();
+
+	if (Binds.Num())
+		glDeleteTextures(Binds.Num(), (GLuint*)&Binds(0));
+
+	for (INT i = 0; i < 8; i++) // Also reset all multi textures.
+		SetNoTexture(i);
+
+	if (AllowPrecache && UsePrecache && !GIsEditor)
+		PrecacheOnFlip = 1;
+
+	if (Viewport && Viewport->GetOuterUClient())
+		SetGamma(Viewport->GetOuterUClient()->Brightness);
+
+	CurrentBlendPolyFlags = 0;
+
+	SetProgram(No_Prog);
+
+	SwapControl();
+
+	if (DistanceFogBuffer.Buffer)
+		ResetDistanceFog();
+
+	StoredOrthoFovAngle = 0;
+	StoredOrthoFX = 0;
+	StoredOrthoFY = 0;
+	StoredEffectiveFovAngle = 0;
+	StoredFX = 0;
+	StoredFY = 0;
+	appMemzero(&Stats, sizeof(Stats));
+
+	unguard;
+}
+
+UBOOL UXOpenGLRenderDevice::Exec(const TCHAR* Cmd, FOutputDevice& Ar)
+{
+	guard(UXOpenGLRenderDevice::Exec);
+	if (URenderDevice::Exec(Cmd, Ar))
+	{
+		return 1;
+	}
+	if (ParseCommand(&Cmd, TEXT("GetRes")))
+	{
+#if _WIN32
+		TArray<FPlane> Relevant;
+		INT i;
+		for (i = 0; i< SupportedDisplayModes.Num(); i++)
+			if (SupportedDisplayModes(i).Z == Viewport->ColorBytes * 8)
+				if
+					((SupportedDisplayModes(i).X != 320 || SupportedDisplayModes(i).Y != 200)
+					&& (SupportedDisplayModes(i).X != 640 || SupportedDisplayModes(i).Y != 400))
+					Relevant.AddUniqueItem(FPlane(SupportedDisplayModes(i).X, SupportedDisplayModes(i).Y, 0, 0));
+		appQsort(&Relevant(0), Relevant.Num(), sizeof(FPlane), (QSORT_COMPARE)CompareRes);
+		FString Str;
+		for (i = 0; i<Relevant.Num(); i++)
+			Str += FString::Printf(TEXT("%ix%i "), (INT)Relevant(i).X, (INT)Relevant(i).Y);
+		Ar.Log(*Str.LeftChop(1));
+		return 1;
+	}
+#else
+	return 0; // let SDLDrv handle this
+    }
+#endif
+	else if (ParseCommand(&Cmd, TEXT("CrashGL")))
+	{
+		appErrorf(TEXT("XOpenGL: Forced OpenGL crash!"));
+	}
+	else if (ParseCommand(&Cmd, TEXT("VideoFlush")))
+	{
+		debugf(NAME_Dev, TEXT("XOpenGL: VideoFlush"));
+		Flush(1);
+		return 1;
+	}
+	else if (ParseCommand(&Cmd, TEXT("RESETCONTEXT")))
+	{
+		CurrentGLContext = NULL;
+		return 1;
+	}
+	return 0;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::UpdateCoords(FSceneNode* Frame)
+{
+    guard(UXOpenGLRenderDevice::UpdateCoords);
+	
+	auto FrameState = FrameStateBuffer.GetElementPtr(0);
+
+    // Update Coords:  World to Viewspace projection.
+	FrameState->FrameCoords[0] = glm::vec4(Frame->Coords.Origin.X, Frame->Coords.Origin.Y, Frame->Coords.Origin.Z, 0.0f);
+	FrameState->FrameCoords[1] = glm::vec4(Frame->Coords.XAxis.X, Frame->Coords.XAxis.Y, Frame->Coords.XAxis.Z, 0.0f);
+	FrameState->FrameCoords[2] = glm::vec4(Frame->Coords.YAxis.X, Frame->Coords.YAxis.Y, Frame->Coords.YAxis.Z, 0.0f);
+	FrameState->FrameCoords[3] = glm::vec4(Frame->Coords.ZAxis.X, Frame->Coords.ZAxis.Y, Frame->Coords.ZAxis.Z, 0.0f);
+
+	// And UnCoords: Viewspace to World projection.
+	FrameState->FrameUncoords[0] = glm::vec4(Frame->Uncoords.Origin.X, Frame->Uncoords.Origin.Y, Frame->Uncoords.Origin.Z, 0.0f);
+	FrameState->FrameUncoords[1] = glm::vec4(Frame->Uncoords.XAxis.X, Frame->Uncoords.XAxis.Y, Frame->Uncoords.XAxis.Z, 0.0f);
+	FrameState->FrameUncoords[2] = glm::vec4(Frame->Uncoords.YAxis.X, Frame->Uncoords.YAxis.Y, Frame->Uncoords.YAxis.Z, 0.0f);
+	FrameState->FrameUncoords[3] = glm::vec4(Frame->Uncoords.ZAxis.X, Frame->Uncoords.ZAxis.Y, Frame->Uncoords.ZAxis.Z, 0.0f);
+
+	FrameStateBuffer.Bind();
+	FrameStateBuffer.BufferData(true);
+	unguard;
+}
+
+void UXOpenGLRenderDevice::SetSceneNode(FSceneNode* Frame)
+{
+	guard(UXOpenGLRenderDevice::SetSceneNode);
+
+	//Flush Buffers.
+	SetProgram(No_Prog);
+	
+	ResetDistanceFog();
+
+	//avoid some overhead, only calculate and set again if something was really changed.
+	if (Frame->Viewport->IsOrtho() && (!bIsOrtho || StoredOrthoFovAngle != Viewport->Actor->FovAngle || StoredOrthoFX != Frame->FX || GIsEditor || StoredOrthoFY != Frame->FY))
+		SetOrthoProjection(Frame);
+	else if (!Frame->Viewport->IsOrtho() && (StoredEffectiveFovAngle != Frame->EffectiveFovAngle || StoredFX != Frame->FX || StoredFY != Frame->FY || GIsEditor || StoredbNearZ))
+		SetProjection(Frame, 0);
+#if UNREAL_OLDUNREAL
+	else if (BumpMaps) // stijn: TODO: We need this to prevent lights from jumping around. This indicates there's some problem in Render!
+		UpdateCoords(Frame);
+#endif
+	if (StoredGamma != GetViewportGamma(Viewport) || StoredOneXBlending != OneXBlending || StoredActorXBlending != ActorXBlending
+#if _WIN32 && !OLDUNREAL_WINXP
+		|| StoredUsingDXGISwapchain != UsingDXGISwapchain
+#endif
+		)
+		SetFrameStateUniforms();
+
+	// Set clip planes.
+	SetSceneNodeHit(Frame);
+
+	// Disable clipping
+#if UNREAL_OLDUNREAL
+	while (NumClipPlanes > 0)
+		PopClipPlane();
+#endif
+
+	// Push light data to the GPU. We only need this if we enable HW lighting or bumpmaps.
+	// 
+	// The HW lighting implementation currently requires us to push data on _all_
+	// light-emitting actors every time we render a frame. This is VERY slow!
+	//
+	// If we enable BumpMaps but not HW Lighting, then we only need to push data on
+	// static light-emitting actors. If we're in-game, we only need to do this once!
+	auto Level = Frame->Level;
+	bool HWLighting =
+#if UNREAL_OLDUNREAL
+		UseHWLighting;
+#else
+        false;
+#endif
+	if (!Level || 
+		(!HWLighting && !BumpMaps) || // These are the only features that use light data
+		(!HWLighting && !GIsEditor && NumLights > 0)) // If we're in-game, we only push light data once
+		return;
+
+	// Gather actors
+	LightList.Empty();
+	for (INT i = 0; i < Level->Actors.Num(); ++i)
+	{
+		AActor* Actor = Level->Actors(i);
+
+		// Filter out invalid actors
+		if (!Actor || Actor->bDeleteMe)
+			continue;
+
+		// Filter out irrelevant lights
+		if (Actor->LightType == LE_None || Actor->LightRadius == 0 || Actor->LightBrightness == 0)
+			continue;
+
+		// Filter out non-static lights if we're not using HW Lighting
+		if (!Actor->bStatic && Actor->bMovable && !HWLighting)
+			continue;
+
+#if ENGINE_VERSION>=430 && ENGINE_VERSION<1100
+		LightList.AddItem(Actor);
+#else
+		if (Actor->NormalLightRadius) //for normal mapping only add lights with normallightradius set. Needs performance tests if not.
+			LightList.AddItem(Actor);
+#endif
+	}
+	NumLights = LightList.Num();
+
+	auto LightData = LightInfoBuffer.GetElementPtr(0);
+	for (INT i = 0; i < NumLights; i++)
+	{
+		auto Actor = LightList(i);
+		LightData->LightPos[i] = glm::vec4(Actor->Location.X, Actor->Location.Y, Actor->Location.Z, 1.f);
+
+		FPlane RGBColor = FGetHSV(Actor->LightHue, Actor->LightSaturation, Actor->LightBrightness);
+
+#if ENGINE_VERSION>=430 && ENGINE_VERSION<1100
+		LightData->LightData1[i] = glm::vec4(RGBColor.X, RGBColor.Y, RGBColor.Z, Actor->LightCone);
+#else
+		LightData->LightData1[i] = glm::vec4(RGBColor.R, RGBColor.G, RGBColor.B, Actor->LightCone);
+#endif
+		LightData->LightData2[i] = glm::vec4(Actor->LightEffect, Actor->LightPeriod, Actor->LightPhase, Actor->LightRadius);
+		LightData->LightData3[i] = glm::vec4(Actor->LightType, Actor->VolumeBrightness, Actor->VolumeFog, Actor->VolumeRadius);
+		
+#if ENGINE_VERSION>=430 && ENGINE_VERSION<1100
+		LightData->LightData4[i] = glm::vec4(Actor->WorldLightRadius(), NumLights, (GLfloat)Actor->Region.ZoneNumber, (GLfloat)(Frame->Viewport->Actor ? Frame->Viewport->Actor->Region.ZoneNumber : 0.f));
+		LightData->LightData5[i] = glm::vec4(Actor->LightRadius * 10, 1.0, 0.0, 0.0);
+#else
+		LightData->LightData4[i] = glm::vec4(Actor->WorldLightRadius(), NumLights, (GLfloat)Actor->Region.ZoneNumber, (GLfloat)(Frame->Viewport->Actor ? Frame->Viewport->Actor->CameraRegion.ZoneNumber : 0.f));
+		LightData->LightData5[i] = glm::vec4(Actor->NormalLightRadius, (GLfloat)Actor->bZoneNormalLight, Actor->LightBrightness, 0.0);
+#endif
+		if (i == MAX_LIGHTS - 1)
+			break;
+	}
+
+	LightInfoBuffer.Bind();
+	LightInfoBuffer.BufferData(true);
+	unguard;
+}
+
+void UXOpenGLRenderDevice::SetFrameStateUniforms()
+{
+	StoredGamma = GetViewportGamma(Viewport);
+	StoredActorXBlending = ActorXBlending;
+	StoredOneXBlending = OneXBlending;
+
+	auto FrameState = FrameStateBuffer.GetElementPtr(0);
+	FrameState->Gamma = StoredGamma;
+	FrameState->LightColorIntensity = ActorXBlending ? 1.f : 1.5f;
+	FrameState->LightMapIntensity = OneXBlending ? 2.f : 4.f;
+#if _WIN32 && !OLDUNREAL_WINXP
+	// The DXGI interop backbuffer is read back by D3D with a top-down (D3D) row order,
+	// while we rendered into it with GL's bottom-up convention, so the post-process pass
+	// needs to flip vertically to compensate (mirrors AntiDrv's YScale trick).
+	StoredUsingDXGISwapchain = UsingDXGISwapchain;
+	FrameState->YScale = UsingDXGISwapchain ? -1.f : 1.f;
+#else
+	FrameState->YScale = 1.f;
+#endif
+	FrameStateBuffer.Bind();
+	FrameStateBuffer.BufferData(true);
+}
+
+void UXOpenGLRenderDevice::SetOrthoProjection(FSceneNode* Frame)
+{
+	guard(UXOpenGLRenderDevice::SetOrthoProjection);
+
+	// Precompute stuff.
+	FLOAT zFar = (GIsEditor && Frame->Viewport->Actor->RendMap == REN_Wire) ? 131072.0 : 65336.f;
+
+	StoredEffectiveFovAngle = StoredFX = StoredFY = 0; //ensure Matrix is updated again if not ortho.
+
+	StoredOrthoFovAngle = Viewport->Actor->FovAngle;
+	StoredOrthoFX = Frame->FX;
+	StoredOrthoFY = Frame->FY;
+
+	Aspect = Frame->FY / Frame->FX;
+	RProjZ = appTan(Viewport->Actor->FovAngle * PI / 360.0);
+	RFX2 = 2.0*RProjZ / Frame->FX;
+	RFY2 = 2.0*RProjZ*Aspect / Frame->FY;
+
+	const auto FrameState = FrameStateBuffer.GetElementPtr(0);
+	FrameState->projMat = glm::ortho(-RProjZ, +RProjZ, -Aspect*RProjZ, +Aspect*RProjZ, -zFar, zFar);
+
+	// Set viewport and projection.
+	glViewport(Frame->XB, Viewport->SizeY - Frame->Y - Frame->YB, Frame->X, Frame->Y);
+	bIsOrtho = true;
+
+	FrameState->modelviewprojMat = FrameState->projMat * FrameState->viewMat * FrameState->modelMat; //yes, this is right.
+	FrameState->modelviewMat = FrameState->viewMat * FrameState->modelMat;
+
+	UpdateCoords(Frame);
+	unguard;
+}
+
+void UXOpenGLRenderDevice::SetProjection(FSceneNode* Frame, UBOOL bNearZ)
+{
+	guard(UXOpenGLRenderDevice::SetProjection);
+
+	// Precompute stuff.
+#if UNREAL_TOURNAMENT_OLDUNREAL
+	FLOAT zNear = 0.5f;
+#else
+    FLOAT zNear = 1.0f;
+#endif
+    StoredbNearZ = 0;
+
+	if (bNearZ)
+    {
+#if UNREAL_TOURNAMENT_OLDUNREAL
+		zNear = 0.5f;
+#else
+		zNear = 0.7f;
+#endif
+        StoredbNearZ = 1;
+    }
+
+    FLOAT zFar = (GIsEditor && Frame->Viewport->Actor->RendMap == REN_Wire) ? 131072.0 : 65336.f;
+
+	StoredEffectiveFovAngle = Frame->EffectiveFovAngle;
+	StoredFX = Frame->FX;
+	StoredFY = Frame->FY;
+
+	Aspect = Frame->FY / Frame->FX;
+	RProjZ = appTan(Frame->EffectiveFovAngle * PI / 360.0);
+	RFX2 = 2.0*RProjZ / Frame->FX;
+	RFY2 = 2.0*RProjZ*Aspect / Frame->FY;
+
+	const auto FrameState = FrameStateBuffer.GetElementPtr(0);
+	FrameState->projMat = glm::frustum(-RProjZ*zNear, +RProjZ*zNear, -Aspect*RProjZ*zNear, +Aspect*RProjZ*zNear, zNear, zFar);
+
+	// Set viewport and projection.
+	glViewport(Frame->XB, Viewport->SizeY - Frame->Y - Frame->YB, Frame->X, Frame->Y);
+	bIsOrtho = false;
+
+	FrameState->modelviewprojMat = FrameState->projMat * FrameState->viewMat * FrameState->modelMat;
+	FrameState->modelviewMat = FrameState->viewMat * FrameState->modelMat;
+
+	UpdateCoords(Frame);
+	unguard;
+}
+
+BYTE UXOpenGLRenderDevice::PushClipPlane(const FPlane& Plane)
+{
+	guard(UXOpenGLRenderDevice::PushClipPlane);
+	if (NumClipPlanes == MaxClippingPlanes)
+		return 2;
+
+	Shaders[ActiveProgram]->Flush(false);
+
+	glEnable(GL_CLIP_DISTANCE0 + NumClipPlanes);
+
+	const auto ClipPlaneInfo = GlobalClipPlaneBuffer.GetElementPtr(0);
+	ClipPlaneInfo->ClipParams = glm::vec4(NumClipPlanes, 1.f, 0.f, 0.f);
+	ClipPlaneInfo->ClipPlane = glm::vec4(Plane.X, Plane.Y, Plane.Z, Plane.W);
+
+	GlobalClipPlaneBuffer.Bind();
+	GlobalClipPlaneBuffer.BufferData(true);
+
+	++NumClipPlanes;
+
+	return 1;
+	unguard;
+}
+
+BYTE UXOpenGLRenderDevice::PopClipPlane()
+{
+	guard(UXOpenGLRenderDevice::PopClipPlane);
+	if (NumClipPlanes == 0)
+		return 2;
+
+	Shaders[ActiveProgram]->Flush(false);
+
+	--NumClipPlanes;
+	glDisable(GL_CLIP_DISTANCE0 + NumClipPlanes);
+
+	const auto ClipPlaneInfo = GlobalClipPlaneBuffer.GetElementPtr(0);
+	ClipPlaneInfo->ClipParams = glm::vec4(NumClipPlanes, 0.f, 0.f, 0.f);
+	ClipPlaneInfo->ClipPlane = glm::vec4(0.f, 0.f, 0.f, 0.f);
+
+	GlobalClipPlaneBuffer.Bind();
+	GlobalClipPlaneBuffer.BufferData(true);
+
+	return 1;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::UpdateRenderFBO(INT Width, INT Height)
+{
+	guard(UXOpenGLRenderDevice::UpdateRenderFBO);
+
+	if (RenderFBO && RenderFBOWidth == Width && RenderFBOHeight == Height && (RenderColorMSAA != 0) == (bool)UseAA)
+		return;
+
+	DestroyRenderFBO();
+
+	// Always create the single-sample color texture used by the postprocess pass.
+	glGenTextures(1, &RenderColorTexture);
+	glBindTexture(GL_TEXTURE_2D, RenderColorTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Width, Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	GLenum Status;
+
+	if (UseAA)
+	{
+		// MSAA render FBO: color + depth/stencil as multisample renderbuffers.
+		glGenFramebuffers(1, &RenderFBO);
+		glBindFramebuffer(GL_FRAMEBUFFER, RenderFBO);
+
+		glGenRenderbuffers(1, &RenderColorMSAA);
+		glBindRenderbuffer(GL_RENDERBUFFER, RenderColorMSAA);
+		glRenderbufferStorageMultisample(GL_RENDERBUFFER, NumAASamples, GL_RGBA8, Width, Height);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, RenderColorMSAA);
+
+		glGenRenderbuffers(1, &RenderDepthAttachment);
+		glBindRenderbuffer(GL_RENDERBUFFER, RenderDepthAttachment);
+		glRenderbufferStorageMultisample(GL_RENDERBUFFER, NumAASamples, GL_DEPTH24_STENCIL8, Width, Height);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, RenderDepthAttachment);
+		glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+		Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		if (Status != GL_FRAMEBUFFER_COMPLETE)
+		{
+			debugf(NAME_Warning, TEXT("XOpenGL: MSAA render FBO incomplete (status=0x%x) at %dx%d; retrying without anti-aliasing"), Status, Width, Height);
+			UseAA = 0;
+			DestroyRenderFBO();
+			UpdateRenderFBO(Width, Height);
+			return;
+		}
+
+		// Single-sample resolve FBO: RenderColorTexture as the only attachment.
+		// glBlitFramebuffer resolves MSAA into this at the end of each frame.
+		// It also gets its own depth/stencil attachment so hit testing can render directly into
+		// it instead of into the multisampled RenderFBO -- resolving MSAA averages neighboring
+		// subsamples together, which corrupts the exact, unblended "ID colors" hit testing relies
+		// on at almost every pixel along a thin or diagonal edge. A color-only blit never touches
+		// this attachment, so it doesn't interfere with the normal MSAA resolve path.
+		glGenFramebuffers(1, &RenderResolvedFBO);
+		glBindFramebuffer(GL_FRAMEBUFFER, RenderResolvedFBO);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RenderColorTexture, 0);
+
+		glGenRenderbuffers(1, &RenderResolvedDepthAttachment);
+		glBindRenderbuffer(GL_RENDERBUFFER, RenderResolvedDepthAttachment);
+		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, Width, Height);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, RenderResolvedDepthAttachment);
+		glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+		Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		if (Status != GL_FRAMEBUFFER_COMPLETE)
+		{
+			debugf(NAME_Warning, TEXT("XOpenGL: resolve FBO incomplete (status=0x%x) at %dx%d; retrying without anti-aliasing"), Status, Width, Height);
+			UseAA = 0;
+			DestroyRenderFBO();
+			UpdateRenderFBO(Width, Height);
+			return;
+		}
+	}
+	else
+	{
+		// Non-MSAA path: single FBO with color texture + depth/stencil renderbuffer.
+		glGenFramebuffers(1, &RenderFBO);
+		glBindFramebuffer(GL_FRAMEBUFFER, RenderFBO);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, RenderColorTexture, 0);
+
+		glGenRenderbuffers(1, &RenderDepthAttachment);
+		glBindRenderbuffer(GL_RENDERBUFFER, RenderDepthAttachment);
+		glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, Width, Height);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, RenderDepthAttachment);
+		glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+		Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		if (Status != GL_FRAMEBUFFER_COMPLETE)
+		{
+			debugf(NAME_Warning, TEXT("XOpenGL: render FBO incomplete (status=0x%x) at %dx%d"), Status, Width, Height);
+			DestroyRenderFBO();
+			return;
+		}
+	}
+
+	RenderFBOWidth  = Width;
+	RenderFBOHeight = Height;
+
+	unguard;
+}
+
+void UXOpenGLRenderDevice::DestroyRenderFBO()
+{
+	if (RenderDepthAttachment)         { glDeleteRenderbuffers(1, &RenderDepthAttachment);         RenderDepthAttachment = 0; }
+	if (RenderResolvedDepthAttachment) { glDeleteRenderbuffers(1, &RenderResolvedDepthAttachment); RenderResolvedDepthAttachment = 0; }
+	if (RenderColorMSAA)       { glDeleteRenderbuffers(1, &RenderColorMSAA);       RenderColorMSAA = 0; }
+	if (RenderColorTexture)    { glDeleteTextures(1, &RenderColorTexture);         RenderColorTexture = 0; }
+	if (RenderResolvedFBO)     { glDeleteFramebuffers(1, &RenderResolvedFBO);      RenderResolvedFBO = 0; }
+	if (RenderFBO)             { glDeleteFramebuffers(1, &RenderFBO);              RenderFBO = 0; }
+	RenderFBOWidth  = 0;
+	RenderFBOHeight = 0;
+	RenderFBOBound  = 0;
+	SceneColorResolved = 0;
+}
+
+void UXOpenGLRenderDevice::UpdateUICompositeFBO(INT Width, INT Height)
+{
+	guard(UXOpenGLRenderDevice::UpdateUICompositeFBO);
+
+	if (UICompositeFBO && UICompositeWidth == Width && UICompositeHeight == Height)
+		return;
+
+	DestroyUICompositeFBO();
+	if (Width < 1 || Height < 1)
+		return;
+
+	glGenTextures(1, &UICompositeColorTexture);
+	glBindTexture(GL_TEXTURE_2D, UICompositeColorTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, Width, Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glGenFramebuffers(1, &UICompositeFBO);
+	glBindFramebuffer(GL_FRAMEBUFFER, UICompositeFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, UICompositeColorTexture, 0);
+
+	glGenRenderbuffers(1, &UICompositeDepthAttachment);
+	glBindRenderbuffer(GL_RENDERBUFFER, UICompositeDepthAttachment);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, Width, Height);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, UICompositeDepthAttachment);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+	const GLenum Status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if (Status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		debugf(NAME_Warning, TEXT("XOpenGL: UI composite FBO incomplete (status=0x%x) at %dx%d"), Status, Width, Height);
+		DestroyUICompositeFBO();
+		return;
+	}
+
+	UICompositeWidth = Width;
+	UICompositeHeight = Height;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::DestroyUICompositeFBO()
+{
+	if (UICompositeDepthAttachment) { glDeleteRenderbuffers(1, &UICompositeDepthAttachment); UICompositeDepthAttachment = 0; }
+	if (UICompositeColorTexture)    { glDeleteTextures(1, &UICompositeColorTexture);          UICompositeColorTexture = 0; }
+	if (UICompositeFBO)             { glDeleteFramebuffers(1, &UICompositeFBO);               UICompositeFBO = 0; }
+	UICompositeWidth = 0;
+	UICompositeHeight = 0;
+	FrameUsesUIComposite = 0;
+	UICompositeBound = 0;
+	LastFrameUsedUIComposite = 0;
+}
+
+void UXOpenGLRenderDevice::ResolveSceneColor()
+{
+	if (SceneColorResolved)
+		return;
+
+	if (!HitTesting() && UseAA && RenderFBO && RenderResolvedFBO)
+	{
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, RenderFBO);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, RenderResolvedFBO);
+		glBlitFramebuffer(0, 0, RenderFBOWidth, RenderFBOHeight,
+			0, 0, RenderFBOWidth, RenderFBOHeight,
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+		if (glInvalidateFramebuffer)
+		{
+			static const GLenum DiscardAttachments[] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_STENCIL_ATTACHMENT };
+			glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, DiscardAttachments);
+		}
+	}
+	SceneColorResolved = 1;
+}
+
+/*-----------------------------------------------------------------------------
+	DXGI low-latency swapchain (WGL_NV_DX_interop) - ReduceMouseLag.
+-----------------------------------------------------------------------------*/
+
+#if _WIN32 && !OLDUNREAL_WINXP
+
+bool UXOpenGLRenderDevice::CreateDXGIFramebuffer(
+	INT             Width,
+	INT             Height,
+	HANDLE          hDev,
+	ID3D11Device*   pDevice,
+	IDXGISwapChain* pSwapChain)
+{
+	//
+	// stijn: we're supposed to be able to attach the DXGI swapchain's back buffer to an OpenGL FBO
+	// as its color attachment, but this does not seem to work on nvidia drivers.
+	// Instead, we'll create a "proxy" texture, use it as a render target, and copy its
+	// contents to the back buffer during present.
+	// This is not ideal, but it works, and it still allows us to reduce input latency
+	// to native d3d11 levels.
+	//
+
+	D3D11_TEXTURE2D_DESC TexDesc = {};
+	TexDesc.Width                = Width;
+	TexDesc.Height               = Height;
+	TexDesc.MipLevels            = 1;
+	TexDesc.ArraySize            = 1;
+	TexDesc.Format               = XOPENGL_DXGI_FORMAT;
+	TexDesc.SampleDesc.Count     = 1;
+	TexDesc.Usage                = D3D11_USAGE_DEFAULT;
+	TexDesc.BindFlags            = D3D11_BIND_RENDER_TARGET;
+	pDevice->CreateTexture2D(&TexDesc, nullptr, (ID3D11Texture2D**)&DXGIInteropTextureD3D);
+
+	// Now create an OpenGL name for this native d3d11 texture
+	glGenTextures(1, &DXGIInteropTextureGL);
+
+	// And register the texture with WGL_NV_DX_interop so we can use it as an FBO attachment
+	HANDLE hBB = wglDXRegisterObjectNV(
+		hDev,
+		DXGIInteropTextureD3D,
+		DXGIInteropTextureGL,
+		GL_TEXTURE_2D,
+		WGL_ACCESS_WRITE_DISCARD_NV);
+
+	if (!hBB)
+	{
+		debugf(TEXT("XOpenGL: wglDXRegisterObjectNV failed. ReduceMouseLag will have no effect."));
+		glDeleteTextures(1, &DXGIInteropTextureGL);
+		DXGIInteropTextureGL = 0;
+		wglDXCloseDeviceNV(hDev);
+		((ID3D11Texture2D*)DXGIInteropTextureD3D)->Release();
+		DXGIInteropTextureD3D = nullptr;
+		pSwapChain->Release();
+		pDevice->Release();
+		return false;
+	}
+
+	// Create the FBO here
+	GLuint FB = 0;
+	glGenFramebuffers(1, &FB);
+
+	// lock the texture so OpenGL can actually see its memory
+	verify(wglDXLockObjectsNV(hDev, 1, &hBB));
+
+	// setup the FBO while the memory is valid
+	glBindFramebuffer(GL_FRAMEBUFFER, FB);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, DXGIInteropTextureGL, 0);
+
+	// Make sure GL draws to the correct color attachment
+	GLenum DrawBuffers[] = { GL_COLOR_ATTACHMENT0 };
+	glDrawBuffers(1, DrawBuffers);
+
+	// force the driver to evaluate and cache the COMPLETE status
+	GLenum FBOStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	if (FBOStatus != GL_FRAMEBUFFER_COMPLETE)
+		debugf(NAME_Warning, TEXT("XOpenGL: DXGI interop FBO is incomplete! Status: 0x%x"), FBOStatus);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	// unlock the resource now that the FBO is safely built
+	verify(wglDXUnlockObjectsNV(hDev, 1, &hBB));
+
+	hDXBackBuffer   = hBB;
+	DXGIFramebuffer = FB;
+
+	return true;
+}
+
+void UXOpenGLRenderDevice::InitDXGISwapchain(INT Width, INT Height)
+{
+	guard(UXOpenGLRenderDevice::InitDXGISwapchain);
+
+	if (!SUPPORTS_WGL_NV_DX_interop)
+	{
+		wglDXOpenDeviceNV       = (PFNWGLDXOPENDEVICENVPROC)wglGetProcAddress("wglDXOpenDeviceNV");
+		wglDXCloseDeviceNV      = (PFNWGLDXCLOSEDEVICENVPROC)wglGetProcAddress("wglDXCloseDeviceNV");
+		wglDXRegisterObjectNV   = (PFNWGLDXREGISTEROBJECTNVPROC)wglGetProcAddress("wglDXRegisterObjectNV");
+		wglDXUnregisterObjectNV = (PFNWGLDXUNREGISTEROBJECTNVPROC)wglGetProcAddress("wglDXUnregisterObjectNV");
+		wglDXLockObjectsNV      = (PFNWGLDXLOCKOBJECTSNVPROC)wglGetProcAddress("wglDXLockObjectsNV");
+		wglDXUnlockObjectsNV    = (PFNWGLDXUNLOCKOBJECTSNVPROC)wglGetProcAddress("wglDXUnlockObjectsNV");
+		SUPPORTS_WGL_NV_DX_interop = wglDXOpenDeviceNV && wglDXCloseDeviceNV && wglDXRegisterObjectNV &&
+									 wglDXUnregisterObjectNV && wglDXLockObjectsNV && wglDXUnlockObjectsNV;
+		if (SUPPORTS_WGL_NV_DX_interop)
+			debugf(TEXT("XOpenGL: WGL_NV_DX_interop supported."));
+		else
+			debugf(TEXT("XOpenGL: WGL_NV_DX_interop not supported. ReduceMouseLag will have no effect."));
+	}
+
+	if (!SUPPORTS_WGL_NV_DX_interop)
+		return;
+
+	D3D_FEATURE_LEVEL    FeatureLevel;
+	ID3D11Device*        pDevice  = nullptr;
+	ID3D11DeviceContext* pContext = nullptr;
+
+	UINT DeviceFlags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+
+	HRESULT hr = D3D11CreateDevice(
+		nullptr,
+		D3D_DRIVER_TYPE_HARDWARE,
+		nullptr,
+		DeviceFlags,
+		nullptr,
+		0,
+		D3D11_SDK_VERSION,
+		&pDevice,
+		&FeatureLevel,
+		&pContext);
+
+	if (FAILED(hr))
+	{
+		debugf(TEXT("XOpenGL: D3D11CreateDevice failed (0x%08X). ReduceMouseLag will have no effect."), hr);
+		return;
+	}
+	pContext->Release();
+
+	// Reduce GPU queue depth to 1 frame for lower input latency.
+	IDXGIDevice1* pDXGIDevice1 = nullptr;
+	if (SUCCEEDED(pDevice->QueryInterface(__uuidof(IDXGIDevice1), (void**)&pDXGIDevice1)))
+	{
+		pDXGIDevice1->SetMaximumFrameLatency(1);
+		pDXGIDevice1->Release();
+	}
+
+	// Walk up to the DXGI factory that created the adapter.
+	IDXGIDevice*  pDXGIDev = nullptr;
+	IDXGIAdapter* pAdapter = nullptr;
+	IDXGIFactory* pFactory = nullptr;
+	pDevice->QueryInterface(__uuidof(IDXGIDevice), (void**)&pDXGIDev);
+	pDXGIDev->GetAdapter(&pAdapter);
+	pAdapter->GetParent(__uuidof(IDXGIFactory), (void**)&pFactory);
+	pAdapter->Release();
+	pDXGIDev->Release();
+
+	// We manage windowed<->borderless-fullscreen transitions ourselves (see WinViewport.cpp,
+	// which just restyles/resizes the same HWND). Without this, DXGI's own window-change
+	// monitoring can decide to intervene when it sees the window grow to cover the whole
+	// monitor, which fights with our explicit ResizeDXGISwapchain/ResizeBuffers calls and
+	// leaves the swapchain in a broken state after a windowed->fullscreen transition.
+	pFactory->MakeWindowAssociation(hWnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+
+	// Check if we can disable vsync-based presentation and use tearing instead.
+	IDXGIFactory5* Factory5;
+	if (SUCCEEDED(pFactory->QueryInterface(__uuidof(IDXGIFactory5), (void**)&Factory5)))
+	{
+		Factory5->CheckFeatureSupport(
+			DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+			&DXGISupportsTearing,
+			sizeof(DXGISupportsTearing));
+		Factory5->Release();
+	}
+
+	// Try flip-discard (Windows 10+) first, fall back to blit-discard.
+	DXGI_SWAP_CHAIN_DESC Desc = {};
+	Desc.BufferDesc.Width     = Width;
+	Desc.BufferDesc.Height    = Height;
+	Desc.BufferDesc.Format    = XOPENGL_DXGI_FORMAT;
+	Desc.SampleDesc.Count     = 1;
+	Desc.BufferUsage          = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	Desc.OutputWindow         = hWnd;
+	Desc.Windowed             = 1;
+	Desc.SwapEffect           = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	Desc.BufferCount          = 2;
+	Desc.Flags                = DXGISupportsTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	DXGISwapChainFlags        = Desc.Flags;
+
+	IDXGISwapChain* pSwapChain = nullptr;
+	hr                         = pFactory->CreateSwapChain(pDevice, &Desc, &pSwapChain);
+	if (FAILED(hr))
+	{
+		Desc.SwapEffect  = DXGI_SWAP_EFFECT_DISCARD;
+		Desc.BufferCount = 1;
+		hr               = pFactory->CreateSwapChain(pDevice, &Desc, &pSwapChain);
+	}
+	pFactory->Release();
+
+	if (FAILED(hr))
+	{
+		debugf(TEXT("XOpenGL: DXGI swapchain creation failed (0x%08X). ReduceMouseLag will have no effect."), hr);
+		pDevice->Release();
+		return;
+	}
+
+	// Open the D3D11 device for WGL interop.
+	HANDLE hDev = wglDXOpenDeviceNV(pDevice);
+	if (!hDev)
+	{
+		debugf(TEXT("XOpenGL: wglDXOpenDeviceNV failed. ReduceMouseLag will have no effect."));
+		pSwapChain->Release();
+		pDevice->Release();
+		return;
+	}
+
+	if (CreateDXGIFramebuffer(Width, Height, hDev, pDevice, pSwapChain))
+	{
+		pD3D11Device       = pDevice;
+		pDXGISwapChain     = pSwapChain;
+		hDXDevice          = hDev;
+		DXGIWidth          = Width;
+		DXGIHeight         = Height;
+		UsingDXGISwapchain = 1;
+
+		debugf(TEXT("XOpenGL: DXGI swapchain initialized for ReduceMouseLag (%dx%d)."), Width, Height);
+	}
+
+	unguard;
+}
+
+void UXOpenGLRenderDevice::DestroyDXGISwapchain()
+{
+	guard(UXOpenGLRenderDevice::DestroyDXGISwapchain);
+
+	if (!UsingDXGISwapchain)
+		return;
+
+	if (hDXBackBuffer)
+	{
+		wglDXUnregisterObjectNV(hDXDevice, hDXBackBuffer);
+		hDXBackBuffer = nullptr;
+	}
+	if (DXGIFramebuffer)
+	{
+		glDeleteFramebuffers(1, &DXGIFramebuffer);
+		DXGIFramebuffer = 0;
+	}
+	if (DXGIInteropTextureGL)
+	{
+		glDeleteTextures(1, &DXGIInteropTextureGL);
+		DXGIInteropTextureGL = 0;
+	}
+	if (DXGIInteropTextureD3D)
+	{
+		((ID3D11Texture2D*)DXGIInteropTextureD3D)->Release();
+		DXGIInteropTextureD3D = nullptr;
+	}
+	if (hDXDevice)
+	{
+		wglDXCloseDeviceNV(hDXDevice);
+		hDXDevice = nullptr;
+	}
+	if (pDXGISwapChain)
+	{
+		((IDXGISwapChain*)pDXGISwapChain)->SetFullscreenState(0, nullptr);
+		((IDXGISwapChain*)pDXGISwapChain)->Release();
+		pDXGISwapChain = nullptr;
+	}
+	if (pD3D11Device)
+	{
+		ID3D11DeviceContext* pContext = nullptr;
+		((ID3D11Device*)pD3D11Device)->GetImmediateContext(&pContext);
+		if (pContext)
+		{
+			pContext->ClearState();
+			pContext->Flush();
+			pContext->Release();
+		}
+
+		((ID3D11Device*)pD3D11Device)->Release();
+		pD3D11Device = nullptr;
+	}
+
+	UsingDXGISwapchain = 0;
+
+	unguard;
+}
+
+void UXOpenGLRenderDevice::ResizeDXGISwapchain(INT Width, INT Height)
+{
+	guard(UXOpenGLRenderDevice::ResizeDXGISwapchain);
+
+	if (!UsingDXGISwapchain || (Width == DXGIWidth && Height == DXGIHeight) || Width <= 0 || Height <= 0)
+		return;
+
+	// Unregister the old backbuffer from the interop layer.
+	wglDXUnregisterObjectNV(hDXDevice, hDXBackBuffer);
+	hDXBackBuffer = nullptr;
+	glDeleteFramebuffers(1, &DXGIFramebuffer);
+	glDeleteTextures(1, &DXGIInteropTextureGL);
+	DXGIFramebuffer      = 0;
+	DXGIInteropTextureGL = 0;
+	if (DXGIInteropTextureD3D)
+	{
+		((ID3D11Texture2D*)DXGIInteropTextureD3D)->Release();
+		DXGIInteropTextureD3D = nullptr;
+	}
+
+	HRESULT hr = ((IDXGISwapChain*)pDXGISwapChain)
+		->ResizeBuffers(0, Width, Height, XOPENGL_DXGI_FORMAT, DXGISwapChainFlags);
+	if (FAILED(hr))
+	{
+		debugf(TEXT("XOpenGL: DXGI ResizeBuffers failed (0x%08X). Disabling ReduceMouseLag."), hr);
+		DestroyDXGISwapchain();
+		return;
+	}
+
+	if (CreateDXGIFramebuffer(Width, Height, hDXDevice, (ID3D11Device*)pD3D11Device, (IDXGISwapChain*)pDXGISwapChain))
+	{
+		DXGIWidth  = Width;
+		DXGIHeight = Height;
+
+		debugf(TEXT("XOpenGL: Resized DXGI swapchain (%dx%d)"), Width, Height);
+	}
+
+	unguard;
+}
+
+#endif // _WIN32
+
+static INT ScaledRenderDimension(INT LogicalSize, FLOAT Scale)
+{
+	return Max(1, static_cast<INT>((DOUBLE)LogicalSize * Scale + 0.5));
+}
+
+static INT LockCount = 0;
+void UXOpenGLRenderDevice::Lock(FPlane InFlashScale, FPlane InFlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* InHitData, INT* InHitSize)
+{
+	guard(UXOpenGLRenderDevice::Lock);
+
+	check(LockCount == 0);
+	++LockCount;
+
+	MakeCurrent();
+
+	RenderFBOBound = 0;
+	FrameUsesUIComposite = 0;
+	UICompositeBound = 0;
+	SceneColorResolved = 0;
+
+	if (appIsNan(RenderScale))
+		RenderScale = 1.f;
+	else
+		RenderScale = Clamp(RenderScale, 0.5f, 1.f);
+
+	const INT LogicalWidth = Max(1, Viewport->SizeX);
+	const INT LogicalHeight = Max(1, Viewport->SizeY);
+	const INT SceneWidth = ScaledRenderDimension(LogicalWidth, RenderScale);
+	const INT SceneHeight = ScaledRenderDimension(LogicalHeight, RenderScale);
+	const UBOOL WantsUIComposite = !InHitData && (SceneWidth != LogicalWidth || SceneHeight != LogicalHeight);
+
+	if (WantsUIComposite)
+	{
+		UpdateRenderFBO(SceneWidth, SceneHeight);
+		UpdateUICompositeFBO(LogicalWidth, LogicalHeight);
+		FrameUsesUIComposite = RenderFBO && UICompositeFBO;
+		if (!FrameUsesUIComposite)
+		{
+			debugf(NAME_Warning, TEXT("XOpenGL: RenderScale composite unavailable; falling back to full-resolution rendering"));
+			RenderScale = 1.f;
+			DestroyUICompositeFBO();
+			UpdateRenderFBO(LogicalWidth, LogicalHeight);
+		}
+	}
+	else
+	{
+		UpdateRenderFBO(LogicalWidth, LogicalHeight);
+		if (!InHitData && UICompositeFBO)
+			DestroyUICompositeFBO();
+	}
+
+	// Hit testing always stays at full logical resolution and bypasses MSAA resolve so the
+	// exact, unblended ID colors remain intact.
+	const GLuint FBOToBind = (InHitData && UseAA && RenderResolvedFBO) ? RenderResolvedFBO : RenderFBO;
+	if (FBOToBind)
+	{
+		glBindFramebuffer(GL_FRAMEBUFFER, FBOToBind);
+		glViewport(0, 0, RenderFBOWidth, RenderFBOHeight);
+		RenderFBOBound = 1;
+	}
+
+	// Clear the Z buffer if needed.
+	glClearColor(ScreenClear.X, ScreenClear.Y, ScreenClear.Z, ScreenClear.W);
+		
+	if (glClearDepthf)
+		glClearDepthf(1.f);
+#ifndef __EMSCRIPTEN__
+	else
+		glClearDepth(1.0);
+#endif
+	if (glDepthRangef)
+		glDepthRangef(0.f, 1.f);
+#ifndef __EMSCRIPTEN__
+	else
+		glDepthRange(0.0, 1.0);
+#endif
+
+	glPolygonOffset(-1.f, -1.f);
+    SetBlend(PF_Occlude);
+#if MACOSX // stijn: on macOS, it's much faster to just clear everything
+	glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+#else
+	glClear(GL_DEPTH_BUFFER_BIT | ((RenderLockFlags & LOCKR_ClearScreen) ? GL_COLOR_BUFFER_BIT : 0));
+#endif
+
+	LastZMode = ZTEST_LessEqual;
+	glDepthFunc(GL_LEQUAL);
+
+	// Remember stuff.
+	FlashScale = InFlashScale;
+	FlashFog = InFlashFog;
+
+	// Lock hits.
+	HitData = InHitData;
+	HitSize = InHitSize;
+
+	// Reset stats.
+	appMemzero(&Stats, sizeof(Stats));
+
+	if (GIsEditor)
+	{
+		auto EditorState = EditorStateBuffer.GetElementPtr(0);
+		EditorState->HitTesting = HitTesting();
+		EditorState->RendMap = Viewport->Actor->RendMap;
+		EditorStateBuffer.Bind();
+		EditorStateBuffer.BufferData(true);
+	}
+
+	LockHit(InHitData, InHitSize);
+	unguard;
+}
+
+void UXOpenGLRenderDevice::BeginUI(FSceneNode* Frame)
+{
+	guard(UXOpenGLRenderDevice::BeginUI);
+
+	if (!RenderFBOBound || !FrameUsesUIComposite || UICompositeBound || HitTesting())
+		return;
+
+	SetProgram(No_Prog);
+	ResolveSceneColor();
+
+	const GLuint SceneFBO = UseAA && RenderResolvedFBO ? RenderResolvedFBO : RenderFBO;
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, SceneFBO);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, UICompositeFBO);
+	glBlitFramebuffer(0, 0, RenderFBOWidth, RenderFBOHeight,
+		0, 0, UICompositeWidth, UICompositeHeight,
+		GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	if (glInvalidateFramebuffer)
+	{
+		static const GLenum DiscardAttachments[] = { GL_DEPTH_STENCIL_ATTACHMENT };
+		glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 1, DiscardAttachments);
+	}
+
+	glBindFramebuffer(GL_FRAMEBUFFER, UICompositeFBO);
+	glViewport(0, 0, UICompositeWidth, UICompositeHeight);
+	SetBlend(PF_Occlude);
+	glClear(GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+	UICompositeBound = 1;
+
+	unguard;
+}
+
+void UXOpenGLRenderDevice::Unlock(UBOOL Blit)
+{
+	guard(UXOpenGLRenderDevice::Unlock);
+
+	// Unlock and render.
+	check(LockCount == 1);
+
+	SetProgram(No_Prog);
+	if (FrameUsesUIComposite && !UICompositeBound)
+		BeginUI(NULL);
+
+	if (RenderFBOBound)
+	{
+		const UBOOL UsesUIComposite = FrameUsesUIComposite && UICompositeBound;
+		if (!UsesUIComposite)
+		{
+			ResolveSceneColor();
+			if ((HitTesting() || !UseAA) && glInvalidateFramebuffer)
+			{
+				static const GLenum DiscardAttachments[] = { GL_DEPTH_STENCIL_ATTACHMENT };
+				glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 1, DiscardAttachments);
+			}
+		}
+		else if (glInvalidateFramebuffer)
+		{
+			static const GLenum DiscardAttachments[] = { GL_DEPTH_STENCIL_ATTACHMENT };
+			glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 1, DiscardAttachments);
+		}
+
+		const GLuint PresentTexture = UsesUIComposite ? UICompositeColorTexture : RenderColorTexture;
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		if (Blit)
+		{
+#if _WIN32 && !OLDUNREAL_WINXP
+			if (UsingDXGISwapchain)
+			{
+				ResizeDXGISwapchain(Viewport->PhysicalSizeX, Viewport->PhysicalSizeY);
+				if (UsingDXGISwapchain) // ResizeDXGISwapchain may have disabled it on failure
+					verify(wglDXLockObjectsNV(hDXDevice, 1, &hDXBackBuffer));
+			}
+#endif
+
+			SetProgram(PostProcess_Prog);
+#if _WIN32 && !OLDUNREAL_WINXP
+			if (UsingDXGISwapchain)
+				glBindFramebuffer(GL_FRAMEBUFFER, DXGIFramebuffer);
+#endif
+			INT PresentWidth = Viewport->SizeX;
+			INT PresentHeight = Viewport->SizeY;
+#if !defined(_WIN32)
+			SDL_GL_GetDrawableSize(Window, &PresentWidth, &PresentHeight);
+#endif
+			CachedPhysicalSizeX = PresentWidth;
+			CachedPhysicalSizeY = PresentHeight;
+			static_cast<PostProcessProgram*>(Shaders[PostProcess_Prog])->Draw(PresentTexture, PresentWidth, PresentHeight);
+			SetProgram(No_Prog);
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+#if !_WIN32
+			SDL_GL_SwapWindow(Window);
+#elif !OLDUNREAL_WINXP
+			if (UsingDXGISwapchain)
+			{
+				// Make the D3D device's back buffer see what we just rendered, then present it
+				// through the low-latency DXGI flip-model swapchain instead of wglSwapBuffers.
+				glFlush();
+				verify(wglDXUnlockObjectsNV(hDXDevice, 1, &hDXBackBuffer));
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+				ID3D11Texture2D* pBackBuf = nullptr;
+				HRESULT hrGetBuffer = ((IDXGISwapChain*)pDXGISwapChain)->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBuf);
+				if (FAILED(hrGetBuffer))
+					debugf(NAME_Warning, TEXT("XOpenGL: DXGI GetBuffer failed (0x%08X)"), hrGetBuffer);
+
+				ID3D11DeviceContext* pDXContext = nullptr;
+				((ID3D11Device*)pD3D11Device)->GetImmediateContext(&pDXContext);
+
+				if (pDXContext && pBackBuf && DXGIInteropTextureD3D)
+				{
+					pDXContext->CopyResource(pBackBuf, (ID3D11Texture2D*)DXGIInteropTextureD3D);
+					pDXContext->Release();
+				}
+				if (pBackBuf)
+					pBackBuf->Release();
+
+				UINT PresentFlags = 0;
+				UINT SyncInterval = UseVSync != VS_Off ? 1 : 0;
+
+				// Only allow tearing if VSync is off, the hardware supports it, and we're not
+				// in (borderless) fullscreen. DXGI appears to reject DXGI_PRESENT_ALLOW_TEARING
+				// with DXGI_ERROR_INVALID_CALL once our window exactly covers its output, even
+				// though we never call SetFullscreenState(TRUE) ourselves (we stay Windowed=TRUE
+				// the whole time) - this was producing a Present failure on every frame (a frozen
+				// screen) right after a windowed->fullscreen transition.
+				if (SyncInterval == 0 && DXGISupportsTearing && !WasFullscreen)
+					PresentFlags |= DXGI_PRESENT_ALLOW_TEARING;
+
+				HRESULT hrPresent = ((IDXGISwapChain*)pDXGISwapChain)->Present(SyncInterval, PresentFlags);
+				if (FAILED(hrPresent))
+					debugf(NAME_Warning, TEXT("XOpenGL: DXGI Present failed (0x%08X)"), hrPresent);
+			}
+			else
+				verify(SwapBuffers(hDC));
+#endif
+		}
+		else
+		{
+			// Keep the exact buffer that contains this completed logical frame bound for
+			// hit decoding or a following ReadPixels call.
+			const GLuint ReadFBO = UsesUIComposite
+				? UICompositeFBO
+				: (UseAA && RenderResolvedFBO ? RenderResolvedFBO : RenderFBO);
+			glBindFramebuffer(GL_READ_FRAMEBUFFER, ReadFBO);
+		}
+
+		LastFrameUsedUIComposite = UsesUIComposite;
+		RenderFBOBound = 0;
+		FrameUsesUIComposite = 0;
+		UICompositeBound = 0;
+	}
+
+	--LockCount;
+	UnlockHit(Blit);
+	unguard;
+}
+
+void UXOpenGLRenderDevice::BuildGammaRamp(FLOAT GammaCorrection, FGammaRamp& Ramp)
+{
+#if ENGINE_VERSION==300 // NERF
+#define OPENGL_SRGB_GAMMA_OFFSET 0.1f
+#elif ENGINE_VERSION==1100 // DEUSEX
+#define OPENGL_SRGB_GAMMA_OFFSET 0.2f
+#else
+#define OPENGL_SRGB_GAMMA_OFFSET 0.15f
+#endif
+
+	// HACK HACK.
+	if (UseSRGBTextures)
+		GammaCorrection += OPENGL_SRGB_GAMMA_OFFSET;
+
+	for (INT i = 0; i<256; i++)
+	{
+		Ramp.red[i] = Clamp(appRound(appPow(OriginalRamp.red[i] / 65535.f, 0.4f / GammaCorrection)*65535.f), 0, 65535);
+		Ramp.green[i] = Clamp(appRound(appPow(OriginalRamp.green[i] / 65535.f, 0.4f / GammaCorrection)*65535.f), 0, 65535);
+		Ramp.blue[i] = Clamp(appRound(appPow(OriginalRamp.blue[i] / 65535.f, 0.4f / GammaCorrection)*65535.f), 0, 65535);
+	}
+}
+
+void UXOpenGLRenderDevice::BuildGammaRamp(FLOAT GammaCorrection, FByteGammaRamp &Ramp) {
+
+	//Parameter clamping
+
+	FLOAT RedGamma = 1.0f / (2.5f * (GammaCorrection));
+	FLOAT GreenGamma = 1.0f / (2.5f * (GammaCorrection));
+	FLOAT BlueGamma = 1.0f / (2.5f * (GammaCorrection));
+
+	for (GLuint u = 0; u < 256; u++)
+	{
+		INT iVal, iValRed, iValGreen, iValBlue;
+
+		//Initial value
+		iVal = u;
+
+		//Brightness
+		iVal += GammaCorrection;
+
+		//Clamping
+		if (iVal < 0)
+			iVal = 0;
+		if (iVal > 255)
+			iVal = 255;
+
+		//Gamma
+		iValRed = (int)appRound((float)appPow(iVal / 255.0f, RedGamma) * 255.0f);
+		iValGreen = (int)appRound((float)appPow(iVal / 255.0f, GreenGamma) * 255.0f);
+		iValBlue = (int)appRound((float)appPow(iVal / 255.0f, BlueGamma) * 255.0f);
+
+		//Save results
+		Ramp.red[u] = (BYTE)iValRed;
+		Ramp.green[u] = (BYTE)iValGreen;
+		Ramp.blue[u] = (BYTE)iValBlue;
+	}
+	return;
+}
+
+void UXOpenGLRenderDevice::SetGamma(FLOAT GammaCorrection)
+{
+	guard(UXOpenGLRenderDevice::SetGamma);
+
+	GammaCorrection += 0.1f; // change range from 0.0-0.9 to 0.1 to 1.0
+	Gamma = GammaCorrection * (GIsEditor ? GammaMultiplierUED : GammaMultiplier);
+
+	unguard;
+}
+
+FLOAT UXOpenGLRenderDevice::GetViewportGamma(UViewport* Viewport) const
+{
+	if (Viewport->IsOrtho())
+		return 1.f;
+	return Gamma;
+}
+
+void UXOpenGLRenderDevice::SetProgram(INT NextProgram)
+{
+	guard(UXOpenGLRenderDevice::SetProgram);
+
+	if (ActiveProgram != NextProgram)
+	{
+		// Flush the old program
+		Shaders[ActiveProgram]->DeactivateShader();
+
+		// Switch and initialize the new program
+		PrevProgram = ActiveProgram;
+		ActiveProgram = NextProgram;
+
+		Shaders[ActiveProgram]->ActivateShader();
+	}
+
+	unguard;
+}
+
+#if ENGINE_VERSION==227
+void UXOpenGLRenderDevice::SetDistanceFog(FFogSurf& Surf)
+{
+	// Stop batching
+	Shaders[ActiveProgram]->Flush(false);
+	
+	auto DistanceFogInfo = DistanceFogBuffer.GetElementPtr(0);
+	DistanceFogInfo->FogColor = glm::vec4(Surf.FogColor.X, Surf.FogColor.Y, Surf.FogColor.Z, Surf.FogColor.W);
+	DistanceFogInfo->FogStart = Surf.FogDistanceStart;
+	DistanceFogInfo->FogEnd = Surf.FogDistanceEnd;
+	DistanceFogInfo->FogDensity = Surf.FogDensity;
+	DistanceFogInfo->FogMode = Surf.FogMode;
+	DistanceFogBuffer.Bind();
+	DistanceFogBuffer.BufferData(true);
+}
+#endif // ENGINE_VERSION
+
+void UXOpenGLRenderDevice::ResetDistanceFog()
+{
+#if ENGINE_VERSION==227
+	auto DistanceFogInfo = DistanceFogBuffer.GetElementPtr(0);
+	if (DistanceFogInfo->FogMode != -1)
+	{
+		Shaders[ActiveProgram]->Flush(false);
+		DistanceFogInfo->FogMode = -1;
+		DistanceFogBuffer.Bind();
+		DistanceFogBuffer.BufferData(true);
+	}
+#endif
+}
+
+void UXOpenGLRenderDevice::ClearZ(FSceneNode* Frame)
+{
+	guard(UXOpenGLRenderDevice::ClearZ);
+
+	Shaders[ActiveProgram]->Flush(false);
+	
+	// stijn: you have a serious problem in Engine/Render if you need this SetSceneNode call here!
+#if !MACOSX
+	SetSceneNode(Frame);
+#endif
+	SetBlend(PF_Occlude);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	
+	unguard;
+}
+
+void UXOpenGLRenderDevice::ReadPixels(FColor* Pixels)
+{
+	guard(UXOpenGLRenderDevice::ReadPixels);
+
+	INT x, y;
+	INT SizeX, SizeY;
+
+	SizeX = Viewport->SizeX;
+	SizeY = Viewport->SizeY;
+
+	MakeCurrent();
+
+	// Scaled frames finish in the full logical-size composite; the fast path keeps
+	// reading the ordinary single-sample scene target exactly as before.
+	const UBOOL UseUIComposite = (UICompositeBound || LastFrameUsedUIComposite) && UICompositeFBO;
+	const GLuint ReadFBO = UseUIComposite
+		? UICompositeFBO
+		: (UseAA && RenderResolvedFBO ? RenderResolvedFBO : RenderFBO);
+	if (ReadFBO)
+		glBindFramebuffer(GL_FRAMEBUFFER, ReadFBO);
+	glReadPixels(0, 0, SizeX, SizeY, GL_RGBA, GL_UNSIGNED_BYTE, Pixels);
+	if (ReadFBO)
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	
+	for (INT i = 0; i<SizeY / 2; i++)
+	{
+		for (INT j = 0; j<SizeX; j++)
+		{
+			Exchange(Pixels[j + i*SizeX].R, Pixels[j + (SizeY - 1 - i)*SizeX].B);
+			Exchange(Pixels[j + i*SizeX].G, Pixels[j + (SizeY - 1 - i)*SizeX].G);
+			Exchange(Pixels[j + i*SizeX].B, Pixels[j + (SizeY - 1 - i)*SizeX].R);
+		}
+	}
+
+	const UBOOL bDoGammaCorrect = GammaCorrectScreenshots;
+
+
+	//Gamma correct screenshots
+	if (bDoGammaCorrect)
+	{
+		FByteGammaRamp Ramp;
+		BuildGammaRamp(GammaOffsetScreenshots, Ramp);
+		for (y = 0; y < SizeY; y++)
+		{
+			for (x = 0; x < SizeX; x++)
+			{
+				Pixels[x + y * SizeX].R = Ramp.red[Pixels[x + y * SizeX].R];
+				Pixels[x + y * SizeX].G = Ramp.green[Pixels[x + y * SizeX].G];
+				Pixels[x + y * SizeX].B = Ramp.blue[Pixels[x + y * SizeX].B];
+			}
+		}
+	}
+    
+	unguard;
+}
+
+void UXOpenGLRenderDevice::PrecacheTexture(FTextureInfo& Info, DWORD PolyFlags)
+{
+	guard(UXOpenGLRenderDevice::PrecacheTexture);
+	SetTexture(DiffuseTextureIndex, Info, PolyFlags, 0.0);
+	unguard;
+}
+
+FString GetTrueFalse(UBOOL Value)
+{
+	return Value == 1 ? TEXT("True") : TEXT("False");
+}
+
+void UXOpenGLRenderDevice::Exit()
+{
+	guard(UXOpenGLRenderDevice::Exit);
+	debugf(TEXT("XOpenGL: Exit"));
+
+	// Viewport switching can call Exit outside Lock/Unlock, so explicitly
+	// restore this device's context before releasing context-owned resources.
+	MakeCurrent();
+	SaveShaderCache();
+
+	if (!GIsEditor)
+		Flush(0);
+
+	DestroyUICompositeFBO();
+	DestroyRenderFBO();
+#if _WIN32 && !OLDUNREAL_WINXP
+	DestroyDXGISwapchain();
+#endif
+
+	ResetShaders();
+
+	// Delete UBOs while the context is current.
+	FrameStateBuffer.DeleteBuffer();
+	LightInfoBuffer.DeleteBuffer();
+	GlobalClipPlaneBuffer.DeleteBuffer();
+	EditorStateBuffer.DeleteBuffer();
+	DistanceFogBuffer.DeleteBuffer();
+	
+#if !_WIN32
+	CurrentGLContext = NULL;
+
+	XOpenGLMakeCurrent(Window, NULL);
+	XOpenGLDestroyContext(glContext);
+	AllContexts.RemoveItem(glContext);
+	glContext = NULL;
+	if (AllContexts.Num() == 0 && SharedBindMap)
+	{
+		delete SharedBindMap;
+		SharedBindMap = NULL;
+	}
+	
+#else
+	// Shut down this GL context. May fail if window was already destroyed.
+	check(glContext);
+	CurrentGLContext = NULL;
+	wglMakeCurrent(NULL, NULL);
+	wglDeleteContext(glContext);
+	verify(AllContexts.RemoveItem(glContext) == 1);
+	glContext = NULL;
+	if (WasFullscreen)
+		ChangeDisplaySettingsW(NULL, 0);
+	
+	if (hDC)
+		ReleaseDC(hWnd, hDC);
+	hDC = NULL;
+
+	// Shut down global GL.
+	if (AllContexts.Num() == 0)
+		AllContexts.~TArray<HGLRC>();
+	NumDevices--;
+#endif
+
+#if _WIN32 && !UNREAL_OLDUNREAL && !UNREAL_TOURNAMENT_OLDUNREAL
+	TimerEnd();
+#endif
+
+	//Why isn't this set automatically??
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("Description"), *FString::Printf(TEXT("%ls"), *Description));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoDrawSimple"), *GetTrueFalse(NoDrawSimple));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoDrawTile"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(NoDrawTile)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoDrawGouraudList"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(NoDrawGouraudList)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoDrawGouraud"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(NoDrawGouraud)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoDrawComplexSurface"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(NoDrawComplexSurface)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseOpenGLDebug"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseOpenGLDebug)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseHWClipping"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseHWClipping)));
+#if UNREAL_OLDUNREAL
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseHWLighting"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseHWLighting)));
+#endif
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseBindlessTextures"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseBindlessTextures)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseShaderDrawParameters"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseShaderDrawParameters)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseShaderCache"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseShaderCache)));
+#if _WIN32
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("ReduceMouseLag"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(ReduceMouseLag)));
+#endif
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UsePersistentBuffers"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UsePersistentBuffers)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("GenerateMipMaps"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(GenerateMipMaps)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseBufferInvalidation"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseBufferInvalidation)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoAATiles"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(NoAATiles)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("DetailTextures"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(DetailTextures)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("MacroTextures"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(MacroTextures)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("BumpMaps"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(BumpMaps)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("ParallaxVersion"), *FString::Printf(TEXT("%ls"), ParallaxVersion == Parallax_Basic ? TEXT("Basic") : ParallaxVersion == Parallax_Occlusion ? TEXT("Occlusion") : ParallaxVersion == Parallax_Relief ? TEXT("Relief") : TEXT("None")));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("GammaCorrectScreenshots"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(GammaCorrectScreenshots)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseAA"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseAA)));
+	//GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseAASmoothing"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseAASmoothing)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseTrilinear"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseTrilinear)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UsePrecache"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UsePrecache)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("AlwaysMipmap"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(AlwaysMipmap)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("ShareLists"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(ShareLists)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NoFiltering"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(NoFiltering)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("HighDetailActors"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(HighDetailActors)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("Coronas"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(Coronas)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("ShinySurfaces"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(ShinySurfaces)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("VolumetricLighting"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(VolumetricLighting)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("SimulateMultiPass"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(SimulateMultiPass)));
+
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("MaxAnisotropy"), *FString::Printf(TEXT("%f"), MaxAnisotropy));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("LODBias"), *FString::Printf(TEXT("%f"), LODBias));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("GammaOffsetScreenshots"), *FString::Printf(TEXT("%f"), GammaOffsetScreenshots));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("DebugLevel"), *FString::Printf(TEXT("%i"), DebugLevel));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("NumAASamples"), *FString::Printf(TEXT("%i"), NumAASamples));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("RefreshRate"), *FString::Printf(TEXT("%i"), RefreshRate));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("DescFlags"), *FString::Printf(TEXT("%i"), DescFlags));
+
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseVSync"), *FString::Printf(TEXT("%ls"), UseVSync == VS_Off ? TEXT("Off") : UseVSync == VS_On ? TEXT("On") : TEXT("Adaptive")));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("OpenGLVersion"), *FString::Printf(TEXT("%ls"), OpenGLVersion == GL_Core ? TEXT("Core") : TEXT("ES")));
+
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("GammaMultiplier"), *FString::Printf(TEXT("%f"), GammaMultiplier));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("GammaMultiplierUED"), *FString::Printf(TEXT("%f"), GammaMultiplierUED));
+
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("OneXBlending"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(OneXBlending)));
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("ActorXBlending"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(ActorXBlending)));
+
+#if UNREAL_TOURNAMENT_OLDUNREAL && !defined(__LINUX_ARM__)
+	GConfig->SetString(TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseLightmapAtlas"), *FString::Printf(TEXT("%ls"), *GetTrueFalse(UseLightmapAtlas)));
+#endif
+	unguard;
+}
+
+void UXOpenGLRenderDevice::ShutdownAfterError()
+{
+	guard(UXOpenGLRenderDevice::ShutdownAfterError);
+	debugf(NAME_Exit, TEXT("XOpenGL: ShutdownAfterError"));
+
+#if XOPENGL_REALLY_WANT_NONCRITICAL_CLEANUP
+	Flush(0);
+	ResetShaders();
+ 	if (SharedBindMap)
+	{
+		SharedBindMap->~TOpenGLMap<QWORD, FCachedTexture>();
+		delete SharedBindMap;
+		SharedBindMap = NULL;
+	}
+#endif
+
+	#if !_WIN32
+		CurrentGLContext = NULL;
+	# if !UNREAL_TOURNAMENT_OLDUNREAL
+		XOpenGLDestroyContext(glContext);
+	# endif
+	#else
+# if XOPENGL_REALLY_WANT_NONCRITICAL_CLEANUP
+	// Shut down this GL context. May fail if window was already destroyed.
+	CurrentGLContext = NULL;
+	wglMakeCurrent(NULL, NULL);
+	wglDeleteContext(glContext);
+	AllContexts.RemoveItem(glContext);
+	glContext = NULL;
+# endif
+
+	if (WasFullscreen)
+		ChangeDisplaySettingsW(NULL, 0);
+
+	if (hDC)
+		ReleaseDC(hWnd, hDC);
+
+#endif
+
+#if _WIN32 && !UNREAL_OLDUNREAL && !UNREAL_TOURNAMENT_OLDUNREAL
+	TimerEnd();
+#endif
+
+	unguard;
+}
+
+void UXOpenGLRenderDevice::GetStats(TCHAR* Result)
+{
+	guard(UXOpenGLRenderDevice::GetStats);
+	const double msPerCycle = GSecondsPerCycle * 1000.0f;
+	FString StatsString = *FString::Printf(TEXT("XOpenGL stats:\nBind=%04.1f\nImage=%04.1f\nComplex=%04.1f\nGouraud=%04.1f\nTile Buffer/Draw=%04.1f/%04.1f\nDraw2DLine=%04.1f\nDraw3DLine=%04.1f\nDraw2DPoint=%04.1f\nPersistent buffer stalls: %i\n"),
+		msPerCycle * Stats.BindCycles,
+		msPerCycle * Stats.ImageCycles,
+		msPerCycle * Stats.ComplexCycles,
+		msPerCycle * Stats.GouraudPolyCycles,
+		msPerCycle * Stats.TileBufferCycles,
+		msPerCycle * Stats.TileDrawCycles,
+		msPerCycle * Stats.Draw2DLine,
+		msPerCycle * Stats.Draw3DLine,
+		msPerCycle * Stats.Draw2DPoint,
+		Stats.StallCount
+	);
+
+#if UNREAL_OLDUNREAL
+    StatsString += *FString::Printf(TEXT("NumStaticLights %i\n"),NumLights);
+#endif
+
+#ifndef __LINUX_ARM__
+	if (SupportsNVIDIAMemoryInfo)
+	{
+		GLint CurrentAvailableVideoMemory = 0;
+		glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &CurrentAvailableVideoMemory);
+		GLint TotalAvailableVideoMemory = 0;
+		glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &TotalAvailableVideoMemory);
+		FLOAT Percent = (FLOAT)CurrentAvailableVideoMemory / (FLOAT)TotalAvailableVideoMemory * 100.0f;
+		StatsString += *FString::Printf(TEXT("\nNVidia VRAM=%d MB\nUsed=%d MB\nUsage: %f%%"), TotalAvailableVideoMemory / 1024, (TotalAvailableVideoMemory - CurrentAvailableVideoMemory) / 1024, 100.0f - Percent);
+		glGetError();
+	}
+	if (SupportsAMDMemoryInfo)
+	{
+		GLint CurrentAvailableTextureMemory = 0;
+		glGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, &CurrentAvailableTextureMemory);
+		GLint CurrentAvailableVBOMemory = 0;
+		glGetIntegerv(GL_VBO_FREE_MEMORY_ATI, &CurrentAvailableVBOMemory);
+		GLint CurrentAvailableRenderbufferMemory = 0;
+		glGetIntegerv(GL_RENDERBUFFER_FREE_MEMORY_ATI, &CurrentAvailableRenderbufferMemory);
+		StatsString += *FString::Printf(TEXT("\nAMD CurrentAvailableTextureMemory=%d MB\nCurrentAvailableVBOMemory=%d MB\nCurrentAvailableRenderbufferMemory=%d MB"), CurrentAvailableTextureMemory / 1024, CurrentAvailableVBOMemory / 1024, CurrentAvailableRenderbufferMemory / 1024);
+		glGetError();
+	}
+#endif
+	appSprintf(Result,*StatsString);
+	unguard;
+}
+
+void UXOpenGLRenderDevice::DrawStats(FSceneNode* Frame)
+{
+	guard(UXOpenGLRenderDevice::DrawStats);
+	INT CurY = 48;
+	UCanvas* Canvas = Frame->Viewport->Canvas;
+
+#if ENGINE_VERSION<400
+	Canvas->DrawColor = FColor(255, 255, 255);
+#else
+	Canvas->Color = FColor(255, 255, 255);
+#endif
+	Canvas->CurX = 392;
+	Canvas->CurY = CurY;
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("[XOpenGL]"));
+
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Cycles: %05.2f"),GSecondsPerCycle * 1000);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Bind____________= %05.2f"), GSecondsPerCycle * 1000 * Stats.BindCycles);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Image___________= %05.2f"), GSecondsPerCycle * 1000 * Stats.ImageCycles);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Blend___________= %05.2f"), GSecondsPerCycle * 1000 * Stats.BlendCycles);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Draw2DLine______= %05.2f"), GSecondsPerCycle * 1000 * Stats.Draw2DLine);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Draw3DLine______= %05.2f"), GSecondsPerCycle * 1000 * Stats.Draw3DLine);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Draw2DPoint_____= %05.2f"), GSecondsPerCycle * 1000 * Stats.Draw2DPoint);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Tile_Buffer/Draw= %05.2f/%05.2f"), (GSecondsPerCycle * 1000 * Stats.TileBufferCycles), (GSecondsPerCycle * 1000 * Stats.TileDrawCycles));
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("ComplexSurface__= %05.2f"), GSecondsPerCycle * 1000 * Stats.ComplexCycles);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("GouraudPoly_____= %05.2f"), GSecondsPerCycle * 1000 * Stats.GouraudPolyCycles);
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 24);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Other:"));
+#if UNREAL_OLDUNREAL
+	Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Number of static Lights: %i"), NumLights);
+#endif
+    Canvas->CurX = 400;
+	Canvas->CurY = (CurY += 12);
+	Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("Persistent buffer stalls = %i"), Stats.StallCount);
+
+#ifndef __LINUX_ARM__
+	if (SupportsNVIDIAMemoryInfo)
+	{
+		GLint CurrentAvailableVideoMemory = 0;
+		glGetIntegerv(GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, &CurrentAvailableVideoMemory);
+		GLint TotalAvailableVideoMemory = 0;
+		glGetIntegerv(GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX, &TotalAvailableVideoMemory);
+		FLOAT Percent = (FLOAT)CurrentAvailableVideoMemory / (FLOAT)TotalAvailableVideoMemory * 100.0f;
+		Canvas->CurX = 400;
+		Canvas->CurY = (CurY += 12);
+		Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("NVidia VRAM (%d MB) Used (%d MB) Usage: %f%%"), TotalAvailableVideoMemory / 1024, (TotalAvailableVideoMemory - CurrentAvailableVideoMemory) / 1024, 100.0f - Percent);
+		glGetError();
+	}
+	if (SupportsAMDMemoryInfo)
+	{
+		GLint CurrentAvailableTextureMemory = 0;
+		glGetIntegerv(GL_TEXTURE_FREE_MEMORY_ATI, &CurrentAvailableTextureMemory);
+		GLint CurrentAvailableVBOMemory = 0;
+		glGetIntegerv(GL_VBO_FREE_MEMORY_ATI, &CurrentAvailableVBOMemory);
+		GLint CurrentAvailableRenderbufferMemory = 0;
+		glGetIntegerv(GL_RENDERBUFFER_FREE_MEMORY_ATI, &CurrentAvailableRenderbufferMemory);
+		Canvas->CurX = 400;
+		Canvas->CurY = (CurY += 12);
+		Canvas->WrappedPrintf(Canvas->MedFont, 0, TEXT("AMD CurrentAvailableTextureMemory (%d MB) CurrentAvailableVBOMemory (%d MB) CurrentAvailableRenderbufferMemory (%d MB)"), CurrentAvailableTextureMemory / 1024, CurrentAvailableVBOMemory / 1024, CurrentAvailableRenderbufferMemory / 1024);
+		glGetError();
+	}
+#endif
+	unguard;
+}
+
+// Static variables.
+#if !_WIN32
+SDL_GLContext		UXOpenGLRenderDevice::CurrentGLContext = NULL;
+TArray<SDL_GLContext> UXOpenGLRenderDevice::AllContexts;
+#else
+HGLRC				UXOpenGLRenderDevice::CurrentGLContext = NULL;
+TArray<HGLRC>		UXOpenGLRenderDevice::AllContexts;
+PFNWGLCHOOSEPIXELFORMATARBPROC UXOpenGLRenderDevice::wglChoosePixelFormatARB = nullptr;
+PFNWGLCREATECONTEXTATTRIBSARBPROC UXOpenGLRenderDevice::wglCreateContextAttribsARB = nullptr;
+PFNWGLGETEXTENSIONSSTRINGARBPROC UXOpenGLRenderDevice::wglGetExtensionsStringARB = nullptr;
+# if !OLDUNREAL_WINXP
+PFNWGLDXOPENDEVICENVPROC UXOpenGLRenderDevice::wglDXOpenDeviceNV = nullptr;
+PFNWGLDXCLOSEDEVICENVPROC UXOpenGLRenderDevice::wglDXCloseDeviceNV = nullptr;
+PFNWGLDXREGISTEROBJECTNVPROC UXOpenGLRenderDevice::wglDXRegisterObjectNV = nullptr;
+PFNWGLDXUNREGISTEROBJECTNVPROC UXOpenGLRenderDevice::wglDXUnregisterObjectNV = nullptr;
+PFNWGLDXLOCKOBJECTSNVPROC UXOpenGLRenderDevice::wglDXLockObjectsNV = nullptr;
+PFNWGLDXUNLOCKOBJECTSNVPROC UXOpenGLRenderDevice::wglDXUnlockObjectsNV = nullptr;
+UBOOL UXOpenGLRenderDevice::SUPPORTS_WGL_NV_DX_interop = 0;
+# endif
+#endif
+INT	  UXOpenGLRenderDevice::LogLevel = 0;
+DWORD UXOpenGLRenderDevice::ComposeSize = 0;
+BYTE* UXOpenGLRenderDevice::Compose = NULL;
+INT   UXOpenGLRenderDevice::NumDevices = 0;
+UBOOL UXOpenGLRenderDevice::SelectedGLVersion = 0;
+INT   UXOpenGLRenderDevice::SelectedMajorVersion = 3;
+INT   UXOpenGLRenderDevice::SelectedMinorVersion = 3;
+
+TOpenGLMap<QWORD, UXOpenGLRenderDevice::FCachedTexture> *UXOpenGLRenderDevice::SharedBindMap;
+
+void autoInitializeRegistrantsXOpenGLDrv(void)
+{
+	UXOpenGLRenderDevice::StaticClass();
+}
+
+/*-----------------------------------------------------------------------------
+The End.
+-----------------------------------------------------------------------------*/

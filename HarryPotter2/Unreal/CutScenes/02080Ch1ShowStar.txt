@@ -1,0 +1,16 @@
+
+
+//Ch1 Show Star
+
+[Main]
+
+Capture Harry
+Capture BaseCam
+
+BaseCam Target FlyTo EndRoomFocus *
+BaseCam FollowSpline StarSplin EaseBetween Time=6 Accel=90 Dest=EndNode Start=StartNode
+
+Sleep 1.0
+
+Release Harry
+Release BaseCam

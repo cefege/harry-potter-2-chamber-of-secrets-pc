@@ -1,0 +1,97 @@
+
+//levelStart_GrandStairHub_GState050
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+trigger MMBathroom
+Trigger MMBathroom_Bars
+sleep .03
+//trigger Charms
+//sleep .03
+//trigger Transfig
+
+//Stick Flitwick and Ron in Charms-------------------------
+Capture Flitwick
+Capture Ron
+
+Ron teleport CutMark166 
+Ron face Harry Follow *
+Flitwick Teleport CutMark154
+
+Release Flitwick
+Release Ron
+
+//teleport 16 students to Flitwick's classroom------------------
+capture GOldMaleGry1
+capture GOldMaleGry2
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf2
+capture GMaleHuf3
+capture GFemRav1
+capture GMaleRav2
+capture GMaleRav3
+capture GFemRav2
+capture GOldMaleSly1
+capture GOldMaleSly2
+capture GFemSly1
+capture GFemSly2
+capture GFemSly3
+
+GOldMaleGry1 teleport Cutmark155
+GOldMaleGry2 teleport Cutmark156
+GFemGry0 teleport Cutmark157
+GMaleGry4 teleport Cutmark158
+GFemHuf2 teleport Cutmark159
+GMaleHuf2 teleport Cutmark160
+GMaleHuf3 teleport Cutmark161
+GFemRav1 teleport Cutmark162
+GMaleRav2 teleport Cutmark163
+GMaleRav3 teleport Cutmark164
+GFemRav2 teleport Cutmark165
+GOldMaleSly1 teleport Cutmark167
+GOldMaleSly2 teleport Cutmark168
+GFemSly1 teleport Cutmark169
+GFemSly2 teleport Cutmark170
+GFemSly3 teleport Cutmark171
+
+GOldMaleGry1 face Flitwick
+GOldMaleGry2 face Flitwick
+GFemGry0 face Flitwick
+GMaleGry4 face Flitwick
+GFemHuf2 face Flitwick
+GMaleHuf2 face Flitwick
+GMaleHuf3 face Flitwick
+GFemRav1 face Flitwick
+GMaleRav2 face Flitwick
+GMaleRav3 face Flitwick
+GFemRav2 face Flitwick
+GOldMaleSly1 face Flitwick
+GOldMaleSly2 face Flitwick
+GFemSly1 face Flitwick
+GFemSly2 face Flitwick
+GFemSly3 face Flitwick
+
+release GOldMaleGry1
+release GOldMaleGry2
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf2
+release GMaleHuf3
+release GFemRav1
+release GMaleRav2
+release GMaleRav3
+release GFemRav2
+release GOldMaleSly1
+release GOldMaleSly2
+release GFemSly1
+release GFemSly2
+release GFemSly3
+//end of student placement--------------------------------------
+
+
+

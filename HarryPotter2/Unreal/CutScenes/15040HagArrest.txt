@@ -1,0 +1,111 @@
+//15040HagArrest
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Hagrid
+Capture Dumbledore
+Capture Lucius
+Capture BaseCam
+
+Harry WalkTo CutMark135 *harrydone1
+
+Sleep 1
+BaseCam Target FlyTo Hagrid
+BaseCam FlyTo CutCameraPos40
+
+waitfor harrydone1
+Harry TurnTo Hagrid
+
+Ron TurnTo Hagrid
+Ron Talk PC_Ron_HagArrest_16
+//Sshh.  I just saw someone who looks very much like Lucius Malfoy going into Hagrid’s hut.
+
+Lucius TurnTo Hagrid
+Hagrid TurnTo Lucius
+Dumbledore Turnto Lucius
+BaseCam FlyTo CutCameraPos39
+Lucius Talk PC_Luc_HagArrest_17
+//Bad business, Hagrid.  A very bad business, indeed.  Four attacks on non-magical folk.  Things have gone far enough.
+
+Lucius Talk PC_Luc_HagArrest_18
+//As chairman of the school governors I’ve simply got to act and send you away.
+
+Hagrid Talk PC_Hdw_HagArrest_19
+//Away?  Away to where?  Not the wizard prison -- not Azkaban?
+
+Lucius Talk PC_Luc_HagArrest_20
+//I’m afraid so.
+
+Lucius Talk PC_Luc_HagArrest_21
+//A dreadful thing, Dumbledore, but all twelve of the governors feel it’s time for you to step aside.
+
+Lucius turnto Dumbledore follow
+Lucius Talk PC_Luc_HagArrest_22
+//As of this moment, you are suspended as Headmaster of Hogwarts.
+
+Dumbledore Talk PC_Dum_HagArrest_23
+//If the governors want my removal, Lucius, I shall of course step aside.
+
+Hagrid turnto Dumbledore
+Hagrid Talk PC_Hdw_HagArrest_24
+//No!
+
+Dumbledore Talk PC_Dum_HagArrest_25
+//However, you will find that I will only truly have left this school when none here are loyal to me.
+
+Dumbledore Talk PC_Dum_HagArrest_26
+//You will also find that help will always be given at Hogwarts to those who ask for it.
+
+Dumbledore WalkTo CutMark134
+Dumbledore teleport DumbledoreLOC
+
+Hagrid turnto Harry
+Hagrid Talk PC_Hdw_HagArrest_27
+//O’course, if anyone wanted ter find out some stuff, all they’d have ter do would be ter follow the spiders.  That’d lead ‘em right!
+
+Lucius turnto Hagrid
+Hagrid Talk PC_Hdw_HagArrest_28
+//That’s the key to the whole thing and that’s all I’m sayin’.
+
+Hagrid turnto Lucius
+Lucius Talk PC_Luc_HagArrest_30
+//Come along now, Hagrid.  We don’t want to keep the Dementors waiting, now do we?
+
+
+Lucius WalkTo CutMark134
+Lucius teleport LuciusLOC
+
+Hagrid Talk PC_Hdw_HagArrest_31
+//All right, I’m comin’.
+
+Hagrid WalkTo CutMark134
+Hagrid teleport HagridLOC
+
+BaseCam Target FlyTo CutMark134
+BaseCam FlyTo CutCameraPos40
+
+Ron TurnTo Harry
+Harry TurnTo Ron
+Ron Talk PC_Ron_HagArrest_32
+//We’re in trouble now.  No Dumbledore.  There’ll be an attack a day with him gone.
+
+Harry TurnTo CutMark134
+Harry Talk PC_Hry_HagArrest_33
+//Look!  Over there!
+
+Ron TurnTo CutMark134
+Harry Talk PC_Hry_HagArrest_34
+//Looks like they’re heading for the Forbidden Forest…
+
+Ron LeadActor Harry RonToForrestStart RonToForrestEnd *
+
+sleep 1
+
+Release Harry
+Release Ron
+Release Hagrid
+Release Dumbledore
+Release Lucius
+Release BaseCam

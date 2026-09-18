@@ -1,0 +1,47 @@
+//17180VictoryV2
+
+[Dialog_01]
+
+Capture Harry
+Capture Ginny
+reCapture Tom
+Capture BaseCam
+Capture Tom
+
+
+basecam flyto tom x=40 z=18 *
+basecam target flyto tom z=25 
+Tom Talk PC_Tmr_VictoryV2_01
+//Noooooooooooooooooo!
+
+ginny turnto Harry
+basecam flyto ginny x=40 z=20 *
+basecam target flyto ginny z=20
+
+Tom teleport CutMark3
+
+Ginny Talk PC_Gin_VictoryV2_04
+//Harry – oh, Harry – I wanted to tell you – it was me, Harry – but I swear I didn’t mean to.  Riddle made me do it.
+Harry face ginny
+basecam Flyto Harry x=40 z=20 *
+basecam target flyto Harry z=20
+Harry say PC_Hry_VictoryV2_03
+//It’s all right.  Riddle’s finished.  C’mon, Ginny, let’s get out of here.
+
+
+//####################################
+Harry ChangeGameState GState180
+//Added by Chad to set the right gamestate
+//####################################
+
+Release Harry
+Release Ginny
+Release Tom
+Release BaseCam
+
+
+//####################################
+Trigger ChangeLevelEntryHall
+//Added by Chad to load the EntryHall
+
+//####################################

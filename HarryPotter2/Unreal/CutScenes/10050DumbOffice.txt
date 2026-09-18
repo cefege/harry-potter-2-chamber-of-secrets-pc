@@ -1,0 +1,33 @@
+//10050DumbOffice
+//MeetFawkes
+
+[Dialog_01]
+
+
+Capture Harry
+Capture FawkesPerch
+Capture Perch
+Capture BaseCam
+
+BaseCam Target FlyTo CutMark80
+BaseCam FlyTo CutCameraPos36
+Harry WalkTo CutMark110
+Harry TurnTo CutMark101
+
+Harry say PC_Hry_DumbOffice_08
+//That bird looks sick.
+
+BaseCam Flash *
+FawkesPerch Teleport CutMark85
+sleep .1
+Perch Teleport CutMark80
+
+Harry say PC_Hry_DumbOffice_09
+//It burst into flames!
+
+Release BaseCam
+Release Harry
+Release FawkesPerch
+Release Perch
+
+trigger CountForDumbEnterCutScene

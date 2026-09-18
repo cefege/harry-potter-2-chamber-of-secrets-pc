@@ -1,0 +1,1113 @@
+/*=============================================================================
+	UnShader.cpp: Unreal XOpenGL shader support code.
+
+	Copyright 2014-2017 OldUnreal
+
+	Revision history:
+	* Created by Smirftsch
+=============================================================================*/
+
+// Include GLM
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+
+#include "XOpenGLDrv.h"
+#include "XOpenGL.h"
+#include <cstring>
+
+
+void UXOpenGLRenderDevice::ShaderProgram::EmitGlobals(ShaderCompilationOptions Options, GLuint ShaderType, UXOpenGLRenderDevice* GL, FShaderWriterX& Out, bool HaveGeoShader)
+{
+	if (Options.HasOption(ShaderCompilationOptions::OPT_GLCore))
+	{
+		if (Options.HasOption(ShaderCompilationOptions::OPT_ShaderDrawParameters))
+			Out << "#version 460 core" END_LINE;
+		else if (Options.HasOption(ShaderCompilationOptions::OPT_BindlessTextures) || 
+			Options.HasOption(ShaderCompilationOptions::OPT_PersistentBuffers))
+			Out << "#version 450 core" END_LINE;
+		else
+			Out << "#version 330 core" END_LINE;
+	}
+	else
+	{	  
+	  Out << "#version 310 es" END_LINE;
+	  Out << "#extension GL_OES_shader_io_blocks : require" END_LINE;
+	}
+
+	if (Options.HasOption(ShaderCompilationOptions::OPT_BindlessTextures))
+		Out << "#extension GL_ARB_bindless_texture : require" END_LINE;
+
+	if (Options.HasOption(ShaderCompilationOptions::OPT_ShaderDrawParameters))
+	{
+		Out << R"(
+#extension GL_ARB_shader_draw_parameters : require
+#extension GL_ARB_shading_language_420pack : require
+)";
+	}
+
+	if (Options.HasOption(ShaderCompilationOptions::OPT_GLES))
+	{
+		Out << R"(
+// The following extension appears not to be available on RaspberryPi4 at the moment.
+#extension GL_EXT_clip_cull_distance : enable
+
+// This determines how much precision the GPU uses when calculating. 
+// Performance critical (especially on low end)!! 
+// Not every option is available on any platform. 
+// TODO: separate option for vert and frag?
+// options: lowp/mediump/highp, should be mediump for performance reasons, but appears to cause trouble determining DrawFlags then !?! (Currently on NVIDIA 470.103.01).
+precision lowp float;
+precision lowp int;
+)";
+	}
+
+	// Emit specialization options
+	Out << appToAnsi(*Options.GetPreprocessorString());
+
+	// Emit hardcoded options
+	Out << "#define OPT_DetailMax " << GL->DetailMax << END_LINE;
+	Out << "#define OPT_MaxClippingPlanes " << GL->MaxClippingPlanes << END_LINE;
+
+	// Emit engine constants
+#if ENGINE_VERSION==227
+	Out << "#define LE_Sunlight " << LE_Sunlight << "u" << END_LINE;
+#else
+	Out << "#define LE_Sunlight " << (LE_MAX + 1) << "u" << END_LINE;
+#endif
+	Out << "#define ENGINE_VERSION " << ENGINE_VERSION << END_LINE;	
+	Out << "#define MAX_LIGHTS " << MAX_LIGHTS << END_LINE;	
+
+	// Editor rendering modes
+	Out << "#define REN_None " << REN_None << "u" << END_LINE;
+	Out << "#define REN_Wire " << REN_Wire << "u" << END_LINE;
+	Out << "#define REN_Zones " << REN_Zones << "u" << END_LINE;
+	Out << "#define REN_Polys " << REN_Polys << "u" << END_LINE;
+	Out << "#define REN_PolyCuts " << REN_PolyCuts << "u" << END_LINE;
+	Out << "#define REN_WalkableSurfs " << REN_WalkableSurfs << "u" << END_LINE;
+	Out << "#define REN_DynLight " << REN_DynLight << "u" << END_LINE;
+	Out << "#define REN_PlainTex " << REN_PlainTex << "u" << END_LINE;
+	Out << "#define REN_OrthXY " << REN_OrthXY << "u" << END_LINE;
+	Out << "#define REN_OrthXZ " << REN_OrthXZ << "u" << END_LINE;
+	Out << "#define REN_TexView " << REN_TexView << "u" << END_LINE;
+	Out << "#define REN_TexBrowser " << REN_TexBrowser << "u" << END_LINE;
+	Out << "#define REN_MeshView " << REN_MeshView << "u" << END_LINE;
+#if ENGINE_VERSION==227
+	Out << "#define REN_Normals " << REN_Normals << "u" << END_LINE;
+#else
+	Out << "#define REN_Normals " << (REN_MAX + 1) << "u" << END_LINE;
+#endif
+
+	// Draw flags
+	Out << "#define DF_None " << ShaderDrawFlags::DF_None << "u" << END_LINE;
+	Out << "#define DF_DiffuseTexture " << ShaderDrawFlags::DF_DiffuseTexture << "u" << END_LINE;
+	Out << "#define DF_LightMap " << ShaderDrawFlags::DF_LightMap << "u" << END_LINE;
+	Out << "#define DF_FogMap " << ShaderDrawFlags::DF_FogMap << "u" << END_LINE;
+	Out << "#define DF_DetailTexture " << ShaderDrawFlags::DF_DetailTexture << "u" << END_LINE;
+	Out << "#define DF_MacroTexture " << ShaderDrawFlags::DF_MacroTexture << "u" << END_LINE;
+	Out << "#define DF_BumpMap " << ShaderDrawFlags::DF_BumpMap << "u" << END_LINE;
+	Out << "#define DF_EnvironmentMap " << ShaderDrawFlags::DF_EnvironmentMap << "u" << END_LINE;
+	Out << "#define DF_HeightMap " << ShaderDrawFlags::DF_HeightMap << "u" << END_LINE;
+	Out << "#define DF_Masked " << ShaderDrawFlags::DF_Masked << "u" << END_LINE;
+	Out << "#define DF_Unlit " << ShaderDrawFlags::DF_Unlit << "u" << END_LINE;
+	Out << "#define DF_Modulated " << ShaderDrawFlags::DF_Modulated << "u" << END_LINE;
+	Out << "#define DF_Translucent " << ShaderDrawFlags::DF_Translucent << "u" << END_LINE;
+	Out << "#define DF_Environment " << ShaderDrawFlags::DF_Environment << "u" << END_LINE;
+	Out << "#define DF_RenderFog " << ShaderDrawFlags::DF_RenderFog << "u" << END_LINE;
+	Out << "#define DF_AlphaBlended " << ShaderDrawFlags::DF_AlphaBlended << "u" << END_LINE;
+	Out << "#define DF_Selected " << ShaderDrawFlags::DF_Selected << "u" << END_LINE;
+
+	// Texture indices into the texhandles array
+	Out << "#define DiffuseTextureIndex " << DiffuseTextureIndex << "u" << END_LINE;
+	Out << "#define LightMapIndex " << LightMapIndex << "u" << END_LINE;
+	Out << "#define FogMapIndex " << FogMapIndex << "u" << END_LINE;
+	Out << "#define DetailTextureIndex " << DetailTextureIndex << "u" << END_LINE;
+	Out << "#define MacroTextureIndex " << MacroTextureIndex << "u" << END_LINE;
+	Out << "#define BumpMapIndex " << BumpMapIndex << "u" << END_LINE;
+	Out << "#define EnvironmentMapIndex " << EnvironmentMapIndex << "u" << END_LINE;
+	Out << "#define HeightMapIndex " << HeightMapIndex << "u" << END_LINE;
+
+	// Aliases for the TMUs we bind textures to when we're not using bindless textures
+	Out << "#define TMUDiffuse Texture" << DiffuseTextureIndex << END_LINE;
+	Out << "#define TMULightMap Texture" << LightMapIndex << END_LINE;
+	Out << "#define TMUFogMap Texture" << FogMapIndex << END_LINE;
+	Out << "#define TMUDetail Texture" << DetailTextureIndex << END_LINE;
+	Out << "#define TMUMacro Texture" << MacroTextureIndex << END_LINE;
+	Out << "#define TMUBumpMap Texture" << BumpMapIndex << END_LINE;
+	Out << "#define TMUEnvironmentMap Texture" << EnvironmentMapIndex << END_LINE;
+	Out << "#define TMUHeightMap Texture" << HeightMapIndex << END_LINE;
+
+	Out << R"(
+layout(std140) uniform FrameState
+{  
+  mat4 projMat;
+  mat4 viewMat;
+  mat4 modelMat;
+  mat4 modelviewMat;
+  mat4 modelviewprojMat;
+  mat4 lightSpaceMat;
+  mat4 FrameCoords;
+  mat4 FrameUncoords;
+  float Gamma;
+  float LightMapIntensity;
+  float LightColorIntensity;
+  float YScale;
+};
+)";
+
+	for (INT i = 0; i < NumTextureSamplers; ++i)
+		Out << "uniform sampler2D Texture" << i << ";" << END_LINE;
+
+	Out << R"(
+// Light information.
+layout(std140) uniform LightInfo
+{  
+  vec4 LightData1[MAX_LIGHTS]; // LightColor.R, LightColor.G, LightColor.B, LightCone
+  vec4 LightData2[MAX_LIGHTS]; // LightEffect, LightPeriod, LightPhase, LightRadius
+  vec4 LightData3[MAX_LIGHTS]; // LightType, VolumeBrightness, VolumeFog, VolumeRadius
+  vec4 LightData4[MAX_LIGHTS]; // WorldLightRadius, NumLights, ZoneNumber, CameraRegion->ZoneNumber
+  vec4 LightData5[MAX_LIGHTS]; // NormalLightRadius, bZoneNormalLight, LightBrightness, unused
+  vec4 LightPos[MAX_LIGHTS];
+};
+
+layout(std140) uniform ClipPlaneParams
+{
+  vec4  ClipParams; // Clipping params, ClipIndex,0,0,0
+  vec4  ClipPlane;  // Clipping planes. Plane.X, Plane.Y, Plane.Z, Plane.W
+};
+
+#if OPT_Editor
+layout(std140) uniform EditorState
+{
+  uint HitTesting;
+  uint RendMap;
+};
+#endif
+
+layout(std140) uniform DistanceFogParams
+{
+	vec4 DistanceFogColor;
+	float DistanceFogStart;			// Only for linear fog
+	float DistanceFogEnd;			// Only for linear fog
+	float DistanceFogDensity;		// For exp and exp2 equation
+	int DistanceFogMode;			// -1 = disabled, 0 = linear, 1 = exp, 2 = exp2
+};
+
+#if OPT_DistanceFog
+float getFogFactor(float FogCoord)
+{
+  float FogResult = 1.0;
+  if (DistanceFogMode == 0)
+    FogResult = ((DistanceFogEnd - FogCoord) / (DistanceFogEnd - DistanceFogStart));
+  else if (DistanceFogMode == 1)
+    FogResult = exp(-DistanceFogDensity * FogCoord);
+  else if (DistanceFogMode == 2)
+    FogResult = exp(-pow(DistanceFogDensity * FogCoord, 2.0));
+  FogResult = 1.0 - clamp(FogResult, 0.0, 1.0);
+  return FogResult;
+}
+#endif
+
+float PlaneDot(vec4 Plane, vec3 Point)
+{
+  return dot(Plane.xyz, Point) - Plane.w;
+}
+
+vec4 GammaCorrect(float Gamma, vec4 Color)
+{
+    float InvGamma = 1.0 / Gamma;
+    Color.r = pow(Color.r, InvGamma);
+    Color.g = pow(Color.g, InvGamma);
+    Color.b = pow(Color.b, InvGamma);
+    return Color;
+}
+
+vec3 rgb2hsv(vec3 c)
+{
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0); // some nice stuff from http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl
+  vec4 p = c.g < c.b ? vec4(c.bg, K.wz) : vec4(c.gb, K.xy);
+  vec4 q = c.r < p.x ? vec4(p.xyw, c.r) : vec4(c.r, p.yzx);
+  float d = q.x - min(q.w, q.y);
+  float e = 1.0e-10;
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c)
+{
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+#if OPT_BindlessTextures
+vec4 GetTexel(uvec2 BindlessTexHandle, sampler2D BoundSampler, vec2 TexCoords)
+{
+  return texture(sampler2D(BindlessTexHandle), TexCoords);
+}
+#else
+// texture bound to TMU. BindlessTexBum is meaningless here
+vec4 GetTexel(uvec2 BindlessTexHandle, sampler2D BoundSampler, vec2 TexCoords)
+{
+  return texture(BoundSampler, TexCoords);
+}
+#endif
+)";
+
+	if (ShaderType == GL_FRAGMENT_SHADER)
+	{
+		Out << R"(
+vec4 ApplyPolyFlags(vec4 Color, uint DrawFlags)
+{
+#if OPT_IsMasked
+  if (Color.a < 0.5)
+    discard;
+  else Color.rgb /= Color.a;
+#elif OPT_IsAlphaBlended
+  if (Color.a < 0.01)
+    discard;
+#endif
+  return Color;
+}
+)";
+	}
+
+	if (ShaderType == GL_VERTEX_SHADER)
+	{
+		Out << "flat out uint vDrawID;" END_LINE;
+	}
+	else if (ShaderType == GL_GEOMETRY_SHADER)
+	{
+		Out << "flat in uint vDrawID[];" END_LINE;
+		Out << "flat out uint gDrawID;" END_LINE;
+	}
+	else if (HaveGeoShader)
+	{
+		Out << "flat in uint gDrawID;" END_LINE;
+	}
+	else
+	{
+		Out << "flat in uint vDrawID;" END_LINE;
+	}
+
+    // The following directive resets the line number to 1 
+    // to have the correct output logging for a possible 
+    // error within the shader files.
+	Out << "#line 1" END_LINE;
+}
+
+static void GetTypeInfo(const char* TypeName, INT& SizeBytes, INT& Components)
+{
+	if (!strcmp("vec4", TypeName) || !strcmp("uvec4", TypeName))
+	{
+		SizeBytes = 16;
+		Components = 4;
+	}
+	else if (!strcmp("vec2", TypeName) || !strcmp("uvec2", TypeName))
+	{
+		SizeBytes = 8;
+		Components = 2;
+	}
+	else if (!strcmp("int", TypeName) || !strcmp("uint", TypeName) || !strcmp("float", TypeName))
+	{
+		SizeBytes = 4;
+		Components = 1;
+	}
+	else
+		appErrorf(TEXT("Unknown GLSL type: %ls"), appFromAnsi(TypeName));
+}
+
+INT UXOpenGLRenderDevice::ShaderProgram::GetMaximumUniformBufferSize(const DrawCallParameterInfo* Info) const
+{
+	INT TotalSizeBytes = 0;
+	INT TotalComponents = 0;
+
+	while (true)
+	{
+		if (!Info->Type)
+			break;
+
+		INT Size = 0, Components = 0;
+		GetTypeInfo(Info->Type, Size, Components);
+		TotalSizeBytes += Size * Max<INT>(Info->ArrayCount, 1);
+		TotalComponents += Components * Max<INT>(Info->ArrayCount, 1);
+		Info++;
+	}
+
+	// TODO: Check the various component limits
+
+	if (TotalSizeBytes > 0)
+		return (RenDev->MaxUniformBlockSize / TotalSizeBytes);
+	return 16;
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::EmitDrawCallParametersHeader
+(
+	const DrawCallParameterInfo* Info, 
+	FShaderWriterX& Out, 
+	ShaderProgram* Program, 
+	INT BufferBindingIndex, 
+	bool UseSSBO, 
+	bool EmitGetters
+)
+{
+	// Emit draw call parameters struct
+	Out << R"(struct DrawCallParameters
+{
+)";
+
+	auto OrigInfo = Info;
+	while (true)
+	{
+		if (!Info->Type)
+			break;
+
+		Out << "  " << Info->Type << " " << Info->Name;
+		if (Info->ArrayCount > 0)
+			Out << "[" << Info->ArrayCount << "]";
+		Out << ";" END_LINE;
+		Info++;
+	}
+	Info = OrigInfo;
+
+	Out << "};" END_LINE;
+
+	// Emit SSBO buffer (if necessary)
+	if (UseSSBO)
+	{
+		Out << R"(
+layout(std430, binding = )" << BufferBindingIndex << R"() buffer All)" << appToAnsi(Program->ShaderName) << R"(ShaderDrawParams
+{
+  DrawCallParameters Draw)" << appToAnsi(Program->ShaderName) << R"(Params[];
+};
+)";
+	}
+	else
+	{
+		//, binding = )" << BufferBindingIndex << R"(
+		Out << R"(
+layout(std140) uniform All)" << appToAnsi(Program->ShaderName) << R"(ShaderDrawParams
+{
+  DrawCallParameters Draw)"	<< appToAnsi(Program->ShaderName) << R"(Params[)" << Program->ParametersBufferSize << R"(];
+};
+)";
+	}
+	
+	if (!EmitGetters)
+		return;
+
+	// Emit getters
+	while (true)
+	{
+		if (!Info->Type)
+			break;
+
+		Out << Info->Type << " Get" << Info->Name;
+		if (Info->ArrayCount > 0)
+			Out << "(uint DrawID, uint Index)" END_LINE;
+		else
+			Out << "(uint DrawID)" END_LINE;
+		Out << "{" END_LINE;
+
+		Out << "  return Draw"
+			<< appToAnsi(Program->ShaderName)
+			<< "Params[DrawID]."
+			<< Info->Name;
+		if (Info->ArrayCount > 0)
+			Out << "[Index]";
+		Out << ";" END_LINE;
+
+		Out << "}" END_LINE;
+		Info++;
+	}
+}
+
+// Helpers
+void UXOpenGLRenderDevice::ShaderProgram::BindUniform(CompiledShader* Specialization, const GLuint BindingIndex, const char* Name) const
+{
+	const GLuint BlockIndex = glGetUniformBlockIndex(Specialization->ShaderProgramObject, Name);
+	if (BlockIndex == GL_INVALID_INDEX)
+	{
+		debugf(NAME_Dev, TEXT("XOpenGL: invalid or unused shader var (UniformBlockIndex) %ls in %ls"), appFromAnsi(Name), ShaderName);
+		if (RenDev->UseOpenGLDebug && LogLevel >= 2)
+			debugf(TEXT("XOpenGL: invalid or unused shader var (UniformBlockIndex) %ls in %ls"), appFromAnsi(Name), ShaderName);
+	}
+	glUniformBlockBinding(Specialization->ShaderProgramObject, BlockIndex, BindingIndex);
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::GetUniformLocation(CompiledShader* Specialization, GLint& Uniform, const char* Name) const
+{
+	Uniform = glGetUniformLocation(Specialization->ShaderProgramObject, Name);
+	if (Uniform == GL_INVALID_INDEX)
+	{
+		debugf(NAME_Dev, TEXT("XOpenGL: invalid or unused shader var (UniformLocation) %ls in %ls"), appFromAnsi(Name), ShaderName);
+		if (RenDev->UseOpenGLDebug && LogLevel >= 2)
+			debugf(TEXT("XOpenGL: invalid or unused shader var (UniformLocation) %ls in %ls"), appFromAnsi(Name), ShaderName);
+	}
+}
+
+static const TCHAR* ShaderTypeString(GLuint ShaderType)
+{
+	switch (ShaderType)
+	{
+		case GL_VERTEX_SHADER: return TEXT("Vertex");
+		case GL_GEOMETRY_SHADER: return TEXT("Geometry");
+		case GL_FRAGMENT_SHADER: return TEXT("Fragment");
+		default: return TEXT("Unknown");
+	}
+}
+
+static void DumpShader(const char* Source, bool AddLineNumbers)
+{
+	const size_t SourceLength = std::strlen(Source);
+	if (SourceLength >= static_cast<size_t>(MAXINT))
+		return;
+	TArray<TCHAR> ConvertedSource(static_cast<INT>(SourceLength + 1));
+	if (!appFromUtf8InPlace(&ConvertedSource(0), Source, ConvertedSource.Num()))
+		return;
+	FString ShaderSource(&ConvertedSource(0));
+	TArray<FString> Lines;
+	INT LineNum = 0;
+	while (true)
+	{
+		const INT NewLine = ShaderSource.InStr(TEXT("\n"));
+		FString Line = NewLine >= 0 ? ShaderSource.Left(NewLine) : ShaderSource;
+		if (Line.Right(1) == TEXT("\r"))
+			Line = Line.Left(Line.Len() - 1);
+		if (Line.InStr(TEXT("#line 1")) == 0)
+			LineNum = 0;
+		if (AddLineNumbers)
+			Lines.AddItem(FString::Printf(TEXT("%03d:\t%ls"), LineNum++, *Line));
+		else
+			Lines.AddItem(*Line);
+		if (NewLine == -1)
+			break;
+		ShaderSource = ShaderSource.Mid(NewLine + 1);
+	}
+	debugf(TEXT("XOpenGL: Shader Source:"));
+	for (INT i = 0; i < Lines.Num(); ++i)
+		debugf(TEXT("%ls"), *Lines(i));
+}
+
+bool UXOpenGLRenderDevice::ShaderProgram::CompileShaderFunction(GLuint ShaderFunctionObject, GLuint FunctionType, ShaderCompilationOptions Options, ShaderWriterFunc Func, bool HaveGeoShader)
+{
+	guard(CompileShader);
+	FShaderWriterX ShOut;
+	EmitGlobals(Options, FunctionType, RenDev, ShOut, HaveGeoShader);
+
+	if (ParametersInfo)
+		EmitDrawCallParametersHeader(ParametersInfo, ShOut, this, ParametersBufferBindingIndex, UseSSBOParametersBuffer, true);
+
+	(*Func)(FunctionType, RenDev, ShOut);
+
+	GLint blen = 0;
+	GLsizei slen = 0;
+	GLint IsCompiled = 0;
+	const GLchar* Shader = *ShOut;
+	GLint length = ShOut.Length();
+	bool Result = true;
+	glShaderSource(ShaderFunctionObject, 1, &Shader, &length);
+	glCompileShader(ShaderFunctionObject);
+
+	glGetShaderiv(ShaderFunctionObject, GL_COMPILE_STATUS, &IsCompiled);
+	if (!IsCompiled)
+	{		
+		GWarn->Logf(TEXT("XOpenGL: Failed compiling %ls %ls Shader (Options %ls)"), ShaderName, ShaderTypeString(FunctionType), *Options.GetShortString());
+		glGetShaderiv(ShaderFunctionObject, GL_INFO_LOG_LENGTH, &blen);
+		if (blen > 1)
+		{
+			GLchar* compiler_log = new GLchar[blen + 1];
+			glGetShaderInfoLog(ShaderFunctionObject, blen, &slen, compiler_log);
+			debugf(TEXT("XOpenGL: ErrorLog compiling %ls %ls"), ShaderName, appFromAnsi(compiler_log));
+			delete[] compiler_log;
+		}
+
+		DumpShader(*ShOut, true);
+		Result = false;
+	}
+	else 
+	{
+		glGetShaderiv(ShaderFunctionObject, GL_INFO_LOG_LENGTH, &blen);
+		if (blen > 1)
+		{
+			GLchar* compiler_log = new GLchar[blen + 1];
+			glGetShaderInfoLog(ShaderFunctionObject, blen, &slen, compiler_log);
+			debugf(NAME_Dev, TEXT("XOpenGL: Log compiling %ls %ls"), ShaderName, appFromAnsi(compiler_log));
+			delete[] compiler_log;
+		}
+		else debugf(NAME_Dev, TEXT("XOpenGL: No compiler messages for %ls %ls Shader (Options %ls)"), ShaderName, ShaderTypeString(FunctionType), *Options.GetShortString());
+	}
+
+	return Result;
+	unguard;
+}
+
+bool UXOpenGLRenderDevice::ShaderProgram::LinkShaderProgram(GLuint ShaderProgramObject) const
+{
+	guard(UXOpenGLRenderDevice::ShaderProgram::LinkShaderProgram);
+	GLint IsLinked = 0;
+	GLint blen = 0;
+	GLsizei slen = 0;
+	bool Result = true;
+	glLinkProgram(ShaderProgramObject);
+	glGetProgramiv(ShaderProgramObject, GL_LINK_STATUS, &IsLinked);
+
+	if (!IsLinked)
+	{
+		GWarn->Logf(TEXT("XOpenGL: Failed linking %ls"), ShaderName);
+		Result = false;
+	}
+
+	glGetProgramiv(ShaderProgramObject, GL_INFO_LOG_LENGTH, &blen);
+	if (blen > 1)
+	{
+		GLchar* linker_log = new GLchar[blen + 1];
+		glGetProgramInfoLog(ShaderProgramObject, blen, &slen, linker_log);
+		debugf(TEXT("XOpenGL: Log linking %ls %ls"), ShaderName, appFromAnsi(linker_log));
+		delete[] linker_log;
+	}
+	else debugf(NAME_Dev, TEXT("XOpenGL: No linker messages for %ls"), ShaderName);
+
+	CHECK_GL_ERROR();
+	return Result;
+	unguard;
+}
+
+void UXOpenGLRenderDevice::InitShaders()
+{
+	guard(UXOpenGLRenderDevice::InitShaders);
+
+	memset(Shaders, 0, sizeof(Shaders));
+	Shaders[No_Prog]				= new NoProgram(TEXT("No"), this);
+	Shaders[Simple_Triangle_Prog]	= new DrawSimpleTriangleProgram(TEXT("DrawSimpleTriangle"), this);
+	Shaders[Simple_Line_Prog]		= new DrawSimpleLineProgram(TEXT("DrawSimpleLine"), this);
+	Shaders[Tile_Prog]				= (OpenGLVersion == GL_Core && UsingGeometryShaders)
+		? static_cast<ShaderProgram*>(new DrawTileCoreProgram(TEXT("DrawTile"), this))
+		: static_cast<ShaderProgram*>(new DrawTileESProgram(TEXT("DrawTile"), this));
+	Shaders[PostProcess_Prog]		= new PostProcessProgram(TEXT("PostProcess"), this);
+	Shaders[Gouraud_Prog]			= new DrawGouraudProgram(TEXT("DrawGouraud"), this);
+	Shaders[Complex_Prog]			= new DrawComplexProgram(TEXT("DrawComplex"), this);
+
+	// (Re)initialize UBOs
+	if (!FrameStateBuffer.Buffer)
+	{
+		FrameStateBuffer.GenerateUBOBuffer(this, GlobalShaderBindingIndices::FrameStateIndex);
+		FrameStateBuffer.MapUBOBuffer(false, 1);
+		FrameStateBuffer.Advance(1);
+	}
+	else
+	{
+		FrameStateBuffer.RebindBufferBase(GlobalShaderBindingIndices::FrameStateIndex);
+	}
+	
+	if (!LightInfoBuffer.Buffer)
+	{
+		LightInfoBuffer.GenerateUBOBuffer(this, GlobalShaderBindingIndices::LightInfoIndex);
+		LightInfoBuffer.MapUBOBuffer(false, 1);
+		LightInfoBuffer.Advance(1);
+	}
+	else
+	{
+		LightInfoBuffer.RebindBufferBase(GlobalShaderBindingIndices::LightInfoIndex);
+	}
+
+	if (!GlobalClipPlaneBuffer.Buffer)
+	{
+		GlobalClipPlaneBuffer.GenerateUBOBuffer(this, GlobalShaderBindingIndices::ClipPlaneIndex);
+		GlobalClipPlaneBuffer.MapUBOBuffer(false, 1);
+		GlobalClipPlaneBuffer.Advance(1);
+	}
+	else
+	{
+		GlobalClipPlaneBuffer.RebindBufferBase(GlobalShaderBindingIndices::ClipPlaneIndex);
+	}
+
+	if (GIsEditor)
+	{
+		if (!EditorStateBuffer.Buffer)
+		{
+			EditorStateBuffer.GenerateUBOBuffer(this, GlobalShaderBindingIndices::EditorStateIndex);
+			EditorStateBuffer.MapUBOBuffer(false, 1);
+			EditorStateBuffer.Advance(1);
+		}
+		else
+		{
+			EditorStateBuffer.RebindBufferBase(GlobalShaderBindingIndices::EditorStateIndex);
+		}
+	}
+
+#if ENGINE_VERSION==227
+	if (!DistanceFogBuffer.Buffer)
+	{
+		DistanceFogBuffer.GenerateUBOBuffer(this, GlobalShaderBindingIndices::DistanceFogInfoIndex);
+		DistanceFogBuffer.MapUBOBuffer(false, 1);
+		DistanceFogBuffer.Advance(1);
+	}
+	else
+	{
+		DistanceFogBuffer.RebindBufferBase(GlobalShaderBindingIndices::DistanceFogInfoIndex);
+	}
+#endif
+
+	LoadShaderCache();
+	RecompileShaders();
+
+	unguard;
+}
+
+void UXOpenGLRenderDevice::ResetShaders()
+{
+	guard(UXOpenGLRenderDevice::ResetShaders);
+
+	if (UBOPoint)
+		UBOPoint->Unbind();
+	if (SSBOPoint)
+		SSBOPoint->Unbind();
+	if (ArrayPoint)
+		ArrayPoint->Unbind();
+
+	UBOPoint = SSBOPoint = ArrayPoint = nullptr;
+	
+	for (const auto Shader: Shaders)
+		delete Shader;
+	memset(Shaders, 0, sizeof(ShaderProgram*) * ARRAY_COUNT(Shaders));
+		
+	unguard;
+}
+
+void UXOpenGLRenderDevice::RecompileShaders()
+{
+	ShaderCompilationOptions Options;
+	Options.SetOptionsForRendererConfig(this);
+	for (const auto Shader : Shaders)
+	{
+		if (!Shader)
+			continue;
+
+		Shader->MapBuffers();
+		Shader->RecompileShader(Options);
+	}
+}
+
+//
+// Shader Cache Support - This is taken almost verbatim from the AntiDrv code.
+//
+
+// We stamp the shader cache with the GL vendor, renderer, version, and the XOpenGL build date.
+// If any of these change, we discard the cache and recompile all shaders from source.
+#if !MACOSX
+static FString ShaderCacheBuildDate = appFromAnsi(__DATE__);
+#endif
+
+UBOOL UXOpenGLRenderDevice::SaveShaderCache()
+{
+	guard(UXOpenGLRenderDevice::SaveShaderCache);
+#if MACOSX
+	return 0;
+#else
+	if (!UseShaderCache || !glGetProgramBinary)
+		return 0;
+
+	FArchive* Ar = GFileManager->CreateFileWriter(TEXT("XOpenGLShaderCache.dat"));
+	if (!Ar)
+		return 0;
+
+	FString VendorString   = appFromAnsi((const ANSICHAR*)glGetString(GL_VENDOR));
+	FString RendererString = appFromAnsi((const ANSICHAR*)glGetString(GL_RENDERER));
+	FString VersionString  = appFromAnsi((const ANSICHAR*)glGetString(GL_VERSION));
+	*Ar << VendorString << RendererString << VersionString << ShaderCacheBuildDate;
+
+	INT NumEntries = 0;
+	for (const auto Shader : Shaders)
+		if (Shader)
+			NumEntries += Shader->SpecializationCache.Num();
+	*Ar << NumEntries;
+
+	for (INT ProgIndex = 0; ProgIndex < Max_Prog; ++ProgIndex)
+	{
+		if (!Shaders[ProgIndex])
+			continue;
+
+		for (TOpenGLMap<DWORD, CompiledShader*>::TIterator It(Shaders[ProgIndex]->SpecializationCache); It; ++It)
+		{
+			CompiledShader* Specialization = It.Value();
+
+			GLint  BinaryLength = 0;
+			GLenum BinaryFormat = 0;
+			glGetProgramiv(Specialization->ShaderProgramObject, GL_PROGRAM_BINARY_LENGTH, &BinaryLength);
+
+			TArray<BYTE> Binary;
+			Binary.AddZeroed(BinaryLength);
+			glGetProgramBinary(Specialization->ShaderProgramObject, BinaryLength, nullptr, &BinaryFormat, Binary.GetData());
+
+			INT SavedProgIndex = ProgIndex;
+			DWORD OptionsMask = It.Key();
+			INT SavedBinaryFormat = static_cast<INT>(BinaryFormat);
+
+			*Ar << SavedProgIndex << OptionsMask << SavedBinaryFormat << Binary;
+		}
+	}
+
+	delete Ar;
+	return 1;
+#endif
+	unguard;
+}
+
+UBOOL UXOpenGLRenderDevice::LoadShaderCache()
+{
+	guard(UXOpenGLRenderDevice::LoadShaderCache);
+#if MACOSX
+	return 0;
+#else
+	if (!UseShaderCache || !glProgramBinary)
+		return 0;
+
+	FArchive* Ar = GFileManager->CreateFileReader(TEXT("XOpenGLShaderCache.dat"));
+	if (!Ar)
+		return 0;
+
+	FString VendorString, RendererString, VersionString, BuildDate;
+	*Ar << VendorString << RendererString << VersionString << BuildDate;
+
+	FString CurrentVendor   = appFromAnsi((const ANSICHAR*)glGetString(GL_VENDOR));
+	FString CurrentRenderer = appFromAnsi((const ANSICHAR*)glGetString(GL_RENDERER));
+	FString CurrentVersion  = appFromAnsi((const ANSICHAR*)glGetString(GL_VERSION));
+
+	if (VendorString != CurrentVendor || RendererString != CurrentRenderer || VersionString != CurrentVersion)
+	{
+		debugf(NAME_Init, TEXT("XOpenGL: Shader cache is for a different driver/GPU/GL version. Discarding it."));
+		delete Ar;
+		return 0;
+	}
+
+	if (BuildDate != ShaderCacheBuildDate)
+	{
+		debugf(NAME_Init, TEXT("XOpenGL: Shader cache build date is: %ls (cache) - expected: %ls (client). Discarding it."), *BuildDate, *ShaderCacheBuildDate);
+		delete Ar;
+		return 0;
+	}
+
+	INT NumEntries = 0;
+	*Ar << NumEntries;
+
+	INT NumLoaded = 0;
+	for (INT n = 0; n < NumEntries; ++n)
+	{
+		INT ProgIndex = 0;
+		DWORD OptionsMask = 0;
+		INT SavedBinaryFormat = 0;
+		TArray<BYTE> Binary;
+
+		*Ar << ProgIndex << OptionsMask << SavedBinaryFormat << Binary;
+
+		if (ProgIndex < 0 || ProgIndex >= Max_Prog || !Shaders[ProgIndex] || Binary.Num() == 0)
+			continue;
+
+		CompiledShader* Specialization = new CompiledShader;
+		Specialization->Options = ShaderCompilationOptions(OptionsMask);
+		Specialization->ShaderProgramObject = glCreateProgram();
+		glProgramBinary(Specialization->ShaderProgramObject, static_cast<GLenum>(SavedBinaryFormat), Binary.GetData(), Binary.Num());
+
+		GLint Success = GL_FALSE;
+		glGetProgramiv(Specialization->ShaderProgramObject, GL_LINK_STATUS, &Success);
+		if (Success != GL_TRUE)
+		{
+			glDeleteProgram(Specialization->ShaderProgramObject);
+			delete Specialization;
+			continue;
+		}
+
+		Specialization->ShaderName = FString::Printf(TEXT("%ls%ls"), Shaders[ProgIndex]->ShaderName, *Specialization->Options.GetShortString());
+		Shaders[ProgIndex]->SpecializationCache.Set(OptionsMask, Specialization);
+		++NumLoaded;
+	}
+
+	delete Ar;
+	debugf(NAME_Init, TEXT("XOpenGL: Loaded %i cached shader specializations."), NumLoaded);
+	return 1;
+#endif
+	unguard;
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::BindShaderState(CompiledShader* Specialization)
+{
+	BindUniform(Specialization, FrameStateIndex, "FrameState");
+	BindUniform(Specialization, LightInfoIndex, "LightInfo");
+	BindUniform(Specialization, ClipPlaneIndex, "ClipPlaneParams");
+	if (GIsEditor)
+		BindUniform(Specialization, EditorStateIndex, "EditorState");
+
+#if ENGINE_VERSION==227
+	BindUniform(Specialization, DistanceFogInfoIndex, "DistanceFogParams");
+#endif
+
+	if (!UseSSBOParametersBuffer && ParametersInfo)
+		BindUniform(Specialization, ParametersBufferBindingIndex, appToAnsi(*FString::Printf(TEXT("All%lsShaderDrawParams"), ShaderName)));
+
+	// Bind regular texture samplers to their respective TMUs
+	check(NumTextureSamplers >= 0 && NumTextureSamplers < 9);
+	for (INT i = 0; i < NumTextureSamplers; i++)
+	{
+		GLint MultiTextureUniform;
+		GetUniformLocation(Specialization, MultiTextureUniform, appToAnsi(*FString::Printf(TEXT("Texture%i"), i)));
+		if (MultiTextureUniform != -1)
+			glUniform1i(MultiTextureUniform, i);
+	}
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::UseShader()
+{
+	glUseProgram(CurrentSpecialization->ShaderProgramObject);
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::RecompileShader(ShaderCompilationOptions Options)
+{
+	if (CurrentSpecialization &&
+		(CurrentSpecialization->Options & RelevantSpecializationOptions) == (Options & RelevantSpecializationOptions))
+	{
+		// No relevant options changed - skip recompilation
+		return;
+	}
+
+	// Renderer config changed: every specialization we've cached so far (they were all
+	// built against the old config) is now stale, so throw the whole cache away and let per-draw-call
+	// specialization requests lazily rebuild whatever they actually need under the new config.
+	ClearSpecializationCache();
+	SelectSpecialization(Options);
+}
+
+bool UXOpenGLRenderDevice::ShaderProgram::SelectSpecialization(ShaderCompilationOptions Options)
+{
+	if (CurrentSpecialization && CurrentSpecialization->Options == Options)
+		return false;
+
+	if (CompiledShader** Cached = SpecializationCache.Find(Options.GetMask()))
+	{
+		// Already built this specialization before. Its uniform block bindings and sampler-unit
+		// assignments are program-object state, so they're still exactly as we left them -- just
+		// switch to it, no need to redo BindShaderState.
+		CurrentSpecialization = *Cached;
+		glUseProgram(CurrentSpecialization->ShaderProgramObject);
+	}
+	else
+	{
+		if (!VertexShaderFunc || !FragmentShaderFunc)
+			return false;
+
+		CompiledShader* NewSpecialization = new CompiledShader;
+		NewSpecialization->Options = Options;
+		NewSpecialization->ShaderName = FString::Printf(TEXT("%ls%ls"), ShaderName, *Options.GetShortString());
+
+		check(BuildShaderProgram(NewSpecialization, VertexShaderFunc, GeoShaderFunc, FragmentShaderFunc));
+		SpecializationCache.Set(Options.GetMask(), NewSpecialization);
+		CurrentSpecialization = NewSpecialization;
+
+		glUseProgram(CurrentSpecialization->ShaderProgramObject);
+		BindShaderState(CurrentSpecialization);
+	}
+
+	return true;
+}
+
+bool UXOpenGLRenderDevice::ShaderProgram::BuildShaderProgram(CompiledShader* Specialization, ShaderWriterFunc VertexShaderFunc, ShaderWriterFunc GeoShaderFunc, ShaderWriterFunc FragmentShaderFunc)
+{
+	Specialization->VertexShaderObject   = glCreateShader(GL_VERTEX_SHADER);
+	if (GeoShaderFunc)
+		Specialization->GeoShaderObject  = glCreateShader(GL_GEOMETRY_SHADER);
+	Specialization->FragmentShaderObject = glCreateShader(GL_FRAGMENT_SHADER);
+
+	if (!CompileShaderFunction(Specialization->VertexShaderObject, GL_VERTEX_SHADER, Specialization->Options, VertexShaderFunc, GeoShaderFunc != nullptr) ||
+		(GeoShaderFunc && !CompileShaderFunction(Specialization->GeoShaderObject, GL_GEOMETRY_SHADER, Specialization->Options, GeoShaderFunc, GeoShaderFunc != nullptr)) ||
+		!CompileShaderFunction(Specialization->FragmentShaderObject, GL_FRAGMENT_SHADER, Specialization->Options, FragmentShaderFunc, GeoShaderFunc != nullptr))
+		return false;
+
+	Specialization->ShaderProgramObject = glCreateProgram();
+	glAttachShader(Specialization->ShaderProgramObject, Specialization->VertexShaderObject);
+	if (GeoShaderFunc)
+		glAttachShader(Specialization->ShaderProgramObject, Specialization->GeoShaderObject);
+	glAttachShader(Specialization->ShaderProgramObject, Specialization->FragmentShaderObject);
+
+	if (!LinkShaderProgram(Specialization->ShaderProgramObject))
+		return false;
+
+	// stijn: We should detach and delete compiled shader objects immediately since they can consume a lot of RAM (especially with the AMD RDNA3 drivers)
+	glDetachShader(Specialization->ShaderProgramObject, Specialization->VertexShaderObject);
+	if (GeoShaderFunc)
+		glDetachShader(Specialization->ShaderProgramObject, Specialization->GeoShaderObject);
+	glDetachShader(Specialization->ShaderProgramObject, Specialization->FragmentShaderObject);
+	glDeleteShader(Specialization->VertexShaderObject);
+	if (GeoShaderFunc)
+		glDeleteShader(Specialization->GeoShaderObject);
+	glDeleteShader(Specialization->FragmentShaderObject);
+
+	Specialization->VertexShaderObject = Specialization->GeoShaderObject = Specialization->FragmentShaderObject = 0;
+
+	return true;
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::DeleteCompiledShader(CompiledShader* Shader)
+{
+	if (!Shader || !Shader->ShaderProgramObject)
+		return;
+
+	if (Shader->VertexShaderObject)
+		glDetachShader(Shader->ShaderProgramObject, Shader->VertexShaderObject);
+
+	if (Shader->GeoShaderObject)
+		glDetachShader(Shader->ShaderProgramObject, Shader->GeoShaderObject);
+
+	if (Shader->FragmentShaderObject)
+		glDetachShader(Shader->ShaderProgramObject, Shader->FragmentShaderObject);
+
+	glDeleteProgram(Shader->ShaderProgramObject);
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::ClearSpecializationCache()
+{
+	for (TOpenGLMap<DWORD, CompiledShader*>::TIterator It(SpecializationCache); It; ++It)
+	{
+		DeleteCompiledShader(It.Value());
+		delete It.Value();
+	}
+	SpecializationCache.Empty();
+	CurrentSpecialization = nullptr;
+}
+
+UXOpenGLRenderDevice::ShaderProgram::~ShaderProgram()
+= default;
+
+/*-----------------------------------------------------------------------------
+    ShaderCompilationOptions
+-----------------------------------------------------------------------------*/
+void UXOpenGLRenderDevice::ShaderCompilationOptions::SetOptionsForRendererConfig(UXOpenGLRenderDevice* RenDev)
+{
+	OptionsMask = 0;
+	if (RenDev->DetailTextures)
+		SetOption(OPT_DetailTextures);
+	if (RenDev->MacroTextures)
+		SetOption(OPT_MacroTextures);
+	if (RenDev->BumpMaps)
+		SetOption(OPT_BumpMaps);
+	if (RenDev->SimulateMultiPass)
+		SetOption(OPT_SimulateMultiPass);
+	if (RenDev->UseHWLighting)
+		SetOption(OPT_HWLighting);
+	if (RenDev->OpenGLVersion == GL_Core)
+		SetOption(OPT_GLCore);
+	else
+		SetOption(OPT_GLES);
+	if (RenDev->UsingGeometryShaders)
+		SetOption(OPT_GeometryShaders);
+	if (RenDev->UsingBindlessTextures)
+		SetOption(OPT_BindlessTextures);
+	if (RenDev->UsingPersistentBuffers)
+		SetOption(OPT_PersistentBuffers);
+	if (RenDev->UsingShaderDrawParameters)
+		SetOption(OPT_ShaderDrawParameters);
+	if (RenDev->SupportsClipDistance)
+		SetOption(OPT_ClipDistance);
+	if (GIsEditor)
+		SetOption(OPT_Editor);
+}
+
+FString UXOpenGLRenderDevice::ShaderCompilationOptions::GetStringHelper(void (*AddOptionFunc)(FString&, const TCHAR*, bool)) const
+{
+    FString Result;
+#define ADD_OPTION(x) \
+AddOptionFunc(Result, L ## #x, (OptionsMask & x) ? true : false);
+
+	ADD_OPTION(OPT_GLES)
+	ADD_OPTION(OPT_GLCore)
+    ADD_OPTION(OPT_DetailTextures)
+    ADD_OPTION(OPT_MacroTextures)
+    ADD_OPTION(OPT_BumpMaps)
+    ADD_OPTION(OPT_HeightMaps)
+	ADD_OPTION(OPT_EnvironmentMaps)
+    ADD_OPTION(OPT_DistanceFog)
+    ADD_OPTION(OPT_SimulateMultiPass)
+    ADD_OPTION(OPT_HWLighting)
+    ADD_OPTION(OPT_GeometryShaders)
+    ADD_OPTION(OPT_BindlessTextures)
+    ADD_OPTION(OPT_PersistentBuffers)
+    ADD_OPTION(OPT_ShaderDrawParameters)
+    ADD_OPTION(OPT_ClipDistance)
+    ADD_OPTION(OPT_Editor)
+    ADD_OPTION(OPT_HasLightMap)
+    ADD_OPTION(OPT_HasFogMap)
+    ADD_OPTION(OPT_HasDetailTexture)
+    ADD_OPTION(OPT_HasMacroTexture)
+    ADD_OPTION(OPT_HasBumpMap)
+    ADD_OPTION(OPT_HasEnvironmentMap)
+    ADD_OPTION(OPT_HasHeightMap)
+    ADD_OPTION(OPT_IsMasked)
+    ADD_OPTION(OPT_IsAlphaBlended)
+    ADD_OPTION(OPT_IsModulated)
+    ADD_OPTION(OPT_IsTranslucent)
+    ADD_OPTION(OPT_IsRenderFog)
+    ADD_OPTION(OPT_IsUnlit)
+
+    if (Result.Len() == 0)
+        AddOptionFunc(Result, TEXT("OPT_None"), true);
+    return Result;
+}
+
+FString UXOpenGLRenderDevice::ShaderCompilationOptions::GetShortString() const
+{
+    return GetStringHelper([](FString& Result, const TCHAR* OptionName, bool IsSet) {
+		if (IsSet)
+		{
+			if (Result.Len() > 0)
+				Result += TEXT("|");
+			Result += OptionName;
+		}
+    });
+}
+
+FString UXOpenGLRenderDevice::ShaderCompilationOptions::GetPreprocessorString() const
+{
+    return GetStringHelper([](FString& Result, const TCHAR* OptionName, bool IsSet) {
+        Result += FString::Printf(TEXT("#define %ls %d\n"), OptionName, IsSet ? 1 : 0);
+    });
+}
+
+void UXOpenGLRenderDevice::ShaderCompilationOptions::SetOption(DWORD Option)
+{
+    OptionsMask |= Option;
+}
+
+void UXOpenGLRenderDevice::ShaderCompilationOptions::UnsetOption(DWORD Option)
+{
+    OptionsMask &= ~Option;
+}
+
+bool UXOpenGLRenderDevice::ShaderCompilationOptions::HasOption(DWORD Option) const
+{
+    return OptionsMask & Option;
+}
+
+/*-----------------------------------------------------------------------------
+	Dummy Shader
+-----------------------------------------------------------------------------*/
+
+UXOpenGLRenderDevice::NoProgram::NoProgram(const TCHAR* Name, UXOpenGLRenderDevice* RenDev)
+	: ShaderProgramImpl(Name, RenDev)
+{
+	VertexBufferSize				= 0;
+	ParametersBufferSize			= 0;
+	ParametersBufferBindingIndex	= 0;
+	NumTextureSamplers				= 0;
+	DrawMode						= GL_TRIANGLES;
+	UseSSBOParametersBuffer			= false;
+	ParametersInfo					= nullptr;
+	VertexShaderFunc				= nullptr;
+	GeoShaderFunc					= nullptr;
+	FragmentShaderFunc				= nullptr;
+}
+
+void UXOpenGLRenderDevice::NoProgram::CreateInputLayout()			{}
+void UXOpenGLRenderDevice::NoProgram::Flush(bool Rotate)			{}
+void UXOpenGLRenderDevice::NoProgram::MapBuffers()					{}
+void UXOpenGLRenderDevice::NoProgram::UnmapBuffers()				{}
+void UXOpenGLRenderDevice::NoProgram::ActivateShader()				{}
+void UXOpenGLRenderDevice::NoProgram::DeactivateShader()			{}

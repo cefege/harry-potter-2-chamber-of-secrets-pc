@@ -1,0 +1,126 @@
+//15060Adv9bLair.txt
+[thread]
+
+capture Harry
+capture Aragog
+Capture SpiderLarge0
+
+
+Harry RunTo HarryWalk
+Harry WalkTo HarryStand
+capture Basecam
+//baseCam Target Flyto Aragog EaseBetween time=1 *
+basecam target flyto cutmarkpit easebetween time=2 *
+basecam Flyto spidercam1 EaseBetween time=2
+
+spiderlarge0 turnto Harry
+spiderlarge0 Talk PC_Spi_Adv9bLair_04 *
+//Aragog! A human is here!
+basecam target flyto spiderlarge0 easebetween time=0.6
+sleep 1
+basecam Target flyto Aragog EaseBetween time=2.5 *
+basecam followspline spidercam easebetween start=spidercam1 dest=spidercam3 time=4 accel=150
+Aragog Talk PC_Ara_Adv9bLair_05
+//Is it Hagrid?
+
+basecam flyto Harry x=384 y=48 z=112
+basecam target flyto Harry y=32 z=64
+Harry Say PC_Hry_Adv9bLair_06
+//No, I am a friend of Hagrid's. I came to help him.
+
+
+basecam Flyto Spidercam3
+basecam Target Flyto Aragog
+
+Aragog animate turn_180 rate=.5
+
+//camera goes to Harry here to hide flip in Aragog's direction
+basecam flyto Harry x=64 y=16 z=40
+basecam target flyto Harry y=16 z=16
+Aragog face Harry
+
+
+
+Aragog Talk PC_Ara_Adv9bLair_07 *AragogDone07
+//Why does Hagrid need help?
+
+Harry Animate eye_blink
+waitfor AragogDone07
+Harry Animate eye_blink
+Harry Animate eye_blink
+
+
+Harry Talk PC_Hry_Adv9bLair_08 startanim=talk_righthand
+//Some say that Hagrid released a monster long ago in Hogwarts.  It killed someone and it must have come back.
+
+basecam target flyto Aragog
+Aragog Talk PC_Ara_Adv9bLair_09
+//It was me he released but he sent me away. I've never gone back. And I've never hurt anyone in Hogwarts.
+
+basecam flyto Harry x=48 y=16 z=32
+basecam target flyto Harry y=16 z=16
+Harry Talk PC_Hry_Adv9bLair_10 startanim=talk_dontknow
+//So you're not the guardian of the Chamber of Secrets.
+
+basecam flyto Aragog x=384 y=-384 z=512
+basecam target flyto Aragog
+basecam flyto aragog x=256 z=128 easebetween time=12 *
+
+Aragog Talk PC_Ara_Adv9bLair_11 startanim=react loopanim=talk
+//No. The guardian is an ancient creature that spiders fear above all others.
+
+//basecam followSpline spidercam easebetween start=spidercam2 dest=spidercam3 time=2 accel=150 *
+Aragog Talk PC_Ara_Adv9bLair_12 startanim=talk loopanim=idle
+//It killed the girl in the bathroom, not I.
+
+basecam flyto Harry x=128 y=24 z=32
+basecam target flyto Harry y=24
+Harry Talk PC_Hry_Adv9bLair_13 startanim=talk_flustered
+//Thank you.  I think I should go now.
+
+basecam target flyto aragog
+basecam flyto aragog x=256 z=-64
+basecam flyto Aragog x=256 z=-512 easebetween time=10 *
+
+Aragog Talk PC_Ara_Adv9bLair_14 startanim=talk
+//No you won't. I cannot deny my children such fresh meat. Goodbye, friend of Hagrid.
+
+basecam flyto Harry x=24 z=32
+basecam target flyto Harry z=24
+sleep .5
+Harry turnto cutmark4
+sleep 1
+
+
+Harry Talk PC_Hry_ArragogFight_18 *
+//If I can cut those support webs with Diffindo, I bet Aragog will fall into the pit!
+
+//shows the webs he should cut
+basecam flyto cutcampos3
+basecam target flyto cutmark8
+Harry face Aragog Follow
+sleep 1
+
+basecam flyto cutcampos4 easebetween time=2 *
+basecam target flyto cutmark9 easebetween time=2
+
+sleep 2
+
+basecam FlyTo cutcamHarryJump
+Harry face spiderlarge0
+basecam target FlyTo spiderlarge0
+sleep 1
+Harry Teleport cutmarkHarryJump2
+release Harry
+SloMo .75
+sleep 1.5
+SloMo 1
+release basecam
+
+
+//release Harry
+release Aragog
+release spiderlarge0
+
+
+

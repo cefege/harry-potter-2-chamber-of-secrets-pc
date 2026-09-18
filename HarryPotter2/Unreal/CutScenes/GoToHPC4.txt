@@ -1,0 +1,41 @@
+//GoToHPC4
+
+[Thread]
+
+
+//Lead Harry To the HPC.--------------------------------------------
+Capture GFemGry1
+Capture Harry
+Capture Basecam
+
+GFemGry1 teleport CutMark126
+GFemGry1 face GoToHPC4start
+GFemGry1 RunTo GoToHPC4start *
+
+
+Harry teleport SmartStartSpongify
+Harry Face CutMark127
+Harry RunTo CutMark127 *HarryDone
+Basecam flyto CutCameraPos36 *
+Basecam Target Flyto Harry x=40 z=20 Staylocked
+BaseCam fadein
+
+waitfor HarryDone
+Harry turnto GFemGry1 Follow
+GFemGry1 say PC_Grf_GoToHPCe_00
+//Harry, The weekly house point Ceremony is about to start!
+
+GFemGry1 say PC_Grf_GoToHPCe_01
+//You don't want to miss it!
+
+//GFemGry1 say PC_Grf_GoToHPCe_02
+//Follow me and I'll show you where it is!
+GFemGry1 LeadActor Harry GoToHPC4start HPCeremony * //anim=WaveAnim speech=speechIndex
+
+sleep 1
+
+SetObjectiveId PC_Hry_GoToHPc1_01
+
+Release Harry
+Release GFemGry1
+Release Basecam

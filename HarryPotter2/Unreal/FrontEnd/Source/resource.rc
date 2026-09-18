@@ -1,0 +1,208 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE MOVEABLE PURE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE MOVEABLE PURE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE MOVEABLE PURE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_DIALOG_MAINMENU DIALOGEX 0, 0, 290, 320
+STYLE DS_MODALFRAME | DS_FIXEDSYS | DS_NOFAILCREATE | WS_POPUP
+EXSTYLE WS_EX_CONTROLPARENT | WS_EX_APPWINDOW
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    CONTROL         "&New Game",IDC_BUTTON_NEWGAME,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,46,93,118,29
+    CONTROL         "&Load Game",IDC_BUTTON_LOADGAME,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,46,136,118,29
+    CONTROL         "&Configure",IDC_BUTTON_CONFIG,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,46,180,118,29
+    CONTROL         "E&xit",IDC_BUTTON_EXIT,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,46,223,118,29
+END
+
+IDD_DIALOG_SLOTMENU DIALOGEX 0, 0, 290, 320
+STYLE DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_SYSMENU
+EXSTYLE WS_EX_APPWINDOW
+FONT 8, "MS Shell Dlg"
+BEGIN
+    CONTROL         "Slot &1 - Empty",IDC_BUTTON_SLOT1,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,12,91,82,57
+    CONTROL         "Slot &2 - Empty",IDC_BUTTON_SLOT2,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,102,91,82,57
+    CONTROL         "Slot &3 - Empty",IDC_BUTTON_SLOT3,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,192,91,82,57
+    CONTROL         "Slot &4 - Empty",IDC_BUTTON_SLOT4,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,12,157,82,57
+    CONTROL         "Slot &5 - Empty",IDC_BUTTON_SLOT5,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,102,157,82,57
+    CONTROL         "Slot &6 - Empty",IDC_BUTTON_SLOT6,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,192,157,82,57
+    CONTROL         "&Back",IDC_BUTTON_CANCEL,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,46,223,117,28
+    LTEXT           "Instructions",IDC_LABEL_ACTION,12,66,262,19
+END
+
+IDD_DIALOG_SPLASH DIALOGEX 0, 0, 374, 301
+STYLE DS_FIXEDSYS | DS_NOFAILCREATE | DS_CENTER | WS_POPUP | WS_BORDER
+EXSTYLE WS_EX_APPWINDOW
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+END
+
+IDD_DIALOG_CONFIGMENU DIALOGEX 0, 0, 290, 320
+STYLE DS_MODALFRAME | DS_FIXEDSYS | DS_NOFAILCREATE | WS_POPUP
+EXSTYLE WS_EX_CONTROLPARENT | WS_EX_APPWINDOW
+FONT 8, "MS Shell Dlg"
+BEGIN
+    CONTROL         "&Back",IDC_BUTTON_CANCEL,"Button",BS_OWNERDRAW | 
+                    WS_TABSTOP,46,223,118,29
+    CONTROL         "&Video Config",IDC_BUTTON_VIDEOCONFIG,"Button",
+                    BS_OWNERDRAW | WS_TABSTOP,46,107,118,29
+    CONTROL         "&Joystick Config",IDC_BUTTON_JOYCONFIG,"Button",
+                    BS_OWNERDRAW | WS_TABSTOP,46,151,118,29
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO MOVEABLE PURE 
+BEGIN
+    IDD_DIALOG_MAINMENU, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 284
+        VERTGUIDE, 46
+        VERTGUIDE, 98
+        VERTGUIDE, 164
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 311
+        HORZGUIDE, 78
+        HORZGUIDE, 107
+        HORZGUIDE, 136
+        HORZGUIDE, 165
+        HORZGUIDE, 194
+        HORZGUIDE, 223
+        HORZGUIDE, 252
+    END
+
+    IDD_DIALOG_SLOTMENU, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 281
+        VERTGUIDE, 12
+        VERTGUIDE, 46
+        VERTGUIDE, 94
+        VERTGUIDE, 102
+        VERTGUIDE, 184
+        VERTGUIDE, 192
+        VERTGUIDE, 274
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 312
+        HORZGUIDE, 26
+        HORZGUIDE, 91
+        HORZGUIDE, 157
+        HORZGUIDE, 168
+        HORZGUIDE, 223
+        HORZGUIDE, 251
+    END
+
+    IDD_DIALOG_SPLASH, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 364
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 292
+    END
+
+    IDD_DIALOG_CONFIGMENU, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 276
+        VERTGUIDE, 46
+        VERTGUIDE, 58
+        VERTGUIDE, 164
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 312
+        HORZGUIDE, 107
+        HORZGUIDE, 136
+        HORZGUIDE, 165
+        HORZGUIDE, 223
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_ICON1               ICON    DISCARDABLE     "game.ico"
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

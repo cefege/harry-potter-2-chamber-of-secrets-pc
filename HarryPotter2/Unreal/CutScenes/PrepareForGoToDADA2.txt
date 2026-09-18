@@ -1,0 +1,20 @@
+
+//PrepareForGoToDADA2
+//This cutscene only needs to play once because Ron and Hermione are persistent
+
+[Thread]
+
+Capture Ron
+Capture Hermione
+capture BaseCam
+
+Ron teleport DADALanding
+Ron Face Harry follow
+Hermione teleport cutmark1
+Hermione Face Harry Follow
+
+BaseCam fadein
+
+release BaseCam
+release Ron
+release Hermione

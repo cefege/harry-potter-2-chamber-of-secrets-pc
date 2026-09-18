@@ -1,0 +1,28 @@
+
+//LevelStart_EntryHallHub_GState145
+
+[Dialog_01]
+
+
+//Level Set Up-------------------------------------------
+
+
+//doors are all open now. -Eric
+
+
+//Put Harry in the right spot after HPC.-----------------
+Capture Harry 
+Capture BaseCam
+
+Harry teleport CutMark110
+Harry Face CutMark35
+
+//Bdelaylevelfadein does not work with this cutscene either. 
+//Second case of this. The other is in GState070 I think. Ask Chris P. what the heck is going on. -Eric
+
+BaseCam FadeIn
+
+Release Harry
+Release BaseCam
+
+SetObjectiveId

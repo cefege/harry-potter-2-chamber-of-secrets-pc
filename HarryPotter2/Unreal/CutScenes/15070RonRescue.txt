@@ -1,0 +1,113 @@
+//15070RonRescue
+
+[thread]
+
+capture basecam
+Capture Harry
+Capture Ron
+Capture FlyingFord
+capture Aragog
+
+Aragog animate slump_idle loop *
+sleep 1
+
+//close up of Harry
+BaseCam flyto Harry x=48 z=24
+BaseCam Target flyto Harry z=12
+sleep 1
+
+
+Aragog Teleport cutMarkOverHole
+trigger ElevatorTrigger2 *
+
+//this shot hides Harry while he teleports to HarryVictoryMark1
+basecam Target AttachedTo=Aragog z=30
+release Aragog
+basecam FlyTo TeleportAragogCamPos
+//web particle fx
+trigger AragogWebFX1
+trigger WebCrashOnFloor
+sleep .2
+trigger AragogWebFX2
+trigger AragogWebFX1
+
+sleep 3
+basecam followspline VictorySweep easeto start=VictorySweep1 dest=victorysweep7 time=5 *vicdone
+
+FlyingFord flyto FlyingFordSpline2
+Harry teleport HarryVictoryMark2
+Harry Face Aragog
+
+
+
+//Harry animate celebrate
+
+waitfor vicdone
+
+//add wizard card spawning here
+
+Harry Talk PC_Hry_RonRescue_07
+//At least one good thing came about from Lockhart's class! Rictusempra!
+
+FlyingFord followspline FlyingFordSpline EaseTo start=FlyingFordSpline2 dest=FlyingFordSpline5 time=5 align *
+basecam target flyto FlyingFord easebetween time=1 SL
+Harry face FlyingFord Follow
+
+
+
+//Harry TurnTo FlyingFord rate=60 Follow
+sleep 3
+
+basecam target flyto Harry y=32 z=24 SL
+basecam flyto Harry x=128  z=96
+basecam flyto cutmarkFord5 easeto time=2 *
+
+ron flyto cutmarkRon5 *
+
+sleep 1
+Ron Talk PC_Ron_RonRescue_05
+//Amazing work, Harry!
+
+//sfx of car door opening and closing?
+trigger CarDoorOpen
+sleep .5
+trigger CarDoorClose
+sleep .5
+
+Harry TurnTo Ron follow
+basecam flyto Harry x=-72 y=78 z=32 *
+basecam target flyto Ron SL *
+
+
+Ron runto cutmarkRon2 *
+
+Ron say PC_Ron_RonRescue_01
+//Harry! I found dad's car but I have terrible news! Hermione has been attacked! She's Petrified like the others!
+//Ron face Harry
+
+
+basecam flyto Harry x=64 y=32 z=24
+basecam target flyto Harry y=16 z=16
+Harry Say PC_Hry_RonRescue_03 *ohno
+//Oh no! We should get back as soon as possible!
+sleep 1
+basecam flyto cutcamposRonHarry2 easebetween time=4 *
+basecam target flyto CutMarkOhNo easebetween time=4 *
+
+
+waitfor ohno
+Harry runto FlyingFord *
+Ron runto FlyingFord *
+Ron say PC_Ron_RonRescue_04 *
+sleep .5
+//Climb in!
+
+basecam fadeout
+
+harry changegamestate gstate160
+trigger TriggerChangeLevel
+
+Release Harry
+Release Ron
+release flyingford
+release basecam

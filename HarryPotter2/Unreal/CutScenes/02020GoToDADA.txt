@@ -1,0 +1,69 @@
+
+//02020GoToDADA
+
+//Get rid of last objective---------------------------------------
+SetObjectiveId
+
+Capture Harry
+Capture Ron
+Capture Hermione
+Capture basecam
+
+Ron FlyTo cutmark21
+Hermione teleport cutmark20
+Hermione Face Ron
+Ron face Hermione
+
+Harry teleport cutmark23
+
+basecam flyto CutCameraPos5 *
+basecam target flyto Harry
+basecam fadein *
+Harry walkto cutmark22 *HarryDone1
+Basecam Target flyto Ron time=2 easebetween *
+sleep .5
+Hermione turnto harry follow*
+sleep 1
+Ron turnto harry follow *
+sleep .5
+Ron say PC_Ron_GoToDADA_00 *RonDone1
+//Good morning, Harry!
+
+waitfor HarryDone1
+Harry turnto ron follow *
+
+waitfor RonDone1
+Basecam flyto Hermione x=80 z=25 y=15
+Basecam target Flyto Hermione z=20
+Hermione say PC_Her_GoToDADA_01 *HermioneDone1
+//It's time for Defence Against Dark Arts class with Professor Lockhart.
+
+sleep .5
+Harry turnto Hermione Follow *
+sleep 2.5
+Ron turnto Hermione follow *
+
+waitfor HermioneDone1
+Hermione say PC_Her_GoToDADA_02
+//I've read his books over and over. He's so dreamy!
+
+Basecam Target flyto Ron
+basecam flyto CutCameraPos5
+
+Hermione say PC_Her_GoToDADA_04
+//It's on the Third Floor. Follow us!
+
+Hermione SetOnPatrolPointPath RonToDADAStart *
+
+sleep 1.3
+Ron leadactor harry RonToDADAStart RonToDADAEnd *
+
+//set objective--------------------------------------------
+SetObjectiveId PC_Hry_GoToDADA2_02
+
+sleep .2
+
+release harry
+release ron
+release hermione
+release basecam

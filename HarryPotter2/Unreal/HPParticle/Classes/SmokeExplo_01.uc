@@ -1,0 +1,41 @@
+//=============================================================================
+// SmokeExplo_01.
+//=============================================================================
+class SmokeExplo_01 expands ParticleFX;
+
+defaultproperties
+{
+     ParticlesPerSec=(Base=800)
+     SourceWidth=(Base=1)
+     SourceHeight=(Base=1)
+     SourceDepth=(Base=1)
+     AngularSpreadWidth=(Base=180)
+     AngularSpreadHeight=(Base=180)
+     bSteadyState=True
+     Speed=(Base=125,Rand=50)
+     Lifetime=(Rand=1)
+     ColorStart=(Base=(R=128,B=128),Rand=(R=128,G=128,B=128))
+     ColorEnd=(Base=(R=11,G=9,B=57))
+     AlphaStart=(Base=0.35)
+     SizeWidth=(Base=15)
+     SizeLength=(Base=15)
+     SizeEndScale=(Base=10)
+     SpinRate=(Base=-1,Rand=1)
+     Attraction=(X=-0.1,Y=-0.1,Z=-0.1)
+     Damping=3
+     GravityModifier=0.2
+     ParticlesMax=80
+     Textures(0)=Texture'HPParticle.hp_fx.Particles.Smoke4'
+     LastUpdateLocation=(X=224,Z=32)
+     LastEmitLocation=(X=224,Z=32)
+     LastUpdateRotation=(Pitch=16336)
+     EmissionResidue=0.20752
+     Age=3280.404
+     ParticlesEmitted=60
+     bDynamicLight=True
+     Tag=Dummyparticle
+     Location=(X=224,Z=32)
+     Rotation=(Pitch=16336)
+     OldLocation=(X=224,Z=32)
+     bSelected=True
+}

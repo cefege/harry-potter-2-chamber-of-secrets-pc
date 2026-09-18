@@ -1,0 +1,199 @@
+
+//Multiple Ending Diffindo Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Sprout
+Capture challengescoremanager
+Capture basecam
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Sprout
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeJustWonFirstTime Cue WonFirstTimeThread
+If ChallengeWorseThanBefore Cue WorseThread
+If ChallengeNewBestScore Cue NewBestThread
+If ChallengeJustMastered Cue JustMasteredThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[WonFirstTimeThread]
+
+WaitFor WonFirstTimeThread
+
+recapture Harry
+recapture Sprout
+recapture challengescoremanager
+recapture basecam
+
+basecam target flyto Harry *
+basecam flyto EndCam01 *
+
+Sprout Talk PC_Spr_Chal3Diff_14 *SproutDone1
+//Well done, Mr. Potter, you have completed my Diffindo Challenge!  The remaining time now becomes your personal high score.
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Waitfor SproutDone1
+
+challengescoremanager tallychallenge *TallyEnd
+
+harry animate celebrate
+
+Waitfor TallyEnd
+
+trigger levelexit
+
+Release challengescoremanager
+Release Sprout
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[WorseThread]
+
+WaitFor WorseThread
+
+recapture Harry
+recapture Sprout
+recapture challengescoremanager
+recapture basecam
+
+basecam target flyto Harry *
+basecam flyto EndCam01 *
+
+Sprout Talk PC_Spr_Chal3Diff_17 *SproutDone1
+//I'm sorry, Mr. Potter.  You will have to reach a better score in order for me to award more House Points to you.
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Waitfor SproutDone1
+
+challengescoremanager tallychallenge *TallyEnd
+
+harry animate talk_remember
+
+Waitfor TallyEnd
+
+trigger levelexit
+
+Release challengescoremanager
+Release Sprout
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[NewBestThread]
+
+WaitFor NewBestThread
+
+recapture Harry
+recapture Sprout
+recapture challengescoremanager
+recapture basecam
+
+basecam target flyto Harry *
+basecam flyto EndCam01 *
+
+Sprout Talk PC_Spr_Chal3Diff_25 *SproutDone1
+//Great job, Mr. Potter!  You have set a new personal high score!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Waitfor SproutDone1
+
+challengescoremanager tallychallenge *TallyEnd
+
+harry animate celebrate
+
+Waitfor TallyEnd
+
+trigger levelexit
+
+Release challengescoremanager
+Release Sprout
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[JustMasteredThread]
+
+WaitFor JustMasteredThread
+
+recapture Harry
+recapture Sprout
+recapture challengescoremanager
+recapture basecam
+
+basecam target flyto Harry *
+basecam flyto EndCam01 *
+
+Sprout Talk PC_Spr_Chal3Diff_15 *SproutDone1
+//Congratulations, Mr. Potter!  You have mastered the Diffindo Challenge.
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Waitfor SproutDone1
+
+challengescoremanager tallychallenge *TallyEnd
+
+harry animate celebrate
+
+Waitfor TallyEnd
+
+trigger levelexit
+
+Release challengescoremanager
+Release Sprout
+Release basecam
+Release Harry
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Sprout
+recapture challengescoremanager
+recapture basecam
+
+basecam target flyto Harry *
+basecam flyto EndCam01 *
+
+Sprout Talk PC_Spr_Chal3Diff_19 *SproutDone1
+//Well done, Harry!
+
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+Waitfor SproutDone1
+
+challengescoremanager tallychallenge *TallyEnd
+
+harry animate celebrate
+
+Waitfor TallyEnd
+
+trigger levelexit
+
+Release challengescoremanager
+Release Sprout
+Release basecam
+Release Harry

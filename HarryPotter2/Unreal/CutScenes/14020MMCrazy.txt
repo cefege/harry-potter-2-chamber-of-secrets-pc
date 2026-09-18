@@ -1,0 +1,45 @@
+//14020MMCrazy
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Basecam
+
+Ron teleport CutMark36
+Harry RunTo CutMark35 *HarryDone
+Ron RunTo CutMark34 *GFemGry1Done0
+Waitfor GFemGry1Done0
+Ron TurnTo Harry *
+Basecam flyto cutcamerapos7 *
+Basecam Target Flyto Harry x=40 z=15
+Ron Talk PC_Ron_MMCrazy_00 *WoodDone1
+//Hey Harry, something has really upset Moaning Myrtle!
+
+waitfor HarryDone
+Harry turnto Ron Follow
+Waitfor GFemGry1Done0
+Ron TurnTo Harry *
+
+waitfor WoodDone1
+Harry Talk PC_Hry_MMCrazy_01
+//You mean more than usual?
+
+Ron Talk PC_Ron_MMCrazy_02
+//I could hear her wailing all the way from the grand staircase.  And the corridor outside her bathroom is flooded again.
+
+Harry Talk PC_Hry_MMCrazy_03
+//You don't think someone else has been attacked, do you?
+
+Ron Talk PC_Ron_MMCrazy_04
+//Anything could have happened. Come on, let's go see what's up.
+
+Ron LeadActor Harry RonGoToMMB GreatHall * //anim=WaveAnim speech=speechIndex
+Release Ron
+sleep 1
+
+SetObjectiveId PC_Hry_GoToMMB3_01
+
+Release Harry
+Release Basecam
+Release Ron

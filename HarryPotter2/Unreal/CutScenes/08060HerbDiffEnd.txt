@@ -1,0 +1,26 @@
+//08060HerbDiffEnd
+
+[Dialog_01]
+
+Capture Harry
+Capture Sprout
+Capture BaseCam
+
+BaseCam FlyTo CutCameraPos1
+BaseCam Target FlyTo Sprout
+Harry TurnTo Sprout 
+Sprout TurnTo Harry 
+
+Sprout Talk PC_Spr_HerbDiffEnd_01
+//You have learned Diffindo, Harry!  We've planted a seed of greatness here today!
+
+Sprout Talk PC_Spr_HerbDiffEnd_02
+//Now let's move on to the Diffindo Challenge!
+
+
+Harry ChangeGameState gstate090
+Trigger ChangeLevelDifChal
+
+Release Harry
+Release Sprout
+Release BaseCam

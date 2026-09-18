@@ -1,0 +1,50 @@
+
+
+//12060Adv7EctoStreamCut
+
+//This is the cut scene that shows ecto growning on the bridge.
+
+
+
+//-----------------------------------------------------------------------
+
+[Cam]
+
+Capture BaseCam
+
+
+BaseCam FlyTo EctoCam1 *
+BaseCam Target FlyTo EctoStreamFocus1 *
+
+Sleep 2.0
+
+BaseCam Target FlyTo EctoStreamFocus2 Time=6 EaseBetween *
+BaseCam FlyTo EctoCam2 Time=5 EaseBetween *
+
+Sleep 8.0
+
+Cue CutEnd
+
+Release BaseCam
+
+//-----------------------------------------------------------------------
+
+
+
+
+
+
+//-----------------------------------------------------------------------
+
+[PotterAsGoyle]
+
+
+Capture PotterAsGoyle
+
+
+WaitFor CutEND
+
+Release PotterAsGoyle
+
+
+//-----------------------------------------------------------------------

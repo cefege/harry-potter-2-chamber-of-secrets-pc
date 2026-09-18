@@ -1,0 +1,39 @@
+
+//Adv3DungeonQuestEnd
+
+
+//Show Door Open at Exit
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Main]
+
+SetObjectiveId
+
+Trigger EndMusic
+
+Sleep 0.5
+
+Capture Harry
+Capture BaseCam
+
+BaseCam Target FlyTo CutCameraPos5 *
+
+BaseCam FlyTo CutCameraPos4 *
+
+Harry ChangeGameState GState070
+Harry RunTo HarryLeaveEOL *
+
+Sleep 3.0
+
+Trigger TriggerChangeLevel
+
+Release Harry
+Release BaseCam
+
+//---------------------------------------------------------------------
+
+

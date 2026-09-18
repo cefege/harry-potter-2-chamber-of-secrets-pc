@@ -1,0 +1,9 @@
+SCC = This is a Source Code Control file
+
+[OldEd.vbp]
+SCC_Aux_Path = "\\baker\HPotterPC\vss"
+SCC_Project_Name = "$/Unreal/EdSrc", LXVAAAAA
+
+[UnrealEd.vbp]
+SCC_Aux_Path = "\\baker\HPotterPC\vss"
+SCC_Project_Name = "$/Unreal/EdSrc", LXVAAAAA

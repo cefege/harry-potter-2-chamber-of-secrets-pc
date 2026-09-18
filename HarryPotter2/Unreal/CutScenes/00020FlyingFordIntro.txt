@@ -1,0 +1,273 @@
+
+//Flying Ford Intro CutScene
+
+//---------------------------------------------------------------------
+[Cam]
+
+//WaitFor Ever
+
+Capture BaseCam
+
+Trigger StartingMusic
+
+Trigger Sound_CarRunning
+
+BaseCam Target FlyTo FlyingCar StayLocked *
+
+//################Cam On Spline#######################################################################################
+BaseCam FollowSpline TestCamPath Start=CAMPathStart2 Dest=CarPopUp Time=6.5 Accel=200 EaseFrom *
+//## Splin Tag = Intro ##
+//## Cutscene name of points, Dest=EndIntroSplin, Start=StartIntroSplin ##
+//################Cam On Spline#######################################################################################
+
+BaseCam FadeIn Time=0.5
+
+Cue DialogSection1
+
+
+
+WaitFor CarCloseUp
+BaseCam FadeOut R=1 G=1 B=1 Time=0.5 *
+
+BaseCam FollowSpline TestCamPath2 Start=LeftSideCamSplineStart Dest=LeftSideCamSplineEND Time=5 Accel=200 EaseBetween *
+
+BaseCam FadeIn Time=0.5 *
+
+Cue DialogSection2
+Sleep 2
+
+
+Cue CloudFadeEffects
+
+
+
+//&&&&&&&&&&&&&&&&&&&&&& Eli Cam Mode, Follow Car &&&&&&&&&&&&&&&&&&&&&&&
+WaitFor CarView
+BaseCam Target AttachedTo=FlyingCar x=0 y=0 z=150 *
+BaseCam Locked Distance=400 RotTightness=4 MoveTightness=4 Yaw=-50 *
+//&&&&&&&&&&&&&&&&&&&&&& Eli Cam Mode, Follow Car &&&&&&&&&&&&&&&&&&&&&&&
+
+Sleep 4
+Cue DialogSection4
+Sleep 5
+
+Cue CarChangeLastSpline
+
+//BaseCam FadeOut R=1 G=1 B=1 Time=2.0 *
+BaseCam FlyTo StartLastCamSpline *
+//BaseCam FadeIn Time=3.0 *
+
+//@@@@@@@@@@@@@@@@ Elijah's & Chads HACK @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//Elijah's HACK idea here, sleep does not work, so we have it moveing on
+//A spline to itself and that seems to solve the problem.
+BaseCam FlyTo StartLastCamSpline Time=3
+//Sleep 2.0
+//@@@@@@@@@@@@@@@@ Elijah's & Chads HACK @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+
+BaseCam FollowSpline LastCamSpline Start=StartLastCamSpline Dest=EndLastCamSpline Time=19 Accel=50 EaseTo *
+
+
+
+
+
+WaitFor EndFade
+BaseCam FadeOut R=1 G=1 B=1 Time=1.0
+Cue CutEND
+
+Release BaseCam
+
+Sleep 0.3
+
+Trigger ChangeToWhompingWillow
+
+//---------------------------------------------------------------------
+
+
+
+
+//---------------------------------------------------------------------
+[FlyingCar]
+
+Capture FlyingCar
+
+FlyingCar MatchRot FirstCarSplinePoint
+
+FlyingCar FollowSpline CarSalesMan Start=FirstCarSplinePoint Dest=LastCarSplinePoint Time=6.5 Accel=200 Align EaseFrom *
+
+Sleep 7
+
+FlyingCar FollowSpline CarSalesMan2 Start=FirstCarSplinePoint2 Dest=LastCarSplinePoint2 Time=20 Accel=200 Align EaseTo *
+
+Cue CarCloseUp
+
+Sleep 3
+
+Cue ActionPlane
+
+Cue CarView
+
+WaitFor CarChangeLastSpline
+
+//FlyingCar FlyTo StartCarEndPath *
+//FlyingCar MatchRot StartCarEndPath
+
+FlyingCar FollowSpline EndPath Start=StartCarEndPath Dest=EndCarEndPath Time=20 Accel=49 align EaseTo *
+
+FlyingCar SetIdle FlyingEratic *
+Trigger TransitionToStalled
+Sleep 1.0
+FlyingCar SetAmbientSound HPSounds.Adv1willow.Anglia_stalled_loop
+
+Cue DialogSection5
+
+Sleep 10
+Cue EndFade
+
+WaitFor CutEND
+Release FlyingCar
+
+//---------------------------------------------------------------------
+[747Plane]
+
+Capture 747Plane
+
+
+WaitFor ActionPlane
+
+Sleep 3.0
+
+747Plane FlyTo PlaneFirstSpline
+
+747Plane MatchRot PlaneFirstSpline
+747Plane FollowSpline PlanePath1 Start=PlaneFirstSpline Dest=PlaneLastSpline Time=11 Accel=600 align EaseTo *
+
+//Sleep 2.0
+
+//747Plane FlyTo RemovePlaneLoc
+
+WaitFor CutEND
+
+Release 747Plane
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[CloudFadeEffects]
+
+WaitFor CloudFadeEffects
+
+Trigger FadeViewTriggerTest
+
+Sleep 4.0
+BaseCam FadeIn Time=1.0
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+[PlaneSounds]
+
+WaitFor ActionPlane
+
+Sleep 2.9
+
+Trigger JetFlyBy
+Sleep 2.0
+BaseCam Shake Magnitude=100 Time=2 *
+Cue DialogSection3
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Thunder]
+
+WaitFor CarChangeLastSpline
+
+Sleep 3.0
+
+Trigger LightningScreenFlash
+Sleep 1.0
+Trigger ThunderFX_1
+
+
+//Sleep 1.5
+
+//Trigger ThunderFX_2
+//Sleep 0.5
+//Trigger LightningScreenFlas
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Dialog]
+
+Capture Narrator
+Capture Harry
+Capture Ron
+
+//Waitfor Ever
+
+WaitFor DialogSection1
+
+Sleep 1.0
+
+Narrator Talk PC_Nar_FlyingCar_25
+//Being sure to check that no one was watching, Ron and Harry took off in the old Ford Anglia.
+
+Sleep 0.5
+
+Ron Say PC_Ron_FlyingCar_28
+//Now all we’ve got to worry about are airplanes.
+
+Ron Say PC_Ron_FlyingCar_29
+//<laugh>
+
+WaitFor DialogSection2
+Ron Say PC_Ron_FlyingCar_31
+//I can’t see anything in here.
+
+WaitFor DialogSection3
+
+Ron Say PC_Ron_FlyingCar_35
+//<panic yell>
+
+WaitFor DialogSection4
+
+Sleep 1.3
+
+Ron Say PC_Ron_FlyingCar_36
+//<Phew> That was close
+
+
+
+WaitFor DialogSection5
+Ron Say PC_Ron_FlyingCar_37
+//I think we’re almost there.
+
+Sleep 0.5
+
+Ron Say PC_Ron_FlyingCar_46
+//Uh-oh, I think the car's cutting out.
+
+Ron Say PC_Ron_FlyingCar_38
+//Come on car.
+
+Sleep 0.5
+
+Ron Say PC_Ron_FlyingCar_39
+//Come on.
+
+WaitFor CutEND
+
+//Release Harry2
+Release Ron
+Release RonHarry
+Release Narrator
+Release Harry
+
+
+
+//---------------------------------------------------------------------

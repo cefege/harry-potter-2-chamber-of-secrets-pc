@@ -1,0 +1,11 @@
+
+//LevelStart_EntryHallHub_GState150
+
+[Dialog_01]
+
+
+//Level Set Up-------------------------------------------
+
+
+//doors are all open now. -Eric
+

@@ -1,0 +1,206 @@
+13 July 2001
+options.h
+	- added 'channelswap' command line switch with -g
+bitstream.c, crc.c, toolame.c, common.h
+	- updated with the DAB extensions
+psycho_I.c
+	- A really dodgy fix for the LSF seg fault problem. for some reason, some of *tone and
+	   power[i].next is being set as large negative numbers in tonal_label().  So if tone<0
+           just skip it.  Need to figure out why it's doing this at all.
+toolame.c
+	- moved the bitrate index check until *after* it has parsed the input file. This is
+	   so the sampling frequency is set, and therefore we know whether it's mpeg-2LSF or 
+	   normal mpeg-1 that we should use.
+
+16 August 2000
+absthr.h, critband.h, freqtable.h
+	- new include files contain the tables/ directory
+tables.c 
+	- includes the alloc_* files from the tables/ dir
+options.h, get_audio.c
+	- added 'byteswap' command line switch with -x
+
+25 April 2000
+*	
+	- changed printf()s to fprintf()s. Everything goes to stderr, except usage().
+		(Not sure if this is 'the right thing'. but its neater than before)
+toolame.c
+	- stdin/stdout now referenced with '-'s as in lame. (-DIOFIX)
+		eg ./toolame - - >dud.mp2  will encode from stdin, to stdout (with 
+		redirection to 'dud.mp2')
+encode.c
+	- Started work on VBR_bit_allocation.
+
+
+22 April 2000 v0.2g
+Makefile
+	- OS/2 bits by Nick Burch <gagravarr@SoftHome.net>
+availbits.c
+	- made the calculation of the bits (adb) a standalone function (prep for VBR)
+common.c
+	- fixed js_bound to be layer2 only
+	- fixed bitrate[][][] table to be layer2 only.
+*	
+	- VBR switch activates a simple VBR mode.  The bits required to encode with 
+	  no noise are calculated in VBR_bits_for_nonoise.
+
+* 	- removed most of the references to 'layer number' and hardcoded for layer2.
+
+16 April 2000 v0.2f
+* *.c
+	- general code cleanup.  Deleted lots of obsolete stuff.
+	- ran it all through 'astyle' to try and get some style :)
+* *.h
+	- turfed out a lot of guff in the header files.
+* psycho_I.c
+	- renamed Psycho_One() to psycho_i()
+	- combined the hann + f_f_t + pickmax functions functions
+		this removes some buffering and a whole bunch of log10 calcs in pickmax.
+* psycho_II.c
+	- renamed psycho_anal to psycho_ii()
+* common.c
+	- split common.c into more logical subunits
+		mem.c - memory handling functions
+		crc.c - the crc stuff
+		bitstream.c - bitstream handling code
+		tables.c - table handling code
+		common.c - miscellaneous mpeg handling/init routines.
+* Makefile
+	- tweaks for gcc2.95.2
+	- added more warnings to fix my dud coding style.
+
+14 December 1999
+* encode.c
+	- change to scale_factor_calc from PDS (Patrick De Smet 
+		pds@telin.rug.ac.be) 44% faster by using binary search 
+		rather than linear. (#define PDS1)
+	- change to subband_quantization from PDS. A little faster.
+		(#define PDS3)
+	- NB. these changes by PDS do not produce bit exact output 
+		when I think they should.
+
+* *.c	
+	- changed all C++ style comments to C style.
+
+* subband.c
+	- merged filter_subband and IDCT.
+	- put table/enwindow into enwindow.h
+
+* musicin.c
+	- fudged a bit with the input file parsing. 
+		Accepts WAV, AIFF and defaults to PCM.
+	- Can read raw PCM from /dev/stdin in a pretty kludgy way. 
+		(use '/dev/stdin' as the input file.)
+		I'm sure someone will tell me why this is a really bad 
+		thing to do.
+	- Changed the print_config a little. Feel free to change 
+		it and get something nicer looking.
+
+5 November 1999
+* fft.c
+	- included table_lookup modification for fht() from Mathew Hendry 
+		<math@vissci.com> 20% speedup
+	- modified fht() to be for n==1024 only. that's all that's 
+		ever needed for LayerII encoding
+* *.c
+	- removed "II_" prefixes from all the functions (superfluous 
+		now that code is layerII only)
+* tonal.c
+	- made add_db() an inline function by separating its init 
+		function into init_add_db()
+* psy.c 
+	- renamed to psycho_II.c
+* tonal.c
+	- renamed to psycho_I.c
+* psycho_II.c
+	- cleaned up memory alloc'ing. Might just make it all explicit 
+		size def'n instead of mallocs.
+	- turned off layerI and III stuff
+	- tuned some loops (fft buffer filling)
+	- replaced loops to initialize values to zero, with memset()
+* Makefile
+	- added a few more switches which work well on my p166/linux/gcc setup.
+
+2 November 1999
+* musicin.c  
+	- frameNum bug fixed (incorrectly incremented it twice every 10th 
+		frame)
+	- a "no padding" switch for those using some layerII editing programs
+		that don't work with padding. afaik, this is a major
+		hack on the format - mpg123 still groks the files.
+		Courtesy of: 	Federico Grau <grauf@rfa.org>
+				Bill Eldridge <bill@hk.rfa.org>
+* tonal.c
+	- threshold()  changed some of the if() checks. 33% speedup.
+	- add_db() tweaked it a little more. 25% speedup
+
+30 Octover 1999
+* musicin.c
+	-added "quick mode", where you can specify how often to calculate 
+		the psy model.  e.g "-q 10" calculate psy model once every 
+		10 frames, and then use those ltmin values for the next 
+		10 frames
+	- now reads WAV files thanks to Nick Burch <gagravarr@SoftHome.net>
+* musicin.c/encode.c
+	- reimplemented -a "downmix to mono switch".
+
+24 October 1999
+* Started using dist10/lsf/encoder as the original source code.  This is the same base code from which LAME patches.  This code (for layer2) is more complete than the previous archive as it contains LSF.
+* added in most of the previous changes (still quite a few to go)
+* No layerI or layerIII support.
+
+17 October 1999
+* tonal.c
+	- tweaked add_db a little. Removed superfluous code. 
+		Maybe separate the table initialization, and make the 
+		function inline 
+	- tweaked threshold(). removed superfluous if() checks and changed some
+		variable usage.  10-15% speedup.
+
+16 October 1999
+* tonal.c
+	- integrated hannwin, fft, pickmax into II_psycho_one()
+* tonalI.c 
+	- created, and put all the LayerI stuff in there.  LayerI
+		stuff will be left in source for the time being
+
+15 October 1999
+* encode.c
+	- added downmix (-a) option to get_audio()
+* encoder.h
+	- changed defaults to be psy model 1, 192 kbps, with extension .mp2
+* fft.c
+	- implemented FHT-based fft() from LAME. 
+* tonal.c
+	- tweaked II_f_f_t to call fft.c/fht() routine
+* encodeII.c
+	- include PDS' II_scale_factor_calc
+
+
+14 October 1999
+* musicin.c
+	- no longer use obtain_parameters(). interactive input is just a pain.
+	- progress meter updated to print every 10th frame.
+	- added 'usepsy' switch (-f) which will turn off all psychoacoustic 
+		calculations for layerII. (could easily be extended to layerI)
+* musicout.c
+	- removed
+* tables/dewindow
+	- removed
+* decode.c
+	- removed
+* decode.h 
+	- removed
+* subs.c
+	- renamed to fft.c (that's all it does anyway :)
+	- replaced old fft with fft from LAME2.x
+* tonal.c
+	- new add_db added
+* subband.c
+	- created
+	- moved window_subband and filter_subband from encode.c to here
+	- LAME versions of these routines replaces ISO routines.
+* encode.c
+	- split into encode.c, encodeI.c, and encodeII.c
+	- encode.c - generic encoding routines
+	- encodeI encodeII - layer specific routines. (easier to grok)

@@ -1,0 +1,637 @@
+
+//Repeating HousePointCeremony CutScene
+
+
+//----------------------------------------------------------------------
+[MainThread]
+
+Capture Harry
+Capture BaseCam
+Capture Dumbledore
+
+Trigger BeanBonusBars *
+
+//One line below added by Eric to get rid of objective from the menu.
+SetObjectiveId
+
+BaseCam FlyTo CutCamPos1 *
+BaseCam Target FlyTo Dumbledore z=15
+
+Harry WalkTo HarryCloser *
+Dumbledore Talk PC_Dum_HPCeremony_15 *DumbDone
+//Hello everyone.  Looks like it's time for another House Point Ceremony.
+
+Sleep 1
+
+BaseCam FlyTo CutCamPos2 EaseTo Time=2 *
+BaseCam FlyTo CutCamPos3 EaseTo Time=5 Z=5 *
+
+WaitFor DumbDone
+Dumbledore Talk PC_Dum_HPCeremony_24
+//Lets see which House is ahead this week...
+
+BaseCam Target FlyTo PointsTarget Time=2 *
+BaseCam FlyTo PointsCamPos EaseTo Time=2 *
+Sleep 2
+
+If IsGryffindorAhead Cue GryffindorThread
+If IsSlytherinAhead Cue SlytherinThread
+If IsHufflepuffAhead Cue HufflepuffThread
+If IsRavenclawAhead Cue RavenclawThread
+
+//Added By Eric so I can advance the Game State@@@@@@@@@@@
+//Waitfor ReloadTheHub
+
+//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//----------------------------------------------------------------------
+
+
+//----------------------------------------------------------------------
+[GryffindorThread]
+
+WaitFor GryffindorThread
+
+ReCapture Harry
+ReCapture BaseCam
+ReCapture Dumbledore
+
+Dumbledore Talk PC_Dum_HPCeremony_12 startanim=Talk_rhand
+//humm, It apears that Gryffindor is in the lead.  Harry, it looks like you get to visit the Bonus Bean Room.
+
+BaseCam Target FlyTo HarryGetReadyBeanMark *
+BaseCam FlyTo BeanCam EaseTo Time=4 *
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+Capture GMaleHuf2
+Capture Draco
+
+//########### Kids Who Lead ####################
+Capture GMaleGry4
+Capture GMaleGry3
+Capture GFemGry1
+//########### Kids Who Lead ####################
+
+Draco TurnTo Harry Follow
+GMaleHuf2 TurnTo Harry Follow
+GOldMaleGry1 TurnTo Harry Follow
+GFemGry0 TurnTo Harry Follow
+GMaleGry4 TurnTo Harry Follow
+GMaleHuf3 TurnTo Harry Follow
+GFemRav2 TurnTo Harry Follow
+GMaleRav2 TurnTo Harry Follow
+GFemRav3 TurnTo Harry Follow
+GOldMaleSly1 TurnTo Harry Follow
+GFemSly2 TurnTo Harry Follow
+GOldMaleSly2 TurnTo Harry Follow
+GFemSly1 TurnTo Harry Follow
+GFemSly3 TurnTo Harry Follow
+
+//########### Kids Who Lead ####################
+GMaleGry4 TurnTo Harry Follow
+GMaleGry3 TurnTo Harry Follow
+GFemGry1 TurnTo Harry Follow
+//########### Kids Who Lead ####################
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+Harry WalkTo HarryGetReadyBeanMark
+
+BaseCam Target FlyTo HarryGoingToBeanRoom Time=8 *
+
+Trigger BeanDoor *
+Harry RunTo HarryGoingToBeanRoom 
+Harry RunTo FinalBeanCutMark *CutDone
+
+WaitFor CutDone
+Trigger BeanDoor
+BaseCam Target FlyTo HarryGoingToBeanRoom
+
+BaseCam FadeOut
+
+Cue CleanUpBeanYes
+//Added by Chad to remove all characters from the HPC Room.
+
+//----------------------------------------------------------------------
+
+
+//----------------------------------------------------------------------
+[SlytherinThread]
+
+WaitFor SlytherinThread
+//Capture Draco
+
+ReCapture BaseCam
+
+Sleep 5.0
+Cue DracoAnim1
+BaseCam Target FlyTo DracoTarget *
+BaseCam FlyTo DracoCam EaseTo Time=6 *
+
+WaitFor DumbledoreDoneTalking
+Cue HarryDracoTalk
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+Capture GMaleHuf2
+
+//########### Kids Who Lead ####################
+Capture GMaleGry4
+Capture GMaleGry3
+Capture GFemGry1
+//########### Kids Who Lead ####################
+
+GMaleHuf2 TurnTo Draco Follow
+GOldMaleGry1 TurnTo Draco Follow
+GFemGry0 TurnTo Draco Follow
+GMaleGry4 TurnTo Draco Follow
+GMaleHuf3 TurnTo Draco Follow
+GFemRav2 TurnTo Draco Follow
+GMaleRav2 TurnTo Draco Follow
+GFemRav3 TurnTo Draco Follow
+GOldMaleSly1 TurnTo Draco Follow
+GFemSly2 TurnTo Draco Follow
+GOldMaleSly2 TurnTo Draco Follow
+GFemSly1 TurnTo Draco Follow
+GFemSly3 TurnTo Draco Follow
+GFemRav1 TurnTo Draco Follow
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+//########### Kids Who Lead ####################
+GMaleGry4 TurnTo Draco Follow
+GMaleGry3 TurnTo Draco Follow
+GFemGry1 TurnTo Draco Follow
+//########### Kids Who Lead ####################
+
+WaitFor DracoDriftCam
+BaseCam FlyTo DracoCam2 Time=5 *
+
+
+WaitFor DracoDone
+Sleep 1
+BaseCam FadeOut
+Cue CleanUpBeansNo
+//Added by Chad to remove all characters from the HPC Room.
+
+//----------------------------------------------------------------------
+[SlythWinDumbledore]
+
+WaitFor SlytherinThread
+ReCapture Dumbledore
+
+Dumbledore Talk PC_Dum_HPCeremony_11 startanim=Talk_lhand
+//humm, It apears that Slytherin is in the lead. Draco looks like you get a chance to collect some beans.
+
+Cue DumbledoreDoneTalking
+
+//----------------------------------------------------------------------
+
+//----------------------------------------------------------------------
+[SlythWinHarry]
+
+WaitFor HarryDracoTalk
+ReCapture Harry
+Harry TurnTo Draco Follow
+
+//----------------------------------------------------------------------
+
+//----------------------------------------------------------------------
+[SlythWinDraco]
+
+WaitFor DracoAnim1
+Capture Draco
+
+Draco Animate Positive
+
+WaitFor HarryDracoTalk
+Draco TurnTo Harry
+
+Draco Talk PC_Drc_HPCeremony_22
+//How many times have you been in Potter?
+
+Draco RunTo HarryGetReadyBeanMark
+Trigger BeanDoor *
+
+Cue DracoDriftCam
+
+Draco RunTo HarryGoingToBeanRoom FinalBeanCutMark
+
+Trigger BeanDoor
+
+Cue DracoDone
+
+//----------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------
+[HufflepuffThread]
+
+WaitFor HufflepuffThread
+
+ReCapture Harry
+ReCapture BaseCam
+ReCapture Dumbledore
+
+Capture GMaleHuf2
+
+Dumbledore Talk PC_Dum_HPCeremony_09 startanim=Talk_rhand *
+//humm, It apears that Hufflepuff is in the lead.  Justin, looks like you get a chance to collect some beans.
+
+Sleep 4.0
+
+BaseCam Target FlyTo JustinHPLoc *
+BaseCam FlyTo OtherKidsCam *
+
+BaseCam Target FlyTo cmHPC06 Time=6 *
+cmHPC06
+
+Sleep 1.5
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+Capture Draco
+
+//########### Kids Who Lead ####################
+Capture GMaleGry4
+Capture GMaleGry3
+Capture GFemGry1
+//########### Kids Who Lead ####################
+
+Harry Face GMaleHuf2 Follow
+Draco Face GMaleHuf2 Follow
+GOldMaleGry1 Face GMaleHuf2 Follow
+GFemGry0 Face GMaleHuf2 Follow
+GMaleGry4 Face GMaleHuf2 Follow
+GMaleHuf3 Face GMaleHuf2 Follow
+GFemRav2 Face GMaleHuf2 Follow
+GMaleRav2 Face GMaleHuf2 Follow
+GFemRav3 Face GMaleHuf2 Follow
+GOldMaleSly1 Face GMaleHuf2 Follow
+GFemSly2 Face GMaleHuf2 Follow
+GOldMaleSly2 Face GMaleHuf2 Follow
+GFemSly1 Face GMaleHuf2 Follow
+GFemSly3 Face GMaleHuf2 Follow
+
+//########### Kids Who Lead ####################
+GMaleGry4 TurnTo GMaleHuf2 Follow
+GMaleGry3 TurnTo GMaleHuf2 Follow
+GFemGry1 TurnTo GMaleHuf2 Follow
+//########### Kids Who Lead ####################
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+GMaleHuf2 RunTo HarryGetReadyBeanMark
+Trigger BeanDoor *
+//Basecam Flyto BeanCam EaseTo Time=3 *
+
+GMaleHuf2 RunTo HarryGoingToBeanRoom FinalBeanCutMark
+GMaleHuf2 Teleport JustinHidden
+
+Trigger BeanDoor
+Sleep 2
+
+BaseCam FadeOut
+
+Cue CleanUpBeansNo
+//Added by Chad to remove all characters from the HPC Room.
+
+
+//----------------------------------------------------------------------
+
+
+//----------------------------------------------------------------------
+[RavenclawThread]
+
+WaitFor RavenclawThread
+
+ReCapture Harry
+ReCapture BaseCam
+ReCapture Dumbledore
+
+Capture GFemRav1
+
+Dumbledore Talk PC_Dum_HPCeremony_10 startanim=Talk_lhand *
+//humm, It apears that Ravenclaw is in the lead.  Penelope, looks like you get a chance to collect some beans.
+
+Sleep 4.0
+
+BaseCam Target FlyTo PenelopeHPLoc *
+BaseCam FlyTo OtherKidsCam *
+
+BaseCam Target FlyTo cmHPC06 Time=6 *
+cmHPC06
+
+Sleep 1.5
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+Capture Draco
+
+//########### Kids Who Lead ####################
+Capture GMaleGry4
+Capture GMaleGry3
+Capture GFemGry1
+//########### Kids Who Lead ####################
+
+Harry Face GFemRav1 Follow
+Draco Face GFemRav1 Follow
+GOldMaleGry1 Face GFemRav1 Follow
+GFemGry0 Face GFemRav1 Follow
+GMaleGry4 Face GFemRav1 Follow
+GMaleHuf3 Face GFemRav1 Follow
+GFemRav2 Face GFemRav1 Follow
+GMaleRav2 Face GFemRav1 Follow
+GFemRav3 Face GFemRav1 Follow
+GOldMaleSly1 Face GFemRav1 Follow
+GFemSly2 Face GFemRav1 Follow
+GOldMaleSly2 Face GFemRav1 Follow
+GFemSly1 Face GFemRav1 Follow
+GFemSly3 Face GFemRav1 Follow
+
+//########### Kids Who Lead ####################
+GMaleGry4 TurnTo GFemRav1 Follow
+GMaleGry3 TurnTo GFemRav1 Follow
+GFemGry1 TurnTo GFemRav1 Follow
+//########### Kids Who Lead ####################
+
+//%%%%%%%%%%%%%% Kids Watch %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+GFemRav1 RunTo HarryGetReadyBeanMark
+Trigger BeanDoor *
+//Basecam Flyto BeanCam EaseTo Time=3 *
+
+GFemRav1 RunTo HarryGoingToBeanRoom FinalBeanCutMark
+GFemRav1 Teleport JustinHidden
+
+
+
+Trigger BeanDoor
+Sleep 2
+
+BaseCam FadeOut
+
+Cue CleanUpBeansNo
+//Added by Chad to remove all characters from the HPC Room.
+
+
+//----------------------------------------------------------------------
+
+
+//----------------------------------------------------------------------
+[CleanUpBeansNo]
+
+WaitFor CleanUpBeansNo
+
+Capture Draco
+Capture GMaleHuf2
+Capture GFemRav1
+
+ReCapture Dumbledore
+
+ReCapture Draco
+ReCapture GMaleHuf2
+ReCapture GFemRav1
+
+Dumbledore Teleport Cutmark27
+Draco Teleport DracoHidden
+GMaleHuf2 Teleport Cutmark51
+GFemRav1 Teleport Cutmark53
+
+//Added by Philip to remove ambient kids *********************
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GMaleGry4
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+
+GOldMaleGry1 Teleport cutmark28
+GFemGry0 Teleport cutmark62f
+GMaleGry4 Teleport cutmark45
+GFemHuf2 Teleport cutmark51f
+GMaleHuf3 Teleport cutmark52
+GFemRav2 Teleport cutmark54f
+GMaleRav2 Teleport cutmark54
+GFemRav3 Teleport cutmark55f
+GOldMaleSly1 Teleport cutmark56
+GFemSly2 Teleport cutmark57f
+GOldMaleSly2 Teleport cutmark57
+GFemSly1 Teleport cutmark56f
+GFemSly3 Teleport cutmark58f
+
+Release GOldMaleGry1
+Release GFemGry0
+Release GMaleGry4
+Release GFemHuf2
+Release GMaleHuf3
+Release GFemRav2
+Release GMaleRav2
+Release GFemRav3
+Release GOldMaleSly1
+Release GFemSly2
+Release GOldMaleSly2
+Release GFemSly1
+Release GFemSly3
+
+
+
+//ambient kids removed**********************
+
+
+//put kid who leads you to HPC in GState060 back in kid room. -Eric
+Capture GMaleGry4
+GMaleGry4 GotoState stateIdle
+GMaleGry4 Teleport Cutmark45
+Release GMaleGry4
+//done putting kid back
+
+
+//put kid who leads you to HPC in GState095 back in kid room. -Eric
+Capture GMaleGry3
+GMaleGry3 GotoState stateIdle
+GMaleGry3 Teleport Cutmark63
+Release GMaleGry3
+//done putting kid back
+
+//put kid who leads you to HPC in GState140 back in kid room. -Eric
+Capture GFemGry1
+GFemGry1 GotoState stateIdle
+GFemGry1 Teleport Cutmark28f
+Release GFemGry1
+//done putting kid back
+
+
+Release Dumbledore
+Release Draco
+Release GMaleHuf2
+Release GFemRav1
+
+//Cue ReloadTheHub
+Trigger NoBeans
+
+//----------------------------------------------------------------------
+
+
+//----------------------------------------------------------------------
+[CleanUpBeanYes]
+
+WaitFor CleanUpBeanYes
+
+Capture Draco
+Capture GMaleHuf2
+Capture GFemRav1
+
+ReCapture Dumbledore
+
+ReCapture Draco
+ReCapture GMaleHuf2
+ReCapture GFemRav1
+
+Dumbledore Teleport Cutmark27
+Draco Teleport DracoHidden
+GMaleHuf2 Teleport Cutmark51
+GFemRav1 Teleport Cutmark53
+
+//Added by Philip to remove ambient kids *********************
+Capture GOldMaleGry1
+Capture GFemGry0
+Capture GMaleGry4
+Capture GFemHuf2
+Capture GMaleHuf3
+Capture GFemRav2
+Capture GMaleRav2
+Capture GFemRav3
+Capture GOldMaleSly1
+Capture GFemSly2
+Capture GOldMaleSly2
+Capture GFemSly1
+Capture GFemSly3
+
+GOldMaleGry1 Teleport cutmark28
+GFemGry0 Teleport cutmark62f
+GMaleGry4 Teleport cutmark45
+GFemHuf2 Teleport cutmark51f
+GMaleHuf3 Teleport cutmark52
+GFemRav2 Teleport cutmark54f
+GMaleRav2 Teleport cutmark54
+GFemRav3 Teleport cutmark55f
+GOldMaleSly1 Teleport cutmark56
+GFemSly2 Teleport cutmark57f
+GOldMaleSly2 Teleport cutmark57
+GFemSly1 Teleport cutmark56f
+GFemSly3 Teleport cutmark58f
+
+Release GOldMaleGry1
+Release GFemGry0
+Release GMaleGry4
+Release GFemHuf2
+Release GMaleHuf3
+Release GFemRav2
+Release GMaleRav2
+Release GFemRav3
+Release GOldMaleSly1
+Release GFemSly2
+Release GOldMaleSly2
+Release GFemSly1
+Release GFemSly3
+//ambient kids removed**********************
+
+
+//put kid who leads you to HPC in GState060 back in kid room. -Eric
+Capture GMaleGry4
+GMaleGry4 GotoState stateIdle
+GMaleGry4 Teleport Cutmark45
+Release GMaleGry4
+//done putting kid back
+
+
+//put kid who leads you to HPC in GState095 back in kid room. -Eric
+Capture GMaleGry3
+GMaleGry3 GotoState stateIdle
+GMaleGry3 Teleport Cutmark63
+Release GMaleGry3
+//done putting kid back
+
+//put kid who leads you to HPC in GState140 back in kid room. -Eric
+Capture GFemGry1
+GFemGry1 GotoState stateIdle
+GFemGry1 Teleport Cutmark28f
+Release GFemGry1
+//done putting kid back
+
+Release Dumbledore
+Release Draco
+Release GMaleHuf2
+Release GFemRav1
+
+Trigger YesBeans
+
+//----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+[Music]
+
+Trigger HPSlience
+//Kills the Music
+Trigger HPC_Music
+
+WaitFor CutEnd
+//Trigger HPSlience
+
+
+//-----------------------------------------------------------------------

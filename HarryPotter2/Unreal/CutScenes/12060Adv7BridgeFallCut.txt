@@ -1,0 +1,131 @@
+
+
+//12060Adv7BridgeFallCut
+
+//Right after the turning room this cut scene grabs the player and shows
+//The kid you followed in, crossing the bridge and removed the ecto that
+//Is holding it up.
+
+
+//-----------------------------------------------------------------------
+
+[Cam]
+
+
+Capture BaseCam
+
+BaseCam FlyTo StartingCam *
+BaseCam Target FlyTo BridgeFocus1 *
+
+
+Sleep 1.0
+
+BaseCam FlyTo DriftCam1 Time=3 EaseBetween *
+
+WaitFor LeadInPosition
+
+//BaseCam Target FlyTo BridgeFocus1 *
+BaseCam FlyTo BridgeFallCam Time=2 EaseTo *
+//BaseCam Target FlyTo Focus1 StayLocked *
+
+WaitFor CutEnd
+
+Sleep 0.5
+ReCapture PotterAsGoyle
+Release BaseCam
+Release PotterAsGoyle
+
+
+
+//-----------------------------------------------------------------------
+
+
+
+
+//-----------------------------------------------------------------------
+
+[LeadSlyth]
+
+Capture LEADSlyth
+
+LeadSlyth Teleport SlythTelInTo *
+
+Sleep 1.0
+
+LeadSlyth RunTo SlythPreCast SlythRunTo
+
+LeadSlyth TurnTo PotterAsGoyle *
+
+Sleep 1.0
+
+Cue LeadInPosition
+
+LeadSlyth TurnTo CUTSCENE_Ectoblob3
+LeadSlyth Animate Cast *
+Sleep 0.5
+LeadSlyth CastSpell SpellTarget=CUTSCENE_Ectoblob3 *
+//Trigger CUTSCENE_Ectoblob3
+Sleep 1.1
+
+LeadSlyth TurnTo CUTSCENE_Ectoblob2
+LeadSlyth Animate Cast *
+Sleep 0.5
+LeadSlyth CastSpell SpellTarget=CUTSCENE_Ectoblob2 *
+//Trigger CUTSCENE_Ectoblob2
+Sleep 1.1
+
+LeadSlyth TurnTo CUTSCENE_Ectoblob1
+LeadSlyth Animate Cast *
+Sleep 0.5
+LeadSlyth CastSpell SpellTarget=CUTSCENE_Ectoblob1 *
+//Trigger CUTSCENE_Ectoblob1
+Sleep 0.5
+Trigger SwingBack
+Sleep 1.1
+
+LeadSlyth TurnTo PotterAsGoyle
+Cue CutEnd
+
+LeadSlyth Talk PC_Gms_Adv7bSlyth_16
+//Have fun Goyle. <evil snicker>
+
+LeadSlyth RunTo RunAway1 RunAway2 RunAway3
+
+LeadSlyth Teleport LeadSlyth_KidRoom
+
+//WaitFor CutEnd
+
+Release LeadSlyth
+
+
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+
+[PotterAsGoyle]
+
+Capture PotterAsGoyle
+
+PotterAsGoyle RunTo HarryLoc1
+PotterAsGoyle TurnTo SlythRunTo
+
+
+//WaitFor CutEnd
+//Release PotterAsGoyle
+
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+[Music]
+
+//Trigger Silence
+//Kills the Music
+//Trigger BridgeMusic
+
+WaitFor CutEnd
+Trigger Silence
+Trigger StartingMusic
+
+//-----------------------------------------------------------------------

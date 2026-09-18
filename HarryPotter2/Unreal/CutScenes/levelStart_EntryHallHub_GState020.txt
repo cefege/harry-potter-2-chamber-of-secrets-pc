@@ -1,0 +1,28 @@
+
+//LevelStart_EntryHallHub_GState020
+
+[MainThread]
+
+//Level Set Up------------------------------------------
+
+trigger Close_Ch1Bars
+trigger ToggleCh1LevelLoad
+sleep .03
+trigger CloseDungeon
+sleep .03
+trigger Close_Ch2Bars
+trigger ToggleCh2LevelLoad
+Sleep .03
+trigger Close_Ch4Bars
+Trigger ToggleCh4LevelLoad
+
+
+//Teleport some kids in and give them beetle bumplines.
+capture GMaleRav2
+capture GMaleHuf3
+GMaleRav2 teleport Cutmark180
+GMaleRav2 face Cutmark182
+GMaleHuf3 teleport Cutmark182
+GMaleHuf3 face Cutmark180
+Release GMaleRav2
+Release GMaleHuf3

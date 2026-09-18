@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="UVulkanRenderDevice.h" />
+    <ClInclude Include="Precomp.h" />
+    <ClInclude Include="SceneTextures.h" />
+    <ClInclude Include="halffloat.h" />
+    <ClInclude Include="mat.h" />
+    <ClInclude Include="quaternion.h" />
+    <ClInclude Include="vec.h" />
+    <ClInclude Include="FileResource.h" />
+    <ClInclude Include="CachedTexture.h" />
+    <ClInclude Include="ShaderManager.h" />
+    <ClInclude Include="SamplerManager.h" />
+    <ClInclude Include="BufferManager.h" />
+    <ClInclude Include="TextureManager.h" />
+    <ClInclude Include="DescriptorSetManager.h" />
+    <ClInclude Include="RenderPassManager.h" />
+    <ClInclude Include="FramebufferManager.h" />
+    <ClInclude Include="CommandBufferManager.h" />
+    <ClInclude Include="UploadManager.h" />
+    <ClInclude Include="TextureUploader.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="VulkanDrv.cpp" />
+    <ClCompile Include="UVulkanRenderDevice.cpp" />
+    <ClCompile Include="Precomp.cpp" />
+    <ClCompile Include="SceneTextures.cpp" />
+    <ClCompile Include="halffloat.cpp" />
+    <ClCompile Include="mat.cpp" />
+    <ClCompile Include="FileResource.cpp" />
+    <ClCompile Include="ShaderManager.cpp" />
+    <ClCompile Include="SamplerManager.cpp" />
+    <ClCompile Include="BufferManager.cpp" />
+    <ClCompile Include="TextureManager.cpp" />
+    <ClCompile Include="DescriptorSetManager.cpp" />
+    <ClCompile Include="RenderPassManager.cpp" />
+    <ClCompile Include="FramebufferManager.cpp" />
+    <ClCompile Include="CommandBufferManager.cpp" />
+    <ClCompile Include="UploadManager.cpp" />
+    <ClCompile Include="TextureUploader.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\VulkanDrv.int" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,39 @@
+//LevelStart_GroundsHub_GState020
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+capture basecam
+
+Trigger CloseHerbology
+
+//sends Hagrid to his hut for patrolling
+capture Hagrid
+Hagrid teleport HagridPP1
+//Hagrid face Wilbur Follow
+//**Wilbur is a pig
+
+//moved the patrol path instruction to bump cutscene by Hagrid's Hut.
+//OK, now I've removed that cutscene because it was breaking--pd
+Hagrid SetOnPatrolPointPath HagridPP1 *
+release Hagrid
+
+//teleports a couple girls in for frolic: running in an endless oval
+capture GFemGry3
+GFemGry3 teleport LawnLoopPP1
+GFemGry3 SetOnPatrolPointPath LawnLoopPP1 *
+release GFemGry3
+sleep 0.5
+capture GFemGry0
+GFemGry0 teleport LawnLoopPP1
+GFemGry0 SetOnPatrolPointPath LawnLoopPP1 *
+release GFemGry0
+
+//teleports a Slytherin boy to search for a secret by the wall facing Hogwarts Entrance Hall
+capture GOldMaleSly2
+GOldMaleSly2 teleport SlySecretPP1
+GOldMaleSly2 SetOnPatrolPointPath SlySecretPP1 *
+release GOldMaleSly2
+
+basecam fadein
+release basecam

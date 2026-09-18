@@ -1,0 +1,62 @@
+//13020GoToSponge
+
+[Dialog_01]
+
+Capture Harry
+Capture Hermione
+//Capture Narrator
+Capture BaseCam
+
+
+//the transition is now handled offshore by transition.unr, inc.
+//Narrator Talk PC_Nar_TransF_00
+//The news that Nearly Headless Nick had been Petrified spread through the school like a dark cloud when everyone got back from holiday.
+
+//Narrator Talk PC_Nar_TransF_06
+//If a ghost can be Petrified, the students thought, then no one is safe.
+
+//Narrator Talk PC_Nar_TransF_02
+//The first years moved around the castle in tight-knit groups, afraid they might be attacked if they ventured out alone.
+
+//Narrator Talk PC_Nar_TransF_03
+//A furious trade in talismans, amulets, and other protective devices was sweeping the school.
+
+//Narrator Talk PC_Nar_TransF_09
+//In the meantime, Harry had learned that Draco Malfoy was not the Heir of Slytherin.
+
+//Narrator Talk PC_Nar_TransF_10
+//But if it isn't Draco…and it isn't Harry…who is it?
+
+Hermione teleport cutmark20
+Harry teleport cutmark23
+Hermione face harry follow
+basecam flyto CutCameraPos5 *
+basecam target flyto Harry
+basecam fadein *
+Harry walkto cutmark22 *HarryDone1
+Basecam Target flyto Cutmark21 time=2 easebetween *
+
+waitfor HarryDone1
+Harry turnto Hermione follow *
+
+Hermione Talk PC_Her_GoToSponge_01
+//Hurry, Harry! It's time for our Defence Against Dark Arts class!
+
+Harry Talk PC_Hry_GoToSponge_02
+//Not his class again?
+
+Basecam flyto Harry x=-20 z=25 y=-25
+Basecam target Flyto Hermione z=20
+Hermione Talk PC_Her_GoToSponge_03
+//It'll be wonderful! Professor Lockhart is going to teach us Spongify! Come on Harry!
+
+basecam flyto CutCameraPos5 *
+Basecam Target flyto Cutmark21
+Hermione leadactor harry RonToDADAStart RonToDADAEnd *
+
+SetObjectiveId PC_Hry_GoToDADA2_02
+
+Release Harry
+Release Hermione
+Release BaseCam
+//Release Narrator

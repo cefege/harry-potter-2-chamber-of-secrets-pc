@@ -1,0 +1,171 @@
+//---------------------------------------------------------------------
+
+//TEMPQuidCup
+
+//This cut scene contains code that will eventually get moved 
+//into 00308Quidditch_LeaveTrenchRun
+//I'm writting this cut scene so that it can be made to only be played if 
+//WonQuidditch is cued.
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[QuidCupWinThread]
+
+Cue WonQuidditch
+//This cue would normally come from a question that I ask Daivd's Director
+
+
+
+
+//---------------------------------------------------------------------
+
+
+
+
+//---------------------------------------------------------------------
+[CamWin]
+
+WaitFor WonQuidditch
+Capture BaseCam
+
+BaseCam Target FlyTo QuidCup_Focus1
+BaseCam FlyTo IP_QuidCupPath1_Start
+
+//Sleep 1.5
+
+//Draco MatchRot IP_EnterTrench_Start
+
+BaseCam FollowSpline IP_QuidCupPath1 Start=IP_QuidCupPath1_Start Dest=IP_QuidCupPath1_End Time=5 Accel=100 EaseFrom
+
+BaseCam FollowSpline IP_QuidCupPath2 Start=IP_QuidCupPath2_Start Dest=IP_QuidCupPath2_End Time=11 Accel=100 EaseTo *
+
+Cue QuidFly2
+
+Sleep 18.0
+
+BaseCam FadeOut
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[HarryWin]
+
+WaitFor WonQuidditch
+Capture Harry
+
+Harry Teleport QuidCup_HarryLoc z=-60
+//Harry SetIdle BroomUp_Wait
+Harry Animate BroomUp_Wait
+Harry Face IP_QuidCupPath2_End
+
+
+WaitFor CutEnd
+
+
+
+//---------------------------------------------------------------------
+
+//---------------------------------------------------------------------
+[DracoLose]
+
+WaitFor WonQuidditch
+Capture Draco
+
+Draco Teleport QuidCup_DracoLoc z=-30
+Draco Animate BroomUp_Wait
+Draco Face QuidCup_DracoLook
+
+
+
+WaitFor CutEnd
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[RavenLose]
+
+WaitFor WonQuidditch
+Capture Raven
+
+Raven Teleport QuidCup_RavenLoc z=-30
+Raven Animate BroomUp_Wait
+Raven Face QuidCup_RavenLook
+
+
+
+WaitFor CutEnd
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Extras]
+
+WaitFor WonQuidditch
+
+Trigger ExtrasCutScene
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[QuidFly1]
+
+WaitFor WonQuidditch
+
+Capture FlyBy3
+
+Sleep 3.5
+
+FlyBy3 FlyTo IP_FirstFlyer_Start
+FlyBy3 MatchRot IP_FirstFlyer_Start
+//FlyBy1 FollowSpline FirstFlyer Start=IP_FirstFlyer_Start Dest=IP_FirstFlyer_End Time=3 Accel=100 Align *
+FlyBy3 FollowSpline FirstFlyer Start=IP_FirstFlyer_Start Dest=IP_FirstFlyer_End Speed=700 Accel=100 Align *
+
+//---------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+//---------------------------------------------------------------------
+[QuidFly2]
+
+WaitFor QuidFly2
+
+Capture FlyBy1
+Capture FlyBy2
+
+Sleep 3.5
+
+FlyBy1 FlyTo IP_FlyByPath1_Start
+FlyBy1 MatchRot IP_FlyByPath1_Start
+FlyBy1 FollowSpline FlyByPath1 Start=IP_FlyByPath1_Start Dest=IP_FlyByPath1_End Time=3 Accel=100 Align *
+
+Sleep 1.0
+
+FlyBy2 FlyTo IP_FlyByPath2_Start
+FlyBy2 MatchRot IP_FlyByPath2_Start
+FlyBy2 FollowSpline FlyByPath2 Start=IP_FlyByPath2_Start Dest=IP_FlyByPath2_End Time=3 Accel=100 Align *
+
+
+
+//---------------------------------------------------------------------
+
+
+

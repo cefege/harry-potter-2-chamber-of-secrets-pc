@@ -1,0 +1,105 @@
+
+//12060GoyleBackToHarry
+
+//This is the cut scene that changes Harry back to himself.
+
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+
+[Main]
+
+Capture PotterAsGoyle
+
+PotterAsGoyle RunTo HarryBackToGoyleLoc1 HarryBackToGoyleLoc2
+
+
+Sleep 0.5
+//PotterAsGoyle Animate Talk_DontKnow *
+PotterAsGoyle Animate Yawn *
+
+
+//Goyle_StandUp
+
+//Trigger ChangeHarryParts
+
+Trigger ScreenFlashHP
+
+Sleep 0.5
+
+Trigger HarryToGoyleTrigger2
+
+Sleep 1.0
+
+PotterAsGoyle Animate Fidget_2 *
+
+Sleep 2.0
+
+PotterAsGoyle Talk PC_Hry_Adv7bSlyth_13 startanim=Fidget_1
+//I'd better hide in the shadows and sneak out. If they spot me in here…who knows what might happen?
+
+
+Cue CutEnd
+
+Release PotterAsGoyle
+
+Trigger GirlsKickOutGoyle
+//Turns off the girls kicking Goyle out, in case Harry heads back that way.
+
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+
+[Cam]
+
+Capture BaseCam
+
+
+BaseCam FlyTo PotterBackCam *
+BaseCam Target FlyTo PotterAsGoyle Z=30 StayLocked *
+
+Sleep 2.0
+
+BaseCam FlyTo PotterBackCam2 Time=3
+
+BaseCam FlyTo PotterBackCam3 Time=7 *
+
+WaitFor CutEnd
+
+Release BaseCam
+
+Trigger EndingCutScene
+
+//-----------------------------------------------------------------------
+
+
+//-----------------------------------------------------------------------
+[Draco]
+
+Capture Draco
+
+Draco RunTo DracoPath4 DracoPath3 DracoPath2 DracoPath1
+
+Draco Teleport DracoLoc_KidRoom
+
+Release Draco
+
+
+//-----------------------------------------------------------------------
+
+
+
+//-----------------------------------------------------------------------
+[Music]
+
+Trigger Silence2
+//Kills the Music
+Trigger ChangeBackMusic
+
+WaitFor CutEnd
+Trigger Silence2
+
+
+//-----------------------------------------------------------------------

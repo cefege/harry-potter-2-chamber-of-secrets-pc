@@ -1,0 +1,29 @@
+//11060GoyleFound
+
+[Dialog_01]
+
+Capture Harry
+
+Capture BaseCam
+
+Harry TurnTo Goyle
+sleep .5
+BaseCam FlyTo CutCameraPos32
+BaseCam Target FlyTo Goyle
+Harry Talk PC_Hry_GoyleFound_01 *HarryDone
+//There’s Goyle… I’d better follow him.
+sleep 2
+cue GoyleGo
+waitfor HarryDone
+sleep 1.5
+
+Release Harry
+
+Release BaseCam
+
+[Goyle]
+Capture Goyle
+waitfor GoyleGo
+Goyle walkto CutMark120 CutMark117 CutMark118
+Goyle teleport CutMark100
+Release Goyle

@@ -1,0 +1,92 @@
+
+//12060SnapeCaughtYou
+
+//This is the cut scene that plays when the Slytherin Kids Catch Harry
+//As he trys to make is way out of the Slytherin CommonRoom.
+//This Cut scene also removes Snape and puts Harry back in a starting location
+//So he can try to sneak out again.
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo SnapeFocus1
+
+BaseCam FlyTo SnapeCatchCamLoc
+Sleep 0.5
+BaseCam FlyTo SnapeCatchCamLoc2 Time=3 *
+
+WaitFor Reset
+BaseCam FadeOut 1.0
+
+Cue PlacesEveryone
+
+Sleep 2.0
+
+BaseCam FadeIn 1.0 *
+
+Cue CutEnd
+Release BaseCam
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[PotterAsGoyle]
+
+Capture PotterAsGoyle
+
+PotterAsGoyle Teleport HarryTellInLoc
+
+PotterAsGoyle RunTo SnapeCatchHarryLoc
+
+PotterAsGoyle TurnTo SnapeFinalLoc
+
+WaitFor PlacesEveryone
+
+PotterAsGoyle Teleport HarryBackToGoyleLoc2
+PotterAsGoyle Face PotterFace
+
+WaitFor CutEnd
+
+PotterAsGoyle Talk PC_Hry_Adv7bSlyth_21
+//I need to get out of here with out any of the Slytherin's seeing me!
+
+Release PotterAsGoyle
+
+
+//---------------------------------------------------------------------
+
+
+
+
+//---------------------------------------------------------------------
+[Snape]
+
+Capture Snape
+
+Snape Teleport SnapeTellInto
+
+Snape WalkTo SnapeFinalLoc
+
+Snape TurnTo SnapeCatchHarryLoc
+
+Snape Talk PC_Snp_Adv7bSlyth_02
+//Ah, Potter I do believe expulsion is in order!
+
+Cue Reset
+
+WaitFor PlacesEveryone
+Snape Teleport SnapeLoc_KidRoom
+
+//Trigger RestartLevel
+
+WaitFor CutEnd
+Release Snape
+
+//---------------------------------------------------------------------

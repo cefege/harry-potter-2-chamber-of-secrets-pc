@@ -1,0 +1,166 @@
+//12060DracoNotHeir
+
+[PotterAsGoyle]
+
+Capture PotterAsGoyle
+
+PotterAsGoyle WalkTo HarryStartLoc
+PotterAsGoyle TurnTo DracoStartLoc
+
+WaitFor HarryWatchMe
+PotterAsGoyle TurnTo Draco Follow
+PotterAsGoyle Talk PC_AsG_DracoNotHeir_05
+//I'll…try.
+
+WaitFor HarryFollow
+Sleep 1.0
+PotterAsGoyle RunTo DracoPath2 DracoPath3 DracoPath4 HarryMainLoc
+PotterAsGoyle TurnTo DracoMainLoc
+
+WaitFor PotterTalk1
+PotterAsGoyle Talk PC_AsG_DracoNotHeir_07
+//Umm…grunt!
+Cue DracoTalk2
+
+WaitFor PotterTalk2
+PotterAsGoyle Talk PC_AsG_DracoNotHeir_11
+//You don't know?
+Cue DracoTalk3
+
+WaitFor PotterTalk3
+PotterAsGoyle Talk PC_AsG_DracoNotHeir_13
+//Irk…ack…
+Cue DracoTalk4
+
+WaitFor PotterTalk4
+PotterAsGoyle Talk PC_AsG_DracoNotHeir_01
+//Stomach ache…
+Cue DracoTalk5
+
+WaitFor CutDONE
+
+PotterAsGoyle Talk PC_Hry_Adv7bSlyth_15
+//The poly-juice potion is about to wear-off, I better get out of here, now!
+
+Release PotterAsGoyle
+
+Trigger BackToHarryCut
+//Turns on the cut scene that will change Harry back into himself.
+
+//-----------------------------------------------------------------------
+
+[Draco]
+Capture Draco
+
+Draco RunTo DracoPath1
+Draco Talk PC_Drc_DracoNotHeir_18 *
+//There you are Goyle!  I've been looking all over for you!
+
+Draco RunTo DracoStartLoc
+Draco TurnTo HarryStartLoc
+
+Cue CamOnMe
+Sleep 1.5
+
+Draco Talk PC_Drc_DracoNotHeir_02
+//Stop grimacing. You're even more unpleasant to look at than usual.
+
+Sleep 1.0
+
+Draco Talk PC_Drc_DracoNotHeir_19
+//Goyle, come on... follow me
+
+Cue HarryWatchMe
+
+Draco RunTo DracoPath2 *
+Cue HarryFollow
+Draco RunTo DracoPath3 DracoPath4
+Cue CamChange
+Draco RunTo DracoMainLoc
+Draco TurnTo HarryMainLoc
+
+Draco Talk PC_Drc_DracoNotHeir_06
+//Have you heard all the talk about Potter being the Heir of Slytherin? What rubbish!
+Cue PotterTalk1
+
+WaitFor DracoTalk2
+Draco Talk PC_Drc_DracoNotHeir_08
+//I just wish I knew who the heir is. I’d try to help them.
+Cue PotterTalk2
+
+WaitFor DracoTalk3
+Draco Talk PC_Drc_DracoNotHeir_10
+//Try to pay attention, Goyle. I have no idea.
+
+Draco Talk PC_Drc_DracoNotHeir_12
+//I don't even know who opened the Chamber the last time. I just know that a student was killed and because of it someone got expelled 50 years ago.
+Cue PotterTalk3
+
+WaitFor DracoTalk4
+Draco Talk PC_Drc_DracoNotHeir_15
+//What's wrong now?
+Cue PotterTalk4
+
+WaitFor DracoTalk5
+Draco Talk PC_Drc_DracoNotHeir_17
+//Oh, just go to the Infirmary, will you?
+
+Cue CutDONE
+Release Draco
+
+
+//-----------------------------------------------------------------------------
+
+[Cam]
+Capture BaseCam
+
+BaseCam FlyTo StartCam *
+BaseCam Target FlyTo Focus1 *
+Sleep 1.0
+BaseCam FlyTo Leavecam EaseTo Time=15 *
+
+WaitFor CamOnMe
+Sleep 3.0
+//BaseCam Target FlyTo Draco EaseBetween Time=1 *
+BaseCam Target FlyTo Draco EaseTo Time=2 StayLocked *
+//BaseCam Target AttachedTo=Draco *
+
+WaitFor HarryFollow
+Sleep 1.0
+BaseCam FlyTo HallCam EaseTo Time=6 *
+
+WaitFor CamChange
+Capture BaseCam
+
+
+BaseCam Target FlyTo HallFocus *
+BaseCam FlyTo MainCam1 *
+
+BaseCam Target FlyTo Focus2 EaseTo Time=3 *
+BaseCam FlyTo MainCam2 EaseTo Time=16 *
+
+WaitFor CutDONE
+Release BaseCam
+
+
+
+//PotterAsGoyle Talk PC_AsG_DracoNotHeir_16
+//Umm…ooo, stomach!
+//Draco Talk PC_Drc_DracoNotHeir_00
+//What's wrong with you, Goyle? You're not yourself.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

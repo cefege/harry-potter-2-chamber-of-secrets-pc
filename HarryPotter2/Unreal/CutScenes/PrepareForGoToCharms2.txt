@@ -1,0 +1,11 @@
+//PrepareForGoToCharms2
+
+//This only needs to play once since Hermione is persistent.
+//Chad, we won't actually need this after the flow is shortened.
+
+Capture Hermione
+
+Hermione Teleport CutMark153
+Hermione face Harry Follow *
+
+Release Hermione

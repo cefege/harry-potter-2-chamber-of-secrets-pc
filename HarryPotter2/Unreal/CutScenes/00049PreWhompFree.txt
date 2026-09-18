@@ -1,0 +1,42 @@
+[No Thread Fred]
+trigger SaveRon
+capture harry
+capture ron
+capture basecam
+Ron setidle idle *
+Ron Talk PC_Ron_WhompTut1_62 *RonDone1 StartAnim=Wave LoopAnim=scared
+//Good Job, Harry! Now, see If you can cast Flipendo on this branch to get it off me.
+Ron TurnTo Harry *
+
+//Harry TurnTo Ron
+Harry TurnTo Ron
+Harry RunTo Cutmark4 *HarryDone1
+Basecam Target FlyTo CutMark31 time=3 *CameraDone1
+//Basecam FlyTo CutCameraPos0 time=3 *
+
+waitfor HarryDone1
+Harry TurnTo Ron
+
+//waitfor CameraDone1
+sleep 1
+//Basecam Target Flyto CutMark31 easebetween Time=2
+//BaseCam Target FlyTo Ron z=20 *
+BaseCam Target FlyTo Ron z=25 *
+BaseCam FlyTo Ron x=40 z=20 y=-5
+//BaseCam FlyTo Ron z=25 x=85 y=-15 Time=5 easeto *
+
+waitfor RonDone1
+//Ron TurnTo CutMark7
+Ron Talk PC_Ron_WhompTut1_63 StartAnim=idle loopanim=idle endanim=idle *RonDone2
+//I think I see a sensitive spot right there!
+
+Sleep 1
+BaseCam Target FlyTo CutMark7 //z=10 Time=2 easebetween *
+BaseCam FlyTo CutCameraPos4 //z=20 x=65 Time=2 easeto 
+
+
+waitfor RonDone2
+Sleep 2
+release Harry
+release Ron
+release Basecam

@@ -1,0 +1,152 @@
+
+//Adv8ForrestDitchRon
+
+//This is the cut scene that Ron helps Harry up over the trees and say's he'll 
+//Find another way.
+
+//----------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo Harry Z=30 StayLocked
+BaseCam FlyTo FFS_Cam1
+//BaseCam FlyTo Harry Z=100 X=300 StayLocked
+
+WaitFor HarryArrive
+BaseCam Target FlyTo FFS_Focus1
+BaseCam FlyTo FFS_Cam2
+
+Cue HarryTalk
+
+WaitFor RonTalk
+BaseCam FlyTo FFS_Cam3 Time=3 *
+BaseCam Target FlyTo FFS_Focus2 Time=3
+
+WaitFor HarryOnTop
+BaseCam Target FlyTo FFS_HarryLoc3
+BaseCam FlyTo FFS_Cam4 Z=-20
+
+WaitFor CamUpTop
+BaseCam Target FlyTo FFS_HarryLoc Z=30
+BaseCam FlyTo FFS_Cam5
+
+WaitFor HarryHeadToFF
+BaseCam Target FlyTo FFS_Focus3
+BaseCam FlyTo FFS_Cam6
+
+WaitFor CutEnd
+ReCapture Harry
+BaseCam GoHome
+Release BaseCam
+Release Harry
+
+//----------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------
+[Harry]
+
+Capture Harry
+
+Harry RunTo FFS_Path1 FFS_Path2 FFS_HarryLoc
+Harry TurnTo FFS_Focus1
+
+Cue HarryArrive
+
+WaitFor HarryTalk
+
+Harry Animate Look_frantic
+
+Harry Talk PC_Hry_Adv9aForest_08 StartAnim=Talk_Negative
+//This ledge is too high to climb!
+
+Cue RonTalk
+
+WaitFor HarryFaceRon
+Harry TurnTo Ron
+
+WaitFor HarryOnTop
+
+Harry RunTo FFS_HarryLoc2
+Harry TurnTo FFS_HarryFace
+
+Cue HarryReadyToClimb
+
+WaitFor RonBoost
+Harry Animate Climb96End
+Harry Teleport FFS_HarryLoc3
+
+Sleep 0.5
+
+Cue CamUpTop
+Harry TurnTo Ron
+
+WaitFor HarryHeadToFF
+//Harry RunTo FFS_HarryLoc4
+
+Harry Teleport FFS_HarryLoc5 
+Harry Face FFS_HarryLoc6
+Harry RunTo FFS_HarryLoc6
+Harry TurnTo Gar1
+
+Cue CutEnd
+
+
+//----------------------------------------------------------------------
+
+
+
+//----------------------------------------------------------------------
+[Ron]
+
+Capture Ron
+
+Sleep 0.5
+
+Ron RunTo FFS_Path1 FFS_Path2 FFS_RonLoc
+Ron TurnTo FFS_Focus1
+
+WaitFor RonTalk
+Cue HarryFaceRon
+Ron TurnTo Harry
+
+Ron Talk PC_Ron_Adv9aForest_09 StartAnim=Talk_Rhand
+//I'll give you a leg up, Harry.  You'll have to brave the Forbidden Forest alone.
+
+Sleep 0.5
+
+Cue HarryOnTop
+
+Ron RunTo FFS_RonLiftLoc
+Ron TurnTo FFS_HarryLoc2
+
+WaitFor HarryReadyToClimb
+Ron Animate Talk_Flustered *
+
+Cue RonBoost
+
+WaitFor CamUpTop
+
+Ron RunTo FFS_RonLoc
+Ron TurnTo Harry
+
+Ron Talk PC_Ron_BitOfGoyle_32 StartAnim=Wave
+//Good luck, Harry.
+
+Cue HarryHeadToFF
+
+WaitFor CutEnd
+Release Ron
+
+//----------------------------------------------------------------------
+
+
+
+
+

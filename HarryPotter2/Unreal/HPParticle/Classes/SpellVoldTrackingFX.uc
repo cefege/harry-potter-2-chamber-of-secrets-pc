@@ -1,0 +1,34 @@
+//=============================================================================
+//=============================================================================
+class SpellVoldTrackingFX expands ParticleFX;
+
+defaultproperties
+{
+     ParticlesPerSec=(Base=120)
+     SourceWidth=(Base=0)
+     SourceHeight=(Base=0)
+     AngularSpreadWidth=(Base=180,Rand=180)
+     AngularSpreadHeight=(Base=180,Rand=180)
+     bSteadyState=True
+     Speed=(Base=20,Rand=20)
+     ColorStart=(Base=(R=255,G=0,B=255),Rand=(R=255,G=0,B=255))
+     ColorEnd=(Base=(R=255),Rand=(B=255))
+     SizeWidth=(Base=1,Rand=10)
+     SizeLength=(Base=1,Rand=10)
+     SizeEndScale=(Base=0,Rand=2)
+     SpinRate=(Base=-6,Rand=12)
+     Chaos=1
+     Attraction=(X=10,Y=10,Z=10)
+     Damping=1
+     GravityModifier=-0.1
+     Textures(0)=Texture'HPParticle.hp_fx.Spells.Les_VoldSpell'
+     LastUpdateLocation=(X=-383.86,Y=-178.5758,Z=65.73093)
+     LastEmitLocation=(X=-383.86,Y=-178.5758,Z=65.73093)
+     LastUpdateRotation=(Pitch=16144,Yaw=-16336)
+     EmissionResidue=0.810257
+     Age=13676.87
+     Tag=ParticleFX
+     Location=(X=-383.86,Y=-178.5758,Z=65.73093)
+     Rotation=(Pitch=16144,Yaw=-16336)
+     OldLocation=(X=1.133467,Y=115.5254,Z=68.5724)
+}

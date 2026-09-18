@@ -1,0 +1,22 @@
+
+//LevelStart_EntryHallHub_GState080
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+//open adv3 in GState060 thru 090
+trigger OpenADV3DungIng
+
+//start parselmouth cutscene the first time we enter this game state
+//trigger 07080Parselmouth
+
+
+
+
+
+
+

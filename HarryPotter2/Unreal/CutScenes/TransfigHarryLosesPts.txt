@@ -1,0 +1,66 @@
+//TransfigHarryLosesPts
+
+[Main]
+
+Capture Basecam
+Capture Harry
+Capture McGonagall
+Capture transfigM1
+Capture transfigM2
+Capture transfigM3
+Capture transfigF1
+Capture transfigF2
+Capture transfigF3
+
+McGonagall teleport McGTeach1
+
+transfigM1 TurnTo McGonagall Follow
+transfigM2 TurnTo McGonagall Follow
+transfigM3 TurnTo McGonagall Follow
+transfigF1 TurnTo McGonagall Follow
+transfigF2 TurnTo McGonagall Follow
+transfigF3 TurnTo McGonagall Follow
+
+
+Harry RunTo TransfigHarry1 *
+
+McGonagall walkto McGTeach2 *Cue3
+sleep 2
+
+BaseCam FlyTo HarryEntersCamPos
+BaseCam Target Flyto HarryEntersCamTarget
+
+WaitFor Cue3
+McGonagall TurnTo Harry
+Harry TurnTo McGonagall Follow
+
+sleep 1
+
+
+BaseCam FlyTo McGCloseCamPos
+BaseCam Target FlyTo McGonagall z=20
+McGonagall Say PC_MCG_BUMPLINES_599
+//Five Points from Gryffindor!
+
+
+
+
+BaseCam Target AttachedTo=harry z=16
+BaseCam Locked Distance=100 
+
+sleep .5
+
+
+
+Harry RunTo TransfigHarry2
+
+Release transfigM1
+Release transfigM2
+Release transfigM3
+Release transfigF1
+Release transfigF2
+Release transfigF3
+
+Release McGonagall
+Release Harry
+Release BaseCam

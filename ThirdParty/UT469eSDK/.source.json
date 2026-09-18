@@ -1,0 +1,79 @@
+{
+  "artifact_url": "https://github.com/OldUnreal/UnrealTournamentPatches/releases/download/v469e/OldUnreal-UTPatch469e-SDK.zip",
+  "release_asset_id": 314894393,
+  "release_asset_size": 60007957,
+  "release_asset_sha256": "b213789a18d736beacdf8bc2740bcc6e031789b806823b9f7eb3a75b2dacedcc",
+  "release_tag": "v469e",
+  "release_tag_commit": "29a429ac87f789bcacba9896b1d4c7f5ff5f16e8",
+  "selected_paths": [
+    "SDLDrv/Inc/SDLDrv.h",
+    "SDLDrv/Inc/SDLDrvNative.h",
+    "SDLDrv/Src/SDLClient.cpp",
+    "SDLDrv/Src/SDLDrv.cpp",
+    "SDLDrv/Src/SDLViewport.cpp",
+    "SDLLaunch/Src/SDLLaunch.cpp",
+    "SDLLaunch/Src/SDLLaunchPrivate.h",
+    "SDLLaunch/Src/FFeedbackContextSDL.h",
+    "SDLLaunch/Src/FOutputDeviceSDLError.h",
+    "LICENSE.md",
+    "README.md"
+  ],
+  "excluded_paths": [
+    "**/* (all archive members except selected_paths)",
+    "**/*.icns",
+    "**/*.ico",
+    "**/*.plist",
+    "wxUnrealTournament/**",
+    "Core/**",
+    "Engine/**",
+    "Render/**",
+    "External/**",
+    "ICBINDx11Drv/**",
+    "UT99VulkanDrv/**",
+    "XOpenGLDrv/**",
+    "**/*.a",
+    "**/*.dll",
+    "**/*.dylib",
+    "**/*.exe",
+    "**/*.lib",
+    "**/*.o",
+    "**/*.obj",
+    "**/*.so"
+  ],
+  "exclusion_policy": [
+    "No icons or property lists.",
+    "No wxUnrealTournament members.",
+    "No engine headers or libraries.",
+    "No executables, binaries, object files, or libraries.",
+    "No third-party source or dependency trees.",
+    "No archive members other than selected_paths."
+  ],
+  "terms": {
+    "owner": "Epic Games, Inc.",
+    "operative_notice": "Unless stated otherwise, all files contained here are the property of Epic Games, Inc. They are provided without warranty, and under the same terms as the Unreal retail license agreement: You may use them for your personal, non-profit enjoyment, but you may not sell or otherwise commercially exploit the source or things you created based on the source.",
+    "permitted_scope": "Personal, non-profit enjoyment, including this local personal non-profit modification.",
+    "commercial_exploitation": "Prohibited."
+  },
+  "controlling_notice_paths": [
+    "LICENSE.md",
+    "README.md"
+  ],
+  "controlling_notice_locations": [
+    "LICENSE.md:1-7",
+    "README.md:115-124"
+  ],
+  "copied_file_sha256": {
+    "SDLDrv/Inc/SDLDrv.h": "f564ed7ab36ae901bfcab39253098b4b5c634a24168fff4efd75a2cb6bde8ae8",
+    "SDLDrv/Inc/SDLDrvNative.h": "1821ee9d3e92b7d0375d11dfe493b6a514e0acf8472a7f901d4e990af9e6ce92",
+    "SDLDrv/Src/SDLClient.cpp": "7421d7f86fdf83e0abbba4ca4d274ec755922d0c2dc794494c9c99733e3dad48",
+    "SDLDrv/Src/SDLDrv.cpp": "a1c449ff51742982e418f6d7bf57292d828e2cfec127b151b9871d218abced59",
+    "SDLDrv/Src/SDLViewport.cpp": "adc3fd539c6d5bcdb32b37439085f9e1fcd7fbeae46d7faaa6a928abc4b74574",
+    "SDLLaunch/Src/SDLLaunch.cpp": "5a50ba29db3c09573d175150b8d54c955b3377ccda78adfb29d407b8db08f37f",
+    "SDLLaunch/Src/SDLLaunchPrivate.h": "cf414dda999f0f6c49787d8d6a89440303eb333e7a65fe230ebb7036405b81af",
+    "SDLLaunch/Src/FFeedbackContextSDL.h": "6f2dde66cda64fd3480c4dd5a3f1ca1b9c0da38178f5ff4ca47dfdb7b0bfc3c5",
+    "SDLLaunch/Src/FOutputDeviceSDLError.h": "5b6978b41cd2cc64a4d12df813acd210b4ff7236fe3daf508447944d11d8550e",
+    "LICENSE.md": "2f44d9e6ae146f939398666e0a13402457a1453294a0de2ad61aa7eebcb2e853",
+    "README.md": "e469457db8da88cfe345721491a5e00bdf3d7ce1e2f29c962308c0e3c3133028"
+  },
+  "modified": false
+}

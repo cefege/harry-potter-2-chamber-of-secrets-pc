@@ -1,0 +1,111 @@
+//04070FollowVoice
+
+[HarryRun]
+Capture Harry
+Harry Teleport CutMark85
+sleep .2
+Harry RunTo CutMark89
+Cue HarryMadeIt
+
+[RonRun]
+Capture Ron
+Ron Teleport CutMark87
+Ron RunTo CutMark88
+Ron TurnTo Harry Follow
+
+[HermioneRun]
+Capture Hermione
+Hermione Teleport CutMark86
+Hermione RunTo CutMark90
+Hermione TurnTo Harry Follow
+
+[Dialog_01]
+Capture BaseCam 
+BaseCam FlyTo CutCameraPos15
+BaseCam Target FlyTo Harry StayLocked *
+BaseCam FadeIn
+
+waitfor HarryMadeIt
+ReCapture Ron
+ReCapture Hermione
+ReCapture Harry
+Capture Basilisk
+
+Hermione TurnTo Harry Follow
+Ron TurnTo Harry Follow
+
+Harry TurnTo Ron *
+Ron Talk PC_Ron_PotionEnd_05
+//Before that lecture, I thought I knew everything I wanted to about flobberworm mucous. And I was right.
+
+Harry TurnTo Hermione
+Hermione Talk PC_Her_PotionEnd_07
+//Well, I thought he touched on some interesting aspects.
+
+Harry Talk PC_Hry_PotionEnd_08
+//Let's get going before Snape comes out.
+
+Basilisk Talk PC_Bas_FollowVoice_39
+//Come… come to me… let me rip you…
+
+Harry TurnTo CutMark91
+Harry Talk PC_Hry_FollowVoice_40
+//What was that?
+
+Ron Talk PC_Ron_FollowVoice_41
+//What was what?
+
+Harry Talk PC_Hry_FollowVoice_42
+//That voice.  It was coming from over there – c’mon…
+
+Harry RunTo CutMark91 *
+
+Sleep 1
+Hermione RunTo CutMark91 *
+
+sleep .5
+Ron RunTo CutMark91 *RonDoneRun
+Basecam FadeOut
+Basecam FlyTo CutCameraPos18
+Harry teleport CutMark92
+
+waitfor RonDoneRun
+Cue RunSomeMore
+Basecam FadeIn *
+Harry RunTo CutMark93 CutMark94
+Harry RunTo CutMark95 *
+Harry ChangeGamestate GState045
+
+sleep 2
+basecam fadeout
+
+//put Ron and Hermione back in people room--------------------------------------------
+ReCapture Ron
+ReCapture Hermione
+Ron GotoState stateIdle
+Ron Teleport RonLoc
+Hermione GotoState stateIdle
+Hermione Teleport HermioneLoc
+Release Ron
+Release Hermione
+
+Trigger ChangeLevelGStaircase
+
+[RonRunSomeMore]
+waitfor RunSomeMore
+ReCapture Ron
+
+sleep 2
+Ron teleport CutMark92
+Ron RunTo CutMark93 CutMark94 CutMark95
+
+[HermioneRunSomeMore]
+waitfor RunSomeMore
+ReCapture Hermione
+
+sleep 1
+Hemione teleport CutMark92
+Hemione RunTo CutMark93 CutMark94 CutMark95
+
+
+

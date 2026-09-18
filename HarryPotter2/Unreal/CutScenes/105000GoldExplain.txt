@@ -1,0 +1,30 @@
+//105000GoldExplain
+
+[Dialog_01]
+
+Capture Harry
+Capture Nick
+Capture BaseCam
+
+Nick Talk PC_Nhn_GoldExplain_01
+//Hello, Harry!
+
+Harry Talk PC_Hry_GoldExplain_02
+//Oh, hello Nick!
+
+Nick Talk PC_Nhn_GoldExplain_03
+//Even after all these years, I still find new secrets in Hogwarts!
+
+Nick Talk PC_Nhn_GoldExplain_04
+//Here's a special area that you can unlock only if you collect all 40 Silver Wizard cards.
+
+Nick Talk PC_Nhn_GoldExplain_05
+//For every ten Silver Wizard cards you collect, you'll get a key that will allow you to open one of the 4 locks on the door.
+
+Nick Talk PC_Nhn_GoldExplain_06
+//See if you can find all 40 Silver Wizard cards hidden throughout Hogwarts and the Grounds.
+
+
+Release Harry
+Release Nick
+

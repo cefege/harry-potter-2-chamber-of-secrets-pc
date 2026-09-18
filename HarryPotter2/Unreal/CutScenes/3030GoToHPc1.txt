@@ -1,0 +1,42 @@
+//3030GoToHPc1
+
+[Dialog_01]
+
+
+Capture GFemGry1
+
+GFemGry1 teleport CutMark29
+GFemGry1 RunTo CutMark19
+GFemGry1 TurnTo Harry follow *
+
+
+Capture Harry
+Capture Basecam
+
+Harry WalkTo CutMark24 *HarryDone
+sleep .5
+Basecam flyto cutcamerapos1 *
+Basecam Target Flyto Harry x=50 z=20 Staylocked
+
+waitfor HarryDone
+Harry turnto GFemGry1 Follow
+GFemGry1 talk PC_Grf_GoToHPCe_00
+//Harry, The weekly house point Ceremony is about to start!
+
+//GFemGry1 say PC_Grf_GoToHPCe_01
+//You don't want to miss it!
+
+GFemGry1 say PC_Grf_GoToHPCe_02
+//Follow me and I'll show you where it is!
+GFemGry1 LeadActor Harry EntranceHall HPCeremony * //anim=WaveAnim speech=speechIndex
+
+sleep 1
+
+//set objective--------------------------------------------
+SetObjectiveId PC_Hry_GoToHPc1_01
+
+Release Harry
+Release GFemGry1
+Release Basecam
+
+

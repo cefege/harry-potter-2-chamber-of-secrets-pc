@@ -1,0 +1,33 @@
+
+//LevelStart_EntryHallHub_GState070
+
+[Dialog_01]
+
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+BaseCam FadeIn
+
+
+
+
+//###############################################
+//Remed by Chad, cause of flow change.
+
+//open adv3 in GState060 thru 090
+//trigger OpenADV3DungIng
+
+//Capture Harry 
+//Capture BaseCam
+
+//SetObjectiveId
+
+//Harry teleport CutMark110
+//Harry Face CutMark35
+
+//Release Harry
+//Release BaseCam
+//###############################################

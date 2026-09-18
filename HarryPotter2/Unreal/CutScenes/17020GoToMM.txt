@@ -1,0 +1,61 @@
+//16060TransI & 17020GoToMM
+
+[Dialog_01]
+
+Capture Narrator
+
+Narrator Talk PC_Nar_TransI_01
+//Yes, there had been another attack, the worst one yet. This time, someone had disappeared…
+
+Narrator Talk PC_Nar_TransI_02
+//It was Ginny Weasley! And another message was left on a wall. It said "Her skeleton will lie in the chamber forever." Hogwarts would surely close now.
+
+Narrator Talk PC_Nar_TransI_03
+//Professor Lockhart had been given the task  of rescuing Ginny, but Ron and Harry were beside themselves with worry. They had to do something!
+
+Narrator Talk PC_Nar_TransI_04
+//So they hurried toward Gryffindor, where they could devise a plan…
+
+
+Release Narrator
+
+//17020GoToMM-------------------------------------------------------
+
+Capture Harry
+Capture Ron
+Capture BaseCam
+
+Harry Teleport Cutmark129
+Ron Teleport Cutmark128
+Ron Face Harry
+Harry Face Ron
+BaseCam Target FlyTo Cutmark130
+BaseCam FlyTo CutCameraPos38
+
+BaseCam FadeIn
+
+Ron Talk PC_Ron_GoToLockhart_02
+//Hurry, Harry, we have to save Ginny!
+
+Harry Talk PC_Hry_GoToLockhart_03
+//We need to have a plan. I'll go to Moaning Myrtle's bathroom and try to find the entrance to the Chamber of Secrets.
+
+Ron Talk PC_Ron_GoToMM_04
+//And I'll go find Lockhart. It wouldn't surprise me if he was trying to sneak out of Hogwarts!
+
+
+SetObjectiveId PC_Hry_GoToMMB_05
+
+Cue RonRunOff
+
+Sleep 1.5
+
+Release Harry
+Release BaseCam
+
+[RonRunOff]
+Waitfor RonRunOff
+ReCapture Ron
+Ron RunTo GryfCom RonToHutPath1 RonToHutPath2
+Ron Teleport RonLOC
+Release Ron

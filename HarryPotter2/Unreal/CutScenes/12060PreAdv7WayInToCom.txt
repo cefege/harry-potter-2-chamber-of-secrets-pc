@@ -1,0 +1,93 @@
+
+//12060PreAdv7WayInToCom
+
+//This is the cut scene that shows a Slytherin Kid going into there common room and is how Harry learns
+//The password.
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo PreSlyWayIn *
+
+BaseCam FlyTo PrySlyStartCam *
+
+BaseCam FlyTo PrySlyDriftCam Time=3 *
+
+WaitFor CloseCam
+
+BaseCam Target FlyTo PreSlythFocus1 *
+
+BaseCam FlyTo PreSlyDoorCam *
+
+WaitFor CutEnd
+
+Release BaseCam
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Harry]
+
+Capture Harry
+
+Harry TurnTo PreSlyWayIn
+
+WaitFor HarryTalk
+
+Harry Talk PC_AsG_Adv7aIntro_09
+//Ah, so that's the password.  I bet I can use that to get into the slytherin common room.
+
+WaitFor CutEnd
+
+Release Harry
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[GOldMaleSly1]
+
+Capture GOldMaleSly1
+
+GOldMaleSly1 Teleport PreSlyTelLoc
+
+GOldMaleSly1 Face PreSlyFaceLoc
+
+GOldMaleSly1 RunTo PreSlyWayIn
+
+GOldMaleSly1 TurnTo PreSlythFocus1
+
+Cue CloseCam
+
+GOldMaleSly1 Talk PC_Oms_Adv7aIntro_07
+//Pure-blood!
+
+Trigger SlythDoor
+
+Cue HarryTalk
+
+Sleep 1.5
+
+GOldMaleSly1 RunTo PreSlythRunInsideLoc
+
+//Sleep 1.0
+
+Trigger SlythDoor
+
+GOldMaleSly1 Teleport ChadsGetOutOfWayLoc
+
+Sleep 1.0
+
+Cue CutEnd
+
+//---------------------------------------------------------------------
+
+

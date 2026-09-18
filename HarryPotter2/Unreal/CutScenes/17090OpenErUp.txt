@@ -1,0 +1,137 @@
+//17090OpenErUp
+
+[Dialog_01]
+
+Capture Harry
+Capture Ron
+Capture Lockhart
+Capture Myrtle
+Capture BaseCam
+
+SetObjectiveId
+
+Harry WalkTo CutMark130
+
+BaseCam Target FlyTo Myrtle
+BaseCam FlyTo CutCameraPos45
+
+Harry TurnTo Myrtle *
+Mrytle TurnTo Harry *
+
+Myrtle Talk PC_Myr_OpenErUp_00
+//What do you want this time?
+
+Harry Talk PC_Hry_OpenErUp_01
+//To ask you how you died.
+
+Myrtle Talk PC_Myr_OpenErUp_02
+//You're the first one who ever asked. I died in this very stall. I remember it so well.
+
+Myrtle Talk PC_Myr_OpenErUp_03
+//The door was locked, and I was crying because Olive Hornby had teased me about my glasses. Then I heard somebody come in.
+
+Myrtle Talk PC_Myr_OpenErUp_04
+//They said something odd, in a different language, I think. And it was a boy speaking!
+
+Myrtle Talk PC_Myr_OpenErUp_05
+//So I unlocked the door, to tell him to go and use his own toilet, and then -- I died.
+
+Harry Talk PC_Hry_OpenErUp_12
+//Where was this boy standing?
+
+Harry TurnTo CutMark136 *
+Myrtle Talk PC_Myr_OpenErUp_13 *MyrtleDone
+//Over there by the sinks. One of the has never worked, not as long as I've been here.
+
+sleep 2
+BaseCam Target FlyTo CutMark136 Time=5 *
+
+sleep .5
+Harry WalkTo CutMark136 *
+
+waitfor MyrtleDone
+
+Harry say PC_Hry_OpenErUp_14
+//I wonder if that's where the entrance to the Chamber is?
+
+
+BaseCam Target FlyTo CutMark136
+BaseCam FlyTo CutCameraPos47
+Harry RunTo CutMark136 *HarryDoneWalking
+BaseCam Target FlyTo CutMark140 Time=6 *
+
+waitfor HarryDoneWalking
+Harry RunTo CutMark140
+Harry TurnTo COS
+Harry Talk PC_Hry_OpenErUp_15
+//Open! Open! That's not working. Maybe if I try parseltongue…
+
+
+
+Harry Talk PC_Hry_OpenErUp_16 *
+//Open! That's got it!
+Sleep 1.5
+trigger Dis2
+BaseCam shake
+
+BaseCam shake
+
+sleep 8
+LockHart Teleport CutMark180
+Ron Teleport CutMark152
+LockHart RunTo CutMark151 *
+sleep .1
+Ron RunTo CutMark150 *RonDone
+waitfor RonDone
+Ron Turnto Harry
+Harry TurnTo Ron *
+Ron Talk PC_Ron_OpenErUp_17
+//Got him! He was packed and ready to go…
+
+Ron TurnTo COS
+Ron Talk PC_Ron_OpenErUp_18
+//What's that?
+
+Harry TurnTo COS
+Harry Talk PC_Hry_OpenErUp_19
+//I think it's the entrance to the Chamber of Secrets!
+
+LockHart TurnTo Harry
+
+Lockhart Talk PC_Gil_OpenErUp_20
+//Well, then, you won't be needing me. Cheers, boys, have to go warm up my broom…
+
+Ron TurnTo Lockhart
+Lockhart TurnTo Ron
+Ron Talk PC_Ron_OpenErUp_21
+//You're not through yet. Down you go.
+
+Lockhart TurnTo COS
+Harry TurnTo COS
+Lockhart say PC_Gil_OpenErUp_22
+//No!
+Lockhart WalkTo CutMark181 *
+Ron WalkTo CutMark151 
+Ron TurnTo Harry
+Ron Talk PC_Ron_OpenErUp_23
+//C'mon, Harry. This is it!
+
+Ron WalkTo CutMark181 *
+sleep 1
+BaseCam Target FlyTo Harry z=21
+BaseCam FlyTo Harry z=21 x=30
+
+Harry Talk PC_Hry_OpenErUp_24
+//I know…
+
+SetObjectiveId PC_Hry_EnterOrDont_01
+
+
+Ron teleport RonLOC
+Lockhart teleport LockhartLOC
+Release BaseCam
+Release Harry
+Release Ron
+Release Lockhart
+Release Myrtle
+

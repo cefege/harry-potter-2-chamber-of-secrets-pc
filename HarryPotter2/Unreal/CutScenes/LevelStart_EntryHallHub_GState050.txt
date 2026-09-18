@@ -1,0 +1,15 @@
+
+//LevelStart_EntryHallHub_GState050
+
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch2Bars
+Trigger ToggleCh2LevelLoad
+Sleep .03
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+
+

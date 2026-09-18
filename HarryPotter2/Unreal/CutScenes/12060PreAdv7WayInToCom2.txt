@@ -1,0 +1,66 @@
+
+//12060PreAdv7WayInToCom2
+
+//This is the cut scene that shows a Slytherin Kid going from the Dungeon Hall
+
+//Into the PreSlythCom area in EntryHall.
+
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[Cam]
+
+Capture BaseCam
+
+BaseCam Target FlyTo GOldMaleSly1 StayLocked *
+BaseCam FlyTo PreSlyth2_CamLoc1
+Sleep 1.5
+BaseCam FlyTo PreSlyth2_CamLoc2 Time=2.0
+
+Cue CutEnd
+
+//WaitFor CutEnd
+//BaseCam GoHome
+Release BaseCam
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+[Harry]
+
+Capture Harry 
+
+//Harry RunTo PreSlyth2_HarryLoc
+
+Harry TurnTo GOldMaleSly1
+
+WaitFor CutEnd
+Release Harry
+
+//---------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+[GOldMaleSly1]
+
+Capture GOldMaleSly1
+
+GOldMaleSly1 Teleport PreSlyth2_LeadStart
+GOldMaleSly1 Face PreSlyth2_RunEnd
+
+//GOldMaleSly1 Animate Look
+Sleep 1.3
+
+GOldMaleSly1 RunTo PreSlyth2_RunEnd
+GOldMaleSly1 Teleport ChadsGetOutOfWayLoc
+
+WaitFor CutEnd
+Release GOldMaleSly1
+
+//---------------------------------------------------------------------
+
+

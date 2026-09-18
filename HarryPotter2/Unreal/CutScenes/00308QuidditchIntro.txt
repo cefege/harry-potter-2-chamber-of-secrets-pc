@@ -1,0 +1,239 @@
+
+//00308QuidditchIntro
+
+//This Cut Scene shows off the Quidditch Pitch before the game starts.
+//Lee Jordan talks a bunch (which changes depending on if it's the First game, Middle games or Last Game.
+
+//This Cut scene also teleports the players to thier starting locations.
+//That may be redundance, as David might do the teleporting.
+
+
+//---------------------------------------------------------------------
+
+[Cam]
+
+Capture BaseCam
+Capture Harry
+
+Trigger OpeningCSMusic
+
+//Cue Dialog1
+
+BaseCam Target FollowSpline IntroFocusPath Start=IntroFocusPathStart Dest=IntroFocusPathEnd Time=6 Accel=30 EaseTo *
+BaseCam FollowSpline IntroCamPath Start=IntroCamPathStart Dest=IntroCamPathEnd Time=8 Accel=30 EaseTo *
+
+//BaseCam Target FollowSpline IntroFocusPath Start=IntroFocusPathStart Dest=IntroFocusPathEnd Time=9 Accel=30 EaseTo *
+//BaseCam FollowSpline IntroCamPath Start=IntroCamPathStart Dest=IntroCamPathEnd Time=12 Accel=30 EaseTo *
+
+
+Sleep 5.0
+//Sleep 8.0
+
+BaseCam FadeOut 0.5
+
+BaseCam Target FlyTo CrazyCamFocus1 *
+BaseCam FlyTo IntroCamPath2_Start
+BaseCam FollowSpline IntroCamPath2 Start=IntroCamPath2_Start Dest=IntroCamPath2_End Time=5 Accel=80 *
+
+BaseCam FadeIn 0.5
+
+Cue Dialog2
+
+Sleep 2.0
+
+Cue Dialog3
+
+Sleep 1.0
+
+BaseCam FadeOut 0.5
+
+BaseCam Target FlyTo IntroCamFocus2
+BaseCam FlyTo IntroCamLoc1
+
+BaseCam FadeIn 0.5
+
+
+
+BaseCam FlyTo IntroCamLoc2 Time=7 *
+
+Sleep 4.0
+
+Cue Dialog4
+
+Sleep 2.0
+
+WaitFor HarryInPosition
+Cue CutEnd
+Release BaseCam
+Release Harry
+
+Capture Director
+Director StartGame
+Release Director
+
+
+
+//---------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[Dialog1]
+
+Capture LeeJordan
+
+LeeJordan Talk PC_Lee_QuidWelcome_01
+//It's a great day for a Quidditch match!
+
+
+//################## Final Match Dialog
+//LeeJordan Talk PC_Lee_QuidWelcome_20
+//There's nothing like the age-old Quidditch rivalries you find here at Hogwarts!
+
+//LeeJordan Talk PC_Lee_QuidWelcome_02
+//The whole season has been pointing toward today's Quidditch match between these two traditional rivals!
+//################## Final Match Dialog
+
+WaitFor Dialog2
+//################## First Match Dialog
+LeeJordan Talk PC_Lee_QuidWelcome_04
+//Rain or shine, day or night, Horklumps on the pitch or ghouls in the stands, nothing keeps the crowds away from a Quidditch match.
+
+WaitFor Dialog3
+LeeJordan Talk PC_Lee_QuidWelcome_20
+//There's nothing like the age-old Quidditch rivalries you find here at Hogwarts!
+//################## First Match Dialog
+
+WaitFor Dialog4
+
+ReCapture Harry 
+Harry Teleport IPGHarry_Intro_Start
+Harry MatchRot IPGHarry_Intro_Start
+Harry FollowSpline IPGHarry_Intro Start=IPGHarry_Intro_Start Dest=IPGHarry_Intro_End Time=4 Accel=100 Align EaseTo *
+
+Capture Director
+Director LaunchPlayers
+Release Director
+
+Trigger Silence
+Trigger EarlyQuidMusic
+
+Cue HarryInPosition
+
+LeeJordan Talk PC_Lee_QuidWelcome_03
+//The pitch is ready, the Quaffles are polished, the Bludgers are humming…let's play Quidditch!
+
+
+
+
+//If FinalMatch Cue FinalMatch
+//If FirstMatch Cue FirstMatch
+
+
+WaitFor CutEnd
+Release LeeJordan
+
+//---------------------------------------------------------------------
+
+
+
+
+//---------------------------------------------------------------------
+
+[FinalMatch_Dialog]
+
+WaitFor FinalMatch
+WaitFor Dialog2
+ReCapture LeeJordan
+
+LeeJordan Talk PC_Lee_QuidWelcome_20
+//There's nothing like the age-old Quidditch rivalries you find here at Hogwarts!
+
+WaitFor Dialog3
+LeeJordan Talk PC_Lee_QuidWelcome_02
+//The whole season has been pointing toward today's Quidditch match between these two traditional rivals!
+
+Cue StartMatch
+
+
+
+//--------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[FirstMatch_Dialog]
+
+WaitFor FirstMatch
+WaitFor Dialog2
+ReCapture LeeJordan
+
+LeeJordan Talk PC_Lee_QuidWelcome_04
+//Rain or shine, day or night, Horklumps on the pitch or ghouls in the stands, nothing keeps the crowds away from a Quidditch match.
+
+WaitFor Dialog3
+LeeJordan Talk PC_Lee_QuidWelcome_20
+//There's nothing like the age-old Quidditch rivalries you find here at Hogwarts!
+
+Cue StartMatch
+
+//--------------------------------------------------------------------
+
+
+
+//---------------------------------------------------------------------
+
+[StartMatch_Dialog]
+
+WaitFor StartMatch
+WaitFor Dialog4
+ReCapture LeeJordan
+
+//Trigger PlayersTakePitch
+//This is where I'll want to trigger the Director to tell Quid players to take the field.
+
+//Trigger StartMatchMusic
+
+LeeJordan Talk PC_Lee_QuidWelcome_03
+//The pitch is ready, the Quaffles are polished, the Bludgers are humming…let's play Quidditch!
+
+WaitFor CutEnd
+Release LeeJordan
+
+//--------------------------------------------------------------------
+
+
+//---------------------------------------------------------------------
+
+[QuidPlayers]
+
+//This is for when I thought I would have to bring all the quiddich players
+//onto the field but now I'm suppose to be able to let David do that.
+
+//WaitFor QPlayersGetReady
+
+//ReCapture Harry
+//Capture Wood
+//Capture George
+//Capture Fred
+//Capture GChaser1
+//Capture GChaser2
+//Capture GChaser3
+
+//Capture Draco
+//Capture OKeeper
+//Capture OBEATER1
+//Capture OBEATER2
+//Capture OChaser1
+//Capture OChaser2
+//Capture OChaser3
+
+//Harry Teleport HarryStartLoc
+//Wood Teleport WoodStartLoc
+
+
+
+//--------------------------------------------------------------------
+

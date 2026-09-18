@@ -1,0 +1,122 @@
+//4040PotionIntro
+
+[Dialog_01]
+
+Capture Snape
+Capture Basecam
+Capture Harry
+Capture Hermione
+
+SetObjectiveId
+
+Snape Talk PC_Snp_PotionIntro_04 *SnapeDone0
+//Now pay attention!  Today, you will attempt to learn the art of mixing one of the most useful potions ever concocted…the Wiggenweld potion.
+
+Hermione teleport HermToPotionsEnd
+Hermione TurnTo Snape Follow *
+
+Harry walkto CutMark50 *HarryDone0
+
+Sleep 1
+Basecam FlyTo CutCameraPosition16
+Basecam target flyto CutMark79
+
+waitfor HarryDone0
+Harry Turnto Snape Follow *
+
+Basecam FlyTo CutCameraPos20 Time=10 *
+waitfor SnapeDone0
+
+//Snape Talk PC_Snp_PotionIntro_02
+//Harry Potter!  How thoughtful of you to join us, we've missed you.  If you're late again, you'll miss the house points I'll deduct!
+
+Snape Talk PC_Snp_PotionIntro_05 *SnapeDone1
+//A Wiggenweld potion will restore some of your lost stamina.  Even a single bottle is capable of healing the most grevious wounds.
+sleep 1
+Harry walkto CutMark80
+waitfor SnapeDone1
+Snape TurnTo CutMark80
+Snape Turnto Harry Follow
+
+
+Snape Talk PC_Snp_PotionIntro_06 *SnapeDone10
+//Potter!  You have just volunteered to show the rest of the class how this is done.  Get up here immediately!
+
+sleep 1
+BaseCam Target FlyTo Snape z=30
+BaseCam FlyTo Snape x=50 z=25
+
+waitfor SnapeDone10
+BaseCam Flyto CutCameraPos17
+BaseCam Target FlyTo Harry StayLocked
+Harry walkto CutMark81
+Harry RunTo CutMark79 *HarryDone1
+Snape WalkTo CutMark83 *SnapeDoneTon
+BaseCam FlyTo CutCameraPos21 Time=4 *
+BaseCam Target FLyTo Chest Time=4 *
+waitfor SnapeDoneTon
+Snape TurnTo Harry
+waitfor HarryDone1
+Harry Turnto Snape
+sleep 1
+Snape Talk PC_Snp_PotionTeach_02 *SnapeDone
+//In this chest are the two ingredients of Wiggenweld Potion, flobberworm mucous and wiggentree bark. Take them out.
+Snape TurnTo Chest *
+sleep 1
+Harry TurnTo Chest
+Sleep 1
+Harry WalkTo CutMark84
+Harry TurnTo Chest
+
+//turn the students from Snape to the Cauldron----------------
+capture GOldMaleGry1
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf3
+capture GFemRav1
+capture GMaleRav2
+capture GFemRav3
+capture GOldMaleSly1
+capture GFemSly2
+capture GOldMaleSly2
+capture GFemSly1
+capture GFemSly3
+
+GOldMaleGry1 face Cauldron
+GFemGry0 face Cauldron
+GMaleGry4 face Cauldron
+GFemHuf2 face Cauldron
+GMaleHuf3 face Cauldron
+GFemRav1 face Cauldron
+GMaleRav2 face Cauldron
+GFemRav3 face Cauldron
+GOldMaleSly1 face Cauldron
+GFemSly2 face Cauldron
+GOldMaleSly2 face Cauldron
+GFemSly1 face Cauldron
+GFemSly3 face Cauldron
+
+release GOldMaleGry1
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf3
+release GFemRav1
+release GMaleRav2
+release GFemRav3
+release GOldMaleSly1
+release GFemSly2
+release GOldMaleSly2
+release GFemSly1
+release GFemSly3
+//already with the kids, oy!---------------------------------------------------
+
+trigger PotionLessonBlockers
+
+waitfor SnapeDone
+Snape turnto Harry Follow
+
+Release Harry
+Release basecam
+Release Hermione

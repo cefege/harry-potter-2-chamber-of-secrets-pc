@@ -1,0 +1,44 @@
+
+//levelStart_GrandStair_GState030
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+trigger MMBathroom
+Trigger MMBathroom_Bars
+sleep .03
+trigger Charms
+//sleep .03
+//trigger Transfig
+
+//send two girls to dish about art on the landing------
+capture GFemHuf3
+GFemHuf3 teleport portraitBumpCM1
+GFemHuf3 face PortraitBumpsLookHere
+release GFemHuf3
+
+capture GFemRav3
+GFemRav3 teleport portraitBumpCM2
+GFemRav3 face PortraitBumpsLookHere
+release GFemRav3
+//end two girls script--------------------------------------
+
+//sends a boy to chat with a vendor on the lowest floor-----
+//capture GMaleGry3
+//GMaleGry3 teleport GMaleChatVendor
+//GMaleGry3 face GFSlyVendor
+//release GMaleGry3
+//end chatboy------------------------------------------------
+
+//sends Pomfrey idling about the infirmary-------------------
+//capture Pomfrey
+//Pomfrey teleport PomfreyPPStart
+//Pomfrey SetOnPatrolPointPath PomfreyPPStart
+//release Pomfrey
+//end Pomfrey-------------------------------------------------
+--
+
+capture basecam
+basecam fadein
+release basecam

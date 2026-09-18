@@ -1,0 +1,11 @@
+
+//LevelStart_EntryHallHub_GState095
+
+//---------------------------------------------------------------------
+
+//Level Set Up-------------------------------------------
+
+trigger Close_Ch4Bars
+trigger ToggleCh4LevelLoad
+
+BaseCam FadeIn

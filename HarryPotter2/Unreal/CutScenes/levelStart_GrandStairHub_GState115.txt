@@ -1,0 +1,14 @@
+//levelStart_GrandStairHub_GState115
+
+[Thread]
+
+//Level Set Up-------------------------------------------
+
+Capture Ron
+Capture Hermione
+
+Hermione Teleport CutMark124
+Ron Teleport CutMark123
+
+Release Hermione
+Release Ron

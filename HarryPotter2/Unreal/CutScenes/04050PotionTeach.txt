@@ -1,0 +1,109 @@
+//04050PotionTeach
+
+[Dialog_01]
+
+reCapture Snape
+Capture Snape
+Capture Harry
+Capture Basecam
+
+trigger PotionLessonBlockers
+
+Snape turnto Harry Follow
+Basecam FlyTo CutCameraPos19
+Basecam Target FlyTo Harry StayLocked
+
+Snape Talk PC_Snp_PotionTeach_05
+//Observe Mr. Potter adding the ingredients to the cauldron and mixing them. Careful, Potter, you don't want to lose house points..
+
+WaitFor MixingCauldronDone
+
+Snape Talk PC_Snp_PotionTeach_06 *SnapeDone1
+//Mr. Potter now has of a Wiggenweld potion. To quaff the potion, press Q. Back to your seat, Potter.
+BaseCam Flyto CutCameraPos17
+
+Harry Turnto Snape
+sleep 1
+Harry RunTo CutMark79
+Harry Turnto Snape
+
+waitfor SnapeDone1
+Snape turnto CutMark82
+Snape Talk PC_Snp_PotionTeach_09 *SnapeDone2
+//Those of you who are adventurous or, more probably, clumsy, will no doubt want to make Wiggenweld potions on your own.
+Harry RunTo CutMark81
+BaseCam FlyTo Cauldron x=50 y=50 z=100
+Basecam Target FlyTo Cauldron
+Harry WalkTo CutMark80
+Harry TurnTo Snape
+
+waitfor SnapeDone2
+Snape TurnTo Cauldron
+Snape Talk PC_Snp_PotionTeach_07
+//Therefore, there are cauldrons like this one throughout Hogwarts. They are the ONLY cauldrons in which Wiggenweld potions can be made.
+
+Snape turnto CutMark82
+BaseCam FlyTo Snape x=50 z=30
+Basecam Target FlyTo Snape z=30
+Snape Talk PC_Snp_PotionTeach_08
+//And the ingedients, flobberworm mucous and wiggentree bark, can also be found throughout Hogwarts.
+
+BaseCam FlyTo CutCameraPos17
+BaseCam Target FlyTo CutCameraPos21
+Snape Talk PC_Snp_PotionTeach_10 *SnapeDoneFinal
+//Now for today's lecture: The history of flobberworm mucous extraction…
+
+sleep 3
+Snape WalkTo CutMark49 *
+BaseCam FadeOut
+waitfor SnapeDoneFinal
+
+//send the kids to their room ---------------------------------------
+capture GOldMaleGry1
+capture GFemGry0
+capture GMaleGry4
+capture GFemHuf2
+capture GMaleHuf3
+capture GFemRav1
+capture GMaleRav2
+capture GFemRav3
+capture GOldMaleSly1
+capture GFemSly2
+capture GOldMaleSly2
+capture GFemSly1
+capture GFemSly3
+
+GOldMaleGry1 teleport cutmark28
+GFemGry0 teleport cutmark62f
+GMaleGry4 teleport cutmark45
+GFemHuf2 teleport cutmark51f
+GMaleHuf3 teleport cutmark52
+GFemRav1 teleport cutmark53f
+GMaleRav2 teleport cutmark54
+GFemRav3 teleport cutmark55f
+GOldMaleSly1 teleport cutmark56
+GFemSly2 teleport cutmark57f
+GOldMaleSly2 teleport cutmark57
+GFemSly1 teleport cutmark56f
+GFemSly3 teleport cutmark58f
+
+release GOldMaleGry1
+release GFemGry0
+release GMaleGry4
+release GFemHuf2
+release GMaleHuf3
+release GFemRav1
+release GMaleRav2
+release GFemRav3
+release GOldMaleSly1
+release GFemSly2
+release GOldMaleSly2
+release GFemSly1
+release GFemSly3
+//----------------------------------------------------------------------
+
+
+Release Snape
+Release Harry
+Release Basecam
+trigger MysteriousVoice

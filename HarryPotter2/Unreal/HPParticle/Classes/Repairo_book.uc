@@ -1,0 +1,35 @@
+//=============================================================================
+//=============================================================================
+class repairo_book expands AllSpellCast_FX;
+
+defaultproperties
+{
+    SourceWidth=(Base=30.000000)
+    SourceHeight=(Base=30.000000)
+    AngularSpreadWidth=(Base=10.000000,Rand=2.000000)
+    AngularSpreadHeight=(Base=10.000000)
+    Lifetime=(Base=3.000000)
+    ColorEnd=(Base=(R=30,G=30,B=30))
+    SizeWidth=(Base=12.000000)
+    SizeLength=(Base=12.000000)
+    SizeEndScale=(Base=5.000000)
+    SpinRate=(Base=-6.000000,Rand=6.000000)
+    DripTime=(Base=0.200000)
+    Attraction=(X=20.000000,Y=20.000000)
+    Damping=1.500000
+    Textures(0)=Texture'HPParticle.hp_fx.Particles.Sparkle_3'
+    LastUpdateLocation=(X=-383.760681,Y=387.409668,Z=16.397217)
+    LastEmitLocation=(X=-383.760681,Y=387.409668,Z=16.397217)
+    LastUpdateRotation=(Pitch=16208,Yaw=-16336)
+    EmissionResidue=0.477905
+    Age=1072.901855
+    CurrentPriorityTag=2
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-383.760681,Y=387.409668,Z=16.397217)
+    Rotation=(Pitch=16208,Yaw=-16336)
+    OldLocation=(X=-353.771149,Y=311.145935,Z=16.397217)
+    bSelected=True
+    Name=ParticleFX7
+}

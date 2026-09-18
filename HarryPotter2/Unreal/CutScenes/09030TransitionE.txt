@@ -1,0 +1,44 @@
+//09030TransitionE
+
+[Dialog_01]
+
+
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+basecam flyto start
+basecam target flyto cutstart
+
+
+basecam flyto middle easebetween time=20 *done
+basecam target flyto cutmiddle easebetween time=20 *
+
+basecam fadein
+
+Narrator Talk PC_Nar_TransE_00
+//In the second week of December Professor McGonagall collected the names of those who would be staying at school over Christmas.
+
+Narrator Talk PC_Nar_TransE_01
+//Harry, Ron, and Hermione signed up. They heard that Malfoy was staying, which struck them as very suspicious.
+
+Narrator Talk PC_Nar_TransE_03
+//The Christmas holiday would be the perfect time to use the Polyjuice Potion and try to worm a confession out of Draco.
+
+waitfor done
+sleep .5
+basecam fadeout
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints E
+Release Housepoints
+
+//Harry changegamestate gstate100
+Trigger TriggerChangeLevel_EntryHall100
+
+Release Harry
+Release Narrator
+Release BaseCam

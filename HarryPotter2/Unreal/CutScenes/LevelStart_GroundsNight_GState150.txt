@@ -1,0 +1,15 @@
+
+//LevelStart_GroundsNight_GState150
+
+[Dialog_01]
+
+
+//Level Set Up-------------------------------------------
+
+trigger OpenHagridHut
+
+Capture Ron 
+Ron Teleport RonToHutStart
+Ron Face Harry
+Ron LeadActor Harry RonToHutStart RonToHutEnd *
+Release Ron

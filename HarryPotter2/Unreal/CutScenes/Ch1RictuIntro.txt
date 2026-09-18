@@ -1,0 +1,168 @@
+
+//Multiple Intro Rictusempra Challenge
+
+[MainThread]
+
+Capture Harry
+Capture Lockhart
+Capture challengescoremanager
+Capture basecam
+
+Cue ThreadPicker *
+
+WaitFor ThreadPicker
+
+//Release Harry
+//Release Lockhart
+//Release challengescoremanager
+//Release BaseCam
+
+If ChallengeIsFirstTime Cue FirstTimeThread
+If ChallengePreviouslyBeaten Cue BeatenThread
+If ChallengePreviouslyMastered Cue MasteredThread
+
+
+//----------------------------------------------------------------------
+[FirstTimeThread]
+
+WaitFor FirstTimeThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep .11
+
+Harry walkto cutmark0 *
+sleep 2
+
+Trigger EntryBars *
+
+BaseCam flyto cutcamerapos0 *
+BaseCam target flyto Harry staylocked *
+
+Lockhart Talk PC_Gil_Chal1Ricta_01 *Lockdone1
+//Welcome, Harry Potter, to my famous Rictusempra Challenge. To complete the challenge, you must find the Completion Star, which will be found at the top of this tower.
+
+sleep 3
+BaseCam flyto cutcamerapos1 *
+BaseCam target flyto Finalstar
+
+waitfor Lockdone1
+Lockhart Talk PC_Gil_Chal1Ricta_00
+//Try to get to it as quickly as you can. If the Challenge Timer reaches zero before you have the Completion Star, you lose the challenge
+
+BaseCam flyto cutcamerapos3 *
+BaseCam target flyto FirstStar 
+
+Lockhart Talk PC_Gil_Chal1Ricta_02 *Lockdone2
+//Along the way you will find Challenge Stars. Collecting Challenge Stars will boost your timer and score.  Try and find them all!
+
+BaseCam flyto cutcamerapos2 easebetween time=6
+
+waitfor Lockdone2
+
+BaseCam flyto cutcamerapos0 *
+BaseCam target flyto Harry staylocked *
+BaseCam FlyTo BackCam EaseTo Time=10 *
+
+Lockhart Talk PC_Gil_Chal1Ricta_03
+//Try to get the Completion Star with as many seconds remaining as possible! The higher your score is when you complete the Challenge, the more house points I will award you!
+
+Lockhart Talk PC_Gil_Chal1Ricta_05
+//Ready to begin? Good luck!  3 2 1 go!
+
+challengescoremanager beginchallenge *
+
+Release Lockhart
+Release Harry
+Release BaseCam
+release challengescoremanager
+
+SaveGame
+
+
+
+//----------------------------------------------------------------------
+[BeatenThread]
+
+WaitFor BeatenThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep .11
+
+Harry walkto cutmark0 *
+sleep 2
+
+BaseCam flyto cutcamerapos0 *
+BaseCam target flyto Harry staylocked *
+
+Lockhart Talk PC_Gil_Chal1Ricta_06 *Lockdone1
+//Welcome back, Harry Potter, to my Rictusempra Challenge!  If you can manage  to beat your high score, I will award you more House Points.
+
+sleep 3
+
+waitfor Lockdone1
+
+BaseCam flyto cutcamerapos0 *
+BaseCam target flyto Harry staylocked *
+BaseCam FlyTo BackCam EaseTo Time=10 *
+
+Lockhart Talk PC_Gil_Chal1Ricta_05
+//Ready to begin? Good luck!  3 2 1 go!
+
+challengescoremanager beginchallenge *
+
+Release Lockhart
+Release Harry
+Release BaseCam
+release challengescoremanager
+
+SaveGame
+
+
+//----------------------------------------------------------------------
+[MasteredThread]
+
+WaitFor MasteredThread
+
+recapture Harry
+recapture Lockhart
+recapture challengescoremanager
+recapture basecam
+
+sleep .11
+
+Harry walkto cutmark0 *
+sleep 2
+
+BaseCam flyto cutcamerapos0 *
+BaseCam target flyto Harry staylocked *
+
+Lockhart Talk PC_Gil_Chal1Ricta_22 *Lockdone1
+//Back again, Harry?  Well, you have already mastered the Rictusempra Challenge, so I can not award you any more House Points.
+
+sleep 3
+
+waitfor Lockdone1
+
+BaseCam flyto cutcamerapos0 *
+BaseCam target flyto Harry staylocked *
+BaseCam FlyTo BackCam EaseTo Time=10 *
+
+Lockhart Talk PC_Gil_Chal1Ricta_23
+//However, I can see that you want to be the very best.  I like that in a wizard, Harry.  Good luck!
+
+challengescoremanager beginchallenge *
+
+Release Lockhart
+Release Harry
+Release BaseCam
+release challengescoremanager
+
+SaveGame

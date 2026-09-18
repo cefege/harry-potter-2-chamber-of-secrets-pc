@@ -1,0 +1,50 @@
+
+//LevelStart_GroundsHub_GState035
+
+//----------------------------------------------------------------------
+[Dialog_01]
+
+//Level Set Up-------------------------------------------
+//capture basecam
+Trigger CloseHerbology
+
+//ambient characters--------------------------------------------
+
+//sends Hagrid to his hut for patrolling
+capture Hagrid
+Hagrid teleport HagridPP1
+Hagrid SetOnPatrolPointPath HagridPP1 *
+release Hagrid
+
+//teleports a couple boys to chat spots by the sundial
+capture GOldMaleGry1
+capture GOldMaleGry2
+GOldMaleGry1 teleport chatSpot1
+GOldMaleGry2 teleport chatSpot2
+GOldMaleGry1 Face GOldMaleGry2
+GOldMaleGry2 Face GOldMaleGry1
+release GOldMaleGry1
+release GOldMaleGry2
+
+
+//teleports a couple girls in for frolic: running in an endless oval
+capture GFemGry1
+GFemGry1 teleport LawnLoopPP1
+GFemGry1 SetOnPatrolPointPath LawnLoopPP1 *
+release GFemGry1
+sleep 0.5
+capture GFemGry4
+GFemGry4 teleport LawnLoopPP1
+GFemGry4 SetOnPatrolPointPath LawnLoopPP1 *
+release GFemGry4
+
+
+//teleports a Ravenclaw fella to search for a secret by the gates to Quidditch
+capture GMaleRav3
+GMaleRav3 teleport SlySecretPP2
+GMaleRav3 SetOnPatrolPointPath SlySecretPP2 *
+release GMaleRav3
+//----------------------------------------------------------------------
+
+basecam fadein *
+//release basecam

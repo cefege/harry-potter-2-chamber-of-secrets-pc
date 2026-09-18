@@ -1,0 +1,21 @@
+
+//Bridge Counter Weight SHOW GATE
+
+
+[Main]
+
+Capture Harry
+Capture BaseCam
+
+BaseCam FlyTo CamBridgeRoomShowStar *
+BaseCam Target FlyTo GateFocus StayLocked *
+
+Sleep 3.5
+
+//BaseCam FlyTo CamStartBridgeRoom EaseTo Time=2 z=200 *
+//BaseCam Target FlyTo BridgeCamFocus EaseTo Time=2 Z=200 *
+
+//Sleep 2.0
+
+Release Harry
+Release BaseCam

@@ -1,0 +1,25 @@
+
+//levelStart_GrandStairHub_GState060
+
+//Level Set Up-------------------------------------------
+
+Trigger MMBathroom
+Trigger MMBathroom_Bars
+
+sleep .03
+//trigger Charms
+//sleep .03
+//trigger Transfig
+
+//send two girls to dish about art on the landing------
+capture GFemHuf3
+GFemHuf3 teleport portraitBumpCM1
+GFemHuf3 face PortraitBumpsLookHere
+release GFemHuf3
+
+capture GFemRav3
+GFemRav3 teleport portraitBumpCM2
+GFemRav3 face PortraitBumpsLookHere
+release GFemRav3
+//end two girls script--------------------------------------
+

@@ -1,0 +1,2 @@
+new TrueTypeFontFactory PACKAGE="scripted" Name=CondemnedFont FontName="Scrolling" Height=24 AntiAlias=0
+

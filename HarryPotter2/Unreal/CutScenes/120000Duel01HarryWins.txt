@@ -1,0 +1,67 @@
+//120000Duel01HarryWins
+
+[thread0]
+
+//******music trigger added at the behest of Mr. Co:
+trigger Lose
+
+capture Harry
+capture Duellist
+capture basecam
+
+//basecam flyto DuelCam1
+//basecam target flyto duellist SL
+
+
+//shouldn't have to put a turnto here, but duellist keeps walking crabwise
+//Duellist turnto duellistStartMark
+// ... but that breaks the bloody scene altogether. 
+
+//Duellist walkto duellistStartMark
+//Duellist turnto HarryStartMark *
+
+//basecam flyto duellist x=100 z=5
+//basecam target flyto duellist
+//sleep 1
+BaseCam Target AttachedTo=duellist
+BaseCam Locked pitch=-15 Yaw=30 Distance=100 *
+
+duellist animate loser *
+Harry walkto HarryStartMark
+duellist animate negative *duellistdone
+Harry TurnTo duellistStartMark
+//remove this duel idle when the animation starts from normal root
+harry animate duel_idle loop *
+waitfor duellistdone
+
+
+//BaseCam FlyTo duelcam
+//BaseCam Target FlyTo Harrystartmark
+
+
+
+capture JarBeans
+BaseCam FlyTo JarBeans x=256 y=128 z=24
+BaseCam Target Flyto JarBeans z=35
+BaseCam Target Flyto JarBeans z=40 easebetween time=4 *
+BaseCam FlyTo JarBeans x=264 y=136 z=20 easebetween time=4 *
+sleep .75
+JarBeans AddBeans 10 *BeansDone
+WaitFor BeansDone
+Release JarBeans
+sleep 1
+
+
+basecam flyto Harry x=100 z=30
+basecam target flyto Harry
+sleep .01
+BaseCam Target AttachedTo=harry z=5
+BaseCam Locked YawStep=-30 Distance=100 *
+
+harry animate winner
+harry animate celebrate
+release Harry
+release Duellist
+release basecam
+
+trigger LoadEntryHall

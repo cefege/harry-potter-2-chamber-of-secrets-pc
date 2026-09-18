@@ -1,0 +1,42 @@
+//=============================================================================
+// Petri_hit.
+//=============================================================================
+class Petri_hit expands AllSpellCast_FX;
+
+defaultproperties
+{
+    ParticlesPerSec=(Base=100.000000)
+    SourceWidth=(Base=75.000000)
+    SourceHeight=(Base=75.000000)
+    SourceDepth=(Base=50.000000)
+    AngularSpreadWidth=(Base=0.000000)
+    AngularSpreadHeight=(Base=0.000000)
+    bSteadyState=True
+    speed=(Base=1.000000)
+    Lifetime=(Base=1.750000)
+    ColorStart=(Base=(R=128,B=128))
+    ColorEnd=(Base=(R=0))
+    AlphaEnd=(Base=0.500000)
+    SizeWidth=(Base=20.000000)
+    SizeLength=(Base=25.000000)
+    SizeEndScale=(Base=0.250000)
+    DripTime=(Base=0.200000)
+    Attraction=(X=5.000000,Y=5.000000)
+    Damping=3.500000
+    Gravity=(Z=100.000000)
+    ParticlesMax=500
+    Textures(0)=Texture'HPParticle.hp_fx.Particles.Sparkle_5'
+    EmitDelay=1.000050
+    LastUpdateLocation=(X=-384.056519,Y=0.978714,Z=15.724504)
+    LastEmitLocation=(X=-384.056519,Y=0.978714,Z=15.724504)
+    LastUpdateRotation=(Pitch=16256,Yaw=-16336)
+    Age=371.506958
+    bDynamicLight=True
+    Level=LevelInfo'MyLevel.LevelInfo0'
+    Tag=ParticleFX
+    Region=(Zone=LevelInfo'MyLevel.LevelInfo0',ZoneNumber=1)
+    Location=(X=-384.056519,Y=0.978714,Z=15.724504)
+    Rotation=(Pitch=16256,Yaw=-16336)
+    OldLocation=(X=-352.649200,Y=233.869247,Z=15.724504)
+    Name=ParticleFX9
+}

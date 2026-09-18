@@ -1,0 +1,99 @@
+//15065Adv9bHarryWins
+[thread]
+
+
+capture Harry
+capture Aragog
+capture Basecam
+
+trigger trigger
+
+
+
+
+
+
+trigger triggerShakeCamera *
+//basecam flyto Harry
+basecam target flyto aragog easebetween time=1 staylocked
+aragog TurnTo Harry
+trigger Aragog
+
+
+//Get Harry the heck out of the way of the falling obelisks
+Harry teleport cutmarkford3
+
+trigger HoleBlocker
+sleep 1
+
+//stalactites fall
+
+//"AragogHarrySafeZone" sets Harry 650 units in front of Aragog
+//so Harry won't block the web edge as Aragog falls 
+Harry teleport AragogHarrySafeZone
+
+Harry TurnTo Aragog
+
+basecam flyto Harry x=48 z=16 * 
+basecam target flyto Harry z=20
+Harry Animate look_frantic *
+sleep 2
+
+basecam target flyto Aragog z=-200 *
+basecam followspline WebPopPath easeto start=WebPopPath1 dest=WebPopPath3 time=4 accel=40 *
+basecam shake magnitude=100 time=0.1 
+trigger AragogWeb1
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.1 
+trigger AragogWeb2
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.1 
+trigger AragogWeb3
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.2 
+trigger AragogWeb4
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.2 
+trigger AragogWeb5
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.2 
+trigger AragogWeb6
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.3 
+trigger AragogWeb7
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=0.4 
+trigger AragogWeb8
+trigger WebPopStompSFX
+basecam shake magnitude=100 time=1.5
+
+
+
+
+
+basecam flyto Harry x=-64 z=64
+basecam target flyto Aragog SL
+trigger triggerShakeCamera
+
+
+trigger ElevatorTrigger1 *
+trigger OuterWebMover *
+trigger WebCrashOnFloor
+aragog animate rearsup 
+aragog animate rearsuploop tween=3
+sleep .75
+trigger WebCrashOnFloor
+sleep 1
+aragog animate land
+basecam shake magnitude=100 time=1
+//trigger triggerShakeCamera 
+
+
+//basecam flyto aragog x=-512 y=256 z=384 easebetween time=3 *
+//basecam target flyto Harry easebetween time=3
+//basecam flyto Harry x=-64 z=128
+
+release Harry
+release Aragog
+release basecam
+trigger BossTrigger

@@ -1,0 +1,84 @@
+//16050MysterySolved
+
+[Dialog_01]
+
+Capture Harry
+
+Capture McGonagall
+Capture BaseCam
+
+Harry Walkto CutMark132 *HarryDone
+Harry say PC_Hry_Adv10GetHerm_05
+//I better not let Madam Pomfrey see me.
+
+BaseCam Target FlyTo Hermione
+BaseCam FlyTo CutCameraPos46
+
+Harry say PC_Hry_Adv10GetHerm_07 *HarryDone1
+//There's Hermione! What's that she's holding? It's a note, in her handwriting!
+
+sleep 2
+
+waitfor HarryDone
+Capture Ron
+Ron TurnTo Hermione
+Harry TurnTo Hermione 
+
+SetObjectiveId
+
+Waitfor HarryDone1
+Harry Talk PC_Hry_MysterySolved_15
+//Here's what it says…
+
+Harry Talk PC_Hry_MysterySolved_00
+//Of the many fearsome beasts and monsters that roam our land, there is none more deadly than the Basilisk,  the King of Serpents.
+
+Harry Talk PC_Hry_MysterySolved_01
+//This snake, which may reach gigantic size and live hundreds of years, is born from a chicken's egg, hatched beneath a toad.
+
+Harry Talk PC_Hry_MysterySolved_02
+//Aside from its deadly and venomous fangs, the Basilisk has a horrible stare, and all who are fixed with the beam of its eye shall suffer instant death.
+
+Harry Talk PC_Hry_MysterySolved_03
+//Spiders flee before the Basilisk, for it is their mortal enemy. The Basilisk flees only from the crowing of the rooster, which is fatal to it.
+
+Ron Talk PC_Ron_MysterySolved_04
+//But how’s the Basilisk been getting around the place?  A giant snake?  Someone would’ve seen…
+
+Harry Talk PC_Hry_MysterySolved_05
+//Pipes... Ron, it's been using the plumbing!  I've been hearing that voice inside the walls…
+
+Harry Talk PC_Hry_MysterySolved_06
+//…That girl who died... Aragog said she was found in a bathroom.
+
+Harry Talk PC_Hry_MysterySolved_07
+//What if she never left the bathroom? What if she's still there?
+
+Ron Talk PC_Ron_MysterySolved_08
+//You don't think--not Moaning Myrtle?
+
+Harry Talk PC_Hry_MysterySolved_09
+//The entrance to the Chamber of Secrets! What if it's in…
+
+Harry Talk PC_Hry_MysterySolved_10
+//Moaning Myrtle's bathroom!
+
+Ron Talk PC_Ron_MysterySolved_16
+//Moaning Myrtle's bathroom!
+
+McGonagall Talk PC_Mcg_MysterySolved_12
+//All students to return to their House dormitories at once. All  teachers return to the staff room. Immediately, please.
+
+Ron Talk PC_Ron_MysterySolved_13
+//Oh no! Not another attack!
+
+BaseCam FadeOut
+
+Harry ChangeGameState GState170
+trigger triggerentrance
+
+Release Harry
+Release Ron
+Release McGonagall
+Release BaseCam
+

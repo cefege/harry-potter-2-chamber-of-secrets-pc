@@ -1,0 +1,41 @@
+//07090TransitionD
+
+[Dialog_01]
+
+
+Capture Narrator
+Capture Harry
+Capture BaseCam
+
+
+basecam flyto twothirds
+basecam target flyto cutGargoyle
+
+
+basecam flyto middle easebetween time=20 *
+basecam FOV angle=60 time=20 *
+basecam fadein
+
+
+Narrator Talk PC_Nar_TransD_00
+//Harry lay awake for hours that night, wondering…
+
+Narrator Talk PC_Nar_TransD_02 *done
+//Could he be a descendant of Salazar Slytherin?
+
+waitfor done
+sleep .5
+basecam fadeout
+basecam FOV angle=90
+
+//Update house point totals---------------------------------------------------------------
+Capture Housepoints
+Housepoints UpdateHousepoints D
+Release Housepoints
+
+//Harry changegamestate gstate080
+//Trigger TriggerChangeLevel_EntryHall080
+
+Release Harry
+Release Narrator
+Release BaseCam
