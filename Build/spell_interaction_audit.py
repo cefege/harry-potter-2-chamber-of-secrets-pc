@@ -11,9 +11,11 @@ import sys
 from typing import NoReturn, Sequence
 
 if __package__:
+    from . import game_test
     from . import package79_reference as p79
     from . import smoke_maps
 else:
+    import game_test
     import package79_reference as p79
     import smoke_maps
 
@@ -347,7 +349,7 @@ def sort_key(r: dict[str,object]) -> tuple[bytes,...]:
     return tuple(str(v).encode() for v in fields)
 def generate(repo: Path,data: Path) -> dict[str,object]:
     catalog=Catalog(data);maps=[];records=[]
-    for path,rel in smoke_maps._enumerate_maps(data):entry,found=audit_map(path,rel,catalog);maps.append(entry);records.extend(found)
+    for path,rel in game_test._enumerate_maps(data):entry,found=audit_map(path,rel,catalog);maps.append(entry);records.extend(found)
     records.sort(key=sort_key); mechanisms=Counter(str(r["mechanism"]) for r in records);statuses=Counter(str(r["status"]) for r in records);spells=Counter((r["spell_enum"],r["spell_name"]) for r in records)
     try:display=data.relative_to(repo).as_posix()
     except ValueError:display=str(data)

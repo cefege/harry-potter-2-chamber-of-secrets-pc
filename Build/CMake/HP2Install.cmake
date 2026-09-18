@@ -62,10 +62,20 @@ configure_file(
     @ONLY
 )
 
+# The documented quick-start flow is `cmake --build --preset macos-arm64`, so
+# the release bundle belongs to the default target. Sanitizer configurations
+# share dist/macos-arm64 and must never silently replace the shipped release
+# bundle with an instrumented binary; they package on explicit request only.
+if(HP2_ENABLE_ASAN_UBSAN OR HP2_ENABLE_TSAN)
+    set(_hp2_bundle_in_all "")
+else()
+    set(_hp2_bundle_in_all ALL)
+endif()
+
 # Always recreate the bundle: stale binaries, signatures, and future runtime
 # libraries must never survive a packaging invocation. Assets intentionally
 # remain external to the application bundle.
-add_custom_target(hp2_macos_app
+add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${HP2_MACOS_APP_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${HP2_MACOS_EXECUTABLE_DIR}"
@@ -104,3 +114,4 @@ add_custom_target(hp2_macos_app
     COMMENT "Recreating signed dist/macos-arm64/HarryPotter2.app"
     VERBATIM
 )
+unset(_hp2_bundle_in_all)
