@@ -74,6 +74,7 @@ void FGlobalRandoms::Exit()
 void FGlobalRandoms::Tick( FLOAT TimeSeconds )
 {
 	guard(FGlobalRandoms::Tick);
+	FAppRandTracePhaseScope StartupPhaseTrace( "pre_render_fglobalrandoms" );
 	DWORD ServerTicks = DWORD (TimeSeconds * 35.0);
 
 	// optimize: This code would benefit greatly from a fast random number generator

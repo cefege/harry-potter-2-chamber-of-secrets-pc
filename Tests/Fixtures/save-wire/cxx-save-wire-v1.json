@@ -1,0 +1,1 @@
+{"schema_version":1,"kind":"legacy_cxx_save_wire","fixture":"cxx-save-wire-v1.usa","sha256":"21e0ce9ffe631b524e193debc2cd428f683fb4a2cf83feb9d5ed994c3ddf4f1a","size":64,"package_version":79,"table_counts":{"names":0,"imports":0,"exports":0},"provenance":{"writer":"FPackageFileSummary::operator<<","generation_writer":"FGenerationInfo::operator<<","source":"Core/Inc/UnLinker.h"}}

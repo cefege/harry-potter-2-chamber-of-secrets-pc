@@ -26,11 +26,13 @@ set(HP2_CORE_SOURCES
     "${HP2_UNREAL_ROOT}/Core/Src/UnFileStream.cpp"
     "${HP2_UNREAL_ROOT}/Core/Src/FEAXABlockDecoder.cpp"
     "${HP2_UNREAL_ROOT}/Core/Src/HP2CrashReporter.cpp"
+    "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2TraceHooks.cpp"
 )
 
 # Engine.dsp runtime units, excluding the Windows-only winstuff.cpp unit.
 set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/AStatLog.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/HP2ActorSlotDumpHooks.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"
@@ -67,6 +69,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/UnReach.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/UnRenderIterator.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/UnReplay.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/UnReplayWire.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/UnRoute.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/UnScript.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/UnScrTex.cpp"
@@ -180,6 +183,7 @@ set(HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/NativeTypogra
 set(HP2_CANVAS_COMPATIBILITY_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/CanvasCompatibilityTests.cpp")
 set(HP2_CONFIG_INI_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ConfigIniTests.cpp")
 set(HP2_REPLAY_ROUNDTRIP_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ReplayRoundTripTests.cpp")
+set(HP2_SAVE_WIRE_ORACLE_SOURCE "${PROJECT_SOURCE_DIR}/Tests/SaveWireOracle.cpp")
 set(HP2_INPUT_CONTRACT_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/InputContractTests.cpp")
 
 # Every source below is required by the completed native test graph. Keep the

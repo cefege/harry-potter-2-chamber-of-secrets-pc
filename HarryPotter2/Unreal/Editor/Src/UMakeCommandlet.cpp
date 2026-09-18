@@ -199,7 +199,8 @@ class UMakeCommandlet : public UCommandlet
 				for( i=0; i<FName::GetMaxNames(); i++ )
 					if( FName::GetEntry(i) )
 						FName::GetEntry(i)->Flags &= ~RF_TagExp;
-				for( TObjectIterator<UClass> It; It; ++It )
+				TObjectIterator<UClass> It;
+				for( ; It; ++It )
 					It->ClearFlags( RF_TagImp | RF_TagExp );
 				for( It=TObjectIterator<UClass>(); It; ++It )
 					if( It->GetOuter()==PkgObject && It->ScriptText && (It->GetFlags()&RF_Native) && !(It->ClassFlags&CLASS_NoExport) )
@@ -237,6 +238,15 @@ class UMakeCommandlet : public UCommandlet
 
 };
 IMPLEMENT_CLASS(UMakeCommandlet)
+
+#if defined(HP2_FIXTURE_COMPILER) && HP2_FIXTURE_COMPILER
+void RegisterFixtureCompilerEditorClasses()
+{
+	UEditorEngine::StaticClass();
+	UClassFactoryUC::StaticClass();
+	UMakeCommandlet::StaticClass();
+}
+#endif
 
 /*-----------------------------------------------------------------------------
 	The End.

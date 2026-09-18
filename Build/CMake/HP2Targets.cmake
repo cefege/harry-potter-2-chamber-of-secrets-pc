@@ -342,14 +342,21 @@ hp2_add_executable(hp2_config_ini_tests
 )
 target_link_libraries(hp2_config_ini_tests PRIVATE hp2_core)
 
-# Replay wire-format contract: uses the in-test verbatim oracle of UnReplay's
-# operator<< (see Tests/ReplayRoundTripTests.cpp). Linking hp2_engine would
-# drag static initializers (FURL globals) that require a full appInit
-# bootstrap, so this target intentionally links core only.
+# Replay wire-format contract: links the same dependency-light production
+# operator translation unit as hp2_engine, without pulling UnReplay.cpp's
+# appInit-dependent FURL globals into the oracle process.
 hp2_add_executable(hp2_replay_roundtrip_tests
     ${HP2_REPLAY_ROUNDTRIP_TEST_SOURCE}
+    "${HP2_UNREAL_ROOT}/Engine/Src/UnReplayWire.cpp"
 )
 target_link_libraries(hp2_replay_roundtrip_tests PRIVATE hp2_core)
+
+# Production save-wire oracle. This is intentionally not a CTest: fixture
+# generation and acceptance are separate explicit operations.
+hp2_add_executable(hp2_save_wire_oracle
+    ${HP2_SAVE_WIRE_ORACLE_SOURCE}
+)
+target_link_libraries(hp2_save_wire_oracle PRIVATE hp2_core)
 
 # Input freeze + mouse-capture policy + normalization mapping contracts.
 hp2_add_executable(hp2_input_contract_tests
@@ -414,6 +421,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_launcher_tests
     hp2_config_ini_tests
     hp2_replay_roundtrip_tests
+    hp2_save_wire_oracle
     hp2_input_contract_tests
 )
 

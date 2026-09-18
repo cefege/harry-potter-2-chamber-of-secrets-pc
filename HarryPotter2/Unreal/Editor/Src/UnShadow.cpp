@@ -452,7 +452,8 @@ void UEditorEngine::shadowIlluminateBsp( ULevel* Level, INT Selected, UBOOL bVis
 		// Compute light visibility and update index with it.
 		Level->BrushTracker = GNewBrushTracker( Level );
 		Illum.BuildSurfList( 0 );
-		for( INT i=0; i<Level->Model->Surfs.Num(); i++ )
+		INT i;
+		for( i=0; i<Level->Model->Surfs.Num(); i++ )
 			new(Illum.Lights)TArray<AActor*>;
 		Illum.NumLights = Illum.ComputeAllLightVisibility( Selected, bVisibleOnly );
 

@@ -414,7 +414,135 @@ CORE_API DOUBLE appAtan2( DOUBLE Y, DOUBLE X );
 CORE_API DOUBLE appSqrt( DOUBLE Value );
 CORE_API DOUBLE appPow( DOUBLE A, DOUBLE B );
 CORE_API UBOOL appIsNan( DOUBLE Value );
+class UObject;
+class UFunction;
+struct FFrame;
+// Optional HP2_RNG_TRACE v2 attribution. These scopes affect telemetry only;
+// appRand remains the sole source of random values.
+class CORE_API FAppRandTraceOuterScope
+{
+public:
+	FAppRandTraceOuterScope( UObject* Object, UObject* Function );
+	~FAppRandTraceOuterScope();
+private:
+	void* Context;
+	UBOOL Pushed;
+};
+// Optional HP2_RNG_TRACE prebegin decision observation. This scopes exactly
+// Engine.Actor.PreBeginPlay's interpreted body and never affects execution.
+class CORE_API FAppRandTracePreBeginScope
+{
+public:
+	FAppRandTracePreBeginScope( UObject* Object, UFunction* Function );
+	~FAppRandTracePreBeginScope();
+private:
+	void* Event;
+};
+// Optional HP2_RNG_TRACE v2 observation for the resolved GameInfo.IsRelevant
+// body. It records dispatch ordering only and never affects script execution.
+class CORE_API FAppRandTraceFunctionScope
+{
+public:
+	FAppRandTraceFunctionScope( UObject* Object, UFunction* Function, FFrame& Stack );
+	~FAppRandTraceFunctionScope();
+private:
+	void* Event;
+	void* PreBeginEvent;
+};
+// Optional HP2_RNG_TRACE branch/result observation for the interpreted
+// GameInfo.IsRelevant body. These scopes observe actual calls and returns only.
+class CORE_API FAppRandTraceRelevanceScope
+{
+public:
+	FAppRandTraceRelevanceScope( UObject* Object, UFunction* Function, FFrame& Stack );
+	~FAppRandTraceRelevanceScope();
+private:
+	void* Event;
+};
+// Optional HP2_RNG_TRACE observation of Actor.PreBeginPlay's exact
+// Level.Game.IsRelevant(Self) expression. This bracket surrounds only that
+// expression's dispatch and never affects script execution.
+class CORE_API FAppRandTracePreBeginRelevanceScope
+{
+public:
+	FAppRandTracePreBeginRelevanceScope( FFrame& CallerStack, UObject* Object, UFunction* Function, void* Result );
+	~FAppRandTracePreBeginRelevanceScope();
+private:
+	void* Event;
+	void* Result;
+};
+// Optional HP2_RNG_TRACE branch/result observation for the interpreted
+// GameInfo.IsRelevant body. These scopes observe actual calls and returns only.
+class CORE_API FAppRandTraceRelevanceCallScope
+{
+public:
+	FAppRandTraceRelevanceCallScope( FFrame& CallerStack, UObject* Object, UFunction* Function, void* Result );
+	~FAppRandTraceRelevanceCallScope();
+private:
+	void* Event;
+	void* Result;
+	BYTE* SuperRelevant;
+	INT CaptureKind;
+};
+CORE_API void appRecordRandTraceRelevanceReturnDebugInfo( FFrame& Stack, INT LineNumber );
+CORE_API void appRecordRandTraceRelevanceReturn( FFrame& Stack, void* Result );
+class CORE_API FAppRandTraceNativeScope
+{
+public:
+	FAppRandTraceNativeScope( FFrame& Stack, const ANSICHAR* Native, INT NativeSlot, INT CallsiteOffset );
+	~FAppRandTraceNativeScope();
+private:
+	void* Context;
+	UBOOL Pushed;
+};
+// Optional HP2_RNG_TRACE observation for native engine subsystems that run
+// outside an UnrealScript FFrame. This preserves the owning actor/class while
+// assigning a stable subsystem label to any appRand calls in the scope.
+class CORE_API FAppRandTraceNativeObjectScope
+{
+public:
+	FAppRandTraceNativeObjectScope( UObject* Object, const ANSICHAR* Native, INT NativeSlot, INT CallsiteOffset );
+	~FAppRandTraceNativeObjectScope();
+private:
+	void* Context;
+	UBOOL Pushed;
+};
+// Optional HP2_STARTUP_RNG_PHASE_TRACE interval observation. This records
+// appRand ordinals at genuine engine boundaries and cannot affect simulation.
+// LoadMap sets map identity once per generation; the phase scope snapshots it.
+class CORE_API FAppRandTracePhaseScope
+{
+public:
+	FAppRandTracePhaseScope( const ANSICHAR* Phase );
+	~FAppRandTracePhaseScope();
+private:
+	void* Event;
+};
+CORE_API void appSetStartupRandTraceMap( const TCHAR* MapToken, const TCHAR* MapURL );
+CORE_API void appSetStartupRandTraceLifecycleBoundary( const ANSICHAR* Boundary );
+// Optional HP2_PATROL_STATE_TRACE observation. It records the selected
+// `patrol` or `stateIdle` state body's property reads and conditional branches,
+// without changing script execution or state-frame cursors.
+// Optional HP2_PATROL_POINT_TRACE observation. It records only actual
+// AllActors yields for PatrolPoint/NavigationPoint requests and never changes
+// iterator admission, ordering, or state execution.
+class UProperty;
+class UClass;
+CORE_API void appRecordPatrolStateTraceProperty( FFrame& Stack, UObject* Object, UProperty* Property, const BYTE* Value, INT OpcodeOffset, const ANSICHAR* Access );
+CORE_API void appRecordPatrolStateTraceBranch( FFrame& Stack, UObject* Object, INT OpcodeOffset, INT TargetOffset, INT NextOffset, UBOOL Condition );
+CORE_API void appRecordPatrolPointIterator( UObject* Requestor, UClass* RequestedClass, const FName& MatchTag, INT Slot, UObject* Yielded, INT Order );
+CORE_API void appSetRandTraceTick( unsigned long long TickIndex, const ANSICHAR* Phase );
+CORE_API void appRecordRandTracePreBeginSoftwareRendering( UObject* Object, UBOOL IsSoftwareRendering );
+// The completed appRand draw count when either RNG or global Tick telemetry is armed.
+// This is observational; callers must not derive simulation decisions from it.
+CORE_API unsigned long long appGetRandTraceOrdinal();
 CORE_API INT appRand();
+// Records the pre-appInit diagnostic seed after trace initialization. Seed is
+// the effective libc seed; RequestedSeed retains the accepted environment text
+// value. FReplay intentionally supersedes both metadata fields with its fixed
+// replay seed.
+CORE_API void appSetRandTraceDiagnosticSeed( unsigned RequestedSeed, unsigned Seed );
+CORE_API void appResetRandTraceForReplay();
 CORE_API FLOAT appFrand();
 CORE_API FLOAT appFrand(FLOAT From, FLOAT To);
 

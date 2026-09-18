@@ -74,7 +74,8 @@ KEY_IDS = {
 }
 
 IST_PRESS, IST_HOLD, IST_RELEASE, IST_AXIS = 1, 2, 3, 4
-IK_PLAY = 0
+# EInputKey::IK_Play in Engine/Inc/EngineClasses.h; replay frame terminator.
+IK_PLAY = 250
 DELTA_FLAG = 0x80
 
 
@@ -200,14 +201,22 @@ def parse_fixture(text: str) -> tuple[float, list[list[tuple[int, int]]]]:
         raise FixtureError(f"fixture ends with keys still held: {names}")
     return tick, frames
 
+def validate_launch_safe_frames(frames: list[list[tuple[int, int]]]) -> None:
+    """Require the initial empty frame that gives FReplay its first tick."""
+    if not frames or frames[0]:
+        raise FixtureError(
+            "launch-safe replay fixtures must begin with an empty frame (use idle 1)"
+        )
+
 
 def compile_replay(url: str, tick_delta: float, frames: list[list[tuple[int, int]]]) -> bytes:
     """Compile parsed frames into the exact FReplay .rep byte stream.
 
     Stream layout (UnReplay.cpp): serialized starting URL FString, then per
     frame zero or more FInputEvent records followed by the frame-tick record
-    {IK_Play, IST_Axis, delta}. The engine reads the first record at open
-    time to seed NextTick, so the stream opens with a tick terminator.
+    {IK_Play, IST_Axis, delta}. This raw encoder deliberately preserves
+    event-first frames for wire coverage; callers that stage a launch replay
+    must validate the initial empty frame separately.
     """
     out = bytearray()
     out += serialize_fstring(url)
@@ -234,7 +243,9 @@ def inject_probe_binding(defuser_text: str) -> str:
 _USER_DIR_RELATIVE = Path("Library/Application Support/Harry Potter 2/User")
 
 
-def prepare_user_home(sandbox_home: Path, data_root: Path, replay_bytes: bytes) -> Path:
+def prepare_user_home(
+    sandbox_home: Path, data_root: Path, replay_bytes: bytes, *, replay_stem: str = REPLAY_STEM,
+) -> Path:
     """Seed the isolated user directory with User.ini and the replay stream.
 
     Both ini seeds are required: when bootstrap finds Game.ini missing it
@@ -251,7 +262,7 @@ def prepare_user_home(sandbox_home: Path, data_root: Path, replay_bytes: bytes) 
     )
     defuser = (system / "DefUser.ini").read_text(encoding="utf-8")
     (user_dir / "User.ini").write_text(inject_probe_binding(defuser), encoding="utf-8")
-    (user_dir / f"{REPLAY_STEM}.rep").write_bytes(replay_bytes)
+    (user_dir / f"{replay_stem}.rep").write_bytes(replay_bytes)
     return user_dir
 
 
@@ -508,16 +519,16 @@ class InputScriptContracts(unittest.TestCase):
         held_states = {state for frame in frames for _, state in frame}
         self.assertEqual(held_states, {IST_PRESS, IST_HOLD, IST_RELEASE})
 
-    def test_compile_replay_matches_the_farchive_wire_format(self) -> None:
+    def test_raw_event_first_encoding_matches_the_farchive_wire_format(self) -> None:
+        # compile_replay is a raw encoder: it preserves event-first frames for
+        # byte-level coverage. Launch scenarios must validate their first frame.
         tick, frames = parse_fixture("tick 0.5\npress K\n")
-        # parse_fixture leaves a trailing empty frame after the release; the
-        # engine reads the FIRST record at open time to seed its tick, so the
-        # stream opens with the first frame's tick terminator.
         self.assertEqual(frames, [
             [(KEY_IDS["K"], IST_PRESS)],
             [(KEY_IDS["K"], IST_RELEASE)],
             [],
         ])
+        self.assertEqual(IK_PLAY, 250)
         blob = compile_replay("Entry.unr", tick, frames)
         tick_record = bytes((IK_PLAY, IST_AXIS | DELTA_FLAG)) + struct.pack("<f", 0.5)
         expected = (
@@ -529,6 +540,23 @@ class InputScriptContracts(unittest.TestCase):
             + tick_record
         )
         self.assertEqual(blob, expected)
+
+    def test_launch_safe_frames_require_a_delimiter_first_stream(self) -> None:
+        with self.assertRaisesRegex(FixtureError, "begin with an empty frame"):
+            validate_launch_safe_frames([])
+
+        _, event_first = parse_fixture("tick 0.5\npress K\n")
+        event_first_blob = compile_replay("Entry.unr", 0.5, event_first)
+        self.assertEqual(event_first_blob[11:13], bytes((KEY_IDS["K"], IST_PRESS)))
+        with self.assertRaisesRegex(FixtureError, "begin with an empty frame"):
+            validate_launch_safe_frames(event_first)
+
+        tick, delimiter_first = parse_fixture("tick 0.5\nidle 1\npress K\n")
+        validate_launch_safe_frames(delimiter_first)
+        self.assertEqual(
+            compile_replay("Entry.unr", tick, delimiter_first)[11:17],
+            bytes((IK_PLAY, IST_AXIS | DELTA_FLAG)) + struct.pack("<f", tick),
+        )
 
     def test_compilation_is_deterministic(self) -> None:
         text = DEFAULT_FIXTURE.read_text(encoding="utf-8")

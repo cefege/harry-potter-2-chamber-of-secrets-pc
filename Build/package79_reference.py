@@ -36,27 +36,18 @@ audit (``--data-root ROOT``):
     the exact same PackageReader parsers as reference mode -- there is no
     second reader implementation.
 
-Audit JSON schema (``schema_version`` 1), keys sorted by canonical_json:
-    accepted_versions        {"max": 79, "min": 60}
-    census.file_count         files examined under the root (excl. excluded manifests)
-    census.format_profiles    map "v<version>/licensee<l>/flags<f>" -> package count
-    census.non_package_count  files that do not start with the package tag
-    census.package_count      packages successfully decoded
-    data_root                 path as passed (repo-relative when possible)
-    format                    "hp1-ue1-package-audit"
-    non_package_files         sorted relative POSIX paths of non-package files
-    packages                  sorted by path; per package:
-      path                    relative POSIX path under the data root
-      version/licensee/package_flags  from the summary header
-      name_count/import_count/export_count from the summary
-      exports                 one entry per export, in table order:
-                              {"class_path": str|null, "object_path": str}
-      native_functions        FUNC_Native ordinals derived exactly like the
-                              reference mode's UFunction terminal-field
-                              derivation (exports whose class_path resolves
-                              to Core.Function / *.Function); entries:
-                              {"native_index": int, "object_path": str}
-    schema_version            1"""
+Audit JSON schema (``schema_version`` 2), keys sorted by canonical_json.  The
+audit retains the structural package census and adds byte-stable payload
+coverage: every export serial span and every non-package file has its size and
+SHA-256 recorded.  Export payloads are classified by resolved class (mesh,
+font, sound, texture, replay, save, or object).  The existing tagged-property
+reader projects every reachable prefix; mesh/font dispatch and standalone
+PSA/DDS-DXT1/raw-EA-XA projections mirror hp-format's existing readers.
+Families without enough wire metadata for those readers remain explicit
+``hash-only`` projections.  Top-level ``payload_family_census`` accounts for
+both package exports and non-package config/localization/PSA/sound/texture/
+replay files.
+"""
 
 from __future__ import annotations
 
@@ -80,6 +71,174 @@ FUNCTION_FLAG_NATIVE = 0x00000400
 FUNCTION_FLAG_MASK = 0x0001FFFF
 PACKAGE_MIN_VERSION = 60
 PACKAGE_MAX_VERSION = 79
+AUDIT_SCHEMA_VERSION = 2
+
+# Family names are deliberately wire-format concepts, not profile concepts.
+# Keep this table in lockstep with hp-format's package79::audit module.
+NON_PACKAGE_FAMILIES = {
+    ".ini": "config",
+    ".int": "localization",
+    ".psa": "psa",
+    ".dem": "replay",
+    ".rpl": "replay",
+    ".replay": "replay",
+    ".uax": "sound",
+    ".wav": "sound",
+    ".ogg": "sound",
+    ".xa": "sound",
+    ".utx": "texture",
+    ".dds": "texture",
+    ".png": "texture",
+    ".bmp": "texture",
+    ".tga": "texture",
+}
+
+def non_package_family(path: str) -> str:
+    return NON_PACKAGE_FAMILIES.get(Path(path).suffix.lower(), "binary")
+
+
+def export_payload_family(path: str, class_path: str | None) -> str:
+    if Path(path).suffix.lower() == ".usa":
+        return "save"
+    leaf = (class_path or "").rsplit(".", 1)[-1].lower()
+    if leaf in {"mesh", "lodmesh", "skeletalmesh"}:
+        return "mesh"
+    if leaf == "font" or leaf.endswith("font"):
+        return "font"
+    if "replay" in leaf:
+        return "replay"
+    if leaf in {"sound", "music"} or leaf.endswith("sound"):
+        return "sound"
+    if "texture" in leaf or leaf == "palette":
+        return "texture"
+    return "object"
+
+
+def add_family_census(
+    census: dict[str, dict[str, int]], family: str, size: int
+) -> None:
+    entry = census.setdefault(family, {"bytes": 0, "payload_count": 0})
+    entry["bytes"] += size
+    entry["payload_count"] += 1
+
+def _decode_dxt1(blocks: bytes, width: int, height: int) -> bytes:
+    if width <= 0 or height <= 0:
+        raise ValueError("empty DXT1 dimensions")
+    blocks_x = (width + 3) // 4
+    blocks_y = (height + 3) // 4
+    if len(blocks) < blocks_x * blocks_y * 8:
+        raise ValueError("truncated DXT1 payload")
+    output = bytearray(width * height * 4)
+    for block_y in range(blocks_y):
+        for block_x in range(blocks_x):
+            base = (block_y * blocks_x + block_x) * 8
+            color0, color1, indices = struct.unpack_from("<HHI", blocks, base)
+            def color(value: int) -> list[int]:
+                r5, g6, b5 = (value >> 11) & 31, (value >> 5) & 63, value & 31
+                return [(r5 << 3) | (r5 >> 2), (g6 << 2) | (g6 >> 4),
+                        (b5 << 3) | (b5 >> 2), 255]
+            c0, c1 = color(color0), color(color1)
+            palette = [c0, c1, [0, 0, 0, 255], [0, 0, 0, 0]]
+            if color0 > color1:
+                palette[2] = [(2 * c0[i] + c1[i]) // 3 for i in range(3)] + [255]
+                palette[3] = [(c0[i] + 2 * c1[i]) // 3 for i in range(3)] + [255]
+            else:
+                palette[2] = [(c0[i] + c1[i]) // 2 for i in range(3)] + [255]
+            for texel in range(16):
+                x, y = block_x * 4 + texel % 4, block_y * 4 + texel // 4
+                if x >= width or y >= height:
+                    continue
+                rgba = palette[(indices >> (texel * 2)) & 3]
+                at = (y * width + x) * 4
+                output[at : at + 4] = bytes((rgba[2], rgba[1], rgba[0], rgba[3]))
+    return bytes(output)
+
+
+_EAXA_COEFFICIENTS = (
+    (0, 0), (240, 0), (460, -208), (392, -220), (488, -240), (328, -208),
+    (440, -168), (420, -188), (432, -176), (240, -16), (416, -192),
+    (424, -160), (288, -8), (436, -188), (224, -1), (272, -16),
+)
+
+
+def _decode_eaxa(data: bytes) -> bytes:
+    if len(data) % 15:
+        raise ValueError("EA-XA payload is not block-aligned")
+    history1 = history2 = 0
+    output = bytearray()
+    for base in range(0, len(data), 15):
+        block = data[base : base + 15]
+        predictor, shift = block[0] >> 4, block[0] & 15
+        c0, c1 = _EAXA_COEFFICIENTS[predictor]
+        for index in range(28):
+            packed = block[1 + index // 2]
+            nibble = (packed >> 4) if index & 1 else (packed & 15)
+            if nibble >= 8:
+                nibble -= 16
+            scaled = nibble << (12 - shift) if shift <= 12 else nibble // (1 << (shift - 12))
+            sample = (scaled * 256 + c0 * history1 + c1 * history2) // 256
+            sample = max(-32768, min(32767, sample))
+            output.extend(struct.pack("<h", sample))
+            history2, history1 = history1, sample
+    return bytes(output)
+
+
+def non_package_projection(path: str, family: str, data: bytes) -> dict[str, Any]:
+    suffix = Path(path).suffix.lower()
+    try:
+        if family == "psa":
+            pos = 0
+            chunks: dict[str, tuple[int, int, bytes]] = {}
+            for expected in ("ANIMHEAD", "BONENAMES", "ANIMINFO", "ANIMKEYS"):
+                if pos + 32 > len(data):
+                    raise ValueError("truncated PSA header")
+                identifier = data[pos : pos + 20].split(b"\0", 1)[0].decode("ascii")
+                total_frames, size, count = struct.unpack_from("<iii", data, pos + 20)
+                if identifier != expected or min(total_frames, size, count) < 0:
+                    raise ValueError("invalid PSA chunk")
+                end = pos + 32 + size * count
+                if end > len(data):
+                    raise ValueError("truncated PSA chunk")
+                chunks[identifier] = (total_frames, count, data[pos + 32 : end])
+                pos = end
+            if pos != len(data):
+                raise ValueError("trailing PSA bytes")
+            total_frames, _, _ = chunks["ANIMHEAD"]
+            bone_count = chunks["BONENAMES"][1]
+            sequence_count = chunks["ANIMINFO"][1]
+            key_count = chunks["ANIMKEYS"][1]
+            return {"bone_count": bone_count, "key_count": key_count,
+                    "reader": "hp-format.psa", "sequence_count": sequence_count,
+                    "status": "projected", "total_frames": total_frames}
+        if family == "texture" and suffix == ".dds":
+            if (
+                len(data) < 128
+                or data[:4] != b"DDS "
+                or struct.unpack_from("<I", data, 4)[0] != 124
+                or struct.unpack_from("<I", data, 76)[0] != 32
+                or data[84:88] != b"DXT1"
+            ):
+                return {"reader": "hp-format.dxt1", "status": "hash-only"}
+            height, width = struct.unpack_from("<II", data, 12)
+            blocks_x = (width + 3) // 4
+            blocks_y = (height + 3) // 4
+            encoded_size = blocks_x * blocks_y * 8
+            if encoded_size > len(data) - 128:
+                return {"reader": "hp-format.dxt1", "status": "hash-only"}
+            decoded = _decode_dxt1(data[128:128 + encoded_size], width, height)
+            return {"decoded_sha256": hashlib.sha256(decoded).hexdigest(),
+                    "height": height, "reader": "hp-format.dxt1",
+                    "status": "decoded", "width": width}
+        if family == "sound" and suffix == ".xa":
+            decoded = _decode_eaxa(data)
+            return {"decoded_sha256": hashlib.sha256(decoded).hexdigest(),
+                    "reader": "hp-format.eaxa", "sample_count": len(decoded) // 2,
+                    "status": "decoded"}
+    except (UnicodeDecodeError, ValueError, struct.error):
+        reader = {"psa": "hp-format.psa", "sound": "hp-format.eaxa",
+                  "texture": "hp-format.dxt1"}.get(family, "bytes")
+        return {"reader": reader, "status": "hash-only"}
+    return {"reader": "bytes", "status": "hash-only"}
 
 DEFAULT_AUDIT_OUTPUT = "Tests/Fixtures/hp1-package-audit.json"
 
@@ -839,16 +998,169 @@ class PackageReader:
             "sha256": sha256_span(self.data, start, end - start),
             "size": end - start,
         }
+    def property_projection(
+        self, payload: bytes, names: Sequence[NameEntry]
+    ) -> dict[str, Any]:
+        """Conservatively project the existing tagged-property prefix.
+
+        UE1 payload families with an object-stack prologue do not begin with a
+        property stream.  Those remain explicit hash-only entries rather than
+        guessing an alignment or dropping the payload.
+        """
+        cursor = Cursor(payload, self.relative_path, 0, "export tagged properties")
+        property_count = 0
+        try:
+            while True:
+                name_index = cursor.compact_index()
+                if not 0 <= name_index < len(names):
+                    raise PackageFormatError("tagged property name index is out of range")
+                if names[name_index].text == "None":
+                    return {
+                        "property_bytes": cursor.pos,
+                        "property_count": property_count,
+                        "reader": "package79.properties",
+                        "status": "decoded",
+                        "trailing_bytes": len(payload) - cursor.pos,
+                    }
+                info = cursor.u8()
+                kind = info & 0x0F
+                size_code = info & 0x70
+                array_flag = bool(info & 0x80)
+                if kind == 10:
+                    struct_name = cursor.compact_index()
+                    if not 0 <= struct_name < len(names):
+                        raise PackageFormatError("tagged property struct name is out of range")
+                if size_code == 0x00:
+                    size = 1
+                elif size_code == 0x10:
+                    size = 2
+                elif size_code == 0x20:
+                    size = 4
+                elif size_code == 0x30:
+                    size = 12
+                elif size_code == 0x40:
+                    size = 16
+                elif size_code == 0x50:
+                    size = cursor.u8()
+                elif size_code == 0x60:
+                    size = cursor.u16()
+                else:
+                    size = cursor.i32()
+                    if size < 0:
+                        raise PackageFormatError("negative tagged property size")
+                if array_flag and kind != 3:
+                    cursor.compact_index()
+                cursor.take(size)
+                property_count += 1
+        except (PackageFormatError, IndexError, struct.error):
+            return {
+                "reader": "package79.properties",
+                "status": "hash-only",
+            }
+    def font_projection(self, payload: bytes) -> dict[str, Any]:
+        cursor = Cursor(payload, self.relative_path, 0, "UFont payload")
+        try:
+            if cursor.compact_index() != 0:
+                raise PackageFormatError("UFont payload has tagged properties")
+            page_count = cursor.compact_index()
+            if page_count < 0:
+                raise PackageFormatError("negative UFont page count")
+            glyph_count = 0
+            for _ in range(page_count):
+                cursor.compact_index()
+                character_count = cursor.compact_index()
+                if character_count < 0:
+                    raise PackageFormatError("negative UFont character count")
+                glyph_count += character_count
+                cursor.take(character_count * 16)
+            characters_per_page = cursor.i32()
+            remap_count = cursor.compact_index()
+            if remap_count < 0:
+                raise PackageFormatError("negative UFont remap count")
+            cursor.take(remap_count * 8)
+            cursor.u32()
+            return {
+                "characters_per_page": characters_per_page,
+                "glyph_count": glyph_count,
+                "page_count": page_count,
+                "properties": self.property_projection(payload, []),
+                "reader": "hp-format.font",
+                "remap_count": remap_count,
+                "status": "decoded",
+            }
+        except (PackageFormatError, IndexError, struct.error):
+            return {
+                "properties": self.property_projection(payload, []),
+                "reader": "hp-format.font",
+                "status": "hash-only",
+            }
+
+    def family_projection(
+        self,
+        family: str,
+        class_path: str | None,
+        payload: bytes,
+        names: Sequence[NameEntry],
+    ) -> dict[str, Any]:
+        properties = self.property_projection(payload, names)
+        if family == "font":
+            projection = self.font_projection(payload)
+            projection["properties"] = properties
+            return projection
+        if family == "mesh":
+            # The Rust leg dispatches hp-format::mesh::decode_export.  The
+            # canonical projection stays on the shared property/count surface;
+            # malformed prefixes are therefore explicit hash-only payloads.
+            return {
+                "properties": properties,
+                "reader": "hp-format.mesh",
+                "status": (
+                    "projected" if properties["status"] == "decoded" else "hash-only"
+                ),
+            }
+        return properties
+
 
     def audit_entry(self, parsed: ParsedPackage) -> dict[str, Any]:
-        """Light per-package projection for --data-root audits (schema in module docstring)."""
+        """Canonical structural and payload projection for one package."""
         exports_summary = []
         native_functions = []
+        family_census: dict[str, dict[str, int]] = {}
         for index, entry in enumerate(parsed.exports):
-            class_path = "Core.Class" if entry.class_ref == 0 else parsed.resolver.ref_path(entry.class_ref)
+            class_path = (
+                "Core.Class"
+                if entry.class_ref == 0
+                else parsed.resolver.ref_path(entry.class_ref)
+            )
             object_path = parsed.resolver.export_path(index)
-            exports_summary.append({"class_path": class_path, "object_path": object_path})
-            if class_path is not None and (class_path == "Core.Function" or class_path.endswith(".Function")):
+            family = export_payload_family(self.relative_path, class_path)
+            payload: dict[str, Any] | None = None
+            if entry.serial_size:
+                assert entry.serial_offset is not None
+                payload_bytes = self.data[
+                    entry.serial_offset : entry.serial_offset + entry.serial_size
+                ]
+                payload = {
+                    "end": entry.serial_offset + entry.serial_size,
+                    "family": family,
+                    "offset": entry.serial_offset,
+                    "projection": self.family_projection(
+                        family, class_path, payload_bytes, parsed.names
+                    ),
+                    "sha256": hashlib.sha256(payload_bytes).hexdigest(),
+                    "size": entry.serial_size,
+                }
+                add_family_census(family_census, family, entry.serial_size)
+            exports_summary.append(
+                {
+                    "class_path": class_path,
+                    "object_path": object_path,
+                    "payload": payload,
+                }
+            )
+            if class_path is not None and (
+                class_path == "Core.Function" or class_path.endswith(".Function")
+            ):
                 function_entry = self.parse_function_terminal(entry)
                 if function_entry["function_flags"] & FUNCTION_FLAG_NATIVE:
                     native_functions.append(
@@ -861,12 +1173,18 @@ class PackageReader:
         return {
             "export_count": summary["export_count"],
             "exports": exports_summary,
+            "file_sha256": hashlib.sha256(self.data).hexdigest(),
+            "file_size": len(self.data),
             "import_count": summary["import_count"],
             "licensee": summary["licensee"],
             "name_count": summary["name_count"],
             "native_functions": native_functions,
             "package_flags": summary["package_flags"],
             "path": self.relative_path,
+            "payload_families": family_census,
+            "payload_region": self.region(
+                parsed.names_end, summary["import_offset"]
+            ),
             "version": summary["version"],
         }
 
@@ -911,6 +1229,8 @@ def generate_audit(data_root: Path, repo_root: Path) -> dict[str, Any]:
 
     packages = []
     non_package_files: list[str] = []
+    non_package_payloads: list[dict[str, Any]] = []
+    family_census: dict[str, dict[str, int]] = {}
     profiles: dict[str, int] = {}
     for relative_path in files:
         try:
@@ -918,11 +1238,28 @@ def generate_audit(data_root: Path, repo_root: Path) -> dict[str, Any]:
         except OSError as exc:
             raise PackageFormatError(f"{relative_path}: cannot read file: {exc}") from exc
         if len(data) < 4 or struct.unpack_from("<I", data, 0)[0] != PACKAGE_TAG:
+            family = non_package_family(relative_path)
             non_package_files.append(relative_path)
+            non_package_payloads.append(
+                {
+                    "family": family,
+                    "path": relative_path,
+                    "projection": non_package_projection(relative_path, family, data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "size": len(data),
+                }
+            )
+            add_family_census(family_census, family, len(data))
             continue
         reader = PackageReader(relative_path, data)
         entry = reader.audit_entry(reader.parse())
         packages.append(entry)
+        for family, counts in entry["payload_families"].items():
+            aggregate = family_census.setdefault(
+                family, {"bytes": 0, "payload_count": 0}
+            )
+            aggregate["bytes"] += counts["bytes"]
+            aggregate["payload_count"] += counts["payload_count"]
         profile = f"v{entry['version']}/licensee{entry['licensee']}/flags{entry['package_flags']}"
         profiles[profile] = profiles.get(profile, 0) + 1
 
@@ -941,8 +1278,10 @@ def generate_audit(data_root: Path, repo_root: Path) -> dict[str, Any]:
         "data_root": data_root_display,
         "format": "hp1-ue1-package-audit",
         "non_package_files": non_package_files,
+        "non_package_payloads": non_package_payloads,
         "packages": packages,
-        "schema_version": 1,
+        "payload_family_census": family_census,
+        "schema_version": AUDIT_SCHEMA_VERSION,
     }
 
 

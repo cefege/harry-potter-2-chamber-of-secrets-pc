@@ -215,6 +215,7 @@ TFace::TFace(INT MatID, TWedge *v0, TWedge *v1,TWedge *v2, INT StartIndex)
 TFace::~TFace()
 {
 	guard(TFace::~TFace);
+	INT i;
 	TModel.GFaces.RemoveItem( this );
 
 	// Record the vertex count at which this face became obsolete.
@@ -222,7 +223,7 @@ TFace::~TFace()
 	NOTE(debugf(TEXT("%% Original Face %i  Collapsed when there were %i vertices left."),this->OriginalIndex,TModel.GVerts.Num());)
 	NOTE(debugf(TEXT("%% And its original wedges were %i %i %i "),Wedges[0]->OriginalIndex,Wedges[1]->OriginalIndex,Wedges[2]->OriginalIndex );)
 
-	for( INT i=0; i<3; i++ ) 
+	for( i=0; i<3; i++ ) 
 	{
 		if( Verts[i] ) 
 		{
@@ -234,7 +235,7 @@ TFace::~TFace()
 		}
 	}
 
-	for( i=0; i<3; i++) 
+	for( i=0; i<3; i++)
 	{
 		INT i2 = (i+1)%3;
 		if( ! Verts[i] || ! Verts[i2] ) continue;
@@ -291,7 +292,7 @@ void TFace::ReplaceVertex(TVertex *VOld, TVertex *VNew)
 
 	NOTE(debugf(TEXT("Replacevertex  %i  by %i"),VOld->OriginalIndex,VNew->OriginalIndex));
 
-	INT NewVertexIndex;
+	INT NewVertexIndex, i;
 
 	if( VOld==Verts[0] )
 	{
@@ -322,13 +323,13 @@ void TFace::ReplaceVertex(TVertex *VOld, TVertex *VNew)
 	VNew->Faces.AddItem(this);
 	VNew->Wedges.AddItem(OldWedge); // insert old one again.
 
-	for( INT i=0; i<3; i++ ) 
+	for( i=0; i<3; i++ ) 
 	{
 		VOld->RemoveIfNonNeighbor(Verts[i]);
 		Verts[i]->RemoveIfNonNeighbor(VOld);
 	}
 
-	for( i=0; i<3; i++ ) 
+	for( i=0; i<3; i++ )
 	{
 		check( Verts[i]->Faces.FindItemIndex(this) != INDEX_NONE ); 
 		for( INT j=0; j<3; j++ ) if( i!=j ) 
@@ -786,6 +787,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 	guard(UEditorEngine::meshLODProcess);
 
 	FMemMark Mark(GMem);
+	INT i, m, p, t, w, f;
 
 	GWarn->Logf( NAME_Log, TEXT("Mesh LOD processing: %s"), Mesh->GetName() );
 
@@ -808,7 +810,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 	// if No UV data required, erase it here..
 	if( LODInfo->NoUVData )
 	{
-		for ( INT t=0; t< Mesh->Tris.Num(); t++)
+		for ( t=0; t< Mesh->Tris.Num(); t++)
 		{
 			Mesh->Tris(t).Tex[0].U = 0;
 			Mesh->Tris(t).Tex[0].V = 0;
@@ -821,14 +823,14 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 
 	// Duplicate TModel vertices for sampling. Use frame # SampleFrame.
 	INT FrameOffset = Mesh->FrameVerts * LODInfo->SampleFrame;
-	for( INT t=0; t< Mesh->FrameVerts; t++ )
+	for( t=0; t< Mesh->FrameVerts; t++ )
 	{
 		new TVertex( Mesh->Verts(t + FrameOffset).Vector(), t, 0 );
 	}   
 
 
 	// Go backwards so we can immediately delete any special-coordinate faces.
-	for(INT p=Mesh->Tris.Num()-1; p>=0; p-- )
+	for( p=Mesh->Tris.Num()-1; p>=0; p-- )
 	{
 		// Always exclude 'special coordinates': meaning N triangles with the invisible
 		// flag set, and record their vertices.
@@ -870,7 +872,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 		
 
 		// Test for unique materials.
-		for( INT m=0; m<Mesh->Materials.Num(); m++ )
+		for( m=0; m<Mesh->Materials.Num(); m++ )
 		{
 			if(  ( Mesh->Materials(m).PolyFlags == Mesh->Tris(p).PolyFlags )
 			   &&( Mesh->Materials(m).TextureIndex == Mesh->Tris(p).TextureIndex) )
@@ -958,7 +960,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 	// if they're not used by any other triangles.
 	if( SpecialCoordVerts.Num() )
 	{
-		for( INT p=TModel.GVerts.Num()-1; p>=0; p-- )
+		for( p=TModel.GVerts.Num()-1; p>=0; p-- )
 		{
 			if( TModel.GVerts(p)->Flag == 0)  
 				TModel.GVerts.Remove(p);
@@ -1036,7 +1038,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 	}
 
 	// Precompute all the collapse costs.
-	for( INT i=0; i<TModel.GVerts.Num(); i++ ) 
+	for( i=0; i<TModel.GVerts.Num(); i++ ) 
 	{
 		ComputeEdgeCostAtVertex( TModel.GVerts(i) );
 	}
@@ -1095,7 +1097,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 	}
 
 	// Move all our extra wedge copies over to the full GWedges list.
-	for( INT w=0; w<TModel.GAuxWedges.Num(); w++ )
+	for( w=0; w<TModel.GAuxWedges.Num(); w++ )
 	{
 		TModel.GWedges.AddItem(TModel.GAuxWedges(w));
 	}
@@ -1222,7 +1224,7 @@ void UEditorEngine::meshLODProcess( ULodMesh* Mesh,	ULODProcessInfo* LODInfo)
 	//
 	// Remap wedges inside the Mesh's Tri's.
 	//
-	for( INT f=(Mesh->Faces.Num()-1); f>=0; f--)
+	for( f=(Mesh->Faces.Num()-1); f>=0; f--)
 	{
 		// Indicates a triangle that didn't get processed because of 2-3 identical verts.
 		if( TModel.FaceLevel(f) == 0xFFFF )
@@ -1416,6 +1418,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 	guard(UEditorEngine::modelLODProcess);
 
 	FMemMark Mark(GMem);
+	INT b, f, i, s, t, w;
 
 	// Todo: * do we need the memmark/pop stuff ?
 	//       * check whether exporter gives us proper wedges and vertices/indices faces etc.
@@ -1473,7 +1476,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 	// Erase UV data if not required (entirely envmapped things)
 	if( LODInfo->NoUVData )
 	{
-		for ( INT t=0; t< RawData->Wedges.Num(); t++)
+		for ( t=0; t< RawData->Wedges.Num(); t++)
 		{
 			RawData->Wedges(t).U = 0;
 			RawData->Wedges(t).V = 0;
@@ -1497,7 +1500,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 	// Initialize TModel vertices for sampling. Uses reference skin pose only.
 	// Fills the TModel.GVerts array automatically. Full FVectors.
 	//
-	for( INT t=0; t< RawData->Points.Num(); t++ )
+	for( t=0; t< RawData->Points.Num(); t++ )
 	{
 		new TVertex( RawData->Points(t), t, 0 );
 	}
@@ -1640,7 +1643,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 	}
 
 	// Precompute all the collapse costs.
-	for( INT i=0; i<TModel.GVerts.Num(); i++ ) 
+	for( i=0; i<TModel.GVerts.Num(); i++ ) 
 	{
 		ComputeEdgeCostAtVertex( TModel.GVerts(i) );
 	}
@@ -1695,7 +1698,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 
 
 	// Move all our extra wedge copies over to the full GWedges list.
-	for( INT w=0; w<TModel.GAuxWedges.Num(); w++ )
+	for( w=0; w<TModel.GAuxWedges.Num(); w++ )
 	{
 		TModel.GWedges.AddItem(TModel.GAuxWedges(w));
 	}
@@ -1819,7 +1822,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 
 		
 	// Remap wedges inside the Mesh's Tri's.
-	for( INT f=(Mesh->Faces.Num()-1); f>=0; f--)
+	for( f=(Mesh->Faces.Num()-1); f>=0; f--)
 	{
 		// Indicates a triangle that didn't get processed because of 2-3 identical verts.
 		if( TModel.FaceLevel(f) == 0xFFFF )
@@ -1975,7 +1978,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 	Mesh->RefSkeleton.Add( RawData->RefBonesBinary.Num() );
 
 	// Digest bones to the serializable format.
-    for( INT b=0; b<RawData->RefBonesBinary.Num(); b++ )
+    for( b=0; b<RawData->RefBonesBinary.Num(); b++ )
 	{
 		FMeshBone& Bone = Mesh->RefSkeleton(b);
 		// Bone = Mesh->RefSkeleton(b);
@@ -2051,7 +2054,7 @@ void UEditorEngine::modelLODProcess( USkeletalMesh* Mesh, ULODProcessInfo* LODIn
 	TArray <FCoords> SpaceBases( Mesh->RefSkeleton.Num() );
 	
 	// Trickle down all transformations.
-	for( INT s=0; s<SpaceBases.Num(); s++ )
+	for( s=0; s<SpaceBases.Num(); s++ )
 	{
 		SpaceBases(s) = FCoords( Mesh->RefSkeleton(s).BonePos.Place );
 		INT Parent = Mesh->RefSkeleton(s).ParentIndex;

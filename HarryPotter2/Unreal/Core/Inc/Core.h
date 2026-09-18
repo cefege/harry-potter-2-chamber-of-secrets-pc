@@ -318,6 +318,43 @@ public:
 	virtual void NotifyExec( void* Src, const TCHAR* Cmd ) {}
 };
 
+// Optional observer for resolved interpreted UnrealScript calls. Core owns
+// only the nullable seam; launch/runtime instrumentation supplies the
+// observer and must clear it before teardown.
+class CORE_API FScriptDispatchObserver
+{
+public:
+	virtual void OnCallEnter( class UObject* Object, class UFunction* Function, struct FFrame& Stack ) {}
+	virtual void OnCallExit( class UObject* Object, class UFunction* Function, struct FFrame& Stack, void* Result ) {}
+	virtual ~FScriptDispatchObserver() {}
+};
+
+// Optional actor lifecycle observer. Core owns only this nullable seam;
+// engine boundaries report completed lifecycle transitions without changing
+// actor scheduling, and launch instrumentation installs an opt-in observer.
+class CORE_API FActorLifecycleObserver
+{
+public:
+	virtual void OnActorSpawned( class AActor* Actor ) {}
+	virtual void OnActorLifecycleEvent( class AActor* Actor, const TCHAR* Event ) {}
+	virtual void OnActorProcessState( class AActor* Actor, FLOAT DeltaSeconds ) {}
+	virtual void OnActorDestroying( class AActor* Actor ) {}
+	virtual void OnActorAllActors( class AActor* Requestor, class UClass* BaseClass, const FName& Tag, class AActor* Yielded, INT Slot, UBOOL Exhausted ) {}
+	virtual ~FActorLifecycleObserver() {}
+};
+// Optional movement callback observer. Engine movement invokes this only at
+// the real Bump/Touch/UnTouch dispatch boundaries; it does not alter movement,
+// collision, notification ordering, or callback delivery.
+class CORE_API FActorMovementObserver
+{
+public:
+	virtual void OnActorBump( class AActor* Recipient, class AActor* Other ) {}
+	virtual void OnActorTouch( class AActor* Recipient, class AActor* Other ) {}
+	virtual void OnActorUnTouch( class AActor* Recipient, class AActor* Other ) {}
+	virtual ~FActorMovementObserver() {}
+};
+
+
 // Interface for returning a context string.
 class FContextSupplier
 {
@@ -500,6 +537,9 @@ CORE_API extern TCHAR					GCdPath[];
 CORE_API extern	FLOAT					GSecondsPerCycle;
 CORE_API extern	FTime					GTempTime;
 CORE_API extern void					(*GTempFunc)(void*);
+CORE_API extern FScriptDispatchObserver*	GScriptDispatchObserver;
+CORE_API extern FActorLifecycleObserver*	GActorLifecycleObserver;
+CORE_API extern FActorMovementObserver*	GActorMovementObserver;
 CORE_API extern SQWORD					GTicks;
 CORE_API extern INT                     GScriptCycles;
 CORE_API extern DWORD					GPageSize;

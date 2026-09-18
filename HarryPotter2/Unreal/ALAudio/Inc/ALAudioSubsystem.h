@@ -150,6 +150,14 @@ struct ALAmbient
 	INT			Id;
 };
 
+// Immutable audio-source state exposed for fidelity telemetry. The subsystem
+// retains ownership of all source and sound objects.
+struct FALAudioFidelitySource
+{
+	FString	Id;
+	UBOOL	Paused;
+};
+
 //
 // The Generic implementation of UAudioSubsystem.
 //
@@ -238,6 +246,7 @@ class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 	void UnpauseSounds( void );
 	void NoteDestroy( AActor* Actor );
 	UViewport* GetViewport();
+	void GetFidelityActiveSources( TArray<FALAudioFidelitySource>& Out ) const;
 
 	// Internal functions.
 	void SetVolumes();

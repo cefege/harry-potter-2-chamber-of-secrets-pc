@@ -5,17 +5,23 @@ reports, bootstrap rejections, and crash records. When adding a code,
 add it here in the same commit. Codes are `<domain>.<specific>`; a
 missing code is represented as JSON `null`.
 
-## data.*
+## app.data_identity_*
 
 | Code | Meaning | Emitted by |
 |---|---|---|
-| data.manifest_missing | overlay-manifest.json absent on a manifest-bearing root | HP2Paths bootstrap |
-| data.checksums_missing | overlay-manifest.json present without overlay-checksums.txt | HP2Paths bootstrap |
-| data.manifest_invalid | manifest unparseable/schema violation | HP2Paths bootstrap |
-| data.path_set_mismatch | manifest and checksums disagree on the file set | HP2Paths bootstrap |
-| data.size_mismatch | size disagreement between indexes or file | HP2Paths bootstrap |
-| data.hash_mismatch | sha256 disagreement or corrupted bytes | HP2Paths bootstrap |
-| data.profile_unknown | manifest declares an unknown profile | HP2Paths bootstrap |
+| app.data_identity_pair | exactly one identity artifact is present | hp2rs startup |
+| app.data_identity_manifest | manifest is unreadable, unparseable, or has an invalid required field | hp2rs startup |
+| app.data_identity_checksums | checksums index is unreadable or not canonical LF sorted TSV | hp2rs startup |
+| app.data_identity_profile | manifest declares an unsupported profile | hp2rs startup |
+| app.data_identity_schema | profile and schema_version disagree | hp2rs startup |
+| app.data_identity_entries | manifest and checksums have different identity entries | hp2rs startup |
+| app.data_identity_path | identity path traverses, duplicates, is missing, or resolves through a non-regular entry | hp2rs startup |
+| app.data_identity_size | index or payload size is invalid or differs | hp2rs startup |
+| app.data_identity_hash | SHA-256 is malformed or disagrees with a payload | hp2rs startup |
+
+## data.*
+
+| Code | Meaning | Emitted by |
 | data.prototype_missing | prototype tree absent for a data-prototype test | Localization/UCC wrappers |
 | data.archive_missing | prototype-data.7z not present | verify_prototype_archive |
 | data.bag_incomplete | bag manifests do not cover the payload | verify_prototype_archive |

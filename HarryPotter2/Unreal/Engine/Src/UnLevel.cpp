@@ -10,6 +10,17 @@
 #include "UnNet.h"
 
 #include <cstdint>
+#include <stdlib.h>
+
+#if defined(__GNUC__)
+extern void HP2ActorSlotDumpBeginRawLevelActorTable( ULevelBase* Level ) __attribute__((weak));
+extern void HP2ActorSlotDumpRawLevelActor( ULevelBase* Level, INT Slot, AActor* Actor, INT ReferenceOffsetBefore, INT ReferenceOffsetAfter, INT CompactPackageIndex, UBOOL CompactPackageIndexCaptured, UBOOL CompactPackageIndexSupported ) __attribute__((weak));
+extern void HP2ActorSlotDumpEndRawLevelActorTable( ULevelBase* Level ) __attribute__((weak));
+#else
+extern void HP2ActorSlotDumpBeginRawLevelActorTable( ULevelBase* Level );
+extern void HP2ActorSlotDumpRawLevelActor( ULevelBase* Level, INT Slot, AActor* Actor, INT ReferenceOffsetBefore, INT ReferenceOffsetAfter, INT CompactPackageIndex, UBOOL CompactPackageIndexCaptured, UBOOL CompactPackageIndexSupported );
+extern void HP2ActorSlotDumpEndRawLevelActorTable( ULevelBase* Level );
+#endif
 
 /*-----------------------------------------------------------------------------
 	ULevelBase implementation.
@@ -41,8 +52,31 @@ void ULevelBase::Serialize( FArchive& Ar )
 			Actors.Empty( DbNum );
 			Actors.Add( DbNum );
 		}
+		const char* ActorSlotDumpPath = getenv( "HP2_ACTOR_SLOT_DUMP" );
+		const UBOOL CaptureRawActorSlots = Ar.IsLoading()
+			&& ActorSlotDumpPath && ActorSlotDumpPath[0]
+			&& HP2ActorSlotDumpBeginRawLevelActorTable && HP2ActorSlotDumpRawLevelActor && HP2ActorSlotDumpEndRawLevelActorTable;
+		if( CaptureRawActorSlots )
+			HP2ActorSlotDumpBeginRawLevelActorTable( this );
 		for( INT i=0; i<Actors.Num(); i++ )
+		{
+			FActorSlotCompactIndexTrace CompactIndexTrace;
+			CompactIndexTrace.Index       = INDEX_NONE;
+			CompactIndexTrace.OffsetAfter = INDEX_NONE;
+			CompactIndexTrace.Captured    = 0;
+			const INT ReferenceOffsetBefore = CaptureRawActorSlots ? Ar.Tell() : INDEX_NONE;
+			const UBOOL CaptureCompactPackageIndex = CaptureRawActorSlots && Ar.SupportsActorSlotCompactIndexTrace();
+			FActorSlotCompactIndexTrace* PreviousCompactIndexTrace = NULL;
+			if( CaptureCompactPackageIndex )
+				PreviousCompactIndexTrace = Ar.SetActorSlotCompactIndexTrace( &CompactIndexTrace );
 			Ar << Actors(i);
+			if( CaptureCompactPackageIndex )
+				Ar.SetActorSlotCompactIndexTrace( PreviousCompactIndexTrace );
+			if( CaptureRawActorSlots )
+				HP2ActorSlotDumpRawLevelActor( this, i, Actors(i), ReferenceOffsetBefore, CompactIndexTrace.OffsetAfter, CompactIndexTrace.Index, CompactIndexTrace.Captured, CaptureCompactPackageIndex );
+		}
+		if( CaptureRawActorSlots )
+			HP2ActorSlotDumpEndRawLevelActorTable( this );
 	}
 	
 	// Level variables.
@@ -943,6 +977,7 @@ void ULevel::SetActorCollision( UBOOL bCollision )
 	// Init collision if first time through.
 	if( bCollision && !Hash )
 	{
+		FAppRandTracePhaseScope StartupPhaseTrace( "collision_hash" );
 		// Init hash.
 		guard(StartCollision);
 		Hash = GNewCollisionHash();

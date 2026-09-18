@@ -32,6 +32,38 @@
 
 // Core includes.
 #include "CorePrivate.h"
+#include "HP2RngSeed.h"
+
+// Context runs before appInit and class registration. Retain only libc state
+// here: the trace subsystem becomes available later in appPlatformInit.
+static int GUnixDiagnosticRngSeeded = 0;
+static unsigned GUnixDiagnosticRngRequestedSeed = 0;
+static unsigned GUnixDiagnosticRngEffectiveSeed = 0;
+
+static void appUnixBootstrapDiagnosticRngSeed()
+{
+	const char* Text = getenv( "HP2_RNG_SEED" );
+	unsigned RequestedSeed = 0;
+	unsigned EffectiveSeed = 0;
+	switch( HP2PrepareDiagnosticRngSeed(Text,&RequestedSeed,&EffectiveSeed) )
+	{
+		case HP2DiagnosticRngSeedAbsent:
+			return;
+		case HP2DiagnosticRngSeedInvalid:
+			fprintf(
+				stderr,
+				"Invalid HP2_RNG_SEED: expected an unsigned decimal value from 0 to %u\n",
+				(unsigned)RAND_MAX
+			);
+			exit(1);
+		case HP2DiagnosticRngSeedAccepted:
+			GUnixDiagnosticRngRequestedSeed = RequestedSeed;
+			GUnixDiagnosticRngEffectiveSeed = EffectiveSeed;
+			GUnixDiagnosticRngSeeded = 1;
+			srand( EffectiveSeed );
+			return;
+	}
+}
 
 static void* appUnixSystemMalloc( size_t Size )
 {
@@ -1133,8 +1165,16 @@ void appPlatformInit()
 	for( INT i=0; i<GSys->Suppress.Num(); i++ )
 		GSys->Suppress(i).SetFlags( RF_Suppress );
 
-	// Randomize.
-	srand( (unsigned)time( NULL ) );
+	// An explicit seed was applied by __Context::StaticInit before appInit and
+	// class registration. Publish it only after the trace subsystem can start;
+	// ordinary launches keep the original wall-clock initialization.
+	if( GUnixDiagnosticRngSeeded )
+		appSetRandTraceDiagnosticSeed(
+			GUnixDiagnosticRngRequestedSeed,
+			GUnixDiagnosticRngEffectiveSeed
+		);
+	else
+		srand( (unsigned)time( NULL ) );
 
 	// Exit code handling
 	ExitCodeMap = new TMap<pid_t,int>;
@@ -1261,6 +1301,8 @@ struct sigaction __Context::Act_SIGTERM;
 
 void __Context::StaticInit()
 {
+	appUnixBootstrapDiagnosticRngSeed();
+
 	// Only try once.
 	INT DefaultFlag = SA_RESETHAND;
 

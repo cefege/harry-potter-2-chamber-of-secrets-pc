@@ -14,6 +14,13 @@
 // Archive class. Used for loading, saving, and garbage collecting
 // in a byte order neutral way.
 //
+struct FActorSlotCompactIndexTrace
+{
+	INT		Index;
+	INT		OffsetAfter;
+	UBOOL	Captured;
+};
+
 class CORE_API FArchive
 {
 public:
@@ -43,6 +50,14 @@ public:
 	virtual FArchive& operator<<( class UObject*& Res )
 	{
 		return *this;
+	}
+	virtual UBOOL SupportsActorSlotCompactIndexTrace()
+	{
+		return 0;
+	}
+	virtual FActorSlotCompactIndexTrace* SetActorSlotCompactIndexTrace( FActorSlotCompactIndexTrace* Trace )
+	{
+		return NULL;
 	}
 	virtual INT MapName( FName* Name )
 	{

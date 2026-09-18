@@ -317,6 +317,8 @@ inline FColor operator+ (FColor A, FColor B)
 int AParticleFX::EmitParticles(FLOAT Tick)
 {
 	guard(AParticleFX::EmitParticles);
+	FAppRandTraceNativeObjectScope RandTrace( this, "Render/ParticleFX", INDEX_NONE, 1 );
+
 	Clock(GStat.ParticleEmitTime);
 
 	EmitDelay += Tick;
@@ -699,6 +701,8 @@ UBOOL AParticleFX::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 bool AParticleFX::Update(FLOAT Step)
 {
 	guard(AParticleFX::Update);
+	FAppRandTraceNativeObjectScope RandTrace( this, "Render/ParticleFX", INDEX_NONE, 0 );
+
 
 	if (!ParticleList)
 	{

@@ -157,6 +157,7 @@ UBOOL UClassExporterH::ExportText( UObject* Object, const TCHAR* Type, FOutputDe
 		// Top of file.
 		if( !DidTop )
 		{
+			INT i;
 			DidTop = 1;
 			Ar.Logf
 			(
@@ -184,7 +185,7 @@ UBOOL UClassExporterH::ExportText( UObject* Object, const TCHAR* Type, FOutputDe
 				API,
 				API
 			);
-			for( INT i=0; i<FName::GetMaxNames(); i++ )
+			for( i=0; i<FName::GetMaxNames(); i++ )
 				if( FName::GetEntry(i) && (FName::GetEntry(i)->Flags & RF_TagExp) )
 					Ar.Logf( TEXT("AUTOGENERATE_NAME(%s)\r\n"), *FName((EName)(i)) );
 			for( i=0; i<FName::GetMaxNames(); i++ )
@@ -199,8 +200,9 @@ UBOOL UClassExporterH::ExportText( UObject* Object, const TCHAR* Type, FOutputDe
 			// Export enum.
 			if( ItE->GetOuter()==Class )
 			{
+				INT i;
 				Ar.Logf( TEXT("%senum %s\r\n{\r\n"), appSpc(TextIndent), ItE->GetName() );
-				for( INT i=0; i<ItE->Names.Num(); i++ )
+				for( i=0; i<ItE->Names.Num(); i++ )
 					Ar.Logf( TEXT("%s    %-24s=%i,\r\n"), appSpc(TextIndent), *ItE->Names(i), i );
 				if( appStrchr(*ItE->Names(0),'_') )
 				{

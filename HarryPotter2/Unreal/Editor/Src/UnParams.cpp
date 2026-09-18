@@ -22,6 +22,7 @@
 //
 // Get a floating-point vector (X=, Y=, Z=), return number of components parsed (0-3).
 //
+#if !HP2_FIXTURE_COMPILER
 UBOOL EDITOR_API GetFVECTOR( const TCHAR* Stream, FVector& Value )
 {
 	guard(GetFVECTOR);
@@ -158,6 +159,7 @@ UBOOL EDITOR_API GetFROTATOR
 
 	unguard;
 }
+#endif
 
 //
 // Gets a "BEGIN" string.  Returns 1 if gotten, 0 if not.

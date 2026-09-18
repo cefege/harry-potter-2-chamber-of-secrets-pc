@@ -230,6 +230,7 @@ class ULinkerLoad : public ULinker, public FArchive
 	INT						ExportHash[256];
 	TArray<FLazyLoader*>	LazyLoaders;
 	FArchive*				Loader;
+	FActorSlotCompactIndexTrace*	ActorSlotCompactIndexTrace;
 	FArchive*				AltLoader;
 
 	ULinkerLoad( UObject* InParent, const TCHAR* InFilename, DWORD InLoadFlags );
@@ -261,6 +262,16 @@ private:
 	FArchive* StreamAr();
 	void Seek( INT InPos );
 	INT Tell();
+	UBOOL SupportsActorSlotCompactIndexTrace()
+	{
+		return 1;
+	}
+	FActorSlotCompactIndexTrace* SetActorSlotCompactIndexTrace( FActorSlotCompactIndexTrace* Trace )
+	{
+		FActorSlotCompactIndexTrace* Previous = ActorSlotCompactIndexTrace;
+		ActorSlotCompactIndexTrace = Trace;
+		return Previous;
+	}
 	INT TotalSize();
 	void Serialize( void* V, INT Length );
 	FArchive& operator<<( UObject*& Object )
@@ -268,9 +279,14 @@ private:
 		guard(ULinkerLoad<<UObject);
 		INT Index;
 		*Loader << AR_INDEX(Index);
+		if( ActorSlotCompactIndexTrace && !ActorSlotCompactIndexTrace->Captured )
+		{
+			ActorSlotCompactIndexTrace->Index       = Index;
+			ActorSlotCompactIndexTrace->OffsetAfter = Loader->Tell();
+			ActorSlotCompactIndexTrace->Captured    = 1;
+		}
 		UObject* Temporary = IndexToObject( Index );
 		appMemcpy(&Object, &Temporary, appCheckedIntSize(sizeof(Temporary)));
-
 		return *this;
 		unguardf(( TEXT("(%s %i))"), GetFullName(), Tell() ));
 	}

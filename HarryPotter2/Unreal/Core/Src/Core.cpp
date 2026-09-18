@@ -143,6 +143,9 @@ CORE_API TCHAR                  GCdPath[256]=TEXT("");			/* Cd path, if any */
 CORE_API FLOAT					GSecondsPerCycle=1.0f;			/* Seconds per CPU cycle for this PC */
 CORE_API FTime					GTempTime=0.0f;					/* Used during development for timing */
 CORE_API void					(*GTempFunc)(void*)=NULL;		/* Used during development for debug hooks */
+CORE_API FScriptDispatchObserver*	GScriptDispatchObserver=NULL;	/* Optional interpreted-call observer */
+CORE_API FActorLifecycleObserver*	GActorLifecycleObserver=NULL;	/* Optional actor lifecycle observer */
+CORE_API FActorMovementObserver*	GActorMovementObserver=NULL;	/* Optional movement callback observer */
 CORE_API SQWORD					GTicks=1;						/* Number of non-persistent ticks thus far in this level, for profiling */
 CORE_API INT					GScriptCycles;					/* Times script execution CPU cycles per tick */
 CORE_API DWORD					GPageSize=4096;					/* Operating system page size */

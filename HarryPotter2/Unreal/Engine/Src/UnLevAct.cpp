@@ -9,6 +9,14 @@ Revision history:
 #include "EnginePrivate.h"
 #include "UnNet.h"
 
+#include "HP2TraceHooks.h"
+
+extern void HP2ActorTransitionPreBeginBefore( AActor* Actor );
+extern void HP2ActorTransitionPreBeginAfter( AActor* Actor );
+extern void HP2ActorTransitionSpawnRequest( UClass* Class, FName Name, AActor* Owner );
+extern void HP2ActorTransitionSpawnResult( AActor* Owner, AActor* Child );
+extern void HP2ActorTransitionSpawnPublished( AActor* Owner, AActor* Child );
+
 /*-----------------------------------------------------------------------------
 	Level actor management.
 -----------------------------------------------------------------------------*/
@@ -30,26 +38,41 @@ AActor* ULevel::SpawnActor
 )
 {
 	guard(ULevel::SpawnActor);
+	HP2ActorTransitionSpawnRequest( Class, InName, Owner );
+	HP2CreatureGeneratorTraceSpawnRequest( Class, Owner );
+
 
 	// Make sure this class is spawnable.
 	if( !Class )
 	{
 		debugf( NAME_Warning, TEXT("SpawnActor failed because no class was specified") );
+		HP2ActorTransitionSpawnResult( Owner, NULL );
+		HP2CreatureGeneratorTraceSpawnResult( Owner, NULL );
+
 		return NULL;
 	}
 	if( Class->ClassFlags & CLASS_Abstract )
 	{
 		debugf( NAME_Warning, TEXT("SpawnActor failed because class %s is abstract"), Class->GetName() );
+		HP2ActorTransitionSpawnResult( Owner, NULL );
+		HP2CreatureGeneratorTraceSpawnResult( Owner, NULL );
+
 		return NULL;
 	}
 	else if( !Class->IsChildOf(AActor::StaticClass()) )
 	{
 		debugf( NAME_Warning, TEXT("SpawnActor failed because %s is not an actor class"), Class->GetName() );
+		HP2ActorTransitionSpawnResult( Owner, NULL );
+		HP2CreatureGeneratorTraceSpawnResult( Owner, NULL );
+
 		return NULL;
 	}
 	else if( !GIsEditor && (Class->GetDefaultActor()->bStatic || Class->GetDefaultActor()->bNoDelete) )
 	{
 		debugf( NAME_Warning, TEXT("SpawnActor failed because class %s has bStatic or bNoDelete"), Class->GetName() );
+		HP2ActorTransitionSpawnResult( Owner, NULL );
+		HP2CreatureGeneratorTraceSpawnResult( Owner, NULL );
+
 		return NULL;		
 	}
 
@@ -63,6 +86,9 @@ AActor* ULevel::SpawnActor
 		if( !FindSpot( Template->GetCylinderExtent(), Location, 0, 1 ) )
 		{
 			debugf( NAME_Warning, TEXT("SpawnActor failed because %s will not fit in location"), Class->GetName() );
+			HP2ActorTransitionSpawnResult( Owner, NULL );
+			HP2CreatureGeneratorTraceSpawnResult( Owner, NULL );
+
 			return NULL;
 		}
 
@@ -70,6 +96,9 @@ AActor* ULevel::SpawnActor
 	INT iActor = Actors.Add();
     AActor* Actor = Actors(iActor) = (AActor*)StaticConstructObject( Class, GetOuter(), InName, 0, Template );
 	Actor->SetFlags( RF_Transactional );
+	HP2ActorTransitionSpawnResult( Owner, Actor );
+	HP2CreatureGeneratorTraceSpawnResult( Owner, Actor );
+
 
 	// Set base actor properties.
 	Actor->Tag		= Class->GetFName();
@@ -109,16 +138,31 @@ AActor* ULevel::SpawnActor
 	Actor->InitExecution();
 	Actor->Spawned();
 	Actor->eventSpawned();
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorLifecycleEvent( Actor, TEXT("Spawned") );
+	HP2ActorTransitionPreBeginBefore( Actor );
 	Actor->eventPreBeginPlay();
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorLifecycleEvent( Actor, TEXT("PreBeginPlay") );
+	HP2ActorTransitionPreBeginAfter( Actor );
 	Actor->eventBeginPlay();
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorLifecycleEvent( Actor, TEXT("BeginPlay") );
 	if( Actor->bDeleteMe )
+	{
+		HP2ActorTransitionSpawnPublished( Owner, NULL );
+		HP2CreatureGeneratorTraceSpawnPublished( Owner, NULL );
+
 		return NULL;
+	}
 
 	// Set the actor's zone.
 	SetActorZone( Actor, iActor==0, 1 );
 
 	// Send PostBeginPlay.
 	Actor->eventPostBeginPlay();
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorLifecycleEvent( Actor, TEXT("PostBeginPlay") );
 
 	// Check for encroachment.
 	if( !bNoCollisionFail )
@@ -129,6 +173,9 @@ AActor* ULevel::SpawnActor
 		if( CheckEncroachment( Actor, Actor->Location, Actor->Rotation, 0 ) )
 		{
 			DestroyActor( Actor );
+			HP2ActorTransitionSpawnPublished( Owner, NULL );
+			HP2CreatureGeneratorTraceSpawnPublished( Owner, NULL );
+
 			return NULL;
 		}
 		if( Actor->bCollideActors && Hash )
@@ -137,6 +184,8 @@ AActor* ULevel::SpawnActor
 
 	// Init scripting.
 	Actor->eventSetInitialState();
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorLifecycleEvent( Actor, TEXT("SetInitialState") );
 
 	// Find Base
 	if( !Actor->Base && Actor->bCollideWorld
@@ -160,6 +209,10 @@ AActor* ULevel::SpawnActor
 		}
 		InsideNotification = 0;
 	}
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorSpawned( Actor );
+	HP2ActorTransitionSpawnPublished( Owner, Actor );
+	HP2CreatureGeneratorTraceSpawnPublished( Owner, Actor );
 
 	return Actor;
 	unguardf(( TEXT("(%s)"), Class->GetName() ));
@@ -337,6 +390,8 @@ UBOOL ULevel::DestroyActor( AActor* ThisActor, UBOOL bNetForce )
 	check(Actors(iActor)==ThisActor);
 	Actors(iActor) = NULL;
 	ThisActor->bDeleteMe = 1;
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorDestroying( ThisActor );
 	unguard;
 
 	// Do object destroy.
@@ -1060,7 +1115,11 @@ UBOOL ULevel::MoveActor
 		if( Hit.Actor && Hit.Actor!=GetLevelInfo() && !Actor->IsBasedOn(Hit.Actor) )
 		{
 			// Notify both actors of the bump.
+			if( GActorMovementObserver )
+				GActorMovementObserver->OnActorBump( Hit.Actor, Actor );
 			Hit.Actor->eventBump(Actor);
+			if( GActorMovementObserver )
+				GActorMovementObserver->OnActorBump( Actor, Hit.Actor );
 			Actor->eventBump(Hit.Actor);
 		}
 

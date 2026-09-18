@@ -599,10 +599,17 @@ class EDITOR_API UTransBuffer : public UTransactor
 IMPLEMENT_CLASS(UTransBuffer);
 IMPLEMENT_CLASS(UTransactor);
 
+#if defined(HP2_FIXTURE_COMPILER) && HP2_FIXTURE_COMPILER
+extern void RegisterFixtureCompilerEditorClasses();
+#endif
+
 void RegisterEditorTransactionClasses()
 {
 	UTransactor::StaticClass();
 	UTransBuffer::StaticClass();
+#if defined(HP2_FIXTURE_COMPILER) && HP2_FIXTURE_COMPILER
+	RegisterFixtureCompilerEditorClasses();
+#endif
 }
 
 /*-----------------------------------------------------------------------------

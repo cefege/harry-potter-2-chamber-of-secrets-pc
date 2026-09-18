@@ -1,11 +1,11 @@
 /*=============================================================================
 	ReplayRoundTripTests.cpp: Byte-level FReplay::FInputEvent stream framing
-	contracts (wave 2 verification foundation).
+	contracts and production-oracle fixture emission.
 
 	Owns the wire format of the replay input stream ONLY:
-	  - operator<<(FArchive&, FReplay::FInputEvent&) packing via the verbatim
-	    in-test oracle of Engine/Src/UnReplay.cpp (linking hp2_engine would
-	    require a full appInit bootstrap for its static initializers)
+	  - the production operator<<(FArchive&, FReplay::FInputEvent&) compiled
+	    from Engine/Src/UnReplayWire.cpp
+	  - deterministic full FReplay fixture emission under HP2_ARTIFACT_DIR
 	  - round-trip structural + byte-for-byte equality
 	  - truncation and trailing-garbage behavior as it exists today
 	UInput dispatch semantics are owned by another test suite and deliberately
@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <CommonCrypto/CommonDigest.h>
 #include <string>
 #include <vector>
 
@@ -51,27 +52,13 @@ namespace
 		if (!Condition)
 			Fail("%s", Message);
 	}
-	// Verbatim copy of the engine wire operator (Engine/Src/UnReplay.cpp,
-	// FArchive& operator<<(FArchive&, FReplay::FInputEvent&)). Linked-in
-	// engine objects drag static initializers (FURL globals) that require a
-	// full appInit bootstrap, so this contract pins the exact body here
-	// instead; TestStaticLayout's static_asserts lock the type layout that
-	// makes the copy faithful. If UnReplay.cpp changes, this must change
-	// with it — the diff is the review gate.
+	// This small adapter keeps the probes readable while ensuring every event
+	// passes through the production operator linked from UnReplayWire.cpp.
 	FArchive& EngineOperatorOracle( FArchive& Ar, FReplay::FInputEvent& IE )
 	{
-		BYTE iKey = IE.iKey, State = IE.State;
-		if( IE.Delta != 0.0f )
-			State |= 0x80;
-		Ar << iKey << State;
-		IE.iKey = EInputKey(iKey);  IE.State = EInputAction(State & 0x7F);
-
-		if( State & 0x80 )
-			Ar << IE.Delta;
-		else if( Ar.IsLoading() )
-			IE.Delta = 0.f;
-		return Ar;
+		return Ar << IE;
 	}
+
 
 	// In-memory persistent archive. Saving grows a byte sink; loading reads a
 	// fixed buffer and degrades gracefully on overrun (error flag + zero-fill +
@@ -532,6 +519,86 @@ namespace
 				"out-of-range state/delta pair did not load verbatim under the frozen rule");
 		}
 	}
+
+	std::string Sha256Hex(const std::vector<BYTE>& Bytes)
+	{
+		unsigned char Digest[CC_SHA256_DIGEST_LENGTH];
+		CC_SHA256(Bytes.empty() ? NULL : &Bytes[0],
+			static_cast<CC_LONG>(Bytes.size()), Digest);
+		static const char Hex[] = "0123456789abcdef";
+		std::string Result(CC_SHA256_DIGEST_LENGTH * 2, '0');
+		for (INT Index = 0; Index < CC_SHA256_DIGEST_LENGTH; ++Index)
+		{
+			Result[Index * 2] = Hex[Digest[Index] >> 4];
+			Result[Index * 2 + 1] = Hex[Digest[Index] & 15];
+		}
+		return Result;
+	}
+
+	void EmitProductionFixture(const char* ArtifactDir)
+	{
+		GTestName = "replay_fixture_emit";
+		const char* FixtureName = "cxx-freplay-v1.rep";
+		const char* MetadataName = "cxx-freplay-v1.json";
+		const FString URL(TEXT("HP2Entry?Game=HP2Game.HP2Game"));
+		static const FReplay::FInputEvent Records[] =
+		{
+			{IK_Play,   IST_Axis,    1.0f / 30.0f}, // frame zero delimiter
+			{IK_Space,  IST_Press,   0.f},
+			{IK_Space,  IST_Release, 0.f},
+			{IK_MouseX, IST_Axis,    -3.25f},
+			{IK_Play,   IST_Axis,    0.05f},        // frame one delimiter
+			{IK_JoyX,   IST_Axis,    0.375f},
+			{IK_LeftMouse, IST_Press, 0.f},
+			{IK_LeftMouse, IST_Release, 0.f},
+			{IK_Play,   IST_Axis,    0.125f},       // frame two delimiter
+		};
+
+		std::vector<BYTE> Wire;
+		FStreamArchive Ar = FStreamArchive::Saver(Wire);
+		FString URLCopy = URL;
+		Ar << URLCopy;
+		for (INT Index = 0; Index < static_cast<INT>(ARRAY_COUNT(Records)); ++Index)
+		{
+			FReplay::FInputEvent Record = Records[Index];
+			Ar << Record;
+		}
+		Require(!Ar.IsError(), "production fixture serialization raised an archive error");
+
+		const std::string FixturePath = std::string(ArtifactDir) + "/" + FixtureName;
+		std::ofstream Fixture(FixturePath.c_str(), std::ios::binary | std::ios::trunc);
+		if (!Fixture)
+		{
+			Fail("cannot create replay fixture %s", FixturePath.c_str());
+			return;
+		}
+		if (!Wire.empty())
+			Fixture.write(reinterpret_cast<const char*>(&Wire[0]), static_cast<std::streamsize>(Wire.size()));
+		Fixture.close();
+		if (!Fixture)
+		{
+			Fail("cannot finish replay fixture %s", FixturePath.c_str());
+			return;
+		}
+
+		const std::string Hash = Sha256Hex(Wire);
+		const std::string MetadataPath = std::string(ArtifactDir) + "/" + MetadataName;
+		std::ofstream Metadata(MetadataPath.c_str(), std::ios::trunc);
+		if (!Metadata)
+		{
+			Fail("cannot create replay fixture metadata %s", MetadataPath.c_str());
+			return;
+		}
+		Metadata << "{\"schema_version\":1,\"kind\":\"legacy_cxx_freplay\","
+			<< "\"fixture\":\"" << FixtureName << "\","
+			<< "\"sha256\":\"" << Hash << "\",\"size\":" << Wire.size() << ","
+			<< "\"url\":\"HP2Entry?Game=HP2Game.HP2Game\","
+			<< "\"frame_count\":3,\"event_count\":6,"
+			<< "\"provenance\":{\"writer\":\"FArchive operators\","
+			<< "\"input_event_operator\":\"Engine/Src/UnReplayWire.cpp\","
+			<< "\"url_operator\":\"Core FString operator<<\"}}\n";
+		Require(static_cast<bool>(Metadata), "cannot finish replay fixture metadata");
+	}
 }
 
 int main(int ArgC, char** ArgV)
@@ -549,6 +616,8 @@ int main(int ArgC, char** ArgV)
 	TestLiteralPacking();
 	TestSequenceRoundTrip();
 	TestCorruptionBehavior();
+	if (const char* ArtifactDir = std::getenv("HP2_ARTIFACT_DIR"))
+		EmitProductionFixture(ArtifactDir);
 
 	std::string Command;
 	for (int Index = 0; Index < ArgC; ++Index)
@@ -570,7 +639,7 @@ int main(int ArgC, char** ArgV)
 				<< "\"invariant\":\"replay_input_event_stream_framing\""
 				<< (GFailures ? ",\"reason_code\":\"replay.framing_mismatch\"" : "")
 				<< ",\"data\":{\"profile\":\"data-none\"}"
-				<< ",\"artifacts\":[]"
+				<< ",\"artifacts\":[\"cxx-freplay-v1.rep\",\"cxx-freplay-v1.json\"]"
 				<< ",\"command\":\"" << Command << "\""
 				<< ",\"exit_reason\":\"" << (GFailures ? "assertion_failed" : "assertions_passed") << "\""
 				<< "}\n";

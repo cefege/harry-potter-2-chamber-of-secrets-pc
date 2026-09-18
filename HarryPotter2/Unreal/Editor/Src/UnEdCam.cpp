@@ -389,13 +389,14 @@ UBOOL ScaleIsWithinBounds( FVector* V, FLOAT Min, FLOAT Max )
 void UEditorEngine::NoteActorMovement( ULevel* Level )
 {
 	guard(NoteActorMovement);
+	INT i;
 	UBOOL Found=0;
 	if( !GUndo && !(GEditor->ClickFlags & CF_MOVE_ACTOR) )
 	{
 		GEditor->ClickFlags |= CF_MOVE_ACTOR;
 		GEditor->Trans->Begin( TEXT("Actor movement") );
 		GSnapping=0;
-		for( INT i=0; i<Level->Actors.Num(); i++ )
+		for( i=0; i<Level->Actors.Num(); i++ )
 		{
 			AActor* Actor = Level->Actors(i);
 			if( Actor && Actor->bSelected )
@@ -619,7 +620,7 @@ UBOOL bVtxDragging = 0;
 -----------------------------------------------------------------------------*/
 
 struct FPolyVertex {
-	FPolyVertex::FPolyVertex( INT i, INT j ) : PolyIndex(i), VertexIndex(j) {};
+	FPolyVertex( INT i, INT j ) : PolyIndex(i), VertexIndex(j) {};
 	INT PolyIndex;
 	INT VertexIndex;
 };
@@ -633,13 +634,14 @@ static TArray<FPolyVertex> VertexEditList;
 void GrabVertex( ULevel* Level )
 {
 	guard(GrabVertex);
+	INT i;
 
 	if( VertexEditActor!=NULL )
 		return;
 
 	// Find the selected brush -- abort if none is found.
 	AActor* Actor=NULL;
-	for( INT i=0; i<Level->Actors.Num(); i++ )
+	for( i=0; i<Level->Actors.Num(); i++ )
 	{
 		Actor = Level->Actors(i);
 		if( Actor && Actor->bSelected && Actor->IsBrush() )
@@ -1099,6 +1101,7 @@ void UEditorEngine::MouseDelta
 					&& Buttons & MOUSE_Ctrl
 					&& Buttons & MOUSE_Left )
 			{
+				int x;
 				// Scale the delta movement based on the viewport zoom.
 				CalcFreeMoveRot( Viewport, MouseX, MouseY, Buttons, Delta, DeltaRot );
 				Constraints.Snap(Delta,FVector(0,0,0));
@@ -1109,7 +1112,7 @@ void UEditorEngine::MouseDelta
 
 				// Move the shared vertices on other faces.
 				//debugf(TEXT("GFaceHits : %d"), GFaceHits.Num() );
-				for( int x = 0 ; x < GFaceHits.Num() ; x++ )
+				for( x = 0 ; x < GFaceHits.Num() ; x++ )
 				{
 					//debugf(TEXT("Vertices : %d"), GFaceHits(x).Poly->NumVertices );
 					for( int srcvertex = 0 ; srcvertex < GFaceHits(x).Poly->NumVertices ; srcvertex++ )
@@ -2830,6 +2833,7 @@ void UEditorEngine::NoteSelectionChange( ULevel* Level )
 void UEditorEngine::SelectNone( ULevel *Level, UBOOL Notify )
 {
 	guard(UEditorEngine::SelectNone);
+	INT i;
 
 	if( Mode == EM_VertexEdit )
 		VertexHitList.Empty();
@@ -2838,7 +2842,7 @@ void UEditorEngine::SelectNone( ULevel *Level, UBOOL Notify )
 
 
 	// Unselect all actors.
-	for( INT i=0; i<Level->Actors.Num(); i++ )
+	for( i=0; i<Level->Actors.Num(); i++ )
 	{
 		AActor* Actor = Level->Actors(i);
 		if( Actor && Actor->bSelected )

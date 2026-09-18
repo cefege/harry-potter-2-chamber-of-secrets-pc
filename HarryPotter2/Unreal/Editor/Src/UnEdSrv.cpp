@@ -225,7 +225,8 @@ void ClipBrushAgainstPlane( FPlane InPlane, ABrush* InBrush, UBOOL InSel )
 			GiantBrush->bSelected = InSel;
 
 			// Clean the brush up.
-			for( int poly = 0 ; poly < GiantBrush->Brush->Polys->Element.Num() ; poly++ )
+			int poly;
+			for( poly = 0 ; poly < GiantBrush->Brush->Polys->Element.Num() ; poly++ )
 			{
 				FPoly* Poly = &(GiantBrush->Brush->Polys->Element(poly));
 				Poly->iLink = poly;
@@ -614,7 +615,8 @@ UBOOL UEditorEngine::SafeExec( const TCHAR* InStr, FOutputDevice& Ar )
 					TrackTime = 1.0f;
 				
 				// Detect which anim sequence to change, or make a new one.
-				for( INT i=0; i<Anim->MovesInfo.Num(); i++ )
+				INT i;
+				for( i=0; i<Anim->MovesInfo.Num(); i++ )
 					if( Anim->MovesInfo(i).Name==MoveInfo.Name )
 						break;
 
@@ -1012,7 +1014,8 @@ UBOOL UEditorEngine::SafeExec( const TCHAR* InStr, FOutputDevice& Ar )
 			{
 				Parse( Str, TEXT("RATE="), Seq.Rate );
 				Parse( Str, TEXT("GROUP="), Seq.Group );
-				for( INT i=0; i<Mesh->AnimSeqs.Num(); i++ )
+				INT i;
+				for( i=0; i<Mesh->AnimSeqs.Num(); i++ )
 					if( Mesh->AnimSeqs(i).Name==Seq.Name )
 						break;
 				if( i<Mesh->AnimSeqs.Num() )
@@ -1173,7 +1176,11 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 		else
 		{
 			// Get the current viewport.
+#if HP2_FIXTURE_COMPILER
+			UViewport* CurrentViewport = NULL;
+#else
 			UViewport* CurrentViewport = (UViewport*)GCurrentViewport;
+#endif
 
 			if( !CurrentViewport )
 			{
@@ -1184,7 +1191,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 			// Gather a list of all the ClipMarkers in the level.
 			TArray<AActor*> ClipMarkers;
 
-			for( int actor = 0 ; actor < Level->Actors.Num() ; actor++ )
+			INT actor;
+			for( actor = 0 ; actor < Level->Actors.Num() ; actor++ )
 			{
 				AActor* pActor = Level->Actors(actor);
 				if( pActor && pActor->IsA(AClipMarker::StaticClass()) )
@@ -1922,7 +1930,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 				if( Level->Model->Polys ) Level->Model->Polys->SetFlags( RF_Transactional );
 				for( TObjectIterator<AActor> It; It; ++It )
 				{
-					for( INT i=0; i<Level->Actors.Num(); i++ )
+					INT i;
+					for( i=0; i<Level->Actors.Num(); i++ )
 						if( *It==Level->Actors(i) )
 							break;
 					if( i==Level->Actors.Num() )
@@ -2398,7 +2407,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 		}
 		else if( ParseCommand(&Str,TEXT("SETASDEFAULT")) )
 		{
-			for( INT i=0; i<Level->Actors.Num(); i++ )
+			INT i;
+			for( i=0; i<Level->Actors.Num(); i++ )
 			{
 				AActor* Actor = Level->Actors(i);
 				if (Actor && Actor->bSelected)
@@ -2747,7 +2757,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 
 			// get the current viewport
 			UViewport* CurrentViewport = NULL;
-			for( int i = 0; i < Client->Viewports.Num(); i++ )
+			INT i;
+			for( i = 0; i < Client->Viewports.Num(); i++ )
 			{
 				if( Client->Viewports(i)->Current )
 					CurrentViewport = Client->Viewports(i);
@@ -2951,7 +2962,7 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 
 			FString TexturePrefix;
 			UBOOL bNoPrefix = !Parse( Str, TEXT("PREFIX="), TexturePrefix );
-			debugf( NAME_Log, TEXT("Prefix=%s"), bNoPrefix ? TEXT("<None>") : TexturePrefix );
+			debugf( NAME_Log, TEXT("Prefix=%s"), bNoPrefix ? TEXT("<None>") : *TexturePrefix );
 
 			UBOOL bOverride = 0;
 			Parse( Str,TEXT("OVERRIDE="), bOverride );
@@ -3453,7 +3464,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 
 			// find the first selected actor as the target for the viewport cameras
 			AActor* Target = NULL;
-			for( int i = 0; i < Level->Actors.Num(); i++ )
+			INT i;
+			for( i = 0; i < Level->Actors.Num(); i++ )
 			{
 				if( Level->Actors(i) && Level->Actors(i)->bSelected )
 				{
@@ -3501,7 +3513,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 		else if( ParseCommand(&Str,TEXT("ALIGN") ) )
 		{
 			APlayerPawn* PlayerPawn = NULL;
-			for( int i = 0; i < Client->Viewports.Num(); i++ )
+			INT i;
+			for( i = 0; i < Client->Viewports.Num(); i++ )
 			{
 				if( Client->Viewports(i)->Current )
 				{
@@ -3530,7 +3543,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 			if( Parse( Str, TEXT("NAME="), TempStr,NAME_SIZE ) )
 			{
 				AActor* Actor = NULL;
-				for( INT i=0; i<Level->Actors.Num(); i++ )
+				INT i;
+				for( i=0; i<Level->Actors.Num(); i++ )
 				{
 					Actor = Level->Actors(i);
 					if( Actor && appStrcmp( Actor->GetName(), TempStr ) == 0 )
@@ -3579,7 +3593,7 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 				if( Cast<ATeleporter>(Level->Actors(i)) )
 				{
 					ATeleporter& Teleporter = *(ATeleporter *)Level->Actors(i);
-					Results->Logf( TEXT("   %s\r\n"), Teleporter.URL );
+					Results->Logf( TEXT("   %s\r\n"), *Teleporter.URL );
 					if( appStrchr(*Teleporter.URL,'//') )
 						External++;
 					else
@@ -3603,7 +3617,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 			}
 
 			// Find playerstart.
-			for( INT i=0; i<Level->Actors.Num(); i++ )
+			INT i;
+			for( i=0; i<Level->Actors.Num(); i++ )
 				if( Cast<APlayerStart>(Level->Actors(i)) )
 					break;
 			if( i == Level->Actors.Num() )
@@ -3916,7 +3931,8 @@ UBOOL UEditorEngine::Exec( const TCHAR* Stream, FOutputDevice& Ar )
 	else if( ParseCommand(&Str,TEXT("LSTAT")) )
 	{
 		TArray<FVector> Sizes;
-		for( INT i=0; i<Level->Model->LightMap.Num(); i++ )
+		INT i;
+		for( i=0; i<Level->Model->LightMap.Num(); i++ )
 			new(Sizes)FVector(Level->Model->LightMap(i).UClamp,Level->Model->LightMap(i).VClamp,0);
 		/*for( i=0; i<Sizes.Num(); i++ )
 			for( INT j=0; j<i; j++ )

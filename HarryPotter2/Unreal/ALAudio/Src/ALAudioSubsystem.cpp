@@ -40,6 +40,22 @@ UALAudioSubsystem::UALAudioSubsystem()
 	unguard;
 }
 
+void UALAudioSubsystem::GetFidelityActiveSources( TArray<FALAudioFidelitySource>& Out ) const
+{
+	Out.Empty();
+	for( INT Index = 0; Index < Sources.Num(); ++Index )
+	{
+		const ALSource& Source = Sources(Index);
+		if( Source.Sound && Source.Started )
+		{
+			FALAudioFidelitySource Snapshot;
+			Snapshot.Id = Source.Sound->GetPathName();
+			Snapshot.Paused = Source.Paused;
+			Out.AddItem( Snapshot );
+		}
+	}
+}
+
 //
 // UALAudioSubsystem::StaticConstructor
 //

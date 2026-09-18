@@ -12,9 +12,9 @@ Checks performed:
   CFBundleIdentifier, CFBundleExecutable).
 - Main executable is a thin little-endian arm64 Mach-O (magic feedfacf /
   bytes cf fa ed fe).
+- The bundle has no embedded framework payload; rodio uses system audio.
 - Codesign state via ``codesign -dv``/``codesign --verify --strict``; an
   unsigned bundle is a recorded warning, a clearly invalid signature fails.
-
 The check itself needs no game data: it always reports data profile "none".
 """
 
@@ -124,6 +124,25 @@ def verify_executable(bundle: Path, executable_name: str) -> dict[str, Any]:
     return {"executable": executable.name, "magic": magic.hex()}
 
 
+def verify_no_framework_payload(bundle: Path) -> dict[str, Any]:
+    """Reject embedded framework files in the Rust bundle."""
+    frameworks = bundle / "Contents" / "Frameworks"
+    if not frameworks.exists():
+        return {"payload": []}
+    if not frameworks.is_dir() or frameworks.is_symlink():
+        raise CheckFailure(
+            "bundle.framework_payload_unexpected",
+            f"Rust bundle must not embed frameworks: {frameworks}",
+        )
+    payload = sorted(path.name for path in frameworks.iterdir())
+    if payload:
+        raise CheckFailure(
+            "bundle.framework_payload_unexpected",
+            "Rust bundle must not embed framework payload: " + ", ".join(payload),
+        )
+    return {"payload": []}
+
+
 def inspect_codesign(bundle: Path) -> dict[str, Any]:
     """Record codesign state. Unsigned -> warning; clearly invalid -> failure."""
     display = subprocess.run(
@@ -199,6 +218,7 @@ def check_bundle(repo_root: Path, bundle: Path | None = None) -> dict[str, Any]:
             "CFBundleExecutable": executable_name,
         }
         checks["executable"] = verify_executable(target, executable_name)
+        checks["frameworks"] = verify_no_framework_payload(target)
         codesign_state = inspect_codesign(target)
         checks["codesign"] = codesign_state
         if "warning" in codesign_state:

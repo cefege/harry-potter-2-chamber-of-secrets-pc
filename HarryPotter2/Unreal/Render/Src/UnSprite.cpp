@@ -9,6 +9,24 @@
 #include "Render.h"
 #include "UnMesh.h"
 
+// SDLLaunch owns this opt-in side artifact. The renderer supplies the exact
+// per-pass admission facts immediately before the existing Update(NULL) seam.
+extern INT HP2ShadowAdmissionTraceBeginPass();
+extern void HP2ShadowAdmissionTraceRecord(
+	INT Pass,
+	AActor* Owner,
+	ADecal* Shadow,
+	const char* CandidateStatus,
+	UBOOL UpdateEligible,
+	AActor* ViewportActor,
+	AActor* ViewTarget,
+	UBOOL BehindView,
+	AActor* RecursionParentActor,
+	UBOOL Perspective,
+	UBOOL WorldDynamics );
+
+extern void HP2ActorTransitionFirstRendererCandidate( AActor* Owner, AActor* Candidate );
+
 
 /*------------------------------------------------------------------------------
 	Dynamics setup and rendering.
@@ -26,6 +44,14 @@ void URender::SetupDynamics( FSceneNode* Frame, AActor* Exclude )
 		return;
 	STAT(clock(GStat.FilterTime));
 	UBOOL HighDetailActors=Frame->Viewport->RenDev->HighDetailActors;
+	const INT ShadowTracePass = HP2ShadowAdmissionTraceBeginPass();
+	APlayerPawn* const ViewportActor = Frame->Viewport->Actor;
+	AActor* const ViewTarget = ViewportActor ? ViewportActor->ViewTarget : NULL;
+	AActor* const RecursionParentActor = Frame->Parent && Frame->Parent->Viewport
+		? Frame->Parent->Viewport->Actor
+		: NULL;
+	const UBOOL BehindView = ViewportActor && ViewportActor->bBehindView;
+	const UBOOL Perspective = !Frame->Viewport->IsOrtho();
 
 	// Traverse entire actor list.
 	for( INT iActor=0; iActor<Frame->Level->Actors.Num(); iActor++ )
@@ -119,15 +145,27 @@ void URender::SetupDynamics( FSceneNode* Frame, AActor* Exclude )
 						STAT(GStat.TotalEARIActors++);
 					}
 
-					// Compute shadow for all renderable actors.
-					if ( Actor && Actor->Shadow && !Frame->Viewport->IsOrtho() )
+					// Preserve the renderer's decision tree and expose its exact
+					// branch at the Update(NULL) seam for opt-in parity traces.
+					HP2ActorTransitionFirstRendererCandidate( Actor, Actor->Shadow );
+					if( !Actor->Shadow )
+					{
+						HP2ShadowAdmissionTraceRecord( ShadowTracePass, Actor, NULL, "missing_shadow", 0,
+							ViewportActor, ViewTarget, BehindView, RecursionParentActor, Perspective, 1 );
+					}
+					else if( !Perspective )
+					{
+						HP2ShadowAdmissionTraceRecord( ShadowTracePass, Actor, Actor->Shadow, "rejected_ortho", 0,
+							ViewportActor, ViewTarget, BehindView, RecursionParentActor, Perspective, 1 );
+					}
+					else
 					{
 						Clock(GStat.DecalUpdateTime);
 
 						// Determine shadow volume bounding box.
 						const float ShadowHeight = 8192;
 						FBox Bounds
-						( 
+						(
 							Actor->Location - FVector( Actor->CollisionRadius, Actor->CollisionRadius, ShadowHeight ),
 							Actor->Location + FVector( Actor->CollisionRadius, Actor->CollisionRadius, 0 )
 						);
@@ -139,11 +177,25 @@ void URender::SetupDynamics( FSceneNode* Frame, AActor* Exclude )
 									 + Abs(Frame->Coords.ZAxis.Y * Size.Y)
 									 + Abs(Frame->Coords.ZAxis.Z * Size.Z);
 						FLOAT Z = ((Center - Frame->Coords.Origin) | Frame->Coords.ZAxis);// - Extent;
-						if( Z >= -Extent )
+						if( Z < -Extent )
+						{
+							HP2ShadowAdmissionTraceRecord( ShadowTracePass, Actor, Actor->Shadow, "rejected_behind_projection", 0,
+								ViewportActor, ViewTarget, BehindView, RecursionParentActor, Perspective, 1 );
+						}
+						else
 						{
 							FScreenBounds ScreenBounds;
 							if( BoundVisible( Frame, Bounds.GetCoords(), NULL, ScreenBounds ) )
+							{
+								HP2ShadowAdmissionTraceRecord( ShadowTracePass, Actor, Actor->Shadow, "admitted", 1,
+									ViewportActor, ViewTarget, BehindView, RecursionParentActor, Perspective, 1 );
 								Actor->Shadow->eventUpdate(NULL);
+							}
+							else
+							{
+								HP2ShadowAdmissionTraceRecord( ShadowTracePass, Actor, Actor->Shadow, "rejected_bounds", 0,
+									ViewportActor, ViewTarget, BehindView, RecursionParentActor, Perspective, 1 );
+							}
 						}
 					}
 				}

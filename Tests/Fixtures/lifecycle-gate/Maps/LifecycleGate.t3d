@@ -1,0 +1,20 @@
+Begin Map
+Begin Actor Class=LevelInfo Name=LevelInfo0
+    Tag=LevelInfo
+    Name=LevelInfo0
+End Actor
+Begin Actor Class=LifecycleGateController Name=LifecycleGateController0
+    Tag=LifecycleGateController
+    Name=LifecycleGateController0
+End Actor
+Begin Actor Class=LifecycleGateProbe Name=ProbeA
+    StableKey=ProbeA
+    Tag=LifecycleGateProbe
+    Name=ProbeA
+End Actor
+Begin Actor Class=LifecycleGateProbe Name=ProbeB
+    StableKey=ProbeB
+    Tag=LifecycleGateProbe
+    Name=ProbeB
+End Actor
+End Map

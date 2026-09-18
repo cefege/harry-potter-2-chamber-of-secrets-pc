@@ -376,7 +376,7 @@ void SoundTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 	if( ParseCommand(&Item,TEXT("FILETYPE")) )
 	{
 		TCHAR Name[NAME_SIZE];
-		UPackage* Package=ANY_PACKAGE;
+		UPackage* Package = reinterpret_cast<UPackage*>(ANY_PACKAGE);
 		ParseObject<UPackage>( Item, TEXT("PACKAGE="), Package, NULL );
 		if( Parse( Item, TEXT("NAME="), Name, ARRAY_COUNT(Name) ) )
 		{
@@ -390,12 +390,12 @@ void SoundTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 		TCHAR Name[NAME_SIZE];
 		if( Parse( Item, TEXT("PATHNAME="), Name, ARRAY_COUNT(Name) ) )
 		{
-			UPackage* AnyPackage=ANY_PACKAGE;
+			UObject* AnyPackage = ANY_PACKAGE;
 			USound* pSound = FindObjectChecked<USound>( AnyPackage, Name );
 
 			if (pSound && appStrfind (Item, TEXT("MEMBER=")))
 			{
-				unsigned short log[64];
+				TCHAR log[64];
 				if (appStrfind (Item, TEXT("Streaming")))
 				{
 					appSprintf( log, TEXT("%d"), pSound->CoreFlags & SF_Streaming );
@@ -409,7 +409,7 @@ void SoundTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 		TCHAR Name[NAME_SIZE];
 		if( Parse( Item, TEXT("PATHNAME="), Name, ARRAY_COUNT(Name) ) )
 		{
-			UPackage* AnyPackage=ANY_PACKAGE;
+			UObject* AnyPackage = ANY_PACKAGE;
 			USound* pSound = FindObjectChecked<USound>( AnyPackage, Name );
 
 			if (pSound && appStrfind (Item, TEXT("MEMBER=")))
@@ -449,7 +449,7 @@ void MusicTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 	if( ParseCommand(&Item,TEXT("FILETYPE")) )
 	{
 		TCHAR Name[NAME_SIZE];
-		UPackage* Package=ANY_PACKAGE;
+		UPackage* Package = reinterpret_cast<UPackage*>(ANY_PACKAGE);
 		ParseObject<UPackage>( Item, TEXT("PACKAGE="), Package, NULL );
 		if( Parse( Item, TEXT("NAME="), Name, ARRAY_COUNT(Name) ) )
 		{
@@ -471,7 +471,7 @@ void SoundTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 	if( ParseCommand(&Item,TEXT("FILETYPE")) )
 	{
 		TCHAR Name[NAME_SIZE];
-		UPackage* Package=ANY_PACKAGE;
+		UPackage* Package = reinterpret_cast<UPackage*>(ANY_PACKAGE);
 		ParseObject<UPackage>( Item, TEXT("PACKAGE="), Package, NULL );
 		if( Parse( Item, TEXT("NAME="), Name, ARRAY_COUNT(Name) ) )
 		{
@@ -485,7 +485,7 @@ void SoundTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 		TCHAR Name[NAME_SIZE];
 		if( Parse( Item, TEXT("PATHNAME="), Name, ARRAY_COUNT(Name) ) )
 		{
-			UPackage* AnyPackage=ANY_PACKAGE;
+			UObject* AnyPackage = ANY_PACKAGE;
 			USound* pSound = FindObjectChecked<USound>( AnyPackage, Name );
 
 			if (pSound && appStrfind (Item, TEXT("MEMBER=")))
@@ -527,7 +527,7 @@ void SoundTopicHandler::Get( ULevel* Level, const TCHAR* Item, FOutputDevice& Ar
 		TCHAR Name[NAME_SIZE];
 		if( Parse( Item, TEXT("PATHNAME="), Name, ARRAY_COUNT(Name) ) )
 		{
-			UPackage* AnyPackage=ANY_PACKAGE;
+			UObject* AnyPackage = ANY_PACKAGE;
 			USound* pSound = FindObjectChecked<USound>( AnyPackage, Name );
 
 			if (pSound && appStrfind (Item, TEXT("MEMBER=")))
@@ -976,7 +976,7 @@ EDITOR_API const TCHAR* ImportProperties
 				Str++;
 			if( *Str )
 			{
-				appStrncpy( Token, Start, Str-Start+1 );
+				appStrncpy( Token, Start, static_cast<INT>(Str-Start+1) );
 				INT Index=0;
 				if( *Str=='(' )
 				{

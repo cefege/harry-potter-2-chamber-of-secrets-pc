@@ -787,6 +787,8 @@ def _resources_record(observed: dict[str, object]) -> dict[str, object]:
     return record
 
 
+
+
 def _resource_leak(resources: dict[str, object]) -> str | None:
     created = resources.get("gl_textures_created")
     destroyed = resources.get("gl_textures_destroyed")
@@ -903,6 +905,8 @@ def _failure_reason_code(record: dict[str, object]) -> str:
             return code
     if record.get("verification_error"):
         return "package.structure"
+    if record.get("script_deferral_violation"):
+        return "script.deferred"
     if record.get("resource_leak"):
         return "resources.leak"
     violations = record.get("budget_violations") or []
@@ -924,6 +928,11 @@ def _apply_budget_contract(
     """Attach additive schema-v1 alignment fields; format_version stays 2."""
     record["resources"] = _resources_record(record.get("resources") or {})
     record["resource_leak"] = _resource_leak(record["resources"])
+    record["script_deferral_violation"] = (
+        game_test._script_deferral_violation(record["resources"])
+        if record.get("verification_mode") == "game_launch"
+        else None
+    )
     duration = record.get("duration_seconds")
     record["budgets"] = _budgets_record(
         duration if isinstance(duration, (int, float)) else None,
@@ -936,6 +945,7 @@ def _apply_budget_contract(
     record["passed"] = bool(
         process_passed
         and not record["resource_leak"]
+        and not record["script_deferral_violation"]
         and not record["budget_violations"]
     )
     record["status"] = "pass" if record["passed"] else "fail"

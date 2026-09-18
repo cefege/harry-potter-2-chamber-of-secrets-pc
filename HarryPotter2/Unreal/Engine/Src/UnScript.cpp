@@ -14,6 +14,11 @@ Revision history:
 #include "UnNet.h"
 #include "UnSkeletalMesh.h"
 #include "UnLinker.h"
+#include "HP2TraceHooks.h"
+
+
+extern void HP2ActorTransitionPostInitExecution( AActor* Actor );
+
 
 /*-----------------------------------------------------------------------------
 	Tim's physics modes.
@@ -333,6 +338,7 @@ void AActor::InitExecution()
 	check(GetLevel()->Actors(0)!=NULL);
 	check(GetLevel()->Actors(0)==Level);
 	check(Level!=NULL);
+	HP2ActorTransitionPostInitExecution( this );
 
 	unguardobj;
 }
@@ -1565,6 +1571,9 @@ void AActor::execSpawn( FFrame& Stack, RESULT_DECL )
 	P_GET_VECTOR_OPTX(SpawnLocation,Location);
 	P_GET_ROTATOR_OPTX(SpawnRotation,Rotation);
 	P_FINISH;
+	HP2CreatureGeneratorTraceClassResolution( SpawnClass, this );
+	if( SpawnClass )
+		HP2CreatureGeneratorTraceSpawnRequest( SpawnClass, this );
 
 	// Spawn and return actor.
 	AActor* Spawned = SpawnClass ? GetLevel()->SpawnActor
@@ -1576,6 +1585,11 @@ void AActor::execSpawn( FFrame& Stack, RESULT_DECL )
 		SpawnLocation,
 		SpawnRotation
 	) : NULL;
+	if( SpawnClass )
+	{
+		HP2CreatureGeneratorTraceSpawnResult( this, Spawned );
+		HP2CreatureGeneratorTraceSpawnPublished( this, Spawned );
+	}
 	if( Spawned )
 		Spawned->Tag = SpawnName;
 	*(AActor**)Result = Spawned;
@@ -1667,6 +1681,7 @@ void AActor::execAllActors( FFrame& Stack, RESULT_DECL )
 
 	BaseClass = BaseClass ? BaseClass : AActor::StaticClass();
 	INT iActor=0;
+	INT iYielded=0;
 
 	PRE_ITERATOR;
 		// Fetch next actor in the iteration.
@@ -1679,9 +1694,14 @@ void AActor::execAllActors( FFrame& Stack, RESULT_DECL )
 		}
 		if( *OutActor == NULL )
 		{
+			if( GActorLifecycleObserver )
+				GActorLifecycleObserver->OnActorAllActors( this, BaseClass, TagName, NULL, INDEX_NONE, 1 );
 			Stack.Code = &Stack.Node->Script(wEndOffset + 1);
 			break;
 		}
+		appRecordPatrolPointIterator( this, BaseClass, TagName, iActor-1, *OutActor, iYielded++ );
+		if( GActorLifecycleObserver )
+			GActorLifecycleObserver->OnActorAllActors( this, BaseClass, TagName, *OutActor, iActor-1, 0 );
 	POST_ITERATOR;
 
 	unguardexecSlow;
@@ -1974,14 +1994,30 @@ void AZoneInfo::execZoneActors( FFrame& Stack, RESULT_DECL )
 //
 void AActor::ProcessState( FLOAT DeltaSeconds )
 {
-	if
-	(	GetStateFrame()
-	&&	GetStateFrame()->Code
-	&&	(Role>=ROLE_Authority || (GetStateFrame()->StateNode->StateFlags & STATE_Simulated))
-	&&	!IsPendingKill() )
+	FStateFrame* StateFrame = GetStateFrame();
+	UObject* StateIdentity = StateFrame ? StateFrame->StateNode : NULL;
+	const char* ProcessStateOutcome = "skip_no_frame";
+	UBOOL ProcessStateDispatched = 0;
+	if( StateFrame )
+	{
+		if( !StateFrame->Code )
+			ProcessStateOutcome = "skip_no_code";
+		else if( !(Role>=ROLE_Authority || (StateFrame->StateNode->StateFlags & STATE_Simulated)) )
+			ProcessStateOutcome = "skip_role";
+		else if( IsPendingKill() )
+			ProcessStateOutcome = "skip_pending_kill";
+		else
+		{
+			ProcessStateOutcome = "dispatched";
+			ProcessStateDispatched = 1;
+		}
+	}
+	HP2GlobalTickTraceProcessState( this, StateIdentity, ProcessStateOutcome );
+	if( ProcessStateDispatched )
 	{
 		UState* OldStateNode = GetStateFrame()->StateNode;
 		guard(AActor::ProcessState);
+		FAppRandTraceOuterScope RandTrace( this, GetStateFrame()->StateNode );
 		if( ++GScriptEntryTag==1 )
 			clock(GScriptCycles);
 
@@ -2009,6 +2045,8 @@ void AActor::ProcessState( FLOAT DeltaSeconds )
 			unclock(GScriptCycles);
 		unguardf(( TEXT("Object %s, Old State %s, New State %s"), GetFullName(), OldStateNode->GetFullName(), GetStateFrame()->StateNode->GetFullName() ));
 	}
+	if( GActorLifecycleObserver )
+		GActorLifecycleObserver->OnActorProcessState( this, DeltaSeconds );
 }
 
 //
@@ -2878,8 +2916,10 @@ void AActor::execIsSoftwareRendering( FFrame& Stack, RESULT_DECL )
 	FString	str;
 	GConfig->GetString(TEXT("Engine.Engine"), TEXT("GameRenderDevice"), str);
 
-	*(bool*)Result = appStricmp(*str, TEXT("SoftDrv.SoftwareRenderDevice")) == 0;
-	
+	const UBOOL IsSoftwareRendering = appStricmp(*str, TEXT("SoftDrv.SoftwareRenderDevice")) == 0;
+	*(bool*)Result = IsSoftwareRendering;
+	appRecordRandTracePreBeginSoftwareRendering( this, IsSoftwareRendering );
+	HP2CreatureGeneratorTraceSoftwareRendering( this, IsSoftwareRendering );
 	unguardSlow;
 }
 

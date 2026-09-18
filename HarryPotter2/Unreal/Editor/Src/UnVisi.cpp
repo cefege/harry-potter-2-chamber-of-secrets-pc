@@ -596,7 +596,7 @@ void FEditorVisibility::MakePortals( INT iNode )
 	FPoly Poly = BuildInfiniteFPoly( Model, iNode );
 
 	// Filter the portal through this subtree.
-	MakePortalsClip( iNode, Poly, 0, AddPortal );
+	MakePortalsClip( iNode, Poly, 0, &FEditorVisibility::AddPortal );
 
 	// Make portals for front.
 	if( Model->Nodes(iNode).iFront != INDEX_NONE )
@@ -631,7 +631,7 @@ void FEditorVisibility::MakePortals( INT iNode )
 				Model->Nodes(iOriginalNode).iLeaf[0],
 				Model->Nodes(iOriginalNode).iBack,
 				Poly,
-				BlockPortal,
+				&FEditorVisibility::BlockPortal,
 				INDEX_NONE
 			);
 		}
@@ -724,7 +724,8 @@ INT FEditorVisibility::ActorVisibility
 
 	// Add this actor to the permeated leaf if it's not already there.
 	int Count = 0;
-	for( FActorLink* Link=LeafLights[iLeaf]; Link; Link=Link->Next )
+	FActorLink* Link;
+	for( Link=LeafLights[iLeaf]; Link; Link=Link->Next )
 		if( Link->Actor == Actor )
 			break;
 	if( !Link )
@@ -957,9 +958,10 @@ void FEditorVisibility::BspVisibility( INT iNode )
 	guard(FEditorVisibility::BspVisibility);
 	FBspNode& Node = Model->Nodes(iNode);
 	INT FragmentCount = 0;
+	FPortal* ClipPortal;
 
 	// Mark this node's portals as partitioners.
-	for( FPortal* ClipPortal = NodePortals[iNode]; ClipPortal; ClipPortal=ClipPortal->NodeNext )
+	for( ClipPortal = NodePortals[iNode]; ClipPortal; ClipPortal=ClipPortal->NodeNext )
 		ClipPortal->IsTesting++;
 
 	// Recurse, so that we can use intersubtree visibility to reject intrasubtree
@@ -1080,6 +1082,7 @@ void FEditorVisibility::FormZonesFromLeaves()
 {
 	guard(FEditorVisibility::FormZonesFromLeaves);
 	FMemMark Mark(GMem);
+	INT i;
 
 	// Go through all portals and merge the adjoining zones.
 	for( FPortal* Portal=FirstPortal; Portal; Portal=Portal->GlobalNext )
@@ -1088,7 +1091,7 @@ void FEditorVisibility::FormZonesFromLeaves()
 		{
 			INT Original = Model->Leaves(Portal->iFrontLeaf).iZone;
 			INT New      = Model->Leaves(Portal->iBackLeaf ).iZone;
-			for( INT i=0; i<Model->Leaves.Num(); i++ )
+			for( i=0; i<Model->Leaves.Num(); i++ )
 			{
 				if( Model->Leaves(i).iZone == Original )
 					Model->Leaves(i).iZone = New;
@@ -1170,7 +1173,7 @@ void FEditorVisibility::FormZonesFromLeaves()
 #else
 	// Renumber the leaves.
 	INT NumZones=0;
-	for( INT i=0; i<Model->Leaves.Num(); i++ )
+	for( i=0; i<Model->Leaves.Num(); i++ )
 	{
 		if( Model->Leaves(i).iZone >= NumZones )
 		{
@@ -1233,7 +1236,7 @@ void FEditorVisibility::AssignAllZones( INT iNode, int Outside )
 				Model->Nodes(iOriginalNode).iLeaf [0],
 				Model->Nodes(iOriginalNode).iChild[0],
 				Poly,
-				TagZonePortalFragment,
+				&FEditorVisibility::TagZonePortalFragment,
 				INDEX_NONE
 			);
 
@@ -1241,7 +1244,8 @@ void FEditorVisibility::AssignAllZones( INT iNode, int Outside )
 			if( Model->Nodes.Num() > OriginalNumNodes )
 			{
 				int CanMerge=1, iZone[2]={0,0};
-				for( int i=OriginalNumNodes; i<Model->Nodes.Num(); i++ )
+				INT i;
+				for( i=OriginalNumNodes; i<Model->Nodes.Num(); i++ )
 					for( int j=0; j<2; j++ )
 						if( Model->Nodes(i).iZone[j] != 0 )
 							iZone[j] = Model->Nodes(i).iZone[j];
@@ -1312,8 +1316,9 @@ QWORD BuildZoneMasks( UModel* Model, INT iNode )
 void FEditorVisibility::BuildConnectivity()
 {
 	guard(FEditorVisibility::BuildConnectivity);
+	INT i;
 
-	for( int i=0; i<64; i++ )
+	for( i=0; i<64; i++ )
 	{
 		// Init to identity.
 		Model->Zones[i].Connectivity = ((QWORD)1)<<i;
@@ -1347,6 +1352,7 @@ void FEditorVisibility::BuildZoneInfo()
 {
 	guard(FEditorVisibility::BuildZoneInfo);
 	int Infos=0, Duplicates=0, Zoneless=0;
+	INT iActor;
 	GWarn->StatusUpdatef( 0, 0, TEXT("Computing zones") );
 
 	for( INT i=0; i<FBspNode::MAX_ZONES; i++ )
@@ -1355,7 +1361,7 @@ void FEditorVisibility::BuildZoneInfo()
 		// for all zones which don't have individual ZoneInfo's.
 		Model->Zones[i].ZoneActor = NULL;
 	}
-	for( INT iActor=0; iActor<Level->Actors.Num(); iActor++ )
+	for( iActor=0; iActor<Level->Actors.Num(); iActor++ )
 	{
 		if( Level->Actors(iActor) )
 			Level->Actors(iActor)->Region = FPointRegion( Level->GetLevelInfo(), INDEX_NONE, 0 );
@@ -1387,7 +1393,8 @@ void FEditorVisibility::BuildZoneInfo()
 					const int NumTraces = 256;
 					const FLOAT MaxDist = 16384;
 					TArray<FVector> Samples;
-					for( int i=0; i<NumTraces; i++ )
+					INT i;
+					for( i=0; i<NumTraces; i++ )
 					{
 						FCheckResult Hit(1.0);
 						Model->LineCheck( Hit, NULL, Actor->Location + MaxDist*VRand(), Actor->Location, FVector(0,0,0), 0 );
@@ -1508,11 +1515,12 @@ void FEditorVisibility::FilterVolumetricLight( AActor* Actor, INT iNode, INT iPa
 void FEditorVisibility::TestVisibility()
 {
 	guard(FEditorVisibility::TestVisibility);
+	INT i;
 
 	GWarn->BeginSlowTask(TEXT("Zoning"),1,0);
 
 	// Init Bsp info.
-	for( int i=0; i<Model->Nodes.Num(); i++ )
+	for( i=0; i<Model->Nodes.Num(); i++ )
 	{
 		for( int j=0; j<2; j++ )
 		{
@@ -1832,7 +1840,8 @@ void UpdateConvolutionWithPolys( UModel *Model, INT iNode, FPoly **PolyList, int
 	{
 		if( PolyList[i]->iBrushPoly != INDEX_NONE )
 		{
-			for( int j=0; j<i; j++ )
+			INT j;
+			for( j=0; j<i; j++ )
 				if( PolyList[j]->iBrushPoly == PolyList[i]->iBrushPoly )
 					break;
 			if( j >= i )

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "fixture": "LifecycleGate",
+  "package": "LifecycleGate",
+  "package_artifact": {
+    "source": "Package/LifecycleGate.u",
+    "stage": "System/LifecycleGate.u",
+    "sha256": "5eef13cba8bb865190ab38fbd3a626eb1afb83377685aad284ffdf22ad8c04c6",
+    "provenance": {
+      "producer": "hp2_fixture_compiler macOS arm64",
+      "source": "Classes/LifecycleGateActor.uc, Classes/LifecycleGateProbe.uc, Classes/LifecycleGateGame.uc"
+    }
+  },
+  "map": "Maps/LifecycleGate.unr",
+  "map_source": "Maps/Entry.unr",
+  "game_class": "LifecycleGate.LifecycleGateGame",
+  "actor": {
+    "class": "LifecycleGateActor",
+    "tag": "LifecycleGate"
+  },
+  "probes": [
+    "LifecycleGateProbe:ProbeA",
+    "LifecycleGateProbe:ProbeB"
+  ],
+  "lifecycle_phases": [
+    "Spawned",
+    "PreBeginPlay",
+    "BeginPlay",
+    "PostBeginPlay",
+    "SetInitialState"
+  ],
+  "fixed_dt": 0.016666667,
+  "emitted_fixed_dt": 0.0166666675,
+  "requested_ticks": 2,
+  "launch_url": "Maps/LifecycleGate.unr?game=LifecycleGate.LifecycleGateGame"
+}

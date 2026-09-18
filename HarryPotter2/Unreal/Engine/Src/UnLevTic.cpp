@@ -10,7 +10,76 @@
 #include "UnNet.h"
 #include "UnMesh.h"
 
+#include "HP2TraceHooks.h"
 #include <stdlib.h>
+
+namespace
+{
+	const char* GHP2GlobalTickTraceRelation = "direct";
+	const char* GHP2GlobalTickTraceRootAdmission = "dynamic";
+
+	class FHP2GlobalTickTraceRelationScope
+	{
+	public:
+		FHP2GlobalTickTraceRelationScope( const char* InRelation )
+			: Previous( GHP2GlobalTickTraceRelation )
+		{
+			GHP2GlobalTickTraceRelation = InRelation;
+		}
+		~FHP2GlobalTickTraceRelationScope()
+		{
+			GHP2GlobalTickTraceRelation = Previous;
+		}
+	private:
+		const char* Previous;
+	};
+
+	class FHP2GlobalTickTraceRootScope
+	{
+	public:
+		FHP2GlobalTickTraceRootScope( const char* InAdmission )
+			: Previous( GHP2GlobalTickTraceRootAdmission )
+		{
+			GHP2GlobalTickTraceRootAdmission = InAdmission;
+		}
+		~FHP2GlobalTickTraceRootScope()
+		{
+			GHP2GlobalTickTraceRootAdmission = Previous;
+		}
+	private:
+		const char* Previous;
+	};
+
+	class FHP2GlobalTickTraceDispatchScope
+	{
+	public:
+		FHP2GlobalTickTraceDispatchScope( AActor* InActor )
+			: Token( ~0ULL ), SkipReason( "skip_no_event" ), EventTickDispatched( 0 )
+		{
+			if( HP2GlobalTickTraceEnabled() )
+				Token = HP2GlobalTickTraceBeginDispatch( InActor, GHP2GlobalTickTraceRelation, GHP2GlobalTickTraceRootAdmission );
+		}
+		~FHP2GlobalTickTraceDispatchScope()
+		{
+			if( Token != ~0ULL )
+				HP2GlobalTickTraceEndDispatch( Token, EventTickDispatched ? "dispatched" : SkipReason );
+		}
+		void EventTick()
+		{
+			EventTickDispatched = 1;
+			if( Token != ~0ULL )
+				HP2GlobalTickTraceEventTick( Token );
+		}
+		void SetSkipReason( const char* InSkipReason )
+		{
+			SkipReason = InSkipReason;
+		}
+	private:
+		unsigned long long Token;
+		const char* SkipReason;
+		UBOOL EventTickDispatched;
+	};
+}
 
 /*-----------------------------------------------------------------------------
 	Helper classes.
@@ -68,20 +137,36 @@ struct FActorPriority
 UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 {
 	guard(AActor::Tick);
+	FHP2GlobalTickTraceDispatchScope GlobalTickTrace( this );
 
 	//First, if TickParent is not null, Tick that actor
 	if( TickParent )
+	{
+		FHP2GlobalTickTraceRelationScope Relation( "tick_parent" );
+		FHP2GlobalTickTraceRootScope RootAdmission( "recursive" );
 		TickParent->Tick( DeltaSeconds, TickType );
+	}
 
 	if( TickParent2 )
+	{
+		FHP2GlobalTickTraceRelationScope Relation( "tick_parent2" );
+		FHP2GlobalTickTraceRootScope RootAdmission( "recursive" );
 		TickParent2->Tick( DeltaSeconds, TickType );
+	}
 	
 	// Now, if Owner is not null, and owner->TickParent!=this, Handle owner-first updating.
 	if( Owner  &&  Owner->TickParent != this  &&  Owner->TickParent2 != this )
+	{
+		FHP2GlobalTickTraceRelationScope Relation( "owner" );
+		FHP2GlobalTickTraceRootScope RootAdmission( "recursive" );
 		Owner->Tick( DeltaSeconds, TickType );
+	}
 
 	if( (INT)bTicked==GetLevel()->Ticked )
+	{
+		GlobalTickTrace.SetSkipReason( "skip_already_ticked" );
 		return 1;
+	}
 
 	// If we are in special pause mode, disable all actors apart form those which 
 	// have the appropriate flag set
@@ -99,7 +184,10 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 		}
 
 		if (!bCanMoveInSpecialPause)
+		{
+			GlobalTickTrace.SetSkipReason( "skip_special_pause" );
 			return 1;
+		}
 		else
 			bInSpecialPause = true;
 	}
@@ -114,7 +202,10 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 	&&	(bForceStasis || (Physics==PHYS_None) || (Physics == PHYS_Rotating))
 	&&	(GetLevel()->TimeSeconds-GetLevel()->Model->Zones[Region.ZoneNumber].LastRenderTime > 5)
 	&&	(Level->NetMode == NM_Standalone) )
+	{
+		GlobalTickTrace.SetSkipReason( "skip_stasis" );
 		return 1;
+	}
 
 	bTicked = GetLevel()->Ticked;
 	APawn* Pawn = NULL;
@@ -300,10 +391,18 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 
 		// Tick the nonplayer.
 		if ( IsProbing(NAME_Tick) )
+		{
+			HP2CreatureGeneratorTraceTickDispatch( this, DeltaSeconds );
+			GlobalTickTrace.EventTick();
 			eventTick(DeltaSeconds);
+		}
+		else
+			GlobalTickTrace.SetSkipReason( "skip_not_probing" );
+
 	}
 	else if( RemoteRole == ROLE_AutonomousProxy ) 
 	{
+		GlobalTickTrace.SetSkipReason( "skip_autonomous_proxy" );
 		if( Role == ROLE_Authority )
 		{
 			// update viewtarget replicated info
@@ -355,17 +454,30 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 		{
 			// Non-player update.
 			if( TickType==LEVELTICK_ViewportsOnly )
+			{
+				GlobalTickTrace.SetSkipReason( "skip_viewports_only" );
 				return 1;
+			}
 
 			// Tick the nonplayer.
 			if ( IsProbing(NAME_Tick) )
+			{
+				HP2CreatureGeneratorTraceTickDispatch( this, DeltaSeconds );
+				GlobalTickTrace.EventTick();
 				eventTick(DeltaSeconds);
+			}
+			else
+				GlobalTickTrace.SetSkipReason( "skip_not_probing" );
 		}
 		else
 		{
 			// Player update.
 			if( PlayerPawn->IsA(ACamera::StaticClass()) && !(PlayerPawn->ShowFlags & SHOW_PlayerCtrl) )
+			{
+				GlobalTickTrace.SetSkipReason( "skip_camera_input_disabled" );
 				return 1;
+			}
+			GlobalTickTrace.SetSkipReason( "skip_player_tick" );
 
 			// Process PlayerTick with input.
 			PlayerPawn->Player->ReadInput( DeltaSeconds );
@@ -430,8 +542,12 @@ UBOOL AActor::Tick( FLOAT DeltaSeconds, ELevelTick TickType )
 		if( Physics!=PHYS_None && Role!=ROLE_AutonomousProxy )
 			performPhysics( DeltaSeconds );
 	}
-	else if ( Physics == PHYS_Falling ) // dumbproxies simulate falling if client side physics set
-		performPhysics( DeltaSeconds );
+	else
+	{
+		GlobalTickTrace.SetSkipReason( "skip_role_below_simulated" );
+		if( Physics == PHYS_Falling ) // dumbproxies simulate falling if client side physics set
+			performPhysics( DeltaSeconds );
+	}
 
 	// During demo playback, setup view offsets for viewtarget
 	if( GetLevel()->DemoRecDriver && GetLevel()->DemoRecDriver->ServerConnection )
@@ -997,10 +1113,20 @@ void ULevel::Tick( ELevelTick TickType, FLOAT DeltaSeconds )
 		// Tick all actors, owners before owned.
 		guard(TickAllActors);
 		NewlySpawned = NULL;
+		static ULevel* StartupPhaseLevel = NULL;
+		if( StartupPhaseLevel!=this && getenv("HP2_STARTUP_RNG_PHASE_TRACE") )
+		{
+			appSetStartupRandTraceLifecycleBoundary( "before_actor_tick" );
+			FAppRandTracePhaseScope StartupPhaseTrace( "pre_first_level_tick" );
+			StartupPhaseLevel = this;
+		}
 		INT Updated  = 0;
 		for( INT iActor=iFirstDynamicActor; iActor<Actors.Num(); iActor++ )
 			if( Actors( iActor ) )
+			{
+				FHP2GlobalTickTraceRootScope RootAdmission( "dynamic" );
 				Updated += Actors( iActor )->Tick(DeltaSeconds,TickType);
+			}
 		while( NewlySpawned && Updated )
 		{
 			FActorLink* Link = NewlySpawned;
@@ -1008,7 +1134,10 @@ void ULevel::Tick( ELevelTick TickType, FLOAT DeltaSeconds )
 			Updated          = 0;
 			for( Link; Link; Link=Link->Next )
 				if( Link->Actor->bTicked!=(DWORD)Ticked )
+				{
+					FHP2GlobalTickTraceRootScope RootAdmission( "dynamic" );
 					Updated += Link->Actor->Tick( DeltaSeconds, TickType );
+				}
 		}
 		unguard;
 	}
@@ -1028,7 +1157,10 @@ void ULevel::Tick( ELevelTick TickType, FLOAT DeltaSeconds )
 						*(FLOAT*)((BYTE*)PlayerPawn + It->Offset) = 0.f;
 			}
 			else if( Actors(iActor) && Actors(iActor)->bAlwaysTick )
+			{
+				FHP2GlobalTickTraceRootScope RootAdmission( "dynamic" );
 				Actors(iActor)->Tick(DeltaSeconds,TickType);
+			}
 		}
 		unguard;
 	}

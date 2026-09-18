@@ -512,7 +512,8 @@ void FEditorHitObserver::Click( const FHitCause& Cause, const struct HBezierCont
 //		return;
 
 	UBOOL bExistsInList = 0;
-	for( INT PosInList = 0 ; PosInList < BezierControlPointList.Num() ; PosInList++ )
+	INT PosInList = 0;
+	for( ; PosInList < BezierControlPointList.Num() ; PosInList++ )
 		if( BezierControlPointList(PosInList) == Hit )
 		{
 			bExistsInList = 1;

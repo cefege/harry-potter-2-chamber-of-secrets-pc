@@ -394,7 +394,8 @@ void UEditorEngine::modelBuildBounds( USkeletalMesh* Mesh )
 
 	// Compute max bounding sphere.
 	TArray<FLOAT> Radii( Mesh->RefSkeleton.Num() );
-	for_array ( t, Mesh->RefSkeleton )
+	INT t;
+	for( t=0; t<Mesh->RefSkeleton.Num(); t++ )
 		Radii(t) = Mesh->RefSkeleton(t).BonePos.Length;
 	for( t=Mesh->RefSkeleton.Num()-1; t>0; t-- )
 	{
@@ -934,9 +935,10 @@ void UEditorEngine::movementDigest(	UAnimation* Anim, INT MoveIndex )
 
 	TArray<FRawTrack> RawTracks;
 	RawTracks.AddZeroed( ThisMove->AnimTracks.Num() );
+	INT i;
 
 	// Reorder raw data into the appropriate tracks - Full bones.
-	for(INT i=0; i<ThisMove->AnimTracks.Num(); i++)
+	for(i=0; i<ThisMove->AnimTracks.Num(); i++)
 	{
 		INT b = Hierarchy(i);
 		NLOG( debugf(TEXT(" Bone B:%i for hierarchy I: %i"),b,i);)
@@ -965,6 +967,7 @@ void UEditorEngine::movementDigest(	UAnimation* Anim, INT MoveIndex )
 	{
 		// Find largest bone size (seems to range from 10 to 40..) -> to factor into the error.
 		TArray<FLOAT> BoneSizes( RawTracks.Num() );
+		INT b;
 		{for_array( b, BoneSizes )
 			// Set to minimum value. It would be nice to have mesh info here.
 			BoneSizes(b) = 1.f;}
@@ -1004,7 +1007,7 @@ void UEditorEngine::movementDigest(	UAnimation* Anim, INT MoveIndex )
 		INT RemovedLerped = 0;	
 
 		// First culling step.
-		for( INT b=0; b<RawTracks.Num(); b++)
+		for( b=0; b<RawTracks.Num(); b++)
 		{
 			FRawTrack& Track = RawTracks(b);
 		
@@ -1013,10 +1016,12 @@ void UEditorEngine::movementDigest(	UAnimation* Anim, INT MoveIndex )
 			{
 				// Test every point below as the start of segment.
 				// Due to compression format, can't eliminate more than 255 consecutive frames.
-				for( INT s=e-2; s>=0 && s>=e-255; s-- )
+				INT s;
+				for( s=e-2; s>=0 && s>=e-255; s-- )
 				{
 					// Test every point in between for error.
-					for( INT m=s+1; m<e; m++ )
+					INT m;
+					for( m=s+1; m<e; m++ )
 					{
 						FLOAT PosErr = GetInterKeyError( Track, s, m, e, BoneSizes(b) );
 						if( PosErr > POSERRCMP )
@@ -1243,6 +1248,7 @@ void UEditorEngine::movementDigest(	UAnimation* Anim, INT MoveIndex )
 	}
 
 	// Merge RawTracks into compressed MasterTrack, and store counts.
+	INT q, s, p, t;
 	for( i=0; i<RawTracks.Num(); i++)
 	{
 		for_array( q, RawTracks(i).KeyQuat )

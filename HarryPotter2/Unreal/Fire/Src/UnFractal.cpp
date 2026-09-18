@@ -42,6 +42,8 @@
 =============================================================================*/
 
 #include "UnFractal.h"
+#include "HP2TraceHooks.h"
+
 
 #if defined(_M_IX86) && ASM
 #define FIRE_X86_ASM    ASM
@@ -246,7 +248,9 @@ inline BYTE SpeedRand()
 #else
 {
     SpeedRindex = (SpeedRindex + 1) & 63;
-    return( SpeedRandArr[(SpeedRindex+31)& 63 ] ^= SpeedRandArr[ SpeedRindex ] );
+    const BYTE Result = ( SpeedRandArr[(SpeedRindex+31)& 63 ] ^= SpeedRandArr[ SpeedRindex ] );
+    HP2FireTextureTraceSpeedRand( SpeedRindex, Result );
+    return Result;
 }
 #endif
 
@@ -259,7 +263,6 @@ FLOAT FakeAtan( FLOAT X )
     return 3.1415f * 0.5f * X / (Abs((FLOAT)X) + 1.f);
 }
 
-
 /*----------------------------------------------------------------------------
 	Initialization routines.
 ----------------------------------------------------------------------------*/
@@ -268,9 +271,12 @@ FLOAT FakeAtan( FLOAT X )
 
 void InitTables()
 {
+		const unsigned long long TraceRngBefore = appGetRandTraceOrdinal();
+
 	static INT  Initialized=0;
 	if( !Initialized )
 	{
+		FAppRandTracePhaseScope StartupPhaseTrace( "fire_init_tables" );
 		// Init 8-bit sine table.
 		INT t;
 		for( t=0; t<256; t++ )
@@ -297,6 +303,16 @@ void InitTables()
 #endif
 		StaleRindex=0;
 
+		unsigned long long Fingerprint = 1469598103934665603ULL;
+		const BYTE* Tables[] = { SpeedRandArr, PhaseTable, SignedPhaseTable, LightPhaseTable };
+		const INT Sizes[] = { 512, 256, 256, 256 };
+		for( INT TableIndex=0; TableIndex<ARRAY_COUNT(Tables); ++TableIndex )
+			for( INT ByteIndex=0; ByteIndex<Sizes[TableIndex]; ++ByteIndex )
+			{
+				Fingerprint ^= Tables[TableIndex][ByteIndex];
+				Fingerprint *= 1099511628211ULL;
+			}
+		HP2FireTextureTraceInitTables( TraceRngBefore, appGetRandTraceOrdinal(), Fingerprint );
 		// Now initialized;
 		Initialized=1;
 	}
@@ -1478,7 +1494,10 @@ void UFireTexture::RedrawSparks()
         case SPARK_Burn:
 			{
 				DWORD SparkDest = (DWORD)(ThisSpark->X + (ThisSpark->Y << UBits) );
-				Mips(0).DataArray(SparkDest) = SpeedRand();  
+				const BYTE Previous = Mips(0).DataArray(SparkDest);
+				const BYTE Value = SpeedRand();
+				Mips(0).DataArray(SparkDest) = Value;
+				HP2FireTextureTraceBurnWrite( this, S, SparkDest, Previous, Value );
 				break;
 			}
 

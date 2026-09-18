@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Package the Rust rewrite (hp2rs) as a macOS app bundle.
+"""Package the Rust rewrite (hp2rs) as a self-contained macOS app bundle.
 
 Builds the hp2rs release binary via cargo, then (re)creates
 dist/macos-arm64-rs/HarryPotter2.app with:
 
-- Contents/MacOS/HarryPotter2 copied from target/release/hp2rs
-- Contents/Info.plist mirroring the existing C++ bundle's plist
-  (dist/macos-arm64/HarryPotter2.app): identifier and version are taken
-  from there verbatim so both bundles stay in lockstep.
-- Any icon assets (.icns) from the existing bundle's Contents/Resources,
-  reused as-is together with their CFBundleIconFile key.
+- Contents/MacOS/HarryPotter2 copied from target/release/hp2rs.
+- Contents/Info.plist generated from Rust bundle metadata owned below.
+
+The Rust bundle intentionally has no external resources or embedded
+frameworks: rodio talks to system audio services. It does not read, copy, or
+otherwise depend on the legacy C++ bundle.
 
 Like the CMake hp2_macos_app target, the bundle is always recreated from
-scratch: stale binaries, signatures, and plists must never survive a
-packaging invocation. rodio talks to system audio, so unlike the C++
-bundle no OpenAL dylib is embedded.
+scratch: stale binaries, signatures, plists, and framework payloads must
+never survive a packaging invocation.
 
 Exit codes: 0 packaged, 1 failure.
 """
@@ -31,14 +30,15 @@ from pathlib import Path
 from typing import Any
 
 BUNDLE_RELPATH = Path("dist") / "macos-arm64-rs" / "HarryPotter2.app"
-REFERENCE_BUNDLE_RELPATH = Path("dist") / "macos-arm64" / "HarryPotter2.app"
 CARGO_PACKAGE = "hp2rs"
 EXECUTABLE_NAME = "HarryPotter2"
 
-MACHO_ARM64_MAGIC = b"\xcf\xfa\xed\xfe"  # MH_MAGIC_64, little-endian (feedfacf)
+# Rust owns this bundle metadata. Keep it aligned with the workspace release
+# identity without deriving it from the retired C++ bundle.
+BUNDLE_IDENTIFIER = "com.hp2.native"
+BUNDLE_VERSION = "0.1.0"
 
-ICON_SUFFIX = ".icns"
-ICON_PLIST_KEY = "CFBundleIconFile"
+MACHO_ARM64_MAGIC = b"\xcf\xfa\xed\xfe"  # MH_MAGIC_64, little-endian (feedfacf)
 
 
 class PackageError(Exception):
@@ -84,50 +84,24 @@ def run_cargo_build(repo: Path) -> dict[str, Any]:
     return {"command": command, "exit_code": completed.returncode}
 
 
-def load_reference_plist(reference_bundle: Path) -> dict[str, Any]:
-    plist_path = reference_bundle / "Contents" / "Info.plist"
-    if not plist_path.is_file():
-        raise PackageError(
-            f"{plist_path} does not exist; build the C++ bundle first "
-            "(cmake --build ... --target hp2_macos_app)"
-        )
-    try:
-        with plist_path.open("rb") as handle:
-            plist = plistlib.load(handle)
-    except (plistlib.InvalidFileException, ValueError, OSError) as error:
-        raise PackageError(f"{plist_path}: {error}") from error
-    if not isinstance(plist, dict):
-        raise PackageError(f"{plist_path} is not a dictionary")
-    return plist
-
-
-def mirrored_plist(reference_plist: dict[str, Any]) -> dict[str, Any]:
-    """Copy the reference plist, keeping executable identity stable."""
-    plist = dict(reference_plist)
-    plist["CFBundleExecutable"] = EXECUTABLE_NAME
-    return plist
-
-
-def copy_icon_assets(reference_bundle: Path, contents: Path,
-                     plist: dict[str, Any]) -> list[str]:
-    """Reuse the existing bundle's icon assets; returns copied names."""
-    resources = reference_bundle / "Contents" / "Resources"
-    if not resources.is_dir():
-        return []
-    icons = sorted(path for path in resources.iterdir()
-                   if path.is_file() and path.suffix.casefold() == ICON_SUFFIX)
-    if not icons:
-        return []
-    destination_dir = contents / "Resources"
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    copied: list[str] = []
-    for icon in icons:
-        shutil.copy2(icon, destination_dir / icon.name)
-        copied.append(icon.name)
-    primary = copied[0]
-    if ICON_PLIST_KEY not in plist:
-        plist[ICON_PLIST_KEY] = primary.removesuffix(ICON_SUFFIX)
-    return copied
+def rust_info_plist() -> dict[str, Any]:
+    """Return the complete, Rust-owned metadata for the app bundle."""
+    return {
+        "ApplePressAndHoldEnabled": False,
+        "CFBundleDevelopmentRegion": "English",
+        "CFBundleDisplayName": "Harry Potter 2",
+        "CFBundleExecutable": EXECUTABLE_NAME,
+        "CFBundleIdentifier": BUNDLE_IDENTIFIER,
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": EXECUTABLE_NAME,
+        "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": BUNDLE_VERSION,
+        "CFBundleVersion": BUNDLE_VERSION,
+        "LSArchitecturePriority": ["arm64"],
+        "LSMinimumSystemVersion": "15.0",
+        "LSRequiresNativeExecution": True,
+        "NSHighResolutionCapable": True,
+    }
 
 
 def sign_bundle(bundle: Path) -> None:
@@ -163,8 +137,8 @@ def verify_arm64_binary(executable: Path) -> None:
 
 def package(repo: Path, skip_build: bool) -> dict[str, Any]:
     resolved = repo.resolve()
+
     bundle = resolved / BUNDLE_RELPATH
-    reference_bundle = resolved / REFERENCE_BUNDLE_RELPATH
 
     build: dict[str, Any] = {"skipped": skip_build}
     if not skip_build:
@@ -186,8 +160,7 @@ def package(repo: Path, skip_build: bool) -> dict[str, Any]:
     verify_arm64_binary(executable)
     os.chmod(executable, 0o755)
 
-    plist = mirrored_plist(load_reference_plist(reference_bundle))
-    icons = copy_icon_assets(reference_bundle, contents, plist)
+    plist = rust_info_plist()
     with (contents / "Info.plist").open("wb") as handle:
         plistlib.dump(plist, handle, sort_keys=True)
 
@@ -196,7 +169,6 @@ def package(repo: Path, skip_build: bool) -> dict[str, Any]:
     return {
         "bundle": bundle,
         "executable": executable,
-        "icons": icons,
         "build": build,
         "version": plist.get("CFBundleShortVersionString"),
         "identifier": plist.get("CFBundleIdentifier"),
@@ -223,10 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"packaged {display}")
     print(f"  executable: {result['executable'].name}"
           f" ({result['version']}, {result['identifier']})")
-    if result["icons"]:
-        print(f"  icons: {', '.join(result['icons'])}")
-    else:
-        print("  icons: none (reference bundle ships no icon assets)")
+    print("  resources: none (Rust bundle embeds no external assets)")
     print(f"  build skipped: {result['build']['skipped']}")
     return 0
 

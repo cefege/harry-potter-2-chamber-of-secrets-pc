@@ -711,9 +711,18 @@ public:
 	{}
 	void Serialize( void* V, INT Length );
 	FArchive& operator<<( class FName& N )
-		{Serialize(&N,sizeof(N));return *this;}
+		{Serialize(&N,appCheckedIntSize(sizeof(N)));return *this;}
 	FArchive& operator<<( class UObject*& Res )
-		{DWORD D = (DWORD)Res; return *this << D;}
+	{
+		INT ObjectIndex = INDEX_NONE;
+		if( Res )
+		{
+			const DWORD Index = Res->GetIndex();
+			check( Index<=static_cast<DWORD>(MAXINT) );
+			ObjectIndex = static_cast<INT>(Index);
+		}
+		return *this << ObjectIndex;
+	}
 	FArchive& operator<<( TCHAR* S )
 		{Serialize(S,appStrlen(S)+1); return *this;}
 	FArchive& operator<<( enum EExprToken E )

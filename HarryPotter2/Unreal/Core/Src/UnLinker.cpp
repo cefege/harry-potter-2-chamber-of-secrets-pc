@@ -158,6 +158,7 @@ ULinker::GetExportFullName( INT i, const TCHAR* FakeRoot )
 ULinkerLoad::ULinkerLoad( UObject* InParent, const TCHAR* InFilename, DWORD InLoadFlags )
 :	ULinker( InParent, InFilename )
 ,	LoadFlags( InLoadFlags )
+,	ActorSlotCompactIndexTrace( NULL )
 {
 	guard(ULinkerLoad::ULinkerLoad);
 #if 0 //Debug added by Legend on 4/12/2000

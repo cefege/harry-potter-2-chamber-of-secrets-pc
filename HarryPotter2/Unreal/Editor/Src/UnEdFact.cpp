@@ -318,7 +318,8 @@ static void ForceValid( ULevel* Level, UStruct* Struct, BYTE* Data )
 				UObject*& Obj = *(UObject**)Value;
 				if( Cast<AActor>(Obj) )
 				{
-					for( INT j=0; j<Level->Actors.Num(); j++ )
+					INT j;
+					for( j=0; j<Level->Actors.Num(); j++ )
 						if( Level->Actors(j)==Obj )
 							break;
 					if( j==Level->Actors.Num() )
@@ -898,7 +899,7 @@ UObject* USoundFactory::FactoryCreateBinary
 		//
 		USound* Sound = new(InParent,Name,Flags)USound;
 		Sound->FileType = FName(FileType);
-		Sound->Data.Add( BufferEnd-Buffer );
+		Sound->Data.Add( appCheckedIntSize(static_cast<SIZE_T>(BufferEnd - Buffer)) );
 		appMemcpy( &Sound->Data(0), Buffer, Sound->Data.Num() );
 
 		return Sound;
@@ -960,7 +961,7 @@ UObject* UMusicFactory::FactoryCreateBinary
 
 	UMusic* Music = new(InParent,Name,Flags)UMusic;
 	Music->Data.FileType = FName(FileType);
-	Music->Data.Add( BufferEnd - Buffer );
+	Music->Data.Add( appCheckedIntSize(static_cast<SIZE_T>(BufferEnd - Buffer)) );
 	appMemcpy( &Music->Data(0), Buffer, Music->Data.Num() );
 
 	Music->Data.SetupVarsForMP2 ();
@@ -1004,7 +1005,8 @@ public:
 		guard(FPCXFileHeader<<);
 		Ar << H.Manufacturer << H.Version << H.Encoding << H.BitsPerPixel;
 		Ar << H.XMin << H.YMin << H.XMax << H.YMax << H.XDotsPerInch << H.YDotsPerInch;
-		for( INT i=0; i<ARRAY_COUNT(H.OldColorMap); i++ )
+		INT i;
+		for( i=0; i<ARRAY_COUNT(H.OldColorMap); i++ )
 			Ar << H.OldColorMap[i];
 		Ar << H.Reserved1 << H.NumPlanes;
 		Ar << H.BytesPerLine << H.PaletteType << H.HScreenSize << H.VScreenSize;
@@ -1088,7 +1090,6 @@ UTextureFactory::UTextureFactory()
 	guard(UTextureFactory::UTextureFactory);
 	unguard;
 }
-TCHAR* GFile=NULL;
 UObject* UTextureFactory::FactoryCreateBinary
 (
 	UClass*				Class,
@@ -1110,7 +1111,7 @@ UObject* UTextureFactory::FactoryCreateBinary
     const FBitmapInfoHeader* bmhdr = (FBitmapInfoHeader *)(Buffer + sizeof(FBitmapFileHeader));
 
 	// Validate it.
-	INT Length = BufferEnd - Buffer;
+	INT Length = appCheckedIntSize(static_cast<SIZE_T>(BufferEnd - Buffer));
     if( (Length>=sizeof(FBitmapFileHeader)+sizeof(FBitmapInfoHeader)) && Buffer[0]=='B' && Buffer[1]=='M' )
     {
         // This is a .bmp type data stream.
@@ -1385,7 +1386,8 @@ UBOOL UTextureExporterPCX::ExportBinary( UObject* Object, const TCHAR* Type, FAr
 		if(ScreenPtr==NULL)
 			return(0);//cmp bypass water texture.
 
-		for( INT i=0; i<Texture->USize*Texture->VSize; i++ )
+		INT i;
+		for( i=0; i<Texture->USize*Texture->VSize; i++ )
 		{
 			if( (*ScreenPtr&0xc0)==0xc0 )
 				Ar << RleCode;
@@ -1491,7 +1493,8 @@ UBOOL UTextureExporterBMP::ExportBinary( UObject* Object, const TCHAR* Type, FAr
 	{
 		// Palette.
 		FColor* Colors = Texture->GetColors();
-		for( INT i=0; i<256; i++ )
+		INT i;
+		for( i=0; i<256; i++ )
 			Ar << Colors[i].B << Colors[i].G << Colors[i].R << Colors[i].A;
 
 		// Upside-down scanlines.

@@ -10,6 +10,8 @@
 #include "CorePrivate.h"
 #include <cstdint>
 
+
+extern void appFlushRandTrace();
 /*-----------------------------------------------------------------------------
 	FOutputDevice implementation.
 -----------------------------------------------------------------------------*/
@@ -2295,6 +2297,7 @@ void appExit()
 	FName::StaticExit();
 	if( !GIsCriticalError )
 		GMalloc->DumpAllocs();
+	appFlushRandTrace();
 	unguard;
 }
 

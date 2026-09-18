@@ -12,6 +12,8 @@ Revision history:
 
 #include "CorePrivate.h"
 
+#include "HP2TraceHooks.h"
+
 /*-----------------------------------------------------------------------------
 	Globals.
 -----------------------------------------------------------------------------*/
@@ -250,8 +252,11 @@ void UObject::execInstanceVariable( FFrame& Stack, RESULT_DECL)
 {
 	guardSlow(UObject::execInstanceVariable);
 
+	const INT OpcodeOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) - 1 : INDEX_NONE;
 	GProperty = (UProperty*)Stack.ReadObject();
 	GPropAddr = (BYTE*)this + GProperty->Offset;
+	appRecordPatrolStateTraceProperty( Stack, this, GProperty, GPropAddr, OpcodeOffset, "instance" );
+
 	if( Result )
 		GProperty->CopyCompleteValue( Result, GPropAddr );
 
@@ -263,8 +268,10 @@ void UObject::execDefaultVariable( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::execDefaultVariable);
 
+	const INT OpcodeOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) - 1 : INDEX_NONE;
 	GProperty = (UProperty*)Stack.ReadObject();
 	GPropAddr = &GetClass()->Defaults(GProperty->Offset);
+	appRecordPatrolStateTraceProperty( Stack, this, GProperty, GPropAddr, OpcodeOffset, "default" );
 	if( Result )
 		GProperty->CopyCompleteValue( Result, GPropAddr );
 
@@ -360,6 +367,11 @@ void UObject::execDebugInfo( FFrame& Stack, RESULT_DECL ) //DEBUGGER
 		Stack.Code++;
 	Stack.Code++;
 
+	if( appStrcmp(*InfoType,TEXT("RETURN"))==0 )
+		appRecordRandTraceRelevanceReturnDebugInfo( Stack, LineNumber );
+	HP2CreatureGeneratorTraceDebugInfo( this, Stack, *InfoType, LineNumber );
+
+
 	// Only valid when the debugger is running.
 	if ( GDebugger != NULL )
 		GDebugger->DebugInfo( this, &Stack, InfoType, LineNumber, InputPos );
@@ -431,6 +443,7 @@ void UObject::execBoolVariable( FFrame& Stack, RESULT_DECL )
 	guardSlow(UObject::execBoolVariable);
 
 	// Get bool variable.
+	const INT OpcodeOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) - 1 : INDEX_NONE;
 	BYTE B = *Stack.Code++;
 	UBoolProperty* Property = (UBoolProperty*)Stack.PeekObject();
 	(this->*GNatives[B])( Stack, NULL );
@@ -438,6 +451,7 @@ void UObject::execBoolVariable( FFrame& Stack, RESULT_DECL )
 
 	// Note that we're not returning an in-place pointer to to the bool, so EX_Let 
 	// must take special precautions with bools.
+	appRecordPatrolStateTraceProperty( Stack, this, GProperty, GPropAddr, OpcodeOffset, "bool" );
 	if( Result )
 		*(BITFIELD*)Result = (GPropAddr && (*(BITFIELD*)GPropAddr & ((UBoolProperty*)GProperty)->BitMask)) ? 1 : 0;
 
@@ -600,12 +614,15 @@ void UObject::execJumpIfNot( FFrame& Stack, RESULT_DECL )
 	guardSlow(UObject::execJumpIfNot);
 	CHECK_RUNAWAY;
 
-	// Get code offset.
+	// Get code offset and preserve the conditional cursor before evaluating it.
+	const INT OpcodeOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) - 1 : INDEX_NONE;
 	INT wOffset = Stack.ReadWord();
 
 	// Get boolean test value.
 	UBOOL Value=0;
 	Stack.Step( Stack.Object, &Value );
+	const INT NextOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) : INDEX_NONE;
+	appRecordPatrolStateTraceBranch( Stack, this, OpcodeOffset, wOffset, NextOffset, Value );
 
 	// Jump if false.
 	if( !Value )
@@ -747,7 +764,9 @@ void UObject::execVirtualFunction( FFrame& Stack, RESULT_DECL )
 	guardSlow(UObject::execVirtualFunction);
 
 	// Call the virtual function.
-	CallFunction( Stack, Result, FindFunctionChecked(Stack.ReadName()) );
+	UFunction* Function = FindFunctionChecked(Stack.ReadName());
+	FAppRandTracePreBeginRelevanceScope PreBeginRelevanceTrace( Stack, this, Function, Result );
+	CallFunction( Stack, Result, Function );
 
 	unguardexecSlow;
 }
@@ -1792,11 +1811,22 @@ IMPLEMENT_FUNCTION( UObject, 166, execSubtractSubtract_Int );
 void UObject::execRand( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::execRand);
+	const INT CallsiteOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) : INDEX_NONE;
 
 	P_GET_INT(A);
 	P_FINISH;
 
-	*(INT*)Result = A>0 ? (appRand() % A) : 0;
+	if( A>0 )
+	{
+		FAppRandTraceNativeScope RandTrace( Stack, "Core.Object.Rand", 167, CallsiteOffset );
+		const INT Raw = appRand();
+		const INT Index = Raw % A;
+		*(INT*)Result = Index;
+		HP2CreatureGeneratorTraceRand( this, Stack, Raw, A, Index );
+
+	}
+	else
+		*(INT*)Result = 0;
 
 	unguardexecSlow;
 }
@@ -2220,9 +2250,11 @@ IMPLEMENT_FUNCTION( UObject, 194, execSquare );
 void UObject::execFRand( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::execFRand);
+	const INT CallsiteOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) : INDEX_NONE;
 
 	P_FINISH;
 
+	FAppRandTraceNativeScope RandTrace( Stack, "Core.Object.FRand", 195, CallsiteOffset );
 	*(FLOAT*)Result = appFrand();
 
 	unguardexecSlow;
@@ -2730,7 +2762,9 @@ IMPLEMENT_FUNCTION( UObject, 0x80 + 99, execInvert );
 void UObject::execVRand( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::execVRand);
+	const INT CallsiteOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) : INDEX_NONE;
 	P_FINISH;
+	FAppRandTraceNativeScope RandTrace( Stack, "Core.Object.VRand", 0x80 + 124, CallsiteOffset );
 	*((FVector*)Result) = VRand();
 	unguardexecSlow;
 }
@@ -2739,8 +2773,10 @@ IMPLEMENT_FUNCTION( UObject, 0x80 + 124, execVRand );
 void UObject::execRotRand( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::execRotRand);
+	const INT CallsiteOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) : INDEX_NONE;
 	P_GET_UBOOL_OPTX(bRoll, 0);
 	P_FINISH;
+	FAppRandTraceNativeScope RandTrace( Stack, "Core.Object.RotRand", 320, CallsiteOffset );
 
 	FRotator RRot;
 	RRot.Yaw = ((2 * appRand()) % 65535);
@@ -3431,11 +3467,17 @@ IMPLEMENT_FUNCTION( UObject, EX_New, execNew );
 void UObject::execRandRange( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::execRandRange);
+	const INT CallsiteOffset = Stack.Node ? (INT)(Stack.Code - &Stack.Node->Script(0)) : INDEX_NONE;
 	P_GET_FLOAT(Min);
 	P_GET_FLOAT(Max);
 	P_FINISH;
 
-	*(FLOAT*)Result = appRandRange( Min, Max );
+	FAppRandTraceNativeScope RandTrace( Stack, "Core.Object.RandRange", 1033, CallsiteOffset );
+	const INT Raw = appRand();
+	const FLOAT Value = Min + (Max - Min) * (Raw / (FLOAT)RAND_MAX);
+	*(FLOAT*)Result = Value;
+	HP2CreatureGeneratorTraceRandRange( this, Stack, Raw, Min, Max, Value );
+
 	
 	unguardexecSlow;
 }
@@ -3743,6 +3785,8 @@ struct FOutParmRec
 void UObject::CallFunction( FFrame& Stack, RESULT_DECL, UFunction* Function )
 {
 	guardSlow(UObject::CallFunction);
+	FAppRandTraceOuterScope RandTrace( this, Function );
+	FAppRandTraceRelevanceCallScope RelevanceCallTrace( Stack, this, Function, Result );
 #if DO_GUARD_SLOW
 	DWORD Cycles=0; clock(Cycles);
 #endif
@@ -3798,10 +3842,15 @@ void UObject::CallFunction( FFrame& Stack, RESULT_DECL, UFunction* Function )
 		if ( *Stack.Code == EX_DebugInfo )
 			Stack.Step( Stack.Object, NULL );
 
-
-		// Execute the code.
 		if( !SkipIt )
+		{
+			FScriptDispatchObserver* Observer = GScriptDispatchObserver;
+			if( Observer )
+				Observer->OnCallEnter( this, Function, NewStack );
 			ProcessInternal( NewStack, Result );
+			if( Observer )
+				Observer->OnCallExit( this, Function, NewStack, Result );
+		}
 
 		// Copy back outparms.
 		while( --Out >= Outs )
@@ -3826,12 +3875,18 @@ void UObject::CallFunction( FFrame& Stack, RESULT_DECL, UFunction* Function )
 void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(UObject::ProcessInternal);
+	UFunction* Function = (UFunction*)Stack.Node;
+	FAppRandTracePreBeginScope PreBeginTrace( this, Function );
+	FAppRandTraceFunctionScope FunctionTrace( this, Function, Stack );
+	FAppRandTraceRelevanceScope RelevanceTrace( this, Function, Stack );
+
 	DWORD SingularFlag = ((UFunction*)Stack.Node)->FunctionFlags & FUNC_Singular;
 	if
 	(	!ProcessRemoteFunction( (UFunction*)Stack.Node, Stack.Locals, NULL )
 	&&	IsProbing( Stack.Node->GetFName() )
 	&&	!(ObjectFlags & SingularFlag) )
 	{
+		HP2CreatureGeneratorTraceFunctionEnter( this, Function );
 		ObjectFlags |= SingularFlag;
 		BYTE Buffer[1024];//!!hardcoded size
 		appMemzero( Buffer, appCheckedIntSize(sizeof(FString)) );//!!
@@ -3843,9 +3898,11 @@ void UObject::ProcessInternal( FFrame& Stack, RESULT_DECL )
 			Stack.Step( Stack.Object, Buffer );
 		Stack.Code++;
 		Stack.Step( Stack.Object, Result );
+		appRecordRandTraceRelevanceReturn( Stack, Result );
 		//DEBUGGER: Necessary for the call stack. Grab an optional 'PREVSTACK' debug info.
 		if ( *Stack.Code == EX_DebugInfo )
 			Stack.Step( Stack.Object, Result );
+		HP2CreatureGeneratorTraceFunctionExit( this, Function, Result );
 
 		ObjectFlags &= ~SingularFlag;
 #if DO_GUARD
@@ -3871,6 +3928,7 @@ void UObject::ProcessEvent( UFunction* Function, void* Parms, void* UnusedResult
 	||	((Function->FunctionFlags & FUNC_Native) && ProcessRemoteFunction( Function, Parms, NULL )) )
 		return;
 	checkSlow(Function->ParmsSize==0 || Parms!=NULL);
+	FAppRandTraceOuterScope RandTrace( this, Function );
 
 	// Start timer.
 	if( ++GScriptEntryTag == 1 )

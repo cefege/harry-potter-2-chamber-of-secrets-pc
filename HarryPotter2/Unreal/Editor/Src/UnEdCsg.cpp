@@ -236,7 +236,7 @@ void UEditorEngine::csgRebuild( ULevel* Level, UBOOL bVisibleOnly )
 		EnlistLeaves( Level->Model, iFronts, iBacks, 0 );
 
 	// Compose all detail brushes.
-	for( It=FStaticBrushIterator(Level); It; ++It )
+	for( FStaticBrushIterator It(Level); It; ++It )
 	{
 		if( !bVisibleOnly || ( bVisibleOnly && !It->bHiddenEd ) )
 			if
@@ -416,7 +416,7 @@ void UEditorEngine::polySelectMatchingGroups( UModel* Model )
 			GFlags1[Poly.Actor->Group.GetIndex()]=1;
 		}
 	}
-	for( i=0; i<Model->Surfs.Num(); i++ )
+	for( INT i=0; i<Model->Surfs.Num(); i++ )
 	{
 		FBspSurf *Surf = &Model->Surfs(i);
 		FPoly Poly; polyFindMaster(Model,i,Poly);
@@ -453,7 +453,7 @@ void UEditorEngine::polySelectMatchingItems(UModel *Model)
 			GFlags1[Poly.ItemName.GetIndex()]=1;
 		}
 	}
-	for( i=0; i<Model->Surfs.Num(); i++ )
+	for( INT i=0; i<Model->Surfs.Num(); i++ )
 	{
 		FBspSurf *Surf = &Model->Surfs(i);
 		if( Surf->Actor )
@@ -617,7 +617,8 @@ void UEditorEngine::polySelectMatchingBrush(UModel *Model)
 			ABrush* ParentBrush = Cast<ABrush>(Surf->Actor);
 
 			// See if we've already got this brush ...
-			for( int brush = 0 ; brush < Brushes.Num() ; brush++ )
+			int brush;
+			for( brush = 0 ; brush < Brushes.Num() ; brush++ )
 				if( ParentBrush == Brushes(brush) )
 					break;
 
@@ -628,7 +629,7 @@ void UEditorEngine::polySelectMatchingBrush(UModel *Model)
 	}
 
 	// Generate a list of unique brushes.
-	for( i = 0 ; i < Model->Surfs.Num() ; i++ )
+	for( INT i = 0 ; i < Model->Surfs.Num() ; i++ )
 	{
 		FBspSurf* Surf = &Model->Surfs(i);
 
@@ -849,7 +850,7 @@ void UEditorEngine::polySelectZone( UModel* Model )
 	}
 
 	// select all polys that are match one of the zones identified above
-	for( i = 0; i < Model->Nodes.Num(); i++ )
+	for( INT i = 0; i < Model->Nodes.Num(); i++ )
 	{
 		FBspNode* Node = &Model->Nodes(i);
 		for( INT j = 0; j < iZoneList.Num(); j++ ) 
@@ -1037,7 +1038,7 @@ void SendTo( ULevel* Level, int bSendToFirst )
 	// Refill.
 	check(Level->Actors.Num()>=2);
 	Level->Actors.Remove(2,Level->Actors.Num()-2);
-	for( i=0; i<2; i++ )
+	for( INT i=0; i<2; i++ )
 		for( INT j=0; j<Lists[i].Num(); j++ )
 			Level->Actors.AddItem( Lists[i](j) );
 

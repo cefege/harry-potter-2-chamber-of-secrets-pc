@@ -10,6 +10,15 @@
 #include "UnRender.h"
 #include "UnNet.h"
 
+
+#if defined(__GNUC__)
+extern void HP2ActorSlotDumpPostDeserialize( ULevel* Level ) __attribute__((weak));
+#else
+extern void HP2ActorSlotDumpPostDeserialize( ULevel* Level );
+#endif
+
+extern void HP2ActorTransitionPreBeginBefore( AActor* Actor );
+extern void HP2ActorTransitionPreBeginAfter( AActor* Actor );
 /*-----------------------------------------------------------------------------
 	Object class implementation.
 -----------------------------------------------------------------------------*/
@@ -949,6 +958,7 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 		GMalloc->DumpAllocs();
 	debugf( NAME_Log, TEXT("LoadMap: %s"), *URL.String() );
 	FTime LoadTime[2] = { appSeconds(), appProcessSeconds() };
+	appSetStartupRandTraceMap( *URL.Map, *URL.String() );
 	GInitRunaway();
 
 	// Remember current level's stack level.
@@ -1174,9 +1184,15 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 		}
 	}
 
+	{
+		FAppRandTracePhaseScope StartupPhaseTrace( "pre_load_map" );
 	guard(LoadLevel);
 	GLevel = LoadObject<ULevel>( MapParent, TEXT("MyLevel"), *URL.Map, LOAD_NoFail, NULL );
 	unguard;
+	}
+	FAppRandTracePhaseScope StartupPhaseTrace( "post_load_map" );
+	if( HP2ActorSlotDumpPostDeserialize )
+		HP2ActorSlotDumpPostDeserialize( GLevel );
 	
 	// If pending network level.
 	if( Pending )
@@ -1423,7 +1439,11 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 		// Send PreBeginPlay.
 		for( INT i=0; i<GLevel->Actors.Num(); i++ )
 			if( GLevel->Actors(i) && !GLevel->Actors(i)->bScriptInitialized )
+			{
+				HP2ActorTransitionPreBeginBefore( GLevel->Actors(i) );
 				GLevel->Actors(i)->eventPreBeginPlay();
+				HP2ActorTransitionPreBeginAfter( GLevel->Actors(i) );
+			}
 
 		// Set BeginPlay.
 		for( INT i=0; i<GLevel->Actors.Num(); i++ )
@@ -1475,6 +1495,7 @@ ULevel* UGameEngine::LoadMap( const FURL& URL, UPendingLevel* Pending, const TMa
 		Info->bStartup = 0;
 	}
 	else GLevel->TimeSeconds = GLevel->GetLevelInfo()->TimeSeconds;
+	appSetStartupRandTraceLifecycleBoundary( "bring_up_for_play_complete" );
 	unguard;
 
 	// Rearrange actors: static first, then others.

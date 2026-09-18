@@ -581,7 +581,7 @@ int CDECL IntPointCompare(const void *A, const void *B)
 // pk -- modified with UW 3/28/2001
 // dpl -- moved to UnEdRend.cpp 9/2/2002
 
-FLOAT Splerp( FLOAT F )
+static FLOAT Splerp( FLOAT F )
 {
 	FLOAT S = Square(F);
 	return (1.0f/16.0f)*S*S - (1.0f/2.0f)*S + 1;

@@ -688,11 +688,12 @@ void UEditorEngine::bspValidateBrush
 )
 {
 	guard(UEditorEngine::bspValidateBrush);
+	INT i;
 	Brush->Modify();
 	if( ForceValidate || !Brush->Linked )
 	{
 		Brush->Linked = 1;
-		for( INT i=0; i<Brush->Polys->Element.Num(); i++ )
+		for( i=0; i<Brush->Polys->Element.Num(); i++ )
 		{
 			Brush->Polys->Element(i).iLink = i;
 		}
@@ -756,6 +757,7 @@ void UEditorEngine::bspUnlinkPolys( UModel* Brush )
 int TryToMerge( FPoly *Poly1, FPoly *Poly2 )
 {
 	guard(TryToMerge);
+	INT i;
 
 	// Vertex count reasonable?
 	if( Poly1->NumVertices+Poly2->NumVertices > FPoly::MAX_VERTICES )
@@ -796,7 +798,7 @@ int TryToMerge( FPoly *Poly1, FPoly *Poly2 )
 	FPoly NewPoly = *Poly1;
 	NewPoly.NumVertices = 0;
 	INT Vertex = End1;
-	for( INT i=0; i<Poly1->NumVertices; i++ )
+	for( i=0; i<Poly1->NumVertices; i++ )
 	{
 		NewPoly.Vertex[NewPoly.NumVertices++] = Poly1->Vertex[Vertex];
 		if( ++Vertex >= Poly1->NumVertices )
@@ -895,10 +897,11 @@ void UEditorEngine::bspBuildFPolys( UModel* Model, UBOOL SurfLinks, INT iNode )
 void UEditorEngine::bspMergeCoplanars( UModel* Model, UBOOL RemapLinks, UBOOL MergeDisparateTextures )
 {
 	guard(UEditorEngine::bspMergeCoplanars);
+	INT i;
 	INT OriginalNum = Model->Polys->Element.Num();
 
 	// Mark all polys as unprocessed.
-	for( INT i=0; i<Model->Polys->Element.Num(); i++ )
+	for( i=0; i<Model->Polys->Element.Num(); i++ )
 		Model->Polys->Element(i).PolyFlags &= ~PF_EdProcessed;
 
 	// Find matching coplanars and merge them.
@@ -2258,6 +2261,7 @@ void AddPointToNode
 )
 {
 	guard(AddPointToNode);
+	INT i;
 
 	FBspNode &Node = Model->Nodes(iNode);
 	if( (Node.NumVertices+1) >= FBspNode::MAX_NODE_VERTICES )
@@ -2275,7 +2279,7 @@ void AddPointToNode
 	Node.iVertPool = Model->Verts.Add( Node.NumVertices+1 );
 
 	// Make sure this node doesn't already contain the vertex.
-	for( INT i=0; i<Node.NumVertices; i++ )
+	for( i=0; i<Node.NumVertices; i++ )
 		check( Model->Verts(iOldVert + i).pVertex != pVertex );
 
 	// Copy the old vertex pool to the new one.
@@ -2315,6 +2319,7 @@ int DistributePoint
 {
 	guard(DistributePoint);
 	INT Count = 0;
+	INT i;
 
 	// Handle front, back, and plane.
 	FLOAT Dist = Model->Nodes(iNode).Plane.PlaneDot(Model->Points(pVertex));
@@ -2339,7 +2344,7 @@ int DistributePoint
 			FVert* VertPool = &Model->Verts(Model->Nodes(iNode).iVertPool);
 
 			// Skip this node if it already contains the point in question.
-			for( INT i=0; i<Model->Nodes(iNode).NumVertices; i++ )
+			for( i=0; i<Model->Nodes(iNode).NumVertices; i++ )
 				if( VertPool[i].pVertex == pVertex )
 					break;
 			if( i != Model->Nodes(iNode).NumVertices )
@@ -2443,9 +2448,10 @@ void MergeNearPoints( UModel *Model, FLOAT Dist )
 	FMemMark Mark(GMem);
 	INT* PointRemap = new(GMem,Model->Points.Num())INT;
 	INT Merged=0,Collapsed=0;
+	INT i;
 
 	// Find nearer point for all points.
-	for( INT i=0; i<Model->Points.Num(); i++ )
+	for( i=0; i<Model->Points.Num(); i++ )
 	{
 		PointRemap[i] = i;
 		FVector &Point = Model->Points(i);
@@ -2625,7 +2631,7 @@ void UEditorEngine::bspOptGeom( UModel *Model )
 	unguard;
 
 	// Gather stats.
-	i=0; int j=0;
+	INT i=0, j=0;
 	guard(3);
 	for( INT iNode=0; iNode < Model->Nodes.Num(); iNode++ )
 	{
