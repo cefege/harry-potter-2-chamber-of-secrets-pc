@@ -546,7 +546,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal/System/Default.ini")
     add_custom_target(regenerate_goldens
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
-            "--data-root=${HP2_TEST_DATA_ROOT}"
+            "--repo-root=${PROJECT_SOURCE_DIR}"
             "--output=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
             "--repo-root=${PROJECT_SOURCE_DIR}"
@@ -561,7 +561,7 @@ else()
     add_custom_target(regenerate_goldens
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/package79_reference.py"
-            "--data-root=${HP2_TEST_DATA_ROOT}"
+            "--repo-root=${PROJECT_SOURCE_DIR}"
             "--output=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
         COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
             "--repo-root=${PROJECT_SOURCE_DIR}"

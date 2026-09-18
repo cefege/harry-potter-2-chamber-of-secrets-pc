@@ -22,7 +22,7 @@ Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:
 - **macOS 15.0 or later**
 - **Apple silicon** (arm64 / Apple M1, M2, M3, M4, M5, etc.)
 - **Xcode** (Command Line Tools or full IDE)
-- **CMake 3.25+**
+- **CMake 3.24+**
 
 ### Game Data
 **You must own a retail copy of *Harry Potter and the Chamber of Secrets* for Windows or macOS.** This repository does not include game data; you will import it from your own installation.
