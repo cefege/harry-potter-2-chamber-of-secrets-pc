@@ -4,13 +4,14 @@ A modernized C++ runtime for *Harry Potter and the Chamber of Secrets*, original
 
 ## Overview
 
-This is a faithful recreation of the classic 2002 game engine for macOS 15+ on Apple silicon (arm64). It uses:
+This is a faithful recreation of the classic 2002 game engine for **macOS 15+ on Apple silicon (arm64)** and **Linux (arm64)**. It uses:
 
 - **XOpenGL** (`ThirdParty/XOpenGLDrv`) — OpenGL renderer adapted from UE1
 - **SDL2** — window management and input handling  
-- **Native text rendering** — optional experimental backend for improved font fidelity
+- **Native text rendering** — optional experimental backend for improved font fidelity (CoreText on macOS, FreeType on Linux)
 
 The codebase is legacy-era UE1-derived C++ with modern platform support.
+
 ## See It In Action
 
 Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:li:activity:7498760430992113665/](https://www.linkedin.com/feed/update/urn:li:activity:7498760430992113665/)
@@ -19,10 +20,17 @@ Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:
 ## Requirements
 
 ### System
-- **macOS 15.0 or later**
-- **Apple silicon** (arm64 / Apple M1, M2, M3, M4, M5, etc.)
-- **Xcode** (Command Line Tools or full IDE)
-- **CMake 3.24+**
+
+**macOS**
+- macOS 15.0 or later
+- Apple silicon (arm64 / Apple M1, M2, M3, M4, M5, etc.)
+- Xcode (Command Line Tools or full IDE)
+- CMake 3.24+
+
+**Linux**
+- arm64
+- Ninja, GCC or Clang, SDL2 development headers
+- CMake 3.24+
 
 ### Game Data
 **You must own a retail copy of *Harry Potter and the Chamber of Secrets* for Windows or macOS.** This repository does not include game data; you will import it from your own installation.
@@ -32,16 +40,19 @@ Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:
 ### 1. Build from Source
 
 ```sh
-# Configure
+# macOS
 cmake --preset macos-arm64
-
-# Build
 cmake --build --preset macos-arm64
+
+# Linux
+cmake --preset linux-arm64
+cmake --build --preset linux-arm64
 ```
 
 The packaged app lands at:
 ```
-dist/macos-arm64/HarryPotter2.app
+dist/macos-arm64/HarryPotter2.app   # macOS
+out/linux-arm64/                    # Linux
 ```
 
 ### 2. Import Game Data
@@ -73,7 +84,11 @@ python3 Build/prepare_retail_data.py \
 Open the packaged app:
 
 ```sh
+# macOS
 open dist/macos-arm64/HarryPotter2.app
+
+# Linux
+out/linux-arm64/HarryPotter2
 ```
 
 In the launcher window:
@@ -83,12 +98,19 @@ In the launcher window:
 
 ## Build Presets
 
-| Preset | Purpose |
-|--------|---------|
-| `macos-arm64` | Release build with optimizations |
-| `macos-arm64-asan-ubsan` | AddressSanitizer + UndefinedBehaviorSanitizer |
-| `macos-arm64-tsan` | ThreadSanitizer |
-| `macos-arm64-full-smoke` | Full test suite with renderer validation |
+| Preset | Platform | Purpose |
+|--------|----------|---------|
+| `macos-arm64` | macOS | Release build with optimizations |
+| `macos-arm64-asan-ubsan` | macOS | AddressSanitizer + UndefinedBehaviorSanitizer |
+| `macos-arm64-tsan` | macOS | ThreadSanitizer |
+| `macos-arm64-full-smoke` | macOS | Full test suite with renderer validation |
+| `macos-arm64-vulkan` | macOS | Release build with Vulkan driver |
+| `macos-arm64-retail` | macOS | Release build against retail-only test data |
+| `linux-arm64` | Linux | Release build with optimizations |
+| `linux-arm64-asan-ubsan` | Linux | AddressSanitizer + UndefinedBehaviorSanitizer |
+| `linux-arm64-tsan` | Linux | ThreadSanitizer |
+| `linux-arm64-full-smoke` | Linux | Full test suite with renderer validation |
+| `linux-arm64-retail` | Linux | Release build against retail-only test data |
 
 Example:
 ```sh
@@ -102,7 +124,11 @@ ctest --preset macos-arm64-asan-ubsan
 Run the full test suite:
 
 ```sh
+# macOS
 ctest --preset macos-arm64
+
+# Linux
+ctest --preset linux-arm64
 ```
 
 Run a single test:
@@ -139,14 +165,16 @@ Ensure you've imported your retail installation to the path shown in the launche
 
 ### Build fails with "CMake not found"
 
-Install CMake via Homebrew:
+Install CMake via Homebrew (macOS) or your distro package manager (Linux):
 ```sh
-brew install cmake
+brew install cmake        # macOS
+sudo apt install cmake    # Debian/Ubuntu
 ```
 
 ### App crashes on launch
 
-Check `~/Library/Application Support/Harry Potter 2/User/Launcher.log` for detailed error messages.
+**macOS**: check `~/Library/Application Support/Harry Potter 2/User/Launcher.log`.
+**Linux**: check `~/.local/share/Harry Potter 2/User/Launcher.log`.
 
 ## Contributing
 
