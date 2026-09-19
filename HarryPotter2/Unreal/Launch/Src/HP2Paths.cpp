@@ -5,7 +5,7 @@
 #include "Core.h"
 #include "HP2Paths.h"
 
-#include <CommonCrypto/CommonDigest.h>
+#include "HP2PortableSha256.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -21,6 +21,7 @@
 namespace
 {
 constexpr const char* DataDirPrefix = "-datadir=";
+#if MACOSX
 constexpr const char* ExternalDataSuffix =
 	"Library/Application Support/Harry Potter 2/Data/Unreal";
 constexpr const char* ConventionalRetailDataSuffix =
@@ -29,6 +30,12 @@ constexpr const char* ConventionalPrototypeDataSuffix =
 	"Library/Application Support/Harry Potter 2/Data/Prototype";
 constexpr const char* UserSuffix =
 	"Library/Application Support/Harry Potter 2/User";
+#else
+constexpr const char* ExternalDataSuffix = "harry-potter-2/Data/Unreal";
+constexpr const char* ConventionalRetailDataSuffix = "harry-potter-2/Data/Retail";
+constexpr const char* ConventionalPrototypeDataSuffix = "harry-potter-2/Data/Prototype";
+constexpr const char* UserSuffix = "harry-potter-2/User";
+#endif
 
 bool EqualsAsciiNoCase(char A, char B)
 {
@@ -76,12 +83,43 @@ char* JoinPath(const char* Left, const char* Right)
 
 char* CanonicalizeExistingDirectory(const char* Directory);
 
+// Resolves the platform prefix that every "Library/Application Support"-
+// style suffix above is joined onto: the canonicalized $HOME on macOS, or
+// $XDG_DATA_HOME (falling back to $HOME/.local/share) on Linux. The
+// returned directory is not required to already exist on Linux; callers
+// create it as needed via EnsureDirectoryTree.
+#if MACOSX
+char* ResolveDataHomePrefix()
+{
+	return CanonicalizeExistingDirectory(std::getenv("HOME"));
+}
+#else
+char* ResolveDataHomePrefix()
+{
+	const char* XdgDataHome = std::getenv("XDG_DATA_HOME");
+	if (XdgDataHome && XdgDataHome[0] == '/')
+	{
+		const size_t Length = std::strlen(XdgDataHome);
+		char* Copy = static_cast<char*>(std::malloc(Length + 1));
+		if (Copy)
+			std::memcpy(Copy, XdgDataHome, Length + 1);
+		return Copy;
+	}
+	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	if (!Home)
+		return nullptr;
+	char* Result = JoinPath(Home, ".local/share");
+	std::free(Home);
+	return Result;
+}
+#endif
+
 bool GetConventionalDataRoot(
 	const char* Suffix,
 	std::string& AbsoluteRoot)
 {
 	AbsoluteRoot.clear();
-	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	char* Home = ResolveDataHomePrefix();
 	if (!Home)
 		return false;
 
@@ -1089,11 +1127,15 @@ bool EnsureWritableChildDirectory(const char* Parent, const char* Child, mode_t 
 	return Success;
 }
 
-char* PrepareLauncherRoot(const char* Home)
+char* PrepareLauncherRoot(const char* DataHomePrefix)
 {
+#if MACOSX
 	char* ApplicationSupport = JoinPath(
-		Home, "Library/Application Support/Harry Potter 2");
-	char* UserRoot = JoinPath(Home, UserSuffix);
+		DataHomePrefix, "Library/Application Support/Harry Potter 2");
+#else
+	char* ApplicationSupport = JoinPath(DataHomePrefix, "harry-potter-2");
+#endif
+	char* UserRoot = JoinPath(DataHomePrefix, UserSuffix);
 	if (!ApplicationSupport || !UserRoot
 		|| !EnsureDirectoryTree(ApplicationSupport, 0755)
 		|| !EnsureDirectory(UserRoot, 0700))
@@ -1233,7 +1275,7 @@ bool GetHP2ConventionalPrototypeDataRoot(std::string& AbsoluteRoot)
 bool DiscoverHP2RetailDataRoot(std::string& CanonicalRoot)
 {
 	CanonicalRoot.clear();
-	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	char* Home = ResolveDataHomePrefix();
 	if (!Home)
 		return false;
 	char* Candidate = JoinPath(Home, ExternalDataSuffix);
@@ -1262,7 +1304,7 @@ bool PrepareHP2LauncherHome(std::string& LauncherRoot, std::string& Error)
 {
 	LauncherRoot.clear();
 	Error.clear();
-	char* Home = CanonicalizeExistingDirectory(std::getenv("HOME"));
+	char* Home = ResolveDataHomePrefix();
 	if (!Home)
 	{
 		Error = "HOME does not name an existing directory";
@@ -1431,23 +1473,30 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 
 	const char* HomeEnvironment = std::getenv("HOME");
 	char* Home = CanonicalizeExistingDirectory(HomeEnvironment);
+	char* DataHomePrefix = Home ? ResolveDataHomePrefix() : nullptr;
 
 	if (!ExplicitDataDir)
 	{
 		DataRoot = DiscoverDevelopmentDataRoot();
-		if (!DataRoot && Home)
+		if (!DataRoot && DataHomePrefix)
 		{
-			char* ExternalDataRoot = JoinPath(Home, ExternalDataSuffix);
+			char* ExternalDataRoot = JoinPath(DataHomePrefix, ExternalDataSuffix);
 			DataRoot = ValidateDataRoot(ExternalDataRoot);
 			std::free(ExternalDataRoot);
 		}
 		if (!DataRoot)
 		{
-			char* ExpectedRoot = Home ? JoinPath(Home, ExternalDataSuffix) : nullptr;
+			char* ExpectedRoot = DataHomePrefix ? JoinPath(DataHomePrefix, ExternalDataSuffix) : nullptr;
+#if MACOSX
+			const char* const DefaultExpectedRoot = "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal";
+#else
+			const char* const DefaultExpectedRoot = "$XDG_DATA_HOME/harry-potter-2/Data/Unreal";
+#endif
 			std::fprintf(stderr,
 				"hp2: unable to locate game data; expected HarryPotter2/Unreal/System/Default.ini from the working directory or %s/System/Default.ini\n",
-				ExpectedRoot ? ExpectedRoot : "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal");
+				ExpectedRoot ? ExpectedRoot : DefaultExpectedRoot);
 			std::free(ExpectedRoot);
+			std::free(DataHomePrefix);
 			std::free(Home);
 			return false;
 		}
@@ -1456,21 +1505,24 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 	if (!Home)
 	{
 		std::fprintf(stderr, "hp2: HOME does not name an existing directory\n");
+		std::free(DataHomePrefix);
 		std::free(DataRoot);
 		return false;
 	}
 
-	char* UserRoot = PrepareUserRoot(Home);
+	char* UserRoot = DataHomePrefix ? PrepareUserRoot(DataHomePrefix) : nullptr;
 	if (!UserRoot)
 	{
-		char* ExpectedUserRoot = JoinPath(Home, UserSuffix);
+		char* ExpectedUserRoot = DataHomePrefix ? JoinPath(DataHomePrefix, UserSuffix) : nullptr;
 		std::fprintf(stderr, "hp2: could not create writable user directory '%s'\n",
 			ExpectedUserRoot ? ExpectedUserRoot : UserSuffix);
 		std::free(ExpectedUserRoot);
+		std::free(DataHomePrefix);
 		std::free(DataRoot);
 		std::free(Home);
 		return false;
 	}
+	std::free(DataHomePrefix);
 	std::free(Home);
 
 	if (IsSameOrDescendant(DataRoot, UserRoot)

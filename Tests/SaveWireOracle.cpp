@@ -7,7 +7,7 @@
 	all point immediately past the serialized summary.
 =============================================================================*/
 
-#include <CommonCrypto/CommonDigest.h>
+#include "HP2PortableSha256.h"
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>

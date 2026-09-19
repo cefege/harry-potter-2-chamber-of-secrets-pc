@@ -9,7 +9,7 @@
 #include "FFeedbackContextAnsi.h"
 #include "FConfigCacheIni.h"
 
-#include <CommonCrypto/CommonDigest.h>
+#include "HP2PortableSha256.h"
 #include <array>
 #include <cstdio>
 #include <cstring>

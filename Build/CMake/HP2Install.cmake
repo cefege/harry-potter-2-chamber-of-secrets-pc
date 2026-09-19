@@ -1,5 +1,6 @@
 include(GNUInstallDirs)
 
+if(APPLE)
 # OpenAL Soft is the sole replaceable runtime dependency in this phase. Give
 # the build dylib its eventual bundle-relative identity so every executable
 # records @rpath/libopenal.1.dylib rather than an absolute build-tree path.
@@ -115,3 +116,67 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     VERBATIM
 )
 unset(_hp2_bundle_in_all)
+
+else()
+
+# Linux build and install: copy the executables and OpenAL next to each
+# other with an $ORIGIN-relative RPATH, then assemble a flat dist tree that
+# bundles the Quickshell-based launcher UI alongside the game binary.
+install(TARGETS ${HP2_EXECUTABLE_TARGETS}
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+
+install(TARGETS OpenAL
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+
+set_target_properties(${HP2_EXECUTABLE_TARGETS} PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+)
+
+set_target_properties(hp2_game PROPERTIES
+    BUILD_RPATH "$<TARGET_FILE_DIR:OpenAL>"
+)
+
+set(HP2_LINUX_DIST_DIR "${PROJECT_SOURCE_DIR}/dist/linux-arm64")
+
+# A separate "hp2_dist" component scopes cmake --install to exactly the
+# runtime pieces the dist tree ships (the game binary and its OpenAL
+# dependency), never the test suite that also lands in
+# HP2_EXECUTABLE_TARGETS. Routing the copy through cmake --install (rather
+# than a raw file copy) is what lets CMake's own RPATH_CHANGE rewrite
+# hp2_game's BUILD_RPATH to the $ORIGIN-relative INSTALL_RPATH above, so the
+# packaged binary stays runnable after the build tree is removed.
+install(TARGETS hp2_game
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+    COMPONENT hp2_dist
+    EXCLUDE_FROM_ALL
+)
+install(TARGETS OpenAL
+    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    COMPONENT hp2_dist
+    EXCLUDE_FROM_ALL
+)
+
+# Always recreate the distribution: stale binaries and libraries must never
+# survive a build invocation. Assets intentionally remain external to the
+# dist tree.
+add_custom_target(hp2_linux_dist ALL
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${HP2_LINUX_DIST_DIR}"
+    COMMAND "${CMAKE_COMMAND}"
+        --install "${CMAKE_BINARY_DIR}"
+        --prefix "${HP2_LINUX_DIST_DIR}"
+        --component hp2_dist
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${HP2_LINUX_DIST_DIR}/share/hp2-launcher"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${PROJECT_SOURCE_DIR}/Launcher/Quickshell"
+        "${HP2_LINUX_DIST_DIR}/share/hp2-launcher"
+    DEPENDS
+        hp2_game
+        OpenAL
+    COMMENT "Recreating dist/linux-arm64/"
+    VERBATIM
+)
+
+endif()

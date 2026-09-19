@@ -73,7 +73,11 @@ _ACTOR_SLOT_NON_SEMANTIC_FIELDS = frozenset((
 _CUTSCRIPT_COMMANDS = frozenset((
     "talk", "playanim", "sleep", "triggerchangelevel", "animate", "waitfor", "release",
 ))
-_REPLAY_USER_DIRECTORY = Path("Library/Application Support/Harry Potter 2/User")
+_REPLAY_USER_DIRECTORY = (
+    Path("Library/Application Support/Harry Potter 2/User")
+    if sys.platform == "darwin"
+    else Path(".local/share/harry-potter-2/User")
+)
 REPLAY_STEM_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 RUST_REPLAY_MARKER_PREFIX = "hp2rs: [replay.wire_v1]"
 RUST_REPLAY_MARKER = re.compile(
@@ -284,6 +288,27 @@ def _validate_native_arm64(executable: Path) -> None:
             if len(header) != 8:
                 raise GameTestError(f"app executable is too small to be Mach-O: {executable}")
             magic = header[:4]
+            if magic == b"\x7fELF":
+                # ELF header: ei_class at byte 4 (2 = ELFCLASS64), ei_data at
+                # byte 5 (1 = little-endian), e_machine at bytes 18-19
+                # (0xb7 = EM_AARCH64).
+                stream.seek(0)
+                elf_header = stream.read(20)
+                if len(elf_header) < 20:
+                    raise GameTestError(f"app executable is too small to be ELF: {executable}")
+                ei_class = elf_header[4]
+                ei_data = elf_header[5]
+                if ei_class != 2:
+                    raise GameTestError(f"app executable is not a 64-bit ELF binary: {executable}")
+                if ei_data != 1:
+                    raise GameTestError(f"app executable is not a little-endian ELF binary: {executable}")
+                e_machine = struct.unpack("<H", elf_header[18:20])[0]
+                EM_AARCH64 = 0xB7
+                if e_machine != EM_AARCH64:
+                    raise GameTestError(
+                        f"app executable is not arm64 (ELF e_machine 0x{e_machine:04x}): {executable}"
+                    )
+                return
             if magic in (b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"):
                 cpu_type = _thin_header_cpu(stream, 0, file_size)
                 if cpu_type != ARM64_CPU_TYPE:
@@ -551,13 +576,15 @@ def _isolated_environment(home: Path) -> dict[str, str]:
     temporary = home / "tmp"
     config = home / ".config"
     cache = home / ".cache"
-    for directory in (temporary, config, cache):
+    data = home / ".local/share"
+    for directory in (temporary, config, cache, data):
         directory.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
     environment.update({
         "HOME": str(home), "CFFIXED_USER_HOME": str(home),
         "TMPDIR": str(temporary) + os.sep, "XDG_CONFIG_HOME": str(config),
-        "XDG_CACHE_HOME": str(cache), "LANG": "C", "LC_ALL": "C", "TZ": "UTC",
+        "XDG_CACHE_HOME": str(cache), "XDG_DATA_HOME": str(data),
+        "LANG": "C", "LC_ALL": "C", "TZ": "UTC",
     })
     return environment
 

@@ -5,7 +5,7 @@
 #include "SDLLaunchPrivate.h"
 #include "HP2TraceHooks.h"
 
-#include <CommonCrypto/CommonDigest.h>
+#include "HP2PortableSha256.h"
 #include <SDL2/SDL.h>
 #include <algorithm>
 #include <cctype>
@@ -28,7 +28,21 @@
 #include "HP2LauncherModel.h"
 #include "HP2LauncherStore.h"
 #include "HP2CrashReporter.h"
+#if MACOSX
 #include "HP2MacLauncher.h"
+namespace HP2Launcher
+{
+	inline LaunchAction RunHP2NativeLauncher(
+		const LauncherRequest& request,
+		LauncherResult& result,
+		std::string& error)
+	{
+		return RunHP2MacLauncher(request, result, error);
+	}
+}
+#else
+#include "HP2ShellLauncher.h"
+#endif
 #include "HP2Paths.h"
 #include "HP2StaticPackages.h"
 #include "ALAudio.h"
@@ -239,8 +253,55 @@ bool RunNativeLauncherRound(
 		Request.dataSourceOptions.push_back( Option );
 	}
 
+	// Populate standard display modes, plus the current setting if custom.
+	// HP2MacLauncher enumerates the real screen's native modes and only
+	// merges these in as extras; the Quickshell-based Linux launcher has no
+	// equivalent enumeration and relies entirely on this list.
+	{
+		const DisplayResolution StandardModes[] = {
+			{640, 480, "640 \xC3\x97 480"},      // U+00D7 in UTF-8
+			{800, 600, "800 \xC3\x97 600"},
+			{1024, 768, "1024 \xC3\x97 768"},
+			{1280, 720, "1280 \xC3\x97 720"},
+			{1280, 800, "1280 \xC3\x97 800"},
+			{1366, 768, "1366 \xC3\x97 768"},
+			{1440, 900, "1440 \xC3\x97 900"},
+			{1600, 900, "1600 \xC3\x97 900"},
+			{1680, 1050, "1680 \xC3\x97 1050"},
+			{1920, 1080, "1920 \xC3\x97 1080"},
+			{1920, 1200, "1920 \xC3\x97 1200"},
+			{2560, 1440, "2560 \xC3\x97 1440"},
+			{2560, 1600, "2560 \xC3\x97 1600"},
+			{3456, 2234, "3456 \xC3\x97 2234"},
+		};
+		for (const DisplayResolution& Mode : StandardModes)
+			Request.displayModes.push_back(Mode);
+
+		bool CurrentModeFound = false;
+		for (const DisplayResolution& Mode : Request.displayModes)
+		{
+			if (Mode.width == Request.settings.resolution.width
+				&& Mode.height == Request.settings.resolution.height)
+			{
+				CurrentModeFound = true;
+				break;
+			}
+		}
+		if (!CurrentModeFound)
+		{
+			char CurrentLabel[64];
+			std::snprintf(CurrentLabel, sizeof(CurrentLabel), "%d \xC3\x97 %d",
+				Request.settings.resolution.width, Request.settings.resolution.height);
+			Request.displayModes.push_back({
+				Request.settings.resolution.width,
+				Request.settings.resolution.height,
+				CurrentLabel
+			});
+		}
+	}
+
 	LauncherResult Result;
-	const LaunchAction Action = RunHP2MacLauncher( Request, Result, StepError );
+	const LaunchAction Action = RunHP2NativeLauncher( Request, Result, StepError );
 	if( Action == LaunchAction::Error )
 	{
 		ShowLauncherError( StepError, "The launcher reported an error." );
@@ -5524,6 +5585,13 @@ int main( int ArgC, char* ArgV[] )
 		// Register all statically linked packages.
 		RegisterHP2RuntimeClasses();
 		RegisterHP2ClientClasses();
+
+		// This SDL build lists the X11 backend ahead of Wayland (SDL_video.c
+		// bootstrap order), so a native Wayland session with XWayland running
+		// silently gets an XWayland window. Prefer Wayland and keep X11 as the
+		// fallback for X sessions. SDL_HINT_VIDEODRIVER accepts a comma-ordered
+		// list; an unavailable first entry falls through to the next.
+		SDL_SetHint( SDL_HINT_VIDEODRIVER, "wayland,x11" );
 
 		if( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_JOYSTICK ) != 0 )
 			debugf( NAME_Warning, TEXT("SDL_Init failed: %s"), *SdlStatusText( SDL_GetError() ) );

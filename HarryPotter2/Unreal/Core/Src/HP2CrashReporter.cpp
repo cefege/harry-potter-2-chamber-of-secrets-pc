@@ -309,7 +309,12 @@ void HP2InstallCrashReporter( const HP2CrashReporterConfig* Config )
 	struct sigaction Sa;
 	memset( &Sa, 0, sizeof( Sa ) );
 	Sa.sa_sigaction = Handler;
-	Sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+	// SA_NODEFER: without it, this signal stays blocked for the duration of
+	// Handler(); the raise() below then only queues it pending, and _exit()
+	// discards that pending signal before the kernel's default (core-dumping)
+	// action ever runs. With SA_NODEFER the re-raise is delivered immediately
+	// against SIG_DFL (set by SA_RESETHAND) and actually dumps core.
+	Sa.sa_flags = SA_SIGINFO | SA_RESETHAND | SA_NODEFER;
 	for( int I = 0; I < kMaxSignals; ++I )
 		sigaction( kWatchedSignals[I], &Sa, NULL );
 

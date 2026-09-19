@@ -17,7 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <CommonCrypto/CommonDigest.h>
+#include "HP2PortableSha256.h"
 #include <string>
 #include <vector>
 

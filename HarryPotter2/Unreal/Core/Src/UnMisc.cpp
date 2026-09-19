@@ -326,7 +326,7 @@ CORE_API TCHAR* appStaticString1024()
 //
 CORE_API ANSICHAR* appAnsiStaticString1024()
 {
-#if defined(__APPLE__)
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	static ANSICHAR Results[128][1024];
 	static INT Count=0;
 	ANSICHAR* Result = Results[Count++ & 127];
@@ -337,7 +337,7 @@ CORE_API ANSICHAR* appAnsiStaticString1024()
 #endif
 }
 
-#if defined(__APPLE__)
+#if defined(HP2_HOST_WCHAR_TCHAR)
 static UNICHAR* appUnicodeStaticString1024()
 {
 	static UNICHAR Results[128][1024];
@@ -2327,7 +2327,7 @@ CORE_API const ANSICHAR* appToAnsi( const TCHAR* Str )
 // TCHAR to UNICHAR.
 CORE_API const UNICHAR* appToUnicode( const TCHAR* Str )
 {
-#if defined(__APPLE__)
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	guard(appToUnicode);
 	if( !Str )
 		return NULL;
@@ -2416,7 +2416,7 @@ CORE_API const TCHAR* appFromAnsi( TArray<TCHAR> & Ch, const ANSICHAR* ACh )
 // UNICHAR to TCHAR.
 CORE_API const TCHAR* appFromUnicode( const UNICHAR* UCh )
 {
-#if defined(__APPLE__)
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	guard(appFromUnicode);
 	if( !UCh )
 		return NULL;

@@ -127,10 +127,25 @@ endfunction()
 find_library(HP2_CORETEXT_FRAMEWORK CoreText)
 find_library(HP2_COREGRAPHICS_FRAMEWORK CoreGraphics)
 
+# QUIET pkg-config probes: a host missing the freetype2/harfbuzz/fontconfig
+# dev packages must still configure cleanly with the FreeType provider simply
+# unmatched, exactly like the CoreText framework probes above.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(HP2_FREETYPE QUIET IMPORTED_TARGET freetype2)
+    pkg_check_modules(HP2_HARFBUZZ QUIET IMPORTED_TARGET harfbuzz)
+    pkg_check_modules(HP2_FONTCONFIG QUIET IMPORTED_TARGET fontconfig)
+endif()
+
 hp2_declare_text_provider(CoreText
-    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeText.cpp"
+    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextShared.cpp"
     LINK_LIBS "${HP2_CORETEXT_FRAMEWORK}" "${HP2_COREGRAPHICS_FRAMEWORK}"
     CONDITION "APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK"
+)
+hp2_declare_text_provider(FreeType
+    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFreeType.cpp"
+    LINK_LIBS PkgConfig::HP2_FREETYPE PkgConfig::HP2_HARFBUZZ PkgConfig::HP2_FONTCONFIG
+    CONDITION "NOT APPLE AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND HP2_FONTCONFIG_FOUND"
 )
 
 option(HP2_DISABLE_NATIVE_TEXT_BACKEND
@@ -159,7 +174,6 @@ endif()")
             PROPERTY HP2_TEXT_PROVIDER_${_hp2_text_provider}_LINK_LIBS)
         set(HP2_HAS_NATIVE_TEXT_BACKEND ON)
         set(HP2_TEXT_PROVIDER_NAME "${_hp2_text_provider}")
-        list(APPEND HP2_XOPENGLDRV_SOURCES ${HP2_TEXT_PROVIDER_SOURCES})
         break()
     endif()
 endforeach()
@@ -169,12 +183,16 @@ unset(_hp2_text_provider_matched)
 unset(_hp2_text_provider)
 unset(_hp2_text_provider_condition)
 
-if(NOT HP2_HAS_NATIVE_TEXT_BACKEND)
+if(HP2_HAS_NATIVE_TEXT_BACKEND)
+    message(STATUS "Native text backend provider: ${HP2_TEXT_PROVIDER_NAME}")
+else()
     message(STATUS "Native text backend unavailable: no text provider condition matched")
 endif()
 
 find_package(OpenGL REQUIRED)
-find_library(HP2_APPKIT_FRAMEWORK AppKit REQUIRED)
+if(APPLE)
+    find_library(HP2_APPKIT_FRAMEWORK AppKit REQUIRED)
+endif()
 
 foreach(_hp2_required_dependency IN ITEMS
     SDL2::SDL2-static

@@ -9,15 +9,18 @@ target_compile_features(hp2_compile_policy INTERFACE cxx_std_17)
 
 target_compile_definitions(hp2_compile_policy INTERFACE
     __UNIX__=1
-    MACOSX=1
     ASM=0
     UNICODE=1
     _UNICODE=1
     HP2_HAS_NATIVE_TEXT_BACKEND=$<BOOL:${HP2_HAS_NATIVE_TEXT_BACKEND}>
 )
+if(APPLE)
+    target_compile_definitions(hp2_compile_policy INTERFACE MACOSX=1)
+endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
     target_compile_options(hp2_compile_policy INTERFACE
+        -fsigned-char
         -Wall
         -Wextra
         # The VC6-era headers intentionally expose empty virtual defaults,
@@ -188,14 +191,21 @@ target_link_libraries(hp2_xopengldrv PUBLIC
 )
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    # Driver-neutral CoreText shaping/rasterization core (NativeTextShared.*)
-    # compiled once and consumed as objects by every render driver with a
-    # native text leg, so the provider link libraries reach both consumers.
+    # Selected shaping/rasterization core (NativeTextShared.cpp for CoreText,
+    # NativeTextFreeType.cpp for FreeType) compiled once and consumed as
+    # objects by every render driver with a native text leg, so the provider
+    # link libraries reach both consumers.
     hp2_add_engine_object(hp2_nativetextcore XOpenGLDrv
-        "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextShared.cpp"
+        ${HP2_TEXT_PROVIDER_SOURCES}
     )
     target_include_directories(hp2_nativetextcore PUBLIC ${HP2_XOPENGLDRV_INCLUDE_DIRS})
     target_link_libraries(hp2_nativetextcore PUBLIC ${HP2_TEXT_PROVIDER_LINK_LIBS})
+
+    # NativeText.cpp is the provider-neutral glyph atlas and XOpenGL text
+    # draw path; it belongs to hp2_xopengldrv itself, not the shaping core.
+    target_sources(hp2_xopengldrv PRIVATE
+        "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeText.cpp"
+    )
 
     # Link libraries exported by the selected native text provider
     # (HP2Dependencies.cmake), not provider-specific framework paths.
@@ -228,9 +238,14 @@ hp2_add_executable(hp2_game
     ${HP2_PATH_SOURCE}
 )
 target_compile_definitions(hp2_game PRIVATE HP2_WITH_CLIENT_PACKAGES=1)
-set_source_files_properties("${HP2_NATIVE_LAUNCHER_SOURCE}" PROPERTIES
-    COMPILE_OPTIONS "-fobjc-arc;-std=c++17"
-)
+if(APPLE)
+    set_source_files_properties("${HP2_NATIVE_LAUNCHER_SOURCE}" PROPERTIES
+        COMPILE_OPTIONS "-fobjc-arc;-std=c++17"
+    )
+else()
+    target_compile_definitions(hp2_game PRIVATE
+        HP2_LAUNCHER_QML_DIR="${PROJECT_SOURCE_DIR}/Launcher/Quickshell")
+endif()
 target_link_libraries(hp2_game PRIVATE
     hp2_core
     hp2_engine
@@ -240,8 +255,13 @@ target_link_libraries(hp2_game PRIVATE
     hp2_alaudio
     hp2_sdldrv
     hp2_xopengldrv
-    "${HP2_APPKIT_FRAMEWORK}"
 )
+if(APPLE)
+    target_link_libraries(hp2_game PRIVATE "${HP2_APPKIT_FRAMEWORK}")
+else()
+    find_package(Threads REQUIRED)
+    target_link_libraries(hp2_game PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+endif()
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     # Object libraries do not propagate their objects through other object
@@ -452,12 +472,23 @@ function(hp2_add_behavior_test test_name target)
     set(_hp2_test_home "${_hp2_test_root}/Home")
     set(_hp2_test_tmp "${_hp2_test_root}/Tmp")
     set(_hp2_test_artifacts "${_hp2_test_root}/Artifacts")
-    file(MAKE_DIRECTORY "${_hp2_test_home}" "${_hp2_test_tmp}" "${_hp2_test_artifacts}")
+    set(_hp2_test_xdg_config "${_hp2_test_home}/.config")
+    set(_hp2_test_xdg_cache "${_hp2_test_home}/.cache")
+    set(_hp2_test_xdg_data "${_hp2_test_home}/.local/share")
+    file(MAKE_DIRECTORY "${_hp2_test_home}" "${_hp2_test_tmp}" "${_hp2_test_artifacts}"
+        "${_hp2_test_xdg_config}" "${_hp2_test_xdg_cache}" "${_hp2_test_xdg_data}")
 
     add_test(NAME "${test_name}" COMMAND "${target}" ${ARGN})
     set(_hp2_test_env
         "HOME=${_hp2_test_home}"
         "TMPDIR=${_hp2_test_tmp}"
+        # Isolate every XDG base directory too: a real desktop session's
+        # $XDG_DATA_HOME would otherwise outrank the redirected $HOME when
+        # HP2Paths resolves the writable Application Support tree on Linux,
+        # leaking test state into (and reading stale state from) the host.
+        "XDG_CONFIG_HOME=${_hp2_test_xdg_config}"
+        "XDG_CACHE_HOME=${_hp2_test_xdg_cache}"
+        "XDG_DATA_HOME=${_hp2_test_xdg_data}"
         "LC_ALL=C"
         "TZ=UTC"
         "HP2_TEST_NAME=${test_name}"

@@ -91,6 +91,86 @@
         "HP2_ENABLE_TSAN": "OFF",
         "HP2_TEST_DATA_ROOT": "$env{HOME}/Library/Application Support/Harry Potter 2/Data/Retail"
       }
+    },
+    {
+      "name": "linux-arm64-base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-arm64",
+      "displayName": "Linux arm64 Release",
+      "inherits": "linux-arm64-base",
+      "binaryDir": "${sourceDir}/out/linux-arm64",
+      "installDir": "${sourceDir}/out/install/linux-arm64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/linux-arm64",
+        "HP2_ENABLE_ASAN_UBSAN": "OFF",
+        "HP2_ENABLE_TSAN": "OFF"
+      }
+    },
+    {
+      "name": "linux-arm64-asan-ubsan",
+      "displayName": "Linux arm64 ASan+UBSan",
+      "inherits": "linux-arm64-base",
+      "binaryDir": "${sourceDir}/out/linux-arm64-asan-ubsan",
+      "installDir": "${sourceDir}/out/install/linux-arm64-asan-ubsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/linux-arm64-asan-ubsan",
+        "HP2_ENABLE_ASAN_UBSAN": "ON",
+        "HP2_ENABLE_TSAN": "OFF"
+      }
+    },
+    {
+      "name": "linux-arm64-tsan",
+      "displayName": "Linux arm64 TSan",
+      "inherits": "linux-arm64-base",
+      "binaryDir": "${sourceDir}/out/linux-arm64-tsan",
+      "installDir": "${sourceDir}/out/install/linux-arm64-tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/linux-arm64-tsan",
+        "HP2_ENABLE_ASAN_UBSAN": "OFF",
+        "HP2_ENABLE_TSAN": "ON"
+      }
+    },
+    {
+      "name": "linux-arm64-full-smoke",
+      "displayName": "Linux arm64 Release + full map sweep",
+      "inherits": "linux-arm64-base",
+      "binaryDir": "${sourceDir}/out/linux-arm64-full-smoke",
+      "installDir": "${sourceDir}/out/install/linux-arm64-full-smoke",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HP2_ENABLE_FULL_MAP_SMOKE": "ON"
+      }
+    },
+    {
+      "name": "linux-arm64-retail",
+      "displayName": "Linux arm64 Release + retail-only test data",
+      "inherits": "linux-arm64-base",
+      "binaryDir": "${sourceDir}/out/linux-arm64-retail",
+      "installDir": "${sourceDir}/out/install/linux-arm64-retail",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/linux-arm64-retail",
+        "HP2_ENABLE_ASAN_UBSAN": "OFF",
+        "HP2_ENABLE_TSAN": "OFF",
+        "HP2_TEST_DATA_ROOT": "$env{XDG_DATA_HOME}/harry-potter-2/Data/Retail"
+      }
     }
   ],
   "buildPresets": [
@@ -117,6 +197,26 @@
     {
       "name": "macos-arm64-retail",
       "configurePreset": "macos-arm64-retail"
+    },
+    {
+      "name": "linux-arm64",
+      "configurePreset": "linux-arm64"
+    },
+    {
+      "name": "linux-arm64-asan-ubsan",
+      "configurePreset": "linux-arm64-asan-ubsan"
+    },
+    {
+      "name": "linux-arm64-tsan",
+      "configurePreset": "linux-arm64-tsan"
+    },
+    {
+      "name": "linux-arm64-full-smoke",
+      "configurePreset": "linux-arm64-full-smoke"
+    },
+    {
+      "name": "linux-arm64-retail",
+      "configurePreset": "linux-arm64-retail"
     }
   ],
   "testPresets": [
@@ -159,6 +259,41 @@
       "name": "macos-arm64-retail",
       "displayName": "macOS 15 arm64 retail-only tests",
       "configurePreset": "macos-arm64-retail",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "linux-arm64",
+      "displayName": "Linux arm64 Release tests",
+      "configurePreset": "linux-arm64",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "linux-arm64-asan-ubsan",
+      "displayName": "Linux arm64 ASan+UBSan tests",
+      "configurePreset": "linux-arm64-asan-ubsan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "linux-arm64-tsan",
+      "displayName": "Linux arm64 TSan tests",
+      "configurePreset": "linux-arm64-tsan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "linux-arm64-full-smoke",
+      "displayName": "Linux arm64 full sweep tests",
+      "configurePreset": "linux-arm64-full-smoke",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "linux-arm64-retail",
+      "displayName": "Linux arm64 retail-only tests",
+      "configurePreset": "linux-arm64-retail",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     }

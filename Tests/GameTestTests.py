@@ -183,14 +183,16 @@ class GameTestContracts(unittest.TestCase):
         def prepare_home(home: Path) -> None:
             staged_directories.append(game_test._stage_replay_home(home, self.data_root, replay))
 
+        replay_relative_path = (
+            (game_test._REPLAY_USER_DIRECTORY / "privet_rng.rep").as_posix()
+        )
         result = game_test.run_command(
             [
                 sys.executable,
                 "-c",
                 (
                     "import os, pathlib, sys; "
-                    "path = pathlib.Path(os.environ['HOME']) / "
-                    "'Library/Application Support/Harry Potter 2/User/privet_rng.rep'; "
+                    f"path = pathlib.Path(os.environ['HOME']) / {replay_relative_path!r}; "
                     "raise SystemExit(0 if path.is_file() else 1)"
                 ),
             ],

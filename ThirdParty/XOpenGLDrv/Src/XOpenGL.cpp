@@ -970,7 +970,18 @@ UBOOL UXOpenGLRenderDevice::CreateOpenGLContext(void* Window, INT NewColorBytes,
 #endif
 
 	if (!glContext)
+	{
+		// Probing (IsSupportedGLVersion) expects failures; only report real ones.
+		if (!QueryOnly)
+		{
+#if _WIN32
+			GWarn->Logf(TEXT("XOpenGL: OpenGL %i.%i context creation failed"), SelectedMajorVersion, SelectedMinorVersion);
+#else
+			GWarn->Logf(TEXT("XOpenGL: SDL_GL_CreateContext failed for OpenGL %i.%i: %ls"), SelectedMajorVersion, SelectedMinorVersion, appFromAnsi(SDL_GetError()));
+#endif
+		}
 		return 0;
+	}
 
 	if (QueryOnly)
 	{
@@ -1281,7 +1292,7 @@ UBOOL UXOpenGLRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL 
 	UBOOL Result = Viewport->ResizeViewport(Fullscreen ? (BLIT_Fullscreen | BLIT_OpenGL) : (BLIT_HardwarePaint | BLIT_OpenGL), NewX, NewY, NewColorBytes);
 	if (!Result)
 	{
-		debugf(TEXT("XOpenGL: Change window size failed!"));
+		GWarn->Logf(TEXT("XOpenGL: Change window size failed!"));
 		if (Fullscreen)
 #if _WIN32
 			ChangeDisplaySettingsW(NULL, 0);
@@ -1306,7 +1317,7 @@ UBOOL UXOpenGLRenderDevice::SetRes(INT NewX, INT NewY, INT NewColorBytes, UBOOL 
 		MakeCurrent();
 	else if (!CreateOpenGLContext(Viewport->GetWindow(), NewColorBytes))
 	{
-		debugf(TEXT("XOpenGL: CreateOpenGLContext failed - failing SetRes"));
+		GWarn->Logf(TEXT("XOpenGL: CreateOpenGLContext failed - failing SetRes"));
 		return 0;
 	}
 

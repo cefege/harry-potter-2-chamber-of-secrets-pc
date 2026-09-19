@@ -12,7 +12,7 @@
 #include <cwchar>
 #include <cstring>
 #include <cstdarg>
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__linux__)
 	#include <alloca.h>
 #endif
 
@@ -23,6 +23,7 @@
 	#define __MACOS__ 1
 	#define __ARM64__ 1
 	#define __INTEL_BYTE_ORDER__ 1
+	#define HP2_HOST_WCHAR_TCHAR 1
 	#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 		#error Apple arm64 builds require little-endian byte order.
 	#endif
@@ -35,6 +36,26 @@
 	#define ASMKNI 0
 	#define ASMLINUX 0
 	#define COMPILER "Compiled with Apple Clang (" __clang_version__ ")"
+#elif defined(__linux__) && (defined(__aarch64__) || defined(__arm64__))
+	#ifndef __UNIX__
+		#define __UNIX__ 1
+	#endif
+	#define __LINUX__ 1
+	#define __ARM64__ 1
+	#define __INTEL_BYTE_ORDER__ 1
+	#define HP2_HOST_WCHAR_TCHAR 1
+	#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+		#error Linux aarch64 builds require little-endian byte order.
+	#endif
+	#undef ASM
+	#undef ASM3DNOW
+	#undef ASMKNI
+	#undef ASMLINUX
+	#define ASM 0
+	#define ASM3DNOW 0
+	#define ASMKNI 0
+	#define ASMLINUX 0
+	#define COMPILER "Compiled with GNU/Clang (" __VERSION__ ")"
 #elif defined(__LINUX_X86__)
 	#define __UNIX__  1
 	#define __LINUX__ 1
@@ -360,7 +381,7 @@ Overflow:
 	return -1;
 }
 
-#if defined(__MACOS__)
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	#define GET_VARARGS(msg,len,fmt) \
 	{ \
 		va_list ArgPtr; \
@@ -446,9 +467,9 @@ static_assert(sizeof(SIZE_T) == sizeof(void*), "SIZE_T must retain host pointer 
 static_assert(sizeof(HANDLE) == sizeof(void*), "HANDLE must retain host pointer width");
 static_assert(sizeof(HINSTANCE) == sizeof(void*), "HINSTANCE must retain host pointer width");
 static_assert(sizeof(HMODULE) == sizeof(void*), "HMODULE must retain host pointer width");
-#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
-static_assert(sizeof(void*) == 8, "Apple arm64 requires an LP64 host ABI");
-static_assert(sizeof(wchar_t) == 4, "Apple arm64 wchar_t must be UTF-32 width");
+#if defined(HP2_HOST_WCHAR_TCHAR)
+static_assert(sizeof(void*) == 8, "host TCHAR must use 32-bit wchar_t");
+static_assert(sizeof(wchar_t) == 4, "host TCHAR must use 32-bit wchar_t");
 #endif
 
 // Make sure characters are unsigned.
@@ -485,7 +506,7 @@ static_assert(sizeof(wchar_t) == 4, "Apple arm64 wchar_t must be UTF-32 width");
 
 // OS unicode function calling.
 #define TCHAR_CALL_OS(funcW,funcA) (funcA)
-#if defined(__APPLE__)
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	#define TCHAR_TO_ANSI(str) appToAnsi(str)
 	#define ANSI_TO_TCHAR(str) appFromAnsi(str)
 #else

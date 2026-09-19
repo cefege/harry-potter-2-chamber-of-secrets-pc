@@ -13,7 +13,7 @@
 #include "Core.h"
 #include "HP2Paths.h"
 
-#include <CommonCrypto/CommonDigest.h>
+#include "HP2PortableSha256.h"
 #include <sys/stat.h>
 
 #include <unistd.h>

@@ -1,5 +1,6 @@
 /*=============================================================================
-	NativeText.cpp: CoreText-backed Canvas layout and XOpenGL glyph atlas.
+	NativeText.cpp: Driver-neutral Canvas glyph atlas and XOpenGL text draw
+	path shared by every native text provider (CoreText, FreeType).
 =============================================================================*/
 
 #include <algorithm>
@@ -22,9 +23,6 @@
 #if !HP2_HAS_NATIVE_TEXT_BACKEND
 #error NativeText.cpp must only be compiled when HP2_HAS_NATIVE_TEXT_BACKEND is enabled.
 #endif
-
-#include <CoreGraphics/CoreGraphics.h>
-#include <CoreText/CoreText.h>
 
 constexpr INT NativeTextAtlasPageLimit = 4;
 
@@ -376,7 +374,7 @@ constexpr INT NativeTextAtlasPageLimit = 4;
 		bool ForcedAllocationFailureObserved{};
 	};
 
-	class FNativeTextCoreTextBackend final : public FNativeTextPlatformBackend
+	class FNativeTextPlatformBackendImpl final : public FNativeTextPlatformBackend
 	{
 	public:
 		UBOOL CreateLayout(const FCanvasTextLayoutRequest& Request, FCanvasTextLayout*& OutLayout) override
@@ -431,7 +429,7 @@ constexpr INT NativeTextAtlasPageLimit = 4;
 			if (!Layout->Underlines.empty() && !Atlas.PrepareSolidPixel(Renderer, PinnedPages, SolidPixel))
 				return 0;
 
-			// Layouts retain CoreText placements and glyph-cache keys, never atlas
+			// Layouts retain shaped placements and glyph-cache keys, never atlas
 			// page pointers.  Every page eviction therefore invalidates references by
 			// construction and the next draw reacquires its glyphs by key.
 			Layout->AtlasGeneration = Atlas.GetGeneration();
@@ -443,9 +441,11 @@ constexpr INT NativeTextAtlasPageLimit = 4;
 				if (!Placement.bDrawable)
 					continue;
 				FNativeTextAtlasGlyph Glyph;
+				double GlyphLeft = 0.0, GlyphTop = 0.0;
+				Hp2NativeText::GlyphDrawOffset(Placement, GlyphLeft, GlyphTop);
 				if (!Atlas.FindGlyph(Placement.Key, Glyph) || !DrawAtlasRect(Renderer, Frame, *Layout, Glyph,
-					static_cast<FLOAT>(Placement.Position.x + std::floor(CGRectGetMinX(Placement.Bounds))),
-					static_cast<FLOAT>(Placement.Position.y - std::ceil(CGRectGetMaxY(Placement.Bounds))),
+					static_cast<FLOAT>(GlyphLeft),
+					static_cast<FLOAT>(GlyphTop),
 					static_cast<FLOAT>(Glyph.Width), static_cast<FLOAT>(Glyph.Height), 0))
 					return 0;
 			}
@@ -467,9 +467,11 @@ constexpr INT NativeTextAtlasPageLimit = 4;
 				if (!Placement.bDrawable)
 					continue;
 				FNativeTextAtlasGlyph Glyph;
+				double GlyphLeft = 0.0, GlyphTop = 0.0;
+				Hp2NativeText::GlyphDrawOffset(Placement, GlyphLeft, GlyphTop);
 				if (!Atlas.FindGlyph(Placement.Key, Glyph) || !DrawAtlasRect(Renderer, Frame, *Layout, Glyph,
-					static_cast<FLOAT>(Placement.Position.x + std::floor(CGRectGetMinX(Placement.Bounds))),
-					static_cast<FLOAT>(Placement.Position.y - std::ceil(CGRectGetMaxY(Placement.Bounds))),
+					static_cast<FLOAT>(GlyphLeft),
+					static_cast<FLOAT>(GlyphTop),
 					static_cast<FLOAT>(Glyph.Width), static_cast<FLOAT>(Glyph.Height), 1))
 					return 0;
 			}
@@ -771,7 +773,7 @@ FNativeTextPlatformBackend* CreateNativeTextPlatformBackend(FNativeTextBackendSt
 
 	OutStatus.Available = true;
 	OutStatus.ReasonCode = ReasonCode;
-	return new FNativeTextCoreTextBackend;
+	return new FNativeTextPlatformBackendImpl;
 }
 FNativeTextPlatformBackend* CreateNativeTextPlatformBackend()
 {

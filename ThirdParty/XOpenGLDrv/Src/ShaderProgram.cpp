@@ -696,7 +696,11 @@ void UXOpenGLRenderDevice::RecompileShaders()
 // We stamp the shader cache with the GL vendor, renderer, version, and the XOpenGL build date.
 // If any of these change, we discard the cache and recompile all shaders from source.
 #if !MACOSX
-static FString ShaderCacheBuildDate = appFromAnsi(__DATE__);
+static FString& ShaderCacheBuildDate()
+{
+	static FString Cached = appFromAnsi(__DATE__);
+	return Cached;
+}
 #endif
 
 UBOOL UXOpenGLRenderDevice::SaveShaderCache()
@@ -715,7 +719,7 @@ UBOOL UXOpenGLRenderDevice::SaveShaderCache()
 	FString VendorString   = appFromAnsi((const ANSICHAR*)glGetString(GL_VENDOR));
 	FString RendererString = appFromAnsi((const ANSICHAR*)glGetString(GL_RENDERER));
 	FString VersionString  = appFromAnsi((const ANSICHAR*)glGetString(GL_VERSION));
-	*Ar << VendorString << RendererString << VersionString << ShaderCacheBuildDate;
+	*Ar << VendorString << RendererString << VersionString << ShaderCacheBuildDate();
 
 	INT NumEntries = 0;
 	for (const auto Shader : Shaders)
@@ -781,9 +785,9 @@ UBOOL UXOpenGLRenderDevice::LoadShaderCache()
 		return 0;
 	}
 
-	if (BuildDate != ShaderCacheBuildDate)
+	if (BuildDate != ShaderCacheBuildDate())
 	{
-		debugf(NAME_Init, TEXT("XOpenGL: Shader cache build date is: %ls (cache) - expected: %ls (client). Discarding it."), *BuildDate, *ShaderCacheBuildDate);
+		debugf(NAME_Init, TEXT("XOpenGL: Shader cache build date is: %ls (cache) - expected: %ls (client). Discarding it."), *BuildDate, *ShaderCacheBuildDate());
 		delete Ar;
 		return 0;
 	}

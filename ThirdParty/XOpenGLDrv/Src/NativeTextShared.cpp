@@ -957,6 +957,12 @@ namespace Hp2NativeText
 			OutRaster.Alpha[Index] = Pixels[Index * 4u + 3u];
 		return true;
 	}
+
+	void GlyphDrawOffset(const FGlyphPlacement& Placement, double& OutLeft, double& OutTop)
+	{
+		OutLeft = Placement.Position.x + std::floor(CGRectGetMinX(Placement.Bounds));
+		OutTop  = Placement.Position.y - std::ceil(CGRectGetMaxY(Placement.Bounds));
+	}
 }
 
 void BeginNativeTextRuntimeSmoke()

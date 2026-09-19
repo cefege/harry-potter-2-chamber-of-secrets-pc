@@ -183,7 +183,7 @@ public:
 		Ar.ByteOrderSerialize( &S, appCheckedIntSize(sizeof(S)) );
 		return Ar;
 	}
-#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	friend FArchive& operator<<( FArchive& Ar, wchar_t& C )
 	{
 		UNICHAR Wire = Ar.IsLoading() ? 0 : ToUnicode(C);

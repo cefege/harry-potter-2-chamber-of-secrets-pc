@@ -2,26 +2,37 @@ cmake_minimum_required(VERSION 3.24)
 
 project(HarryPotter2Native
     VERSION 0.1.0
-    LANGUAGES C CXX OBJC OBJCXX
+    LANGUAGES C CXX
 )
 
-if(NOT APPLE OR NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    message(FATAL_ERROR "HarryPotter2Native supports Darwin only.")
-endif()
+if(APPLE)
+    enable_language(OBJC)
+    enable_language(OBJCXX)
 
-if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR
-   NOT CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
-    message(FATAL_ERROR "HarryPotter2Native must be configured natively on an arm64 Darwin host.")
-endif()
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        message(FATAL_ERROR "HarryPotter2Native supports Darwin only.")
+    endif()
 
-if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    message(FATAL_ERROR
-        "HarryPotter2Native is arm64-only; configure with CMAKE_OSX_ARCHITECTURES=arm64.")
-endif()
+    if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR
+       NOT CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+        message(FATAL_ERROR "HarryPotter2Native must be configured natively on an arm64 Darwin host.")
+    endif()
 
-if(NOT CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "15.0")
-    message(FATAL_ERROR
-        "HarryPotter2Native targets macOS 15.0; configure with CMAKE_OSX_DEPLOYMENT_TARGET=15.0.")
+    if(NOT CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+        message(FATAL_ERROR
+            "HarryPotter2Native is arm64-only; configure with CMAKE_OSX_ARCHITECTURES=arm64.")
+    endif()
+
+    if(NOT CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL "15.0")
+        message(FATAL_ERROR
+            "HarryPotter2Native targets macOS 15.0; configure with CMAKE_OSX_DEPLOYMENT_TARGET=15.0.")
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        message(FATAL_ERROR "HarryPotter2Native supports Linux on aarch64 only.")
+    endif()
+else()
+    message(FATAL_ERROR "HarryPotter2Native supports Darwin and Linux only.")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)

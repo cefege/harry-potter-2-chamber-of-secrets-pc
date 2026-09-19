@@ -154,9 +154,15 @@ set(HP2_LAUNCHER_CORE_SOURCES
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LaunchPolicy.cpp"
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherStore.cpp"
 )
-set(HP2_NATIVE_LAUNCHER_SOURCE
-    "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2MacLauncher.mm"
-)
+if(APPLE)
+    set(HP2_NATIVE_LAUNCHER_SOURCE
+        "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2MacLauncher.mm"
+    )
+else()
+    set(HP2_NATIVE_LAUNCHER_SOURCE
+        "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2ShellLauncher.cpp"
+    )
+endif()
 set(HP2_SDL_LAUNCH_SOURCES
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/SDLLaunch.cpp"
     ${HP2_LAUNCHER_CORE_SOURCES}

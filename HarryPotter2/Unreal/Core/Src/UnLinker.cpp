@@ -162,7 +162,7 @@ ULinkerLoad::ULinkerLoad( UObject* InParent, const TCHAR* InFilename, DWORD InLo
 {
 	guard(ULinkerLoad::ULinkerLoad);
 #if 0 //Debug added by Legend on 4/12/2000
-	debugf( TEXT("%1.1fms Loading: %s"), appSeconds() * 1000.0, InParent->GetFullName() );
+	debugf( TEXT("%1.1fms Loading: %s"), appSeconds().GetFloat() * 1000.0, InParent->GetFullName() );
 #endif
 	Loader = GFileManager->CreateFileReader( InFilename, 0, GError );
 	if( !Loader )
@@ -765,7 +765,7 @@ ULinkerLoad::Destroy()
 {
 	guard(ULinkerLoad::Destroy);
 #if 1 //Debug added by Legend on 4/12/2000
-	debugf( TEXT("%1.1fms Unloading: %s"), appSeconds() * 1000.0, LinkerRoot->GetFullName() );
+	debugf( TEXT("%1.1fms Unloading: %s"), appSeconds().GetFloat() * 1000.0, LinkerRoot->GetFullName() );
 #endif
 
 	// Detach all lazy loaders.

@@ -3,6 +3,9 @@
 	Copyright 1997-1999 Epic Games, Inc. All Rights Reserved.
 =============================================================================*/
 
+#include <string>
+
+
 /*-----------------------------------------------------------------------------
 	Global variables.
 -----------------------------------------------------------------------------*/
@@ -187,8 +190,11 @@ CORE_API void VARARGS appThrowf( const TCHAR* Fmt, ... );
 -----------------------------------------------------------------------------*/
 
 //
-// Normal timing.
-//
+// Normal timing. Pre-include <time.h> so libstdc++'s transitive pulls (via
+// <memory>/pthread on Linux) see it already header-guarded; otherwise a
+// later first-time include would try to declare clock() while this macro
+// shadows the identifier.
+#include <time.h>
 #define clock(Timer)   {Timer -= appCycles();}
 #define unclock(Timer) {Timer += appCycles()-34;}
 

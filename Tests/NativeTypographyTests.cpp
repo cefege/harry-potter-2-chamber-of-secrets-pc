@@ -3,6 +3,7 @@
 #include "Engine.h"
 #include "UnRenDev.h"
 #include "NativeText.h"
+#include "NativeTextShared.h"
 #include "HP2Paths.h"
 #include "FMallocAnsi.h"
 #include "FFileManagerUnix.h"
@@ -247,6 +248,48 @@ void TestShaping()
 	Check( TimesInfo.GlyphKeyCount && HelveticaInfo.GlyphKeyCount && TimesInfo.GlyphKeyFingerprint != HelveticaInfo.GlyphKeyFingerprint, "glyph cache identity ignored resolved CTFont identity" );
 }
 
+void TestGlyphCoverage()
+{
+	std::unique_ptr<FNativeTextPlatformBackend> Backend(CreateNativeTextPlatformBackend());
+	Check( Backend.get() != NULL, "text backend was not created" );
+	if( !Backend ) return;
+	UFont* Times = CreateFontFixture(TEXT("Times"), 18);
+	if( !Times ) return;
+
+	const TCHAR A[] = { 'A', 0 };
+	FLayout Layout = { *Backend, NULL };
+	Check( Backend->CreateLayout(RequestFor(*Times, A), Layout.Value) && Layout.Value, "coverage layout failed" );
+	if( !Layout.Value ) return;
+
+	const Hp2NativeText::FGlyphPlacement* Drawable = NULL;
+	for( const Hp2NativeText::FGlyphPlacement& Placement : Layout.Value->Glyphs )
+	{
+		if( Placement.bDrawable )
+		{
+			Drawable = &Placement;
+			break;
+		}
+	}
+	Check( Drawable != NULL, "glyph 'A' produced no drawable placement" );
+	if( !Drawable ) return;
+
+	Hp2NativeText::FRasterizedGlyph Raster;
+	Check( Hp2NativeText::RasterizeGlyph(*Drawable, Hp2NativeText::PageSize, Raster), "glyph rasterization failed" );
+	Check( Raster.Width > 0 && Raster.Height > 0 &&
+		Raster.Alpha.size() == static_cast<size_t>(Raster.Width) * static_cast<size_t>(Raster.Height),
+		"glyph rasterization produced no coverage" );
+
+	bool HasFullCoverage = false;
+	bool HasPartialCoverage = false;
+	for( BYTE Alpha : Raster.Alpha )
+	{
+		if( Alpha >= 250 ) HasFullCoverage = true;
+		else if( Alpha > 0 ) HasPartialCoverage = true;
+	}
+	Check( HasFullCoverage, "glyph coverage never reached full opacity" );
+	Check( HasPartialCoverage, "glyph coverage was not antialiased" );
+}
+
 void TestLayoutSemantics()
 {
 	std::unique_ptr<FNativeTextPlatformBackend> Backend(CreateNativeTextPlatformBackend());
@@ -292,6 +335,7 @@ int main( int ArgC, char** ArgV )
 	TestUTF16Conversion();
 	TestRejectedRequests();
 	TestShaping();
+	TestGlyphCoverage();
 	TestLayoutSemantics();
 	return Failures == 0 ? 0 : 1;
 }

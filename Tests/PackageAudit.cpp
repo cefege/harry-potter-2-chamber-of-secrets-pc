@@ -2,17 +2,6 @@
 	PackageAudit.cpp: Deterministic package-79 runtime audit and audio corpus dump.
 =============================================================================*/
 
-#include "Engine.h"
-#include "FConfigCacheIni.h"
-#include "FFeedbackContextAnsi.h"
-#include "FFileManagerUnix.h"
-#include "FMallocAnsi.h"
-#include "FOutputDeviceAnsiError.h"
-#include "FOutputDeviceFile.h"
-#include "HP2Paths.h"
-#include "HP2StaticPackages.h"
-#include "UnLinker.h"
-
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -33,6 +22,17 @@
 #if !defined(_WIN32)
 #include <unistd.h>
 #endif
+
+#include "Engine.h"
+#include "FConfigCacheIni.h"
+#include "FFeedbackContextAnsi.h"
+#include "FFileManagerUnix.h"
+#include "FMallocAnsi.h"
+#include "FOutputDeviceAnsiError.h"
+#include "FOutputDeviceFile.h"
+#include "HP2Paths.h"
+#include "HP2StaticPackages.h"
+#include "UnLinker.h"
 
 INT GFilesOpen = 0;
 INT GFilesOpened = 0;

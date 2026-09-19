@@ -43,7 +43,7 @@ else:
 SmokeError = game_test.GameTestError
 
 
-DEFAULT_APP = Path("dist/macos-arm64/HarryPotter2.app")
+DEFAULT_APP = Path("dist/linux-arm64/bin/hp2_game" if sys.platform.startswith("linux") else "dist/macos-arm64/HarryPotter2.app")
 DEFAULT_DATA_ROOT = Path("HarryPotter2/Unreal")
 DEFAULT_TICKS = 300
 DEFAULT_TIMEOUT_SECONDS = 120.0

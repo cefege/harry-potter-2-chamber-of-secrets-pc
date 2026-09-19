@@ -703,10 +703,21 @@ void TestConventionalDataRoots()
 	const char* priorHomeValue = std::getenv("HOME");
 	const bool hadHome = priorHomeValue != nullptr;
 	const std::string priorHome = hadHome ? priorHomeValue : "";
+	const char* priorXdgDataHomeValue = std::getenv("XDG_DATA_HOME");
+	const bool hadXdgDataHome = priorXdgDataHomeValue != nullptr;
+	const std::string priorXdgDataHome = hadXdgDataHome ? priorXdgDataHomeValue : "";
 	::setenv("HOME", roots.root.c_str(), 1);
+	// A real desktop session's $XDG_DATA_HOME would otherwise outrank the
+	// redirected $HOME below when resolving the Linux data-home prefix.
+	::unsetenv("XDG_DATA_HOME");
 
+#if MACOSX
 	const fs::path dataRoot = fs::canonical(roots.root) / "Library" / "Application Support" /
 		"Harry Potter 2" / "Data";
+#else
+	const fs::path dataRoot = fs::canonical(roots.root) / ".local" / "share" /
+		"harry-potter-2" / "Data";
+#endif
 	const fs::path expectedRetail = dataRoot / "Retail";
 	const fs::path expectedPrototype = dataRoot / "Prototype";
 	Expect(!fs::exists(expectedRetail) && !fs::exists(expectedPrototype),
@@ -734,6 +745,10 @@ void TestConventionalDataRoots()
 		::setenv("HOME", priorHome.c_str(), 1);
 	else
 		::unsetenv("HOME");
+	if (hadXdgDataHome)
+		::setenv("XDG_DATA_HOME", priorXdgDataHome.c_str(), 1);
+	else
+		::unsetenv("XDG_DATA_HOME");
 }
 
 fs::path CreateDataRoot(const TemporaryRoots& roots, const char* name, const char* sentinel)
@@ -981,7 +996,11 @@ void TestDataDirectoryArgumentContract()
 	const char* priorHomeValue = std::getenv("HOME");
 	const bool hadHome = priorHomeValue != nullptr;
 	const std::string priorHome = hadHome ? priorHomeValue : "";
+	const char* priorXdgDataHomeValue = std::getenv("XDG_DATA_HOME");
+	const bool hadXdgDataHome = priorXdgDataHomeValue != nullptr;
+	const std::string priorXdgDataHome = hadXdgDataHome ? priorXdgDataHomeValue : "";
 	::setenv("HOME", roots.root.c_str(), 1);
+	::unsetenv("XDG_DATA_HOME");
 	Arguments arguments({"hp2", "--datadir=" + prototype.string(), "-DaTaDiR=" + retail.string(),
 		"-datadir=" + prototype.string()});
 	std::string retailArgumentBefore = arguments.storage[2];
@@ -996,6 +1015,10 @@ void TestDataDirectoryArgumentContract()
 		::setenv("HOME", priorHome.c_str(), 1);
 	else
 		::unsetenv("HOME");
+	if (hadXdgDataHome)
+		::setenv("XDG_DATA_HOME", priorXdgDataHome.c_str(), 1);
+	else
+		::unsetenv("XDG_DATA_HOME");
 }
 
 LegacySettingValue V(const char* section, const char* key, const char* value)

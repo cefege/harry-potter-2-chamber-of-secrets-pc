@@ -22,7 +22,11 @@ SCHEMA_VERSION = 1
 STATE_FILENAME = "hp2-state.json"
 
 DEFAULT_UNREAL_ROOT = Path("HarryPotter2/Unreal")
-DEFAULT_APP_BUNDLE = Path("dist/macos-arm64/HarryPotter2.app")
+DEFAULT_APP_BUNDLE = (
+    Path("dist/macos-arm64/HarryPotter2.app")
+    if sys.platform == "darwin"
+    else Path("dist/linux-arm64/bin/hp2_game")
+)
 DEFAULT_RETAIL_DATA_DIR = Path("out/retail-data")
 OVERLAY_MANIFEST_NAME = "overlay-manifest.json"
 
@@ -116,7 +120,7 @@ def read_build_facts(build_dir: Path) -> dict[str, object]:
         missing.append("CMAKE_CXX_COMPILER_ID (CMakeFiles/*/CMakeCXXCompiler.cmake)")
     if not cxx_compiler:
         missing.append("CMAKE_CXX_COMPILER (CMakeCache.txt)")
-    if deployment_target is None:
+    if sys.platform == "darwin" and deployment_target is None:
         missing.append("CMAKE_OSX_DEPLOYMENT_TARGET (CMakeCache.txt)")
     if missing:
         raise StateError(
@@ -127,7 +131,7 @@ def read_build_facts(build_dir: Path) -> dict[str, object]:
     return {
         "compiler_id": compiler_id,
         "cxx_compiler": cxx_compiler,
-        "osx_deployment_target": deployment_target.strip(),
+        "osx_deployment_target": deployment_target.strip() if deployment_target is not None else None,
         "native_text_backend": resolve_native_text_backend(cache, definitions),
         "full_map_smoke": _cache_bool(cache.get(FULL_MAP_SMOKE_CACHE_VAR, "OFF")),
     }

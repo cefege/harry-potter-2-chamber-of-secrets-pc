@@ -256,7 +256,19 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 
 	if( !SdlWindow )
 	{
-		DWORD Flags = SDL_WINDOW_RESIZABLE | (Temporary ? SDL_WINDOW_HIDDEN : 0);
+		// EGL (Wayland) binds the framebuffer config at window creation, unlike
+		// GLX which can still honour attributes set before context creation.
+		// XOpenGL's SetSDLAttributes runs only later, in SetRes, so request the
+		// framebuffer-side attributes here or Wayland silently downgrades depth
+		// (observed: 24 requested, 16 provided). Context version/profile stay in
+		// SetSDLAttributes; they are only consumed at context creation.
+		SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
+		SDL_GL_SetAttribute( SDL_GL_DEPTH_SIZE, 24 );
+		SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8 );
+		SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8 );
+		SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
+
+		DWORD Flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (Temporary ? SDL_WINDOW_HIDDEN : 0);
 		if( C->BorderlessWindow )
 			Flags |= SDL_WINDOW_BORDERLESS;
 		SdlWindow = SDL_CreateWindow(
@@ -280,7 +292,11 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 	UpdateMouseScale( *this );
 
 	if( !ParseParam(appCmdLine(),TEXT("nohard")) )
+	{
 		TryRenderDevice( TEXT("ini:Engine.Engine.GameRenderDevice"), SizeX, SizeY, ColorBytes, IsFullscreen() );
+		if( !RenDev )
+			appErrorf( TEXT("No render device could be initialized (see the XOpenGL messages above for the failing reason)") );
+	}
 	unguard;
 }
 
@@ -429,6 +445,21 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 						LostGrab = 0;
 					}
 				}
+				else if( Kind == SDL_WINDOWEVENT_RESIZED )
+				{
+					// Wayland compositors can resize the xdg-toplevel out from
+					// under us (tiling layout, compositor-driven fullscreen)
+					// without ever routing through ToggleFullscreen/EndFullscreen.
+					// Left unhandled, SizeX/SizeY, MouseScaleX/Y, and the render
+					// device's resolution go stale while SDL's own window size
+					// (and therefore SDL_MOUSEMOTION coordinates) track the new
+					// size, so the menu cursor drifts away from the pointer by
+					// the gap between the old and new size.
+					const INT NewWidth = Event.window.data1;
+					const INT NewHeight = Event.window.data2;
+					if( NewWidth > 0 && NewHeight > 0 && (NewWidth != SizeX || NewHeight != SizeY) )
+						ResizeViewport( BLIT_NoWindowChange, NewWidth, NewHeight, INDEX_NONE );
+				}
 				break;
 			}
 			default:
@@ -446,8 +477,24 @@ void* USDLViewport::GetWindow()
 void USDLViewport::SetMouseCapture( UBOOL Capture, UBOOL Clip, UBOOL FocusOnly )
 {
 	guard(USDLViewport::SetMouseCapture);
-	if( Capture && FocusOnly && SdlWindow && !(SDL_GetWindowFlags(SdlWindow) & SDL_WINDOW_INPUT_FOCUS) )
+	if( !Capture )
+	{
+		// An explicit release cancels any grab deferred below while still
+		// waiting for focus; otherwise a later FOCUS_GAINED could complete
+		// a grab into a menu that opened before focus ever arrived.
+		LostGrab = 0;
+	}
+	else if( FocusOnly && SdlWindow && !(SDL_GetWindowFlags(SdlWindow) & SDL_WINDOW_INPUT_FOCUS) )
+	{
+		// Window doesn't have input focus yet -- a real race right as
+		// gameplay starts, before the compositor finishes focusing the
+		// freshly created window. Defer instead of dropping the request:
+		// mark it pending exactly like a grab lost to a real focus loss, so
+		// the existing SDL_WINDOWEVENT_FOCUS_GAINED handler's tested
+		// HP2Capture::OnRestore completes it once focus genuinely arrives.
 		Capture = 0;
+		LostGrab = 1;
+	}
 	UpdateMouseGrabState( Capture );
 	unguard;
 }
@@ -502,6 +549,13 @@ void USDLViewport::UpdateMouseGrabState( UBOOL Capture )
 {
 	guard(USDLViewport::UpdateMouseGrabState);
 	Capture = Capture ? 1 : 0;
+	// UWindow's console only adopts an absolute pointer position when this is
+	// set (WindowConsole.uc RenderUWindow); otherwise it accumulates IK_MouseX/Y
+	// deltas, which this driver emits only while grabbed, so a released-for-menu
+	// cursor would never move. Mirrors UWindowsViewport::SetMouseCapture. Assign
+	// above the early return so cold start (MouseIsGrabbed(0) at construction)
+	// still sets the flag on the first UpdateMouseGrabState(0) call.
+	bWindowsMouseAvailable = !Capture;
 	if( Capture == (INT)MouseIsGrabbed )
 		return; // No transition; cursor visibility must stay untouched.
 

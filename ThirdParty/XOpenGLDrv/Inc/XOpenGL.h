@@ -2073,7 +2073,7 @@ class UXOpenGLRenderDevice : public URenderDevice
     static void DebugCallback(unsigned int source, unsigned int type, unsigned int id, unsigned int severity, int length, const char* message, const void* userParam);
 #endif
 private:
-	friend class FNativeTextCoreTextBackend;
+	friend class FNativeTextPlatformBackendImpl;
 	friend class FNativeTextAtlas;
 	void PrepareNativeTextTextureMutation(GLuint Texture);
 

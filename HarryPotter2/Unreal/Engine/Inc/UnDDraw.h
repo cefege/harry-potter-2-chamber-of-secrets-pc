@@ -183,9 +183,9 @@ static_assert(sizeof(DDCOLORKEY) == 8, "DDCOLORKEY numeric layout must remain fi
 static_assert(sizeof(DDSCAPS) == 4, "DDSCAPS numeric layout must remain fixed");
 static_assert(sizeof(DDPIXELFORMAT) == 32, "DDPIXELFORMAT numeric layout must remain fixed");
 static_assert(sizeof(((DDSURFACEDESC*)0)->lPitch) == 4, "DDSURFACEDESC pitch must remain 32-bit");
-#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#if defined(HP2_HOST_WCHAR_TCHAR)
 static_assert(offsetof(DDSURFACEDESC, lpSurface) == 40, "DDSURFACEDESC host pointer offset changed");
-static_assert(sizeof(DDSURFACEDESC) == 120, "DDSURFACEDESC Apple arm64 API layout changed");
+static_assert(sizeof(DDSURFACEDESC) == 120, "DDSURFACEDESC host arm64 API layout changed");
 #endif
 #endif
 

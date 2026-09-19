@@ -104,7 +104,7 @@ enum {UNICODE_BOM   = 0xfeff     };
 enum ENoInit {E_NoInit = 0};
 
 // Host and serialized character mappings.
-#if defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__))
+#if defined(HP2_HOST_WCHAR_TCHAR)
 	#ifndef _TCHAR_DEFINED
 		typedef wchar_t TCHAR;
 		typedef wchar_t TCHARU;
@@ -134,8 +134,8 @@ enum ENoInit {E_NoInit = 0};
 			? static_cast<UNICHAR>(In)
 			: static_cast<UNICHAR>(0xfffd);
 	}
-	static_assert(sizeof(TCHAR) == 4, "Apple host TCHAR must use 32-bit wchar_t");
-	static_assert(sizeof(TCHARU) == 4, "Apple host TCHARU must use 32-bit wchar_t");
+	static_assert(sizeof(TCHAR) == 4, "host TCHAR must use 32-bit wchar_t");
+	static_assert(sizeof(TCHARU) == 4, "host TCHAR must use 32-bit wchar_t");
 	static_assert(sizeof(UNICHAR) == 2, "Serialized Unicode must remain UTF-16");
 #elif defined(_UNICODE)
 	#ifndef _TCHAR_DEFINED
