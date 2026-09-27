@@ -87,10 +87,10 @@ cmake --preset linux-arm64
 cmake --build --preset linux-arm64
 ```
 
-The packaged app lands at:
+The packaged build lands at:
 ```
 dist/macos-arm64/HarryPotter2.app   # macOS
-out/linux-arm64/                    # Linux
+dist/linux-arm64/                   # Linux (bin/, lib/, share/)
 ```
 
 ### 2. Import Game Data
@@ -119,14 +119,14 @@ python3 Build/prepare_retail_data.py \
 
 ### 3. Run
 
-Open the packaged app:
+Open the packaged build:
 
 ```sh
 # macOS
 open dist/macos-arm64/HarryPotter2.app
 
 # Linux
-out/linux-arm64/HarryPotter2
+./dist/linux-arm64/bin/hp2_game
 ```
 
 In the launcher window:
