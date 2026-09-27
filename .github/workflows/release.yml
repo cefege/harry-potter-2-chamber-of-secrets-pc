@@ -24,6 +24,11 @@ env:
   # the repository rather than hardcoded so a branch rename cannot silently
   # push the commit somewhere Homebrew never looks.
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  # Repo rule: structured reports and distributable artifacts land under
+  # HP2_ARTIFACT_DIR, never ad-hoc in the tree. Every step that references it
+  # runs under `set -u`, so it must be defined at workflow scope or the job
+  # aborts before it can publish anything.
+  HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/release-artifacts
 
 jobs:
   publish:
