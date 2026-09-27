@@ -5591,7 +5591,15 @@ int main( int ArgC, char* ArgV[] )
 		// silently gets an XWayland window. Prefer Wayland and keep X11 as the
 		// fallback for X sessions. SDL_HINT_VIDEODRIVER accepts a comma-ordered
 		// list; an unavailable first entry falls through to the next.
+		//
+		// Linux only. Naming wayland,x11 on macOS makes SDL_CreateWindow fail
+		// outright ("wayland,x11 not available"), because neither backend is
+		// built there and the hint is not a preference list across platforms.
+#if MACOSX
+		SDL_SetHint( SDL_HINT_VIDEODRIVER, "cocoa" );
+#else
 		SDL_SetHint( SDL_HINT_VIDEODRIVER, "wayland,x11" );
+#endif
 
 		if( SDL_Init( SDL_INIT_VIDEO | SDL_INIT_JOYSTICK ) != 0 )
 			debugf( NAME_Warning, TEXT("SDL_Init failed: %s"), *SdlStatusText( SDL_GetError() ) );

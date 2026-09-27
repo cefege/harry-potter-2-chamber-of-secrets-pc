@@ -47,12 +47,13 @@ set(HP2_MACOS_EXECUTABLE_DIR "${HP2_MACOS_CONTENTS_DIR}/MacOS")
 set(HP2_MACOS_FRAMEWORKS_DIR "${HP2_MACOS_CONTENTS_DIR}/Frameworks")
 set(HP2_MACOS_EXECUTABLE "${HP2_MACOS_EXECUTABLE_DIR}/HarryPotter2")
 set(HP2_MACOS_INFO_PLIST "${HP2_MACOS_CONTENTS_DIR}/Info.plist")
+set(HP2_MACOS_RESOURCES_DIR "${HP2_MACOS_CONTENTS_DIR}/Resources")
+set(HP2_IMPORT_SCRIPT
+    "${PROJECT_SOURCE_DIR}/Build/prepare_retail_data.py")
+set(HP2_IMPORT_LAUNCHER
+    "${PROJECT_SOURCE_DIR}/Build/hp2-import-game-data.sh")
 set(HP2_MACOS_OPENAL_DYLIB
-    "${HP2_MACOS_FRAMEWORKS_DIR}/$<TARGET_FILE_NAME:OpenAL>")
-set(HP2_MACOS_OPENAL_SONAME_LINK
     "${HP2_MACOS_FRAMEWORKS_DIR}/$<TARGET_SONAME_FILE_NAME:OpenAL>")
-set(HP2_MACOS_OPENAL_LINKER_LINK
-    "${HP2_MACOS_FRAMEWORKS_DIR}/$<TARGET_LINKER_FILE_NAME:OpenAL>")
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Packaging")
 set(HP2_MACOS_CONFIGURED_PLIST
@@ -81,21 +82,28 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${HP2_MACOS_EXECUTABLE_DIR}"
         "${HP2_MACOS_FRAMEWORKS_DIR}"
+        "${HP2_MACOS_RESOURCES_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy
         "$<TARGET_FILE:hp2_game>"
         "${HP2_MACOS_EXECUTABLE}"
+    # Ship the dylib under the soname the executable actually resolves
+    # (@rpath/libopenal.1.dylib) instead of its versioned build-tree name plus
+    # two symlinks. A quarantine flag propagates onto symlinks when a DMG is
+    # downloaded or a cask is installed, which breaks the code seal and makes
+    # codesign --verify fail on the *installed* app even though the source
+    # bundle is clean. One real file, no symlinks, nothing to propagate onto.
     COMMAND "${CMAKE_COMMAND}" -E copy
         "$<TARGET_FILE:OpenAL>"
         "${HP2_MACOS_OPENAL_DYLIB}"
-    COMMAND "${CMAKE_COMMAND}" -E create_symlink
-        "$<TARGET_FILE_NAME:OpenAL>"
-        "${HP2_MACOS_OPENAL_SONAME_LINK}"
-    COMMAND "${CMAKE_COMMAND}" -E create_symlink
-        "$<TARGET_SONAME_FILE_NAME:OpenAL>"
-        "${HP2_MACOS_OPENAL_LINKER_LINK}"
     COMMAND "${CMAKE_COMMAND}" -E copy
         "${HP2_MACOS_CONFIGURED_PLIST}"
         "${HP2_MACOS_INFO_PLIST}"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "${HP2_IMPORT_SCRIPT}"
+        "${HP2_MACOS_RESOURCES_DIR}/prepare_retail_data.py"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "${HP2_IMPORT_LAUNCHER}"
+        "${HP2_MACOS_RESOURCES_DIR}/Import Game Data.command"
     COMMAND "${HP2_INSTALL_NAME_TOOL}"
         -id "@rpath/$<TARGET_SONAME_FILE_NAME:OpenAL>"
         "${HP2_MACOS_OPENAL_DYLIB}"
