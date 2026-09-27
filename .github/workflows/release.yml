@@ -126,9 +126,14 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           sha256="${{ steps.checksum.outputs.sha256 }}"
 
+          # GH_TOKEN is exported by this step's env block; Actions does not
+          # define GITHUB_TOKEN, and `set -u` would abort the step after the
+          # release is already public, leaving the cask unpinned. Masked so a
+          # clone failure cannot echo the credential into the log.
+          echo "::add-mask::${GH_TOKEN}"
           bump_dir="$(mktemp -d)"
-          git clone --depth 1 --branch "${DEFAULT_BRANCH}" \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+          git clone --quiet --depth 1 --branch "${DEFAULT_BRANCH}" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "${bump_dir}"
 
           cd "${bump_dir}"
