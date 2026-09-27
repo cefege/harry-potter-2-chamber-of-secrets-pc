@@ -13,7 +13,7 @@ cask "harry-potter-2" do
 
   # Stamped by Build/stamp_cask.py during a tagged release, so the checksum
   # always matches the artifact that actually shipped.
-  sha256 :no_check
+  sha256 "aebc33e00e0da67b2500a89cf06b360db8ff05f37ca61adc1c63e444a09805d2"
 
   url "https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/download/v#{version}/HarryPotter2-#{version}-macos-arm64.dmg",
       verified: "github.com/cefege/harry-potter-2-chamber-of-secrets-pc/"
