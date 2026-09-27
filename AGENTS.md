@@ -12,7 +12,6 @@ References" below); treat those as dead, not as a second live subsystem.
 
 ## Ownership / Subsystem Map
 
-<<<<<<< HEAD
 |Subsystem|Path|Notes|
 |---|---|---|
 |Core|`HarryPotter2/Unreal/Core/`|Object model, serialization (`FName`/`FString`, package79 archives), memory, names, portable SHA-256|
@@ -61,33 +60,6 @@ Left over from the removed Rust rewrite; do not treat as live, do not extend:
 If a task touches these paths, flag the drift to the user rather than quietly
 "fixing" cross-cutting doc/script debt as a side effect of an unrelated
 change.
-=======
-| Subsystem | Path | Notes |
-| --- | --- | --- |
-| Core | `HarryPotter2/Unreal/Core/` | Object model, serialization (`FName`/`FString`, package79 archives), memory, names (legacy era — slated for cutover removal) |
-| Engine | `HarryPotter2/Unreal/Engine/` | Game loop, `UEngine::InputEvent` dispatch, level flow (legacy era — slated for cutover removal) |
-| Render | `HarryPotter2/Unreal/Render/` | Scene rendering shared by driver backends (legacy era — slated for cutover removal) |
-| XOpenGLDrv | `ThirdParty/XOpenGLDrv/` | GL driver + text seam (`FCanvasTextRequest`, `FNativeTextPlatformBackend`). Pinned upstream; see ThirdParty rules below (legacy era — slated for cutover removal) |
-| SDLDrv | `HarryPotter2/Unreal/SDLLaunch/` | SDL2 window/input (`USDLViewport` → `CauseInputEvent`), launch policy/store, `HP2MacLauncher.mm` (legacy era — slated for cutover removal) |
-| Launcher | `HarryPotter2/Unreal/Launch/` | Bootstrap paths, static packages, editor runtime entry (legacy era — slated for cutover removal) |
-| ALAudio / codecs | `HarryPotter2/Unreal/ALAudio/`, `EAAudioCodec/`, `Vorbis/`, `OpenAL/` | Sound pipeline (legacy era — slated for cutover removal) |
-| hp-format | `crates/hp-format/` | Package79 archive read/write, FName/FString byte forms, tagged properties, EA-XA decoder, DXT1 decode, mesh structs, font glyph blits |
-| hp-ini | `crates/hp-ini/` | UE1 INI parse/merge/write contract (`FConfigFile`/`FConfigCacheIni`) plus launcher path resolution |
-| hp-uobject | `crates/hp-uobject/` | Name pool, object arena, classes-from-data, tagged-property access, UnrealScript VM, world snapshot hashing |
-| hp-render | `crates/hp-render/` | wgpu renderer: headless/offscreen and windowed swapchain targets, surface draw pipelines, texture manager, bitmap-glyph canvas |
-| hp-audio | `crates/hp-audio/` | rodio output graph, Ogg-loop and XA stream types mirroring the ALAudio streaming path |
-| hp-engine | `crates/hp-engine/` | Level bootstrap, actor projection, tick orchestration, byte-exact save reader/writer + native repair, camera math, seeded determinism RNG |
-| hp-app | `crates/hp-app/` | winit event-loop ownership, CLI parsing, launcher profile store, input normalization, egui-wgpu app shell |
-| hp2rs | `crates/hp2rs/` | Engine binary: frozen headless harness protocol (`game_test.py`) plus interactive windowed mode |
-| Build scripts | `Build/*.py` | `game_test.py`, `smoke_maps.py`, `check_bundle.py` / `check_bundle_rs.py`, `prepare_retail_data.py`, `repair_save.py`, `abi_inventory.py`, `package_rust_app.py`, `retail_flow_smoke.py`; CMake modules in `Build/CMake/` |
-| Tests | `Tests/` | C++ `*Tests.cpp` (`main()`-style, minimal TU), Python `*Tests.py` (`unittest`, no app launch), fixtures in `Tests/Fixtures/`; Rust contracts live in-crate under `crates/*/src` (+ `tests/` where present) |
-| Data roots | `HarryPotter2/Unreal/` (prototype), retail overlay via `Build/prepare_retail_data.py` | Prototype root is `HP2_UNREAL_ROOT` in `Build/CMake/HP2Sources.cmake` |
-| Dist bundle | `dist/macos-arm64/HarryPotter2.app` | Installed C++ app; verify with `Build/check_bundle.py` (legacy era — slated for cutover removal) |
-| Release DMG | `dist/macos-arm64/HarryPotter2-<version>-macos-arm64.dmg` | Built by the `hp2_macos_dmg` target; the artifact Homebrew and GitHub Releases serve |
-| Homebrew cask | `Casks/harry-potter-2.rb` | This repo is its own tap (tap name must equal the repo name). `version`/`sha256` are owned by `.github/workflows/release.yml` via `Build/stamp_cask.py` — never hand-edit |
-| In-bundle importer | `Build/hp2-import-game-data.sh` | Wraps `prepare_retail_data.py`; shipped as `Contents/Resources/Import Game Data.command` and documented in `Docs/PLAYING.md` |
-| Dist bundle (Rust) | `dist/macos-arm64-rs/HarryPotter2.app` | Installed Rust app; package with `Build/package_rust_app.py`, verify with `Build/check_bundle_rs.py` |
->>>>>>> e460c26 (Document distribution in runbook and agent contract)
 
 ## Non-Negotiables
 

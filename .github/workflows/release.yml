@@ -104,9 +104,21 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           tag="${{ steps.version.outputs.tag }}"
           dmg="${HP2_ARTIFACT_DIR}/HarryPotter2-${version}-macos-arm64.dmg"
-          gh release create "${tag}" "${dmg}" \
-            --title "Harry Potter 2 ${version}" \
-            --notes "macOS 15+ on Apple silicon. Download the .dmg, drag the app to Applications, then import your own retail copy of the game. Full instructions: https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc#readme"
+          notes="macOS 15+ on Apple silicon. Download the .dmg, drag the app to Applications, then import your own retail copy of the game. Full instructions: https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc#readme"
+
+          # Re-runnable. A retag (fix pushed after a first attempt) or a manual
+          # re-dispatch finds the release already published, and a bare
+          # `gh release create` would abort the run before the cask checksum is
+          # ever stamped. Replace the asset instead of failing.
+          if gh release view "${tag}" > /dev/null 2>&1; then
+            echo "release ${tag} already exists; replacing its asset"
+            gh release upload "${tag}" "${dmg}" --clobber
+            gh release edit "${tag}" --title "Harry Potter 2 ${version}" --notes "${notes}"
+          else
+            gh release create "${tag}" "${dmg}" \
+              --title "Harry Potter 2 ${version}" \
+              --notes "${notes}"
+          fi
 
       - name: Bump cask checksum on the default branch
         # The tap users read is the default branch, so the checksum has to land
