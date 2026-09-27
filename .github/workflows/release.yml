@@ -1,0 +1,96 @@
+name: release
+
+# Publishing is tag-driven and never automatic on push: a DMG is only built
+# when someone asks for a specific version with
+#   git tag -a v0.2.0 -m "0.2.0" && git push origin v0.2.0
+# The tag's version must match CMakeLists.txt, otherwise the artifact and the
+# cask would disagree about what 0.2.0 is.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          tag_version="${tag#v}"
+          project_version="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt)"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag_version}" >> "$GITHUB_OUTPUT"
+          echo "project_version=${project_version}" >> "$GITHUB_OUTPUT"
+          if [ "${tag_version}" != "${project_version}" ]; then
+            echo "::error::tag ${tag} does not match CMakeLists.txt VERSION ${project_version}"
+            exit 1
+          fi
+
+      - name: Configure
+        run: cmake --preset macos-arm64
+
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          cmake --build --preset macos-arm64
+          cmake --build out/macos-arm64 --target hp2_macos_dmg
+
+      - name: Verify bundle
+        run: python3 Build/check_bundle.py
+
+      - name: Mount DMG and smoke the app inside it
+        run: |
+          set -euo pipefail
+          dmg="dist/macos-arm64/HarryPotter2-${{ steps.version.outputs.version }}-macos-arm64.dmg"
+          test -f "${dmg}"
+          mount_point="$(hdiutil attach "${dmg}" -nobrowse -readonly | tail -1 | sed 's/.*\(\/Volumes\/.*\)/\1/')"
+          codesign --verify --strict "${mount_point}/HarryPotter2.app"
+          hdiutil detach "${mount_point}"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          tag="${{ steps.version.outputs.tag }}"
+          dmg="dist/macos-arm64/HarryPotter2-${version}-macos-arm64.dmg"
+
+          # Keep the cask's version and checksum in step with the artifact that
+          # actually shipped, so `brew install` verifies the download instead
+          # of trusting whatever the file claims to be.
+          shasum -a 256 "${dmg}" | awk '{print $1}' > dmg.sha256
+          python3 Build/stamp_cask.py \
+            --cask Casks/harry-potter-2.rb \
+            --version "${version}" \
+            --sha256 "$(cat dmg.sha256)"
+
+          gh release create "${tag}" "${dmg}" \
+            --title "Harry Potter 2 ${version}" \
+            --notes "macOS 15+ on Apple silicon. Download the .dmg, drag the app to Applications, then import your own retail copy of the game. Full instructions: https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc#readme"
+
+          # Commit the bumped cask back so the tap in the default branch
+          # points at the published checksum.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/harry-potter-2.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "Cask ${version}: release checksum"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi

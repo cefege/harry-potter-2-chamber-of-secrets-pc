@@ -4,17 +4,45 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  rust:
-    runs-on: macos-14
+  build:
+    # The engine is arm64-only and refuses cross-compilation (see
+    # CMakeLists.txt), so this needs a real Apple silicon runner.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: fmt
-        run: cargo fmt --check
-      - name: test
-        run: cargo test --workspace
+
+      - name: Configure
+        run: cmake --preset macos-arm64
+
+      - name: Build
+        run: cmake --build --preset macos-arm64
+
+      # Data-free contracts only. Tests guarded on prototype or retail data
+      # are not registered without it, and this runner has neither; see
+      # Docs/BEHAVIOR_MATRIX.md for the data-profile contract.
+      - name: Test
+        run: ctest --preset macos-arm64 --output-on-failure
+
+      - name: Verify bundle
+        run: python3 Build/check_bundle.py
+
+  cask:
+    # The tap is this repository, so a broken cask blocks every install
+    # command in the README. Exercise the exact path the README documents,
+    # without installing: tap the checkout, trust it, load the cask.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate cask
+        run: |
+          set -euo pipefail
+          brew tap cefege/ci-check "file://$PWD"
+          brew trust cefege/ci-check
+          brew readall cefege/ci-check
+          brew info --cask cefege/ci-check/harry-potter-2

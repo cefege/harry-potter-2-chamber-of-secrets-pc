@@ -117,6 +117,55 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
 )
 unset(_hp2_bundle_in_all)
 
+# Distribution disk image.
+#
+# The release artifact consumed by Homebrew and GitHub Releases. It contains
+# exactly the bundle that `hp2_macos_app` produced, so a DMG can never ship a
+# different binary than the verified dist/macos-arm64 tree. Retired on every
+# invocation: a stale image from an earlier build must never survive.
+set(HP2_MACOS_DMG "${HP2_MACOS_DIST_DIR}/HarryPotter2-${PROJECT_VERSION}-macos-arm64.dmg")
+set(HP2_DMG_STAGE_DIR "${CMAKE_CURRENT_BINARY_DIR}/Packaging/dmg")
+
+find_program(HP2_HDIUTIL hdiutil)
+if(NOT HP2_HDIUTIL)
+    message(FATAL_ERROR "hdiutil is required to package the macOS disk image.")
+endif()
+
+add_custom_target(hp2_macos_dmg
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${HP2_DMG_STAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${HP2_DMG_STAGE_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${HP2_MACOS_APP_DIR}"
+        "${HP2_DMG_STAGE_DIR}/HarryPotter2.app"
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink
+        "/Applications"
+        "${HP2_DMG_STAGE_DIR}/Applications"
+    # Plain files at the image root. No symlinked README: it reads as a broken
+    # alias for the app rather than an install affordance, and the import
+    # command is the thing a first-time user actually needs to reach.
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "${PROJECT_SOURCE_DIR}/Docs/PLAYING.md"
+        "${HP2_DMG_STAGE_DIR}/How to play.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "${HP2_IMPORT_LAUNCHER}"
+        "${HP2_DMG_STAGE_DIR}/Import Game Data.command"
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "${HP2_IMPORT_SCRIPT}"
+        "${HP2_DMG_STAGE_DIR}/prepare_retail_data.py"
+    COMMAND "${HP2_HDIUTIL}" create
+        -volname "Harry Potter 2 ${PROJECT_VERSION}"
+        -srcfolder "${HP2_DMG_STAGE_DIR}"
+        -ov
+        -format UDZO
+        -quiet
+        "${HP2_MACOS_DMG}"
+    DEPENDS
+        hp2_macos_app
+    COMMENT "Creating ${HP2_MACOS_DMG}"
+    VERBATIM
+)
+
 else()
 
 # Linux build and install: copy the executables and OpenAL next to each
