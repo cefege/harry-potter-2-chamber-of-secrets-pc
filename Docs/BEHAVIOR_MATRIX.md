@@ -5,6 +5,35 @@ contracts registered in `Build/CMake/HP2Targets.cmake`, not from a Rust-only
 smoke result. A row is complete only when its named evidence artifact exists
 for the same qualified data profile and commit.
 
+## Data profile registration
+
+Which tests exist at all depends on the configured data root, not on runtime
+skipping. `Build/CMake/HP2Targets.cmake` sets `HP2_TEST_DATA_PRESENT` from
+`${HP2_TEST_DATA_ROOT}/System/Default.ini` and registers data-backed contracts
+only when it is present. `CMake` reports the decision at configure time:
+
+```
+-- HP2 test data present at <root>: ON|OFF
+```
+
+| Profile | `HP2_TEST_DATA_ROOT` | Registered | CI selection |
+| --- | --- | --- | --- |
+| `data-none` | a path with no `System/Default.ini` | pure logic, codec, config, launcher, save, and contract tests | `ctest --preset macos-arm64 -L data-none` |
+| `data-prototype` | `HarryPotter2/Unreal` (default) | the above plus registration, package79, spell interaction and runtime, input contracts, typography, canvas compatibility, renderer smoke | full `ctest --preset macos-arm64` |
+| `data-retail` | an imported retail overlay (`macos-arm64-retail`) | as prototype, against retail assets | full `ctest --preset macos-arm64` |
+
+A test that is not registered is a **configuration gap, not a skip** — it
+exists wherever the data does. CI runs the `data-none` column because a fresh
+GitHub checkout has no game data (those directories are gitignored). Renderer
+smoke additionally requires the packaged bundle, so it is registered only
+after `hp2_macos_app` has run.
+
+Labels are the selector: `data-none` means the test needs no data, and CI's
+`ctest -L data-none` is therefore a complete and honest run for a data-less
+runner. Tests that were once mislabelled `data-none` while booting the path
+bootstrap against real assets (`native_typography_contracts`,
+`audio_lifecycle`) are labelled `data-prototype`.
+
 ## Status vocabulary
 
 | Status | Meaning | Gate command and proof artifact |
