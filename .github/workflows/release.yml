@@ -5,6 +5,10 @@ name: release
 #   git tag -a v0.2.0 -m "0.2.0" && git push origin v0.2.0
 # The tag's version must match CMakeLists.txt, otherwise the artifact and the
 # cask would disagree about what 0.2.0 is.
+#
+# This publishes the macOS artifact only. The Linux port has its own build and
+# dist layout (Build/CMake/HP2Install.cmake, else() branch) and is not covered
+# by the cask; add a Linux job here when it needs a published tarball.
 
 on:
   push:
@@ -18,6 +22,17 @@ on:
 
 permissions:
   contents: write
+
+env:
+  # The branch `brew tap` clones, and where the cask bump must land. Read from
+  # the repository rather than hardcoded so a branch rename cannot silently
+  # push the commit somewhere Homebrew never looks.
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  # Repo rule: structured reports and distributable artifacts land under
+  # HP2_ARTIFACT_DIR, never ad-hoc in the tree. Every step that references it
+  # runs under `set -u`, so it must be defined at workflow scope or the job
+  # aborts before it can publish anything.
+  HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/release-artifacts
 
 jobs:
   publish:
@@ -51,9 +66,6 @@ jobs:
           cmake --build --preset macos-arm64
           cmake --build out/macos-arm64 --target hp2_macos_dmg
 
-      - name: Verify bundle
-        run: python3 Build/check_bundle.py
-
       - name: Mount DMG and smoke the app inside it
         run: |
           set -euo pipefail
@@ -63,6 +75,30 @@ jobs:
           codesign --verify --strict "${mount_point}/HarryPotter2.app"
           hdiutil detach "${mount_point}"
 
+      - name: Stage release artifacts
+        id: checksum
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          dmg="dist/macos-arm64/HarryPotter2-${version}-macos-arm64.dmg"
+          test -f "${dmg}"
+          mkdir -p "${HP2_ARTIFACT_DIR}"
+          cp "${dmg}" "${HP2_ARTIFACT_DIR}/"
+          shasum -a 256 "${dmg}" | awk '{print $1}' \
+            > "${HP2_ARTIFACT_DIR}/HarryPotter2-${version}-macos-arm64.dmg.sha256"
+          HP2_ARTIFACT_DIR="${HP2_ARTIFACT_DIR}" \
+            python3 Build/check_bundle.py \
+            --output "${HP2_ARTIFACT_DIR}/bundle-integrity.json"
+          echo "sha256=$(cat "${HP2_ARTIFACT_DIR}/HarryPotter2-${version}-macos-arm64.dmg.sha256")" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hp2-release-${{ steps.version.outputs.version }}
+          path: ${{ env.HP2_ARTIFACT_DIR }}
+          if-no-files-found: error
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,27 +106,56 @@ jobs:
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
           tag="${{ steps.version.outputs.tag }}"
-          dmg="dist/macos-arm64/HarryPotter2-${version}-macos-arm64.dmg"
-
-          # Keep the cask's version and checksum in step with the artifact that
-          # actually shipped, so `brew install` verifies the download instead
-          # of trusting whatever the file claims to be.
-          shasum -a 256 "${dmg}" | awk '{print $1}' > dmg.sha256
-          python3 Build/stamp_cask.py \
-            --cask Casks/harry-potter-2.rb \
-            --version "${version}" \
-            --sha256 "$(cat dmg.sha256)"
-
+          dmg="${HP2_ARTIFACT_DIR}/HarryPotter2-${version}-macos-arm64.dmg"
           gh release create "${tag}" "${dmg}" \
             --title "Harry Potter 2 ${version}" \
             --notes "macOS 15+ on Apple silicon. Download the .dmg, drag the app to Applications, then import your own retail copy of the game. Full instructions: https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc#readme"
 
-          # Commit the bumped cask back so the tap in the default branch
-          # points at the published checksum.
+      - name: Bump cask checksum on the default branch
+        # The tap users read is the default branch, so the checksum has to land
+        # there. This step deliberately does NOT push at the tag: the release
+        # tag is the immutable pointer at the source that built this artifact.
+        #
+        # The working tree is still checked out at that tag, so pushing HEAD
+        # straight at the default branch would be a non-fast-forward rejection
+        # whenever main moved after the tag. Replay the one-file change onto a
+        # fresh clone of the current default branch instead, and fail loudly
+        # rather than leaving a published release whose cask still says
+        # sha256 :no_check.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          sha256="${{ steps.checksum.outputs.sha256 }}"
+
+          # GH_TOKEN is exported by this step's env block; Actions does not
+          # define GITHUB_TOKEN, and `set -u` would abort the step after the
+          # release is already public. Masked so a clone failure cannot echo
+          # the credential into the log.
+          echo "::add-mask::${GH_TOKEN}"
+          bump_dir="$(mktemp -d)"
+          git clone --quiet --depth 1 --branch "${DEFAULT_BRANCH}" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "${bump_dir}"
+
+          cd "${bump_dir}"
+          python3 Build/stamp_cask.py \
+            --cask Casks/harry-potter-2.rb \
+            --version "${version}" \
+            --sha256 "${sha256}"
+
+          grep -q "${sha256}" Casks/harry-potter-2.rb || {
+            echo "::error::cask checksum was not stamped"
+            exit 1
+          }
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Casks/harry-potter-2.rb
-          if ! git diff --cached --quiet; then
-            git commit -m "Cask ${version}: release checksum"
-            git push origin HEAD:"${GITHUB_REF_NAME}"
-          fi
+          git diff --cached --quiet && {
+            echo "cask already current"
+            exit 0
+          }
+          git commit -m "Cask ${version}: release checksum"
+          git push origin "HEAD:${DEFAULT_BRANCH}"
