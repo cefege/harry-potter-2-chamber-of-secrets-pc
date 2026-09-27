@@ -9,30 +9,45 @@ scripts.
 
 Drag **HarryPotter2.app** into your **Applications** folder.
 
-If macOS refuses to open it the first time, macOS is blocking an app that was
-not signed by an Apple Developer account. Either:
+If macOS shows **"HarryPotter2" Not Opened** and says it could not verify the
+app is free of malware, that is Gatekeeper. This build is not signed with an
+Apple Developer ID, so macOS quarantines anything downloaded and then asks you
+to confirm. Either:
 
 - right-click the app in Applications and choose **Open**, then confirm **Open**
-  again; or
+  again (one time only); or
 - run this once in Terminal:
 
   ```sh
   xattr -dr com.apple.quarantine /Applications/HarryPotter2.app
   ```
 
-Installing with Homebrew (`brew install --cask cefege/hp2/harry-potter-2`)
-already handles this for you.
+Homebrew users get the same one-time check: the cask clears the quarantine
+attribute during install, so a successful `brew install` normally opens
+straight away. If your Mac still prompts, use the right-click **Open** above.
+Until the project has a Developer ID certificate and notarized releases, this
+is expected on both routes.
 
 ## 2. Import your game data
 
 The runtime reads data files only. It never launches the original installer or
 the old game executable.
 
-Double-click **Import Game Data.command**. It opens a Terminal window and asks
-for the location of your retail installation. You can give it either:
+Double-click **Import Game Data.command** (in this disk image, or inside the
+installed app). It opens a Terminal window and asks for the location of your
+retail installation. You can give it either:
 
 - the folder you installed the game into, or
 - an archive (`.zip`, `.tar`, `.tar.gz`, `.7z`) of that folder.
+
+The importer is a Python 3 script, and macOS does not install Python 3 by
+default. If you see "python3 was not found", install it once:
+
+```sh
+xcode-select --install      # Apple's Command Line Tools
+# or
+brew install python         # Homebrew
+```
 
 Press Return to accept each prompt. The importer copies the data to:
 

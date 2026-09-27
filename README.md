@@ -16,6 +16,41 @@ The codebase is legacy-era UE1-derived C++ with modern platform support.
 
 Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:li:activity:7498760430992113665/](https://www.linkedin.com/feed/update/urn:li:activity:7498760430992113665/)
 
+## Play it on macOS
+
+You do not need the source code. Two routes, both ending in the same app:
+
+**Disk image (smallest download)**
+
+Grab the `.dmg` from
+[Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases),
+drag `HarryPotter2.app` into Applications, then double-click
+`Import Game Data.command` in the image and point it at your retail copy.
+
+**Homebrew**
+
+```sh
+brew tap cefege/hp2 https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc
+brew trust cefege/hp2
+brew install --cask cefege/hp2/harry-potter-2
+```
+
+The `brew trust` line answers the one-time prompt Homebrew shows for any
+third-party tap. This repository *is* the tap — the URL is required, because
+Homebrew would otherwise look for a separate `homebrew-hp2` repository. Note
+that tapping clones this repo (~330 MB) to read the cask; you never have to
+build from it, and the disk image above fetches only the app.
+
+The importer needs Python 3, which macOS does not install by default. If it
+says `python3 was not found`, run `xcode-select --install` once.
+
+> **macOS may ask before the first launch.** This build is not signed with an
+> Apple Developer ID, so Gatekeeper quarantines downloaded apps. Right-click
+> the app in Applications → **Open** → **Open** again. One time, and expected
+> on both routes until releases are signed and notarized.
+
+Full instructions: [Docs/PLAYING.md](Docs/PLAYING.md), which ships in the
+disk image.
 
 ## Requirements
 
@@ -31,6 +66,9 @@ Watch gameplay in action on LinkedIn: [https://www.linkedin.com/feed/update/urn:
 - arm64
 - Ninja, GCC or Clang, SDL2 development headers
 - CMake 3.24+
+
+The toolchain (Xcode, Ninja, CMake) is only needed to build from source.
+Installing a prebuilt app needs none of it.
 
 ### Game Data
 **You must own a retail copy of *Harry Potter and the Chamber of Secrets* for Windows or macOS.** This repository does not include game data; you will import it from your own installation.
@@ -178,7 +216,24 @@ sudo apt install cmake    # Debian/Ubuntu
 
 ## Contributing
 
-This repository is a historical preservation and modernization effort. Bug reports and compatibility improvements are welcome; please file an issue with reproduction steps and platform details.
+Contributions are welcome, and PRs get merged fast. Two specific asks:
+
+**Bring it to a platform nobody has tested.** macOS arm64 and Linux arm64 are
+covered. **Windows is not**, and there is no x86-64 (Intel/AMD) build for
+either platform. If you have a machine the project does not and want Harry
+Potter 2 running on it, do the work and open a PR. This game is small and old
+enough that it should run on almost anything with patience.
+
+**Use your AI coding agents.** This repo is set up for them and that is
+encouraged, not a shortcut. `AGENTS.md` and `Docs/OPERATIONS.md` are the
+contract for agents in this codebase: subsystem map, verification discipline,
+exact commands. Point your agent at them.
+
+**No need to fork.** Commit to a branch and open a PR. Reviews are quick and
+you keep the credit.
+
+Bug reports and compatibility improvements are also welcome — please include
+reproduction steps and platform details.
 
 ---
 

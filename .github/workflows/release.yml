@@ -5,10 +5,6 @@ name: release
 #   git tag -a v0.2.0 -m "0.2.0" && git push origin v0.2.0
 # The tag's version must match CMakeLists.txt, otherwise the artifact and the
 # cask would disagree about what 0.2.0 is.
-#
-# This publishes the macOS artifact only. The Linux port has its own build and
-# dist layout (Build/CMake/HP2Install.cmake, else() branch) and is not covered
-# by the cask; add a Linux job here when it needs a published tarball.
 
 on:
   push:
@@ -28,11 +24,6 @@ env:
   # the repository rather than hardcoded so a branch rename cannot silently
   # push the commit somewhere Homebrew never looks.
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-  # Repo rule: structured reports and distributable artifacts land under
-  # HP2_ARTIFACT_DIR, never ad-hoc in the tree. Every step that references it
-  # runs under `set -u`, so it must be defined at workflow scope or the job
-  # aborts before it can publish anything.
-  HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/release-artifacts
 
 jobs:
   publish:
@@ -65,6 +56,7 @@ jobs:
           set -euo pipefail
           cmake --build --preset macos-arm64
           cmake --build out/macos-arm64 --target hp2_macos_dmg
+
 
       - name: Mount DMG and smoke the app inside it
         run: |
@@ -129,14 +121,9 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           sha256="${{ steps.checksum.outputs.sha256 }}"
 
-          # GH_TOKEN is exported by this step's env block; Actions does not
-          # define GITHUB_TOKEN, and `set -u` would abort the step after the
-          # release is already public. Masked so a clone failure cannot echo
-          # the credential into the log.
-          echo "::add-mask::${GH_TOKEN}"
           bump_dir="$(mktemp -d)"
-          git clone --quiet --depth 1 --branch "${DEFAULT_BRANCH}" \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+          git clone --depth 1 --branch "${DEFAULT_BRANCH}" \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             "${bump_dir}"
 
           cd "${bump_dir}"

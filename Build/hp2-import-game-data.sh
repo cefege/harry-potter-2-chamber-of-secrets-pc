@@ -43,6 +43,27 @@ IMPORTER="$(resolve_importer)" || {
     exit 2
 }
 
+# The importer is Python. A stock Mac ships without python3 unless the Command
+# Line Tools or Xcode are installed, and a double-clicked script must say so
+# plainly rather than dying with "command not found".
+if ! command -v python3 > /dev/null 2>&1; then
+    cat >&2 << 'MSG'
+error: python3 was not found on this Mac.
+
+The game data importer needs Python 3, which macOS does not install by default.
+Install it once with either:
+
+  xcode-select --install      (Apple's Command Line Tools, ~1 GB)
+
+or
+
+  brew install python         (Homebrew, if you have it)
+
+Then run this again.
+MSG
+    exit 2
+fi
+
 if [ "$#" -gt 0 ]; then
     exec python3 "${IMPORTER}" "$@"
 fi

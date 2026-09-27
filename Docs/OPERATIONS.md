@@ -246,6 +246,68 @@ The first configure of a fresh preset needs network access to populate `_deps`;
 the vendored trees under `ThirdParty/` (UT469eSDK, XOpenGLDrv, UT99VulkanDrv,
 vgmstream) are already in-tree and need no download.
 
+## Distribution
+
+Two artifacts, both built locally from the same bundle:
+
+| Target | Produces | Notes |
+| --- | --- | --- |
+| `hp2_macos_app` | `dist/macos-arm64/HarryPotter2.app` | default target; part of `ALL` for release presets |
+| `hp2_macos_dmg` | `dist/macos-arm64/HarryPotter2-<version>-macos-arm64.dmg` | the release artifact |
+
+```sh
+cmake --build out/macos-arm64 --target hp2_macos_dmg
+```
+
+The DMG contains the app, a symlink to `/Applications`, `How to play.txt` (a
+copy of `Docs/PLAYING.md`), and a copy of `Import Game Data.command` with the
+importer beside it, so the image is usable without ever reaching the app
+bundle. The bundle also carries `Contents/Resources/Import Game Data.command`,
+so a Homebrew install reaches the same importer.
+
+The importer needs `python3` on the machine. A stock Mac has none, so the
+wrapper checks for it and prints install instructions rather than failing with
+"command not found".
+
+The bundle ships exactly one `Contents/Frameworks/libopenal.1.dylib` — the
+soname the executable resolves. It must stay a real file with no symlink
+siblings: quarantine propagates onto symlinks during a DMG download or cask
+install, which invalidates the code seal and makes `codesign --verify` fail on
+the *installed* app.
+
+### Homebrew
+
+This repository is its own tap; there is no separate formula repository. The
+tap name must match the repository name (`cefege/hp2`) or Homebrew will not
+find `Casks/` in the clone.
+
+```sh
+brew tap cefege/hp2 https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc
+brew install --cask cefege/hp2/harry-potter-2
+```
+
+The cask `postflight` strips `com.apple.quarantine` from the installed app.
+Without it Gatekeeper refuses to open the ad-hoc signed app
+("Apple could not verify ... is free of malware") on first launch.
+
+`version` and `sha256` in `Casks/harry-potter-2.rb` are owned by the release
+workflow via `Build/stamp_cask.py`. Hand-editing them desynchronizes the tap
+from the published artifact and every `brew install` fails its checksum.
+
+### Releasing
+
+Bump `VERSION` in `CMakeLists.txt`, then:
+
+```sh
+git tag -a v0.2.0 -m "0.2.0" && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` builds, verifies the bundle, mounts the DMG and
+verifies the app's seal inside it, publishes the release, then commits the
+cask checksum back to the **default branch** (never to the tag, which is the
+immutable pointer at the source that built the artifact). The workflow fails
+if the tag's version does not match `CMakeLists.txt`.
+
 ## Provenance bundle (placeholder)
 
 Retail imports produce `overlay-manifest.json` (SHA-256 per file, provenance,

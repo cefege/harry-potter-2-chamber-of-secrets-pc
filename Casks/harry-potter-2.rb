@@ -23,17 +23,28 @@ cask "harry-potter-2" do
 
   app "HarryPotter2.app"
   depends_on macos: :sequoia
+  # The engine is built arm64-only, and CMake refuses to configure anywhere
+  # else. Fail the install on an Intel Mac instead of shipping an app that
+  # cannot launch.
+  depends_on arch: :arm64
 
+  # Gatekeeper note, for both install routes.
+  #
+  # This app is ad-hoc signed and arrives as a download, so macOS quarantines
+  # it and then refuses to open it ("Apple could not verify ... is free of
+  # malware"). Clearing the attribute is exactly what the right-click > Open
+  # dance does by hand. If that fails the install must not report success
+  # while leaving an app the user cannot launch, so this aborts.
+  #
+  # Plain Ruby: the block runs in the cask context, which does not expose
+  # Homebrew's command wrappers.
   postflight do
-    # The app is ad-hoc signed and distributed as a release download, so
-    # Gatekeeper quarantines it and then refuses to open it ("Apple could not
-    # verify ... is free of malware"). Stripping the attribute is exactly what
-    # the right-click > Open dance does by hand, so `brew install` leaves an
-    # app that launches with no extra step.
-    #
-    # Plain Ruby rather than a cask DSL helper: the block runs in the cask
-    # context, which does not expose Homebrew's command wrappers.
-    app = File.join(appdir.to_s, "HarryPotter2.app")
-    system("/usr/bin/xattr", "-dr", "com.apple.quarantine", app)
+    target = File.join(appdir.to_s, "HarryPotter2.app")
+    unless system("/usr/bin/xattr", "-dr", "com.apple.quarantine", target)
+      abort "could not clear the quarantine attribute on #{target}; macOS " \
+            "will block the app on first launch. Open it once via " \
+            "right-click > Open, or run: " \
+            "xattr -dr com.apple.quarantine #{target}"
+    end
   end
 end

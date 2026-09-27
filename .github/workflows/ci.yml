@@ -22,11 +22,18 @@ jobs:
       - name: Build
         run: cmake --build --preset macos-arm64
 
-      # Data-free contracts only. Tests guarded on prototype or retail data
-      # are not registered without it, and this runner has neither; see
-      # Docs/BEHAVIOR_MATRIX.md for the data-profile contract.
-      - name: Test
-        run: ctest --preset macos-arm64 --output-on-failure
+      # A fresh GitHub checkout has no game data — the data directories are
+      # gitignored — so the data-backed contracts are not registered at
+      # configure time (see HP2_TEST_DATA_PRESENT in HP2Targets.cmake). What
+      # runs here is the data-none selection: the pure logic, codec, config,
+      # launcher, and save contracts.
+      #
+      # This is a documented data-profile scope, NOT the full suite. The
+      # renderer smoke, map sweep, and data-backed contracts are a
+      # configuration gap on this runner, not skips. See
+      # Docs/BEHAVIOR_MATRIX.md for what each data profile covers.
+      - name: Test (data-none profile)
+        run: ctest --preset macos-arm64 -L data-none --output-on-failure
 
       - name: Verify bundle
         run: python3 Build/check_bundle.py
@@ -39,10 +46,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The tap name must match the repository name, or Homebrew clones into
+      # homebrew-<name> and never sees this repo's Casks/ directory. Tapping
+      # the checkout by URL is what a user does, and it exercises the same
+      # resolution without publishing anything.
       - name: Validate cask
         run: |
           set -euo pipefail
-          brew tap cefege/ci-check "file://$PWD"
-          brew trust cefege/ci-check
-          brew readall cefege/ci-check
-          brew info --cask cefege/ci-check/harry-potter-2
+          brew tap cefege/hp2 "file://$PWD"
+          brew trust cefege/hp2
+          brew readall cefege/hp2
+          brew info --cask cefege/hp2/harry-potter-2

@@ -555,24 +555,40 @@ hp2_add_behavior_test(compact_index hp2_abi_tests
 hp2_add_behavior_test(fstring_archive hp2_abi_tests
     --test=fstring_archive
 )
-hp2_add_behavior_test(native_registration hp2_abi_tests
-    --test=native_registration
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
-hp2_add_behavior_test(package79_manifest hp2_package_audit
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-    "--reference=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
-)
-hp2_add_behavior_test(spell_interaction_manifest "${Python3_EXECUTABLE}"
-    "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
-    "--repo-root=${PROJECT_SOURCE_DIR}"
-    "--data-root=${HP2_TEST_DATA_ROOT}"
-    "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
-    --check
-)
-set_tests_properties(spell_interaction_manifest PROPERTIES
-    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/Testing/HP2/spell_interaction_manifest"
-)
+# A test that needs game data is only registered when the configured data root
+# actually provides it. Without this guard a fresh clone (no data, by design)
+# registers tests that abort on a missing System/Default.ini, so a plain
+# `ctest --preset macos-arm64` reports failures no checkout can fix. This is a
+# configuration gap, not a skip: the tests exist wherever the data does. See
+# Docs/BEHAVIOR_MATRIX.md for the data-profile contract.
+set(HP2_TEST_DATA_PRESENT OFF)
+if(EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
+    set(HP2_TEST_DATA_PRESENT ON)
+endif()
+message(STATUS "HP2 test data present at ${HP2_TEST_DATA_ROOT}: ${HP2_TEST_DATA_PRESENT}")
+
+if(HP2_TEST_DATA_PRESENT)
+    hp2_add_behavior_test(native_registration hp2_abi_tests
+        --test=native_registration
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+    hp2_add_behavior_test(package79_manifest hp2_package_audit
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+        "--reference=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
+    )
+    hp2_add_behavior_test(spell_interaction_manifest "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
+        "--repo-root=${PROJECT_SOURCE_DIR}"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        "--output=${CMAKE_BINARY_DIR}/goldens/spell-interactions.json"
+        --check
+    )
+    set_tests_properties(spell_interaction_manifest PROPERTIES
+        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/Testing/HP2/spell_interaction_manifest"
+    )
+else()
+    message(STATUS "Skipping data-backed tests: no System/Default.ini under ${HP2_TEST_DATA_ROOT}")
+endif()
 if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal/System/Default.ini")
     add_custom_target(regenerate_goldens
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/goldens"
@@ -601,9 +617,11 @@ else()
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
         COMMENT "Regenerating machine-local goldens from the configured test data root (no HP1 data root present)")
 endif()
-hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
+if(HP2_TEST_DATA_PRESENT)
+    hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+endif()
 hp2_add_behavior_test(dxt1_codec hp2_dxt1_tests)
 hp2_add_behavior_test(eaxa_decoder hp2_eaxa_tests)
 hp2_add_behavior_test(replay_roundtrip hp2_replay_roundtrip_tests)
@@ -627,33 +645,35 @@ hp2_add_behavior_test(config_ini_unicode_roundtrip hp2_config_ini_tests
 )
 # Audio lifecycle exercises a prototype music file that ships as untracked
 # local reference data; without it the test cannot exist (configuration gap).
-if(EXISTS "${HP2_UNREAL_ROOT}/Music/sm_bur_PlayfulFail_01.ogg")
+if(EXISTS "${HP2_UNREAL_ROOT}/Music/sm_bur_PlayfulFail_01.ogg" AND HP2_TEST_DATA_PRESENT)
     hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
     set_tests_properties(audio_lifecycle PROPERTIES
         DEPENDS "eaxa_decoder;native_registration"
-        LABELS "fast;data-none"
+        LABELS "fast;data-prototype"
     )
 endif()
-hp2_add_behavior_test(input_edge_contracts hp2_input_contract_tests
-    --test=input_edge
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
-hp2_add_behavior_test(input_axis_order hp2_input_contract_tests
-    --test=input_axis_order
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
-hp2_add_behavior_test(input_release_all hp2_input_contract_tests
-    --test=input_release_all
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
-hp2_add_behavior_test(mouse_capture_policy hp2_input_contract_tests
-    --test=mouse_capture_policy
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
-hp2_add_behavior_test(input_event_mapping hp2_input_contract_tests
-    --test=input_event_mapping
-    "-datadir=${HP2_TEST_DATA_ROOT}"
-)
+if(HP2_TEST_DATA_PRESENT)
+    hp2_add_behavior_test(input_edge_contracts hp2_input_contract_tests
+        --test=input_edge
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+    hp2_add_behavior_test(input_axis_order hp2_input_contract_tests
+        --test=input_axis_order
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+    hp2_add_behavior_test(input_release_all hp2_input_contract_tests
+        --test=input_release_all
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+    hp2_add_behavior_test(mouse_capture_policy hp2_input_contract_tests
+        --test=mouse_capture_policy
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+    hp2_add_behavior_test(input_event_mapping hp2_input_contract_tests
+        --test=input_event_mapping
+        "-datadir=${HP2_TEST_DATA_ROOT}"
+    )
+endif()
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"
@@ -755,7 +775,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
 endif()
 
 
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
+if(HP2_HAS_NATIVE_TEXT_BACKEND AND HP2_TEST_DATA_PRESENT)
     # Data-backed contracts pass their root explicitly (never CWD discovery),
     # so a local out/retail-data import can never hijack the fixture path.
     hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests
@@ -815,15 +835,20 @@ endif()
 # ABI and registration checks are prerequisites for package/runtime tests.
 # Codec tests are otherwise independent; audio lifecycle additionally requires
 # the decoder and native registration contracts.
-set_tests_properties(compact_index fstring_archive native_registration
+set_tests_properties(compact_index fstring_archive
     PROPERTIES DEPENDS abi_widths
 )
-set_tests_properties(package79_manifest PROPERTIES
-    DEPENDS "compact_index;fstring_archive;native_registration"
-)
-set_tests_properties(spell_runtime_contracts PROPERTIES
-    DEPENDS "native_registration;package79_manifest;spell_interaction_manifest"
-)
+if(HP2_TEST_DATA_PRESENT)
+    set_tests_properties(native_registration
+        PROPERTIES DEPENDS abi_widths
+    )
+    set_tests_properties(package79_manifest PROPERTIES
+        DEPENDS "compact_index;fstring_archive;native_registration"
+    )
+    set_tests_properties(spell_runtime_contracts PROPERTIES
+        DEPENDS "native_registration;package79_manifest;spell_interaction_manifest"
+    )
+endif()
 set_tests_properties(native_launcher_contract game_test_contract repair_save_contract
     ucc_smoke_contract prototype_archive_contract
     PROPERTIES LABELS "fast;data-none"
@@ -838,13 +863,18 @@ set_tests_properties(abi_widths render_clip projection_fov command_line_load
     native_launcher_contract game_test_contract repair_save_contract
     PROPERTIES LABELS "fast;data-none"
 )
-set_tests_properties(native_registration package79_manifest
-    spell_interaction_manifest spell_runtime_contracts
-    PROPERTIES LABELS "integration;data-prototype"
-)
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
+if(HP2_TEST_DATA_PRESENT)
+    set_tests_properties(native_registration package79_manifest
+        spell_interaction_manifest spell_runtime_contracts
+        PROPERTIES LABELS "integration;data-prototype"
+    )
+endif()
+# The typography contracts boot the path bootstrap against real game data, so
+# they are data-backed despite running quickly. Labelling them data-none would
+# put them in a CI selection that has no data root to give them.
+if(HP2_TEST_DATA_PRESENT)
     set_tests_properties(native_typography_contracts
-        PROPERTIES LABELS "fast;data-none"
+        PROPERTIES LABELS "fast;data-prototype"
     )
 endif()
 # ---------------------------------------------------------------------------
