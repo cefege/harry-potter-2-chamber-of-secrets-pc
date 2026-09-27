@@ -2,6 +2,23 @@
 
 The native runtime does not bundle the copyrighted retail game data. Use this workflow with a retail installation you own. The importer reads data files only: it never launches the old installer, game executable, DLLs, Wine, Rosetta, or a virtual machine.
 
+## Easiest: run the bundled importer
+
+If you installed the app (Homebrew or a disk image), the importer is already
+inside it and needs no checkout:
+
+```sh
+"/Applications/HarryPotter2.app/Contents/Resources/Import Game Data.command"
+```
+
+Double-clicking that file from Finder gives the same walkthrough. It prompts
+for your retail folder or archive, writes to
+`~/Library/Application Support/Harry Potter 2/Data/Retail`, and prints a
+summary. Re-running it is safe.
+
+The rest of this document covers the importer's flags and validation rules for
+people calling it directly from a source checkout.
+
 ## Supported input
 
 Provide either:
