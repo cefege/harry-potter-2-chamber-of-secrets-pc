@@ -112,6 +112,15 @@
       "license": "ISC-style",
       "upstream_license_path": "COPYING",
       "role": "EA-XA coefficient and arithmetic oracle only"
+    },
+    {
+      "name": "emsdk",
+      "source_type": "git",
+      "url": "https://github.com/emscripten-core/emsdk",
+      "tag": "6.0.10",
+      "commit": "a2b92777574c2feda07994cd4f1079a3dfc151f8",
+      "license": "MIT (emsdk); Emscripten MIT/UIUC; bundled SDL2 port zlib; bundled OpenAL port per Emscripten library_openal.js",
+      "role": "web-wasm64 toolchain; supplies the SDL2 (-sUSE_SDL=2) and OpenAL (-lopenal) implementations linked into the browser build instead of the pinned SDL2/OpenAL Soft entries"
     }
   ]
 }

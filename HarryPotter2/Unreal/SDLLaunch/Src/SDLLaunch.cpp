@@ -14,6 +14,10 @@
 #include <memory>
 #include <string>
 #include <vector>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/emscripten.h>
+#include <GLES2/gl2.h>
+#endif
 
 #include "FConfigCacheIni.h"
 #include "FFileManagerUnix.h"
@@ -44,6 +48,7 @@ namespace HP2Launcher
 #include "HP2ShellLauncher.h"
 #endif
 #include "HP2Paths.h"
+#include "HP2DataImport.h"
 #include "HP2StaticPackages.h"
 #include "ALAudio.h"
 #include "UnSkeletalMesh.h"
@@ -114,6 +119,16 @@ void ShowLauncherError( const std::string& Detail, const char* Context )
 	const std::string Text = Context + std::string("\n\n") + (Detail.empty() ? "Unknown error." : Detail);
 	fprintf( stderr, "hp2-launcher: %s\n", Text.c_str() );
 	SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_ERROR, "Launcher Error", Text.c_str(), NULL );
+}
+
+// Informational counterpart to ShowLauncherError, used to report a completed
+// import. Errors and confirmations must not share a title that claims
+// failure.
+void ShowLauncherNotice( const std::string& Title, const std::string& Detail )
+{
+	const std::string Text = Detail.empty() ? std::string( "Done." ) : Detail;
+	fprintf( stderr, "hp2-launcher: %s\n%s\n", Title.c_str(), Text.c_str() );
+	SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_INFORMATION, Title.c_str(), Text.c_str(), NULL );
 }
 
 /*-----------------------------------------------------------------------------
@@ -206,6 +221,14 @@ bool RunNativeLauncherRound(
 	DataSourceConfiguration Configuration;
 	LoadDataSourceConfiguration( LauncherRoot, Configuration, StepError );
 
+	// Resolved from the packaged resources (or the checkout) rather than
+	// assumed, so a build without the bundled importer degrades to a hidden
+	// button instead of a button that always fails.
+	const HP2DataImport::Toolchain ImportTool = HP2DataImport::ResolveToolchain( ArgC > 0 ? ArgV[0] : "" );
+	std::string ImportDestination;
+	if( !HP2DataImport::GetConventionalRetailDestination( ImportDestination ) )
+		ImportDestination = "./Retail";
+
 	const DataSource SelectedSource = Configuration.selected;
 	std::string ProfileRoot;
 	if( !PrepareDataSourceProfile( LauncherRoot, SelectedSource, ProfileRoot, StepError ) )
@@ -214,17 +237,22 @@ bool RunNativeLauncherRound(
 		return false;
 	}
 
+	// With no game data installed yet this is the expected first-run state, not
+	// an error: the chooser still opens so the player can import. Only an
+	// explicitly overridden root that turns out unusable is fatal here.
 	std::string DataRoot;
 	std::string ResolveFailure;
-	if( !ResolveSourceRoot( Configuration, SelectedSource, HasOverride, OverrideRoot, DataRoot, ResolveFailure ) )
+	const bool HasDataRoot = ResolveSourceRoot(
+		Configuration, SelectedSource, HasOverride, OverrideRoot, DataRoot, ResolveFailure );
+	if( !HasDataRoot && HasOverride )
 	{
-		ShowLauncherError( ResolveFailure, "Could not resolve a playable data root." );
+		ShowLauncherError( ResolveFailure, "The data folder given on the command line cannot be used." );
 		return false;
 	}
 
-	const LauncherPaths Paths{ ProfileRoot, DataRoot + "/System" };
+	const LauncherPaths Paths{ ProfileRoot, HasDataRoot ? DataRoot + "/System" : std::string() };
 	LauncherState State;
-	if( !LoadLauncherState( Paths, State, StepError ) )
+	if( HasDataRoot && !LoadLauncherState( Paths, State, StepError ) )
 		State = LauncherState();
 
 	LauncherRequest Request;
@@ -235,6 +263,20 @@ bool RunNativeLauncherRound(
 	Request.dataSources = Configuration;
 	Request.hasExplicitDataRootOverride = HasOverride;
 	Request.explicitDataRoot = OverrideRoot;
+
+	// Import affordance. Resolved once per round so the chooser can hide the
+	// button outright when this installation cannot run the importer at all.
+	Request.importerPath = ImportTool.importerScript;
+	Request.retailDataRoot = ImportDestination;
+	Request.needsGameData = !HasDataRoot;
+	if( !HasDataRoot )
+	{
+		// A first run has no playable root yet, so the per-source probe below
+		// reports the conventional folder as unusable. Say what actually needs
+		// to happen instead of leaving the player with a dead folder picker.
+		Request.errorMessage = "No game data is installed yet. Choose Import Game Data "
+			"and point it at your own copy of the game to get started.";
+	}
 	for( const DataSource OptionSource : { DataSource::Retail, DataSource::Prototype } )
 	{
 		DataSourceOption Option;
@@ -309,6 +351,48 @@ bool RunNativeLauncherRound(
 	}
 	if( Action == LaunchAction::Quit )
 		return false;
+
+	// The player picked a game folder or archive and asked to import it. Run
+	// the bundled importer, then re-enter the chooser so a successful import
+	// is immediately usable instead of requiring a second launch.
+	if( Action == LaunchAction::Import )
+	{
+		if( Result.importSource.empty() )
+			return false;
+
+		// A modal box is enough to tell the player why the window froze: the
+		// native chooser has already been dismissed at this point, so there is
+		// no window left to keep responsive during the copy.
+		SDL_ShowSimpleMessageBox( SDL_MESSAGEBOX_INFORMATION, "Importing Game Data",
+			"Copying and checking your game files. This can take a few minutes.",
+			NULL );
+
+		std::string ImportLog;
+		std::string ImportError;
+		const bool Imported = HP2DataImport::RunRetailImport(
+			ImportTool, Result.importSource, ImportDestination, ImportLog, ImportError );
+
+		if( !Imported )
+		{
+			ShowLauncherError( ImportError, "The game data import did not finish." );
+			return false;
+		}
+
+		// Point the launcher at what was just written so the next round finds
+		// it without relying on discovery order.
+		DataSourceConfiguration ImportedConfiguration = Configuration;
+		ImportedConfiguration.retailRoot = ImportDestination;
+		ImportedConfiguration.selected = DataSource::Retail;
+		std::string CommitError;
+		if( !CommitDataSourceConfiguration( LauncherRoot, ImportedConfiguration, CommitError ) )
+			fprintf( stderr, "hp2-launcher: could not record the imported data folder: %s\n",
+				CommitError.c_str() );
+
+		ShowLauncherNotice( "Game Data Imported",
+			"Your game files are ready. Choose New Game to start." );
+		Outcome.RunEngine = false;
+		return true;
+	}
 
 	// Persist every chooser decision before touching the engine so a failed
 	// launch still resumes from the same state next time.
@@ -5135,82 +5219,109 @@ private:
 FireTextureTraceReporter* GFireTextureTraceReporter = NULL;
 
 
-void MainLoop( UEngine* Engine, INT TestTicks, FLOAT FixedDeltaSeconds, LifecycleGateReporter* LifecycleReporter, WorldCollisionGateReporter* WorldCollisionReporter, StaticBspProbeReporter* StaticBspProbe )
+// Main loop state shared by the native driver loop and the browser's
+// requestAnimationFrame callback. Splitting the loop into phases is what lets
+// the wasm build reuse the exact same tick/flush sequence without copying it.
+struct FMainLoopState
 {
-	check( Engine );
-	UBOOL ActorSlotDumpPending = ActorSlotDump::IsEnabled();
-	ActorSlotDump::CapturePostStartupBeforeFirstTick( Engine );
-	if( StaticBspProbe )
-		StaticBspProbe->Run( Engine );
-	if( WorldCollisionReporter )
-		WorldCollisionReporter->Run( Engine );
-
+	UEngine* Engine;
+	INT TestTicks;
+	FLOAT FixedDeltaSeconds;
+	LifecycleGateReporter* LifecycleReporter;
+	WorldCollisionGateReporter* WorldCollisionReporter;
+	StaticBspProbeReporter* StaticBspProbe;
+	UBOOL ActorSlotDumpPending;
 	std::unique_ptr<FidelityReporter> Reporter;
+	FTime OldTime;
+	FTime SecondStartTime;
+	INT TickCount;
+	INT RemainingTestTicks;
+	unsigned long long TraceTickIndex;
+};
+
+static void MainLoopBegin( FMainLoopState& S )
+{
+	check( S.Engine );
+	S.ActorSlotDumpPending = ActorSlotDump::IsEnabled();
+	ActorSlotDump::CapturePostStartupBeforeFirstTick( S.Engine );
+	if( S.StaticBspProbe )
+		S.StaticBspProbe->Run( S.Engine );
+	if( S.WorldCollisionReporter )
+		S.WorldCollisionReporter->Run( S.Engine );
+
 	if( FidelityReporter::IsEnabled() )
-		Reporter.reset( new FidelityReporter( Engine ) );
+		S.Reporter.reset( new FidelityReporter( S.Engine ) );
 
 	// Loop while running.
 	GIsRunning = 1;
-	FTime OldTime = appSeconds();
-	FTime SecondStartTime = OldTime;
-	INT TickCount = 0;
-	INT RemainingTestTicks = TestTicks;
-	unsigned long long TraceTickIndex = 0;
-	while( GIsRunning && !GIsRequestingExit )
-	{
-		if( GShadowAdmissionTraceReporter )
-			GShadowAdmissionTraceReporter->SetFrame( TraceTickIndex );
-		if( GCreatureGeneratorTraceReporter )
-			GCreatureGeneratorTraceReporter->SetFrame( TraceTickIndex );
-		if( GGlobalTickTraceReporter )
-			GGlobalTickTraceReporter->SetFrame( TraceTickIndex );
-		// A paired fidelity replay supplies the same positive fixed delta to
-		// the C++ oracle and hp2rs. Normal launches retain wall-clock timing.
-		FTime NewTime = appSeconds();
-		FLOAT DeltaSeconds = FixedDeltaSeconds > 0.0f
-			? FixedDeltaSeconds
-			: Max( (FLOAT)(NewTime - OldTime), 0.0001f );
-		if( LifecycleReporter )
-			LifecycleReporter->BeginTick( (INT)TraceTickIndex );
-		appSetRandTraceTick( TraceTickIndex, "engine_tick" );
-		Engine->Tick( DeltaSeconds );
-		appSetRandTraceTick( TraceTickIndex, "after_tick" );
-		if( ActorSlotDumpPending && ActorSlotDump::WriteIfReady( Engine ) )
-			ActorSlotDumpPending = 0;
-		if( Reporter )
-			Reporter->AfterTick( Engine, DeltaSeconds );
-		OldTime = NewTime;
-		++TickCount;
-		++TraceTickIndex;
-		if( RemainingTestTicks > 0 && --RemainingTestTicks == 0 )
-			appRequestExit( 0 );
-		if( OldTime - SecondStartTime > 1 )
-		{
-			Engine->CurrentTickRate = (FLOAT)TickCount / (FLOAT)(OldTime - SecondStartTime);
-			SecondStartTime = OldTime;
-			TickCount = 0;
-		}
+	S.OldTime = appSeconds();
+	S.SecondStartTime = S.OldTime;
+	S.TickCount = 0;
+	S.RemainingTestTicks = S.TestTicks;
+	S.TraceTickIndex = 0;
+}
 
-		// Enforce optional maximum tick rate. A fixed-delta replay is driven
-		// by tick count, so it must not inherit the unfocused wall-clock cap.
-		FLOAT TargetTickRate = Engine->GetMaxTickRate();
-		if( FixedDeltaSeconds <= 0.0f && SDL_GetKeyboardFocus() == NULL )
-			TargetTickRate = TargetTickRate > 0.f ? Min( TargetTickRate, 10.f ) : 10.f;
-		if( TargetTickRate > 0.f )
-			appSleep( Max( 0.f, (1.f / TargetTickRate) - (FLOAT)(appSeconds() - OldTime) ) );
+static void MainLoopTick( FMainLoopState& S )
+{
+	if( GShadowAdmissionTraceReporter )
+		GShadowAdmissionTraceReporter->SetFrame( S.TraceTickIndex );
+	if( GCreatureGeneratorTraceReporter )
+		GCreatureGeneratorTraceReporter->SetFrame( S.TraceTickIndex );
+	if( GGlobalTickTraceReporter )
+		GGlobalTickTraceReporter->SetFrame( S.TraceTickIndex );
+	// A paired fidelity replay supplies the same positive fixed delta to
+	// the C++ oracle and hp2rs. Normal launches retain wall-clock timing.
+	FTime NewTime = appSeconds();
+	FLOAT DeltaSeconds = S.FixedDeltaSeconds > 0.0f
+		? S.FixedDeltaSeconds
+		: Max( (FLOAT)(NewTime - S.OldTime), 0.0001f );
+	if( S.LifecycleReporter )
+		S.LifecycleReporter->BeginTick( (INT)S.TraceTickIndex );
+	appSetRandTraceTick( S.TraceTickIndex, "engine_tick" );
+	S.Engine->Tick( DeltaSeconds );
+	appSetRandTraceTick( S.TraceTickIndex, "after_tick" );
+	if( S.ActorSlotDumpPending && ActorSlotDump::WriteIfReady( S.Engine ) )
+		S.ActorSlotDumpPending = 0;
+	if( S.Reporter )
+		S.Reporter->AfterTick( S.Engine, DeltaSeconds );
+	S.OldTime = NewTime;
+	++S.TickCount;
+	++S.TraceTickIndex;
+	if( S.RemainingTestTicks > 0 && --S.RemainingTestTicks == 0 )
+		appRequestExit( 0 );
+	if( S.OldTime - S.SecondStartTime > 1 )
+	{
+		S.Engine->CurrentTickRate = (FLOAT)S.TickCount / (FLOAT)(S.OldTime - S.SecondStartTime);
+		S.SecondStartTime = S.OldTime;
+		S.TickCount = 0;
 	}
+}
+
+static void MainLoopFrameCap( const FMainLoopState& S )
+{
+	// Enforce optional maximum tick rate. A fixed-delta replay is driven
+	// by tick count, so it must not inherit the unfocused wall-clock cap.
+	FLOAT TargetTickRate = S.Engine->GetMaxTickRate();
+	if( S.FixedDeltaSeconds <= 0.0f && SDL_GetKeyboardFocus() == NULL )
+		TargetTickRate = TargetTickRate > 0.f ? Min( TargetTickRate, 10.f ) : 10.f;
+	if( TargetTickRate > 0.f )
+		appSleep( Max( 0.f, (1.f / TargetTickRate) - (FLOAT)(appSeconds() - S.OldTime) ) );
+}
+
+static void MainLoopEnd( FMainLoopState& S )
+{
 	GIsRunning = 0;
 	debugf( TEXT("<HP2_RES> script_deferred=0") );
 	debugf( TEXT("<HP2_RES> script_deferral_reasons=none") );
 	debugf( TEXT("<HP2_RES> script_deferral_subjects=none") );
-	if( Reporter )
-		Reporter->Flush( TestTicks, FixedDeltaSeconds );
-	if( LifecycleReporter )
-		LifecycleReporter->Flush( TestTicks, FixedDeltaSeconds );
-	if( WorldCollisionReporter )
-		WorldCollisionReporter->Flush();
-	if( StaticBspProbe )
-		StaticBspProbe->Flush();
+	if( S.Reporter )
+		S.Reporter->Flush( S.TestTicks, S.FixedDeltaSeconds );
+	if( S.LifecycleReporter )
+		S.LifecycleReporter->Flush( S.TestTicks, S.FixedDeltaSeconds );
+	if( S.WorldCollisionReporter )
+		S.WorldCollisionReporter->Flush();
+	if( S.StaticBspProbe )
+		S.StaticBspProbe->Flush();
 	if( GShadowAdmissionTraceReporter )
 		GShadowAdmissionTraceReporter->Flush();
 	if( GActorTransitionLedger )
@@ -5219,6 +5330,30 @@ void MainLoop( UEngine* Engine, INT TestTicks, FLOAT FixedDeltaSeconds, Lifecycl
 		GCreatureGeneratorTraceReporter->Flush();
 	if( GGlobalTickTraceReporter )
 		GGlobalTickTraceReporter->Flush();
+}
+
+void MainLoop( UEngine* Engine, INT TestTicks, FLOAT FixedDeltaSeconds, LifecycleGateReporter* LifecycleReporter, WorldCollisionGateReporter* WorldCollisionReporter, StaticBspProbeReporter* StaticBspProbe )
+{
+	FMainLoopState State;
+	State.Engine = Engine;
+	State.TestTicks = TestTicks;
+	State.FixedDeltaSeconds = FixedDeltaSeconds;
+	State.LifecycleReporter = LifecycleReporter;
+	State.WorldCollisionReporter = WorldCollisionReporter;
+	State.StaticBspProbe = StaticBspProbe;
+	State.ActorSlotDumpPending = 0;
+	State.OldTime = 0.0f;
+	State.SecondStartTime = 0.0f;
+	State.TickCount = 0;
+	State.RemainingTestTicks = 0;
+	State.TraceTickIndex = 0;
+	MainLoopBegin( State );
+	while( GIsRunning && !GIsRequestingExit )
+	{
+		MainLoopTick( State );
+		MainLoopFrameCap( State );
+	}
+	MainLoopEnd( State );
 }
 
 void CleanUpOnExit( UEngine* Engine )
@@ -5467,9 +5602,116 @@ static const FHP2TraceHookBindings GTraceHookBindings =
 	&TraceShadowAdmissionRecord
 };
 
+static void ClearTraceReporterGlobals();
+static INT FinishProcess( INT ExitCode );
+
+// Everything the browser frame callback needs. Heap allocated because the
+// callback keeps running after main() has returned; the reporters must outlive
+// the stack frame that created them, exactly as on the native path where they
+// live until MainLoop returns.
+struct FBrowserSession
+{
+	FMainLoopState Loop;
+	std::unique_ptr<LifecycleGateReporter> LifecycleReporter;
+	std::unique_ptr<WorldCollisionGateReporter> WorldCollisionReporter;
+	std::unique_ptr<StaticBspProbeReporter> StaticBspProbe;
+	std::unique_ptr<ShadowAdmissionTraceReporter> ShadowAdmissionReporter;
+	std::unique_ptr<ActorTransitionLedger> ActorTransitionReporter;
+	std::unique_ptr<CreatureGeneratorTraceReporter> CreatureGeneratorTrace;
+	std::unique_ptr<GlobalTickTraceReporter> GlobalTickTrace;
+	INT ExitCode;
+	UBOOL Finished;
+};
+
+#if defined(__EMSCRIPTEN__)
+static void HP2BrowserFrame( void* Arg )
+{
+	FBrowserSession* Session = (FBrowserSession*)Arg;
+	INT ExitCode = Session->ExitCode;
+	UEngine* Engine = Session->Loop.Engine;
+	if( !Session->Finished )
+	{
+		if( GIsRunning && !GIsRequestingExit )
+		{
+			// No frame cap: requestAnimationFrame already paces the callback,
+			// and the unfocused 10 Hz clamp has no page-visibility meaning here.
+			try
+			{
+				MainLoopTick( Session->Loop );
+			}
+			catch( ... )
+			{
+				ExitCode = 1;
+				if( GError )
+					GError->HandleError();
+				fprintf( stderr, "%ls", GErrorHist );
+				Session->Finished = 1;
+			}
+		}
+		else
+		{
+			MainLoopEnd( Session->Loop );
+			ClearTraceReporterGlobals();
+			CleanUpOnExit( Engine );
+			Session->Finished = 1;
+		}
+	}
+
+	if( Session->Finished )
+	{
+		emscripten_cancel_main_loop();
+		// Destroying the session flushes nothing further: MainLoopEnd has
+		// already run every reporter's Flush exactly as the native loop does.
+		delete Session;
+		ExitCode = FinishProcess( ExitCode );
+	}
+}
+#endif
+
 /*-----------------------------------------------------------------------------
 	Main.
 -----------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------
+	Process teardown shared by main and the browser frame callback.
+-----------------------------------------------------------------------------*/
+
+static void ClearTraceReporterGlobals()
+{
+	GShadowAdmissionTraceReporter = NULL;
+	GActorTransitionLedger = NULL;
+	GCreatureGeneratorTraceReporter = NULL;
+	GGlobalTickTraceReporter = NULL;
+}
+
+static INT FinishProcess( INT ExitCode )
+{
+	GIsGuarded = 0;
+	try
+	{
+		HideSplash();
+		appExit();
+		SDL_Quit();
+	}
+	catch( ... )
+	{
+		// A guard error raised during teardown sits outside the guarded
+		// engine region above; letting it escape main would terminate the
+		// process with an uncaught exception instead of exiting cleanly.
+		GIsStarted = 0;
+		ExitCode = 1;
+	}
+	GIsStarted = 0;
+#if defined(__EMSCRIPTEN__)
+	// Every exit path reports here rather than in the frame callback: an
+	// engine that fails during init returns from main through FinishProcess
+	// before requestAnimationFrame is ever installed, and the page would
+	// otherwise sit on "Running…" forever. The page treats the first report
+	// as final, so the frame callback's own call is no longer needed.
+	EM_ASM( { if ( Module['onHP2Exit'] ) Module['onHP2Exit']( $0 ); }, ExitCode );
+#endif
+	return ExitCode;
+}
 
 int main( int ArgC, char* ArgV[] )
 {
@@ -5482,8 +5724,11 @@ int main( int ArgC, char* ArgV[] )
 	GMalloc = &Malloc;
 
 	// Validate and install the initial data/user roots before anything else
-	// touches the filesystem.
-	if( !PrepareHP2Paths( ArgC, ArgV ) )
+	// touches the filesystem. Finding no game data is a normal first-run
+	// state, not a crash: the launcher still opens and offers to import, so
+	// only a broken environment ends the process here.
+	const HP2PathsBootstrap Bootstrap = BootstrapHP2Paths( ArgC, ArgV );
+	if( !Bootstrap.Installed && !ShouldRunNativeLauncher( ArgC, ArgV ) )
 		return 1;
 
 	// Crash reporter: signal handlers plus atexit marker; watchdog unused
@@ -5508,6 +5753,12 @@ int main( int ArgC, char* ArgV[] )
 			break;
 		}
 	}
+
+	// The Linux launcher locates its QML and the bundled importer relative to
+	// this binary, so a dist tree moved off the build machine still works.
+#if !MACOSX
+	SetHP2ShellLauncherExecutablePath( ArgC > 0 ? ArgV[0] : "" );
+#endif
 
 	// Forwarded command line and chooser flow build engine FStrings; the
 	// real process allocator was installed right after PrepareHP2Paths
@@ -5597,6 +5848,10 @@ int main( int ArgC, char* ArgV[] )
 		// built there and the hint is not a preference list across platforms.
 #if MACOSX
 		SDL_SetHint( SDL_HINT_VIDEODRIVER, "cocoa" );
+#elif defined(__EMSCRIPTEN__)
+		// Emscripten builds exactly one SDL video backend (the HTML5 canvas).
+		// Any SDL_HINT_VIDEODRIVER value makes SDL_Init(SDL_INIT_VIDEO) fail,
+		// so the hint is left unset here.
 #else
 		SDL_SetHint( SDL_HINT_VIDEODRIVER, "wayland,x11" );
 #endif
@@ -5675,6 +5930,12 @@ int main( int ArgC, char* ArgV[] )
 			GGlobalTickTraceReporter = GlobalTickTrace.get();
 		}
 
+#if defined(__EMSCRIPTEN__)
+		// The browser frame callback outlives main(), so every reporter and the
+		// loop state move to the heap and stay alive until the loop ends.
+		FBrowserSession* Session = new FBrowserSession;
+#endif
+
 
 
 
@@ -5715,12 +5976,39 @@ int main( int ArgC, char* ArgV[] )
 		Parse( appCmdLine(), TEXT("fixed-dt="), FixedDeltaSeconds );
 		if( FixedDeltaSeconds < 0.0f )
 			appErrorf( TEXT("fixed-dt must be positive") );
+#if defined(__EMSCRIPTEN__)
+		if( !GIsRequestingExit )
+		{
+			// Ownership of every reporter moves into the session: the frame
+			// callback runs after main has returned, and their flush order in
+			// MainLoopEnd is identical to the native path.
+			Session->Loop.TestTicks = Max( 0, TestTicks );
+			Session->Loop.FixedDeltaSeconds = FixedDeltaSeconds;
+			Session->ShadowAdmissionReporter.swap( ShadowAdmissionReporter );
+			Session->ActorTransitionReporter.swap( ActorTransitionReporter );
+			Session->CreatureGeneratorTrace.swap( CreatureGeneratorTrace );
+			Session->GlobalTickTrace.swap( GlobalTickTrace );
+			Session->LifecycleReporter.swap( LifecycleReporter );
+			Session->WorldCollisionReporter.swap( WorldCollisionReporter );
+			Session->StaticBspProbe.swap( StaticBspProbe );
+			Session->ExitCode = ExitCode;
+			Session->Loop.Engine = Engine;
+			Session->Loop.LifecycleReporter = Session->LifecycleReporter.get();
+			Session->Loop.WorldCollisionReporter = Session->WorldCollisionReporter.get();
+			Session->Loop.StaticBspProbe = Session->StaticBspProbe.get();
+			MainLoopBegin( Session->Loop );
+			// An explicit frame rate is required: with fps = 0 Emscripten never
+			// starts the loop in this configuration. 30 keeps the page
+			// responsive; requestAnimationFrame still paces the callback.
+			emscripten_set_main_loop_arg( HP2BrowserFrame, Session, 10, 0 );
+			// EXIT_RUNTIME is disabled, so returning here leaves the runtime
+			// (and the frame callback) alive.
+			return 0;
+		}
+#endif
 		if( !GIsRequestingExit )
 			MainLoop( Engine, Max( 0, TestTicks ), FixedDeltaSeconds, LifecycleReporter.get(), WorldCollisionReporter.get(), StaticBspProbe.get() );
-		GShadowAdmissionTraceReporter = NULL;
-		GActorTransitionLedger = NULL;
-		GCreatureGeneratorTraceReporter = NULL;
-		GGlobalTickTraceReporter = NULL;
+		ClearTraceReporterGlobals();
 		CleanUpOnExit( Engine );
 	}
 #ifndef _DEBUG
@@ -5735,21 +6023,5 @@ int main( int ArgC, char* ArgV[] )
 	}
 #endif
 
-	GIsGuarded = 0;
-	try
-	{
-		HideSplash();
-		appExit();
-		SDL_Quit();
-	}
-	catch( ... )
-	{
-		// A guard error raised during teardown sits outside the guarded
-		// engine region above; letting it escape main would terminate the
-		// process with an uncaught exception instead of exiting cleanly.
-		GIsStarted = 0;
-		return 1;
-	}
-	GIsStarted = 0;
-	return ExitCode;
+	return FinishProcess( ExitCode );
 }

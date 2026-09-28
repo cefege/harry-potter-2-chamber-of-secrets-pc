@@ -267,6 +267,14 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 		SDL_GL_SetAttribute( SDL_GL_RED_SIZE, 8 );
 		SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, 8 );
 		SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, 8 );
+#if defined(__EMSCRIPTEN__)
+		// Emscripten creates the WebGL2 context for this window. An explicit
+		// alpha size of 0 and no multisampling match the framebuffer the driver
+		// renders into, and avoid the multisample renderbuffer path.
+		SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 0 );
+		SDL_GL_SetAttribute( SDL_GL_MULTISAMPLEBUFFERS, 0 );
+		SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 0 );
+#endif
 
 		DWORD Flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (Temporary ? SDL_WINDOW_HIDDEN : 0);
 		if( C->BorderlessWindow )

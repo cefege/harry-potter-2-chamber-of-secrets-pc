@@ -73,6 +73,12 @@ namespace
 		WriteJsonBool(file, req.hasExplicitDataRootOverride);
 		std::fputs(",\"explicitDataRoot\":", file);
 		WriteJsonString(file, req.explicitDataRoot.c_str());
+		std::fputs(",\"importerPath\":", file);
+		WriteJsonString(file, req.importerPath.c_str());
+		std::fputs(",\"retailDataRoot\":", file);
+		WriteJsonString(file, req.retailDataRoot.c_str());
+		std::fputs(",\"needsGameData\":", file);
+		WriteJsonBool(file, req.needsGameData);
 
 		// Data source configuration: which of retail/prototype is selected,
 		// plus the persisted root for each.
@@ -301,6 +307,10 @@ namespace
 				// For error messages
 				// (would be stored in a separate error field if needed)
 			}
+			else if (key == "importSource")
+			{
+				result.importSource = value;
+			}
 			else if (key == "saveIndex")
 			{
 				result.selection.save.saveIndex = std::atoi(value);
@@ -451,6 +461,12 @@ namespace
 		{
 			result.selection.action = HP2Launcher::LaunchAction::Quit;
 		}
+		else if (action == "import")
+		{
+			// The chosen source is carried on the result; the engine process
+			// owns running the importer.
+			result.selection.action = HP2Launcher::LaunchAction::Import;
+		}
 		else
 		{
 			result.selection.action = HP2Launcher::LaunchAction::Error;
@@ -459,6 +475,80 @@ namespace
 		return true;
 	}
 
+	// Absolute directory holding this executable, so installed assets can be
+	// located relative to the binary rather than to a build-tree path baked
+	// in at compile time.
+	std::string ExecutableDirectory(const char* Invoked)
+	{
+		if (!Invoked || !Invoked[0])
+		{
+			return std::string();
+		}
+		std::string Path(Invoked);
+		if (Path.find('/') == std::string::npos)
+		{
+			return std::string();
+		}
+		if (Path[0] != '/')
+		{
+			char Buffer[4096];
+			if (getcwd(Buffer, sizeof(Buffer)) == nullptr)
+			{
+				return std::string();
+			}
+			std::string Cwd(Buffer);
+			if (Cwd.empty() || Cwd.back() != '/')
+			{
+				Cwd += '/';
+			}
+			Path = Cwd + Path;
+		}
+		const size_t Slash = Path.find_last_of('/');
+		return Slash == std::string::npos || Slash == 0
+			? std::string("/")
+			: Path.substr(0, Slash);
+	}
+	// Resolves an executable against PATH, returning an empty string when it
+	// is not found. An argument containing '/' is checked directly.
+	std::string ResolveOnPath(const char* Name)
+	{
+		if (!Name || !Name[0])
+			return std::string();
+		if (std::strchr(Name, '/') != nullptr)
+			return access(Name, X_OK) == 0 ? std::string(Name) : std::string();
+		const char* pathEnv = std::getenv("PATH");
+		if (!pathEnv)
+			return std::string();
+		const std::string path(pathEnv);
+		size_t start = 0;
+		while (start <= path.size())
+		{
+			const size_t end = path.find(':', start);
+			const std::string dir = path.substr(
+				start, end == std::string::npos ? std::string::npos : end - start);
+			if (!dir.empty())
+			{
+				std::string candidate = dir;
+				if (candidate.back() != '/')
+					candidate += '/';
+				candidate += Name;
+				if (access(candidate.c_str(), X_OK) == 0)
+					return candidate;
+			}
+			if (end == std::string::npos)
+				break;
+			start = end + 1;
+		}
+		return std::string();
+	}
+
+	// argv[0] of this process, recorded at startup so the launcher can locate
+	// assets installed next to the binary.
+	std::string& ExecutablePathStorage()
+	{
+		static std::string path;
+		return path;
+	}
 	// Ensure directory exists, create if needed
 	bool EnsureDirectory(const std::string& path)
 	{
@@ -471,6 +561,11 @@ namespace
 
 namespace HP2Launcher
 {
+	void SetHP2ShellLauncherExecutablePath(const char* Invoked)
+	{
+		ExecutablePathStorage() = Invoked != nullptr ? Invoked : "";
+	}
+
 	LaunchAction RunHP2ShellLauncher(
 		const LauncherRequest& request,
 		LauncherResult& result,
@@ -504,21 +599,56 @@ namespace HP2Launcher
 		// Remove stale result file
 		::unlink(resultPath.c_str());
 
-		// Resolve Quickshell binary
-		const char* qsBin = std::getenv("HP2_QUICKSHELL_BIN");
-		if (!qsBin)
-			qsBin = "qs";
-
-		// Resolve QML directory
-		const char* qmlDir = std::getenv("HP2_LAUNCHER_QML");
-		if (!qmlDir)
-			qmlDir = HP2_LAUNCHER_QML_DIR;
-
-		// Check if QML directory exists
-		struct stat info;
-		if (stat(qmlDir, &info) != 0 || !S_ISDIR(info.st_mode))
+		// Resolve the Quickshell binary. `qs` is an external runtime
+		// dependency the dist does not vendor, so an absent one must be
+		// reported as an install problem rather than as a bare spawn failure.
+		const char* qsOverride = std::getenv("HP2_QUICKSHELL_BIN");
+		const std::string qsBin = ResolveOnPath(qsOverride && qsOverride[0] ? qsOverride : "qs");
+		if (qsBin.empty())
 		{
-			error = std::string("launcher QML not found: ") + qmlDir;
+			error = "The launcher UI (Quickshell, 'qs') was not found on PATH. Install it "
+				"with your package manager (for example 'sudo pacman -S quickshell' or "
+				"'sudo apt install quickshell'), or set HP2_QUICKSHELL_BIN to its path. "
+				"Game data can still be imported without the UI by running the bundled "
+				"prepare_retail_data.py from the install's share/hp2-launcher directory.";
+			::unlink(requestPath.c_str());
+			return LaunchAction::Error;
+		}
+
+		// Resolve the QML directory. The compiled-in default points into the
+		// build tree, which does not exist once a dist tree is moved off the
+		// build machine, so probe the installed layout relative to this
+		// executable before falling back to it. Without this the launcher
+		// fails before the import picker can ever open.
+		std::vector<std::string> qmlCandidates;
+		if (const char* override = std::getenv("HP2_LAUNCHER_QML"))
+		{
+			qmlCandidates.push_back(override);
+		}
+		const std::string selfDir = ExecutableDirectory(ExecutablePathStorage().c_str());
+		if (!selfDir.empty())
+		{
+			// dist/linux-arm64/bin/hp2_game -> dist/linux-arm64/share/...
+			qmlCandidates.push_back(selfDir + "/../share/hp2-launcher");
+			qmlCandidates.push_back(selfDir + "/../share/hp2");
+		}
+		qmlCandidates.push_back(HP2_LAUNCHER_QML_DIR);
+
+		std::string qmlDir;
+		for (const std::string& candidate : qmlCandidates)
+		{
+			struct stat candidateInfo;
+			if (!candidate.empty()
+				&& stat(candidate.c_str(), &candidateInfo) == 0
+				&& S_ISDIR(candidateInfo.st_mode))
+			{
+				qmlDir = candidate;
+				break;
+			}
+		}
+		if (qmlDir.empty())
+		{
+			error = "launcher QML not found; looked in: " + qmlCandidates[0];
 			return LaunchAction::Error;
 		}
 
@@ -542,11 +672,19 @@ namespace HP2Launcher
 
 		// Build argv for qs -p Launcher/Quickshell/shell.qml
 		std::string qmlPath = std::string(qmlDir) + "/shell.qml";
-		std::vector<const char*> argv = {qsBin, "-p", qmlPath.c_str(), nullptr};
+	std::vector<const char*> argv = {qsBin.c_str(), "-p", qmlPath.c_str(), nullptr};
 
 		// Spawn process
+#if defined(__EMSCRIPTEN__)
+		// A browser page cannot spawn a host process. Report the same failure the
+		// native path reports when the spawn call itself fails, so the caller
+		// takes its existing error branch.
+		error = std::string("failed to spawn ") + qsBin + ": " + std::strerror(ENOSYS);
+		::unlink(requestPath.c_str());
+		return LaunchAction::Error;
+#else
 		pid_t pid;
-		const int SpawnStatus = posix_spawnp(&pid, qsBin, nullptr, nullptr,
+		const int SpawnStatus = posix_spawnp(&pid, qsBin.c_str(), nullptr, nullptr,
 			const_cast<char* const*>(argv.data()),
 			const_cast<char* const*>(envp.data()));
 		if (SpawnStatus != 0)
@@ -555,6 +693,7 @@ namespace HP2Launcher
 			::unlink(requestPath.c_str());
 			return LaunchAction::Error;
 		}
+
 
 		// Wait for process
 		int status;
@@ -575,6 +714,7 @@ namespace HP2Launcher
 			::unlink(resultPath.c_str());
 			return LaunchAction::Error;
 		}
+	#endif
 
 		// Parse result.conf
 		if (!ParseResultConf(resultPath, result))

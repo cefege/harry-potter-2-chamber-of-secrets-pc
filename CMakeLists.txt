@@ -27,6 +27,13 @@ if(APPLE)
         message(FATAL_ERROR
             "HarryPotter2Native targets macOS 15.0; configure with CMAKE_OSX_DEPLOYMENT_TARGET=15.0.")
     endif()
+elseif(EMSCRIPTEN)
+    # The browser port targets wasm64 so that every package/ABI layout matches
+    # the verified arm64 builds.
+    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR
+            "HarryPotter2Native web builds require wasm64 (-sMEMORY64=1).")
+    endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
         message(FATAL_ERROR "HarryPotter2Native supports Linux on aarch64 only.")
@@ -73,4 +80,8 @@ set(BUILD_TESTING ON CACHE BOOL "Build HP2 behavioral tests" FORCE)
 include(CTest)
 
 include(HP2Targets)
-include(HP2Install)
+if(EMSCRIPTEN)
+    include(HP2Web)
+else()
+    include(HP2Install)
+endif()

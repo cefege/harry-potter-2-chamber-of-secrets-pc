@@ -65,7 +65,7 @@ private:
 	TIMETYP v;
 };
 
-#if _MSC_VER || __ICC || __LINUX__ || defined(__APPLE__)
+#if _MSC_VER || __ICC || __LINUX__ || defined(__APPLE__) || defined(__EMSCRIPTEN__)
 	#define SUPPORTS_PRAGMA_PACK 1
 #else
 	#define SUPPORTS_PRAGMA_PACK 0

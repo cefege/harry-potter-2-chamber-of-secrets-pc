@@ -270,6 +270,12 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
     target_sources(hp2_game PRIVATE $<TARGET_OBJECTS:hp2_nativetextcore>)
 endif()
 
+# ctest cannot execute wasm modules, and the editor/ucc/audit executables exist
+# only for native workflows. The browser build skips these; the shared test
+# helper, hp2_state, and the data-present gate below stay common, and
+# HP2Web.cmake registers the browser smoke tests.
+if(NOT EMSCRIPTEN)
+
 hp2_add_executable(hp2_ucc
     ${HP2_UCC_SOURCES}
     ${HP2_STATIC_PACKAGE_SOURCE}
@@ -460,6 +466,19 @@ add_custom_target(hp2_verification_binaries
     DEPENDS ${HP2_EXECUTABLE_TARGETS}
     COMMENT "Building every executable referenced by the HP2 behavioral test graph"
 )
+endif()
+
+# A test that needs game data is only registered when the configured data root
+# actually provides it. Without this guard a fresh clone (no data, by design)
+# registers tests that abort on a missing System/Default.ini, so a plain
+# `ctest --preset macos-arm64` reports failures no checkout can fix. This is a
+# configuration gap, not a skip: the tests exist wherever the data does. See
+# Docs/BEHAVIOR_MATRIX.md for the data-profile contract.
+set(HP2_TEST_DATA_PRESENT OFF)
+if(EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
+    set(HP2_TEST_DATA_PRESENT ON)
+endif()
+message(STATUS "HP2 test data present at ${HP2_TEST_DATA_ROOT}: ${HP2_TEST_DATA_PRESENT}")
 
 # Give every behavioral test an isolated, deterministic HOME. HP2 derives its
 # writable Application Support tree from HOME; immutable package data is
@@ -537,6 +556,7 @@ add_custom_target(hp2_state
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Validating hp2-state.json drift")
 
+if(NOT EMSCRIPTEN)
 hp2_add_behavior_test(abi_widths hp2_abi_tests
     --test=abi_widths
 )
@@ -555,17 +575,6 @@ hp2_add_behavior_test(compact_index hp2_abi_tests
 hp2_add_behavior_test(fstring_archive hp2_abi_tests
     --test=fstring_archive
 )
-# A test that needs game data is only registered when the configured data root
-# actually provides it. Without this guard a fresh clone (no data, by design)
-# registers tests that abort on a missing System/Default.ini, so a plain
-# `ctest --preset macos-arm64` reports failures no checkout can fix. This is a
-# configuration gap, not a skip: the tests exist wherever the data does. See
-# Docs/BEHAVIOR_MATRIX.md for the data-profile contract.
-set(HP2_TEST_DATA_PRESENT OFF)
-if(EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
-    set(HP2_TEST_DATA_PRESENT ON)
-endif()
-message(STATUS "HP2 test data present at ${HP2_TEST_DATA_ROOT}: ${HP2_TEST_DATA_PRESENT}")
 
 if(HP2_TEST_DATA_PRESENT)
     hp2_add_behavior_test(native_registration hp2_abi_tests
@@ -876,6 +885,7 @@ if(HP2_TEST_DATA_PRESENT)
     set_tests_properties(native_typography_contracts
         PROPERTIES LABELS "fast;data-prototype"
     )
+endif()
 endif()
 # ---------------------------------------------------------------------------
 # Experimental Vulkan render device: HP2 port of ThirdParty/UT99VulkanDrv

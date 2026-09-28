@@ -171,6 +171,22 @@
         "HP2_ENABLE_TSAN": "OFF",
         "HP2_TEST_DATA_ROOT": "$env{XDG_DATA_HOME}/harry-potter-2/Data/Retail"
       }
+    },
+    {
+      "name": "web-wasm64",
+      "displayName": "WebAssembly (wasm64) + WebGL2, Chrome/Firefox",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/web-wasm64",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON",
+        "HP2_DISABLE_NATIVE_TEXT_BACKEND": "ON",
+        "CMAKE_C_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
+        "CMAKE_CXX_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
+        "CMAKE_EXE_LINKER_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm"
+      }
     }
   ],
   "buildPresets": [
@@ -217,6 +233,13 @@
     {
       "name": "linux-arm64-retail",
       "configurePreset": "linux-arm64-retail"
+    },
+    {
+      "name": "web-wasm64",
+      "configurePreset": "web-wasm64",
+      "targets": [
+        "hp2_web"
+      ]
     }
   ],
   "testPresets": [
@@ -294,6 +317,13 @@
       "name": "linux-arm64-retail",
       "displayName": "Linux arm64 retail-only tests",
       "configurePreset": "linux-arm64-retail",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "web-wasm64",
+      "displayName": "WebAssembly (wasm64) browser smoke tests",
+      "configurePreset": "web-wasm64",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     }

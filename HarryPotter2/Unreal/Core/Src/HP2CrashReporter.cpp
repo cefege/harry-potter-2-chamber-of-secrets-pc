@@ -14,7 +14,11 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <unistd.h>
+#if !defined(__EMSCRIPTEN__)
+// The wasm build has no native stack unwinder; the report keeps the
+// "frames" array (empty) so downstream consumers see the same schema.
 #include <execinfo.h>
+#endif
 #include <pthread.h>
 #include <time.h>
 #include <stdlib.h>
@@ -176,7 +180,11 @@ namespace
 		if( Signal == SIGSEGV || Signal == SIGBUS || Signal == SIGILL || Signal == SIGFPE || Signal == SIGABRT )
 		{
 			static void* Frames[kMaxFrames];
+#if defined(__EMSCRIPTEN__)
+			int Count = 0;
+#else
 			int Count = backtrace( Frames, (int)kMaxFrames );
+#endif
 			AppendC( ",\"frames\":[" );
 			for( int I = 0; I < Count; ++I )
 			{

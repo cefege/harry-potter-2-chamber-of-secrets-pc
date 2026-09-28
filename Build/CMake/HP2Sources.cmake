@@ -153,6 +153,7 @@ set(HP2_XOPENGLDRV_SOURCES
 set(HP2_LAUNCHER_CORE_SOURCES
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LaunchPolicy.cpp"
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherStore.cpp"
+    "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2DataImport.cpp"
 )
 if(APPLE)
     set(HP2_NATIVE_LAUNCHER_SOURCE

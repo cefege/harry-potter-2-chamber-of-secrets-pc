@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -60,6 +61,16 @@ def parse_compiler_id_file(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def parse_compiler_path_file(text: str) -> str | None:
+    """Extract CMAKE_CXX_COMPILER from a CMakeCXXCompiler.cmake file.
+
+    A toolchain file can force the compiler without CMakeCache.txt ever
+    recording it, which is the case for the Emscripten web build.
+    """
+    match = re.search(r'set\(CMAKE_CXX_COMPILER\s+"([^"]+)"\)', text)
+    return match.group(1) if match else None
+
+
 def extract_compile_definitions(compile_commands_text: str) -> frozenset[str]:
     """Collect -D<NAME> definition names from compile_commands.json content."""
     names: set[str] = set()
@@ -94,14 +105,17 @@ def read_build_facts(build_dir: Path) -> dict[str, object]:
     cache = parse_cmake_cache(cache_text)
 
     compiler_id: str | None = None
+    compiler_path: str | None = None
     for compiler_file in sorted(build_dir.glob("CMakeFiles/*/CMakeCXXCompiler.cmake")):
         try:
-            compiler_id = parse_compiler_id_file(
-                compiler_file.read_text(encoding="utf-8", errors="replace")
-            )
+            text = compiler_file.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if compiler_id:
+        if compiler_id is None:
+            compiler_id = parse_compiler_id_file(text)
+        if compiler_path is None:
+            compiler_path = parse_compiler_path_file(text)
+        if compiler_id and compiler_path:
             break
 
     definitions: frozenset[str] = frozenset()
@@ -113,14 +127,21 @@ def read_build_facts(build_dir: Path) -> dict[str, object]:
     except OSError:
         pass
 
-    cxx_compiler = cache.get("CMAKE_CXX_COMPILER")
+    cxx_compiler = cache.get("CMAKE_CXX_COMPILER") or compiler_path
     deployment_target = cache.get("CMAKE_OSX_DEPLOYMENT_TARGET")
+    # The Emscripten toolchain sets EMSCRIPTEN in the cache; when the cache
+    # does not carry it, an em++ compiler path is the same signal.
+    is_web = cache.get("EMSCRIPTEN") == "1" or (
+        cxx_compiler is not None and os.path.basename(cxx_compiler) == "em++"
+    )
     missing: list[str] = []
     if not compiler_id:
         missing.append("CMAKE_CXX_COMPILER_ID (CMakeFiles/*/CMakeCXXCompiler.cmake)")
     if not cxx_compiler:
-        missing.append("CMAKE_CXX_COMPILER (CMakeCache.txt)")
-    if sys.platform == "darwin" and deployment_target is None:
+        missing.append("CMAKE_CXX_COMPILER (CMakeCache.txt or CMakeCXXCompiler.cmake)")
+    # A wasm build has no macOS deployment target to record: the host OS is
+    # not the target OS, so requiring the cache entry is wrong there.
+    if sys.platform == "darwin" and not is_web and deployment_target is None:
         missing.append("CMAKE_OSX_DEPLOYMENT_TARGET (CMakeCache.txt)")
     if missing:
         raise StateError(

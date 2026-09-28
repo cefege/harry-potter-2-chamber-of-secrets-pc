@@ -12,7 +12,7 @@
 #include <cwchar>
 #include <cstring>
 #include <cstdarg>
-#if defined(__APPLE__) || defined(__linux__)
+#if defined(__APPLE__) || defined(__linux__) || defined(__EMSCRIPTEN__)
 	#include <alloca.h>
 #endif
 
@@ -77,6 +77,24 @@
 	#undef ASMLINUX
 	#define ASMPSX2 1
 	#define COMPILER "Compiled with PSX2-EE g++ ("__VERSION__")"
+#elif defined(__EMSCRIPTEN__) && defined(__wasm64__)
+	#ifndef __UNIX__
+		#define __UNIX__ 1
+	#endif
+	#define __INTEL_BYTE_ORDER__ 1
+	#define HP2_HOST_WCHAR_TCHAR 1
+	#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+		#error Emscripten builds require little-endian byte order.
+	#endif
+	#undef ASM
+	#undef ASM3DNOW
+	#undef ASMKNI
+	#undef ASMLINUX
+	#define ASM 0
+	#define ASM3DNOW 0
+	#define ASMKNI 0
+	#define ASMLINUX 0
+	#define COMPILER "Compiled with Emscripten Clang (" __clang_version__ ")"
 #else
 	#error Unsupported platform.
 #endif

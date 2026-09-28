@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Harry Potter 2 — browser build</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #111; color: #ddd;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 10px 14px; background: #1c1c1c; border-bottom: 1px solid #333; }
+  #toolbar h1 { font-size: 14px; margin: 0 12px 0 0; font-weight: 600; }
+  button { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;
+    padding: 5px 14px; cursor: pointer; font: inherit; }
+  button:disabled { opacity: .45; cursor: default; }
+  #canvas { display: block; width: 100vw; height: calc(100vh - 96px);
+    background: #000; outline: none; cursor: default; }
+  #status { margin-left: auto; color: #9bd; }
+  #log { display: block; height: 64px; margin: 0; padding: 6px 14px; overflow: auto;
+    background: #0a0a0a; border-top: 1px solid #333; color: #8a8;
+    font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <h1>Harry Potter 2 (wasm64 + WebGL2)</h1>
+  <input type="file" id="import" webkitdirectory multiple>
+  <button id="import-dev" class="hidden">Import dev data</button>
+  <button id="new-game" disabled>New Game</button>
+  <select id="save" class="hidden"></select>
+  <button id="continue" disabled>Continue</button>
+  <span id="status">Loading…</span>
+</div>
+<canvas id="canvas" tabindex="-1" oncontextmenu="return false;"></canvas>
+<pre id="log"></pre>
+<script src="hp2_game.js"></script>
+<script src="hp2-web.js"></script>
+</body>
+</html>

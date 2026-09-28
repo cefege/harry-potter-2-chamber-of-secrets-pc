@@ -489,6 +489,11 @@ CORE_API void ClipboardPaste( FString& Result )
 	Shared libraries.
 -----------------------------------------------------------------------------*/
 
+#if defined(__EMSCRIPTEN__) && __STATIC_LINK
+// Non-NULL dummy so the handle checks above behave as they do natively.
+static char GHP2StaticLinkHandle;
+#endif
+
 //
 // Load a library.
 //
@@ -496,7 +501,13 @@ void* appGetDllHandle( const TCHAR* Filename )
 {
 	guard(appGetDllHandle);
 
-	#if __STATIC_LINK
+	#if defined(__EMSCRIPTEN__) && __STATIC_LINK
+		// Emscripten only gives dlopen a usable handle with MAIN_MODULE, which
+		// this build does not use. The caller only tests the handle for NULL
+		// (which would skip ProcessRegistrants); exports resolve through
+		// FindNative under __STATIC_LINK instead of dlsym.
+		return &GHP2StaticLinkHandle;
+	#elif __STATIC_LINK
 		return dlopen( NULL, RTLD_NOW );
 	#endif
 	check(Filename);
@@ -567,7 +578,9 @@ void appFreeDllHandle( void* DllHandle )
 	guard(appFreeDllHandle);
 	check(DllHandle);
 
+	#if !(defined(__EMSCRIPTEN__) && __STATIC_LINK)
 	dlclose( DllHandle );
+	#endif
 
 	unguard;
 }
@@ -581,6 +594,11 @@ void* appGetDllExport( void* DllHandle, const TCHAR* ProcName )
 	check(DllHandle);
 	check(ProcName);
 
+	#if defined(__EMSCRIPTEN__) && __STATIC_LINK
+	// Everything is linked into the module; there are no separate exports to
+	// resolve through a dynamic loader.
+	return NULL;
+	#else
 	dlerror(); // Clear any error condition.
 	FUnixUtf8String ProcNameUtf8( ProcName );
 	void* Result = dlsym( DllHandle, *ProcNameUtf8 );
@@ -588,6 +606,7 @@ void* appGetDllExport( void* DllHandle, const TCHAR* ProcName )
 	if( Error != NULL )
 		debugf( TEXT("dlerror: %s"), *appUnixFromUtf8(Error) );
 	return Result;
+	#endif
 
 	unguard;
 }
@@ -901,7 +920,14 @@ void appGetGUID( void* GUID )
 		return;
 
 	BYTE* Bytes = static_cast<BYTE*>(GUID);
+#if defined(__EMSCRIPTEN__)
+	// Emscripten has no arc4random_buf. getentropy draws from the host CSPRNG
+	// and returns 0 on success, matching the zero-filled failure case below.
+	if( getentropy( Bytes, 16 ) != 0 )
+		memset( Bytes, 0, 16 );
+#else
 	arc4random_buf( Bytes, 16 );
+#endif
 
 	// RFC 4122 version 4 and variant bits.
 	Bytes[6] = static_cast<BYTE>((Bytes[6] & 0x0f) | 0x40);

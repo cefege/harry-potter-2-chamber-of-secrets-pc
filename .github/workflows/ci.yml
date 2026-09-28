@@ -57,3 +57,35 @@ jobs:
           brew trust cefege/hp2
           brew readall cefege/hp2
           brew info --cask cefege/hp2/harry-potter-2
+
+  web:
+    # Browser build: pinned emsdk from ThirdParty/sources.json, then the
+    # data-none smoke (cross-origin isolation + wasm64 module instantiation
+    # in headless Chrome). No game data exists on the runner, so the
+    # data-prototype boot smoke is not registered here; see
+    # Docs/BEHAVIOR_MATRIX.md for what each data profile covers.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # The toolchain is not a repo submodule or an action: it is fetched at
+      # the exact tag recorded in ThirdParty/sources.json, so the version
+      # CI uses is the version the tree claims to be verified against.
+      - name: Install pinned emsdk
+        run: |
+          set -euo pipefail
+          tag=$(python3 -c "import json;print(next(s['tag'] for s in json.load(open('ThirdParty/sources.json'))['sources'] if s['name']=='emsdk'))")
+          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" checkout "$tag"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$tag"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$tag"
+          echo "EMSDK=$RUNNER_TEMP/emsdk" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: source "$EMSDK/emsdk_env.sh" && cmake --preset web-wasm64
+
+      - name: Build
+        run: source "$EMSDK/emsdk_env.sh" && cmake --build --preset web-wasm64
+
+      - name: Test (data-none profile)
+        run: source "$EMSDK/emsdk_env.sh" && ctest --preset web-wasm64 -L data-none --output-on-failure

@@ -3,18 +3,22 @@ include(FetchContent)
 # Keep every dependency at the immutable commit recorded in
 # ThirdParty/sources.json. Updates are deliberate source changes, never moving
 # tags or branches.
-FetchContent_Declare(hp2_sdl2
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG 5d249570393f7a37e037abf22cd6012a4cc56a71
-    GIT_SHALLOW FALSE
-    GIT_SUBMODULES ""
-)
-FetchContent_Declare(hp2_openal_soft
-    GIT_REPOSITORY https://github.com/kcat/openal-soft.git
-    GIT_TAG b2c48f7718ef3fcf67921a8b6534c4914e328970
-    GIT_SHALLOW FALSE
-    GIT_SUBMODULES ""
-)
+if(NOT EMSCRIPTEN)
+    FetchContent_Declare(hp2_sdl2
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG 5d249570393f7a37e037abf22cd6012a4cc56a71
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES ""
+    )
+endif()
+if(NOT EMSCRIPTEN)
+    FetchContent_Declare(hp2_openal_soft
+        GIT_REPOSITORY https://github.com/kcat/openal-soft.git
+        GIT_TAG b2c48f7718ef3fcf67921a8b6534c4914e328970
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES ""
+    )
+endif()
 FetchContent_Declare(hp2_ogg
     GIT_REPOSITORY https://github.com/xiph/ogg.git
     GIT_TAG be05b13e98b048f0b5a0f5fa8ce514d56db5f822
@@ -36,13 +40,24 @@ FetchContent_Declare(hp2_squish
 
 # SDL2 is linked statically; its tests, examples, and install surface are not
 # part of the HP2 graph.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
-set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-set(SDL_STATIC ON CACHE BOOL "" FORCE)
-set(SDL_TEST OFF CACHE BOOL "" FORCE)
-set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(hp2_sdl2)
+if(NOT EMSCRIPTEN)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static third-party libraries" FORCE)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(hp2_sdl2)
+else()
+    # No browser has a native SDL2; the emsdk port provides one that already
+    # binds the HTML5 canvas, keyboard, pointer lock, and WebAudio. Consumers
+    # keep linking SDL2::SDL2-static, so no caller changes.
+    add_library(SDL2::SDL2-static INTERFACE IMPORTED)
+    set_target_properties(SDL2::SDL2-static PROPERTIES
+        INTERFACE_COMPILE_OPTIONS "-sUSE_SDL=2"
+        INTERFACE_LINK_OPTIONS "-sUSE_SDL=2"
+    )
+endif()
 
 # Ogg and Vorbis are both static. Vorbis ships a FindOgg module that takes
 # precedence over OggConfig.cmake, so seed its cache variables with the pinned
@@ -76,26 +91,35 @@ endif()
 
 # OpenAL Soft remains a replaceable shared dylib; no utilities, examples, or
 # test programs are added to this graph.
-set(LIBTYPE SHARED CACHE STRING "OpenAL Soft library type" FORCE)
-set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
-set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL_CONFIG OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL_HRTF_DATA OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL_AMBDEC_PRESETS OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(ALSOFT_INSTALL_UTILS OFF CACHE BOOL "" FORCE)
-set(ALSOFT_UPDATE_BUILD_VERSION OFF CACHE BOOL "" FORCE)
-set(ALSOFT_ENABLE_MODULES OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(hp2_openal_soft)
-if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
-    # OpenAL Soft 1.25.2 enables -Werror=function-effects on Clang 20+, but
-    # Xcode 26 diagnoses its AudioUnit callback lambdas under the newer rules.
-    # Keep the warning visible while preventing a pinned dependency from
-    # blocking the HP2 build.
-    target_compile_options(OpenAL PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:-Wno-error=function-effects>")
+if(NOT EMSCRIPTEN)
+    set(LIBTYPE SHARED CACHE STRING "OpenAL Soft library type" FORCE)
+    set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL_CONFIG OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL_HRTF_DATA OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL_AMBDEC_PRESETS OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_INSTALL_UTILS OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_UPDATE_BUILD_VERSION OFF CACHE BOOL "" FORCE)
+    set(ALSOFT_ENABLE_MODULES OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(hp2_openal_soft)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
+        # OpenAL Soft 1.25.2 enables -Werror=function-effects on Clang 20+, but
+        # Xcode 26 diagnoses its AudioUnit callback lambdas under the newer rules.
+        # Keep the warning visible while preventing a pinned dependency from
+        # blocking the HP2 build.
+        target_compile_options(OpenAL PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:-Wno-error=function-effects>")
+    endif()
+else()
+    # Emscripten ships an OpenAL Soft build whose back end is WebAudio. Keep
+    # the target name so the audio subsystem links unchanged.
+    add_library(OpenAL::OpenAL INTERFACE IMPORTED)
+    set_target_properties(OpenAL::OpenAL PROPERTIES
+        INTERFACE_LINK_OPTIONS "-lopenal"
+    )
 endif()
 
 # ---------------------------------------------------------------------------
@@ -189,7 +213,17 @@ else()
     message(STATUS "Native text backend unavailable: no text provider condition matched")
 endif()
 
-find_package(OpenGL REQUIRED)
+if(EMSCRIPTEN)
+    # WebGL2 is bound at run time through SDL_GL_GetProcAddress, so no GL
+    # library is linked. The version pin keeps Emscripten from emitting the
+    # WebGL1 emulation path.
+    add_library(OpenGL::GL INTERFACE IMPORTED)
+    set_target_properties(OpenGL::GL PROPERTIES INTERFACE_LINK_OPTIONS
+        "-sMIN_WEBGL_VERSION=2;-sMAX_WEBGL_VERSION=2;-sGL_ENABLE_GET_PROC_ADDRESS=1"
+    )
+else()
+    find_package(OpenGL REQUIRED)
+endif()
 if(APPLE)
     find_library(HP2_APPKIT_FRAMEWORK AppKit REQUIRED)
 endif()
