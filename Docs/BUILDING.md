@@ -25,8 +25,52 @@ The codebase is legacy-era UE1-derived C++ with modern platform support.
 
 **Linux**
 - arm64
-- Ninja, GCC or Clang, SDL2 development headers
-- CMake 3.24+
+- CMake 3.24+, Ninja, a C/C++ compiler, Git, and `pkg-config`
+- OpenGL (`find_package(OpenGL REQUIRED)`)
+- FreeType, HarfBuzz and Fontconfig — **not optional on Linux**: the native
+  text provider's condition is
+  `NOT APPLE AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND
+  HP2_FONTCONFIG_FOUND` (`Build/CMake/HP2Dependencies.cmake:145`). Without all
+  three, `HP2_HAS_NATIVE_TEXT_BACKEND` stays `OFF` and
+  `HP2Targets.cmake:876` then calls `set_tests_properties` on
+  `native_typography_contracts`, a test that is only registered when the
+  backend exists (`:777`) — so the configure step **fails outright**
+  ("Can not find test to add properties to"). macOS never hits this because
+  CoreText ships with the system.
+- The window and audio development headers SDL2 probes for: X11 (`X11`,
+  `Xext`, `Xrandr`, `Xcursor`, `Xfixes`, `Xi`, `Xss`), Wayland
+  (`wayland-client`, `xkbcommon`), ALSA and PulseAudio
+
+SDL2, OpenAL Soft, Ogg, Vorbis and Squish are **not** system packages here —
+`Build/CMake/HP2Dependencies.cmake` fetches each at a pinned commit
+(`ThirdParty/sources.json`) and builds it in-tree. There is no system SDL2 to
+install, and the "SDL2 development headers" this page used to list were never
+read by the build.
+
+Omarchy / Arch (Hyprland or X11):
+
+```sh
+sudo pacman -S --needed base-devel cmake ninja pkgconf
+sudo pacman -S --needed libglvnd mesa libx11 libxext libxrandr libxcursor \
+  libxfixes libxi libxss wayland libxkbcommon alsa-lib libpulse \
+  freetype harfbuzz fontconfig
+```
+
+Debian / Ubuntu:
+
+```sh
+sudo apt install build-essential cmake ninja-build pkg-config \
+  libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
+  libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev \
+  libxkbcommon-dev libasound2-dev libpulse-dev \
+  libfreetype-dev libharfbuzz-dev libfontconfig-dev
+```
+
+Fedora: `alsa-lib-devel pulseaudio-libs-devel libX11-devel libXext-devel
+libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel
+libXScrnSaver-devel wayland-devel wayland-protocols-devel
+libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel
+mesa-libGL-devel cmake ninja-build gcc pkgconf-pkg-config`.
 
 ## Build
 

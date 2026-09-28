@@ -95,8 +95,34 @@ the Trash) leaves your saves and game files alone.
 
 ## Linux
 
-Linux on **arm64** works, but there's no download yet — you build it yourself:
+Linux on **arm64** works — tested on **Omarchy** (Arch-based, Hyprland), and
+any other distro should work too. There's no download yet, so you build it
+yourself. First the tools and libraries the build needs:
 
+**Omarchy / Arch / EndeavourOS:**
+
+```sh
+sudo pacman -S --needed base-devel cmake ninja pkgconf
+sudo pacman -S --needed libglvnd mesa libx11 libxext libxrandr libxcursor \
+  libxfixes libxi libxss wayland libxkbcommon alsa-lib libpulse \
+  freetype harfbuzz fontconfig
+```
+
+**Debian / Ubuntu:**
+
+```sh
+sudo apt install build-essential cmake ninja-build pkg-config \
+  libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
+  libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev \
+  libxkbcommon-dev libasound2-dev libpulse-dev \
+  libfreetype-dev libharfbuzz-dev libfontconfig-dev
+```
+
+You do **not** install SDL2, OpenAL, or the Vorbis libraries yourself — the
+build fetches pinned copies and compiles them. Both Wayland (Hyprland) and
+X11 work; it uses whichever your session provides.
+
+Then build, add your game files, and play:
 ```sh
 git clone https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc
 cd harry-potter-2-chamber-of-secrets-pc
@@ -110,8 +136,9 @@ python3 Build/prepare_retail_data.py \
 ./dist/linux-arm64/bin/hp2_game
 ```
 
-You'll need CMake 3.24+, Ninja, GCC or Clang, and the SDL2 development headers.
-Logs are in `~/.local/share/harry-potter-2/User/Launcher.log`. More in
+You'll need an **arm64** machine (a Raspberry Pi won't do), CMake 3.24+, a
+C/C++ compiler, and Git. Logs are in
+`~/.local/share/harry-potter-2/User/Launcher.log`. More in
 [Docs/BUILDING.md](Docs/BUILDING.md).
 
 ## Help it run everywhere
