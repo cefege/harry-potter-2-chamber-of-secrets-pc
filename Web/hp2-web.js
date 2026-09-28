@@ -21,14 +21,21 @@
   const LOG_LINES = 20000;
 
   const canvas = document.getElementById('canvas');
+  const setupEl = document.getElementById('setup');
+  const chooserEl = document.getElementById('chooser');
   const importInput = document.getElementById('import');
-  const importDevButton = document.getElementById('import-dev');
+  const chooseFolderButton = document.getElementById('choose-folder');
+  const setupStatus = document.getElementById('setup-status');
+  const saveList = document.getElementById('save-list');
+  const noSaves = document.getElementById('no-saves');
   const newGameButton = document.getElementById('new-game');
-  const saveSelect = document.getElementById('save');
   const continueButton = document.getElementById('continue');
   const statusEl = document.getElementById('status');
   const logEl = document.getElementById('log');
+  const logToggle = document.getElementById('log-toggle');
   const params = new URLSearchParams(location.search);
+  // ?devdata additionally offers a button that imports from the dev server,
+  // for local testing against a served data root. Never shown otherwise.
   const devMode = params.has('devdata');
 
   // The module is instantiated at page init (see init), so FS, the IDBFS
@@ -47,6 +54,7 @@
   let smokeReported = false;
   let currentModule = null;
   let saves = [];
+  let selectedSave = -1;
 
   function setStatus(text) {
     statusEl.textContent = text;
@@ -104,7 +112,9 @@
   function updateButtons() {
     const canLaunch = moduleReady && dataImported && !started;
     newGameButton.disabled = !canLaunch;
-    continueButton.disabled = !canLaunch || saves.length === 0;
+    // Native launcher parity: Continue needs a save *selected*, not merely
+    // one existing (shell.qml gates it on selectedSaveIndex >= 0).
+    continueButton.disabled = !canLaunch || selectedSave < 0;
   }
 
   function formatBytes(bytes) {
@@ -219,7 +229,7 @@
       await writeToOpfs(dataDir, target, data);
       written += 1;
       bytes += data.byteLength;
-      setStatus('Importing ' + written + '/' + total + ' (' + formatBytes(bytes) + ')');
+      setSetupStatus('Importing ' + written + '/' + total + ' (' + formatBytes(bytes) + ')');
     }
 
     // Written last: its presence is the only signal that an import completed.
@@ -231,9 +241,9 @@
     await writeToOpfs(dataDir, MARKER, new Blob([JSON.stringify(marker)], {
       type: 'application/json',
     }));
-    setStatus('Imported ' + written + ' files (' + formatBytes(bytes) + '). Ready.');
     dataImported = true;
-    updateButtons();
+    showChooser();
+    setStatus('Ready. ' + written + ' files imported.');
   }
 
   async function hasMarker() {
@@ -415,31 +425,53 @@
     return found;
   }
 
-  // Fills the save picker. The most recently modified save is preselected,
-  // matching the native launcher's default, and the picker only appears
-  // when there is an actual choice to make.
+  // Fills the save list. The most recently modified save is preselected,
+  // matching the native launcher's default, and each row shows the same
+  // name-and-timestamp pair the QML delegate renders.
   function refreshSaves() {
     if (!currentModule || !currentModule.FS) {
       return;
     }
     saves = listSaves(currentModule.FS);
-    saveSelect.textContent = '';
+    saveList.textContent = '';
     saves.forEach(function (save, position) {
-      const option = document.createElement('option');
-      option.value = String(position);
-      option.textContent = save.label;
-      saveSelect.appendChild(option);
+      const row = document.createElement('li');
+      row.className = 'save';
+      row.dataset.position = String(position);
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = save.label;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = save.mtime ? new Date(save.mtime).toLocaleString() : '';
+      row.appendChild(name);
+      row.appendChild(meta);
+      row.addEventListener('click', function () {
+        selectSave(position);
+      });
+      saveList.appendChild(row);
     });
-    if (saves.length > 0) {
-      let newest = 0;
-      for (let i = 1; i < saves.length; ++i) {
-        if (saves[i].mtime > saves[newest].mtime) {
-          newest = i;
-        }
+    noSaves.hidden = saves.length > 0;
+    // Preselect the newest, so Continue is useful without a tap.
+    selectSave(saves.length > 0 ? newestSavePosition() : -1);
+  }
+
+  function newestSavePosition() {
+    let newest = 0;
+    for (let i = 1; i < saves.length; ++i) {
+      if (saves[i].mtime > saves[newest].mtime) {
+        newest = i;
       }
-      saveSelect.value = String(newest);
     }
-    saveSelect.classList.toggle('hidden', saves.length < 2);
+    return newest;
+  }
+
+  function selectSave(position) {
+    selectedSave = position;
+    Array.prototype.forEach.call(saveList.children, function (row) {
+      row.classList.toggle('selected', Number(row.dataset.position) === position);
+    });
+    updateButtons();
   }
 
   // Runs main with the launcher's arguments. The module already exists (it is
@@ -489,6 +521,9 @@
       antialias: false,
     });
 
+    // The launcher is the primary surface; the game replaces it only once
+    // the engine is actually running.
+    document.body.classList.add('running');
     setStatus('Running…');
     resumeAudioContexts();
     canvas.addEventListener('pointerdown', resumeAudioContexts);
@@ -505,7 +540,7 @@
   }
 
   function continueArgs() {
-    const save = saves[Number(saveSelect.value)];
+    const save = saves[selectedSave];
     if (!save) {
       return null;
     }
@@ -528,6 +563,9 @@
     // The runtime is still alive here (EXIT_RUNTIME=0), so the IDBFS
     // contents can be flushed before the user reloads the page.
     syncFilesystem(false);
+    // Back to the launcher rather than a dead page: the player can pick
+    // another save or start over without reloading.
+    document.body.classList.remove('running');
     setStatus(text + ' Reload the page to play again.');
     reportSmoke('failed', text);
   }
@@ -596,31 +634,63 @@
     });
   }
 
+  // The first-run step is one button, not a file input the player has to
+  // understand: the label opens the folder picker and the file input stays
+  // hidden behind it.
+  chooseFolderButton.addEventListener('click', function () {
+    importInput.click();
+  });
+
   importInput.addEventListener('change', async function () {
     if (importInput.files.length === 0) {
       return;
     }
     dataImported = false;
-    updateButtons();
+    showSetup();
+    setSetupStatus('Copying your game files into this browser…');
     try {
       await importEntries(await entriesFromFolderInput(importInput.files));
     } catch (err) {
-      setStatus('Import failed: ' + err);
+      setSetupStatus('Import failed: ' + err);
     }
   });
 
   if (devMode) {
-    importDevButton.classList.remove('hidden');
-    importDevButton.addEventListener('click', async function () {
+    const devButton = document.createElement('button');
+    devButton.textContent = 'Import from dev server';
+    devButton.addEventListener('click', async function () {
       dataImported = false;
-      updateButtons();
+      showSetup();
+      setSetupStatus('Reading dev data…');
       try {
         await importEntries(await entriesFromDevServer());
       } catch (err) {
-        setStatus('Import failed: ' + err);
+        setSetupStatus('Import failed: ' + err);
       }
     });
+    setupEl.appendChild(devButton);
   }
+
+  function showSetup() {
+    setupEl.hidden = false;
+    chooserEl.hidden = true;
+  }
+
+  function showChooser() {
+    setupEl.hidden = true;
+    chooserEl.hidden = false;
+    refreshSaves();
+    updateButtons();
+  }
+
+  function setSetupStatus(text) {
+    setupStatus.textContent = text;
+  }
+
+  logToggle.addEventListener('click', function () {
+    logEl.classList.toggle('open');
+    logToggle.textContent = logEl.classList.contains('open') ? 'Hide log' : 'Log';
+  });
 
   newGameButton.addEventListener('click', function () {
     launch(newGameArgs());
@@ -718,27 +788,31 @@
   }
 
   (async function init() {
+    // The chooser is the product's face, so it is what the page starts on.
+    // The setup step replaces it only when there is nothing to play yet.
+    chooserEl.hidden = true;
+    setupEl.hidden = true;
     if (!self.crossOriginIsolated) {
-      setStatus(COOP_STATUS);
-      importInput.disabled = true;
-      importDevButton.disabled = true;
-      updateButtons();
+      setSetupStatus(COOP_STATUS);
+      setupEl.hidden = false;
+      chooseFolderButton.disabled = true;
       reportSmoke('failed', COOP_STATUS);
       return;
     }
     if (!('getDirectory' in navigator.storage)) {
-      setStatus('This browser has no origin-private file system (OPFS).');
-      importInput.disabled = true;
-      updateButtons();
+      setSetupStatus('This browser has no private file storage, so the game cannot be installed here.');
+      setupEl.hidden = false;
+      chooseFolderButton.disabled = true;
       reportSmoke('failed', 'no origin-private file system (OPFS)');
       return;
     }
-    setStatus('Loading the game…');
+    setSetupStatus('Loading the game…');
     let instance;
     try {
       instance = await createModule();
     } catch (err) {
-      setStatus('Loading the game failed: ' + err);
+      setSetupStatus('Loading the game failed: ' + err);
+      setupEl.hidden = false;
       reportSmoke('failed', 'module instantiation failed: ' + err);
       return;
     }
@@ -749,14 +823,13 @@
     window.hp2Module = instance;
     moduleReady = true;
     startPersistence(instance);
-    refreshSaves();
     dataImported = await hasMarker();
     if (dataImported) {
-      setStatus('Data already imported. Ready.');
+      showChooser();
     } else {
-      setStatus('Import your HarryPotter2/Unreal folder to begin.');
+      setSetupStatus('');
+      showSetup();
     }
-    updateButtons();
     if (smokeMode === 'boot') {
       // Headless Chrome never clicks: boot mode drives the launch itself.
       await runBootSmoke();

@@ -2,37 +2,187 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Harry Potter 2 — browser build</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Harry Potter 2</title>
 <style>
-  html, body { margin: 0; padding: 0; background: #111; color: #ddd;
-    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  #toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
-    padding: 10px 14px; background: #1c1c1c; border-bottom: 1px solid #333; }
-  #toolbar h1 { font-size: 14px; margin: 0 12px 0 0; font-weight: 600; }
-  button { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px;
-    padding: 5px 14px; cursor: pointer; font: inherit; }
-  button:disabled { opacity: .45; cursor: default; }
-  #canvas { display: block; width: 100vw; height: calc(100vh - 96px);
-    background: #000; outline: none; cursor: default; }
-  #status { margin-left: auto; color: #9bd; }
-  #log { display: block; height: 64px; margin: 0; padding: 6px 14px; overflow: auto;
-    background: #0a0a0a; border-top: 1px solid #333; color: #8a8;
-    font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
-  .hidden { display: none; }
+  /* Palette and shape language copied from the native Quickshell launcher
+     (Launcher/Quickshell/shell.qml) so the browser reads as the same product:
+     #13141c page, #24283b panels, #7aa2f7 accent, #c0caf5 primary text. */
+  :root {
+    --bg: #13141c;
+    --panel: #24283b;
+    --line: #414868;
+    --accent: #7aa2f7;
+    --text: #c0caf5;
+    --dim: #a9b1d6;
+    --muted: #565f89;
+    --green: #9ece6a;
+    --red: #f7768e;
+  }
+  * { box-sizing: border-box; }
+  /* `hidden` must beat the flex display values set below, or a hidden screen
+     still lays itself out. */
+  [hidden] { display: none !important; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior: none;
+  }
+  body { display: flex; flex-direction: column; }
+
+  /* ---- Launcher screen. This is the primary surface: full bleed, canvas
+         hidden until the game is actually running. ---- */
+  #launcher {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+    padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+             max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+    gap: 16px;
+    overflow: hidden;
+  }
+  body.running #launcher { display: none; }
+
+  header { text-align: center; }
+  header h1 { margin: 0; font-size: 30px; color: var(--red); letter-spacing: .5px; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+
+  /* Saves + actions share a row on wide screens and stack on narrow ones. */
+  .body { flex: 1; min-height: 0; display: flex; gap: 20px; }
+  @media (max-width: 760px) { .body { flex-direction: column; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  .label {
+    color: var(--muted); font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 10px;
+  }
+  #saves { flex: 1; }
+  #saves { width: 300px; }
+  @media (max-width: 760px) { #saves { width: auto; min-height: 120px; } }
+  .actions { flex: 1; }
+
+  ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+  li.save {
+    background: #0e0e14; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; margin-bottom: 8px; cursor: pointer;
+    /* 44px minimum touch target on every device. */
+    min-height: 60px;
+  }
+  li.save.selected { background: var(--accent); border-color: #7da6ff; }
+  li.save .name { font-weight: 700; font-size: 15px; }
+  li.save .meta { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  /* The selection fill is the light accent, so selected text goes dark --
+     the unselected light-on-dark pairing is unreadable on top of it. */
+  li.save.selected .name { color: #13141c; }
+  li.save.selected .meta { color: #24304a; }
+  .empty { color: var(--muted); font-size: 14px; padding: 10px 2px; }
+
+  button {
+    font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 18px; cursor: pointer; width: 100%;
+    /* Comfortable on a phone, not cartoonish on a desktop. */
+    min-height: 48px; font-weight: 700;
+    touch-action: manipulation;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { color: var(--muted); cursor: default; border-color: var(--line); }
+  button.primary { border-color: var(--green); }
+  button.primary:hover:not(:disabled) { border-color: var(--green); background: #2b3348; }
+  button.secondary { border-color: var(--accent); }
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+
+  .note { color: var(--muted); font-size: 13px; }
+  .note strong { color: var(--dim); }
+  /* Shown on narrow screens, where a touch-only device is the likely case.
+     Width rather than (pointer: coarse): a narrow desktop window is equally
+     unplayable, and emulation cannot be trusted to report pointer type. */
+  @media (min-width: 900px) { #needs-peripherals { display: none; } }
+
+  #status { color: var(--accent); font-size: 14px; }
+  #status.error { color: var(--red); }
+
+  /* ---- First-run data import. The one unavoidable setup step, so it is
+         stated as a sentence and given one button. ---- */
+  #setup { display: flex; flex-direction: column; align-items: center;
+           justify-content: center; gap: 16px; text-align: center; flex: 1; }
+  #setup h2 { margin: 0; font-size: 22px; }
+  #setup p { margin: 0; color: var(--dim); max-width: 34em; }
+  #setup input[type=file] { display: none; }
+  #setup button { width: auto; padding: 14px 28px; }
+
+  /* ---- Game surface. Shown only while the engine is running. ---- */
+  #stage { display: none; flex: 1; min-height: 0; position: relative; }
+  body.running #stage { display: flex; }
+  #canvas { flex: 1; min-height: 0; width: 100%; background: #000; outline: none; cursor: default; }
+
+  /* Log is a diagnostic, not part of the product surface: collapsed by
+     default behind one small button. */
+  #log-toggle {
+    position: absolute; right: 8px; top: 8px; width: auto; min-height: 0;
+    padding: 6px 12px; font-size: 12px; background: rgba(19,20,28,.85);
+  }
+  #log {
+    display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 40%;
+    margin: 0; padding: 10px; overflow: auto; z-index: 2;
+    background: #0a0a0a; border-top: 1px solid var(--line); color: #8a8;
+    font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
+  }
+  #log.open { display: block; }
+  #log-toggle { z-index: 3; }
 </style>
 </head>
 <body>
-<div id="toolbar">
-  <h1>Harry Potter 2 (wasm64 + WebGL2)</h1>
-  <input type="file" id="import" webkitdirectory multiple>
-  <button id="import-dev" class="hidden">Import dev data</button>
-  <button id="new-game" disabled>New Game</button>
-  <select id="save" class="hidden"></select>
-  <button id="continue" disabled>Continue</button>
-  <span id="status">Loading…</span>
+
+<section id="launcher">
+  <header>
+    <h1>Harry Potter 2</h1>
+    <p>Chamber of Secrets</p>
+  </header>
+
+  <div id="setup">
+    <h2>No game data yet</h2>
+    <p>This build does not include the game. Choose the folder your copy of
+       Harry Potter and the Chamber of Secrets is in, and it will be copied
+       into this browser once. Your folder never leaves your device.</p>
+    <input type="file" id="import" webkitdirectory multiple>
+    <button id="choose-folder" class="secondary">Choose Folder…</button>
+    <p class="note" id="setup-status"></p>
+  </div>
+
+  <div class="body" id="chooser" hidden>
+    <div class="panel" id="saves">
+      <div class="label">Saved Games</div>
+      <ul id="save-list"></ul>
+      <div class="empty" id="no-saves">No saved games yet.</div>
+    </div>
+    <div class="panel actions">
+      <div class="label">Play</div>
+      <div class="stack">
+        <button id="new-game" class="primary">New Game</button>
+        <button id="continue" class="secondary" disabled>Continue</button>
+        <p class="note" id="needs-peripherals">
+          <strong>Playing needs a keyboard and mouse.</strong>
+          This launcher works on a phone, but the game itself does not.
+        </p>
+      </div>
+      <div style="flex:1"></div>
+      <div id="status">Ready.</div>
+    </div>
+  </div>
+</section>
+
+<div id="stage">
+  <button id="log-toggle">Log</button>
+  <canvas id="canvas" tabindex="-1" oncontextmenu="return false;"></canvas>
+  <pre id="log"></pre>
 </div>
-<canvas id="canvas" tabindex="-1" oncontextmenu="return false;"></canvas>
-<pre id="log"></pre>
+
 <script src="hp2_game.js"></script>
 <script src="hp2-web.js"></script>
 </body>
