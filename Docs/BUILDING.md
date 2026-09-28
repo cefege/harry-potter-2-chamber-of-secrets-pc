@@ -90,12 +90,14 @@ sudo dnf install clang make cmake ninja-build pkgconf-pkg-config git \
 `bsdtar` (Arch `libarchive`, Debian `libarchive-tools`, Fedora `bsdtar`) is
 needed in two places, not just the test suite:
 
-- **Importing a retail `.7z` or `.tar*` on Linux.** `retail_root_from_archive`
+- **Importing a retail `.7z` on Linux.** `retail_root_from_archive`
   (`Build/prepare_retail_data.py:1708-1716`) dispatches `.7z` to
   `extract_7z`, which calls `system_bsdtar()` (`:1569-1582`, checking
   `/usr/bin/bsdtar`, `/bin/bsdtar`, then `$PATH`) and hard-errors if none is
-  found. macOS always has it, so this only bites Linux. `.zip` input does not
-  need it — `extract_zip` (`:1518`) uses the standard library.
+  found. macOS always has it, so this only bites Linux. `.zip` and tar
+  archives (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`,
+  `.txz`) do not need it — `extract_zip` (`:1518`) and `extract_tar`
+  (`:1542`) use the standard library.
 - **The test suite.** `Build/verify_prototype_archive.py:31` hardcodes
   `/usr/bin/bsdtar` with no `$PATH` fallback; without it
   `prototype_archive_contract` fails on Linux, and the script does not
