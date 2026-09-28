@@ -31,9 +31,15 @@ void UXOpenGLRenderDevice::ShaderProgram::EmitGlobals(ShaderCompilationOptions O
 			Out << "#version 330 core" END_LINE;
 	}
 	else
-	{	  
+	{
+#if defined(__EMSCRIPTEN__)
+		// WebGL2 is GLSL ES 3.00. Interface blocks (in/out) are an ES 3.10
+		// feature, so the varyings become struct-typed in/out on this path.
+		Out << "#version 300 es" END_LINE;
+#else
 	  Out << "#version 310 es" END_LINE;
 	  Out << "#extension GL_OES_shader_io_blocks : require" END_LINE;
+#endif
 	}
 
 	if (Options.HasOption(ShaderCompilationOptions::OPT_BindlessTextures))
@@ -49,6 +55,16 @@ void UXOpenGLRenderDevice::ShaderProgram::EmitGlobals(ShaderCompilationOptions O
 
 	if (Options.HasOption(ShaderCompilationOptions::OPT_GLES))
 	{
+#if defined(__EMSCRIPTEN__)
+		// WebGL2 is core GLSL ES 3.00: GL_EXT_clip_cull_distance is not an
+		// available extension, and declaring it fails compilation. GLSL ES
+		// requires an explicit default precision for float and int in fragment
+		// shaders; lowp breaks the DrawFlags decode on real ES hardware, and
+		// usampler2D has no default precision at all.
+		Out << "precision highp float;" << END_LINE;
+		Out << "precision highp int;" << END_LINE;
+		Out << "precision highp usampler2D;" << END_LINE;
+#else
 		Out << R"(
 // The following extension appears not to be available on RaspberryPi4 at the moment.
 #extension GL_EXT_clip_cull_distance : enable
@@ -61,6 +77,7 @@ void UXOpenGLRenderDevice::ShaderProgram::EmitGlobals(ShaderCompilationOptions O
 precision lowp float;
 precision lowp int;
 )";
+#endif
 	}
 
 	// Emit specialization options
@@ -185,6 +202,7 @@ layout(std140) uniform EditorState
 };
 #endif
 
+#if ENGINE_VERSION==227
 layout(std140) uniform DistanceFogParams
 {
 	vec4 DistanceFogColor;
@@ -193,6 +211,7 @@ layout(std140) uniform DistanceFogParams
 	float DistanceFogDensity;		// For exp and exp2 equation
 	int DistanceFogMode;			// -1 = disabled, 0 = linear, 1 = exp, 2 = exp2
 };
+#endif
 
 #if OPT_DistanceFog
 float getFogFactor(float FogCoord)
@@ -294,6 +313,35 @@ vec4 ApplyPolyFlags(vec4 Color, uint DrawFlags)
     // to have the correct output logging for a possible 
     // error within the shader files.
 	Out << "#line 1" END_LINE;
+}
+
+void UXOpenGLRenderDevice::ShaderProgram::EmitVaryingBlock(FShaderWriterX& Out, const char* Qualifier, const char* BlockName, const char* Members, const char* InstanceName, const char* StagePrefix)
+{
+#if defined(__EMSCRIPTEN__)
+	// GLSL ES 3.00 has no in/out interface blocks (that is an ES 3.10 feature),
+	// but it does allow struct-typed varyings. Each stage declares the struct
+	// type itself - the two stages are compiled independently and share no
+	// declarations - using the same member list the desktop interface block
+	// uses, so every Out.X / In.X reference in the generated shaders stays
+	// valid.
+	//
+	// Two naming rules apply: an ES varying may not share its struct type's
+	// name, and the linker matches the two stages on the varying's instance
+	// name, so both stages use the same derived instance and the stage's
+	// conventional Out./In. name is bound to it with a #define.
+	const FString Instance = FString::Printf(TEXT("%lsIO"), appFromAnsi(BlockName));
+	Out << "struct " << BlockName << " {" << END_LINE;
+	Out << Members;
+	Out << "};" << END_LINE;
+	Out << Qualifier << " " << BlockName << " " << appToAnsi(*Instance) << ";" << END_LINE;
+	Out << "#define " << StagePrefix << " " << appToAnsi(*Instance) << END_LINE;
+
+#else
+	Out << Qualifier << " " << BlockName << END_LINE;
+	Out << "{" << END_LINE;
+	Out << Members;
+	Out << "} " << InstanceName << ";" << END_LINE;
+#endif
 }
 
 static void GetTypeInfo(const char* TypeName, INT& SizeBytes, INT& Components)
@@ -513,7 +561,7 @@ bool UXOpenGLRenderDevice::ShaderProgram::CompileShaderFunction(GLuint ShaderFun
 	if (!IsCompiled)
 	{		
 		GWarn->Logf(TEXT("XOpenGL: Failed compiling %ls %ls Shader (Options %ls)"), ShaderName, ShaderTypeString(FunctionType), *Options.GetShortString());
-		glGetShaderiv(ShaderFunctionObject, GL_INFO_LOG_LENGTH, &blen);
+
 		if (blen > 1)
 		{
 			GLchar* compiler_log = new GLchar[blen + 1];

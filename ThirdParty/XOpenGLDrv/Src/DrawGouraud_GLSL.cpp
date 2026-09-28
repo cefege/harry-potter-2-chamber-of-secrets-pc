@@ -66,12 +66,9 @@ layout(location = 3) in vec2 TexCoords; // TexCoords
 layout(location = 4) in vec4 LightColor;
 layout(location = 5) in vec4 FogColor;
 
-out VertexData
-{
 )";
-    Out << InterfaceBlockData;
+    EmitVaryingBlock(Out, "out", "VertexData", InterfaceBlockData, "Out", "Out");
     Out << R"(
-} Out;
 
 #if OPT_ClipDistance && !OPT_GeometryShaders
 out float gl_ClipDistance[OPT_MaxClippingPlanes];
@@ -253,20 +250,16 @@ layout(location = 0, index = 1) out vec4 FragColor1;
 # endif
 layout(location = 0, index = 0) out vec4 FragColor;
 #endif
-
-#if OPT_GeometryShaders
-in GeometryData
-#else
-in VertexData
-#endif
-{
-)";
-    Out << InterfaceBlockData;
+    )";
+    // GLSL: the fragment stage receives the vertex payload. Desktop GLSL keeps
+    // the interface-block form; GLSL ES 3.00 has no in blocks, so the same
+    // members are read from a struct-typed varying (see EmitVaryingBlock).
+    if (GL && GL->UsingGeometryShaders)
+        EmitVaryingBlock(Out, "in", "GeometryData", InterfaceBlockData, "In", "In");
+    else
+        EmitVaryingBlock(Out, "in", "VertexData", InterfaceBlockData, "In", "In");
     Out << R"(
-} In;
-)";
 
-    Out << R"(
 uvec2 GetTexHandleHelper(uint DrawID, uint Index)
 {
 	uvec4 Handles = GetTexHandles(DrawID, Index / 2u);

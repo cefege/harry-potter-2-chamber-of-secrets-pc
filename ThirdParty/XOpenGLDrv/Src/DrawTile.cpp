@@ -294,13 +294,16 @@ void UXOpenGLRenderDevice::DrawTileESProgram::CreateInputLayout()
 	VertBuffer.SetInputLayoutCreated();
 }
 
+
 void UXOpenGLRenderDevice::DrawTileESProgram::DeactivateShader()
 {
 	ShaderProgramImpl::DeactivateShader();
 
 
+#if !defined(__EMSCRIPTEN__)
 	if (RenDev->UseAA && RenDev->NoAATiles)
 		glEnable(GL_MULTISAMPLE);
+#endif
 }
 
 void UXOpenGLRenderDevice::DrawTileESProgram::ActivateShader()

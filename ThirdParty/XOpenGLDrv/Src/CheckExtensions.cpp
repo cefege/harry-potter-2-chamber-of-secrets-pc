@@ -16,6 +16,10 @@
 #include "XOpenGL.h"
 
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/html5_webgl.h>
+#endif
+
 UBOOL UXOpenGLRenderDevice::GLExtensionSupported(FString ExtensionName)
 {
 #if !_WIN32
@@ -268,11 +272,20 @@ void UXOpenGLRenderDevice::CheckExtensions()
 		LODBias = 0;
 	}
 
+#if defined(__EMSCRIPTEN__)
+	// WebGL reports S3TC as WEBGL_compressed_texture_s3tc and only accepts
+	// compressed texture enums after emscripten_webgl_enable_extension, so
+	// SDL_GL_ExtensionSupported is not the right probe here.
+	SupportsS3TC = emscripten_webgl_enable_extension(emscripten_webgl_get_current_context(), "WEBGL_compressed_texture_s3tc") != 0;
+	if (!SupportsS3TC)
+		GWarn->Logf(TEXT("XOpenGL: WEBGL_compressed_texture_s3tc extension not found!"));
+#else
     if (!GLExtensionSupported(TEXT("GL_EXT_texture_compression_s3tc")))
 	{
 		GWarn->Logf(TEXT("XOpenGL: GL_EXT_texture_compression_s3tc extension not found!"));
         SupportsS3TC = false;
 	}
+#endif
 
 	// HP2 selects compressed mip chains from this base-class capability.
 	SupportsTC = SupportsS3TC;
@@ -336,6 +349,12 @@ void UXOpenGLRenderDevice::CheckExtensions()
         glGetIntegerv(GL_MAX_SAMPLES, &MaxAASamples);
 		glGetIntegerv(GL_SAMPLES, &NumberOfAASamples);
 		debugf(NAME_Dev, TEXT("XOpenGL: NumAASamples: (%i/%i)"), NumberOfAASamples, MaxAASamples);
+#endif
+#if defined(__EMSCRIPTEN__)
+		// The WebGL context is created without multisampling (SDLViewport.cpp),
+		// so keep the driver on the single-sample render FBO path.
+		if (NumberOfAASamples < 2)
+			UseAA = 0;
 #endif
 	}
 

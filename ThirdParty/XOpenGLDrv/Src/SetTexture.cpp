@@ -159,7 +159,7 @@ void UXOpenGLRenderDevice::SetSampler(GLuint Sampler, FTextureInfo& Info, UBOOL 
 		if (MaxAnisotropy != 0.f)
 			glSamplerParameterf(Sampler, GL_TEXTURE_MAX_ANISOTROPY, MaxAnisotropy);
 
-		if (LODBias != 0.f)
+		if (LODBias != 0.f && OpenGLVersion == GL_Core)
 			glSamplerParameterf(Sampler, GL_TEXTURE_LOD_BIAS, LODBias);
 	}
 	unguard;

@@ -379,8 +379,13 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 	glContext = NULL;
 	iPixelFormat = 0;
 
+#if defined(__EMSCRIPTEN__)
+	// WebGL2 exposes only the OpenGL ES 3.0 surface.
+	OpenGLVersion = GL_ES;
+#else
 	// HP2's macOS renderer is deliberately limited to Apple's OpenGL 4.1 core surface.
 	OpenGLVersion = GL_Core;
+#endif
 	UseBindlessTextures = 0;
 	UsePersistentBuffers = 0;
 	UseShaderDrawParameters = 0;
@@ -592,13 +597,6 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 	UsingPersistentBuffers = UsePersistentBuffers ? true : false;
 	UsingShaderDrawParameters = UseShaderDrawParameters ? true : false;
 
-	if (OpenGLVersion == GL_ES)
-    {
-		if (SimulateMultiPass)
-            GWarn->Logf(TEXT("OpenGL ES does not support SimulateMultiPass at this time, disabling SimulateMultiPass"));
-        SimulateMultiPass = false;
-		SupportsGLSLInt64 = SupportsSSBO = false;
-    }
 
 	// Bindless Textures
 	UsingBindlessTextures = UseBindlessTextures ? true : false;
@@ -607,6 +605,17 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 	UsingPersistentBuffers = false;
 	UsingShaderDrawParameters = false;
 #endif
+
+	// Applies to HP2 as well as the upstream drivers: WebGL2 has no
+	// dual-source blending, and neither ES 3.0 nor ES 3.1 guarantees the
+	// int64/SSBO shader features the core path relies on.
+	if (OpenGLVersion == GL_ES)
+	{
+		if (SimulateMultiPass)
+            GWarn->Logf(TEXT("OpenGL ES does not support SimulateMultiPass at this time, disabling SimulateMultiPass"));
+        SimulateMultiPass = false;
+		SupportsGLSLInt64 = SupportsSSBO = false;
+	}
 
 	if (OpenGLVersion == GL_Core
 #if MACOSX
@@ -651,9 +660,10 @@ UBOOL UXOpenGLRenderDevice::Init(UViewport* InViewport, INT NewX, INT NewY, INT 
 
 	SetFrameStateUniforms();
 
-	if (UseAA)
+	// GL_MULTISAMPLE only exists in the desktop core profile; WebGL2 rejects it
+	// with INVALID_ENUM.
+	if (UseAA && OpenGLVersion == GL_Core)
 		glEnable(GL_MULTISAMPLE);
-
 	NumDevices++;
 	return 1;
 	unguard;
@@ -809,7 +819,12 @@ void UXOpenGLRenderDevice::SelectGLVersion()
 	if (OpenGLVersion == GL_ES)
 	{
 		SelectedMajorVersion = 3;
+#if defined(__EMSCRIPTEN__)
+		// WebGL2 is OpenGL ES 3.0; there is no ES 3.1 context to request.
+		SelectedMinorVersion = 0;
+#else
 		SelectedMinorVersion = 1;
+#endif
 	}
 	else
     {
@@ -1122,7 +1137,8 @@ void UXOpenGLRenderDevice::SetPermanentState()
 	glPolygonOffset(-1.0f, -1.0f);
 	glBlendFunc(GL_ONE, GL_ZERO);
 	glEnable(GL_BLEND);
-	glDisable(GL_CLIP_DISTANCE0);
+	if (OpenGLVersion == GL_Core)
+		glDisable(GL_CLIP_DISTANCE0);
 
 	/*
 	GLES 3 supports sRGB functionality, but it does not expose the GL_FRAMEBUFFER_SRGB enable/disable bit.
@@ -1133,8 +1149,10 @@ void UXOpenGLRenderDevice::SetPermanentState()
 		glEnable(GL_FRAMEBUFFER_SRGB);
 #endif
 
-    if (UseAA && UseAASmoothing)
+    if (UseAA && UseAASmoothing && OpenGLVersion == GL_Core)
     {
+        // GL_LINE_SMOOTH / GL_POLYGON_SMOOTH do not exist in GLSL ES 3.00;
+        // enabling them raises INVALID_ENUM and leaves the pipeline dirty.
         glEnable( GL_LINE_SMOOTH );
         glEnable( GL_POLYGON_SMOOTH );
         glHint( GL_LINE_SMOOTH_HINT, GL_NICEST );

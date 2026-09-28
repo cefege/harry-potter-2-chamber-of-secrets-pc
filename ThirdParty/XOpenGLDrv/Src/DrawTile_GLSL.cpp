@@ -42,13 +42,8 @@ static const char* InterfaceBlockData = R"(
 
 void UXOpenGLRenderDevice::DrawTileESProgram::BuildVertexShader(GLuint ShaderType, UXOpenGLRenderDevice* GL, FShaderWriterX& Out)
 {
+	EmitVaryingBlock(Out, "out", "VertexData", InterfaceBlockData, "Out", "Out");
 	Out << R"(
-out VertexData
-{
-)";
-	Out << InterfaceBlockData;
-	Out << R"(
-} Out;
 
 layout(location = 0) in vec3 Coords; // ==gl_Vertex
 layout(location = 1) in uint DrawID; // emulated gl_DrawID
@@ -72,12 +67,9 @@ layout(location = 0) out vec4 FragColor;
 layout ( location = 1 ) out vec4 FragColor1;
 #endif
 
-in VertexData
-{
 )";
-	Out << InterfaceBlockData;
+	EmitVaryingBlock(Out, "in", "VertexData", InterfaceBlockData, "In", "In");
 	Out << R"(
-} In;
 void main(void)
 {	
   vec4 TotalColor;

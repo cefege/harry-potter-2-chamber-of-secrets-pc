@@ -78,7 +78,15 @@
 #define DRAWGOURAUDPOLY_SIZE 1024
 #define NUMBUFFERS 8
 
-#define MAX_LIGHTS 256
+// Six vec4 per light in the std140 LightInfo uniform block. Desktop GL allows
+// 64 KiB blocks (256 lights). GLSL ES 3.00 guarantees only 16 KiB, and the
+// browser build additionally has to fit the whole block inside the ES vertex
+// uniform budget (1024 vectors on WebGL2), so it caps at 16 lights.
+#if defined(__EMSCRIPTEN__)
+	#define MAX_LIGHTS 16
+#else
+	#define MAX_LIGHTS 256
+#endif
 
 // necessary defines for GLES (f.e. when building with glad). Only needed to build. Do NOT use these functions for ES. Check if maybe existing some day.
 
@@ -917,6 +925,26 @@ class UXOpenGLRenderDevice : public URenderDevice
 		//
 		void BufferData(bool Replace)
 		{
+#if defined(__EMSCRIPTEN__)
+			// The core-profile ES path (ShaderDrawParameters, bindless, persistent)
+			// maps a UNIFORM buffer through the desktop glMap* path, which WebGL2
+			// does not have. The non-persistent map/unmap route is legal in ES
+			// and is already what the non-core buffer path uses.
+			const bool WasPersistent = bPersistentBuffer;
+			if (WasPersistent)
+			{
+				Bind();
+				GLintptr RangeOffset = static_cast<GLintptr>(Index * SubBufferSize * sizeof(T));
+				GLsizeiptr RangeSize = static_cast<GLsizeiptr>(SubBufferSize * sizeof(T));
+				glBindBufferRange(BufferType, BindingIndex, BufferObjectName, RangeOffset, RangeSize);
+				void* Mapped = glMapBufferRange(BufferType, RangeOffset, RangeSize, GL_MAP_WRITE_BIT);
+				if (Mapped)
+					memcpy(Mapped, Buffer + Index * SubBufferSize, SubBufferSize * sizeof(T));
+				glUnmapBuffer(BufferType);
+				Unbind();
+				return;
+			}
+#endif
 			const auto UnbufferedRegionOffset = Replace ? 0 : UnbufferedRegionOffsetBytes();
 			const auto Size = SizeBytes() - UnbufferedRegionOffset;
 
@@ -1384,6 +1412,14 @@ class UXOpenGLRenderDevice : public URenderDevice
 		// Emit the shared header for a GLSL shader
 		void EmitGlobals(ShaderCompilationOptions Options, GLuint ShaderType, UXOpenGLRenderDevice* RenDev, FShaderWriterX& Out, bool HaveGeoShader);
 
+		// Emit one stage-to-stage varying payload. Desktop GLSL keeps the
+		// interface-block form. GLSL ES 3.00 has no in/out interface blocks, so
+		// there the members go into a struct that is declared as a varying;
+		// the instance name must be identical in both stages, and StagePrefix
+		// ("Out"/"In") is bound to it so the generated member references stay
+		// valid on both paths.
+		static void EmitVaryingBlock(FShaderWriterX& Out, const char* Qualifier, const char* BlockName, const char* Members, const char* InstanceName, const char* StagePrefix);
+
 		// Compiles one shader function		
 		bool CompileShaderFunction(GLuint ShaderFunctionObject, GLuint FunctionType, ShaderCompilationOptions Options, ShaderWriterFunc Func, bool HaveGeoShader=false);
 
@@ -1461,7 +1497,11 @@ class UXOpenGLRenderDevice : public URenderDevice
 				return;
 
             // stijn: since we always replace the entire buffer (with glBufferData), it is better to just rotate after every flush on these platforms
-#if MACOSX || __LINUX_ARM__ || __LINUX_ARM64__
+#if MACOSX || __LINUX_ARM__ || __LINUX_ARM64__ || defined(__EMSCRIPTEN__)
+			// Emscripten's WebGL2 emulation rejects a partial glBufferSubData
+			// upload of a UBO that is already bound to an indexed target, so the
+			// buffer is reallocated in full on every flush, exactly like the
+			// platforms above.
 			Rotate = true;
 #endif
 
@@ -1544,7 +1584,15 @@ class UXOpenGLRenderDevice : public URenderDevice
 				}
 				else
 				{
-					ParametersBufferSize = Min<INT>(ParametersBufferSize, GetMaximumUniformBufferSize(ParametersInfo) / (RenDev->UsingPersistentBuffers ? NUMBUFFERS : 1));
+					// The desktop path stores the draw parameters in a uniform
+					// block; GLSL ES 3.00 has no blocks, so the whole array
+					// becomes default-block uniforms counted against
+					// MAX_FRAGMENT_UNIFORM_VECTORS. The ES budget is much
+					// smaller, so the batch size shrinks to match.
+					if (RenDev->OpenGLVersion == GL_ES)
+						ParametersBufferSize = Min<INT>(ParametersBufferSize, 8);
+					else
+						ParametersBufferSize = Min<INT>(ParametersBufferSize, GetMaximumUniformBufferSize(ParametersInfo) / (RenDev->UsingPersistentBuffers ? NUMBUFFERS : 1));
 					ParametersBuffer.GenerateUBOBuffer(RenDev, ParametersBufferBindingIndex);
 					ParametersBuffer.MapUBOBuffer(RenDev->UsingPersistentBuffers, ParametersBufferSize, DRAWCALL_BUFFER_USAGE_PATTERN, RenDev->UseBufferInvalidation);
 				}
