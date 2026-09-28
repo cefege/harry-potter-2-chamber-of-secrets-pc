@@ -16,7 +16,11 @@ enum class LaunchAction
 	Continue,
 	NewGame,
 	Quit,
-	Error
+	Error,
+	// The player asked to import game data. Carries the picked source and the
+	// destination to publish into; the caller runs the import and re-enters
+	// the chooser with the result.
+	Import
 };
 
 enum class ScreenMode
@@ -161,6 +165,15 @@ struct LauncherRequest
 	DataSourceConfiguration dataSources;
 	bool hasExplicitDataRootOverride = false;
 	std::string explicitDataRoot;
+
+	// Import affordance. Empty importerPath means this build has no bundled
+	// importer and the button must be hidden rather than shown broken.
+	std::string importerPath;
+	// Conventional folder an import publishes into.
+	std::string retailDataRoot;
+	// Whether the bootstrap found no data root at all. The chooser leads with
+	// the import call to action in that state instead of failing silently.
+	bool needsGameData = false;
 };
 
 struct LaunchSelection
@@ -175,6 +188,9 @@ struct LauncherResult
 	LaunchSelection selection;
 	LauncherSettings settings;
 	DataSourceConfiguration dataSources;
+	// Source the player picked for an Import action: an extracted retail
+	// installation folder, or a ZIP/TAR/7z archive of one.
+	std::string importSource;
 };
 
 }

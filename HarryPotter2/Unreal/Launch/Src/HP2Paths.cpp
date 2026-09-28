@@ -1278,21 +1278,51 @@ bool DiscoverHP2RetailDataRoot(std::string& CanonicalRoot)
 	char* Home = ResolveDataHomePrefix();
 	if (!Home)
 		return false;
-	char* Candidate = JoinPath(Home, ExternalDataSuffix);
-	char* Root = ValidateDataRoot(Candidate);
-	std::free(Candidate);
+	// Probe the documented import destination first, then the historical
+	// Data/Unreal hand-copy location. Probing only the latter meant a player
+	// who had imported correctly was still told no game data existed.
+	static const char* const Suffixes[] = {
+		ConventionalRetailDataSuffix,
+		ExternalDataSuffix
+	};
+	for (const char* const Suffix : Suffixes)
+	{
+		char* Candidate = JoinPath(Home, Suffix);
+		char* Root = Candidate ? ValidateDataRoot(Candidate) : nullptr;
+		std::free(Candidate);
+		if (Root)
+		{
+			CanonicalRoot = Root;
+			std::free(Root);
+			std::free(Home);
+			return true;
+		}
+	}
 	std::free(Home);
-	if (!Root)
-		return false;
-	CanonicalRoot = Root;
-	std::free(Root);
-	return true;
+	return false;
 }
 
 bool DiscoverHP2PrototypeDataRoot(std::string& CanonicalRoot)
 {
 	CanonicalRoot.clear();
+	// A repository checkout wins, matching the pre-launch bootstrap: running
+	// from a source tree should use that tree's data, not a user import.
 	char* Root = DiscoverPrototypeDataRoot();
+	if (Root)
+	{
+		CanonicalRoot = Root;
+		std::free(Root);
+		return true;
+	}
+	// Otherwise fall back to the conventional external prototype folder, so
+	// an installed prototype tree is found the same way a retail one is.
+	char* Home = ResolveDataHomePrefix();
+	if (!Home)
+		return false;
+	char* Candidate = JoinPath(Home, ConventionalPrototypeDataSuffix);
+	Root = Candidate ? ValidateDataRoot(Candidate) : nullptr;
+	std::free(Candidate);
+	std::free(Home);
 	if (!Root)
 		return false;
 	CanonicalRoot = Root;
@@ -1431,11 +1461,20 @@ bool InstallHP2Paths(
 	return true;
 }
 
-bool PrepareHP2Paths(int ArgC, char* const ArgV[])
+// Establishes the user root and, when one exists, the data root. When no data
+// root is found at all the function still creates the user root and returns a
+// non-installed result: the caller decides whether that is fatal (UCC and the
+// test binaries still treat it as such) or recoverable (the launcher opens so
+// the player can import). Only genuinely broken environment problems - an
+// unusable HOME, an unwritable user root, overlapping roots - remain fatal
+// here, because no amount of importing fixes them.
+HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[])
 {
 	// First statement: every allocation below, including C++ container
 	// growth, must bypass the not-yet-installed engine allocator.
 	const FScopedBootstrapAllocator BootstrapAllocatorGuard;
+
+	HP2PathsBootstrap Result;
 
 	const char* ExplicitDataDir = nullptr;
 	for (int Index = 1; Index < ArgC; ++Index)
@@ -1448,9 +1487,67 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 		}
 	}
 
+	const char* HomeEnvironment = std::getenv("HOME");
+	char* Home = CanonicalizeExistingDirectory(HomeEnvironment);
+	char* DataHomePrefix = Home ? ResolveDataHomePrefix() : nullptr;
+
+	// Every conventional location the importer or the documented hand-copy
+	// flow can produce. The launcher already treats Retail and Prototype as
+	// first-class, but this bootstrap historically probed only Data/Unreal -
+	// which is why a user whose data sat in Data/Retail was told they had no
+	// game data at all. Probing all of them here keeps the chooser's own
+	// discovery and the pre-launch bootstrap in agreement.
+	if (DataHomePrefix)
+	{
+		char* Conventional = JoinPath(DataHomePrefix, ConventionalRetailDataSuffix);
+		if (Conventional)
+		{
+			Result.RetailDataRoot = Conventional;
+			std::free(Conventional);
+		}
+		char* Searched = JoinPath(DataHomePrefix, ExternalDataSuffix);
+		if (Searched)
+		{
+			Result.SearchedRoot = Searched;
+			std::free(Searched);
+		}
+		char* Prototype = JoinPath(DataHomePrefix, ConventionalPrototypeDataSuffix);
+		if (Prototype)
+		{
+			Result.PrototypeDataRoot = Prototype;
+			std::free(Prototype);
+		}
+	}
+
+	if (!Home)
+	{
+		std::fprintf(stderr, "hp2: HOME does not name an existing directory\n");
+		std::free(DataHomePrefix);
+		return Result;
+	}
+
+	// The user root is created whether or not data exists: the launcher, the
+	// logs, and the import log all live under it, and the import flow needs
+	// them to exist before the first import.
+	char* UserRoot = DataHomePrefix ? PrepareUserRoot(DataHomePrefix) : nullptr;
+	if (!UserRoot)
+	{
+		char* ExpectedUserRoot = DataHomePrefix ? JoinPath(DataHomePrefix, UserSuffix) : nullptr;
+		std::fprintf(stderr, "hp2: could not create writable user directory '%s'\n",
+			ExpectedUserRoot ? ExpectedUserRoot : UserSuffix);
+		std::free(ExpectedUserRoot);
+		std::free(DataHomePrefix);
+		std::free(Home);
+		return Result;
+	}
+	std::free(DataHomePrefix);
+	std::free(Home);
+
 	char* DataRoot = nullptr;
 	if (ExplicitDataDir)
 	{
+		// An explicit -datadir is a command the user typed deliberately, so an
+		// unusable one stays fatal rather than silently falling back.
 		HP2PathsBootstrapStatus ExplicitStatus;
 		DataRoot = ValidateDataRoot(ExplicitDataDir, &ExplicitStatus);
 		if (!DataRoot)
@@ -1467,63 +1564,44 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 					"hp2: invalid -datadir '%s': expected a readable System/Default.ini\n",
 					ExplicitDataDir);
 			}
-			return false;
+			std::free(UserRoot);
+			return Result;
 		}
 	}
-
-	const char* HomeEnvironment = std::getenv("HOME");
-	char* Home = CanonicalizeExistingDirectory(HomeEnvironment);
-	char* DataHomePrefix = Home ? ResolveDataHomePrefix() : nullptr;
-
-	if (!ExplicitDataDir)
+	else
 	{
 		DataRoot = DiscoverDevelopmentDataRoot();
-		if (!DataRoot && DataHomePrefix)
+		// Conventional roots, in the order the rest of the launcher prefers:
+		// the retail import destination first, then the historical Data/Unreal
+		// hand-copy location, then the prototype tree.
+		if (!DataRoot && !Result.RetailDataRoot.empty())
 		{
-			char* ExternalDataRoot = JoinPath(DataHomePrefix, ExternalDataSuffix);
-			DataRoot = ValidateDataRoot(ExternalDataRoot);
-			std::free(ExternalDataRoot);
+			DataRoot = ValidateDataRoot(Result.RetailDataRoot.c_str());
 		}
-		if (!DataRoot)
+		if (!DataRoot && !Result.SearchedRoot.empty())
 		{
-			char* ExpectedRoot = DataHomePrefix ? JoinPath(DataHomePrefix, ExternalDataSuffix) : nullptr;
+			DataRoot = ValidateDataRoot(Result.SearchedRoot.c_str());
+		}
+		if (!DataRoot && !Result.PrototypeDataRoot.empty())
+		{
+			DataRoot = ValidateDataRoot(Result.PrototypeDataRoot.c_str());
+		}
+	}
+
+	if (!DataRoot)
+	{
 #if MACOSX
-			const char* const DefaultExpectedRoot = "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal";
+		const char* const DefaultExpectedRoot = "$HOME/Library/Application Support/Harry Potter 2/Data/Unreal";
 #else
-			const char* const DefaultExpectedRoot = "$XDG_DATA_HOME/harry-potter-2/Data/Unreal";
+		const char* const DefaultExpectedRoot = "$XDG_DATA_HOME/harry-potter-2/Data/Unreal";
 #endif
-			std::fprintf(stderr,
-				"hp2: unable to locate game data; expected HarryPotter2/Unreal/System/Default.ini from the working directory or %s/System/Default.ini\n",
-				ExpectedRoot ? ExpectedRoot : DefaultExpectedRoot);
-			std::free(ExpectedRoot);
-			std::free(DataHomePrefix);
-			std::free(Home);
-			return false;
-		}
+		std::fprintf(stderr,
+			"hp2: no game data installed yet; the launcher will offer to import it.\n"
+			"hp2: expected HarryPotter2/Unreal/System/Default.ini from the working directory or %s/System/Default.ini\n",
+			Result.SearchedRoot.empty() ? DefaultExpectedRoot : Result.SearchedRoot.c_str());
+		std::free(UserRoot);
+		return Result;
 	}
-
-	if (!Home)
-	{
-		std::fprintf(stderr, "hp2: HOME does not name an existing directory\n");
-		std::free(DataHomePrefix);
-		std::free(DataRoot);
-		return false;
-	}
-
-	char* UserRoot = DataHomePrefix ? PrepareUserRoot(DataHomePrefix) : nullptr;
-	if (!UserRoot)
-	{
-		char* ExpectedUserRoot = DataHomePrefix ? JoinPath(DataHomePrefix, UserSuffix) : nullptr;
-		std::fprintf(stderr, "hp2: could not create writable user directory '%s'\n",
-			ExpectedUserRoot ? ExpectedUserRoot : UserSuffix);
-		std::free(ExpectedUserRoot);
-		std::free(DataHomePrefix);
-		std::free(DataRoot);
-		std::free(Home);
-		return false;
-	}
-	std::free(DataHomePrefix);
-	std::free(Home);
 
 	if (IsSameOrDescendant(DataRoot, UserRoot)
 		|| IsSameOrDescendant(UserRoot, DataRoot))
@@ -1531,7 +1609,7 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 		std::fprintf(stderr, "hp2: data and user directories must be separate\n");
 		std::free(UserRoot);
 		std::free(DataRoot);
-		return false;
+		return Result;
 	}
 
 	char* SystemDirectory = JoinPath(DataRoot, "System");
@@ -1542,7 +1620,7 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 	{
 		std::fprintf(stderr, "hp2: could not canonicalize the validated System directory\n");
 		std::free(UserRoot);
-		return false;
+		return Result;
 	}
 
 	char* BaseDirectory = JoinPath(CanonicalSystem, "");
@@ -1560,7 +1638,7 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 		std::free(UserTchar);
 		std::free(BaseDirectory);
 		std::free(UserDirectory);
-		return false;
+		return Result;
 	}
 	std::free(BaseDirectory);
 	std::free(UserDirectory);
@@ -1569,5 +1647,12 @@ bool PrepareHP2Paths(int ArgC, char* const ArgV[])
 	appSetUserDir(UserTchar);
 	std::free(BaseTchar);
 	std::free(UserTchar);
-	return true;
+	Result.Installed = true;
+	return Result;
 }
+
+bool PrepareHP2Paths(int ArgC, char* const ArgV[])
+{
+	return BootstrapHP2Paths(ArgC, ArgV).Installed;
+}
+

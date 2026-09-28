@@ -140,6 +140,8 @@ const char* SelectionActionName(LaunchAction action)
 	case LaunchAction::Continue: return "Continue";
 	case LaunchAction::NewGame: return "NewGame";
 	case LaunchAction::Quit: return "Quit";
+	case LaunchAction::Import: return "Import";
+	case LaunchAction::Error: break;
 	}
 	return nullptr;
 }

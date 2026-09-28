@@ -512,6 +512,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	NSTextField* _dataSourceRootField;
 	NSTextField* _dataSourceStatusLabel;
 	NSButton* _chooseDataFolderButton;
+	NSButton* _importDataButton;
 	NSPopUpButton* _savePopup;
 	NSImageView* _thumbnailImageView;
 	NSTextField* _saveSummaryLabel;
@@ -576,6 +577,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 - (IBAction)revealLog:(id)sender;
 - (IBAction)dataSourceChanged:(id)sender;
 - (IBAction)chooseDataFolder:(id)sender;
+- (IBAction)importGameData:(id)sender;
 - (IBAction)saveSelectionChanged:(id)sender;
 - (IBAction)displayModeChanged:(id)sender;
 - (void)rebuildResolutionPopupForMode:(HP2Launcher::ScreenMode)mode;
@@ -586,6 +588,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 - (std::string)rootForDataSource:(HP2Launcher::DataSource)source;
 - (const HP2Launcher::DataSourceOption*)dataSourceOptionForSource:(HP2Launcher::DataSource)source;
 - (void)updateDataSourceControls;
+- (void)updatePlayButtonAvailability;
 - (HP2Launcher::DataSourceConfiguration)dataSourcesFromControls;
 @end
 
@@ -873,15 +876,25 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	_dataSourceStatusLabel.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
 	_dataSourceStatusLabel.textColor = NSColor.secondaryLabelColor;
 	_dataSourceStatusLabel.lineBreakMode = NSLineBreakByWordWrapping;
-	_dataSourceStatusLabel.maximumNumberOfLines = 2;
+	_dataSourceStatusLabel.maximumNumberOfLines = 3;
 	[_dataSourceStatusLabel setAccessibilityLabel:@"Game data status"];
 	[_dataSourceStatusLabel setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow
 		forOrientation:NSLayoutConstraintOrientationHorizontal];
 
+	// Import is the primary call to action: it is the only way a player who
+	// owns the game but has never run the importer gets a playable install.
+	_importDataButton = [self
+		actionButtonWithTitle:@"Import Game Data…"
+		action:@selector(importGameData:)];
+	[_importDataButton setAccessibilityLabel:@"Import game data"];
+	[_importDataButton setAccessibilityHelp:
+		@"Choose your own copy of the game - a folder or a .zip, .tar, or .7z archive - and it is copied and checked for you."];
+
 	NSStackView* form = [self verticalStackWithViews:@[
 		[self formRowWithTitle:@"Source" control:_dataSourcePopup],
 		[self formRowWithTitle:@"Folder" control:folderControls],
-		[self formRowWithTitle:@"" control:_dataSourceStatusLabel]
+		[self formRowWithTitle:@"" control:_dataSourceStatusLabel],
+		[self formRowWithTitle:@"" control:_importDataButton]
 	] spacing:RowSpacing];
 	[form setHuggingPriority:NSLayoutPriorityDefaultLow
 		forOrientation:NSLayoutConstraintOrientationHorizontal];
@@ -966,6 +979,10 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	] spacing:SectionSpacing];
 	[saveControls.widthAnchor constraintGreaterThanOrEqualToConstant:PopupMinimumWidth].active = YES;
 
+	// The play buttons are created after the game-data section, so the
+	// availability pass that gates them on a resolved data root has to run
+	// here rather than from updateDataSourceControls.
+	[self updatePlayButtonAvailability];
 	[self updateSelectedSavePreview];
 	return saveSection;
 }
@@ -1565,6 +1582,10 @@ bool CopyCocoaString(NSString* value, std::string& result)
 		NSString* message = CocoaString(_request->errorMessage);
 		_dataSourceStatusLabel.stringValue = message.length > 0 ? message : overrideHelp;
 		[_dataSourceStatusLabel setAccessibilityValue:_dataSourceStatusLabel.stringValue];
+		// An explicit -datadir is a deliberate override; importing over it
+		// would contradict the command line, so the button stays hidden.
+		_importDataButton.hidden = YES;
+		[self updatePlayButtonAvailability];
 		return;
 	}
 
@@ -1577,11 +1598,17 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	[_chooseDataFolderButton setAccessibilityHelp:
 		@"Choose a game data folder that contains System/Default.ini."];
 
+	// No bundled importer means no import button: a control that always fails
+	// is worse than an absent one.
+	_importDataButton.hidden = _request->importerPath.empty();
+
 	const HP2Launcher::DataSourceOption* option = [self dataSourceOptionForSource:source];
 	NSString* status = @"";
 	if (root.empty())
 	{
-		status = @"Choose a folder that contains System/Default.ini.";
+		status = _request->needsGameData
+			? @"No game data yet - import your copy of the game to get started."
+			: @"Choose a folder that contains System/Default.ini.";
 	}
 	else if (option != nullptr && !option->available && option->root == root)
 	{
@@ -1597,6 +1624,32 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	}
 	_dataSourceStatusLabel.stringValue = status;
 	[_dataSourceStatusLabel setAccessibilityValue:status];
+	[self updatePlayButtonAvailability];
+}
+
+// New Game and Continue are only meaningful once the selected source resolves
+// to a real data root. Without this the player gets a second, much less
+// helpful error after the launcher has already closed.
+- (void)updatePlayButtonAvailability
+{
+	// The game-data section is built before the play buttons exist, so this
+	// runs at least once with both still nil.
+	if (_newGameButton == nil || _continueButton == nil)
+	{
+		return;
+	}
+
+	BOOL hasData = NO;
+	for (const HP2Launcher::DataSourceOption& option : _request->dataSourceOptions)
+	{
+		if (option.source == [self selectedDataSource] && option.available)
+		{
+			hasData = YES;
+			break;
+		}
+	}
+	_newGameButton.enabled = hasData;
+	_continueButton.enabled = hasData && !_request->saves.empty();
 }
 
 - (HP2Launcher::DataSourceConfiguration)dataSourcesFromControls
@@ -1674,6 +1727,88 @@ bool CopyCocoaString(NSString* value, std::string& result)
 			_dataSources.retailRoot = std::move(selectedRoot);
 		}
 		[self updateDataSourceControls];
+	}];
+}
+
+// The one action a player needs on a fresh install. It accepts both shapes the
+// importer understands - an extracted retail installation folder, or a
+// ZIP/TAR/7z archive of one - and hands the choice back to the caller, which
+// owns the actual import.
+- (IBAction)importGameData:(id)sender
+{
+	(void)sender;
+	if (_request->importerPath.empty())
+	{
+		[self
+			showAlertWithMessage:@"Game Data Import Is Unavailable"
+			informativeText:@"This installation does not include the bundled importer. "
+				"Reinstall the app, or run Build/prepare_retail_data.py from a source checkout."];
+		return;
+	}
+	if (_request->hasExplicitDataRootOverride)
+	{
+		[self
+			showAlertWithMessage:@"Import Is Unavailable"
+			informativeText:@"This launch was given a data folder on the command line. "
+				"Start Harry Potter 2 normally to import game data."];
+		return;
+	}
+
+	NSOpenPanel* panel = [NSOpenPanel openPanel];
+	panel.canChooseDirectories = YES;
+	panel.canChooseFiles = YES;
+	panel.allowsMultipleSelection = NO;
+	panel.canCreateDirectories = NO;
+	panel.resolvesAliases = YES;
+	panel.prompt = @"Import";
+	panel.message = @"Choose the folder your copy of Harry Potter and the Chamber of Secrets "
+		@"was installed into, or an archive (.zip, .tar, .7z) of that folder.";
+
+	NSString* home = NSHomeDirectory();
+	if (home.length > 0)
+	{
+		panel.directoryURL = [NSURL fileURLWithPath:home isDirectory:YES];
+	}
+
+	[panel beginSheetModalForWindow:_window completionHandler:^(NSModalResponse response)
+	{
+		if (response != NSModalResponseOK)
+		{
+			return;
+		}
+
+		NSURL* selectedURL = panel.URL;
+		NSString* selectedPath = [[selectedURL path] stringByStandardizingPath];
+		if (selectedURL == nil ||
+			![selectedURL isFileURL] ||
+			![selectedPath isAbsolutePath])
+		{
+			[self
+				showAlertWithMessage:@"Game Data Could Not Be Used"
+				informativeText:@"Choose a game folder or archive from your Mac."];
+			return;
+		}
+
+		std::string importSource;
+		if (!CopyCocoaString(selectedPath, importSource) || importSource.empty())
+		{
+			[self
+				showAlertWithMessage:@"Game Data Could Not Be Used"
+				informativeText:@"The selected name could not be read as UTF-8."];
+			return;
+		}
+
+		// Importing always publishes a retail overlay, so select that source
+		// and let the next round show the freshly written folder.
+		_dataSources.retailRoot = _request->retailDataRoot;
+		_dataSources.selected = HP2Launcher::DataSource::Retail;
+
+		_result.selection = HP2Launcher::LaunchSelection{};
+		_result.selection.action = HP2Launcher::LaunchAction::Import;
+		_result.dataSources = _dataSources;
+		_result.importSource = std::move(importSource);
+		_completed = YES;
+		[_application stopModal];
 	}];
 }
 

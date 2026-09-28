@@ -14,6 +14,11 @@ namespace HP2Launcher
 		LauncherResult& result,
 		std::string& error);
 
+	// Records argv[0] so the launcher can locate assets installed next to the
+	// binary (the Quickshell QML and the bundled importer). Called once from
+	// main() before the chooser runs.
+	void SetHP2ShellLauncherExecutablePath(const char* Invoked);
+
 	// Platform-neutral dispatcher forwarder
 	inline LaunchAction RunHP2NativeLauncher(
 		const LauncherRequest& request,

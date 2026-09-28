@@ -19,6 +19,31 @@ const char* HP2DataDirectoryArgumentValue(const char* Argument);
 // GMalloc and appInit. A failure is reported to stderr.
 bool PrepareHP2Paths(int ArgC, char* const ArgV[]);
 
+// Result of a bootstrap that found no playable data root.
+//
+// A player with no game data installed is a normal, expected first-run state,
+// not a fatal error: the launcher has to open so it can offer the import
+// flow. PrepareHP2Paths therefore reports this outcome instead of exiting,
+// and the engine is only started once a root has been imported or chosen.
+struct HP2PathsBootstrap
+{
+	// True when a validated data root was found and installed.
+	bool Installed = false;
+	// Conventional location the importer should publish into, always set on
+	// a failed bootstrap so the launcher knows where an import would land.
+	std::string RetailDataRoot;
+	// Conventional external root that was searched, for the error text.
+	std::string SearchedRoot;
+	// Conventional prototype root, probed so a prototype-only install is not
+	// reported as having no data at all.
+	std::string PrototypeDataRoot;
+};
+
+// Establishes the validated read-only data root and the separate writable
+// user root, or reports a recoverable "no game data yet" outcome. Safe before
+// GMalloc and appInit, exactly like PrepareHP2Paths.
+HP2PathsBootstrap BootstrapHP2Paths(int ArgC, char* const ArgV[]);
+
 // Data-root bootstrap runs in one of two modes:
 //
 //   Legacy mode - the candidate contains no retail overlay bookkeeping files
