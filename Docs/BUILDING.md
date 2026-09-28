@@ -25,21 +25,31 @@ The codebase is legacy-era UE1-derived C++ with modern platform support.
 
 **Linux**
 - arm64
-- CMake 3.24+, Ninja, a C/C++ compiler, Git, and `pkg-config`
+- CMake 3.24+, Git, `pkg-config`, and **Clang** — `linux-arm64-base` pins
+  `CMAKE_C_COMPILER=clang` / `CMAKE_CXX_COMPILER=clang++`
+  (`CMakePresets.json:100-101`), so a GCC-only toolchain cannot run the
+  documented preset
+- `make` — that preset's generator is `Unix Makefiles`
+  (`CMakePresets.json:98`), so Ninja is not what drives the Linux build
 - OpenGL (`find_package(OpenGL REQUIRED)`)
-- FreeType, HarfBuzz and Fontconfig — **not optional on Linux**: the native
-  text provider's condition is
-  `NOT APPLE AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND
-  HP2_FONTCONFIG_FOUND` (`Build/CMake/HP2Dependencies.cmake:145`). Without all
-  three, `HP2_HAS_NATIVE_TEXT_BACKEND` stays `OFF` and
-  `HP2Targets.cmake:876` then calls `set_tests_properties` on
-  `native_typography_contracts`, a test that is only registered when the
-  backend exists (`:777`) — so the configure step **fails outright**
-  ("Can not find test to add properties to"). macOS never hits this because
-  CoreText ships with the system.
 - The window and audio development headers SDL2 probes for: X11 (`X11`,
   `Xext`, `Xrandr`, `Xcursor`, `Xfixes`, `Xi`, `Xss`), Wayland
   (`wayland-client`, `xkbcommon`), ALSA and PulseAudio
+- FreeType, HarfBuzz and Fontconfig — required for the native text backend,
+  whose condition is `NOT APPLE AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND
+  AND HP2_FONTCONFIG_FOUND` (`Build/CMake/HP2Dependencies.cmake:145`).
+  Without all three the backend stays off and the game falls back to the
+  bitmap fonts; macOS never hits this because CoreText ships with the system.
+
+  One caveat, which is a bug and not a requirement: when test data *is*
+  present (`HP2_TEST_DATA_PRESENT`, i.e. `System/Default.ini` exists under
+  `HarryPotter2/Unreal`) **and** the backend is off, `HP2Targets.cmake:876`
+  calls `set_tests_properties` on `native_typography_contracts` — a test only
+  registered when the backend exists (`:777`) — so configure dies with "Can
+  not find test to add properties to". A fresh clone has no
+  `System/Default.ini` (`.gitignore:55` excludes the whole directory), so the
+  crash only reproduces on a checkout that has game data imported. Keep the
+  three packages; the guard is what should change.
 
 SDL2, OpenAL Soft, Ogg, Vorbis and Squish are **not** system packages here —
 `Build/CMake/HP2Dependencies.cmake` fetches each at a pinned commit
@@ -50,7 +60,7 @@ read by the build.
 Omarchy / Arch (Hyprland or X11):
 
 ```sh
-sudo pacman -S --needed base-devel cmake ninja pkgconf
+sudo pacman -S --needed base-devel clang make cmake pkgconf git python libarchive
 sudo pacman -S --needed libglvnd mesa libx11 libxext libxrandr libxcursor \
   libxfixes libxi libxss wayland libxkbcommon alsa-lib libpulse \
   freetype harfbuzz fontconfig
@@ -59,18 +69,29 @@ sudo pacman -S --needed libglvnd mesa libx11 libxext libxrandr libxcursor \
 Debian / Ubuntu:
 
 ```sh
-sudo apt install build-essential cmake ninja-build pkg-config \
-  libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
-  libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev \
-  libxkbcommon-dev libasound2-dev libpulse-dev \
-  libfreetype-dev libharfbuzz-dev libfontconfig-dev
+sudo apt install build-essential clang make cmake ninja-build pkg-config \
+  git python3 libarchive-tools libgl1-mesa-dev libegl1-mesa-dev \
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+  libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev \
+  libpulse-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev
 ```
 
-Fedora: `alsa-lib-devel pulseaudio-libs-devel libX11-devel libXext-devel
-libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel
-libXScrnSaver-devel wayland-devel wayland-protocols-devel
-libxkbcommon-devel freetype-devel harfbuzz-devel fontconfig-devel
-mesa-libGL-devel cmake ninja-build gcc pkgconf-pkg-config`.
+Fedora:
+
+```sh
+sudo dnf install clang make cmake ninja-build pkgconf-pkg-config git \
+  python3 bsdtar mesa-libGL-devel libX11-devel libXext-devel \
+  libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel \
+  libXScrnSaver-devel wayland-devel wayland-protocols-devel \
+  libxkbcommon-devel alsa-lib-devel pulseaudio-libs-devel freetype-devel \
+  harfbuzz-devel fontconfig-devel
+```
+
+`bsdtar` (Arch `libarchive`, Debian `libarchive-tools`, Fedora `bsdtar`) is
+for the test suite, not the game: `Build/verify_prototype_archive.py:31`
+hardcodes `/usr/bin/bsdtar`, which macOS provides out of the box. Without it
+`prototype_archive_contract` fails on Linux — and the script does not
+degrade gracefully, it returns no JSON and the test errors out.
 
 ## Build
 

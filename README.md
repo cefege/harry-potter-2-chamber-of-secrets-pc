@@ -102,7 +102,7 @@ yourself. First the tools and libraries the build needs:
 **Omarchy / Arch / EndeavourOS:**
 
 ```sh
-sudo pacman -S --needed base-devel cmake ninja pkgconf
+sudo pacman -S --needed base-devel clang make cmake pkgconf git python libarchive
 sudo pacman -S --needed libglvnd mesa libx11 libxext libxrandr libxcursor \
   libxfixes libxi libxss wayland libxkbcommon alsa-lib libpulse \
   freetype harfbuzz fontconfig
@@ -111,12 +111,15 @@ sudo pacman -S --needed libglvnd mesa libx11 libxext libxrandr libxcursor \
 **Debian / Ubuntu:**
 
 ```sh
-sudo apt install build-essential cmake ninja-build pkg-config \
-  libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxext-dev libxrandr-dev \
-  libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev \
-  libxkbcommon-dev libasound2-dev libpulse-dev \
-  libfreetype-dev libharfbuzz-dev libfontconfig-dev
+sudo apt install build-essential clang make cmake ninja-build pkg-config \
+  git python3 libarchive-tools libgl1-mesa-dev libegl1-mesa-dev \
+  libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+  libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev \
+  libpulse-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev
 ```
+
+`clang` is not optional: the `linux-arm64` preset pins it as the compiler, so
+the GCC-only toolchain groups above won't do.
 
 You do **not** install SDL2, OpenAL, or the Vorbis libraries yourself — the
 build fetches pinned copies and compiles them. Both Wayland (Hyprland) and
@@ -136,8 +139,9 @@ python3 Build/prepare_retail_data.py \
 ./dist/linux-arm64/bin/hp2_game
 ```
 
-You'll need an **arm64** machine (a Raspberry Pi won't do), CMake 3.24+, a
-C/C++ compiler, and Git. Logs are in
+You'll need an **arm64** machine and Git. (Any arm64 Linux works — a
+Raspberry Pi 4 or 5 running 64-bit Raspberry Pi OS counts, though expect a
+long build.) Logs are in
 `~/.local/share/harry-potter-2/User/Launcher.log`. More in
 [Docs/BUILDING.md](Docs/BUILDING.md).
 
