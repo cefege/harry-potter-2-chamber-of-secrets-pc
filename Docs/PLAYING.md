@@ -9,45 +9,40 @@ scripts.
 
 Drag **HarryPotter2.app** into your **Applications** folder.
 
-If macOS shows **"HarryPotter2" Not Opened** and says it could not verify the
-app is free of malware, that is Gatekeeper. This build is not signed with an
-Apple Developer ID, so macOS quarantines anything downloaded and then asks you
-to confirm. Either:
+Before opening it the first time, open **Terminal** (⌘ Space, type
+*Terminal*) and paste this once:
 
-- right-click the app in Applications and choose **Open**, then confirm **Open**
-  again (one time only); or
-- run this once in Terminal:
+```sh
+xattr -dr com.apple.quarantine /Applications/HarryPotter2.app
+```
 
-  ```sh
-  xattr -dr com.apple.quarantine /Applications/HarryPotter2.app
-  ```
+This build isn't signed with an Apple Developer ID, so macOS blocks it until
+you clear that flag. If you already saw **"HarryPotter2" Not Opened**, you can
+instead go to **System Settings → Privacy & Security**, scroll down, click
+**Open Anyway**, and confirm. (Right-click → Open no longer works on macOS 15.)
 
-Homebrew users get the same one-time check: the cask clears the quarantine
-attribute during install, so a successful `brew install` normally opens
-straight away. If your Mac still prompts, use the right-click **Open** above.
-Until the project has a Developer ID certificate and notarized releases, this
-is expected on both routes.
+Installed with Homebrew? It already did this for you.
 
 ## 2. Import your game data
 
 The runtime reads data files only. It never launches the original installer or
 the old game executable.
 
-Double-click **Import Game Data.command** (in this disk image, or inside the
-installed app). It opens a Terminal window and asks for the location of your
-retail installation. You can give it either:
+In Terminal, paste:
+
+```sh
+"/Applications/HarryPotter2.app/Contents/Resources/Import Game Data.command"
+```
+
+It asks where your game is — drag your game folder or archive from Finder into
+the Terminal window and press Return. You can give it either:
 
 - the folder you installed the game into, or
 - an archive (`.zip`, `.tar`, `.tar.gz`, `.7z`) of that folder.
 
-The importer is a Python 3 script, and macOS does not install Python 3 by
-default. If you see "python3 was not found", install it once:
-
-```sh
-xcode-select --install      # Apple's Command Line Tools
-# or
-brew install python         # Homebrew
-```
+If macOS asks to install **command line developer tools**, click **Install**,
+wait for it to finish, then paste the command again — that's how macOS
+provides the Python the importer needs.
 
 Press Return to accept each prompt. The importer copies the data to:
 

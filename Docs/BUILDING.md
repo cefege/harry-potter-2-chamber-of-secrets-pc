@@ -1,0 +1,167 @@
+# Building from source
+
+Players do not need any of this — see the [README](../README.md) to install and
+play. This page is for building, testing, and hacking on the engine.
+
+## Overview
+
+This is a faithful recreation of the classic 2002 game engine for **macOS 15+ on Apple silicon (arm64)** and **Linux (arm64)**. It uses:
+
+- **XOpenGL** (`ThirdParty/XOpenGLDrv`) — OpenGL renderer adapted from UE1
+- **SDL2** — window management and input handling  
+- **Native text rendering** — optional experimental backend for improved font fidelity (CoreText on macOS, FreeType on Linux)
+
+The codebase is legacy-era UE1-derived C++ with modern platform support.
+
+## Requirements
+
+### System
+
+**macOS**
+- macOS 15.0 or later
+- Apple silicon (arm64 / Apple M1, M2, M3, M4, M5, etc.)
+- Xcode (Command Line Tools or full IDE)
+- CMake 3.24+
+
+**Linux**
+- arm64
+- Ninja, GCC or Clang, SDL2 development headers
+- CMake 3.24+
+
+## Build
+
+```sh
+# macOS
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64
+
+# Linux
+cmake --preset linux-arm64
+cmake --build --preset linux-arm64
+```
+
+The packaged build lands at:
+```
+dist/macos-arm64/HarryPotter2.app   # macOS
+dist/linux-arm64/                   # Linux (bin/, lib/, share/)
+```
+
+## Import game data from a checkout
+
+If you own a retail installation, import it using the provided script:
+
+```sh
+python3 Build/prepare_retail_data.py \
+  --archive "/path/to/Harry Potter and the Chamber of Secrets.7z" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
+  --profile retail-only \
+  --link-mode copy
+```
+
+Or from an extracted installation directory:
+
+```sh
+python3 Build/prepare_retail_data.py \
+  --retail-root "/path/to/Harry Potter and the Chamber of Secrets" \
+  --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail" \
+  --profile retail-only \
+  --link-mode copy
+```
+
+**For detailed import instructions, security notes, and validation steps, see [RETAIL_IMPORT.md](../RETAIL_IMPORT.md).**
+
+On Linux, use `--output "$HOME/.local/share/harry-potter-2/Data/Retail"`
+instead (or `$XDG_DATA_HOME/harry-potter-2/Data/Retail` if you set
+XDG_DATA_HOME).
+
+## Run a build
+
+Open the packaged build:
+
+```sh
+# macOS
+open dist/macos-arm64/HarryPotter2.app
+
+# Linux
+./dist/linux-arm64/bin/hp2_game
+```
+
+In the launcher window:
+- **Game Data** → select the imported retail folder (or **Choose Folder…** to browse)
+- **New Game** → start a fresh campaign
+- **Continue** → resume from a save
+
+## Build Presets
+
+| Preset | Platform | Purpose |
+|--------|----------|---------|
+| `macos-arm64` | macOS | Release build with optimizations |
+| `macos-arm64-asan-ubsan` | macOS | AddressSanitizer + UndefinedBehaviorSanitizer |
+| `macos-arm64-tsan` | macOS | ThreadSanitizer |
+| `macos-arm64-full-smoke` | macOS | Full test suite with renderer validation |
+| `macos-arm64-vulkan` | macOS | Release build with Vulkan driver |
+| `macos-arm64-retail` | macOS | Release build against retail-only test data |
+| `linux-arm64` | Linux | Release build with optimizations |
+| `linux-arm64-asan-ubsan` | Linux | AddressSanitizer + UndefinedBehaviorSanitizer |
+| `linux-arm64-tsan` | Linux | ThreadSanitizer |
+| `linux-arm64-full-smoke` | Linux | Full test suite with renderer validation |
+| `linux-arm64-retail` | Linux | Release build against retail-only test data |
+
+Example:
+```sh
+cmake --preset macos-arm64-asan-ubsan
+cmake --build --preset macos-arm64-asan-ubsan
+ctest --preset macos-arm64-asan-ubsan
+```
+
+## Verification & Tests
+
+Run the full test suite:
+
+```sh
+# macOS
+ctest --preset macos-arm64
+
+# Linux
+ctest --preset linux-arm64
+```
+
+Run a single test:
+
+```sh
+ctest --preset macos-arm64 -R <test_name>
+```
+
+Commonly useful tests:
+- `game_test_contract` — baseline game behavior
+- `renderer_smoke_xopengl` — renderer correctness
+- `package79_manifest` — data serialization
+
+**For complete test documentation, see [BEHAVIOR_MATRIX.md](BEHAVIOR_MATRIX.md).**
+
+## Documentation
+
+- **[OPERATIONS.md](OPERATIONS.md)** — Authoritative build, test, and launch reference
+- **[BEHAVIOR_MATRIX.md](BEHAVIOR_MATRIX.md)** — Every test, its invariant, and expected behavior
+- **[../RETAIL_IMPORT.md](../RETAIL_IMPORT.md)** — Game data import security and validation
+- **[../NOTICE.md](../NOTICE.md)** — Third-party software attribution
+- **[../AGENTS.md](../AGENTS.md)** — Contract for AI coding agents working in this repo
+
+## Build troubleshooting
+
+### Build fails with "CMake not found"
+
+Install CMake via Homebrew (macOS) or your distro package manager (Linux):
+```sh
+brew install cmake        # macOS
+sudo apt install cmake    # Debian/Ubuntu
+```
+
+## Releasing
+
+Bump `VERSION` in `CMakeLists.txt`, then
+`git tag -a vX.Y.Z -m "X.Y.Z" && git push origin vX.Y.Z`.
+`.github/workflows/release.yml` builds the DMG, publishes the GitHub release,
+and stamps the checksum into `Casks/harry-potter-2.rb` on the default branch.
+Never hand-edit the cask's `version` or `sha256`. Full details:
+[OPERATIONS.md](OPERATIONS.md#distribution).
