@@ -788,19 +788,23 @@ UBOOL UXOpenGLRenderDevice::CreateCanvasTextLayout(const FCanvasTextRequest& Req
 	{
 #if HP2_HAS_NATIVE_TEXT_BACKEND
 		// The browser build stages the game's font when the data is copied in,
-		// which is after this device was created, so the probe at init can have
-		// failed on a face that is present by the time text is first drawn.
-		// Retry once, here, at the first real request: a second failure is a
-		// genuine one and is left to stand.
-		if (!NativeTextBackendRetryDone)
+		// which can be after both the device was created and the first text
+		// request arrives. The probe reported text.font_not_staged, so instead
+		// of re-probing on every draw -- which would burn an attempt budget
+		// long before a first-time player ever imports anything -- wait for the
+		// face to actually exist and probe exactly once, when it does. A
+		// non-staged reason is not retried at all: it is a real failure, and
+		// repeating it every frame would just spin.
+		if (!NativeTextBackend && Hp2NativeText::IsAwaitingStagedFont())
 		{
-			NativeTextBackendRetryDone = 1;
 			FNativeTextBackendStatus RetryStatus;
 			FNativeTextPlatformBackend* Retry = CreateNativeTextPlatformBackend(RetryStatus);
+			// Record the outcome either way: a retry that fails for a real
+			// reason must stop the next draw from trying again.
+			NativeTextBackendStatus = RetryStatus;
 			if (Retry)
 			{
 				NativeTextBackend = Retry;
-				NativeTextBackendStatus = RetryStatus;
 				debugf(TEXT("XOpenGL: native text backend became available (%s)"),
 					RetryStatus.ReasonCode ? appFromAnsi(RetryStatus.ReasonCode) : TEXT("unknown"));
 			}

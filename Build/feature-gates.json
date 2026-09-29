@@ -4,20 +4,33 @@
   "gates": {
     "native_text": {
       "state": "experimental",
-      "default_enabled": true,
+      "default_enabled": false,
       "promotion_evidence": [
-        "data-prototype (HarryPotter2/Unreal), macOS arm64, CoreText provider: `ctest --test-dir out/macos-arm64 -R '^(native_typography_contracts|canvas_compatibility_contracts)$' --output-on-failure` -> 2/2 passed (0.08 s); shaping, ligature/combining/RTL cluster handling, font fallback, and the NativeText=False bitmap-compatibility cursor contract all hold",
-        "data-prototype, macOS arm64: `python3 Build/smoke_maps.py --renderer=xopengl --maps=PrivetDr --output=out/macos-arm64/Testing/HP2/_gatecheck/Artifacts/gatecheck-smoke-maps.json` -> 1/1 maps passed; engine log records `XOpenGL: native text backend ready (text.ready)` and reaches `Entering main loop.` with no script/native/package/render/assert/critical marker",
-        "the default is reached without any opt-in: `UClient::StaticConstructor` sets `NativeText = 1` (`HarryPotter2/Unreal/Engine/Src/UnCamMgr.cpp`), and the launcher model defaults `settings.nativeText = true` (`HarryPotter2/Unreal/SDLLaunch/Src/HP2LauncherModel.h`), so an absent `[Display] NativeText` key resolves to enabled in both the engine and the launcher UI",
-        "retail profile: NOT verified. No data-retail launch of this configuration has been run, so `retail-verified` is not claimed",
-        "platform coverage: macOS arm64 / CoreText only. The Linux arm64 FreeType provider compiles but has not been run with the default on",
-        "browser build: unaffected either way. `web-wasm64` sets `HP2_DISABLE_NATIVE_TEXT_BACKEND=ON` and compiles `HP2_HAS_NATIVE_TEXT_BACKEND=0`, so no text provider exists in the wasm module and the gate cannot change what the page renders",
-        "bitmap-font compatibility mode is unchanged and remains selectable: `[Display] NativeText=False` in Game.ini, the launcher's toggle, or `UClient::StaticConstructor` at build time",
-        "wasm (Emscripten) provider added: same FreeType/HarfBuzz sources as Linux, with a small seam that reads the game's own System/Simyou.ttf out of the module filesystem for FT_New_Memory_Face (there is no fontconfig and no page-side font download)",
-        "wasm evidence so far is limited to: web_boot_smoke passes and the engine logs 'XOpenGL: native text backend ready (text.ready)'. Small-HUD legibility in the browser has NOT been reviewed by eye, so this provider is not runtime-verified",
-        "WebAssembly uses MEMORY64; the seam's EM_ASM bridges need setValue for out-parameters and Number() for pointer arguments",
-        "Emscripten's FS.readFile returns a Uint8Array for a raw read; asking for encoding 'binary' yields an array whose charCodeAt is undefined, which silently zeroed every byte of the font"
-      ]
+        "macOS arm64 / CoreText: ctest native_typography_contracts + canvas_compatibility_contracts (2/2, data-prototype) and a real PrivetDr renderer smoke reaching the main loop with 'text.ready'",
+        "wasm (Emscripten): same FreeType/HarfBuzz sources as Linux plus a seam that reads the game's own System/Simyou.ttf out of the module filesystem, because there is no fontconfig and a page cannot download a font; web ctest 2/2 and 'XOpenGL: native text backend ready (text.ready)' observed in a browser",
+        "wasm seam notes: EM_ASM cannot write C++ out-parameters (use setValue); the web preset is MEMORY64 so pointers need Number() in JS; Emscripten FS.readFile returns a Uint8Array for a raw read, and asking for encoding 'binary' silently zeroes every byte",
+        "NOT verified: no one has looked at small-HUD legibility in a browser, no data-retail run exists for this configuration, and the typography contracts are native-only so the wasm provider has no shaping assertions of its own",
+        "The bitmap compatibility path remains selectable everywhere via [Display] NativeText=False; canvas_compatibility_contracts pins it"
+      ],
+      "providers": {
+        "CoreText": {
+          "state": "runtime-verified",
+          "platform": "macOS arm64",
+          "data_profile": "data-prototype"
+        },
+        "FreeType": {
+          "state": "runtime-verified",
+          "platform": "linux arm64",
+          "data_profile": "data-prototype",
+          "note": "compiles with the default on; not run with it on"
+        },
+        "FreeTypeEmscripten": {
+          "state": "experimental",
+          "platform": "web (wasm64)",
+          "data_profile": "data-prototype",
+          "note": "text.ready and glyphs in the framebuffer; small-HUD legibility not reviewed by eye"
+        }
+      }
     }
   }
 }

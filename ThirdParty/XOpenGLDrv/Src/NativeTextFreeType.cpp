@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -1111,6 +1112,10 @@ namespace Hp2NativeText
 			WideValue <= static_cast<double>(std::numeric_limits<INT>::max());
 	}
 
+	// The most recent probe outcome, so a caller can tell "not staged yet"
+	// (worth waiting for) from "genuinely broken" (not worth retrying).
+	static const char* GNativeTextLastReason = "";
+
 	bool ProbeAvailability(const char*& OutReasonCode)
 	{
 		EnsureFontStack();
@@ -1129,6 +1134,7 @@ namespace Hp2NativeText
 		if (!Hp2NativeTextEmscripten::FontIsPresent())
 		{
 			OutReasonCode = "text.font_not_staged";
+			GNativeTextLastReason = OutReasonCode;
 			return false;
 		}
 #endif
@@ -1148,6 +1154,7 @@ namespace Hp2NativeText
 		}
 
 		OutReasonCode = "text.ready";
+		GNativeTextLastReason = OutReasonCode;
 		return true;
 	}
 
@@ -1249,6 +1256,23 @@ namespace Hp2NativeText
 		OutWidth = Layout->Width;
 		OutHeight = Layout->Height;
 		return true;
+	}
+
+	// True only while the last probe failed because the shell had not staged
+	// the game's face yet AND that face has now appeared. Both conditions are
+	// one-way: once the file is missing again, or the reason changes, this
+	// stays false, so a draw loop can never re-probe on a timer or exhaust a
+	// budget before a first-time player imports anything.
+	bool IsAwaitingStagedFont()
+	{
+#if defined(__EMSCRIPTEN__)
+		const char* Reason = GNativeTextLastReason ? GNativeTextLastReason : "";
+		if (strcmp(Reason, "text.font_not_staged") != 0)
+			return false;
+		return Hp2NativeTextEmscripten::FontIsPresent();
+#else
+		return false;
+#endif
 	}
 
 	bool IsLayout(const FCanvasTextLayout* Layout)

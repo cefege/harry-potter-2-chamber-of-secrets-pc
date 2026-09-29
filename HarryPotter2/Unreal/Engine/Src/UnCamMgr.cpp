@@ -76,9 +76,11 @@ void UClient::StaticConstructor()
 	new(GetClass(),TEXT("ShowFPS"),				RF_Public)UBoolProperty (CPP_PROPERTY(ShowFPS				), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("ParticleDensity"),		RF_Public)UIntProperty  (CPP_PROPERTY(ParticleDensity		), TEXT("Display"), CPF_Config );
 	MaintainVerticalFOV = 1;
-	// Native text is now the default: the TrueType path is the gate's
-	// runtime-verified state, and this engine runs on hardware where the 2002
-	// bitmap fallback is the worse experience. Turning it off again is
+	// Native text ships on by default. This is a product decision, not a
+	// statement that the gate has reached default-enabled: the gate is still
+	// experimental because the wasm provider has not been reviewed by eye, and
+	// Build/feature-gates.json records that per provider. The 2002 bitmap
+	// fallback remains the compatibility path and is still reachable with
 	// [Display] NativeText=False in Game.ini.
 	NativeText = 1;
 	ShowFPS = 0;

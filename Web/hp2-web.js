@@ -1809,6 +1809,8 @@
       }
       reportSmoke('running', 'main loop ran ' + smokeFrames + ' frames',
         { frames: smokeFrames });
+    // After the report on purpose: the harness terminates the browser as soon
+    // as it lands, and a later capture would never run.
     };
     requestAnimationFrame(tick);
   }

@@ -732,6 +732,13 @@ namespace Hp2NativeText
 			WideValue <= static_cast<double>(std::numeric_limits<INT>::max());
 	}
 
+	bool IsAwaitingStagedFont()
+	{
+		// CoreText resolves fonts from the system, so there is never a staged
+		// file to wait for and the probe result is final.
+		return false;
+	}
+
 	bool ProbeAvailability(const char*& OutReasonCode)
 	{
 		CFArrayRef FamilyNames = CTFontManagerCopyAvailableFontFamilyNames();

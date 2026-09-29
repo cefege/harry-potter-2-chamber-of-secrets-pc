@@ -176,6 +176,14 @@ namespace Hp2NativeText
 	bool ProbeAvailability(const char*& OutReasonCode);
 	bool SafeFloat(FLOAT Value);
 
+	// True only while the last probe failed because the shell had not staged
+	// the game's face yet AND that face has since appeared, so the driver can
+	// wait for it rather than re-probing on every draw. One-way: a changed
+	// reason or a vanished face keeps it false for good, so a draw loop can
+	// never spin or exhaust a budget. Always false where the font is present
+	// before the device is created.
+	bool IsAwaitingStagedFont();
+
 	// All-or-nothing layout creation: preprocesses the request text, resolves
 	// the role font, trims to the visible source span, then shapes the whole
 	// layout.  Returns NULL on any failure without leaking shaped state.
@@ -315,6 +323,14 @@ namespace Hp2NativeText
 	ENativeTextRole RoleForFont(const UFont* Font);
 	bool ProbeAvailability(const char*& OutReasonCode);
 	bool SafeFloat(FLOAT Value);
+
+	// True only while the last probe failed because the shell had not staged
+	// the game's face yet AND that face has since appeared, so the driver can
+	// wait for it rather than re-probing on every draw. One-way: a changed
+	// reason or a vanished face keeps it false for good, so a draw loop can
+	// never spin or exhaust a budget. Always false where the font is present
+	// before the device is created.
+	bool IsAwaitingStagedFont();
 
 	// All-or-nothing layout creation: preprocesses the request text, resolves
 	// the role font, trims to the visible source span, then shapes the whole
