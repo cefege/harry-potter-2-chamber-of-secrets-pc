@@ -8,7 +8,10 @@
       "commit": "6907839798152fc02090711b260e54a7294eecfc",
       "tree": "a7dde1f73285bacbb8fc21bad6e64da7ead915fe",
       "license": "BSD-3-Clause-style with bundled glad MIT and GLM MIT notices",
-      "license_paths": ["ThirdParty/XOpenGLDrv/LICENSE.md", "ThirdParty/XOpenGLDrv/glm/copying.txt"],
+      "license_paths": [
+        "ThirdParty/XOpenGLDrv/LICENSE.md",
+        "ThirdParty/XOpenGLDrv/glm/copying.txt"
+      ],
       "role": "vendored XOpenGL renderer subset",
       "vendored_metadata": "ThirdParty/XOpenGLDrv/.source.json"
     },
@@ -19,7 +22,11 @@
       "commit": "a29e9ac0df1c60ad302d91bc3a51ab026c1a307c",
       "tree": "e3c6add0866e3b00d40c39031a5d46f9ad28d68e",
       "license": "zlib with bundled ZVulkan, Vulkan-header, VMA, volk, and glslang notices",
-      "license_paths": ["ThirdParty/UT99VulkanDrv/LICENSE.md", "ThirdParty/UT99VulkanDrv/ZVulkan/LICENSE.md", "ThirdParty/UT99VulkanDrv/ZVulkan/src/glslang/LICENSE.txt"],
+      "license_paths": [
+        "ThirdParty/UT99VulkanDrv/LICENSE.md",
+        "ThirdParty/UT99VulkanDrv/ZVulkan/LICENSE.md",
+        "ThirdParty/UT99VulkanDrv/ZVulkan/src/glslang/LICENSE.txt"
+      ],
       "role": "vendored VulkanDrv and self-contained ZVulkan trees",
       "vendored_metadata": "ThirdParty/UT99VulkanDrv/.source.json"
     },
@@ -42,7 +49,11 @@
       "tag": "1.25.2",
       "commit": "b2c48f7718ef3fcf67921a8b6534c4914e328970",
       "license": "LGPL-2.0-or-later with BSD-3-Clause and PFFFT notices",
-      "upstream_license_paths": ["COPYING", "BSD-3Clause", "LICENSE-pffft"],
+      "upstream_license_paths": [
+        "COPYING",
+        "BSD-3Clause",
+        "LICENSE-pffft"
+      ],
       "role": "replaceable bundled dynamic OpenAL implementation"
     },
     {
@@ -121,6 +132,34 @@
       "commit": "a2b92777574c2feda07994cd4f1079a3dfc151f8",
       "license": "MIT (emsdk); Emscripten MIT/UIUC; bundled SDL2 port zlib; bundled OpenAL port per Emscripten library_openal.js",
       "role": "web-wasm64 toolchain; supplies the SDL2 (-sUSE_SDL=2) and OpenAL (-lopenal) implementations linked into the browser build instead of the pinned SDL2/OpenAL Soft entries"
+    },
+    {
+      "name": "openfonts",
+      "source_type": "vendored",
+      "license": "SIL Open Font License 1.1 (Liberation Fonts; Noto Sans CJK)",
+      "role": "web-wasm64 text fallback: the game data supplies one TrueType face (System/Simyou.ttf), and these are staged beside it so FreeType has a real coverage chain instead of missing-glyph boxes. Liberation Sans covers Latin/Greek/Cyrillic, Liberation Mono the console text, Noto Sans SC CJK. No runtime download and no dependency on the visitor's installed fonts.",
+      "upstreams": [
+        {
+          "name": "Liberation Fonts",
+          "url": "https://github.com/liberationfonts/liberation-fonts",
+          "version": "2.1.5",
+          "tag": "2.1.5",
+          "license_file": "fonts/LICENSE-Liberation.txt"
+        },
+        {
+          "name": "Noto Sans CJK",
+          "url": "https://github.com/notofonts/noto-cjk",
+          "version": "Sans2.004",
+          "license_file": "fonts/LICENSE-NotoSansCJK.txt"
+        }
+      ],
+      "files": [
+        "fonts/LiberationSans-Regular.ttf",
+        "fonts/LiberationSans-Bold.ttf",
+        "fonts/LiberationMono-Regular.ttf",
+        "fonts/NotoSansSC-Regular.otf"
+      ],
+      "modified": false
     }
   ]
 }

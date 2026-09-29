@@ -38,6 +38,11 @@
 
 #include <emscripten/emscripten.h>
 
+// FreeType is needed here, not just in the provider: the coverage probe opens
+// each staged face to ask FT_Get_Char_Index whether it has a glyph.
+#include <ft2build.h>
+#include FT_FREETYPE_H
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -109,7 +114,17 @@ namespace Hp2NativeTextEmscripten
 	// Where the shell stages the face. It is a separate directory from the data
 	// root on purpose: the engine's bootstrap checks /hp2data for Default.ini,
 	// and a font appearing there would make an empty data root look imported.
+	// The game's own face first: it is what the text was authored against, so
+	// using it keeps the look faithful. The vendored open-licence faces behind
+	// it are what make the browser build independent -- the game's data supplies
+	// one face, and without these anything outside it would be a missing-glyph
+	// box with no way to recover. Liberation Sans is a wide Latin/Greek/Cyrillic
+	// cover; Noto Sans SC is the CJK fallback; Liberation Mono covers the
+	// console text that is otherwise monospaced in the original.
 	const char* const kFontPath = "/hp2fonts/Simyou.ttf";
+	const char* const kFallbackSans = "/hp2fonts/LiberationSans-Regular.ttf";
+	const char* const kFallbackCJK = "/hp2fonts/NotoSansSC-Regular.otf";
+	const char* const kFallbackMono = "/hp2fonts/LiberationMono-Regular.ttf";
 	// A sanity bound only: the largest realistic face is far under this, and
 	// anything larger is a corrupt stat rather than a font.
 	const long long kMaxFontBytes = 64ll * 1024ll * 1024ll;
@@ -135,26 +150,71 @@ namespace Hp2NativeTextEmscripten
 	}
 
 
-	bool ResolveFamilyFile(const std::string& /*Family*/, bool /*Bold*/, std::string& OutPath)
+	// A family name carries no information here, so the face is chosen by
+	// coverage instead: the first chain entry that has the requested glyph.
+	// Requesting the game's own face is the default so a caller with no code
+	// point to check still gets the authored look.
+	// Both defined below; the coverage probe needs the loader and they are
+	// mutually recursive through the chain.
+	bool LoadFontFile(const std::string& Path, std::vector<unsigned char>& OutBytes);
+	bool FaceCoversPath(const std::string& Path, std::uint32_t CodePoint);
+
+	// Chain in preference order: the game's face, then the vendored ones.
+	const char* const kChain[] = {
+		kFontPath, kFallbackSans, kFallbackCJK, kFallbackMono
+	};
+
+	bool FaceCoversPath(const std::string& Path, std::uint32_t CodePoint)
+	{
+		std::vector<unsigned char> Bytes;
+		if (!LoadFontFile(Path, Bytes))
+			return false;
+		// Probe through FreeType itself rather than an index lookup, so the
+		// answer reflects what the rasterizer would actually draw.
+		FT_Library Library = NULL;
+		if (FT_Init_FreeType(&Library) != 0)
+			return false;
+		FT_Face Face = NULL;
+		bool Covers = false;
+		if (FT_New_Memory_Face(Library, Bytes.data(),
+				static_cast<FT_Long>(Bytes.size()), 0, &Face) == 0 && Face)
+		{
+			Covers = FT_Get_Char_Index(Face, static_cast<FT_ULong>(CodePoint)) != 0;
+			FT_Done_Face(Face);
+		}
+		FT_Done_FreeType(Library);
+		return Covers;
+	}
+	bool ResolveFamilyFile(const std::string& /*Family*/, bool /*Bold*/,
+		std::string& OutPath, std::uint32_t CodePoint, bool bCheckCoverage)
 	{
 		OutPath = kFontPath;
+		if (!bCheckCoverage)
+			return true;
+		for (const char* Candidate : kChain)
+		{
+			if (FaceCoversPath(Candidate, CodePoint))
+			{
+				OutPath = Candidate;
+				return true;
+			}
+		}
 		return true;
 	}
 
-	// The browser build stages exactly one face, the game's own
-	// System/Simyou.ttf, so there is no second face to fall back to and no
-	// coverage walk to perform. Saying "yes" for every code point would make
-	// FallbackFaceFor believe the primary face can render characters it
-	// cannot, and a missing-glyph box would be drawn with no signal anywhere.
-	//
-	// Real fallback needs more faces staged from the data root plus a
-	// FT_Get_Char_Index probe per candidate. Until that exists this reports
-	// "not covered" for anything the single staged face is not asked about,
-	// so the caller's coverage segmentation sees an honest gap: with no
-	// alternative face available it keeps the primary face, which is the
-	// same outcome the Fontconfig path reaches when substitution fails.
-	bool FamilyHasCodePoint(const std::string& /*Family*/, std::uint32_t /*CodePoint*/)
+	// The real question the Linux build answers with a Fontconfig charset
+	// match. Here the answer is "which of the staged faces has this glyph",
+	// which is exactly FT_Get_Char_Index against each one. Nothing here
+	// guesses from a family name, so a face is only credited with coverage it
+	// really has.
+
+	bool FamilyHasCodePoint(const std::string& /*Family*/, std::uint32_t CodePoint)
 	{
+		for (const char* Candidate : kChain)
+		{
+			if (FaceCoversPath(Candidate, CodePoint))
+				return true;
+		}
 		return false;
 	}
 

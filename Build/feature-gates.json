@@ -7,9 +7,10 @@
       "default_enabled": false,
       "promotion_evidence": [
         "macOS arm64 / CoreText: ctest native_typography_contracts + canvas_compatibility_contracts (2/2, data-prototype) and a real PrivetDr renderer smoke reaching the main loop with 'text.ready'",
-        "wasm (Emscripten): same FreeType/HarfBuzz sources as Linux plus a seam that reads the game's own System/Simyou.ttf out of the module filesystem, because there is no fontconfig and a page cannot download a font; web ctest 2/2 and a text.ready session captured from the framebuffer under out/evidence",
+        "wasm (Emscripten): same FreeType/HarfBuzz sources as Linux plus a seam that reads font files out of the module filesystem, because there is no fontconfig and a page cannot download a font at run time; web ctest 2/2, a text.ready session captured from the framebuffer",
+        "web text fallback: the game data supplies one face, so Liberation Sans, Liberation Mono and Noto Sans SC (all SIL OFL 1.1) are vendored under ThirdParty/fonts and staged beside it. Coverage is answered with FT_Get_Char_Index against each face in turn -- the role Fontconfig's charset match plays on Linux -- so a face is only credited with glyphs it really has, and nothing depends on fonts installed on the visitor's machine",
         "wasm seam notes: EM_ASM cannot write C++ out-parameters (use setValue); the web preset is MEMORY64 so pointers need Number() in JS; Emscripten FS.readFile returns a Uint8Array for a raw read, and asking for encoding 'binary' silently zeroes every byte",
-        "NOT verified: Linux arm64 has not been run with native text on, so that provider stays experimental on its own evidence rather than borrowing macOS's; no data-retail run exists for this configuration; the typography contracts are native-only so the wasm provider has no shaping assertions; and the browser build stages a single face, so characters outside System/Simyou.ttf have no fallback and no diagnostic",
+        "NOT verified: the fallback branch has not been observed selecting a second face for a character the first one lacks; Linux arm64 has not been run with native text on; no data-retail run exists; the typography contracts are native-only so the wasm provider has no shaping assertions; and a human has not reviewed browser text for legibility",
         "The bitmap compatibility path remains selectable everywhere via [Display] NativeText=False; canvas_compatibility_contracts pins it"
       ],
       "providers": {
@@ -28,7 +29,7 @@
           "state": "experimental",
           "platform": "web (wasm64)",
           "data_profile": "data-prototype",
-          "note": "text.ready and glyphs in the framebuffer; small-HUD legibility not reviewed by eye"
+          "note": "text.ready observed; fallback chain staged (game face + Liberation Sans/Mono + Noto Sans SC, all OFL) and coverage is probed with FT_Get_Char_Index, but the fallback path itself has not been exercised on a character that needs it, and no one has reviewed the result"
         }
       }
     }

@@ -291,7 +291,7 @@ namespace Hp2NativeText
 
 #if defined(__EMSCRIPTEN__)
 			std::string Url;
-			if (!Hp2NativeTextEmscripten::ResolveFamilyFile(Family, Bold, Url))
+			if (!Hp2NativeTextEmscripten::ResolveFamilyFile(Family, Bold, Url, 0, false))
 				return NULL;
 			return LoadFaceFromFile(Url, 0, PointSize);
 #else
@@ -408,8 +408,14 @@ namespace Hp2NativeText
 				if (!Hp2NativeTextEmscripten::FamilyHasCodePoint(Candidate, CodePoint))
 					continue;
 				std::string Url;
-				if (!Hp2NativeTextEmscripten::ResolveFamilyFile(Candidate, Bold, Url))
+				// This is the Fontconfig charset match, replaced: pick the first
+				// staged face that actually has the glyph rather than walking a
+				// list of family names that all resolve to the same file.
+				if (!Hp2NativeTextEmscripten::ResolveFamilyFile(Candidate, Bold, Url,
+						CodePoint, true))
+				{
 					continue;
+				}
 				FNativeTextFace* Loaded = LoadFaceFromFile(Url, 0, PointSize);
 				if (Loaded)
 				{

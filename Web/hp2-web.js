@@ -764,37 +764,65 @@
   // while the full data root is only copied in at launch; a font staged later
   // misses the probe and the build silently falls back to bitmap text.
 
-  const FONT_PATH = '/hp2fonts/Simyou.ttf';
-  const FONT_OPFS_PATH = 'System/Simyou.ttf';
+  // The faces the browser build can draw with, in the order the provider
+  // prefers them. The first is the game's own, so the authored look is kept
+  // wherever it can; the rest are open-licence faces vendored under
+  // ThirdParty/fonts and staged next to the game. That is what makes the web
+  // build independent: nothing depends on the visitor having a font
+  // installed, and characters outside the game's face still render instead of
+  // becoming missing-glyph boxes.
+  const FONT_DIR = '/hp2fonts';
+  const FONT_PATH = FONT_DIR + '/Simyou.ttf';
+  const FONT_FILES = [
+    { name: 'Simyou.ttf', opfs: 'System/Simyou.ttf' },
+    { name: 'LiberationSans-Regular.ttf', opfs: null },
+    { name: 'LiberationMono-Regular.ttf', opfs: null },
+    { name: 'NotoSansSC-Regular.otf', opfs: null },
+  ];
 
-  // Copies the face out of the import (OPFS) into the module filesystem. Small
-  // and one file, so this is cheap enough to do before anything else.
-  async function stageFont(instance) {
-    try {
-      let buffer = null;
+  // One face: the game's own comes out of the import (OPFS), the vendored ones
+  // are fetched from the staged web directory alongside the module.
+  async function readFontBytes(instance, entry) {
+    if (entry.opfs) {
       try {
         const root = await navigator.storage.getDirectory();
         const dataDir = await root.getDirectoryHandle(OPFS_DIR);
-        const parts = FONT_OPFS_PATH.split('/');
+        const parts = entry.opfs.split('/');
         let dir = dataDir;
         for (let i = 0; i < parts.length - 1; ++i) {
           dir = await dir.getDirectoryHandle(parts[i]);
         }
         const handle = await dir.getFileHandle(parts[parts.length - 1]);
-        buffer = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+        return new Uint8Array(await (await handle.getFile()).arrayBuffer());
       } catch (err) {
         // The dev-import path writes the data root directly and never puts the
         // face in the import store, so fall back to the copy already made.
-        buffer = instance.FS.readFile(DATA_ROOT + '/System/Simyou.ttf');
+        return instance.FS.readFile(DATA_ROOT + '/' + entry.opfs);
       }
-      mkdirTree(instance.FS, FONT_PATH.slice(0, FONT_PATH.lastIndexOf('/')));
-      instance.FS.writeFile(FONT_PATH, buffer);
-      logToBoth('Native text font staged (' + buffer.length + ' bytes)');
-    } catch (err) {
-      // No font yet: the player has not imported. The provider will report the
-      // text stack unavailable and the bitmap path stays in charge, which is
-      // the correct state for a fresh install.
-      logToBoth('Font staging skipped: ' + err);
+    }
+    const response = await fetch('fonts/' + entry.name, { cache: 'force-cache' });
+    if (!response.ok) {
+      throw new Error('HTTP ' + response.status);
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  async function stageFont(instance) {
+    mkdirTree(instance.FS, FONT_DIR);
+    let staged = 0;
+    for (const entry of FONT_FILES) {
+      try {
+        const buffer = await readFontBytes(instance, entry);
+        instance.FS.writeFile(FONT_DIR + '/' + entry.name, buffer);
+        staged += 1;
+      } catch (err) {
+        // A missing face is not fatal: the provider walks the chain and uses
+        // whichever are present.
+        logToBoth('Font not staged: ' + entry.name + ' (' + err + ')');
+      }
+    }
+    if (staged > 0) {
+      logToBoth('Native text fonts staged: ' + staged + '/' + FONT_FILES.length);
     }
   }
 

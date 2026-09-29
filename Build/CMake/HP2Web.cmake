@@ -68,6 +68,13 @@ add_custom_target(hp2_web ALL
             -P "${CMAKE_CURRENT_LIST_DIR}/HP2WebStage.cmake"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${HP2_WEB_SHELL_DIR}/index.html" "${HP2_WEB_DIST_DIR}/index.html"
+    # Open-licence faces the browser build stages for text fallback. They are
+    # vendored rather than fetched at run time so the build stays independent
+    # of what the visitor has installed, and so nothing the page needs arrives
+    # from a third party at run time.
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${HP2_WEB_DIST_DIR}/fonts"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${HP2_THIRD_PARTY_ROOT}/fonts" "${HP2_WEB_DIST_DIR}/fonts"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${HP2_WEB_SHELL_DIR}/hp2-web.js" "${HP2_WEB_DIST_DIR}/hp2-web.js"
     COMMENT "Staging the WebAssembly browser build in ${HP2_WEB_DIST_DIR}"
