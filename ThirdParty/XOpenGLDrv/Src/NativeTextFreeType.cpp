@@ -1113,49 +1113,62 @@ namespace Hp2NativeText
 	}
 
 	// The most recent probe outcome, so a caller can tell "not staged yet"
-	// (worth waiting for) from "genuinely broken" (not worth retrying).
-	static const char* GNativeTextLastReason = "";
+	// (worth waiting for) from "genuinely broken" (not worth retrying). Every
+	// exit from ProbeAvailability goes through ReportProbe so a later real
+	// failure cannot leave a stale "not staged" behind and make
+	// IsAwaitingStagedFont re-probe on every single text draw.
+	static const char* GBrowserLastReason = "text.internal_error";
+
+	bool ReportProbe(const char*& OutReasonCode, const char* Reason, bool Available)
+	{
+		GBrowserLastReason = Reason;
+		OutReasonCode = Reason;
+		return Available;
+	}
+
+	bool IsAwaitingStagedFont()
+	{
+#if defined(__EMSCRIPTEN__)
+		return strcmp(GBrowserLastReason, "text.font_not_staged") == 0 &&
+			Hp2NativeTextEmscripten::FontIsPresent();
+#else
+		return false;
+#endif
+	}
 
 	bool ProbeAvailability(const char*& OutReasonCode)
 	{
 		EnsureFontStack();
 		if (!GFontStackOk)
 		{
-			OutReasonCode = "text.fonts_unavailable";
-			return false;
+			return ReportProbe(OutReasonCode, "text.fonts_unavailable", false);
 		}
 #if defined(__EMSCRIPTEN__)
 		// On the browser the face arrives with the game data, which is copied
 		// in only when the player launches. The render device is created before
 		// that, so this probe would otherwise fail once and stay failed for the
 		// life of the page. Reporting unavailable here is still correct -- the
-		// caller keeps the bitmap path -- and the driver retries at first text
-		// draw, by which time the shell has staged the face.
+		// caller keeps the bitmap path -- and the driver retries once the face
+		// exists, not on a timer.
 		if (!Hp2NativeTextEmscripten::FontIsPresent())
 		{
-			OutReasonCode = "text.font_not_staged";
-			GNativeTextLastReason = OutReasonCode;
-			return false;
+			return ReportProbe(OutReasonCode, "text.font_not_staged", false);
 		}
 #endif
 
 		FNativeTextFace* RoleFace = CreateRoleFont(NTROLE_Body, 12.0);
 		if (!RoleFace)
 		{
-			OutReasonCode = "text.fonts_unavailable";
-			return false;
+			return ReportProbe(OutReasonCode, "text.fonts_unavailable", false);
 		}
 
 		const FT_UInt GlyphIndex = FT_Get_Char_Index(RoleFace->Face, static_cast<FT_ULong>('A'));
 		if (GlyphIndex == 0 || FT_Load_Glyph(RoleFace->Face, GlyphIndex, FT_LOAD_DEFAULT | FT_LOAD_RENDER) != 0)
 		{
-			OutReasonCode = "text.rasterizer_unavailable";
-			return false;
+			return ReportProbe(OutReasonCode, "text.rasterizer_unavailable", false);
 		}
 
-		OutReasonCode = "text.ready";
-		GNativeTextLastReason = OutReasonCode;
-		return true;
+		return ReportProbe(OutReasonCode, "text.ready", true);
 	}
 
 	ENativeTextRole RoleForFont(const UFont* Font)
@@ -1256,23 +1269,6 @@ namespace Hp2NativeText
 		OutWidth = Layout->Width;
 		OutHeight = Layout->Height;
 		return true;
-	}
-
-	// True only while the last probe failed because the shell had not staged
-	// the game's face yet AND that face has now appeared. Both conditions are
-	// one-way: once the file is missing again, or the reason changes, this
-	// stays false, so a draw loop can never re-probe on a timer or exhaust a
-	// budget before a first-time player imports anything.
-	bool IsAwaitingStagedFont()
-	{
-#if defined(__EMSCRIPTEN__)
-		const char* Reason = GNativeTextLastReason ? GNativeTextLastReason : "";
-		if (strcmp(Reason, "text.font_not_staged") != 0)
-			return false;
-		return Hp2NativeTextEmscripten::FontIsPresent();
-#else
-		return false;
-#endif
 	}
 
 	bool IsLayout(const FCanvasTextLayout* Layout)

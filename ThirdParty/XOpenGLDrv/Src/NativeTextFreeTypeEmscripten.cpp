@@ -141,13 +141,21 @@ namespace Hp2NativeTextEmscripten
 		return true;
 	}
 
+	// The browser build stages exactly one face, the game's own
+	// System/Simyou.ttf, so there is no second face to fall back to and no
+	// coverage walk to perform. Saying "yes" for every code point would make
+	// FallbackFaceFor believe the primary face can render characters it
+	// cannot, and a missing-glyph box would be drawn with no signal anywhere.
+	//
+	// Real fallback needs more faces staged from the data root plus a
+	// FT_Get_Char_Index probe per candidate. Until that exists this reports
+	// "not covered" for anything the single staged face is not asked about,
+	// so the caller's coverage segmentation sees an honest gap: with no
+	// alternative face available it keeps the primary face, which is the
+	// same outcome the Fontconfig path reaches when substitution fails.
 	bool FamilyHasCodePoint(const std::string& /*Family*/, std::uint32_t /*CodePoint*/)
 	{
-		// One face serves every role, so the fallback walk the Fontconfig
-		// build performs has nothing to select. Reporting "yes" keeps the
-		// primary face in use instead of churning through candidates that all
-		// resolve to the same file.
-		return true;
+		return false;
 	}
 
 	bool LoadFontFile(const std::string& Path, std::vector<unsigned char>& OutBytes)

@@ -7,9 +7,9 @@
       "default_enabled": false,
       "promotion_evidence": [
         "macOS arm64 / CoreText: ctest native_typography_contracts + canvas_compatibility_contracts (2/2, data-prototype) and a real PrivetDr renderer smoke reaching the main loop with 'text.ready'",
-        "wasm (Emscripten): same FreeType/HarfBuzz sources as Linux plus a seam that reads the game's own System/Simyou.ttf out of the module filesystem, because there is no fontconfig and a page cannot download a font; web ctest 2/2 and 'XOpenGL: native text backend ready (text.ready)' observed in a browser",
+        "wasm (Emscripten): same FreeType/HarfBuzz sources as Linux plus a seam that reads the game's own System/Simyou.ttf out of the module filesystem, because there is no fontconfig and a page cannot download a font; web ctest 2/2 and a text.ready session captured from the framebuffer under out/evidence",
         "wasm seam notes: EM_ASM cannot write C++ out-parameters (use setValue); the web preset is MEMORY64 so pointers need Number() in JS; Emscripten FS.readFile returns a Uint8Array for a raw read, and asking for encoding 'binary' silently zeroes every byte",
-        "NOT verified: no one has looked at small-HUD legibility in a browser, no data-retail run exists for this configuration, and the typography contracts are native-only so the wasm provider has no shaping assertions of its own",
+        "NOT verified: Linux arm64 has not been run with native text on, so that provider stays experimental on its own evidence rather than borrowing macOS's; no data-retail run exists for this configuration; the typography contracts are native-only so the wasm provider has no shaping assertions; and the browser build stages a single face, so characters outside System/Simyou.ttf have no fallback and no diagnostic",
         "The bitmap compatibility path remains selectable everywhere via [Display] NativeText=False; canvas_compatibility_contracts pins it"
       ],
       "providers": {
@@ -19,10 +19,10 @@
           "data_profile": "data-prototype"
         },
         "FreeType": {
-          "state": "runtime-verified",
+          "state": "experimental",
           "platform": "linux arm64",
           "data_profile": "data-prototype",
-          "note": "compiles with the default on; not run with it on"
+          "note": "compiles with the default on; not run with it on, so not runtime-verified"
         },
         "FreeTypeEmscripten": {
           "state": "experimental",
