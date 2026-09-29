@@ -3508,12 +3508,9 @@ void URender::DrawFrame( FSceneNode* Frame )
 					else if( !pPlayer->bLumosOn && (LumosPolyFlags & PF_LumosAppear) )
 						break;// This is a LumosApearing surface so because lumos is not on do not draw the surface
 					
-					// Get rid of the lumos identifing flags in the Temp LumosPolyFlags.
-					// (so they don't mess with the software rendering of the surface )
-					LumosPolyFlags &= ~PF_LumosAffected;
-					LumosPolyFlags &= ~PF_LumosAppear;
-					LumosPolyFlags &= ~PF_LumosAlwaysOn;
-					
+					// The lumos marker flags are stripped for both this path
+					// and the hardware one after the branch below, so they are
+					// not repeated here.
 				}
 				else // Hardware mode
 				{	
@@ -3566,6 +3563,19 @@ void URender::DrawFrame( FSceneNode* Frame )
 						// then occlude objects.
 						LumosPolyFlags |= PF_Occlude;
 					}
+
+				// PF_LumosAffected is an alias for PF_HighShadowDetail |
+				// PF_Modulated, not a bit of its own, so the driver cannot
+				// tell a lumos surface from an ordinary one and reads any
+				// surface carrying both as a lumos surface. The hardware path
+				// never stripped them (only the software path above did), so
+				// a lumos wall was drawn with the lumos blend and a live depth
+				// write even while it was supposed to be fully hidden, which
+				// is what made untriggered surfaces flicker as the camera
+				// moved. Strip the three lumos markers here, at the single
+				// point every mode passes through: the draw below already
+				// carries the fade in cAlpha, which is what the driver needs.
+				LumosPolyFlags &= ~( PF_LumosAffected | PF_LumosAppear | PF_LumosAlwaysOn );
 					
 				}//end hardware mode
 				

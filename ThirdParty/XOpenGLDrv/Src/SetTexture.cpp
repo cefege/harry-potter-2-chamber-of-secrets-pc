@@ -637,11 +637,14 @@ void UXOpenGLRenderDevice::SetBlend(DWORD PolyFlags)
 	{
 		if (Xor & BlendFlags)
 		{
-			if ((PolyFlags & PF_LumosAffected) == PF_LumosAffected)
-			{
-				glBlendFunc(GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA);
-			}
-			else if (PolyFlags & PF_Invisible)
+			// HP2's PF_LumosAffected is PF_HighShadowDetail | PF_Modulated, a
+			// mask rather than a bit of its own, so it cannot identify a lumos
+			// surface here: testing it would match any surface that happens to
+			// be both high-shadow and modulated. The renderer strips the lumos
+			// markers and passes the fade in cAlpha (Render/Src/UnRender.cpp),
+			// so a lumos surface now arrives here as an ordinary translucent
+			// polygon and the PF_Translucent branch below blends it correctly.
+			if (PolyFlags & PF_Invisible)
 			{
 				glBlendFunc(GL_ZERO, GL_ONE);
 			}

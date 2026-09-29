@@ -485,8 +485,32 @@
     updateButtons();
     try {
       const opfsRoot = await navigator.storage.getDirectory();
-      const dataDir = await opfsRoot.getDirectoryHandle(OPFS_DIR);
+      // The marker and the data live in the same OPFS directory, but a
+      // profile can carry one without the other (an import that wrote the
+      // marker last, or a half-cleared profile). Missing data is the setup
+      // step, not a launch failure, so send the player back to it.
+      let dataDir;
+      try {
+        dataDir = await opfsRoot.getDirectoryHandle(OPFS_DIR);
+      } catch (err) {
+        dataImported = false;
+        showSetup();
+        setSetupStatus('The imported game data is missing. Choose your folder again.');
+        reportSmoke('failed', 'imported game data is missing');
+        started = false;
+        updateButtons();
+        return;
+      }
       const copied = await copyOpfsDataIntoFs(window.hp2Module, dataDir);
+      if (copied === 0) {
+        dataImported = false;
+        showSetup();
+        setSetupStatus('The imported game data is empty. Choose your folder again.');
+        reportSmoke('failed', 'imported game data is empty');
+        started = false;
+        updateButtons();
+        return;
+      }
       logToBoth('Loaded ' + copied + ' data files into ' + DATA_ROOT);
       // The engine addresses packages relative to the process working
       // directory, which is the data root's System directory: it logs
@@ -702,6 +726,113 @@
       launch(args);
     }
   });
+
+  // Fullscreen is the page's to give and take: the browser owns the canvas
+  // size, so the shell asks for the element and lets the engine's own
+  // SDL_WINDOWEVENT_RESIZED path pick the new resolution up. Requesting the
+  // document rather than the canvas fills the screen and hides the toolbar.
+  const stageEl = document.getElementById('stage');
+  const fullscreenToggle = document.getElementById('fullscreen-toggle');
+
+  // The glyph shows the current state; the tooltip also says how to free the
+  // mouse when the engine holds the pointer lock and the button cannot be
+  // clicked (see syncPointerLockHint below).
+  function syncFullscreenButton() {
+    fullscreenToggle.textContent = document.fullscreenElement ? '⤡' : '⤢';
+    syncPointerLockHint();
+  }
+
+  // The engine grabs the mouse while the game runs, and a locked pointer sends
+  // every event to the locked element, so neither the button nor a keypress
+  // can reach the page until the lock is dropped. Escape is the player's way
+  // out; the same release is what makes these controls usable, and the engine
+  // re-grabs the pointer when the player clicks back into the game.
+  function releasePointerLock() {
+    if (document.pointerLockElement && document.exitPointerLock) {
+      document.exitPointerLock();
+      return true;
+    }
+    return false;
+  }
+
+  async function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      try {
+        await document.exitFullscreen();
+      } catch (err) {
+        logToBoth('Leaving full screen was refused by the browser: ' + err);
+      }
+      return;
+    }
+    const released = releasePointerLock();
+    try {
+      // A user gesture is required, and the element must be in the document:
+      // the stage is display:none until the game starts.
+      await document.documentElement.requestFullscreen();
+    } catch (err) {
+      // Safari on iOS only fullscreens video, and a denied request is normal
+      // when the page is not focused; the button simply stays as it was.
+      logToBoth('Full screen was refused by the browser: ' + err);
+      if (released) {
+        // Put the cursor back so the player is not left without a mouse.
+        canvas.focus();
+      }
+    }
+  }
+
+  fullscreenToggle.addEventListener('click', toggleFullscreen);
+  document.addEventListener('fullscreenchange', syncFullscreenButton);
+  syncFullscreenButton();
+
+  // F toggles fullscreen from the keyboard, which also works while the engine
+  // holds the pointer lock, because key events still reach the document.
+  document.addEventListener('keydown', function (event) {
+    if (!started || event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+    if (event.key === 'f' || event.key === 'F') {
+      event.preventDefault();
+      toggleFullscreen();
+    }
+  });
+
+  // While the engine holds the pointer lock the button cannot be clicked --
+  // every pointer event goes to the locked canvas -- so say so on the button
+  // itself rather than leaving a control that looks broken. Pressing Escape
+  // (or F) frees the cursor and the button works again.
+  function syncPointerLockHint() {
+    fullscreenToggle.title = document.pointerLockElement
+      ? (document.fullscreenElement
+          ? 'Leave full screen (F)'
+          : 'Full screen (F, or press Escape to free the mouse)')
+      : (document.fullscreenElement ? 'Leave full screen (F)' : 'Full screen (F)');
+  }
+  document.addEventListener('pointerlockchange', syncPointerLockHint);
+  syncPointerLockHint();
+
+  // The corner buttons fade while playing so they never sit in the picture,
+  // and come back on hover, focus, or when the pointer is near the top edge.
+  function wakeCorners() {
+    stageEl.classList.remove('idle');
+  }
+  let cornerTimer = null;
+  function scheduleIdle() {
+    wakeCorners();
+    clearTimeout(cornerTimer);
+    cornerTimer = setTimeout(function () {
+      stageEl.classList.add('idle');
+    }, 2500);
+  }
+  canvas.addEventListener('pointermove', function (event) {
+    if (event.clientY < 90) {
+      wakeCorners();
+    } else {
+      scheduleIdle();
+    }
+  });
+  fullscreenToggle.addEventListener('focus', wakeCorners);
+  logToggle.addEventListener('focus', wakeCorners);
+  scheduleIdle();
 
   canvas.addEventListener('click', function () {
     canvas.focus();
