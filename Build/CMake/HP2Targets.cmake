@@ -199,7 +199,18 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
         ${HP2_TEXT_PROVIDER_SOURCES}
     )
     target_include_directories(hp2_nativetextcore PUBLIC ${HP2_XOPENGLDRV_INCLUDE_DIRS})
+    # Emscripten only builds the FreeType/HarfBuzz ports when asked, and the
+    # headers are part of that, so the compile side needs the flag as well as
+    # the link side. Without it <ft2build.h> is simply absent.
+    if(EMSCRIPTEN)
+        target_compile_options(hp2_nativetextcore PRIVATE -sUSE_FREETYPE=1 -sUSE_HARFBUZZ=1)
+    endif()
     target_link_libraries(hp2_nativetextcore PUBLIC ${HP2_TEXT_PROVIDER_LINK_LIBS})
+    # Emscripten's FreeType/HarfBuzz are emcc ports, not CMake libraries, so
+    # they are requested as link flags on the final executable instead. Read
+    # here (a global property, since the provider declares them) and applied
+    # to hp2_game further down, where that target exists.
+    get_property(HP2_WEB_FONTLINK_FLAGS GLOBAL PROPERTY HP2_WEB_FONTLINK_FLAGS)
 
     # NativeText.cpp is the provider-neutral glyph atlas and XOpenGL text
     # draw path; it belongs to hp2_xopengldrv itself, not the shaping core.
@@ -361,6 +372,16 @@ hp2_add_executable(hp2_launcher_tests
 target_compile_definitions(hp2_launcher_tests PRIVATE HP2_LAUNCHER_TESTING=1)
 target_link_libraries(hp2_launcher_tests PRIVATE hp2_core)
 
+# Data-root identity contracts: the two-mode bootstrap rule and the structured
+# overlay rejection reason codes (data.manifest_missing, data.hash_mismatch,
+# and friends). This executable deliberately does NOT link hp2_core: the test
+# supplies its own Core link seams (GMalloc, appSetBaseDir, appFromUtf8InPlace)
+# so the bootstrap is exercised in isolation, without appInit or the engine.
+hp2_add_executable(hp2_data_identity_tests
+    ${HP2_PATH_SOURCE}
+    ${HP2_DATA_IDENTITY_TEST_SOURCE}
+)
+
 # Config contract: links full hp2_core because FConfigCacheIni behavior lives
 # in CORE_API helpers (appStricmp, codecs), not the header-only container.
 hp2_add_executable(hp2_config_ini_tests
@@ -445,6 +466,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_dxt1_tests
     hp2_audio_tests
     hp2_launcher_tests
+    hp2_data_identity_tests
     hp2_config_ini_tests
     hp2_replay_roundtrip_tests
     hp2_save_wire_oracle
@@ -526,12 +548,30 @@ function(hp2_add_behavior_test test_name target)
             "TSAN_OPTIONS=halt_on_error=1"
         )
     endif()
+    # Every test gets a data-profile label by default. CI selects with
+    # `ctest -L data-none`, so a test with no LABELS property is silently
+    # omitted from the run a data-less checkout can execute. Deriving the
+    # label from the arguments - rather than a hand-maintained name list -
+    # keeps a newly registered data-backed test from being dropped because
+    # someone forgot a set_tests_properties line elsewhere in this file.
+    set(_hp2_default_labels "fast;data-none")
+    if(HP2_TEST_DATA_PRESENT)
+        foreach(_hp2_arg IN LISTS ARGN)
+            if(_hp2_arg MATCHES "HP2_TEST_DATA_ROOT"
+               OR _hp2_arg MATCHES "^--?datadir="
+               OR _hp2_arg MATCHES "^--?data-root=")
+                set(_hp2_default_labels "integration;data-prototype")
+                break()
+            endif()
+        endforeach()
+    endif()
     set_tests_properties("${test_name}" PROPERTIES
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
         # Deterministic contracts must never hang a verification run; a
         # timeout is a first-class failure with retained artifacts.
         TIMEOUT 900
         ENVIRONMENT "${_hp2_test_env}"
+        LABELS "${_hp2_default_labels}"
     )
 endfunction()
 
@@ -684,6 +724,7 @@ if(HP2_TEST_DATA_PRESENT)
     )
 endif()
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
+hp2_add_behavior_test(data_identity_contracts hp2_data_identity_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"
 )

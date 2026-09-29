@@ -343,6 +343,9 @@
     }
     logToBoth('Loaded ' + copied + ' data files (' + formatBytes(bytes) +
       ') into ' + DATA_ROOT);
+    // The engine probed for a text face during instantiation, before this copy
+    // ran, so stage it now: a later probe still picks it up.
+    await stageFont(window.hp2Module);
     return copied;
   }
 
@@ -745,6 +748,56 @@
     setupEl.appendChild(devButton);
   }
 
+  // --- Native text font -----------------------------------------------------
+  //
+  // The web build uses the same FreeType/HarfBuzz text provider as Linux, so
+  // shaping, ligatures, combining marks and fallback all behave identically.
+  // Only font resolution differs: Linux asks Fontconfig for a file, and there
+  // is no Fontconfig in WebAssembly, so the provider is pointed at a path
+  // inside the module's own filesystem instead.
+  //
+  // The face is the game's own -- System/Simyou.ttf ships with the data -- so
+  // nothing extra is downloaded and no font licence enters the repository.
+  //
+  // It has to be in place BEFORE the module resolves. The render device is
+  // created during instantiation and probes for a usable font at that point,
+  // while the full data root is only copied in at launch; a font staged later
+  // misses the probe and the build silently falls back to bitmap text.
+
+  const FONT_PATH = '/hp2fonts/Simyou.ttf';
+  const FONT_OPFS_PATH = 'System/Simyou.ttf';
+
+  // Copies the face out of the import (OPFS) into the module filesystem. Small
+  // and one file, so this is cheap enough to do before anything else.
+  async function stageFont(instance) {
+    try {
+      let buffer = null;
+      try {
+        const root = await navigator.storage.getDirectory();
+        const dataDir = await root.getDirectoryHandle(OPFS_DIR);
+        const parts = FONT_OPFS_PATH.split('/');
+        let dir = dataDir;
+        for (let i = 0; i < parts.length - 1; ++i) {
+          dir = await dir.getDirectoryHandle(parts[i]);
+        }
+        const handle = await dir.getFileHandle(parts[parts.length - 1]);
+        buffer = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      } catch (err) {
+        // The dev-import path writes the data root directly and never puts the
+        // face in the import store, so fall back to the copy already made.
+        buffer = instance.FS.readFile(DATA_ROOT + '/System/Simyou.ttf');
+      }
+      mkdirTree(instance.FS, FONT_PATH.slice(0, FONT_PATH.lastIndexOf('/')));
+      instance.FS.writeFile(FONT_PATH, buffer);
+      logToBoth('Native text font staged (' + buffer.length + ' bytes)');
+    } catch (err) {
+      // No font yet: the player has not imported. The provider will report the
+      // text stack unavailable and the bitmap path stays in charge, which is
+      // the correct state for a fresh install.
+      logToBoth('Font staging skipped: ' + err);
+    }
+  }
+
   // --- Settings -------------------------------------------------------------
   //
   // The engine reads its configuration from two ini files in the user root,
@@ -1019,12 +1072,16 @@
   // panel edits them means a first launch has the engine's real defaults in
   // place; without it the panel would write a three-key file that silently
   // drops the package and level setup.
+  // True when the engine can actually read a data root. The font is staged into
+  // /hp2data before the launch, so the directory existing proves nothing: what
+  // matters is Default.ini being there, because that is what the bootstrap
+  // checks before it will load anything.
   function dataRootReady() {
     if (!currentModule || !currentModule.FS) {
       return false;
     }
     try {
-      currentModule.FS.stat(DATA_ROOT + '/System');
+      currentModule.FS.stat(DATA_ROOT + '/System/Default.ini');
       return true;
     } catch (err) {
       return false;
@@ -1504,6 +1561,23 @@
     });
   });
 
+  // One line, to the page log, about the staged face. The engine's own
+  // "native text backend ..." line says the outcome; this says what the page
+  // actually put in the filesystem, which is what distinguishes "the font
+  // never arrived" from "the provider could not read it".
+  function reportFontState() {
+    let present = 0;
+    let size = 0;
+    try {
+      const stat = window.hp2Module.FS.stat(FONT_PATH);
+      present = 1;
+      size = stat.size;
+    } catch (err) {
+      present = 0;
+    }
+    logToBoth('Font state: ' + FONT_PATH + ' present=' + present + ' size=' + size);
+  }
+
   function showSetup() {
     setupEl.hidden = false;
     chooserEl.hidden = true;
@@ -1774,6 +1848,17 @@
       },
       preRun: [
         function (m) {
+          // The render device is created before main() runs and probes for a
+          // font at that moment, so the face has to be in the filesystem by
+          // the time the engine starts, not when the player first clicks a
+          // button. preRun is the last point where that is still possible, and
+          // a run dependency holds the runtime until the async read is done.
+          m.addRunDependency('hp2-font');
+          stageFont(m).then(function () {
+            m.removeRunDependency('hp2-font');
+          }, function () {
+            m.removeRunDependency('hp2-font');
+          });
           m.ENV.XDG_DATA_HOME = HOME_PREFIX;
           mkdirTree(m.FS, USER_ROOT);
           m.FS.mount(m.FS.filesystems.IDBFS, {}, USER_ROOT);
@@ -1828,6 +1913,7 @@
     // The controls are built once the module is up, because applying stored
     // values needs the ini files, which live inside its filesystem.
     buildSettingsPanes();
+    reportFontState();
     dataImported = await hasMarker();
     if (dataImported) {
       showChooser();

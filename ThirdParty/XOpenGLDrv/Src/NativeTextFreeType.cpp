@@ -31,7 +31,14 @@
 #include FT_OUTLINE_H
 #include <hb.h>
 #include <hb-ft.h>
+#if defined(__EMSCRIPTEN__)
+// Fontconfig is a native library with its own font cache. Under Emscripten
+// the shell resolves families and fetches the font bytes instead; shaping,
+// fallback and the glyph cache are the same code either way.
+#include "NativeTextFreeTypeEmscripten.h"
+#else
 #include <fontconfig/fontconfig.h>
+#endif
 
 #if !HP2_HAS_NATIVE_TEXT_BACKEND
 #error NativeTextFreeType.cpp must only be compiled when HP2_HAS_NATIVE_TEXT_BACKEND is enabled.
@@ -68,12 +75,24 @@ namespace Hp2NativeText
 		bool GFontStackOk = false;
 		FT_Library GFtLibrary{};
 		std::map<std::string, std::unique_ptr<FNativeTextFace>> GFaceCache;
+#if defined(__EMSCRIPTEN__)
+	// Backing store for faces opened with FT_New_Memory_Face. FreeType does
+	// not copy the buffer, and a face lives for the process, so the bytes are
+	// held here for the life of the page rather than by the face.
+	std::vector<std::vector<unsigned char>> GBackedFontBytes;
+#endif
 
 		void EnsureFontStack()
 		{
 			std::call_once(GFontStackInitFlag, []()
 			{
+#if defined(__EMSCRIPTEN__)
+				// No Fontconfig to initialise; family resolution is done by the
+				// page through the seam in NativeTextFreeTypeEmscripten.cpp.
+				GFontStackOk = FT_Init_FreeType(&GFtLibrary) == 0;
+#else
 				GFontStackOk = (FcInit() != FcFalse) && FT_Init_FreeType(&GFtLibrary) == 0;
+#endif
 			});
 		}
 
@@ -216,11 +235,33 @@ namespace Hp2NativeText
 				return Existing->second.get();
 
 			FT_Face FtFace = NULL;
+#if defined(__EMSCRIPTEN__)
+			// A page has no filesystem, so the font arrives as bytes the shell
+			// fetched. The buffer must outlive the face -- FreeType does not
+			// copy it -- and faces live for the process in GFaceCache, so the
+			// bytes are kept in a process-global arena that is never freed
+			// rather than being owned by the face.
+			std::vector<unsigned char> FontBytes;
+			if (!Hp2NativeTextEmscripten::LoadFontFile(File, FontBytes))
+				return NULL;
+			GBackedFontBytes.push_back(std::move(FontBytes));
+			const std::vector<unsigned char>& Backing = GBackedFontBytes.back();
+			if (FT_New_Memory_Face(GFtLibrary, Backing.data(), static_cast<FT_Long>(Backing.size()),
+					FaceIndex, &FtFace) != 0 || !FtFace)
+			{
+				GBackedFontBytes.pop_back();
+				return NULL;
+			}
+#else
 			if (FT_New_Face(GFtLibrary, File.c_str(), FaceIndex, &FtFace) != 0 || !FtFace)
 				return NULL;
+#endif
 			if (FT_Set_Char_Size(FtFace, 0, static_cast<FT_F26Dot6>(std::llround(PointSize * 64.0)), 72, 72) != 0)
 			{
 				FT_Done_Face(FtFace);
+#if defined(__EMSCRIPTEN__)
+				GBackedFontBytes.pop_back();
+#endif
 				return NULL;
 			}
 			hb_font_t* HbFont = hb_ft_font_create_referenced(FtFace);
@@ -247,6 +288,12 @@ namespace Hp2NativeText
 				PointSize > static_cast<double>(std::numeric_limits<uint32_t>::max()) / 64.0)
 				return NULL;
 
+#if defined(__EMSCRIPTEN__)
+			std::string Url;
+			if (!Hp2NativeTextEmscripten::ResolveFamilyFile(Family, Bold, Url))
+				return NULL;
+			return LoadFaceFromFile(Url, 0, PointSize);
+#else
 			FcPattern* Pattern = FcPatternCreate();
 			if (!Pattern)
 				return NULL;
@@ -274,6 +321,7 @@ namespace Hp2NativeText
 			FcPatternDestroy(Matched);
 
 			return LoadFaceFromFile(File, FaceIndex, PointSize);
+#endif
 		}
 
 		// Deliberate policy difference from CoreText: Fontconfig's own
@@ -344,6 +392,33 @@ namespace Hp2NativeText
 				return Existing->second;
 
 			FNativeTextFace* Result = Primary;
+#if defined(__EMSCRIPTEN__)
+			// Same question the Fontconfig charset match answers, asked of the
+			// browser instead: is there a face that actually has this code
+			// point? The generic stack is walked in the same order the
+			// Fontconfig path would substitute, so a Latin-only primary picks
+			// up CJK the same way it does on Linux.
+			static const char* const GFallbackFamilies[] = {
+				"Trebuchet MS", "Segoe UI", "Arial", "Helvetica", "sans-serif",
+				"serif", "Noto Sans", "Noto Sans CJK SC", "Arial Unicode MS"
+			};
+			for (const char* Candidate : GFallbackFamilies)
+			{
+				if (!Hp2NativeTextEmscripten::FamilyHasCodePoint(Candidate, CodePoint))
+					continue;
+				std::string Url;
+				if (!Hp2NativeTextEmscripten::ResolveFamilyFile(Candidate, Bold, Url))
+					continue;
+				FNativeTextFace* Loaded = LoadFaceFromFile(Url, 0, PointSize);
+				if (Loaded)
+				{
+					Result = Loaded;
+					break;
+				}
+			}
+			Cache.emplace(CodePoint, Result);
+			return Result;
+#else
 			FcCharSet* CharSet = FcCharSetCreate();
 			if (CharSet && FcCharSetAddChar(CharSet, static_cast<FcChar32>(CodePoint)))
 			{
@@ -385,6 +460,7 @@ namespace Hp2NativeText
 
 			Cache.emplace(CodePoint, Result);
 			return Result;
+#endif
 		}
 
 		// ---------------------------------------------------------------
@@ -1043,6 +1119,19 @@ namespace Hp2NativeText
 			OutReasonCode = "text.fonts_unavailable";
 			return false;
 		}
+#if defined(__EMSCRIPTEN__)
+		// On the browser the face arrives with the game data, which is copied
+		// in only when the player launches. The render device is created before
+		// that, so this probe would otherwise fail once and stay failed for the
+		// life of the page. Reporting unavailable here is still correct -- the
+		// caller keeps the bitmap path -- and the driver retries at first text
+		// draw, by which time the shell has staged the face.
+		if (!Hp2NativeTextEmscripten::FontIsPresent())
+		{
+			OutReasonCode = "text.font_not_staged";
+			return false;
+		}
+#endif
 
 		FNativeTextFace* RoleFace = CreateRoleFont(NTROLE_Body, 12.0);
 		if (!RoleFace)

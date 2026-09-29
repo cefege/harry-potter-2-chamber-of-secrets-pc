@@ -3,7 +3,7 @@
   "schema_version": 1,
   "gates": {
     "native_text": {
-      "state": "runtime-verified",
+      "state": "experimental",
       "default_enabled": true,
       "promotion_evidence": [
         "data-prototype (HarryPotter2/Unreal), macOS arm64, CoreText provider: `ctest --test-dir out/macos-arm64 -R '^(native_typography_contracts|canvas_compatibility_contracts)$' --output-on-failure` -> 2/2 passed (0.08 s); shaping, ligature/combining/RTL cluster handling, font fallback, and the NativeText=False bitmap-compatibility cursor contract all hold",
@@ -12,7 +12,11 @@
         "retail profile: NOT verified. No data-retail launch of this configuration has been run, so `retail-verified` is not claimed",
         "platform coverage: macOS arm64 / CoreText only. The Linux arm64 FreeType provider compiles but has not been run with the default on",
         "browser build: unaffected either way. `web-wasm64` sets `HP2_DISABLE_NATIVE_TEXT_BACKEND=ON` and compiles `HP2_HAS_NATIVE_TEXT_BACKEND=0`, so no text provider exists in the wasm module and the gate cannot change what the page renders",
-        "bitmap-font compatibility mode is unchanged and remains selectable: `[Display] NativeText=False` in Game.ini, the launcher's toggle, or `UClient::StaticConstructor` at build time"
+        "bitmap-font compatibility mode is unchanged and remains selectable: `[Display] NativeText=False` in Game.ini, the launcher's toggle, or `UClient::StaticConstructor` at build time",
+        "wasm (Emscripten) provider added: same FreeType/HarfBuzz sources as Linux, with a small seam that reads the game's own System/Simyou.ttf out of the module filesystem for FT_New_Memory_Face (there is no fontconfig and no page-side font download)",
+        "wasm evidence so far is limited to: web_boot_smoke passes and the engine logs 'XOpenGL: native text backend ready (text.ready)'. Small-HUD legibility in the browser has NOT been reviewed by eye, so this provider is not runtime-verified",
+        "WebAssembly uses MEMORY64; the seam's EM_ASM bridges need setValue for out-parameters and Number() for pointer arguments",
+        "Emscripten's FS.readFile returns a Uint8Array for a raw read; asking for encoding 'binary' yields an array whose charCodeAt is undefined, which silently zeroed every byte of the font"
       ]
     }
   }

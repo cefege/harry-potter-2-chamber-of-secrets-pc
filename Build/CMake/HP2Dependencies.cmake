@@ -172,6 +172,30 @@ hp2_declare_text_provider(FreeType
     CONDITION "NOT APPLE AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND HP2_FONTCONFIG_FOUND"
 )
 
+# The browser build uses the same FreeType/HarfBuzz provider as Linux. Only
+# font resolution differs -- Fontconfig is a native library with its own font
+# cache -- so Emscripten gets the same sources plus a small seam that asks the
+# page which font file a family resolves to, and reads it into memory for
+# FT_New_Memory_Face. Shaping, fallback, cluster boundaries and the glyph
+# cache are unchanged, which is what lets one typography contract cover all
+# three builds instead of the web one being a weaker variant.
+if(EMSCRIPTEN)
+    # Both are Emscripten ports, and neither is in the sysroot by default, so
+    # asking emcc to build them is what makes <ft2build.h> and <hb.h> resolve.
+    # These are link flags rather than libraries, so they are carried through
+    # the provider's global property rather than as target_link_libraries
+    # items, and applied to hp2_game at the end (see HP2Targets.cmake).
+    set_property(GLOBAL PROPERTY HP2_WEB_FONTLINK_FLAGS
+        "-sUSE_FREETYPE=1" "-sUSE_HARFBUZZ=1")
+    hp2_declare_text_provider(FreeTypeEmscripten
+        SOURCES
+            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFreeType.cpp"
+            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFreeTypeEmscripten.cpp"
+        LINK_LIBS ""
+        CONDITION "TRUE"
+    )
+endif()
+
 option(HP2_DISABLE_NATIVE_TEXT_BACKEND
     "Force the native text backend off regardless of platform detection \
 (the browser build sets this, because no wasm text provider exists yet)" OFF)

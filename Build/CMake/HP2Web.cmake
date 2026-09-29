@@ -24,6 +24,14 @@ set_target_properties(hp2_game PROPERTIES SUFFIX ".js")
 # -sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm already come
 # from the preset's global flags so FetchContent dependencies compile for the
 # same target.
+# The Emscripten FreeType/HarfBuzz ports, when a native text provider needs
+# them. Reading a global property rather than a variable because the provider
+# declaration in HP2Dependencies.cmake publishes it that way.
+get_property(HP2_WEB_FONTLINK_FLAGS GLOBAL PROPERTY HP2_WEB_FONTLINK_FLAGS)
+if(HP2_WEB_FONTLINK_FLAGS)
+    target_link_options(hp2_game PRIVATE ${HP2_WEB_FONTLINK_FLAGS})
+endif()
+
 target_link_options(hp2_game PRIVATE
     -sMODULARIZE=1
     -sEXPORT_NAME=createHP2Module

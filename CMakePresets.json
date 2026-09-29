@@ -182,7 +182,6 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
         "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON",
-        "HP2_DISABLE_NATIVE_TEXT_BACKEND": "ON",
         "CMAKE_C_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
         "CMAKE_CXX_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
         "CMAKE_EXE_LINKER_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm"

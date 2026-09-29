@@ -547,6 +547,11 @@ class UXOpenGLRenderDevice : public URenderDevice
 	UBOOL  LastFrameUsedUIComposite;
 	FNativeTextPlatformBackend* NativeTextBackend{};
 	FNativeTextBackendStatus NativeTextBackendStatus{false, "capability.compile_time_disabled"};
+	// The browser stages the game's font when the data is copied in, which is
+	// after this device is created, so the init probe can fail on a face that
+	// is present moments later. One lazy retry covers that; a second failure is
+	// a real one and is left to stand.
+	UBOOL NativeTextBackendRetryDone{0};
 
 	// Context specifics.
 	INT DesiredColorBits;

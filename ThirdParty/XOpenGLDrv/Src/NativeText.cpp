@@ -785,7 +785,30 @@ UBOOL UXOpenGLRenderDevice::CreateCanvasTextLayout(const FCanvasTextRequest& Req
 {
 	OutLayout = NULL;
 	if (!NativeTextBackend)
-		return 0;
+	{
+#if HP2_HAS_NATIVE_TEXT_BACKEND
+		// The browser build stages the game's font when the data is copied in,
+		// which is after this device was created, so the probe at init can have
+		// failed on a face that is present by the time text is first drawn.
+		// Retry once, here, at the first real request: a second failure is a
+		// genuine one and is left to stand.
+		if (!NativeTextBackendRetryDone)
+		{
+			NativeTextBackendRetryDone = 1;
+			FNativeTextBackendStatus RetryStatus;
+			FNativeTextPlatformBackend* Retry = CreateNativeTextPlatformBackend(RetryStatus);
+			if (Retry)
+			{
+				NativeTextBackend = Retry;
+				NativeTextBackendStatus = RetryStatus;
+				debugf(TEXT("XOpenGL: native text backend became available (%s)"),
+					RetryStatus.ReasonCode ? appFromAnsi(RetryStatus.ReasonCode) : TEXT("unknown"));
+			}
+		}
+#endif
+		if (!NativeTextBackend)
+			return 0;
+	}
 	// Draw-side state: the Canvas origin is validated here and applied to the
 	// opaque layout only after a successful all-or-nothing creation.
 	if (!Hp2NativeText::SafeFloat(Request.OriginX) || !Hp2NativeText::SafeFloat(Request.OriginY))
