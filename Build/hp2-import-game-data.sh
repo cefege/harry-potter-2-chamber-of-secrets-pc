@@ -75,7 +75,7 @@ echo "It never runs the original installer or the old game executable."
 echo
 
 while true; do
-    printf 'Retail folder, Windows installer (.exe), or .zip/.tar/.7z archive: '
+    printf 'Your retail installation folder (or .zip/.tar/.7z archive): '
     if ! IFS= read -r source_path; then
         echo
         echo "error: no path entered." >&2

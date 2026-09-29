@@ -888,8 +888,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 		action:@selector(importGameData:)];
 	[_importDataButton setAccessibilityLabel:@"Import game data"];
 	[_importDataButton setAccessibilityHelp:
-		@"Choose your own copy of the game - a folder, the Windows installer, or a "
-		@" .zip, .tar, or .7z archive - and it is copied and checked for you."];
+		@"Choose your own copy of the game - a folder or a .zip, .tar, or .7z archive - and it is copied and checked for you."];
 
 	NSStackView* form = [self verticalStackWithViews:@[
 		[self formRowWithTitle:@"Source" control:_dataSourcePopup],
@@ -1763,7 +1762,7 @@ bool CopyCocoaString(NSString* value, std::string& result)
 	panel.resolvesAliases = YES;
 	panel.prompt = @"Import";
 	panel.message = @"Choose the folder your copy of Harry Potter and the Chamber of Secrets "
-		@"was installed into, its Windows installer, or an archive (.zip, .tar, .7z) of that folder.";
+		@"was installed into, or an archive (.zip, .tar, .7z) of that folder.";
 
 	NSString* home = NSHomeDirectory();
 	if (home.length > 0)

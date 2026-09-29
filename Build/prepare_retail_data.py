@@ -171,11 +171,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     retail = parser.add_mutually_exclusive_group(required=True)
     retail.add_argument("--retail-root", type=Path, help="extracted retail installation root")
-    retail.add_argument(
-        "--archive",
-        type=Path,
-        help="retail source as one file: a Windows installer .exe, or a ZIP/TAR/7z archive",
-    )
+    retail.add_argument("--archive", type=Path, help="ZIP, TAR, or 7z archive containing the retail tree")
     parser.add_argument("--output", required=True, type=Path, help="normalized overlay directory")
     parser.add_argument(
         "--profile",
@@ -1692,179 +1688,6 @@ def extract_7z(archive: Path, destination: Path) -> None:
 
 
 
-# --- Windows installer (InstallShield self-extracting .exe) ----------------
-#
-# A retail installer is a PE stub with a Microsoft cabinet appended. Two
-# external tools are needed and neither is a Python stdlib feature:
-#
-#   7zz      splits the SFX and yields data1.cab / data1.hdr
-#   unshield reads data1.cab, which is InstallShield's own cabinet format and
-#            is explicitly NOT readable by 7-Zip, even though the outer SFX is
-#
-# The cabinet unpacks into per-component directories (Component_1..
-# Component_11, _Engine_Engine_Files, _Support_English_Files, ...) that each
-# contribute a slice of one flat game tree. Merging them is the whole job.
-
-INSTALLER_COMPONENT_PREFIXES = ("component_", "_engine_", "_support_")
-# install.ini Default=0x040c is the French LCID; english is 0x0009 and spanish
-# 0x000a. Only the first is needed as a fallback.
-INSTALLER_DEFAULT_LANGUAGE = "usa"
-
-
-def installer_tool(name: str) -> str:
-    found = shutil.which(name)
-    if not found:
-        error(
-            f"importing a Windows installer requires {name}, which was not found "
-            f"on PATH (Homebrew: brew install sevenzip unshield)"
-        )
-    return found
-
-
-def run_installer_tool(arguments: list[str], action: str) -> None:
-    try:
-        completed = subprocess.run(
-            arguments,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-    except OSError as exc:
-        error(f"cannot {action}: {exc}")
-    if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", "replace").strip()
-        error(f"cannot {action}: {detail or 'exit code ' + str(completed.returncode)}")
-
-
-def ini_language(path: Path) -> str | None:
-    """The Language= value from an ini file, if it declares one."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    for line in text.splitlines():
-        key, separator, value = line.partition("=")
-        if separator and key.strip().casefold() == "language":
-            return value.strip().casefold()
-    return None
-
-
-def merge_installer_components(extracted: Path, destination: Path) -> None:
-    """Flatten the cabinet's component directories into one game tree.
-
-    InstallShield ships the same relative filename from several components
-    only when those components are per-language variants of one file: each
-    language's component carries its own Default.ini whose Language= line
-    selects the suffix the engine then uses (Core/Src/UnMisc.cpp
-    UObject::GetLanguage). Taking whichever component happened to sort last
-    would silently pin the game to one language, so the Default.ini variants
-    are resolved by language and everything else must be byte-identical.
-    """
-    components = sorted(
-        (path for path in extracted.iterdir() if path.is_dir()),
-        key=lambda path: (path.name.casefold(), path.name),
-    )
-    language_variants: dict[str, list[Path]] = collections.defaultdict(list)
-    for component in components:
-        if not component.name.casefold().startswith(INSTALLER_COMPONENT_PREFIXES):
-            continue
-        for source in sorted(component.rglob("*"), key=lambda path: path.as_posix().casefold()):
-            if source.is_symlink():
-                error(f"installer component contains a symbolic link: {source}")
-            relative = source.relative_to(component)
-            target = destination.joinpath(*relative.parts)
-            if source.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            if not source.is_file():
-                error(f"installer component contains an unsupported entry: {source}")
-            if target.is_file():
-                # Only the per-language Default.ini variants collide, and the
-                # one that must win is chosen by language below; anything
-                # else sharing a name means this is not a plain component
-                # merge and guessing would silently drop a file.
-                if relative.name.casefold() == "default.ini":
-                    language_variants[relative.as_posix().casefold()].append(source)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-
-    resolve_language_variants(destination, language_variants)
-
-
-def resolve_language_variants(
-    destination: Path, variants: dict[str, list[Path]]
-) -> None:
-    """Choose which per-language Default.ini becomes the one the engine reads.
-
-    Every language component ships its own Default.ini, and the engine reads
-    Language= from the root one to decide the suffix it appends to every other
-    localized asset (Core/Src/UnMisc.cpp). Letting the last component win
-    would pin the game to whichever language happened to sort last, so the
-    neutral "int" file is preferred and a language file is used only when no
-    neutral one exists.
-    """
-    for relative_key, sources in variants.items():
-        if len(sources) < 2:
-            continue
-        by_language: dict[str, list[Path]] = {}
-        for source in sources:
-            language = ini_language(source)
-            if language is not None:
-                by_language.setdefault(language, []).append(source)
-        if len(by_language) < 2:
-            # Same language twice: the bytes are supposed to match, so the
-            # first one already in place stands.
-            continue
-        preferred = by_language.get("int") or by_language.get(INSTALLER_DEFAULT_LANGUAGE)
-        if not preferred:
-            error(
-                f"installer ships {len(by_language)} language variants of "
-                f"{relative_key} but none is the neutral one; refusing to guess"
-            )
-        winner = sorted(preferred, key=lambda path: path.as_posix().casefold())[0]
-        target = destination.joinpath(*PurePosixPath(relative_key).parts)
-        shutil.copy2(winner, target)
-
-
-
-def extract_installer(installer: Path, destination: Path) -> None:
-    """Unpack a Windows self-extracting installer into a flat game tree."""
-    seven_zip = installer_tool("7zz") if shutil.which("7zz") else installer_tool("7z")
-    unshield = installer_tool("unshield")
-
-    # The staging area lives beside the destination, never inside it: the
-    # SFX payload (Setup.exe, Setup.ini, the .cab parts) is installer
-    # machinery, not game data, and locate_retail_root must not see it.
-    with tempfile.TemporaryDirectory(prefix="hp2-installer-") as staging_name:
-        staged = Path(staging_name)
-        # The SFX is a Microsoft cabinet wrapping the InstallShield cabinet,
-        # so 7-Zip is enough for this step. -o must be attached to the path.
-        run_installer_tool(
-            [seven_zip, "x", "-y", f"-o{staged}", str(installer)],
-            f"unpack installer {installer}",
-        )
-
-        cabinet = staged / "data1.cab"
-        if not cabinet.is_file():
-            found = sorted(staged.glob("*.cab"), key=lambda path: path.name.casefold())
-            if not found:
-                error(
-                    f"installer {installer} contains no cabinet; it is not a "
-                    "supported InstallShield package"
-                )
-            cabinet = found[0]
-
-        components = staged / "components"
-        run_installer_tool(
-            [unshield, "x", str(cabinet), "-d", str(components)],
-            f"unpack {cabinet.name} from {installer}",
-        )
-
-        merge_installer_components(components, destination)
-    validate_extracted_tree(destination)
-
 def locate_retail_root(extracted: Path) -> Path:
     candidates: list[Path] = []
     for current, directory_names, _ in os.walk(extracted, followlinks=False):
@@ -1884,13 +1707,6 @@ def locate_retail_root(extracted: Path) -> Path:
 
 def retail_root_from_archive(archive: Path, temporary: Path) -> Path:
     lower = archive.name.casefold()
-    if lower.endswith(".exe"):
-        # A Windows installer is not an archive of the game tree: it is a
-        # component cabinet that must be unpacked and merged first.
-        staged = temporary / "installer"
-        staged.mkdir(parents=True, exist_ok=True)
-        extract_installer(archive, staged)
-        return validate_directory(locate_retail_root(staged), "retail installer root")
     if lower.endswith(".7z"):
         extract_7z(archive, temporary)
     elif lower.endswith(".zip"):
@@ -1898,7 +1714,7 @@ def retail_root_from_archive(archive: Path, temporary: Path) -> Path:
     elif lower.endswith((".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")):
         extract_tar(archive, temporary)
     else:
-        error(f"unsupported archive format (use an installer .exe, ZIP, TAR, or 7z): {archive}")
+        error(f"unsupported archive format (use ZIP, TAR, or 7z): {archive}")
     return validate_directory(locate_retail_root(temporary), "retail archive root")
 
 
