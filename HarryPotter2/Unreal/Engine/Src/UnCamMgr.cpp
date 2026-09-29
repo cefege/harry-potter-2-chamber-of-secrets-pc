@@ -76,10 +76,11 @@ void UClient::StaticConstructor()
 	new(GetClass(),TEXT("ShowFPS"),				RF_Public)UBoolProperty (CPP_PROPERTY(ShowFPS				), TEXT("Display"), CPF_Config );
 	new(GetClass(),TEXT("ParticleDensity"),		RF_Public)UIntProperty  (CPP_PROPERTY(ParticleDensity		), TEXT("Display"), CPF_Config );
 	MaintainVerticalFOV = 1;
-	// Native text is an experimental, opt-in feature gate: bitmap fonts remain
-	// the default compatibility path. Users enable it explicitly with
-	// [Display] NativeText=True after the gate reaches default-enabled state.
-	NativeText = 0;
+	// Native text is now the default: the TrueType path is the gate's
+	// runtime-verified state, and this engine runs on hardware where the 2002
+	// bitmap fallback is the worse experience. Turning it off again is
+	// [Display] NativeText=False in Game.ini.
+	NativeText = 1;
 	ShowFPS = 0;
 
 	unguard;

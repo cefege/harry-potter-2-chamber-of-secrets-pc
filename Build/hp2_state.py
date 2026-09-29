@@ -71,24 +71,37 @@ def parse_compiler_path_file(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def extract_compile_definitions(compile_commands_text: str) -> frozenset[str]:
-    """Collect -D<NAME> definition names from compile_commands.json content."""
-    names: set[str] = set()
-    for match in re.finditer(r"(?<![\w-])-D([A-Za-z_][A-Za-z0-9_]*)", compile_commands_text):
-        names.add(match.group(1))
-    return frozenset(names)
+def extract_compile_definitions(compile_commands_text: str) -> dict[str, str]:
+    """Collect -D<NAME>[=<value>] definitions from compile_commands.json.
+
+    The value matters: HP2_HAS_NATIVE_TEXT_BACKEND is compiled as 0 for the
+    browser build, and treating the mere presence of the name as "on" reported
+    a capability that build does not have.
+    """
+    values: dict[str, str] = {}
+    for match in re.finditer(
+        r"(?<![\w-])-D([A-Za-z_][A-Za-z0-9_]*)(?:=([^\s\"]*))?", compile_commands_text
+    ):
+        name = match.group(1)
+        # First definition wins: the values are uniform across the tree, and a
+        # later empty match would otherwise overwrite a real one.
+        values.setdefault(name, match.group(2) if match.group(2) is not None else "1")
+    return values
 
 
 def resolve_native_text_backend(
-    cache: Mapping[str, str], compile_definitions: frozenset[str]
+    cache: Mapping[str, str], compile_definitions: Mapping[str, str]
 ) -> bool:
     """Native text is on when the cache var says so, or when the compiled
-    translation units carry the backend define (the var itself is a normal,
-    non-cached CMake variable)."""
+    translation units carry the backend define as enabled (the var itself is a
+    normal, non-cached CMake variable)."""
     cached = cache.get(NATIVE_TEXT_CACHE_VAR)
     if cached is not None:
         return _cache_bool(cached)
-    return NATIVE_TEXT_CACHE_VAR in compile_definitions
+    defined = compile_definitions.get(NATIVE_TEXT_CACHE_VAR)
+    if defined is None:
+        return False
+    return _cache_bool(defined)
 
 
 def _cache_bool(value: str) -> bool:
@@ -118,7 +131,7 @@ def read_build_facts(build_dir: Path) -> dict[str, object]:
         if compiler_id and compiler_path:
             break
 
-    definitions: frozenset[str] = frozenset()
+    definitions: dict[str, str] = {}
     commands_path = build_dir / "compile_commands.json"
     try:
         definitions = extract_compile_definitions(

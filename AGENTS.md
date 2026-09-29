@@ -78,11 +78,17 @@ change.
 4. **Feature-gate promotion is earned.** `experimental` → `runtime-verified` →
    `retail-verified` → `default-enabled` requires passing verification under
    the matching data profile, recorded in the acceptance evidence (see
-   `Build/feature-gates.json`). Native text is `experimental`/opt-in today;
-   do not flip gates in drive-by changes.
+   `Build/feature-gates.json`). Native text is `runtime-verified` and
+   `default_enabled: true` as of 2026-09-28: `[Display] NativeText` defaults to
+   on, verified under `data-prototype` only — no `data-retail` run backs it, so
+   `retail-verified` is still unearned. Do not flip gates in drive-by changes.
 5. **Bitmap-font compatibility mode is intentional.** Do not "fix" fallback
    glyph rendering to use native text paths; the compatibility mode exists for
-   stock-font fidelity.
+   stock-font fidelity. It stays reachable and supported while native text is
+   the default: set `[Display] NativeText=False` in `Game.ini`, or use the
+   launcher's text-rendering toggle. `Tests/CanvasCompatibilityTests.cpp`
+   pins that `NativeText=False` retains the page-backed Canvas path and cursor
+   advance — that contract must survive any future gate promotion.
 6. **MACOSX macro caution.** Apple platform code uses UE1-era `MACOSX` guards
    (not `__APPLE__` alone). New platform conditionals must match surrounding
    convention or `TCHAR`/UTF-32 assumptions silently diverge. Linux code paths

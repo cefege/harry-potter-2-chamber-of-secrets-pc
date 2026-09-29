@@ -199,10 +199,14 @@ Data-profile labels follow the taxonomy `data-none`, `data-prototype`
 (`HarryPotter2/Unreal`), `data-retail`.
 
 Feature gates have four states: `experimental`, `runtime-verified`,
-`retail-verified`, `default-enabled`. Native text rendering is experimental /
-opt-in today; the machine-readable gate state file
-(`Build/feature-gates.json`) and per-preset state snapshot
-(`out/<preset>/hp2-state.json`) are landing — see the placeholder section below.
+`retail-verified`, `default-enabled`. Native text is `runtime-verified` with
+`default_enabled: true` — smooth TrueType rendering is the shipped default on
+the macOS arm64 / CoreText provider, evidenced under `data-prototype` only. It
+is **not** `retail-verified`: no `data-retail` run of this configuration
+exists, and the Linux arm64 / FreeType provider compiles but has not been run
+with the default on. The machine-readable gate registry is
+`Build/feature-gates.json`; per-preset capability snapshots are
+`out/<preset>/hp2-state.json`.
 
 Label application to individual tests and gate metadata registration are being
 rolled out alongside this document; until they land in
@@ -318,14 +322,22 @@ its own reason codes and artifacts) is planned and will be documented here once
 it lands. Runtime enforcement of import-time manifests is landing separately;
 today validation happens at import time.
 
-## State-file reference (placeholder)
+## State-file reference
 
-Two machine-readable state files are planned:
+Two machine-readable state files exist:
 
 - `Build/feature-gates.json` — repository-tracked feature gate registry
-  (name, state from the taxonomy above, owning tests).
-- `out/<preset>/hp2-state.json` — per-preset snapshot emitted by verification
-  runs (which gates were exercised, which tests ran).
+  (name, state from the taxonomy above, `default_enabled`, and the concrete
+  evidence each promotion rests on). It is the gate policy of record: read it,
+  and change it only with the matching verification recorded alongside.
+- `out/<preset>/hp2-state.json` — per-preset snapshot written by
+  `Build/hp2_state.py` at configure time (toolchain identity and the capability
+  flags the preset actually compiled, e.g. `native_text_backend`). It describes
+  a build, not a verification result.
 
-Neither file exists yet; this section will become the normative reference when
-they land. Do not parse or hand-edit either path before then.
+`Build/provenance.py` assembles both into a promotion bundle
+(`out/<preset>/provenance.json`) for a feature-gate promotion. Note that
+`native_text_backend` in `hp2-state.json` is a *capability* flag and is
+independent of the gate state in `feature-gates.json`: a preset that compiles
+no text provider reports it false regardless of the gate, and the browser build
+(`HP2_DISABLE_NATIVE_TEXT_BACKEND=ON`) compiles the backend in as `0`.

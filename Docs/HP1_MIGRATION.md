@@ -241,8 +241,11 @@ Every fact below is recon-verified; file:line references are in-tree as of
   no symptom suppression (unknown native ≠ skip).
 - `ThirdParty/` untouched (vgmstream/UT469eSDK already vendored cover HP1's
   formats; no pin changes anticipated).
-- Native text stays `experimental`; HP1 fonts (US English: stock UWindowFonts)
-  don't change that.
+- Native text is `runtime-verified` and default-on for HP2, but that promotion
+  is scoped to the `data-prototype` profile. Bringing HP1 data does not advance
+  it: `retail-verified` still needs a full-sweep run under `data-hp1`, and the
+  stock `UWindowFonts` bitmap path stays available via
+  `[Display] NativeText=False`.
 
 ## 4. Risks
 

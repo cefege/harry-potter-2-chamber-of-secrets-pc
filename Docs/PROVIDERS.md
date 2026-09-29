@@ -59,13 +59,30 @@ sources must expose the same `FNativeTextPlatformBackend` seam that
 `ThirdParty/XOpenGLDrv/Src/NativeText.cpp` implements; the driver and tests
 compile against the interface, not the backend.
 
-## Gate interaction: capability is not default-enabled
+## Gate interaction: capability and default are separate decisions
 
 Selection answers "can this graph compile a native text backend?" It says
-nothing about whether the feature runs by default. That decision lives in
-`Build/feature-gates.json` (`native_text`: state `experimental`,
-`default_enabled: false`): even with a provider selected, the runtime stays on
-the original bitmap-font path unless `[Display] NativeText=True` is set
-explicitly (launcher toggle or config). Promotion to default-enabled requires
-the evidence listed in the gate file. Keep the two decisions separate:
-adding a provider widens capability; touching the gate changes behavior.
+nothing about whether the feature runs by default. Those are two independent
+decisions, and this file owns only the first.
+
+The second lives in `Build/feature-gates.json` (`native_text`: state
+`runtime-verified`, `default_enabled: true`) and in the runtime default at
+`UClient::StaticConstructor` (`NativeText = 1` in
+`HarryPotter2/Unreal/Engine/Src/UnCamMgr.cpp`). With a provider selected, the
+runtime now dispatches to the TrueType path unless `[Display] NativeText=False`
+is set (launcher toggle or `Game.ini`), which keeps the bitmap-font
+compatibility mode available and supported. The launcher model defaults
+`settings.nativeText = true` (`HarryPotter2/Unreal/SDLLaunch/Src/HP2LauncherModel.h`),
+so an absent `[Display] NativeText` key resolves to enabled on a fresh install,
+and the launcher's **Text Rendering** toggle offers *Clear Native Text
+(CoreText)* and *Original Bitmap Fonts*.
+
+The gate state is evidence-bounded, not aspirational: `runtime-verified` means
+the contracts and a real launch passed under `data-prototype` on macOS arm64
+/ CoreText. `retail-verified` is not claimed (no `data-retail` run), and the
+Linux arm64 / FreeType provider compiles but has not been exercised with the
+default on. Keep the two decisions separate: adding a provider widens
+capability; touching the gate changes behavior.
+
+A preset that selects no provider (`HP2_DISABLE_NATIVE_TEXT_BACKEND=ON`, as
+the browser build does) has no native path at all, whatever the gate says.

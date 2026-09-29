@@ -224,6 +224,11 @@ void UGameEngine::StaticConstructor()
 	B->Inner = new(B,TEXT("StrProperty0"),RF_Public)UStrProperty;
 
 	new(GetClass(),TEXT("FrameRateLimit"),RF_Public)UFloatProperty( CPP_PROPERTY(FrameRateLimit), TEXT("GameEngine"), CPF_Config );
+	// 144 is the shipped default: a 2002 engine capped at 60 leaves most of a
+	// modern display's refresh rate unused, and one more frame costs far less
+	// than the engine stuttering below the display rate. A data root that pins
+	// its own value still wins, which is why the launcher writes 144 as well.
+	FrameRateLimit = 144.f;
 
 	unguard;
 }

@@ -3,12 +3,16 @@
   "schema_version": 1,
   "gates": {
     "native_text": {
-      "state": "experimental",
-      "default_enabled": false,
+      "state": "runtime-verified",
+      "default_enabled": true,
       "promotion_evidence": [
-        "fast semantic contracts",
-        "renderer smoke incl. reset/resize",
-        "visual baseline matrix (retail)"
+        "data-prototype (HarryPotter2/Unreal), macOS arm64, CoreText provider: `ctest --test-dir out/macos-arm64 -R '^(native_typography_contracts|canvas_compatibility_contracts)$' --output-on-failure` -> 2/2 passed (0.08 s); shaping, ligature/combining/RTL cluster handling, font fallback, and the NativeText=False bitmap-compatibility cursor contract all hold",
+        "data-prototype, macOS arm64: `python3 Build/smoke_maps.py --renderer=xopengl --maps=PrivetDr --output=out/macos-arm64/Testing/HP2/_gatecheck/Artifacts/gatecheck-smoke-maps.json` -> 1/1 maps passed; engine log records `XOpenGL: native text backend ready (text.ready)` and reaches `Entering main loop.` with no script/native/package/render/assert/critical marker",
+        "the default is reached without any opt-in: `UClient::StaticConstructor` sets `NativeText = 1` (`HarryPotter2/Unreal/Engine/Src/UnCamMgr.cpp`), and the launcher model defaults `settings.nativeText = true` (`HarryPotter2/Unreal/SDLLaunch/Src/HP2LauncherModel.h`), so an absent `[Display] NativeText` key resolves to enabled in both the engine and the launcher UI",
+        "retail profile: NOT verified. No data-retail launch of this configuration has been run, so `retail-verified` is not claimed",
+        "platform coverage: macOS arm64 / CoreText only. The Linux arm64 FreeType provider compiles but has not been run with the default on",
+        "browser build: unaffected either way. `web-wasm64` sets `HP2_DISABLE_NATIVE_TEXT_BACKEND=ON` and compiles `HP2_HAS_NATIVE_TEXT_BACKEND=0`, so no text provider exists in the wasm module and the gate cannot change what the page renders",
+        "bitmap-font compatibility mode is unchanged and remains selectable: `[Display] NativeText=False` in Game.ini, the launcher's toggle, or `UClient::StaticConstructor` at build time"
       ]
     }
   }

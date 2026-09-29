@@ -214,15 +214,16 @@ void UXOpenGLRenderDevice::StaticConstructor()
 	GammaOffsetScreenshots = 0.7f;
 	LODBias = 0.f;
 	RenderScale = 1.f;
-	MaxAnisotropy = 4.f;
+	MaxAnisotropy = 16.f;
 	UseHWClipping = 1;
 	UsePrecache = 1;
 	ShareLists = 1;
-#if MACOSX
-	UseAA = 0; // stijn: MSAA used to make the game unplayable on macOS so I turned this off by default. However, we now use multisampled FBOs for MSAA. That should make it playable, but it's still noticeably slower than on other platforms
-#else
+	// Upstream disabled MSAA on macOS in 2002, when multisampled framebuffers
+	// made the game unplayable there. That trade no longer applies: a 2002
+	// engine on hardware that does 4x MSAA cheaply renders much better with
+	// it, and the smooth edges are the better default.
+	// [XOpenGLDrv.XOpenGLRenderDevice] UseAA=False still turns it off.
 	UseAA = 1;
-#endif
 	UseAASmoothing = 0;
 	GammaCorrectScreenshots = 1;
 	MacroTextures = 1;

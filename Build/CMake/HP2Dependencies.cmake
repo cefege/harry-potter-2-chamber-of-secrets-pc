@@ -174,7 +174,7 @@ hp2_declare_text_provider(FreeType
 
 option(HP2_DISABLE_NATIVE_TEXT_BACKEND
     "Force the native text backend off regardless of platform detection \
-(escape hatch while a provider implementation is in flight)" OFF)
+(the browser build sets this, because no wasm text provider exists yet)" OFF)
 
 set(HP2_HAS_NATIVE_TEXT_BACKEND OFF)
 set(HP2_TEXT_PROVIDER_NAME "")

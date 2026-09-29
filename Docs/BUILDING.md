@@ -9,7 +9,9 @@ This is a faithful recreation of the classic 2002 game engine for **macOS 15+ on
 
 - **XOpenGL** (`ThirdParty/XOpenGLDrv`) — OpenGL renderer adapted from UE1
 - **SDL2** — window management and input handling  
-- **Native text rendering** — optional experimental backend for improved font fidelity (CoreText on macOS, FreeType on Linux)
+- **Native text rendering** — the default text backend (CoreText on macOS,
+  FreeType on Linux); the 2002 bitmap fonts remain available via
+  `[Display] NativeText=False`
 
 The codebase is legacy-era UE1-derived C++ with modern platform support.
 
@@ -40,6 +42,10 @@ The codebase is legacy-era UE1-derived C++ with modern platform support.
   AND HP2_FONTCONFIG_FOUND` (`Build/CMake/HP2Dependencies.cmake:145`).
   Without all three the backend stays off and the game falls back to the
   bitmap fonts; macOS never hits this because CoreText ships with the system.
+  The backend is the default *only when a provider was selected* — on a Linux
+  host missing the three packages, "default on" silently degrades to the
+  intentional bitmap compatibility mode, which is also the escape hatch a
+  player can pick deliberately.
 
   One caveat, which is a bug and not a requirement: when test data *is*
   present (`HP2_TEST_DATA_PRESENT`, i.e. `System/Default.ini` exists under
@@ -217,7 +223,7 @@ Commonly useful tests:
 ## Documentation
 
 - **[OPERATIONS.md](OPERATIONS.md)** — Authoritative build, test, and launch reference
-- **[BEHAVIOR_MATRIX.md](BEHAVIOR_MATRIX.md)** — Every test, its invariant, and expected behavior
+- **[BEHAVIOR_MATRIX.md](BEHAVIOR_MATRIX.md)** — Every registered test, its data profile, class, and source
 - **[../RETAIL_IMPORT.md](../RETAIL_IMPORT.md)** — Game data import security and validation
 - **[../NOTICE.md](../NOTICE.md)** — Third-party software attribution
 - **[../AGENTS.md](../AGENTS.md)** — Contract for AI coding agents working in this repo
