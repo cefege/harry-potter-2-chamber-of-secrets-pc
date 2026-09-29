@@ -35,7 +35,7 @@
   /* ---- Launcher screen. This is the primary surface: full bleed, canvas
          hidden until the game is actually running. ---- */
   #launcher {
-    flex: 1; min-height: 0;
+    flex: 1; min-height: 0; max-height: 100%;
     display: flex; flex-direction: column;
     padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
              max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
@@ -49,8 +49,46 @@
   header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
 
   /* One pane at a time: the tabs swap which one is shown. */
+  /* The shell is a centred column with a comfortable measure. Without a cap a
+     2560px monitor stretched every row to full width: a 2490px New Game button
+     and a save list 1000px tall. A launcher is not a document, but it is not a
+     game viewport either -- it gets a max width and centres. */
+  #launcher { width: 100%; max-width: 1100px; margin: 0 auto; }
+  @media (min-width: 1500px) { #launcher { max-width: 1240px; } }
+
   .body { flex: 1; min-height: 0; display: flex; gap: 20px; }
   .body > .tabpane { flex: 1; min-width: 0; }
+  /* Settings panes are a form, not a board: size to content on wide screens so
+     the panel does not become 1200px of empty background behind a handful of
+     controls. The list-capped Play pane below still scrolls on its own. */
+  @media (min-width: 900px) {
+    .body { align-items: flex-start; }
+    .body > .tabpane:not(#tab-play) { flex: 0 1 auto; }
+  }
+
+  /* Wide screens get a real two-column launcher: saves on the left, actions on
+     the right, each with a sane width. Narrow screens stack them and bound the
+     save list so the buttons stay reachable without scrolling. This is two
+     layouts, not one layout stretched. */
+  @media (min-width: 900px) {
+    /* Rows size to their content, so the panel is as tall as the launcher
+       needs rather than the full viewport height: a save list with one entry
+       should not sit inside a 1200px box of empty background. */
+    #tab-play { display: grid; grid-template-columns: 1fr 320px; gap: 16px 20px;
+                align-content: start; align-items: start; }
+    #tab-play > .label { grid-column: 1; margin-bottom: 0; }
+    #tab-play > #saves { grid-column: 1; max-height: 50vh; }
+    #tab-play > .actions { grid-column: 2; grid-row: 1 / span 3; }
+    #tab-play > .statusrow { grid-column: 1 / -1; }
+    /* .body > .tabpane sets flex:1, which stretched the pane to the full
+       viewport height even though its grid rows sum to ~140px. On the wide
+       layout the pane sizes to its content instead. */
+    /* flex:0 1 auto stops the vertical stretch, but the pane must still fill
+       the launcher width so the grid tracks stay correct. Height is left to
+       the content: the save list carries its own max-height and scrolls. */
+    .body > .tabpane { flex: 0 1 auto; width: 100%; }
+  }
+  @media (max-width: 899px) { #saves { max-height: 34vh; } }
 
   .panel {
     background: var(--panel); border: 1px solid var(--line);
@@ -67,7 +105,7 @@
   .statusrow { margin-top: auto; padding-top: 12px; }
 
   /* Settings tabs, mirroring the native launcher's TabBar. */
-  #tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  #tabs { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .tab {
     width: auto; min-height: 0; padding: 9px 18px; font-size: 13px;
     background: var(--panel); border-color: var(--line); font-weight: 400;
@@ -78,6 +116,13 @@
   .field {
     display: flex; align-items: center; justify-content: space-between;
     gap: 16px; padding: 11px 2px; border-bottom: 1px solid rgba(65,72,104,.5);
+    max-width: 520px;
+  }
+  @media (max-width: 560px) {
+    /* Below this the label and the control no longer fit side by side. */
+    .field { flex-direction: column; align-items: stretch; gap: 8px; }
+    .field select, .field input[type=range] { width: 100%; }
+    .field .value { text-align: left; }
   }
   .field:last-child { border-bottom: none; }
   .field > label { color: var(--dim); font-size: 14px; flex: 1; }
