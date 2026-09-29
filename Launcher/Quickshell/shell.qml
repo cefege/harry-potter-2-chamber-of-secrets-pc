@@ -3,6 +3,7 @@ import Quickshell.Io
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 ShellRoot {
 	id: root
@@ -14,6 +15,57 @@ ShellRoot {
 	property bool isProcessing: false
 	property bool loadFailed: false
 
+	// Import flow state. A picked source is handed back to the engine process
+	// as an "import" action; the engine runs the bundled importer and reopens
+	// this window.
+	property bool canImport: false
+	property string retailDataRoot: ""
+	// Bumped whenever the request is (re)loaded. The data source options live
+	// inside the parsed request object, so QML cannot track them as a
+	// dependency; without this the gating bindings would evaluate once while
+	// req was still null and never update.
+	property int requestGeneration: 0
+
+	// True when the selected data source resolves to a usable root. Gates the
+	// play buttons so a player without data is pushed to import rather than to
+	// an error after the window closes. Reading requestGeneration keeps the
+	// calling bindings alive across the request load.
+	function hasPlayableData() {
+		if (root.requestGeneration < 0) return false
+		if (!root.req || !root.req.dataSourceOptions) return false
+		const wanted = root.req.dataSources ? root.req.dataSources.selected : "retail"
+		for (let i = 0; i < root.req.dataSourceOptions.length; ++i) {
+			const o = root.req.dataSourceOptions[i]
+			if (o.source === wanted && o.available) return true
+		}
+		return false
+	}
+
+	FolderDialog {
+		id: folderPicker
+		title: "Choose your copy of Harry Potter and the Chamber of Secrets"
+		onAccepted: root.requestImport(selectedFolder.toString().replace("file://", ""))
+	}
+
+	FileDialog {
+		id: archivePicker
+		title: "Choose an installer or archive of your copy of the game (.exe, .zip, .tar, .7z)"
+		onAccepted: root.requestImport(selectedFile.toString().replace("file://", ""))
+	}
+
+	function requestImport(path) {
+		if (root.isProcessing || !path || !root.req) return
+		root.isProcessing = true
+
+		let lines = ["action=import", "importSource=" + path]
+		// Point the next round at the conventional import destination so a
+		// successful import is found without relying on discovery order.
+		lines.push("dataSources.selected=retail")
+		lines.push("dataSources.retailRoot=" + root.req.retailDataRoot)
+		lines.push("dataSources.prototypeRoot=" + (root.req.dataSources ? root.req.dataSources.prototypeRoot : ""))
+		resultWriter.setText(lines.join("\n") + "\n")
+	}
+
 	FileView {
 		id: requestView
 		path: root.requestPath
@@ -21,6 +73,13 @@ ShellRoot {
 			root.req = JSON.parse(text())
 			// Shallow-copy settings into a plain JS object so bindings react to reassignment.
 			root.settings = Object.assign({}, root.req.settings)
+			// The import controls exist only when this installation actually
+			// bundles the importer.
+			root.canImport = !!(root.req.importerPath && root.req.importerPath.length > 0)
+			root.retailDataRoot = root.req.retailDataRoot || ""
+			// Re-evaluate the data-dependent bindings now that the request
+			// object exists.
+			root.requestGeneration++
 		}
 		onLoadFailed: (err) => {
 			root.loadFailed = true
@@ -135,6 +194,81 @@ ShellRoot {
 				wrapMode: Text.WordWrap
 				Layout.fillWidth: true
 			}
+
+		// First-run import call to action. Shown whenever no playable data
+		// root resolved, which is the only state in which importing is the
+		// next step a player can take.
+		Rectangle {
+			Layout.fillWidth: true
+			visible: root.req && !root.req.hasExplicitDataRootOverride
+				&& root.canImport && !root.hasPlayableData()
+			color: "#24283b"
+			radius: 8
+			border.color: "#7aa2f7"
+			border.width: 1
+
+			RowLayout {
+				anchors.fill: parent
+				anchors.margins: 14
+				spacing: 14
+
+				ColumnLayout {
+					Layout.fillWidth: true
+					spacing: 2
+
+					Text {
+						text: "No game data yet"
+						font.pixelSize: 14
+						font.bold: true
+						color: "#c0caf5"
+					}
+					Text {
+						text: "Import your own copy of the game: pick the folder it was "
+							+ "installed into, its Windows installer, or an archive (.zip, .tar, .7z)."
+						font.pixelSize: 12
+						color: "#a9b1d6"
+						wrapMode: Text.WordWrap
+						Layout.fillWidth: true
+					}
+				}
+
+				Button {
+					text: "Choose Folder…"
+					enabled: !root.isProcessing
+					onClicked: folderPicker.open()
+					background: Rectangle {
+						color: parent.enabled ? "#24283b" : "#13141c"
+						radius: 6
+						border.color: parent.enabled ? "#7aa2f7" : "#414868"
+						border.width: 1
+					}
+					contentItem: Text {
+						text: parent.text
+						color: parent.enabled ? "#c0caf5" : "#565f89"
+						font.pixelSize: 13
+						horizontalAlignment: Text.AlignHCenter
+					}
+				}
+
+				Button {
+					text: "Choose Archive…"
+					enabled: !root.isProcessing
+					onClicked: archivePicker.open()
+					background: Rectangle {
+						color: parent.enabled ? "#24283b" : "#13141c"
+						radius: 6
+						border.color: parent.enabled ? "#7aa2f7" : "#414868"
+						border.width: 1
+					}
+					contentItem: Text {
+						text: parent.text
+						color: parent.enabled ? "#c0caf5" : "#565f89"
+						font.pixelSize: 13
+						horizontalAlignment: Text.AlignHCenter
+					}
+				}
+			}
+		}
 
 			RowLayout {
 				Layout.fillWidth: true
@@ -759,7 +893,7 @@ ShellRoot {
 				Button {
 					Layout.fillWidth: true
 					text: "New Game"
-					enabled: !root.isProcessing && !!root.req
+					enabled: !root.isProcessing && !!root.req && root.hasPlayableData()
 					background: Rectangle {
 						color: parent.enabled ? "#24283b" : "#13141c"
 						radius: 6
@@ -779,7 +913,7 @@ ShellRoot {
 				Button {
 					Layout.fillWidth: true
 					text: "Continue"
-					enabled: !root.isProcessing && !!root.req && root.selectedSaveIndex >= 0
+					enabled: !root.isProcessing && !!root.req && root.selectedSaveIndex >= 0 && root.hasPlayableData()
 					background: Rectangle {
 						color: parent.enabled ? "#24283b" : "#13141c"
 						radius: 6
