@@ -1609,6 +1609,50 @@
     }
   });
 
+  // Escape means one thing at a time. The engine binds it to "quit"
+  // (System/DefUser.ini:58) and the browser reserves it to leave full screen,
+  // so pressing it while full screen must not also reach the game and start a
+  // quit prompt. It is swallowed here and the game only ever sees it when the
+  // page is not full screen.
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') {
+      return;
+    }
+    if (document.fullscreenElement) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+
+  // Browser chrome must never win a click the game is using. The canvas
+  // already suppresses the context menu, but text selection, the tab key and
+  // middle-click paste all leak out of the canvas otherwise, and on a
+  // trackpad a stray gesture lands on the browser's own buttons.
+  canvas.addEventListener('contextmenu', function (event) {
+    event.preventDefault();
+  });
+  canvas.addEventListener('dragstart', function (event) {
+    event.preventDefault();
+  });
+  canvas.addEventListener('mousedown', function (event) {
+    // Middle click pastes and autoscrolls in most browsers; on a mouse the
+    // player is aiming, not pasting.
+    if (event.button === 1) {
+      event.preventDefault();
+    }
+  });
+  canvas.addEventListener('wheel', function (event) {
+    // The game reads the wheel itself; stop the page from zooming behind it.
+    event.preventDefault();
+  }, { passive: false });
+  // Nothing in the game is a form control, so Tab must move focus nowhere
+  // rather than off the canvas and into the browser's focus ring.
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Tab') {
+      event.preventDefault();
+    }
+  });
+
   // While the engine holds the pointer lock the button cannot be clicked --
   // every pointer event goes to the locked canvas -- so say so on the button
   // itself rather than leaving a control that looks broken. Pressing Escape
@@ -1718,6 +1762,14 @@
         finish('Game exited (code ' + code + ').');
       },
       onAbort: function (what) {
+        // Emscripten calls onAbort with an empty reason when the runtime tears
+        // down after a clean exit. Reporting that as a crash tells the player
+        // their game broke when it did not, and the real exit has already
+        // been reported through onHP2Exit.
+        if (!what) {
+          finish('Game exited.');
+          return;
+        }
         finish('Game crashed: ' + what + '.');
       },
       preRun: [
