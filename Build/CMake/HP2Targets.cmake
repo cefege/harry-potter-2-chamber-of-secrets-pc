@@ -903,7 +903,7 @@ if(EXISTS "${HP2_TEST_DATA_ROOT}/System/CUTSCENES")
         "--data-root=${HP2_TEST_DATA_ROOT}"
     )
 endif()
-if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
+if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/Chamber of Secrets.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(input_script_contract "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/InputScriptSmoke.py"
@@ -929,7 +929,7 @@ hp2_add_behavior_test(matrix_compare_contract "${Python3_EXECUTABLE}"
 )
 set_tests_properties(matrix_compare_contract PROPERTIES LABELS "fast;data-none")
 
-if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
+if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/Chamber of Secrets.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(determinism_double_run "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/DeterminismDoubleRunTests.py"
@@ -971,7 +971,7 @@ endif()
 # Both require the installed app bundle and prototype data at configure time;
 # without them the tests are not silently skipped, they simply do not exist,
 # which the verification docs call out as a configuration gap.
-if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
+if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/Chamber of Secrets.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(renderer_smoke_xopengl "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"

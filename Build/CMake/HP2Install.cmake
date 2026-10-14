@@ -42,7 +42,7 @@ find_program(HP2_CODESIGN
 )
 
 set(HP2_MACOS_DIST_DIR "${PROJECT_SOURCE_DIR}/dist/macos-arm64")
-set(HP2_MACOS_APP_DIR "${HP2_MACOS_DIST_DIR}/HarryPotter2.app")
+set(HP2_MACOS_APP_DIR "${HP2_MACOS_DIST_DIR}/Chamber of Secrets.app")
 set(HP2_MACOS_CONTENTS_DIR "${HP2_MACOS_APP_DIR}/Contents")
 set(HP2_MACOS_EXECUTABLE_DIR "${HP2_MACOS_CONTENTS_DIR}/MacOS")
 set(HP2_MACOS_FRAMEWORKS_DIR "${HP2_MACOS_CONTENTS_DIR}/Frameworks")
@@ -114,7 +114,7 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     DEPENDS
         hp2_game
         OpenAL
-    COMMENT "Recreating signed dist/macos-arm64/HarryPotter2.app"
+    COMMENT "Recreating signed dist/macos-arm64/Chamber of Secrets.app"
     VERBATIM
 )
 unset(_hp2_bundle_in_all)
@@ -139,7 +139,7 @@ add_custom_target(hp2_macos_dmg
         "${HP2_DMG_STAGE_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${HP2_MACOS_APP_DIR}"
-        "${HP2_DMG_STAGE_DIR}/HarryPotter2.app"
+        "${HP2_DMG_STAGE_DIR}/Chamber of Secrets.app"
     COMMAND "${CMAKE_COMMAND}" -E create_symlink
         "/Applications"
         "${HP2_DMG_STAGE_DIR}/Applications"

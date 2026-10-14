@@ -45,7 +45,7 @@ SmokeError = game_test.GameTestError
 
 
 DEFAULT_APP = Path(
-    "dist/macos-arm64/HarryPotter2.app"
+    "dist/macos-arm64/Chamber of Secrets.app"
     if sys.platform == "darwin"
     else "dist/linux-arm64/bin/hp2_game"
     if platform.machine() in ("aarch64", "arm64")

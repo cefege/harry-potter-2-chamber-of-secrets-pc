@@ -48,7 +48,7 @@ SMOKE_INVARIANT = (
     "(movement, rotation, jump, fire, spell switch), writes probe "
     "screenshots, and exits cleanly within the tick budget"
 )
-DEFAULT_APP = REPOSITORY_ROOT / "dist" / "macos-arm64" / "HarryPotter2.app"
+DEFAULT_APP = REPOSITORY_ROOT / "dist" / "macos-arm64" / "Chamber of Secrets.app"
 DEFAULT_DATA_ROOT = REPOSITORY_ROOT / "HarryPotter2" / "Unreal"
 DEFAULT_FIXTURE = REPOSITORY_ROOT / "Tests" / "Fixtures" / "input_script_smoke.txt"
 DEFAULT_TICKS = 240

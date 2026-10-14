@@ -468,7 +468,7 @@ def _discover_engine() -> Path | None:
     explicit = os.environ.get("HP2_ENGINE_BINARY")
     if explicit:
         candidates.append(Path(explicit))
-    bundle = REPOSITORY_ROOT / "dist" / "macos-arm64" / "HarryPotter2.app" / "Contents" / "MacOS"
+    bundle = REPOSITORY_ROOT / "dist" / "macos-arm64" / "Chamber of Secrets.app" / "Contents" / "MacOS"
     if bundle.is_dir():
         candidates.extend(sorted(entry for entry in bundle.iterdir() if entry.is_file()))
     for candidate in candidates:

@@ -25,7 +25,7 @@ STATE_FILENAME = "hp2-state.json"
 
 DEFAULT_UNREAL_ROOT = Path("HarryPotter2/Unreal")
 DEFAULT_APP_BUNDLE = (
-    Path("dist/macos-arm64/HarryPotter2.app")
+    Path("dist/macos-arm64/Chamber of Secrets.app")
     if sys.platform == "darwin"
     else Path("dist/linux-arm64/bin/hp2_game")
     if platform.machine() in ("aarch64", "arm64")

@@ -98,7 +98,7 @@ cmake --build --preset windows-x64 --target hp2_windows_zip
 
 Packaged builds:
 ```
-dist/macos-arm64/HarryPotter2.app   # macOS
+dist/macos-arm64/Chamber of Secrets.app   # macOS
 dist/linux-arm64/                   # Linux arm64 (bin/, lib/, share/)
 dist/linux-x64/                     # Linux x86_64 (bin/, lib/, share/)
 dist/windows-x64/                   # Windows x64 portable ZIP and staged tree
@@ -131,7 +131,7 @@ Open the packaged build:
 
 ```sh
 # macOS
-open dist/macos-arm64/HarryPotter2.app
+open "dist/macos-arm64/Chamber of Secrets.app"
 
 # Linux
 ./dist/linux-arm64/bin/hp2_game
