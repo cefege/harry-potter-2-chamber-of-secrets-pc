@@ -168,7 +168,12 @@ if(APPLE)
     set(HP2_LAUNCHER_PLATFORM_MAC_SOURCE
         "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherPlatformMac.mm"
     )
-    list(APPEND HP2_LAUNCHER_UI_SOURCES "${HP2_LAUNCHER_PLATFORM_MAC_SOURCE}")
+    set(HP2_MAC_LAUNCHER_SOURCE "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2MacLauncher.mm")
+    set(HP2_LAUNCHER_UI_SOURCES
+        "${HP2_MAC_LAUNCHER_SOURCE}"
+        "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherPlatform.cpp"
+        "${HP2_LAUNCHER_PLATFORM_MAC_SOURCE}"
+    )
 endif()
 set(HP2_SDL_LAUNCH_SOURCES
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/SDLLaunch.cpp"

@@ -178,6 +178,42 @@ void TestPolicyClassification()
 	Expect(!Arguments({"hp2", "-datadir=/Retail", "-eXeC=Boot.txt"}).run(), "datadir-only filtering still detects bypass option");
 }
 
+void TestAutomaticContinue()
+{
+	LauncherState state;
+	LaunchSelection selection;
+	SaveRecord older; older.saveIndex = 8; older.size = 1; older.modifiedSeconds = 10;
+	SaveRecord latest; latest.saveIndex = 2; latest.size = 1; latest.modifiedSeconds = 20;
+	latest.usesSlotDirectory = true; latest.slot = 3;
+	state.saves = {older, latest};
+	Expect(!BuildAutomaticContinueSelection(state, false, selection), "unsaved settings retain launcher");
+	state.hasSavedSettings = true;
+	Expect(!BuildAutomaticContinueSelection(state, true, selection), "Option retains launcher");
+	Expect(BuildAutomaticContinueSelection(state, false, selection), "saved setup continues automatically");
+	std::string command, error;
+	Expect(BuildSelectedCommand(selection, command, error) && command == "Startup.unr -LOAD=2 -SAVESLOT=3",
+		"latest timestamp wins across flat and slotted saves, regardless of save index");
+	std::reverse(state.saves.begin(), state.saves.end());
+	Expect(BuildAutomaticContinueSelection(state, false, selection) && selection.save.slot == 3,
+		"latest selection is independent of discovery order");
+	state.saves[0].slot = -1;
+	Expect(BuildAutomaticContinueSelection(state, false, selection) && selection.save.saveIndex == 8,
+		"invalid slot is never automatically loaded");
+	state.saves.clear();
+	Expect(!BuildAutomaticContinueSelection(state, false, selection), "no save retains launcher without starting a new game");
+
+	TemporaryRoots roots;
+	WriteDefaultTemplates(roots);
+	Expect(LoadLauncherState(roots.paths(), state, error) && !state.hasSavedSettings,
+		"immutable defaults do not count as saved settings");
+	Expect(CommitLauncherSettings(roots.paths(), state.settings, error), "save settings for automatic startup");
+	Expect(LoadLauncherState(roots.paths(), state, error) && state.hasSavedSettings,
+		"both saved setting documents complete setup");
+	WriteBytes(roots.user / "Game.ini", std::string(1, '\xff'));
+	Expect(LoadLauncherState(roots.paths(), state, error) && !state.hasSavedSettings,
+		"invalid writable encoding keeps recovery launcher available");
+}
+
 void TestSelectedCommands()
 {
 	std::string command, error;
@@ -1789,6 +1825,7 @@ int main()
 	GMalloc->Init();
 	TestPolicyClassification();
 	TestSelectedCommands();
+	TestAutomaticContinue();
 	TestValidationBoundaries();
 	TestScaleDefaultsAndValidation();
 	TestSaveDiscovery();

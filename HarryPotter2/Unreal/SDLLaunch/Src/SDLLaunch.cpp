@@ -37,6 +37,9 @@ using FLauncherFileManager = FFileManagerUnix;
 
 #include "HP2LaunchPolicy.h"
 #include "HP2Launcher.h"
+#if MACOSX
+#include "HP2MacLauncher.h"
+#endif
 #include "HP2LauncherPlatform.h"
 #include "HP2LauncherModel.h"
 #include "HP2LauncherStore.h"
@@ -203,6 +206,8 @@ struct FLauncherRound
 	bool HasOverride = false;
 	std::string OverrideRoot;
 	bool OwnsVideo = false;
+	LauncherState LoadedState;
+	std::string PreparedDataRoot;
 
 	bool Prepare(int ArgC, char* ArgV[], bool bHasOverride, const std::string& InOverrideRoot)
 	{
@@ -239,12 +244,12 @@ struct FLauncherRound
 		}
 
 		const LauncherPaths Paths{ProfileRoot, HasDataRoot ? DataRoot + "/System" : std::string()};
-		LauncherState State;
-		if (HasDataRoot && !LoadLauncherState(Paths, State, StepError))
-			State = LauncherState();
+		PreparedDataRoot = DataRoot;
+		if (HasDataRoot && !LoadLauncherState(Paths, LoadedState, StepError))
+			LoadedState = LauncherState();
 
-		Request.settings = State.settings;
-		Request.saves = State.saves;
+		Request.settings = LoadedState.settings;
+		Request.saves = LoadedState.saves;
 		Request.userRoot = ProfileRoot;
 		Request.logPath = LauncherRoot + "/Launcher.log";
 		Request.dataSources = Configuration;
@@ -281,6 +286,8 @@ struct FLauncherRound
 			Request.displayModes.push_back({Width, Height, Label});
 		};
 
+		// The native macOS launcher discovers display modes before SDL starts.
+#if !MACOSX
 		const LauncherCapabilities Capabilities = HP2LauncherPlatform::CurrentCapabilities();
 		if (Capabilities.resolutions)
 		{
@@ -301,6 +308,7 @@ struct FLauncherRound
 			}
 		}
 
+#endif
 		const DisplayResolution StandardModes[] = {
 			{640, 480, "640 \xC3\x97 480"}, {800, 600, "800 \xC3\x97 600"},
 			{1024, 768, "1024 \xC3\x97 768"}, {1280, 720, "1280 \xC3\x97 720"},
@@ -322,6 +330,29 @@ struct FLauncherRound
 			SDL_QuitSubSystem(SDL_INIT_VIDEO);
 			OwnsVideo = false;
 		}
+	}
+
+	bool StartSelection(const std::string& DataRoot, const LaunchSelection& Selection,
+		LauncherFlowResult& Outcome, std::string& StepError)
+	{
+		std::string PrefixUtf8;
+		if (!BuildSelectedCommand(Selection, PrefixUtf8, StepError) || PrefixUtf8.empty()) return false;
+		TCHAR Prefix[1024];
+		if (!appFromUtf8InPlace(Prefix, PrefixUtf8.c_str(), ARRAY_COUNT(Prefix))) return false;
+		if (!InstallHP2Paths(DataRoot, ProfileRoot, StepError)) return false;
+		Outcome.RunEngine = true;
+		Outcome.EnginePrefix = Prefix;
+		return true;
+	}
+
+	bool TryAutomaticContinue(bool ForceLauncher, LauncherFlowResult& Outcome)
+	{
+		LaunchSelection Selection;
+		std::string StepError;
+		if (!HasDataRoot || !ValidateLauncherSettings(LoadedState.settings, StepError) ||
+			!BuildAutomaticContinueSelection(LoadedState, ForceLauncher, Selection)) return false;
+		// Reuse the normal launch path without re-publishing the user's INIs.
+		return StartSelection(PreparedDataRoot, Selection, Outcome, StepError);
 	}
 
 	bool Finish(const LauncherResult& Result, LauncherFlowResult& Outcome)
@@ -371,28 +402,11 @@ struct FLauncherRound
 			ShowLauncherError(StepError, "Could not save the selected settings.");
 			return false;
 		}
-		if (!InstallHP2Paths(FinalDataRoot, ProfileRoot, StepError))
-		{
-			ShowLauncherError(StepError, "Could not install the selected paths.");
-			return false;
-		}
-
-		std::string PrefixUtf8;
-		if (!BuildSelectedCommand(Result.selection, PrefixUtf8, StepError))
+		if (!StartSelection(FinalDataRoot, Result.selection, Outcome, StepError))
 		{
 			ShowLauncherError(StepError, "The launcher selection cannot be started.");
 			return false;
 		}
-		if (PrefixUtf8.empty()) return false;
-
-		TCHAR Prefix[1024];
-		if (!appFromUtf8InPlace(Prefix, PrefixUtf8.c_str(), ARRAY_COUNT(Prefix)))
-		{
-			ShowLauncherError(PrefixUtf8, "The launch command is invalid.");
-			return false;
-		}
-		Outcome.RunEngine = true;
-		Outcome.EnginePrefix = Prefix;
 		return true;
 	}
 };
@@ -404,11 +418,27 @@ bool RunNativeLauncherRound(
 	const std::string& OverrideRoot,
 	LauncherFlowResult& Outcome)
 {
+#if MACOSX
+	// Sample Option before video initialization. Explicit command-line launches
+	// keep their existing path, including test and automation arguments.
+	const bool ForceLauncher = ArgC > 1 || HP2LauncherPlatform::IsLauncherShortcutHeld();
+#endif
 	FLauncherRound Round;
 	if (!Round.Prepare(ArgC, ArgV, HasOverride, OverrideRoot)) return false;
+#if MACOSX
+	if (Round.TryAutomaticContinue(ForceLauncher, Outcome))
+	{
+		Round.ReleaseVideo();
+		return true;
+	}
+#endif
 	LauncherResult Result;
 	std::string Error;
+#if MACOSX
+	const bool Opened = RunHP2MacLauncher(Round.Request, Result, Error) != LaunchAction::Error;
+#else
 	const bool Opened = HP2Launcher::RunLauncher(Round.Request, Result, Error);
+#endif
 	Round.ReleaseVideo();
 	if (!Opened)
 	{

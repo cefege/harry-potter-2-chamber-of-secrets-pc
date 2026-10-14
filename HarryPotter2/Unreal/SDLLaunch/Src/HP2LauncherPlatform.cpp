@@ -36,6 +36,10 @@ private:
 }
 #endif
 
+#if !MACOSX
+bool IsLauncherShortcutHeld() { return false; }
+#endif
+
 HP2Launcher::LauncherCapabilities CurrentCapabilities()
 {
 	HP2Launcher::LauncherCapabilities result;

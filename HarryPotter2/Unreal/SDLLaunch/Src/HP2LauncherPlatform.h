@@ -9,6 +9,7 @@
 namespace HP2LauncherPlatform
 {
 HP2Launcher::LauncherCapabilities CurrentCapabilities();
+bool IsLauncherShortcutHeld();
 bool PickFolder(std::string& Path);
 bool PickFile(std::string& Path, const std::vector<std::string>& Extensions);
 void RevealPath(const std::string& Path);

@@ -328,7 +328,7 @@ if(WIN32)
     )
 endif()
 if(APPLE)
-    set_source_files_properties("${HP2_LAUNCHER_PLATFORM_MAC_SOURCE}" PROPERTIES
+    set_source_files_properties("${HP2_LAUNCHER_PLATFORM_MAC_SOURCE}" "${HP2_MAC_LAUNCHER_SOURCE}" PROPERTIES
         COMPILE_OPTIONS "-fobjc-arc;-std=c++17"
     )
 endif()

@@ -633,8 +633,9 @@ bool LoadDocument(const std::string& path, Document& document, mode_t* mode, std
 	return true;
 }
 bool SelectDocument(const LauncherPaths& paths, const char* userName, const char* defaultName,
-	Document& document, bool& exists, mode_t& mode, std::string& error)
+	Document& document, bool& exists, mode_t& mode, std::string& error, bool* loadedSaved = nullptr)
 {
+	if (loadedSaved) *loadedSaved = false;
 	const std::string userPath = Join(paths.userRoot, userName);
 #ifdef HP2_WINDOWS
 	const DWORD attr = Attributes(userPath);
@@ -648,7 +649,11 @@ bool SelectDocument(const LauncherPaths& paths, const char* userName, const char
 		std::string bytes;
 		if (!ReadFile(userPath, bytes, &mode, error)) return false;
 		std::string decodeError;
-		if (Decode(bytes, document, decodeError)) return true;
+		if (Decode(bytes, document, decodeError))
+		{
+			if (loadedSaved) *loadedSaved = true;
+			return true;
+		}
 		error.clear();
 		return LoadDocument(Join(paths.systemRoot, defaultName), document, nullptr, error);
 	}
@@ -2434,13 +2439,16 @@ bool DiscoverSaves(const std::string& userRoot, std::vector<SaveRecord>& saves, 
 bool LoadLauncherState(const LauncherPaths& paths, LauncherState& state, std::string& error)
 {
 	error.clear();
+	state.hasSavedSettings = false;
 	Document game, user;
-	bool gameExists, userExists;
+	bool gameExists, userExists, gameSaved = false, userSaved = false;
 	mode_t gameMode, userMode;
-	if (!SelectDocument(paths, "Game.ini", "Default.ini", game, gameExists, gameMode, error) ||
-		!SelectDocument(paths, "User.ini", "DefUser.ini", user, userExists, userMode, error)) return false;
+	if (!SelectDocument(paths, "Game.ini", "Default.ini", game, gameExists, gameMode, error, &gameSaved) ||
+		!SelectDocument(paths, "User.ini", "DefUser.ini", user, userExists, userMode, error, &userSaved)) return false;
 	LoadSettings(game, user, state.settings);
-	return DiscoverSaves(paths.userRoot, state.saves, error);
+	if (!DiscoverSaves(paths.userRoot, state.saves, error)) return false;
+	state.hasSavedSettings = gameSaved && userSaved;
+	return true;
 }
 
 bool CommitLauncherSettings(const LauncherPaths& paths, const LauncherSettings& settings, std::string& error)

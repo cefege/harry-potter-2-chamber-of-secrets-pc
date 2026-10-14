@@ -145,6 +145,7 @@ struct LauncherPaths
 
 struct LauncherState
 {
+	bool hasSavedSettings = false;
 	LauncherSettings settings;
 	std::vector<SaveRecord> saves;
 };

@@ -85,3 +85,12 @@ directory is yours, and deleting it is a separate, deliberate act.
 ## Source, issues, and more platforms
 
 <https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc>
+
+## macOS startup
+
+Once settings are saved, opening the app continues the newest save in the
+selected game-data profile. Hold **Option** while opening it to show the
+launcher and change settings or choose another save. Missing game data,
+unsaved settings, or no usable saves also open the launcher; startup never
+creates a new game automatically. Explicit command-line launches and other
+platforms keep their existing behavior.
