@@ -26,7 +26,7 @@ References" below); treat those as dead, not as a second live subsystem.
 |Build scripts|`Build/*.py`|`game_test.py`, `smoke_maps.py`, `check_bundle.py`, `prepare_retail_data.py`, `repair_save.py`, `abi_inventory.py`, `retail_flow_smoke.py`; CMake modules in `Build/CMake/`|
 |Tests|`Tests/`|C++ `*Tests.cpp` (`main()`-style, minimal TU), Python `*Tests.py` (`unittest`, no app launch), fixtures in `Tests/Fixtures/`. Registered via `hp2_add_behavior_test` in `Build/CMake/HP2Targets.cmake`|
 |Data roots|`HarryPotter2/Unreal/` (prototype), retail overlay via `Build/prepare_retail_data.py`|Prototype root is `HP2_UNREAL_ROOT` in `Build/CMake/HP2Sources.cmake`|
-|Dist bundle (macOS)|`dist/macos-arm64/HarryPotter2.app`|Verify with `Build/check_bundle.py`|
+|Dist bundle (macOS)|`dist/macos-arm64/Chamber of Secrets.app`|Verify with `Build/check_bundle.py`|
 |Dist bundle (Linux)|`dist/linux-arm64/` (`bin/`, `lib/`, `share/`)|Installed by the `linux-arm64*` presets via `Build/CMake/HP2Install.cmake`|
 | Release DMG (macOS)|`dist/macos-arm64/HarryPotter2-<version>-macos-arm64.dmg`|Built by the `hp2_macos_dmg` target (macOS branch of `HP2Install.cmake`); the artifact Homebrew and GitHub Releases serve|
 | Homebrew cask|`Casks/harry-potter-2.rb`|This repo is its own tap. Tap name must equal the repo name, and the URL must be passed explicitly, or Homebrew looks for a separate `homebrew-hp2` repo. `version`/`sha256` are owned by `.github/workflows/release.yml` via `Build/stamp_cask.py` — never hand-edit|

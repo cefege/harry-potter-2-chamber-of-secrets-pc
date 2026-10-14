@@ -136,7 +136,7 @@ jobs:
           dmg="dist/macos-arm64/HarryPotter2-${{ steps.version.outputs.version }}-macos-arm64.dmg"
           test -f "${dmg}"
           mount_point="$(hdiutil attach "${dmg}" -nobrowse -readonly | tail -1 | sed 's/.*\(\/Volumes\/.*\)/\1/')"
-          codesign --verify --strict "${mount_point}/HarryPotter2.app"
+          codesign --verify --strict "${mount_point}/Chamber of Secrets.app"
           hdiutil detach "${mount_point}"
 
       - name: Stage release artifacts

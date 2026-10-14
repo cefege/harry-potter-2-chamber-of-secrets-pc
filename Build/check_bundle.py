@@ -32,7 +32,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 REPORT_NAME = "check_bundle"
 DATA_PROFILE = "none"
-BUNDLE_RELPATH = Path("dist") / "macos-arm64" / "HarryPotter2.app"
+BUNDLE_RELPATH = Path("dist") / "macos-arm64" / "Chamber of Secrets.app"
 
 MACHO_ARM64_MAGIC = b"\xcf\xfa\xed\xfe"  # MH_MAGIC_64, little-endian (feedfacf)
 

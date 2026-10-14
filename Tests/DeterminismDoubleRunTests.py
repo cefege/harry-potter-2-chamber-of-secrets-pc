@@ -38,7 +38,7 @@ REPORT_NAME = "determinism_double_run"
 # Capture hook lives in the built hp2_game; the installed dist bundle may be
 # stale. Prefer a fresh build-tree binary when one exists.
 DEFAULT_APP = Path("out/macos-arm64/hp2_game")
-DEFAULT_APP_FALLBACK = Path("dist/macos-arm64/HarryPotter2.app")
+DEFAULT_APP_FALLBACK = Path("dist/macos-arm64/Chamber of Secrets.app")
 DEFAULT_DATA_ROOT = Path("HarryPotter2/Unreal")
 DEFAULT_MAP_STEM = "PrivetDr"
 DEFAULT_TICKS = 60

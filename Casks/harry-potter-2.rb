@@ -17,11 +17,13 @@ cask "harry-potter-2" do
 
   url "https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/download/v#{version}/HarryPotter2-#{version}-macos-arm64.dmg",
       verified: "github.com/cefege/harry-potter-2-chamber-of-secrets-pc/"
-  name "Harry Potter 2"
+  name "Chamber of Secrets"
   desc "Modernized runtime for Harry Potter and the Chamber of Secrets (2002)"
   homepage "https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc"
 
-  app "HarryPotter2.app"
+  # The already published 0.1.0 DMG retains its original bundle name.
+  bundle_name = version.to_s == "0.1.0" ? "HarryPotter2.app" : "Chamber of Secrets.app"
+  app bundle_name
   depends_on macos: :sequoia
   # The engine is built arm64-only, and CMake refuses to configure anywhere
   # else. Fail the install on an Intel Mac instead of shipping an app that
@@ -39,12 +41,12 @@ cask "harry-potter-2" do
   # Plain Ruby: the block runs in the cask context, which does not expose
   # Homebrew's command wrappers.
   postflight do
-    target = File.join(appdir.to_s, "HarryPotter2.app")
+    target = File.join(appdir.to_s, bundle_name)
     unless system("/usr/bin/xattr", "-dr", "com.apple.quarantine", target)
       abort "could not clear the quarantine attribute on #{target}; macOS " \
             "will block the app on first launch. Open it once via " \
             "right-click > Open, or run: " \
-            "xattr -dr com.apple.quarantine #{target}"
+            "xattr -dr com.apple.quarantine \"#{target}\""
     end
   end
 end

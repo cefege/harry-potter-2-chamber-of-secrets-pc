@@ -7,17 +7,17 @@ scripts.
 
 ## 1. Install
 
-Drag **HarryPotter2.app** into your **Applications** folder.
+Drag **Chamber of Secrets.app** into your **Applications** folder.
 
 Before opening it the first time, open **Terminal** (⌘ Space, type
 *Terminal*) and paste this once:
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/HarryPotter2.app
+xattr -dr com.apple.quarantine "/Applications/Chamber of Secrets.app"
 ```
 
 This build isn't signed with an Apple Developer ID, so macOS blocks it until
-you clear that flag. If you already saw **"HarryPotter2" Not Opened**, you can
+you clear that flag. If you already saw **"Chamber of Secrets" Not Opened**, you can
 instead go to **System Settings → Privacy & Security**, scroll down, click
 **Open Anyway**, and confirm. (Right-click → Open no longer works on macOS 15.)
 
@@ -28,7 +28,7 @@ Installed with Homebrew? It already did this for you.
 The runtime reads data files only. It never launches the original installer or
 the old game executable.
 
-Open **HarryPotter2**. On a first run the launcher says **No game data yet** —
+Open **Chamber of Secrets**. On a first run the launcher says **No game data yet** —
 that's the expected state, not an error. Click **Import retail game…** to pick
 the installed folder, or **Import retail archive…** for an archive of it:
 
@@ -78,7 +78,7 @@ of `Game.ini` in the user directory above.
 
 ## Uninstalling
 
-Drag **HarryPotter2.app** out of Applications. Your imported game data and
+Drag **Chamber of Secrets.app** out of Applications. Your imported game data and
 saves are left alone in `~/Library/Application Support/Harry Potter 2` — that
 directory is yours, and deleting it is a separate, deliberate act.
 

@@ -215,7 +215,7 @@ rolled out alongside this document; until they land in
 ## Smoke tiers
 
 Two renderer smoke tiers exist, both requiring the packaged app bundle at
-`dist/macos-arm64/HarryPotter2.app` and prototype data at
+`dist/macos-arm64/Chamber of Secrets.app` and prototype data at
 `HarryPotter2/Unreal/System/Default.ini` at configure time. Without them the
 tests are **not silently skipped — they simply do not exist**, which surfaces as
 a configuration gap rather than a green run.
@@ -256,7 +256,7 @@ Two artifacts, both built locally from the same bundle:
 
 | Target | Produces | Notes |
 | --- | --- | --- |
-| `hp2_macos_app` | `dist/macos-arm64/HarryPotter2.app` | default target; part of `ALL` for release presets |
+| `hp2_macos_app` | `dist/macos-arm64/Chamber of Secrets.app` | default target; part of `ALL` for release presets |
 | `hp2_macos_dmg` | `dist/macos-arm64/HarryPotter2-<version>-macos-arm64.dmg` | the release artifact |
 
 ```sh

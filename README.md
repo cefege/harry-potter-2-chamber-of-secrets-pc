@@ -7,8 +7,8 @@ Play the 2002 game with a modern launcher on macOS, Windows, Linux, and Raspberr
 ## macOS
 
 1. Download the latest **macOS arm64 DMG** from [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest).
-2. Open the DMG and drag **HarryPotter2** into **Applications**.
-3. Open **HarryPotter2**. If macOS blocks the app, open **System Settings → Privacy & Security**, then choose **Open Anyway**.
+2. Open the DMG and drag **Chamber of Secrets** into **Applications**.
+3. Open **Chamber of Secrets**. If macOS blocks the app, open **System Settings → Privacy & Security**, then choose **Open Anyway**.
 4. In the launcher, choose **Game Data → Import retail game…** and select the installed game folder (the folder containing `Maps`, `System`, and `Textures`). You can also choose **Import retail archive…** for a `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.7z` file.
 5. Choose **New Game** or **Continue**.
 
