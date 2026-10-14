@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import struct
 import sys
 import tempfile
 import unittest
@@ -30,6 +31,13 @@ class _Resolver:
 
 
 class PackageAuditReferenceContracts(unittest.TestCase):
+    def test_eaxa_signed_samples_are_high_nibble_first(self) -> None:
+        # Predictor zero and range twelve make each signed nibble one sample.
+        block = bytes([0x0C, 0x81, 0x7F, 0x2E] + [0] * 11)
+        samples = struct.unpack("<28h", p79._decode_eaxa(block))
+        self.assertEqual(samples[:6], (-8, 1, 7, -1, 2, -2))
+        self.assertEqual(samples[6:], (0,) * 22)
+
     def test_schema_and_known_payload_projection(self) -> None:
         payload = bytes(range(16))
         reader = p79.PackageReader("Synthetic.u", payload)

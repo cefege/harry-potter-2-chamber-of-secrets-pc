@@ -172,7 +172,7 @@ def _decode_eaxa(data: bytes) -> bytes:
         c0, c1 = _EAXA_COEFFICIENTS[predictor]
         for index in range(28):
             packed = block[1 + index // 2]
-            nibble = (packed >> 4) if index & 1 else (packed & 15)
+            nibble = (packed & 15) if index & 1 else (packed >> 4)
             if nibble >= 8:
                 nibble -= 16
             scaled = nibble << (12 - shift) if shift <= 12 else nibble // (1 << (shift - 12))

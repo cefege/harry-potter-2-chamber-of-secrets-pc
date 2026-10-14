@@ -77,8 +77,8 @@ namespace
 	{
 		static const BYTE Packed[14] =
 		{
-			0x81, 0x7f, 0x2e, 0xd3, 0x4c, 0xb5, 0x6a,
-			0x99, 0x08, 0xf1, 0x27, 0xc4, 0x5b, 0xae
+			0x18, 0xf7, 0xe2, 0x3d, 0xc4, 0x5b, 0xa6,
+			0x99, 0x80, 0x1f, 0x72, 0x4c, 0xb5, 0xea
 		};
 		static const std::uint64_t PredictorHashes[16] =
 		{
@@ -139,8 +139,8 @@ namespace
 		};
 		static const SWORD Expected[28] =
 		{
-			1, -8, -1, 7, -2, 2, 3, -3, -4, 4, 5, -5, -6, 6,
-			-7, -7, -8, 0, 1, -1, 7, 2, 4, -4, -5, 5, -2, -6
+			-8, 1, 7, -1, 2, -2, -3, 3, 4, -4, -5, 5, 6, -6,
+			-7, -7, 0, -8, -1, 1, 2, 7, -4, 4, 5, -5, -6, -2
 		};
 		BYTE Block[15];
 		SWORD Output[28];
@@ -148,7 +148,7 @@ namespace
 		FEAXABlockDecoder Decoder;
 		Require( Decoder.Feed(Block, 15, 28) != 0, "signed-nibble Feed rejected" );
 		Require( Decoder.Decode(Output, 28) == 28, "signed-nibble sample count" );
-		Require( std::memcmp(Output, Expected, sizeof(Expected)) == 0, "signed nibble or low/high order mismatch" );
+		Require( std::memcmp(Output, Expected, sizeof(Expected)) == 0, "signed nibble or high/low order mismatch" );
 	}
 
 	static void TestClipping()
@@ -185,8 +185,8 @@ namespace
 		};
 		static const SWORD Expected[28] =
 		{
-			1, -8, -1, 7, -2, 2, 3, -3, -4, 4, 5, -5, -6, 6,
-			-7, -7, -8, 0, 1, -1, 7, 2, 4, -4, -5, 5, -2, -6
+			-8, 1, 7, -1, 2, -2, -3, 3, 4, -4, -5, 5, 6, -6,
+			-7, -7, 0, -8, -1, 1, 2, 7, -4, 4, 5, -5, -6, -2
 		};
 		BYTE Block[15];
 		SWORD Output[30];
@@ -207,7 +207,7 @@ namespace
 
 	static void TestMalformedFeedIsTransactional()
 	{
-		BYTE Block[15] = { 0x0c, 0x21, 0x43, 0x65, 0x07, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+		BYTE Block[15] = { 0x0c, 0x12, 0x34, 0x56, 0x70, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 		SWORD Output[5];
 		FEAXABlockDecoder Decoder;
 		Require( Decoder.Feed(Block, 15, 5) != 0, "valid baseline Feed rejected" );
