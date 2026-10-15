@@ -127,11 +127,11 @@ char* ResolveDataHomePrefix()
 	}
 	if (Root.empty() || !std::filesystem::is_directory(Root, Ec))
 		return nullptr;
+	// Canonical like the macOS and Linux prefixes: a raw %LOCALAPPDATA% may name
+	// the account through an 8.3 short path (RUNNER~1), and conventional roots
+	// are reported canonical everywhere.
 	const std::string Utf8 = Root.u8string();
-	char* Result = static_cast<char*>(std::malloc(Utf8.size() + 1));
-	if (Result)
-		std::memcpy(Result, Utf8.c_str(), Utf8.size() + 1);
-	return Result;
+	return CanonicalizeExistingDirectory(Utf8.c_str());
 }
 #else
 char* ResolveDataHomePrefix()

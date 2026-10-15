@@ -28,6 +28,23 @@ using namespace HP2Launcher;
 
 namespace
 {
+// The environment variable that roots the conventional data home, and the
+// suffixes joined onto it. These mirror ResolveDataHomePrefix and the Suffix
+// constants in HP2Paths.cpp: $HOME on macOS and Linux, %LOCALAPPDATA% on Windows.
+#if defined(_WIN32)
+constexpr const char* DataHomeEnv = "LOCALAPPDATA";
+constexpr const char* ConventionalDataSuffix = "Harry Potter 2/Data";
+constexpr const char* ConventionalUserSuffix = "Harry Potter 2/User";
+#elif MACOSX
+constexpr const char* DataHomeEnv = "HOME";
+constexpr const char* ConventionalDataSuffix = "Library/Application Support/Harry Potter 2/Data";
+constexpr const char* ConventionalUserSuffix = "Library/Application Support/Harry Potter 2/User";
+#else
+constexpr const char* DataHomeEnv = "HOME";
+constexpr const char* ConventionalDataSuffix = ".local/share/harry-potter-2/Data";
+constexpr const char* ConventionalUserSuffix = ".local/share/harry-potter-2/User";
+#endif
+
 fs::path UniqueTemporaryDirectory()
 {
 	fs::path base = fs::temp_directory_path();
@@ -730,24 +747,18 @@ void TestUnsafeBackupRejected()
 void TestConventionalDataRoots()
 {
 	TemporaryRoots roots;
-	const char* priorHomeValue = std::getenv("HOME");
+	const char* priorHomeValue = std::getenv(DataHomeEnv);
 	const bool hadHome = priorHomeValue != nullptr;
 	const std::string priorHome = hadHome ? priorHomeValue : "";
 	const char* priorXdgDataHomeValue = std::getenv("XDG_DATA_HOME");
 	const bool hadXdgDataHome = priorXdgDataHomeValue != nullptr;
 	const std::string priorXdgDataHome = hadXdgDataHome ? priorXdgDataHomeValue : "";
-	::setenv("HOME", roots.root.string().c_str(), 1);
+	::setenv(DataHomeEnv, roots.root.string().c_str(), 1);
 	// A real desktop session's $XDG_DATA_HOME would otherwise outrank the
-	// redirected $HOME below when resolving the Linux data-home prefix.
+	// redirected data home below when resolving the Linux data-home prefix.
 	::unsetenv("XDG_DATA_HOME");
 
-#if MACOSX
-	const fs::path dataRoot = fs::canonical(roots.root) / "Library" / "Application Support" /
-		"Harry Potter 2" / "Data";
-#else
-	const fs::path dataRoot = fs::canonical(roots.root) / ".local" / "share" /
-		"harry-potter-2" / "Data";
-#endif
+	const fs::path dataRoot = fs::canonical(roots.root) / ConventionalDataSuffix;
 	const fs::path expectedRetail = dataRoot / "Retail";
 	const fs::path expectedPrototype = dataRoot / "Prototype";
 	Expect(!fs::exists(expectedRetail) && !fs::exists(expectedPrototype),
@@ -772,9 +783,9 @@ void TestConventionalDataRoots()
 		"conventional roots never point into the repository checkout");
 
 	if (hadHome)
-		::setenv("HOME", priorHome.c_str(), 1);
+		::setenv(DataHomeEnv, priorHome.c_str(), 1);
 	else
-		::unsetenv("HOME");
+		::unsetenv(DataHomeEnv);
 	if (hadXdgDataHome)
 		::setenv("XDG_DATA_HOME", priorXdgDataHome.c_str(), 1);
 	else
@@ -801,24 +812,18 @@ fs::path CreateDataRoot(const TemporaryRoots& roots, const char* name, const cha
 void TestConventionalRetailDiscovery()
 {
 	TemporaryRoots roots;
-	const char* priorHomeValue = std::getenv("HOME");
+	const char* priorHomeValue = std::getenv(DataHomeEnv);
 	const bool hadHome = priorHomeValue != nullptr;
 	const std::string priorHome = hadHome ? priorHomeValue : "";
 	const char* priorXdgDataHomeValue = std::getenv("XDG_DATA_HOME");
 	const bool hadXdgDataHome = priorXdgDataHomeValue != nullptr;
 	const std::string priorXdgDataHome = hadXdgDataHome ? priorXdgDataHomeValue : "";
-	::setenv("HOME", roots.root.string().c_str(), 1);
+	::setenv(DataHomeEnv, roots.root.string().c_str(), 1);
 	// A real desktop session's $XDG_DATA_HOME would otherwise outrank the
-	// redirected $HOME below when resolving the Linux data-home prefix.
+	// redirected data home below when resolving the Linux data-home prefix.
 	::unsetenv("XDG_DATA_HOME");
 
-#if MACOSX
-	const fs::path dataHome = fs::canonical(roots.root) / "Library" / "Application Support" /
-		"Harry Potter 2" / "Data";
-#else
-	const fs::path dataHome = fs::canonical(roots.root) / ".local" / "share" /
-		"harry-potter-2" / "Data";
-#endif
+	const fs::path dataHome = fs::canonical(roots.root) / ConventionalDataSuffix;
 
 	// Nothing installed yet: discovery must report absence rather than
 	// inventing a root, which is what lets the launcher offer the import.
@@ -859,9 +864,9 @@ void TestConventionalRetailDiscovery()
 		"the legacy Data/Unreal location is still discovered on its own");
 
 	if (hadHome)
-		::setenv("HOME", priorHome.c_str(), 1);
+		::setenv(DataHomeEnv, priorHome.c_str(), 1);
 	else
-		::unsetenv("HOME");
+		::unsetenv(DataHomeEnv);
 	if (hadXdgDataHome)
 		::setenv("XDG_DATA_HOME", priorXdgDataHome.c_str(), 1);
 	else
@@ -878,22 +883,15 @@ void TestConventionalRetailDiscovery()
 void TestBootstrapInstallsConventionalRetailRoot()
 {
 	TemporaryRoots roots;
-	const char* priorHomeValue = std::getenv("HOME");
+	const char* priorHomeValue = std::getenv(DataHomeEnv);
 	const bool hadHome = priorHomeValue != nullptr;
 	const std::string priorHome = hadHome ? priorHomeValue : "";
 	const char* priorXdgDataHomeValue = std::getenv("XDG_DATA_HOME");
 	const bool hadXdgDataHome = priorXdgDataHomeValue != nullptr;
 	const std::string priorXdgDataHome = hadXdgDataHome ? priorXdgDataHomeValue : "";
 
-#if MACOSX
-	const fs::path dataHome = roots.root / "Library" / "Application Support" /
-		"Harry Potter 2" / "Data";
-	const fs::path userHome = roots.root / "Library" / "Application Support" /
-		"Harry Potter 2" / "User";
-#else
-	const fs::path dataHome = roots.root / ".local" / "share" / "harry-potter-2" / "Data";
-	const fs::path userHome = roots.root / ".local" / "share" / "harry-potter-2" / "User";
-#endif
+	const fs::path dataHome = roots.root / ConventionalDataSuffix;
+	const fs::path userHome = roots.root / ConventionalUserSuffix;
 	// canonical() rejects a path that does not exist yet.
 	fs::create_directories(dataHome);
 	fs::create_directories(userHome.parent_path());
@@ -906,7 +904,7 @@ void TestBootstrapInstallsConventionalRetailRoot()
 
 	// Nothing installed: recoverable, and it must advertise where an import
 	// would land so the launcher knows what to offer.
-	::setenv("HOME", roots.root.string().c_str(), 1);
+	::setenv(DataHomeEnv, roots.root.string().c_str(), 1);
 	::unsetenv("XDG_DATA_HOME");
 	fs::current_path(neutral);
 	{
@@ -934,9 +932,9 @@ void TestBootstrapInstallsConventionalRetailRoot()
 
 	fs::current_path(previousCwd);
 	if (hadHome)
-		::setenv("HOME", priorHome.c_str(), 1);
+		::setenv(DataHomeEnv, priorHome.c_str(), 1);
 	else
-		::unsetenv("HOME");
+		::unsetenv(DataHomeEnv);
 	if (hadXdgDataHome)
 		::setenv("XDG_DATA_HOME", priorXdgDataHome.c_str(), 1);
 	else
@@ -1171,13 +1169,13 @@ void TestDataDirectoryArgumentContract()
 	TemporaryRoots roots;
 	const fs::path retail = CreateDataRoot(roots, "RetailData", "retail");
 	const fs::path prototype = CreateDataRoot(roots, "PrototypeData", "prototype");
-	const char* priorHomeValue = std::getenv("HOME");
+	const char* priorHomeValue = std::getenv(DataHomeEnv);
 	const bool hadHome = priorHomeValue != nullptr;
 	const std::string priorHome = hadHome ? priorHomeValue : "";
 	const char* priorXdgDataHomeValue = std::getenv("XDG_DATA_HOME");
 	const bool hadXdgDataHome = priorXdgDataHomeValue != nullptr;
 	const std::string priorXdgDataHome = hadXdgDataHome ? priorXdgDataHomeValue : "";
-	::setenv("HOME", roots.root.string().c_str(), 1);
+	::setenv(DataHomeEnv, roots.root.string().c_str(), 1);
 	::unsetenv("XDG_DATA_HOME");
 	Arguments arguments({"hp2", "--datadir=" + prototype.string(), "-DaTaDiR=" + retail.string(),
 		"-datadir=" + prototype.string()});
@@ -1190,9 +1188,9 @@ void TestDataDirectoryArgumentContract()
 	Expect(arguments.storage[2] == retailArgumentBefore && arguments.storage[3] == prototypeArgumentBefore,
 		"path bootstrap preserves command-line data root arguments for launcher filtering");
 	if (hadHome)
-		::setenv("HOME", priorHome.c_str(), 1);
+		::setenv(DataHomeEnv, priorHome.c_str(), 1);
 	else
-		::unsetenv("HOME");
+		::unsetenv(DataHomeEnv);
 	if (hadXdgDataHome)
 		::setenv("XDG_DATA_HOME", priorXdgDataHome.c_str(), 1);
 	else
