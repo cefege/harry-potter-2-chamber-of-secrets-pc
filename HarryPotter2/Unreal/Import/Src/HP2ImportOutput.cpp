@@ -47,7 +47,7 @@ std::map<std::string, fs::path> WalkOutput(const fs::path& output) {
         const fs::path path = it->path();
         // Keys are POSIX-style on every platform, matching asset paths; native separators
         // on Windows would make the output path set compare as unequal.
-        const auto relative = Utf8(path.lexically_relative(output).generic_u8string());
+        const auto relative = GenericUtf8(path.lexically_relative(output));
         const auto entryStatus = it->symlink_status(ec);
         if (ec) Fail("cannot stat output " + Utf8(path) + ": " + ec.message());
         if (fs::is_symlink(entryStatus))
@@ -93,7 +93,7 @@ void ValidateOutput(const fs::path& output, const std::vector<Asset>& assets,
     auto canonicalName = [&](const std::string& key, const std::string& expected,
                              const char* description) -> const fs::path& {
         const auto& path = found.at(key);
-        const auto relative = Utf8(path.lexically_relative(output).generic_u8string());
+        const auto relative = GenericUtf8(path.lexically_relative(output));
         if (relative != expected)
             Fail(std::string(description) + " has incorrect canonical case: " + relative + ", expected " + expected);
         return path;

@@ -217,8 +217,8 @@ std::vector<Asset> Plan(const Options& options, const fs::path& retailRoot, cons
     std::vector<std::string> defaultSources, defuserSources;
     if (options.profile == Profile::RetailOnly) {
         configClass = "generated_retail_native";
-        defaultSources = {"retail:" + Utf8(retailDefault.lexically_relative(retailRoot))};
-        defuserSources = {"retail:" + Utf8(retailDefuser.lexically_relative(retailRoot))};
+        defaultSources = {"retail:" + GenericUtf8(retailDefault.lexically_relative(retailRoot))};
+        defuserSources = {"retail:" + GenericUtf8(retailDefuser.lexically_relative(retailRoot))};
     } else {
         const auto prototypeSystem = Child(Path(options.prototypeRoot), "System");
         defaultTemplate = ChildFile(prototypeSystem, "Default.ini");
