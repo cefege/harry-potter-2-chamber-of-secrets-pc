@@ -97,10 +97,10 @@ def discover_ucc_binary(explicit: str | None = None) -> Path | None:
 
 def classify_data_profile(data_root: Path) -> str:
     """Map a data root to the data-none|data-prototype|data-retail taxonomy."""
-    resolved = str(data_root)
-    if resolved.endswith("out/retail-data") or "/retail-data" in resolved:
+    parts = Path(str(data_root)).parts
+    if any(part.startswith("retail-data") for part in parts):
         return "data-retail"
-    if resolved.endswith("HarryPotter2/Unreal"):
+    if parts[-2:] == ("HarryPotter2", "Unreal"):
         return "data-prototype"
     return "data-none"
 
@@ -296,13 +296,16 @@ def _finalize(
 class UccSmokeContracts(unittest.TestCase):
     """Deterministic contracts over the smoke runner using a stub binary."""
 
+    HELP_OUTPUT = 'Commands for "ucc":\nucc help <command>\n'
+    HELP_USAGE = 'Usage:\nCommands for "ucc":\n   ucc help <command>\n'
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="hp2-ucc-smoke-contracts-")
         self.root = Path(self.temporary.name)
         self.addCleanup(self.temporary.cleanup)
-        self.binary = self.root / "stub-ucc"
-        self.binary.write_text("#!/bin/sh\nexit 0\n")
-        self.binary.chmod(0o755)
+        self.script = self.root / "stub_ucc.py"
+        self.binary = self.root / ("stub-ucc.bat" if os.name == "nt" else "stub-ucc")
+        self._stub("import sys; sys.exit(0)")
         self.data_root = self.root / "Unreal"
         (self.data_root / "System").mkdir(parents=True)
         (self.data_root / "System" / "Default.ini").write_text("[Core.System]\n")
@@ -322,7 +325,17 @@ class UccSmokeContracts(unittest.TestCase):
                 os.environ[key] = value
 
     def _stub(self, body: str) -> None:
-        self.binary.write_text(f"#!/bin/sh\n{body}\n")
+        """Install a stub ucc whose behaviour is the Python snippet `body`.
+
+        POSIX runs the file directly via a shebang. Windows cannot exec '#!'
+        scripts (WinError 193), so the stub is a .bat that runs the same
+        snippet with the current interpreter.
+        """
+        if os.name == "nt":
+            self.script.write_text(body + "\n", encoding="utf-8")
+            self.binary.write_text(f'@"{sys.executable}" "{self.script}" %*\r\n')
+        else:
+            self.binary.write_text(f"#!{sys.executable}\n{body}\n", encoding="utf-8")
         self.binary.chmod(0o755)
 
     def test_missing_binary_reports_blocked_with_reason(self) -> None:
@@ -333,9 +346,7 @@ class UccSmokeContracts(unittest.TestCase):
         self.assertEqual(report["data"], {"profile": "data-none"})
 
     def test_pass_report_carries_full_schema(self) -> None:
-        self._stub(
-            'printf \'Usage:\\nCommands for "ucc":\\n   ucc help <command>\\n\''
-        )
+        self._stub(f"import sys; sys.stdout.write({self.HELP_USAGE!r})")
         report = run_ucc_help_smoke(self.binary, self.data_root)
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["schema"], 1)
@@ -347,36 +358,34 @@ class UccSmokeContracts(unittest.TestCase):
         self.assertEqual(set(report["data"]), {"profile"})
 
     def test_nonzero_exit_fails_with_exit_status_reason(self) -> None:
-        self._stub("exit 7")
+        self._stub("import sys; sys.exit(7)")
         report = run_ucc_help_smoke(self.binary, self.data_root)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["reason_code"], "ucc.exit_status")
         self.assertIn("7", report["exit_reason"])
 
     def test_failure_marker_fails_even_with_zero_exit(self) -> None:
-        self._stub('printf \'Commands for "ucc":\\nucc help <command>\\n\'; printf "Critical: bad" >&2')
+        self._stub(f"import sys; sys.stdout.write({self.HELP_OUTPUT!r}); sys.stderr.write('Critical: bad')")
         report = run_ucc_help_smoke(self.binary, self.data_root)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["reason_code"], "ucc.failure_marker")
         self.assertIn("critical", report["exit_reason"])
 
     def test_missing_stdout_marker_fails(self) -> None:
-        self._stub("printf 'nothing useful\\n'")
+        self._stub("import sys; sys.stdout.write('nothing useful\\n')")
         report = run_ucc_help_smoke(self.binary, self.data_root)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["reason_code"], "ucc.stdout_marker_missing")
 
     def test_timeout_exceeding_run_fails_with_budget_reason(self) -> None:
-        self._stub("sleep 5")
+        self._stub("import time; time.sleep(5)")
         report = run_ucc_help_smoke(self.binary, self.data_root, timeout_seconds=0.5)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["reason_code"], "ucc.timeout")
 
     def test_data_mutation_fails_with_mutation_reason(self) -> None:
-        self._stub(
-            'printf \'Commands for "ucc":\\nucc help <command>\\n\'; '
-            f"touch '{self.data_root / 'System' / 'Default.ini'}'"
-        )
+        touched = self.data_root / "System" / "Default.ini"
+        self._stub(f"import sys; from pathlib import Path; sys.stdout.write({self.HELP_OUTPUT!r}); Path({str(touched)!r}).touch()")
         report = run_ucc_help_smoke(self.binary, self.data_root)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["reason_code"], "data.mutated")
@@ -385,8 +394,9 @@ class UccSmokeContracts(unittest.TestCase):
     def test_smoke_runs_with_isolated_home_and_c_locale(self) -> None:
         observed = self.root / "observed-env"
         self._stub(
-            'printf \'Commands for "ucc":\\nucc help <command>\\n\'; '
-            'printf "%s\\n" "$HOME" "$LC_ALL" "$TZ" > \'' + str(observed) + "'"
+            "import os, sys; from pathlib import Path; "
+            f"sys.stdout.write({self.HELP_OUTPUT!r}); "
+            f"Path({str(observed)!r}).write_text('\\n'.join(os.environ[k] for k in ('HOME', 'LC_ALL', 'TZ')) + '\\n')"
         )
         report = run_ucc_help_smoke(self.binary, self.data_root)
         self.assertEqual(report["status"], "pass")
@@ -396,7 +406,7 @@ class UccSmokeContracts(unittest.TestCase):
         self.assertEqual(lines[2], "UTC")
 
     def test_artifacts_land_in_artifact_dir(self) -> None:
-        self._stub('printf \'Commands for "ucc":\\nucc help <command>\\n\'')
+        self._stub(f"import sys; sys.stdout.write({self.HELP_OUTPUT!r})")
         artifacts = self.root / "artifacts"
         report = run_ucc_help_smoke(self.binary, self.data_root, artifact_dir=artifacts)
         self.assertEqual(report["status"], "pass")
