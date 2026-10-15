@@ -41,7 +41,6 @@ namespace HP2Launcher
 {
 namespace
 {
-constexpr const char* ArchiveExtensions[] = {"zip", "tar", "tar.gz", "tgz", "tar.bz2", "tbz2", "tar.xz", "txz", "7z"};
 constexpr float ColumnWidth = 640.0f;
 constexpr float PrimaryHeight = 72.0f;
 constexpr float SecondaryHeight = 48.0f;
@@ -383,14 +382,6 @@ struct FLauncherSession::Impl
 #endif
 	}
 
-	void ChooseGameArchive()
-	{
-		dataMessage.clear();
-		std::string file;
-		std::vector<std::string> extensions(ArchiveExtensions,ArchiveExtensions+9);
-		if(HP2LauncherPlatform::PickFile(file,extensions))StartImport(file);
-	}
-
 	void StartImport(const std::string& source)
 	{
 		if (importing || source.empty()) return;
@@ -425,7 +416,10 @@ struct FLauncherSession::Impl
 		importing = false;
 		if (!importSucceeded)
 		{
-			dataMessage = importError.empty() ? "Import failed." : importError;
+			// The importer's reason is for the log; the player gets one clear sentence.
+			SDL_Log("HP2Launcher: import failed: %s", importError.empty() ? "unknown error" : importError.c_str());
+			dataMessage = "This doesn\u2019t look like the original game folder. Choose the folder the game was "
+				"installed to (it contains Maps, System and Textures), not a copy made by another tool.";
 			return;
 		}
 #if defined(__EMSCRIPTEN__)
@@ -525,7 +519,6 @@ struct FLauncherSession::Impl
 		ColoredWrapped(ColorText, "To play, choose the folder where the game is installed on this computer.");
 		Gap(8.0f);
 		if (PrimaryButton("Choose your game folder")) ChooseGameFolder();
-		if (caps.nativeFolderPicker && SecondaryButton("I have a .zip or .7z of the game instead")) ChooseGameArchive();
 		if (!dataMessage.empty()) { Gap(4.0f); ColoredWrapped(ColorWarning, dataMessage); }
 		Gap(16.0f);
 		SmallMuted("Look for the folder named \u201CHarry Potter and the Chamber of Secrets\u201D. "
@@ -712,60 +705,48 @@ struct FLauncherSession::Impl
 			else ColoredWrapped(ColorWarning, "Not installed yet.");
 			Gap(4.0f);
 			if (SecondaryButton(DataReady() ? "Import the game folder again" : "Choose your game folder")) ChooseGameFolder();
-			if (caps.nativeFolderPicker && SecondaryButton("Import from a .zip or .7z file")) ChooseGameArchive();
 		}
 		if (!dataMessage.empty()) ColoredWrapped(ColorWarning, dataMessage);
+#if !defined(__EMSCRIPTEN__)
 		Gap(8.0f);
 		if (ImGui::CollapsingHeader("Advanced")) DrawAdvancedData();
+#endif
 	}
 
-	// Developer and diagnostic controls: the prototype data profile, the
-	// active roots, and the user/log folders.
+#if !defined(__EMSCRIPTEN__)
+	// Desktop developer and diagnostic controls: the prototype data profile,
+	// the active roots, and the user/log folders.
 	void DrawAdvancedData()
 	{
 		int selected=static_cast<int>(request.dataSources.selected);
 		const char* sources[]={"Retail game data","Prototype data"};
 		ImGui::SetNextItemWidth(-220.0f);
-		if(ImGui::Combo("Data source",&selected,sources,2))
-		{
-			request.dataSources.selected=static_cast<DataSource>(selected);
-#if defined(__EMSCRIPTEN__)
-			const char* kind=selected==static_cast<int>(DataSource::Retail)?"retail":"prototype";
-			if(webStagedKind!=kind)RequestWeb(3,kind);
-#endif
-		}
+		if(ImGui::Combo("Data source",&selected,sources,2))request.dataSources.selected=static_cast<DataSource>(selected);
 		const DataSourceOption* option=FindOption(options,request.dataSources.selected);
 		if(option)
 		{
-#if !defined(__EMSCRIPTEN__)
 			ImGui::TextWrapped("Folder: %s",option->root.empty()?"(not configured)":option->root.c_str());
-#endif
 			ColoredWrapped(option->available?ColorSuccess:ColorWarning,option->available?"Available":"Unavailable");
 			if(!option->error.empty())ImGui::TextWrapped("%s",option->error.c_str());
 		}
-		if(caps.nativeFolderPicker)
+		if(caps.nativeFolderPicker&&SecondaryButton("Choose prototype folder…"))
 		{
-			if(SecondaryButton("Choose prototype folder…"))
+			std::string folder;
+			if(HP2LauncherPlatform::PickFolder(folder))
 			{
-				std::string folder;
-				if(HP2LauncherPlatform::PickFolder(folder))
-				{
-					std::string canonicalRoot,error;
-					const bool valid=ValidateHP2DataRoot(folder,canonicalRoot,error);
-					request.dataSources.prototypeRoot=valid?canonicalRoot:folder;
-					for(auto& item:options)if(item.source==DataSource::Prototype){item.root=valid?canonicalRoot:folder;item.available=valid;item.error=valid?std::string():error;}
-				}
+				std::string canonicalRoot,error;
+				const bool valid=ValidateHP2DataRoot(folder,canonicalRoot,error);
+				request.dataSources.prototypeRoot=valid?canonicalRoot:folder;
+				for(auto& item:options)if(item.source==DataSource::Prototype){item.root=valid?canonicalRoot:folder;item.available=valid;item.error=valid?std::string():error;}
 			}
 		}
-#if defined(__EMSCRIPTEN__)
-		else if(SecondaryButton("Choose prototype folder…"))RequestWeb(1,"prototype");
-#endif
 		if(caps.revealPaths)
 		{
 			if(SecondaryButton("Open user folder"))HP2LauncherPlatform::RevealPath(request.userRoot);
 			if(SecondaryButton("Show log",-1.0f,!request.logPath.empty()))HP2LauncherPlatform::RevealPath(request.logPath);
 		}
 	}
+#endif
 
 #if defined(__EMSCRIPTEN__)
 	void RequestWeb(int operation,const std::string& argument)
@@ -908,13 +889,6 @@ bool FLauncherSession::Frame()
 				}
 			}
 			else if(type==1 && s.webPendingKind=="retail" && !answer.second.empty())s.StartImport(answer.second);
-			else if(type==1 && s.webPendingKind=="prototype")
-			{
-				s.request.dataSources.prototypeRoot="/hp2data/prototype";
-				s.request.dataSources.selected=DataSource::Prototype;
-				for(auto& option:s.options)if(option.source==DataSource::Prototype){option.root="/hp2data/prototype";option.available=true;option.error.clear();}
-				const int id=NextWebRequest++;s.webStageRequest=id;s.webPendingKind="prototype";HP2WebCall(id,3,"prototype");
-			}
 			else if(type==2)
 			{
 				s.webRefreshAfterStage=true;

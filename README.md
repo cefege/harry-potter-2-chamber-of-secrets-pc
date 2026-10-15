@@ -9,7 +9,7 @@ Play the 2002 game with a modern launcher on macOS, Windows, Linux, and Raspberr
 1. Download the latest **macOS arm64 DMG** from [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest).
 2. Open the DMG and drag **HarryPotter2** into **Applications**.
 3. Open **HarryPotter2**. If macOS blocks the app, open **System Settings → Privacy & Security**, then choose **Open Anyway**.
-4. The launcher asks you to **Choose your game folder**: select the installed game folder (the folder containing `Maps`, `System`, and `Textures`). You can also choose **I have a .zip or .7z of the game instead** for a `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.7z` file.
+4. The launcher asks you to **Choose your game folder**: select the folder the game was installed to (it contains `Maps`, `System`, and `Textures`).
 5. Choose **Start playing**, or **Continue** once you have a save.
 
 The app also installs through Homebrew:
@@ -25,7 +25,7 @@ The published `v0.1.0` release currently has the macOS download only. The Window
 
 1. Download the **Windows x64 ZIP** and choose **Extract All**. Keep all extracted files together.
 2. Double-click **HarryPotter2.exe**.
-3. The launcher asks you to **Choose your game folder**: select your installed game folder, or choose **I have a .zip or .7z of the game instead** for a supported archive.
+3. The launcher asks you to **Choose your game folder**: select your installed game folder.
 4. Choose **Start playing**, or **Continue** once you have a save.
 
 This is a portable app; there is no installer. Your game data and saves are kept separately under your Windows user profile. The ZIP contains the runtime files it needs, but not the original game data.

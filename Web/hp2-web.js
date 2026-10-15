@@ -102,22 +102,20 @@
   }
 
   const NOT_GAME_FOLDER = 'This folder does not contain the game. Choose the folder that contains '
-    + 'Maps, System and Textures.';
+    + 'Maps, System and Textures (with HP2_Master.utx inside Textures).';
 
   // The browser prefixes every picked path with the chosen folder's own name,
   // and players may pick a folder above the game. The game root is the
-  // shallowest directory with a System folder in it; null when there is none.
+  // shallowest directory holding Textures/HP2_Master.utx, a file only HP2
+  // ships (HP1 also has a System folder); null when there is none.
+  const HP2_MARKER = 'textures/hp2_master.utx';
   function findGameRoot(paths) {
     let best = null;
-    let bestDepth = 0;
     for (const path of paths) {
-      const parts = path.split('/');
-      for (let i = 0; i < parts.length - 1; ++i) {
-        if (parts[i].toLowerCase() !== 'system') continue;
-        const root = parts.slice(0, i).join('/');
-        if (best === null || i < bestDepth) { best = root; bestDepth = i; }
-        break;
-      }
+      const lower = path.toLowerCase();
+      if (lower !== HP2_MARKER && !lower.endsWith('/' + HP2_MARKER)) continue;
+      const root = path.slice(0, path.length - HP2_MARKER.length).replace(/\/$/, '');
+      if (best === null || root.split('/').length < best.split('/').length) best = root;
     }
     return best;
   }
@@ -495,52 +493,43 @@
       overlayRequest = null;
       const selected = Array.from(input.files);
       try {
-        if (request.kind === 'prototype') {
-          showProgress('Reading the prototype data…');
-          await importEntries(selected.map((file) => ({
-            path: file.webkitRelativePath || file.name,
-            read: () => file.arrayBuffer(),
-          })));
-          bridgeComplete(request.id, true, '');
-        } else {
-          showProgress('Reading your game files\u2026');
-          const paths = selected.map((file) => (file.webkitRelativePath || file.name).replace(/\\/g, '/'));
-          const root = findGameRoot(paths);
-          if (root === null) throw new Error(NOT_GAME_FOLDER);
-          const prefix = root ? root + '/' : '';
-          const m = currentModule;
-          const source = '/hp2import/source';
-          removeFsTree(m.FS, source);
-          mkdirTree(m.FS, source);
-          const wanted = [];
-          for (let i = 0; i < selected.length; ++i) {
-            if (paths[i].startsWith(prefix)) wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
-          }
-          for (let i = 0; i < wanted.length; ++i) {
-            const rel = wanted[i].rel;
-            if (rel.split('/').some((part) => !part || part === '.' || part === '..')) {
-              throw new Error('Unsafe file path: ' + rel);
-            }
-            const path = source + '/' + rel;
-            mkdirTree(m.FS, path.slice(0, path.lastIndexOf('/')));
-            m.FS.writeFile(path, new Uint8Array(await wanted[i].file.arrayBuffer()));
-            if ((i & 31) === 31) {
-              showProgress('Reading your game files\u2026 ' + (i + 1) + ' of ' + wanted.length);
-              await new Promise((resolve) => setTimeout(resolve, 0));
-            }
-          }
-          bridgeComplete(request.id, true, source);
+        showProgress('Reading your game files\u2026');
+        const paths = selected.map((file) => (file.webkitRelativePath || file.name).replace(/\\/g, '/'));
+        const root = findGameRoot(paths);
+        if (root === null) throw new Error(NOT_GAME_FOLDER);
+        const prefix = root ? root + '/' : '';
+        const m = currentModule;
+        const source = '/hp2import/source';
+        removeFsTree(m.FS, source);
+        mkdirTree(m.FS, source);
+        // Only the game folder itself is read; anything beside it is ignored.
+        const wanted = [];
+        for (let i = 0; i < selected.length; ++i) {
+          if (paths[i].startsWith(prefix)) wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
         }
+        for (let i = 0; i < wanted.length; ++i) {
+          const rel = wanted[i].rel;
+          if (rel.split('/').some((part) => !part || part === '.' || part === '..')) {
+            throw new Error('Unsafe file path: ' + rel);
+          }
+          const path = source + '/' + rel;
+          mkdirTree(m.FS, path.slice(0, path.lastIndexOf('/')));
+          m.FS.writeFile(path, new Uint8Array(await wanted[i].file.arrayBuffer()));
+          if ((i & 31) === 31) {
+            showProgress('Reading your game files\u2026 ' + (i + 1) + ' of ' + wanted.length);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+        }
+        bridgeComplete(request.id, true, source);
       } catch (err) { bridgeComplete(request.id, false, err && err.message ? err.message : String(err)); }
       close();
     });
     folderOverlay = {
       show: function (request) {
         overlayRequest = request;
-        const retail = request.kind === 'retail';
-        lead.textContent = retail ? RETAIL_FOLDER_LEAD : 'Choose the folder containing your prototype game data.';
-        button.textContent = retail ? 'Choose your game folder' : 'Choose folder\u2026';
-        hints.replaceChildren(...(retail ? RETAIL_FOLDER_HINTS : []).map(function (line) {
+        lead.textContent = RETAIL_FOLDER_LEAD;
+        button.textContent = 'Choose your game folder';
+        hints.replaceChildren(...RETAIL_FOLDER_HINTS.map(function (line) {
           const paragraph = document.createElement('p');
           paragraph.className = 'hint';
           paragraph.textContent = line;
@@ -574,11 +563,13 @@
       pickFolder: function (requestId, kind) {
         if (typeof requestId === 'string') { kind = requestId; requestId = nextId(); }
         const id = requestId === undefined ? nextId() : requestId;
-        if (kind !== 'retail' && kind !== 'prototype') {
+        // Players only ever hand over the game folder: every import is copied
+        // into this browser's storage, so nothing else may be picked here.
+        if (kind !== 'retail') {
           bridgeComplete(id, false, 'Unknown data source: ' + kind);
           return;
         }
-        makeFolderOverlay().show({ id: id, kind: kind });
+        makeFolderOverlay().show({ id: id });
       },
       persistImport: function (requestId, sourcePath, destinationKind) {
         if (typeof requestId === 'string') {

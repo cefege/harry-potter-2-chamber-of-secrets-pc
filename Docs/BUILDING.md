@@ -106,8 +106,8 @@ dist/windows-x64/                   # Windows x64 portable ZIP and staged tree
 
 ## Import game data from a checkout
 
-Players import a retail folder or supported archive from the in-engine
-launcher. No Python runtime or external archive utility is needed.
+Players import their installed retail folder from the in-engine launcher. No
+Python runtime is needed. (The developer CLI below also accepts archives.)
 
 For developer workflows, build and run the native CLI:
 
@@ -143,7 +143,7 @@ open dist/macos-arm64/HarryPotter2.app
 ```
 
 In the launcher window:
-- First run → **Choose your game folder** (or a .zip/.7z archive) imports retail data
+- First run → **Choose your game folder** imports the installed retail folder
 - **Start playing** / **New game** → start a fresh campaign; **Continue** → resume the latest save
 - **Game files → Advanced** → select retail or prototype data
 

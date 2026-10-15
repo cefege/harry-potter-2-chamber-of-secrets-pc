@@ -29,11 +29,9 @@ The runtime reads data files only. It never launches the original installer or
 the old game executable.
 
 Open **HarryPotter2**. On a first run the launcher asks you to **Choose your
-game folder**: pick the installed folder, or click **I have a .zip or .7z of the
-game instead** for an archive of it:
-
-- `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`,
-  or `.7z`.
+game folder**: pick the folder the game was installed to (it contains `Maps`,
+`System` and `Textures`). Copies made by other tools are rejected; use the
+original install.
 
 The importer copies the data to:
 
@@ -45,8 +43,7 @@ and validates it. A progress bar and cancel control stay in the launcher while
 the import runs; when it completes, **Start playing** becomes available.
 
 The importer runs in-process in the launcher. It does not require Python or
-another external importer. Folder and supported archive imports use the same
-validation and can be run again safely.
+another external importer, and it can be run again safely.
 
 ## 3. Play
 

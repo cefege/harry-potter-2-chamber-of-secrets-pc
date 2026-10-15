@@ -70,38 +70,6 @@ bool PickFolder(std::string& Path)
 #endif
 }
 
-bool PickFile(std::string& Path, const std::vector<std::string>& Extensions)
-{
-#if defined(__EMSCRIPTEN__)
-	(void)Path;
-	(void)Extensions;
-	return false;
-#else
-	std::string specification;
-	for (const std::string& extension : Extensions)
-	{
-		if (extension.empty()) continue;
-		if (!specification.empty()) specification.push_back(',');
-		specification += extension;
-	}
-	const nfdu8filteritem_t filter = {"Retail game archives", specification.c_str()};
-	FNfdSession session;
-	if (!session.IsReady()) return false;
-	nfdu8char_t* selected = nullptr;
-	const nfdresult_t result = NFD_OpenDialogU8(&selected,
-		specification.empty() ? nullptr : &filter,
-		specification.empty() ? 0U : 1U, nullptr);
-	if (result == NFD_OKAY && selected)
-	{
-		Path.assign(selected);
-		NFD_FreePathU8(selected);
-		return true;
-	}
-	if (result == NFD_ERROR) SDL_Log("HP2Launcher: file picker failed: %s", NFD_GetError());
-	return false;
-#endif
-}
-
 #if !defined(__APPLE__)
 
 void RevealPath(const std::string& Path)
