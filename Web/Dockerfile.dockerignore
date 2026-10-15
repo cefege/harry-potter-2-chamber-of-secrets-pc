@@ -1,0 +1,3 @@
+*
+!dist/web-wasm64/
+!Web/Caddyfile

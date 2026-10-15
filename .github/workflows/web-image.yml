@@ -1,0 +1,91 @@
+name: web-image
+
+# Publishes ghcr.io/cefege/hp2-web:<tag>: the browser build served by Caddy at
+# / on port 8080 with the cross-origin isolation headers (Web/Dockerfile).
+# Tag pushes publish <version>; manual runs publish sha-<12>.
+#
+# The wasm is built and smoke-tested on macos-15 like the ci.yml web job:
+# headless Chrome on the Linux runners has no WebGL2 without software GL, and
+# the shell smoke needs a WebGL2 context. The image is packaged on Linux.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned emsdk
+        run: |
+          set -euo pipefail
+          tag=$(python3 -c "import json;print(next(s['tag'] for s in json.load(open('ThirdParty/sources.json'))['sources'] if s['name']=='emsdk'))")
+          git clone https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          git -C "$RUNNER_TEMP/emsdk" checkout "$tag"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$tag"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$tag"
+          echo "EMSDK=$RUNNER_TEMP/emsdk" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: source "$EMSDK/emsdk_env.sh" && cmake --preset web-wasm64
+
+      - name: Build
+        run: source "$EMSDK/emsdk_env.sh" && cmake --build --preset web-wasm64
+
+      - name: Shell smoke (data-none)
+        run: source "$EMSDK/emsdk_env.sh" && ctest --preset web-wasm64 -R web_shell_smoke --output-on-failure
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-wasm64
+          path: dist/web-wasm64
+          if-no-files-found: error
+
+  image:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-wasm64
+          path: dist/web-wasm64
+
+      - name: Image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tag_version="${GITHUB_REF_NAME#v}"
+            project_version="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt)"
+            if [ "${tag_version}" != "${project_version}" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} does not match CMakeLists.txt VERSION ${project_version}"
+              exit 1
+            fi
+            echo "tag=${tag_version}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        env:
+          IMAGE: ghcr.io/cefege/hp2-web:${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          docker build -f Web/Dockerfile -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "Pushed $IMAGE" >> "$GITHUB_STEP_SUMMARY"

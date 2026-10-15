@@ -89,7 +89,7 @@ The first launch can take a while while the Pi builds the game. A 32-bit Raspber
 
 Browser mode runs on a computer that hosts the game and sends a secure web link to your phone or tablet. **Android devices with a current Chrome or Firefox browser are the supported mobile option. iPhone and iPad browsers currently cannot run this WebAssembly build.** Check [browser support for WebAssembly Memory64](https://caniuse.com/wf-wasm-memory64) before trying another device.
 
-You need a computer to build and host the browser version. This is not a public game website or a ready-to-download mobile app.
+To play without hosting anything, open [hp2.mihaimateias.com](https://hp2.mihaimateias.com/) in a supported browser. To host it yourself, you need a computer to build and serve the browser version, as described below.
 
 ### 1. Build the browser version
 
@@ -130,6 +130,18 @@ cloudflared tunnel --url http://127.0.0.1:8080
 Open the `https://…trycloudflare.com` link printed in that terminal on the phone or tablet. Keep both terminals and the host computer running while you play. The temporary link can be opened by anyone who has it, so close the tunnel when you're done. **Do not add `--data-root`** to the server command; that option is for development and exposes files from a folder on the host.
 
 On the device, choose **Game Data** and select your extracted game-data folder when asked. The browser saves imported data and game saves in that browser's storage on that device. Archives must be extracted before browser import.
+
+Use **Save backup** in the top-right corner to download your saves and settings as a `.zip` file, and **Restore backup** to load that file again, for example after clearing browser data or on another device.
+
+### Hosting it
+
+Each release publishes a container image that serves the complete game at `/` with the required headers:
+
+```sh
+docker run -p 8080:8080 ghcr.io/cefege/hp2-web:<tag>
+```
+
+Put it behind HTTPS on a stable address. Browser saves belong to the exact origin (scheme, host and port), so changing the address later leaves players' saves behind unless they use **Save backup** / **Restore backup**.
 
 ## Troubleshooting
 

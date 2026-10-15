@@ -16,8 +16,21 @@
   const logToggle = document.getElementById('log-toggle');
   const stageEl = document.getElementById('stage');
   const fullscreenToggle = document.getElementById('fullscreen-toggle');
+  const backupSave = document.getElementById('backup-save');
+  const backupRestore = document.getElementById('backup-restore');
+  const backupInput = document.getElementById('backup-input');
   const COOP_STATUS =
     'This page must be served with COOP/COEP headers (python3 Build/serve_web.py).';
+  const MEMORY64_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 1]); // (module (memory i64 1))
+  const UNSUPPORTED_BROWSER = 'This browser cannot run the game. Use Chrome, Edge or Firefox on a computer, '
+    + 'or Chrome/Firefox on Android. iPhone and iPad are not supported.';
+  const RETAIL_FOLDER_PROMPT = [
+    'Choose your "Harry Potter and the Chamber of Secrets" game folder: the one that contains '
+      + 'the folders Maps, System, Textures, Sounds, Music and Help.',
+    "Can't find it? Search your computer for HP2_Master.utx. It is inside the Textures folder, "
+      + 'so choose the folder one level above Textures.',
+    'Your browser may say it will "upload" the files. They stay on this device; nothing is sent anywhere.',
+  ];
   let currentModule = null;
   let started = false;
   let syncInFlight = false;
@@ -210,6 +223,131 @@
     } else fs.unlink(path);
   }
 
+  // Every regular file under root as {path relative to root, data}, keeping
+  // only names for which keep(name) is true.
+  function readFsTree(fs, root, keep) {
+    const files = [];
+    function visit(directory, relative) {
+      for (const name of fs.readdir(directory)) {
+        if (name === '.' || name === '..') continue;
+        const path = directory + '/' + name;
+        const rel = relative ? relative + '/' + name : name;
+        if (fs.isDir(fs.stat(path).mode)) visit(path, rel);
+        else if (keep(name)) files.push({ path: rel, data: fs.readFile(path) });
+      }
+    }
+    visit(root, '');
+    return files;
+  }
+
+  // Store-only (method 0) zip, enough for save backups without a library.
+  const CRC32_TABLE = (function () {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; ++n) {
+      let c = n;
+      for (let k = 0; k < 8; ++k) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      table[n] = c >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; ++i) crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  const ZIP_LOCAL = 0x04034b50;
+  const ZIP_CENTRAL = 0x02014b50;
+  const ZIP_END = 0x06054b50;
+  const ZIP_UTF8 = 0x0800;
+  const NOT_A_BACKUP = 'This file is not a Harry Potter 2 save backup.';
+
+  function buildStoredZip(entries) {
+    const encoder = new TextEncoder();
+    const now = new Date();
+    const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    const records = [];
+    const directory = [];
+    let offset = 0;
+    for (const entry of entries) {
+      const name = encoder.encode(entry.path);
+      const crc = crc32(entry.data);
+      const size = entry.data.length;
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, ZIP_LOCAL, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, ZIP_UTF8, true);
+      local.setUint16(10, dosTime, true);
+      local.setUint16(12, dosDate, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, size, true);
+      local.setUint32(22, size, true);
+      local.setUint16(26, name.length, true);
+      records.push(local, name, entry.data);
+      const central = new DataView(new ArrayBuffer(46));
+      central.setUint32(0, ZIP_CENTRAL, true);
+      central.setUint16(4, 20, true);
+      central.setUint16(6, 20, true);
+      central.setUint16(8, ZIP_UTF8, true);
+      central.setUint16(12, dosTime, true);
+      central.setUint16(14, dosDate, true);
+      central.setUint32(16, crc, true);
+      central.setUint32(20, size, true);
+      central.setUint32(24, size, true);
+      central.setUint16(28, name.length, true);
+      central.setUint32(42, offset, true);
+      directory.push(central, name);
+      offset += 30 + name.length + size;
+    }
+    const directorySize = directory.reduce((sum, part) => sum + part.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, ZIP_END, true);
+    end.setUint16(8, entries.length, true);
+    end.setUint16(10, entries.length, true);
+    end.setUint32(12, directorySize, true);
+    end.setUint32(16, offset, true);
+    return new Blob(records.concat(directory, [end]), { type: 'application/zip' });
+  }
+
+  function readStoredZip(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const view = new DataView(buffer);
+    const invalid = () => new Error(NOT_A_BACKUP);
+    let end = -1;
+    for (let i = bytes.length - 22; i >= 0 && i >= bytes.length - 65557; --i) {
+      if (view.getUint32(i, true) === ZIP_END) { end = i; break; }
+    }
+    if (end < 0) throw invalid();
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    const entries = [];
+    try {
+      const count = view.getUint16(end + 10, true);
+      let cursor = view.getUint32(end + 16, true);
+      for (let i = 0; i < count; ++i) {
+        if (view.getUint32(cursor, true) !== ZIP_CENTRAL) throw invalid();
+        const flags = view.getUint16(cursor + 8, true);
+        const method = view.getUint16(cursor + 10, true);
+        const crc = view.getUint32(cursor + 16, true);
+        const size = view.getUint32(cursor + 20, true);
+        const nameLength = view.getUint16(cursor + 28, true);
+        const localOffset = view.getUint32(cursor + 42, true);
+        if (method !== 0 || (flags & 1) || size !== view.getUint32(cursor + 24, true)) throw invalid();
+        const path = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
+        if (view.getUint32(localOffset, true) !== ZIP_LOCAL) throw invalid();
+        const start = localOffset + 30 + view.getUint16(localOffset + 26, true)
+          + view.getUint16(localOffset + 28, true);
+        if (start + size > bytes.length) throw invalid();
+        const data = bytes.slice(start, start + size);
+        if (crc32(data) !== crc) throw invalid();
+        entries.push({ path: path, data: data });
+        cursor += 46 + nameLength + view.getUint16(cursor + 30, true) + view.getUint16(cursor + 32, true);
+      }
+    } catch (err) { throw invalid(); }
+    return entries;
+  }
+
   async function copyOpfsTreeToFs(kind, m) {
     const opfs = await navigator.storage.getDirectory();
     const source = await opfs.getDirectoryHandle(kind);
@@ -229,19 +367,7 @@
   }
 
   async function copyFsTreeToOpfs(m, sourcePath, kind) {
-    const fs = m.FS;
-    const files = [];
-    function visit(directory, relative) {
-      for (const name of fs.readdir(directory)) {
-        if (name === '.' || name === '..') continue;
-        const path = directory + '/' + name;
-        const rel = relative ? relative + '/' + name : name;
-        const stat = fs.stat(path);
-        if (fs.isDir(stat.mode)) visit(path, rel);
-        else files.push({ path: rel, data: fs.readFile(path) });
-      }
-    }
-    visit(sourcePath, '');
+    const files = readFsTree(m.FS, sourcePath, () => true);
     const opfs = await navigator.storage.getDirectory();
     await clearOpfsDirectory(opfs, kind);
     const destination = await opfs.getDirectoryHandle(kind, { create: true });
@@ -281,7 +407,7 @@
     const overlay = document.createElement('div');
     overlay.id = 'hp2-folder-overlay';
     overlay.hidden = true;
-    const message = document.createElement('p');
+    const message = document.createElement('div');
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = 'Choose folder…';
@@ -339,9 +465,13 @@
     folderOverlay = {
       show: function (request) {
         overlayRequest = request;
-        message.textContent = request.kind === 'prototype'
-          ? 'Choose the folder containing your prototype game data.'
-          : 'Choose the folder containing your retail game files.';
+        const lines = request.kind === 'prototype'
+          ? ['Choose the folder containing your prototype game data.'] : RETAIL_FOLDER_PROMPT;
+        message.replaceChildren(...lines.map(function (line) {
+          const paragraph = document.createElement('p');
+          paragraph.textContent = line;
+          return paragraph;
+        }));
         overlay.hidden = false;
         button.focus();
       },
@@ -514,6 +644,76 @@
   canvas.addEventListener('keydown', resumeAudioContexts);
   logToggle.addEventListener('click', function () { logEl.classList.toggle('open'); });
 
+  // Save backup / Restore backup: the user tree under USER_ROOT (saves,
+  // settings, Launcher.ini) as a store-only zip, so progress can outlive
+  // cleared site data or move to another computer.
+  const BACKUP_MANIFEST = 'hp2-saves.json';
+  const GAME_LOADING = 'The game is still loading. Try again in a moment.';
+  backupSave.addEventListener('click', function () {
+    if (!currentModule) { setStatus(GAME_LOADING); return; }
+    try {
+      const entries = readFsTree(currentModule.FS, USER_ROOT,
+        (name) => !name.toLowerCase().endsWith('.log'));
+      const manifest = { format: 1, exportedAt: new Date().toISOString(), origin: location.host };
+      entries.push({ path: BACKUP_MANIFEST, data: new TextEncoder().encode(JSON.stringify(manifest)) });
+      const now = new Date();
+      const day = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-'
+        + String(now.getDate()).padStart(2, '0');
+      const url = URL.createObjectURL(buildStoredZip(entries));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'hp2-saves-' + day + '.zip';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      setStatus('Backup saved to your Downloads folder. Keep it somewhere safe.');
+    } catch (err) { setStatus('Saving the backup failed: ' + err); }
+  });
+  backupRestore.addEventListener('click', function () {
+    if (!currentModule) { setStatus(GAME_LOADING); return; }
+    backupInput.click();
+  });
+  backupInput.addEventListener('change', async function () {
+    const file = backupInput.files && backupInput.files[0];
+    if (!file) return;
+    try {
+      if (!currentModule) throw new Error(GAME_LOADING);
+      const entries = readStoredZip(await file.arrayBuffer());
+      const manifest = entries.find((entry) => entry.path === BACKUP_MANIFEST);
+      let format = null;
+      try { format = manifest && JSON.parse(new TextDecoder().decode(manifest.data)).format; }
+      catch (err) { format = null; }
+      if (format !== 1) throw new Error(NOT_A_BACKUP);
+      for (const entry of entries) {
+        if (entry.path.indexOf('\\') >= 0 || entry.path.startsWith('/')
+          || entry.path.split('/').some((part) => !part || part === '.' || part === '..')) {
+          throw new Error(NOT_A_BACKUP);
+        }
+      }
+      if (!confirm('Restoring replaces the progress stored in this browser with the backup. Continue?')) return;
+      const fs = currentModule.FS;
+      // USER_ROOT itself is the IDBFS mount point, so only its children go.
+      for (const name of fs.readdir(USER_ROOT)) {
+        if (name !== '.' && name !== '..') removeFsTree(fs, USER_ROOT + '/' + name);
+      }
+      for (const entry of entries) {
+        if (entry.path === BACKUP_MANIFEST) continue;
+        const path = USER_ROOT + '/' + entry.path;
+        mkdirTree(fs, path.slice(0, path.lastIndexOf('/')));
+        fs.writeFile(path, entry.data);
+      }
+      await new Promise(function (resolve, reject) {
+        fs.syncfs(false, function (err) { if (err) reject(err); else resolve(); });
+      });
+      location.reload();
+    } catch (err) {
+      setStatus('Restoring failed: ' + (err && err.message ? err.message : err));
+    } finally {
+      backupInput.value = '';
+    }
+  });
+
   const FONT_DIR = '/hp2fonts';
   const FONT_FILES = ['LiberationSans-Regular.ttf', 'LiberationSans-Bold.ttf',
     'LiberationMono-Regular.ttf', 'NotoSansSC-Regular.otf'];
@@ -562,6 +762,11 @@
     if (!self.crossOriginIsolated) {
       setStatus(COOP_STATUS);
       reportSmoke('failed', COOP_STATUS);
+      return;
+    }
+    if (!WebAssembly.validate(MEMORY64_PROBE)) {
+      setStatus(UNSUPPORTED_BROWSER);
+      reportSmoke('failed', 'no wasm memory64');
       return;
     }
     if (!navigator.storage || !('getDirectory' in navigator.storage)) {

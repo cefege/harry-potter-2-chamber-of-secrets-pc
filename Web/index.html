@@ -13,11 +13,10 @@
   #status { flex: none; min-height: 28px; padding: 5px 10px; color: var(--accent); }
   #stage { display: flex; flex: 1; min-height: 0; position: relative; }
   #canvas { display: block; flex: 1; min-height: 0; width: 100%; background: #000; outline: none; }
-  .corner { position: absolute; top: 8px; width: auto; min-height: 0; padding: 6px 12px;
+  #toolbar { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 3; }
+  .corner { width: auto; min-height: 0; padding: 6px 12px;
     border: 1px solid var(--line); border-radius: 6px; background: rgba(19,20,28,.85);
     color: #c0caf5; z-index: 3; }
-  #fullscreen-toggle { right: 8px; }
-  #log-toggle { right: 52px; }
   #log { display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 40%;
     margin: 0; padding: 10px; overflow: auto; z-index: 2; background: #0a0a0a;
     border-top: 1px solid var(--line); color: #8a8; font: 11px/1.35 monospace; white-space: pre-wrap; }
@@ -34,8 +33,13 @@
 <body>
 <div id="status" role="status" aria-live="polite">Starting Harry Potter 2…</div>
 <div id="stage">
-  <button id="fullscreen-toggle" class="corner" title="Full screen (F)">⤢</button>
-  <button id="log-toggle" class="corner" type="button">Log</button>
+  <div id="toolbar">
+    <button id="backup-save" class="corner" type="button">Save backup</button>
+    <button id="backup-restore" class="corner" type="button">Restore backup</button>
+    <button id="log-toggle" class="corner" type="button">Log</button>
+    <button id="fullscreen-toggle" class="corner" title="Full screen (F)">⤢</button>
+  </div>
+  <input type="file" id="backup-input" accept=".zip,application/zip" hidden>
   <canvas id="canvas" tabindex="-1" oncontextmenu="return false;"></canvas>
   <pre id="log"></pre>
 </div>
