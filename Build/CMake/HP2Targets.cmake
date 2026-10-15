@@ -264,6 +264,7 @@ set(HP2_IMPORT_SOURCES
     "${HP2_IMPORT_ROOT}/Src/HP2ImportManifest.cpp"
     "${HP2_IMPORT_ROOT}/Src/HP2ImportOutput.cpp"
     "${HP2_IMPORT_ROOT}/Src/HP2ImportIni.cpp"
+    "${HP2_IMPORT_ROOT}/Src/HP2ImportInstaller.cpp"
 )
 if(NOT EMSCRIPTEN)
     list(APPEND HP2_IMPORT_SOURCES "${HP2_IMPORT_ROOT}/Src/HP2ImportArchive.cpp")
@@ -272,7 +273,7 @@ add_library(hp2_import_core STATIC ${HP2_IMPORT_SOURCES})
 target_include_directories(hp2_import_core PUBLIC "${HP2_IMPORT_ROOT}/Inc"
     PRIVATE "${HP2_IMPORT_ROOT}/Src" "${HP2_UNREAL_ROOT}/Core/Inc")
 target_compile_features(hp2_import_core PUBLIC cxx_std_17)
-target_link_libraries(hp2_import_core PUBLIC hp2_compile_policy PRIVATE utf8proc::utf8proc)
+target_link_libraries(hp2_import_core PUBLIC hp2_compile_policy PRIVATE utf8proc::utf8proc hp2_unshield)
 if(WIN32)
     target_link_libraries(hp2_import_core PUBLIC bcrypt)
 endif()
@@ -454,6 +455,14 @@ hp2_add_executable(hp2_launcher_tests
 )
 target_compile_definitions(hp2_launcher_tests PRIVATE HP2_LAUNCHER_TESTING=1)
 target_link_libraries(hp2_launcher_tests PRIVATE hp2_core hp2_import_core)
+
+# Installer disc routing: a pure function of the importer, so the test links
+# only the importer and reaches its internal header directly.
+hp2_add_executable(hp2_installer_routing_tests
+    ${HP2_INSTALLER_ROUTING_TEST_SOURCE}
+)
+target_include_directories(hp2_installer_routing_tests PRIVATE "${HP2_IMPORT_ROOT}/Src")
+target_link_libraries(hp2_installer_routing_tests PRIVATE hp2_import_core utf8proc::utf8proc)
 
 # Data-root identity contracts: the two-mode bootstrap rule and the structured
 # overlay rejection reason codes (data.manifest_missing, data.hash_mismatch,
@@ -790,6 +799,7 @@ if(HP2_TEST_DATA_PRESENT)
 endif()
 hp2_add_behavior_test(dxt1_codec hp2_dxt1_tests)
 hp2_add_behavior_test(eaxa_decoder hp2_eaxa_tests)
+hp2_add_behavior_test(installer_routing hp2_installer_routing_tests)
 hp2_add_behavior_test(replay_roundtrip hp2_replay_roundtrip_tests)
 hp2_add_behavior_test(config_ini_parse_semantics hp2_config_ini_tests
     --test=parse_semantics
@@ -1026,7 +1036,7 @@ set_tests_properties(dxt1_codec eaxa_decoder PROPERTIES DEPENDS abi_widths)
 # data-profile label (data-none|data-prototype|data-retail). Smoke tests keep
 # the labels assigned in the smoke block above.
 set_tests_properties(abi_widths render_clip projection_fov command_line_load
-    compact_index fstring_archive dxt1_codec eaxa_decoder
+    compact_index fstring_archive dxt1_codec eaxa_decoder installer_routing
     native_launcher_contract game_test_contract repair_save_contract
     PROPERTIES LABELS "fast;data-none"
 )

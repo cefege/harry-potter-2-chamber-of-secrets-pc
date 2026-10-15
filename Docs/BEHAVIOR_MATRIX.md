@@ -81,6 +81,7 @@ partition the suite.
 | `input_release_all` | data-prototype | integration | `Tests/InputContractTests.cpp` |
 | `input_script_contract` | data-none | fast | `Tests/InputScriptSmoke.py` |
 | `input_script_smoke` | data-prototype | integration | `Tests/InputScriptSmoke.py` |
+| `installer_routing` | data-none | fast | `Tests/InstallerRoutingTests.cpp` |
 | `localization_contract` | data-prototype | integration | `Tests/LocalizationTests.py` |
 | `matrix_compare_contract` | data-none | fast | `Tests/MatrixCompareTests.py` |
 | `mouse_capture_policy` | data-prototype | integration | `Tests/InputContractTests.cpp` |

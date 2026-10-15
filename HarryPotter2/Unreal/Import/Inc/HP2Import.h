@@ -16,6 +16,10 @@ struct Options {
     Profile profile = Profile::Safe;
     LinkMode linkMode = LinkMode::Auto;
     bool checkOnly = false;
+    // retailRoot may be a game installer disc (setup/data1.hdr); it is
+    // expanded first. Set when retailRoot is disposable scratch (the browser's
+    // copy of the disc) so its cabinets are freed as soon as they are unpacked.
+    bool consumeInstallerSource = false;
 };
 struct Progress {
     std::atomic<std::int64_t> filesDone{0}, filesTotal{0};

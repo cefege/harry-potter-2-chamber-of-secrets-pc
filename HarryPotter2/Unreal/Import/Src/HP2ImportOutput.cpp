@@ -188,7 +188,8 @@ void CommitStage(const fs::path& stage, const fs::path& output) {
 }
 
 bool RunImport(const Options& options, Progress* progress, std::string& Log, std::string& Error) {
-    fs::path archiveTemporary;
+    // Scratch space for an extracted archive and/or an expanded installer disc.
+    fs::path scratch;
     try {
         if (options.retailRoot.empty() == options.archive.empty())
             Fail("exactly one of --retail-root and --archive is required");
@@ -220,13 +221,21 @@ bool RunImport(const Options& options, Progress* progress, std::string& Log, std
             const auto archive = Path(options.archive);
             if (fs::is_symlink(archive) || !fs::is_regular_file(archive))
                 Fail("retail archive is not a regular file: " + Utf8(archive));
-            archiveTemporary = resolvedParent / (".hp2-import-archive-" + RandomHex());
-            fs::create_directory(archiveTemporary, ec);
-            if (ec) Fail("cannot create archive staging directory " + Utf8(archiveTemporary) + ": " + ec.message());
-            retail = Detail::Extract(archive, archiveTemporary);
+            scratch = resolvedParent / (".hp2-import-archive-" + RandomHex());
+            fs::create_directory(scratch, ec);
+            if (ec) Fail("cannot create archive staging directory " + Utf8(scratch) + ": " + ec.message());
+            retail = Detail::Extract(archive, scratch);
         }
 #endif
         if (retail.empty()) retail = SafeDirectory(Path(options.retailRoot), "retail root");
+        if (Detail::IsInstallerDisc(retail)) {
+            if (scratch.empty()) {
+                scratch = resolvedParent / (".hp2-import-installer-" + RandomHex());
+                fs::create_directory(scratch, ec);
+                if (ec) Fail("cannot create installer staging directory " + Utf8(scratch) + ": " + ec.message());
+            }
+            retail = Detail::ExpandInstaller(retail, scratch / "installed", progress, options.consumeInstallerSource);
+        }
         fs::path prototype;
         if (!options.prototypeRoot.empty()) prototype = SafeDirectory(Path(options.prototypeRoot), "prototype root");
         if ((!prototype.empty() && Overlap(output, prototype)) || Overlap(output, retail))
@@ -241,7 +250,7 @@ bool RunImport(const Options& options, Progress* progress, std::string& Log, std
         }
         if (options.checkOnly) {
             ValidateOutput(output, assets, manifest);
-            if (!archiveTemporary.empty()) fs::remove_all(archiveTemporary, ec);
+            if (!scratch.empty()) fs::remove_all(scratch, ec);
             Log = "Import completed successfully.\n";
             Error.clear();
             return true;
@@ -249,7 +258,7 @@ bool RunImport(const Options& options, Progress* progress, std::string& Log, std
         if (fs::exists(output) || fs::is_symlink(output)) {
             try {
                 ValidateOutput(output, assets, manifest);
-                if (!archiveTemporary.empty()) fs::remove_all(archiveTemporary, ec);
+                if (!scratch.empty()) fs::remove_all(scratch, ec);
                 Log = "Import completed successfully.\n";
                 Error.clear();
                 return true;
@@ -268,19 +277,19 @@ bool RunImport(const Options& options, Progress* progress, std::string& Log, std
             fs::remove_all(stage, ec);
             throw;
         }
-        if (!archiveTemporary.empty()) fs::remove_all(archiveTemporary, ec);
+        if (!scratch.empty()) fs::remove_all(scratch, ec);
         Log = "Import completed successfully.\n";
         Error.clear();
         return true;
     } catch (const Failure& failure) {
         std::error_code ignored;
-        if (!archiveTemporary.empty()) fs::remove_all(archiveTemporary, ignored);
+        if (!scratch.empty()) fs::remove_all(scratch, ignored);
         Error = failure.message;
         Log.clear();
         return false;
     } catch (const std::exception& exception) {
         std::error_code ignored;
-        if (!archiveTemporary.empty()) fs::remove_all(archiveTemporary, ignored);
+        if (!scratch.empty()) fs::remove_all(scratch, ignored);
         Error = exception.what();
         Log.clear();
         return false;

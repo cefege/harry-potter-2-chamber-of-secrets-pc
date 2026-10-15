@@ -199,6 +199,51 @@ if(NOT EMSCRIPTEN)
     set_property(TARGET archive_static PROPERTY INTERFACE_LINK_LIBRARIES "${_hp2_compression_links}")
 endif()
 
+# InstallShield cabinets: the game's installer CD keeps every game file in
+# setup/data1.hdr + dataN.cab. Same pinned source on every platform, built
+# from its lib/ sources only (the upstream CMakeLists wants find_package(ZLIB)
+# and builds a CLI). SOURCE_SUBDIR points at a directory with no CMakeLists so
+# FetchContent only populates.
+FetchContent_Declare(hp2_unshield
+    GIT_REPOSITORY https://github.com/twogood/unshield.git
+    GIT_TAG 51de441ba6893f11026d4671ccef9e8e2a4634fa
+    SOURCE_SUBDIR hp2-populate-only
+)
+FetchContent_MakeAvailable(hp2_unshield)
+set(_hp2_unshield_generated "${CMAKE_CURRENT_BINARY_DIR}/hp2_unshield")
+file(WRITE "${_hp2_unshield_generated}/lib/unshield_config.h"
+    "#define HAVE_INTTYPES_H 1\n#define HAVE_STDBOOL_H 1\n#define HAVE_STDINT_H 1\n"
+    "#define HAVE_STDLIB_H 1\n#define HAVE_STRING_H 1\n#define HAVE_SYS_STAT_H 1\n"
+    "#define HAVE_SYS_TYPES_H 1\n#define HAVE_UNISTD_H 1\n#define SIZE_FORMAT \"zu\"\n"
+    "#define USE_OUR_OWN_MD5 1\n#define PACKAGE \"unshield\"\n#define VERSION \"1.6.2\"\n"
+    "#define __USE_MINGW_ANSI_STDIO 1\n")
+add_library(hp2_unshield STATIC
+    "${hp2_unshield_SOURCE_DIR}/lib/component.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/converter.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/directory.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/file.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/file_group.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/helper.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/libunshield.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/log.c"
+    "${hp2_unshield_SOURCE_DIR}/lib/md5/md5c.c"
+)
+target_include_directories(hp2_unshield
+    PUBLIC "${hp2_unshield_SOURCE_DIR}/lib"
+    PRIVATE "${_hp2_unshield_generated}" "${hp2_unshield_SOURCE_DIR}")
+set_target_properties(hp2_unshield PROPERTIES C_STANDARD 99 POSITION_INDEPENDENT_CODE ON)
+# RSA's md5/global.h declares MD5Update() without parameters unless
+# PROTOTYPES=1, so file.c would pass its 64-bit length unconverted. Native
+# ABIs tolerate it; wasm-ld replaces the mismatched call with a trap.
+target_compile_definitions(hp2_unshield PRIVATE PROTOTYPES=1)
+if(EMSCRIPTEN)
+    target_compile_options(hp2_unshield PUBLIC "-sUSE_ZLIB=1")
+    target_link_options(hp2_unshield PUBLIC "-sUSE_ZLIB=1")
+else()
+    target_link_libraries(hp2_unshield PUBLIC zlibstatic)
+    target_include_directories(hp2_unshield PRIVATE "${hp2_zlib_SOURCE_DIR}" "${hp2_zlib_BINARY_DIR}")
+endif()
+
 
 # SDL2 is linked statically; its tests, examples, and install surface are not
 # part of the HP2 graph.

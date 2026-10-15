@@ -49,6 +49,23 @@ inline bool Debris(const fs::path&p){auto n=Lower(Utf8(p.filename())),e=Lower(Ut
 inline bool Prohibited(const std::string&p){auto l=Lower(p);auto ext=Lower(Utf8(Path(p).extension()));static const std::set<std::string>x={".bat",".cmd",".com",".dll",".drv",".exe",".lib",".ocx",".sys"};if(x.find(ext)!=x.end()||Debris(Path(p)))return true;std::stringstream ss(l);std::string a;while(std::getline(ss,a,'/'))if(a==".git"||a==".svn"||a=="cvs"||a=="__pycache__")return true;return false;}
 inline Asset MakeAsset(const std::string&source,const fs::path&root,const fs::path&file,std::string dest){if(fs::is_symlink(file)||!fs::is_regular_file(file))Fail("input asset is not a real regular file: "+Utf8(file));auto rel=GenericUtf8(file.lexically_relative(root));if(rel.empty()||Starts(rel,"../"))Fail("input asset escapes "+source+" root: "+Utf8(file));if(Prohibited(dest))Fail("prohibited asset selected for overlay: "+dest);auto [size,hash]=Hash(file);Asset a;a.source=source;a.sourcePath=rel;a.path=std::move(dest);a.hash=std::move(hash);a.disk=file;a.size=size;return a;}
 fs::path Extract(const fs::path&,const fs::path&);
+// Installer discs keep the game inside InstallShield cabinets (setup/data1.hdr).
+bool IsInstallerDisc(const fs::path& root);
+// Copies the installer files (setup/data1.hdr, setup/dataN.cab, setup/*.u)
+// out of a game CD image (ISO 9660) into destination/setup and returns
+// destination, which is then an installer disc.
+fs::path ExtractDiscImage(const fs::path& image, const fs::path& destination);
+// Canonical destination ("Maps/Entry.unr") for one cabinet file, or "" when
+// the file is not part of the installed game. directory is the cabinet's own
+// directory for the file ("" at the top of its group); systemGroup is true for
+// the group that carries System/Core.u; cutscenes holds the lower-case names
+// found in any cabinet directory called "cutscenes".
+std::string RouteInstallerFile(const std::string& directory, const std::string& name, bool systemGroup,
+    const std::set<std::string>& cutscenes);
+// Lays the disc's game files out as an installed game folder under
+// destination and returns that folder. consumeSource removes the cabinets
+// afterwards (the browser's scratch copy, to bound memory).
+fs::path ExpandInstaller(const fs::path& disc, const fs::path& destination, Progress* progress, bool consumeSource);
 inline fs::path Child(const fs::path&d,const std::string&w,bool required=true){std::vector<fs::path>m;std::error_code ec;for(fs::directory_iterator i(d,ec),end;i!=end&&!ec;i.increment(ec))if(Lower(Utf8(i->path().filename()))==Lower(w))m.push_back(i->path());if(ec)Fail("cannot inspect "+Utf8(d)+": "+ec.message());if(m.size()>1)Fail("ambiguous case-insensitive component '"+w+"' under "+Utf8(d));if(m.empty()){if(required)Fail("missing "+w+" directory under "+Utf8(d));return {}; }auto st=fs::symlink_status(m[0],ec);if(ec||fs::is_symlink(st)||!fs::is_directory(st))Fail("expected real directory for "+w+": "+Utf8(m[0]));return m[0];}
 inline fs::path ChildFile(const fs::path&d,const std::string&w){std::vector<fs::path>m;for(auto&i:fs::directory_iterator(d))if(Lower(Utf8(i.path().filename()))==Lower(w))m.push_back(i.path());if(m.size()!=1)Fail("expected exactly one "+w+" under "+Utf8(d)+", found "+std::to_string(m.size()));if(fs::is_symlink(m[0])||!fs::is_regular_file(m[0]))Fail("expected real config file: "+Utf8(m[0]));return m[0];}
 std::vector<Asset> Plan(const Options&,const fs::path&,const fs::path&);

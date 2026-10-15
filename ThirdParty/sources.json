@@ -205,6 +205,16 @@
       "role": "native ZIP, TAR, and 7z reader for the importer"
     },
     {
+      "name": "unshield",
+      "source_type": "git",
+      "url": "https://github.com/twogood/unshield",
+      "tag": "1.6.2",
+      "commit": "51de441ba6893f11026d4671ccef9e8e2a4634fa",
+      "license": "MIT",
+      "upstream_license_path": "LICENSE",
+      "role": "InstallShield cabinet reader for importing the game CD; built from lib/ with its bundled MD5 and PROTOTYPES=1 so the RSA MD5 functions get full prototypes (required by WebAssembly's strict call signatures)"
+    },
+    {
       "name": "Dear ImGui",
       "source_type": "git",
       "url": "https://github.com/ocornut/imgui",

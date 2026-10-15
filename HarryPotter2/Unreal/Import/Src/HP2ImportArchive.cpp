@@ -35,12 +35,13 @@ std::string ArchiveError(archive* reader) {
 
 fs::path Extract(const fs::path& file, const fs::path& destination) {
     const auto extension = Lower(Utf8(file.filename()));
+    if (Ends(extension, ".iso")) return ExtractDiscImage(file, destination);
     if (!Ends(extension, ".7z") && !Ends(extension, ".zip") &&
         !Ends(extension, ".tar") && !Ends(extension, ".tar.gz") &&
         !Ends(extension, ".tgz") && !Ends(extension, ".tar.bz2") &&
         !Ends(extension, ".tbz2") && !Ends(extension, ".tar.xz") &&
         !Ends(extension, ".txz"))
-        Fail("unsupported archive format (use ZIP, TAR, or 7z): " + Utf8(file));
+        Fail("unsupported archive format (use ZIP, TAR, 7z or the game CD's ISO): " + Utf8(file));
     archive* reader = archive_read_new();
     if (!reader) Fail("cannot read archive " + Utf8(file) + ": cannot allocate archive reader");
     archive_read_support_format_zip(reader);

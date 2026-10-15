@@ -199,6 +199,7 @@ set(HP2_CONFIG_INI_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ConfigIniTests.cpp")
 set(HP2_REPLAY_ROUNDTRIP_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ReplayRoundTripTests.cpp")
 set(HP2_SAVE_WIRE_ORACLE_SOURCE "${PROJECT_SOURCE_DIR}/Tests/SaveWireOracle.cpp")
 set(HP2_INPUT_CONTRACT_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/InputContractTests.cpp")
+set(HP2_INSTALLER_ROUTING_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/InstallerRoutingTests.cpp")
 
 # Every source below is required by the completed native test graph. Keep the
 # list explicit so HP2_REQUIRE_IMPLEMENTED_SOURCES reports a focused error at

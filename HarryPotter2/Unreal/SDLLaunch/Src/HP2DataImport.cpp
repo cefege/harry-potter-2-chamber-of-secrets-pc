@@ -30,6 +30,11 @@ bool RunRetailImport(
 	Options.output = Destination;
 	Options.profile = HP2Import::Profile::RetailOnly;
 	Options.linkMode = HP2Import::LinkMode::Copy;
+#if defined(__EMSCRIPTEN__)
+	// The browser's source is its own scratch copy (/hp2import/source); an
+	// unpacked installer disc frees its cabinets right away to bound memory.
+	Options.consumeInstallerSource = true;
+#endif
 
 	const bool IsDirectory = std::filesystem::is_directory(std::filesystem::u8path(SourcePath));
 	if (IsDirectory)
