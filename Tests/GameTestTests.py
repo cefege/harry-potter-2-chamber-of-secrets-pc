@@ -21,6 +21,20 @@ import game_test  # noqa: E402
 import smoke_maps  # noqa: E402
 
 
+def _process_alive(pid: int) -> bool:
+    """Liveness probe: os.kill(pid, 0) is POSIX-only (WinError 87 on Windows)."""
+    if os.name == "nt":
+        listing = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+        ).stdout.decode(errors="replace")
+        return any(field == str(pid) for line in listing.splitlines() for field in line.split())
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
 
 class GameTestContracts(unittest.TestCase):
     def setUp(self) -> None:
@@ -119,7 +133,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertEqual(
             command,
             [
-                "/application", f"-datadir={self.data_root}", "..\\Maps\\Entryhall_hub.unr",
+                str(Path("/application")), f"-datadir={self.data_root}", "..\\Maps\\Entryhall_hub.unr",
                 "-xopengl", "-NOFRONTEND", "-window", "-testticks=42", "-log",
             ],
         )
@@ -276,7 +290,7 @@ class GameTestContracts(unittest.TestCase):
 
     def test_supervised_command_captures_output_to_log(self) -> None:
         log_path = self.root / "logs" / "child.log"
-        command = [sys.executable, "-c", "print('controlled child output')"]
+        command = [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'controlled child output\\n')"]
         result = game_test.run_command(command, repo_root=self.root, timeout_seconds=5.0, log_path=log_path)
         self.assertTrue(result["passed"])
         self.assertEqual(result["command"], command)
@@ -302,9 +316,7 @@ class GameTestContracts(unittest.TestCase):
         worker_pid = int(child_pid_path.read_text())
         deadline = time.monotonic() + 2.0
         while True:
-            try:
-                os.kill(worker_pid, 0)
-            except ProcessLookupError:
+            if not _process_alive(worker_pid):
                 break
             if time.monotonic() >= deadline:
                 self.fail("timed-out child process group left its worker alive")
