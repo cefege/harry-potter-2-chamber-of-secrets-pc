@@ -188,7 +188,7 @@ class ImporterParity(unittest.TestCase):
         if prototype is not None:
             command.extend(("--prototype-root", str(prototype)))
         command.extend(extra)
-        return subprocess.run(command, capture_output=True, text=True, check=False)
+        return subprocess.run(command, capture_output=True, encoding="utf-8", check=False)
 
     def _assert_success(self, py: subprocess.CompletedProcess[str], cpp: subprocess.CompletedProcess[str]) -> None:
         self.assertEqual(py.returncode, cpp.returncode, f"Python stderr: {py.stderr}\nC++ stderr: {cpp.stderr}")
@@ -252,7 +252,7 @@ class ImporterParity(unittest.TestCase):
         command = ([str(self.importer)] if tool == "cpp" else [self.python, str(self.oracle)])
         command.extend(("--archive", str(archive), "--output", str(output),
                         "--profile", "retail-only", "--link-mode", "copy"))
-        return subprocess.run(command, capture_output=True, text=True, check=False)
+        return subprocess.run(command, capture_output=True, encoding="utf-8", check=False)
 
     @staticmethod
     def _normalized_error(result: subprocess.CompletedProcess[str], prefix: str) -> str:

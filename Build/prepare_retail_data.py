@@ -1785,6 +1785,11 @@ def run(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Diagnostics name retail files (e.g. Straße.unr) and are compared byte-for-byte
+    # with the C++ importer, which always writes UTF-8. Windows defaults stdio to the
+    # ANSI code page, which would turn ß into a lone 0xDF byte.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     try:
         args = parse_args(argv)
         run(args)
