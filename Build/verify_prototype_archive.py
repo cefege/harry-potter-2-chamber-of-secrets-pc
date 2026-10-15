@@ -28,7 +28,11 @@ from typing import Iterator
 
 SCHEMA_VERSION = 1
 REPORT_NAME = "prototype_archive"
-BSDTAR = "/usr/bin/bsdtar"
+BSDTAR = (
+    str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "tar.exe")
+    if sys.platform == "win32"
+    else "/usr/bin/bsdtar"
+)
 
 BAGIT_ALGORITHMS = {
     "md5": 32,
