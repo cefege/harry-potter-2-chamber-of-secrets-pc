@@ -920,7 +920,17 @@ bool Backup(const std::string& original, const std::string& bytes, mode_t mode, 
 	if (errno != ENOENT) { error = ErrorAt("Unable to inspect backup", backup); return false; }
 	StagedFile staged;
 	if (!Stage(backup, bytes, mode, staged, error)) return false;
-	if (::link(staged.temporary.c_str(), backup.c_str()) != 0)
+	// link() publishes without ever replacing an existing backup. The
+	// browser's file system has no hard links; the absence check above has
+	// already ruled out an existing backup there, so a rename publishes it.
+	const bool linked = ::link(staged.temporary.c_str(), backup.c_str()) == 0;
+	if (!linked && (errno == EMLINK || errno == EPERM || errno == ENOTSUP || errno == ENOSYS)
+		&& ::rename(staged.temporary.c_str(), backup.c_str()) == 0)
+	{
+		staged.active = false;
+		return SyncParent(staged.directory, error);
+	}
+	if (!linked)
 	{
 		if (errno == EEXIST)
 		{

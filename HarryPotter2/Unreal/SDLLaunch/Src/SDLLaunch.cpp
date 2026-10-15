@@ -453,6 +453,12 @@ void HideSplash()
 // silent: the splash is cosmetic and must never block startup.
 void ShowSplash( const TCHAR* Filename )
 {
+#if defined(__EMSCRIPTEN__)
+	// The browser has a single canvas: a splash "window" is that canvas, and
+	// destroying it once the game window exists shrinks the game's canvas to
+	// 0x0, leaving the game drawing into nothing.
+	(void)Filename;
+#else
 	TArray<BYTE> SplashData;
 	if( !appLoadFileToArray( SplashData, Filename ) || SplashData.Num() == 0 )
 		return;
@@ -486,6 +492,7 @@ void ShowSplash( const TCHAR* Filename )
 	SDL_RenderClear( SplashRenderer );
 	SDL_RenderCopy( SplashRenderer, SplashTexture, NULL, NULL );
 	SDL_RenderPresent( SplashRenderer );
+#endif
 }
 
 /*-----------------------------------------------------------------------------
@@ -5577,25 +5584,28 @@ struct FBrowserSession
 	std::unique_ptr<ActorTransitionLedger> ActorTransitionReporter;
 	std::unique_ptr<CreatureGeneratorTraceReporter> CreatureGeneratorTrace;
 	std::unique_ptr<GlobalTickTraceReporter> GlobalTickTrace;
-	INT ExitCode;
-	UBOOL Finished;
+	// Every field starts defined: the session is heap-allocated after the
+	// launcher has run, so reused memory would otherwise leave Finished set and
+	// end the game on its first frame.
+	INT ExitCode = 0;
+	UBOOL Finished = 0;
 	// Frame pacing, owned by the frame callback below. The browser build
 	// cannot use the native MainLoopFrameCap: appSleep would block the page's
 	// main thread, which is also what serves input and presents frames.
-	DOUBLE FrameStartMs;	// emscripten_get_now() at the previous tick's start
-	INT TimingMode;			// timing this code installed last
-	INT TimingValue;
-	UBOOL VSync;			// display pacing asked for (UseVSync On/Adaptive)
+	DOUBLE FrameStartMs = 0.0;	// emscripten_get_now() at the previous tick's start
+	INT TimingMode = 0;			// timing this code installed last
+	INT TimingValue = 0;
+	UBOOL VSync = 0;			// display pacing asked for (UseVSync On/Adaptive)
 	// One-off pacing trace: when the next tick was due, when it actually ran,
 	// and how long the one before it took. Printed once the loop has settled
 	// and then removed; it exists to tell an early gate apart from a browser
 	// that hands the callback back late.
-	DOUBLE DueMs;			// when this tick should have started
-	DOUBLE AdmitLateMs;		// admitted - due, accumulated
-	DOUBLE AdmitEarlyMs;	// due - admitted, accumulated
-	DOUBLE TickCostMs;		// cost of the previous tick
-	INT LateSamples;
-	INT EarlySamples;
+	DOUBLE DueMs = 0.0;			// when this tick should have started
+	DOUBLE AdmitLateMs = 0.0;	// admitted - due, accumulated
+	DOUBLE AdmitEarlyMs = 0.0;	// due - admitted, accumulated
+	DOUBLE TickCostMs = 0.0;	// cost of the previous tick
+	INT LateSamples = 0;
+	INT EarlySamples = 0;
 };
 
 #if defined(__EMSCRIPTEN__)
@@ -5744,6 +5754,7 @@ static void HP2BrowserFrame( void* Arg )
 		}
 		else
 		{
+			debugf( TEXT("Browser main loop stopping (running=%i, exit requested=%i)."), GIsRunning ? 1 : 0, GIsRequestingExit ? 1 : 0 );
 			MainLoopEnd( Session->Loop );
 			ClearTraceReporterGlobals();
 			CleanUpOnExit( Engine );

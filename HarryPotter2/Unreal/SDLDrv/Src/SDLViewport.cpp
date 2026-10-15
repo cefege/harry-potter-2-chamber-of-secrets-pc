@@ -13,6 +13,24 @@
 	#include <sys/wait.h>
 	#include <unistd.h>
 #endif
+#if defined(__EMSCRIPTEN__)
+	#include <emscripten/html5.h>
+
+// The page lays the canvas out with CSS. The game renders at that size so the
+// engine's viewport, the canvas buffer and SDL always agree; a configured
+// resolution cannot resize a web page, and honouring it while the browser
+// reports the CSS size left the scene drawn offset and cropped.
+static void BrowserCanvasSize( INT& Width, INT& Height )
+{
+	double CssWidth = 0.0, CssHeight = 0.0;
+	if( emscripten_get_element_css_size( "#canvas", &CssWidth, &CssHeight ) == EMSCRIPTEN_RESULT_SUCCESS
+		&& CssWidth >= 1.0 && CssHeight >= 1.0 )
+	{
+		Width = (INT)CssWidth;
+		Height = (INT)CssHeight;
+	}
+}
+#endif
 
 /*-----------------------------------------------------------------------------
 	Static registration.
@@ -184,6 +202,9 @@ UBOOL USDLViewport::ResizeViewport( DWORD BlitType, INT NewX, INT NewY, INT NewC
 		SizeX = NewX;
 	if( NewY != INDEX_NONE )
 		SizeY = NewY;
+#if defined(__EMSCRIPTEN__)
+	BrowserCanvasSize( SizeX, SizeY );
+#endif
 	if( NewColorBytes != INDEX_NONE )
 		ColorBytes = Clamp( NewColorBytes, 2, 4 );
 
@@ -253,8 +274,11 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 	}
 
 	(void)ParentHandle;
-	const INT Width  = NewX != INDEX_NONE ? NewX : (OpenX != INDEX_NONE ? OpenX : C->WindowedViewportX);
-	const INT Height = NewY != INDEX_NONE ? NewY : (OpenY != INDEX_NONE ? OpenY : C->WindowedViewportY);
+	INT Width  = NewX != INDEX_NONE ? NewX : (OpenX != INDEX_NONE ? OpenX : C->WindowedViewportX);
+	INT Height = NewY != INDEX_NONE ? NewY : (OpenY != INDEX_NONE ? OpenY : C->WindowedViewportY);
+#if defined(__EMSCRIPTEN__)
+	BrowserCanvasSize( Width, Height );
+#endif
 
 	if( !SdlWindow )
 	{
@@ -281,6 +305,13 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 		DWORD Flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (Temporary ? SDL_WINDOW_HIDDEN : 0);
 		if( C->BorderlessWindow )
 			Flags |= SDL_WINDOW_BORDERLESS;
+#if defined(__EMSCRIPTEN__)
+		// Like the native Retina build: the canvas buffer, SDL's drawable size
+		// and the renderer's present size are all device pixels, the viewport
+		// is CSS pixels. Without it SDL reported a device-pixel drawable over a
+		// CSS-pixel canvas on high-density screens and the frame was misplaced.
+		Flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
 		SdlWindow = SDL_CreateWindow(
 			"Harry Potter 2",
 			SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,

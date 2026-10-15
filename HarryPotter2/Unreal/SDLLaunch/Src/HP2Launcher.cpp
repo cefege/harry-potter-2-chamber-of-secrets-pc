@@ -295,6 +295,19 @@ struct FLauncherSession::Impl
 		if (rendererBackend) ImGui_ImplSDLRenderer2_Shutdown();
 		if (sdlBackend) ImGui_ImplSDL2_Shutdown();
 		if (imguiContext) ImGui::DestroyContext();
+#if defined(__EMSCRIPTEN__)
+		// The browser has one WebGL context, shared with the game that starts
+		// next. ImGui leaves the scissor test on with its last clip rectangle
+		// (the launcher's column), and the game's renderer never sets a
+		// scissor, so it would only ever draw inside that column. A clear with
+		// no clip rectangle makes SDL switch the scissor test off.
+		if (renderer)
+		{
+			SDL_RenderSetClipRect(renderer, nullptr);
+			SDL_RenderClear(renderer);
+			SDL_RenderFlush(renderer);
+		}
+#endif
 		if (renderer) SDL_DestroyRenderer(renderer);
 		if (window) SDL_DestroyWindow(window);
 		if (ownsVideo) SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -369,6 +382,8 @@ struct FLauncherSession::Impl
 		}
 		result.dataSources = request.dataSources;
 		finished = true;
+		SDL_Log("HP2Launcher: closing (%s)", action == LaunchAction::Continue ? "continue"
+			: action == LaunchAction::NewGame ? "new game" : action == LaunchAction::Quit ? "quit" : "other");
 	}
 
 	void ChooseGameFolder()
