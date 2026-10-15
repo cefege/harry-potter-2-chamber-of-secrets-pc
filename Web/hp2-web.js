@@ -119,6 +119,9 @@
     }
     return best;
   }
+  // A Windows install keeps Game.exe and its DLLs in System; the game never
+  // uses them, so they are not even read into memory.
+  const EXECUTABLE = /\.(exe|dll|sys|com|bat|cmd|ocx|drv|lib)$/i;
 
   function findDataRoot(paths) {
     const normalized = paths.map((path) => String(path).replace(/\\/g, '/'));
@@ -505,7 +508,8 @@
         // Only the game folder itself is read; anything beside it is ignored.
         const wanted = [];
         for (let i = 0; i < selected.length; ++i) {
-          if (paths[i].startsWith(prefix)) wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
+          if (!paths[i].startsWith(prefix) || EXECUTABLE.test(paths[i])) continue;
+          wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
         }
         for (let i = 0; i < wanted.length; ++i) {
           const rel = wanted[i].rel;

@@ -372,9 +372,11 @@ def collect_side(root: Path, source: str) -> dict[str, SourceAsset]:
     help_directory = find_child(root, "Help", required=False)
     assert system and maps and textures and sounds and music
 
+    # A Windows install keeps Game.exe, its DLLs and the SECDRV driver beside
+    # the packages in System. They are never selected (only .u/.int/.usa
+    # below), so they cannot reach the output; the output check also refuses
+    # any executable payload.
     for path in sorted_direct_files(system):
-        if not is_debris(path) and path.suffix.casefold() in PROHIBITED_EXTENSIONS:
-            source_asset(source, root, path, output_path("System", PurePosixPath(path.name)))
         suffix = path.suffix.casefold()
         if suffix == ".u" or suffix in {".int", ".usa"}:
             insert_asset(

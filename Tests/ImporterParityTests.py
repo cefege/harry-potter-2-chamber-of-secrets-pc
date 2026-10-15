@@ -248,6 +248,23 @@ class ImporterParity(unittest.TestCase):
                 self._assert_success(py, cpp)
                 self._assert_outputs_equal(py_out, cpp_out)
 
+    def test_windows_install_executables_are_left_behind(self) -> None:
+        # A real Windows install keeps the game's executables in System. The
+        # import must accept it and must never copy an executable out.
+        installed = self.root / "windows-install"
+        shutil.copytree(self.retail, installed)
+        for relative in ("System/Game.exe", "System/ALAudio.dll", "System/SECDRV.SYS"):
+            _write(installed, relative)
+        py_out = self.root / "windows-install-python"
+        cpp_out = self.root / "windows-install-cpp"
+        py = self._run("python", installed, py_out, "retail-only")
+        cpp = self._run("cpp", installed, cpp_out, "retail-only")
+        self._assert_success(py, cpp)
+        self._assert_outputs_equal(py_out, cpp_out)
+        leaked = [path for path in tree_bytes(cpp_out)
+                  if Path(path).suffix.lower() in {".exe", ".dll", ".sys"}]
+        self.assertEqual(leaked, [], "executables reached the import output")
+
     def _run_archive(self, tool: str, archive: Path, output: Path) -> subprocess.CompletedProcess[str]:
         command = ([str(self.importer)] if tool == "cpp" else [self.python, str(self.oracle)])
         command.extend(("--archive", str(archive), "--output", str(output),
@@ -275,11 +292,6 @@ class ImporterParity(unittest.TestCase):
         shutil.copytree(self.retail, missing_maps)
         shutil.rmtree(missing_maps / "Maps")
         self._failure_root(missing_maps, "missing-maps")
-
-        executable = self.root / "bad-executable"
-        shutil.copytree(self.retail, executable)
-        _write(executable, "System/unsafe.exe")
-        self._failure_root(executable, "bad-executable")
 
         collision = self.root / "case-collision"
         shutil.copytree(self.retail, collision)

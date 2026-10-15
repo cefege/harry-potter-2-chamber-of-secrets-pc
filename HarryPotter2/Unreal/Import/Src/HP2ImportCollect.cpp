@@ -59,9 +59,10 @@ std::map<std::string, Asset> CollectSide(const fs::path& root, const std::string
             Insert(assets, SourceAsset(source, root, file, destinationRoot + "/" + Posix(Utf8(file.lexically_relative(base)))));
         }
     };
-    for (const auto& file : Walk(system, false))
-        if (!Debris(file) && Prohibited("System/" + Posix(Utf8(file.filename()))))
-            SourceAsset(source, root, file, "System/" + Posix(Utf8(file.filename())));
+    // A Windows install keeps Game.exe, its DLLs and the SECDRV driver beside
+    // the packages in System. They are never selected (only .u/.int/.usa
+    // below), so they cannot reach the output; the output check also refuses
+    // any executable payload.
     collectTo(system, "System", false, [](const fs::path& p) { const auto e = Lower(Utf8(p.extension())); return e == ".u" || e == ".int" || e == ".usa"; });
     collectTo(maps, "Maps", true, [](const fs::path& p) { return Lower(Utf8(p.extension())) == ".unr"; });
     collectTo(textures, "Textures", false, [](const fs::path& p) { return Lower(Utf8(p.extension())) == ".utx"; });
