@@ -2,14 +2,14 @@
 
 Play the 2002 game with a modern launcher on macOS, Windows, Linux, and Raspberry Pi. A browser build is also available for compatible browsers.
 
-**You need your own copy of the original game.** This project does not include the game's maps, sounds, textures, or other copyrighted game data. The first time you launch, the game asks you to import your installed game folder. Nothing is installed from the original CD or installer.
+**You need your own copy of the original game.** This project does not include the game's maps, sounds, textures, or other copyrighted game data. The first time you launch, the game asks for your game: either the folder the game was installed to, or the game CD (the disc itself or an `.iso` image of it). The game files are read straight off the CD; the original installer never runs.
 
 ## macOS
 
 1. Download the latest **macOS arm64 DMG** from [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest).
 2. Open the DMG and drag **HarryPotter2** into **Applications**.
 3. Open **HarryPotter2**. If macOS blocks the app, open **System Settings → Privacy & Security**, then choose **Open Anyway**.
-4. The launcher asks you to **Choose your game folder**: select the folder the game was installed to (it contains `Maps`, `System`, and `Textures`).
+4. The launcher asks you to **Choose your game folder**: select the folder the game was installed to (it contains `Maps`, `System`, and `Textures`), or the game CD. If you have the CD as an `.iso` file, choose **I have the game CD as an .iso file** instead.
 5. Choose **Start playing**, or **Continue** once you have a save.
 
 The app also installs through Homebrew:
@@ -25,7 +25,7 @@ The published `v0.1.0` release currently has the macOS download only. The Window
 
 1. Download the **Windows x64 ZIP** and choose **Extract All**. Keep all extracted files together.
 2. Double-click **HarryPotter2.exe**.
-3. The launcher asks you to **Choose your game folder**: select your installed game folder.
+3. The launcher asks you to **Choose your game folder**: select your installed game folder or the game CD, or choose **I have the game CD as an .iso file**.
 4. Choose **Start playing**, or **Continue** once you have a save.
 
 This is a portable app; there is no installer. Your game data and saves are kept separately under your Windows user profile. The ZIP contains the runtime files it needs, but not the original game data.
@@ -129,7 +129,7 @@ cloudflared tunnel --url http://127.0.0.1:8080
 
 Open the `https://…trycloudflare.com` link printed in that terminal on the phone or tablet. Keep both terminals and the host computer running while you play. The temporary link can be opened by anyone who has it, so close the tunnel when you're done. **Do not add `--data-root`** to the server command; that option is for development and exposes files from a folder on the host.
 
-On the device, the page asks you to **Choose your game folder**: pick your installed (or extracted) game folder. The browser saves imported data and game saves in that browser's storage on that device. Archives must be extracted before browser import.
+On the device, the page asks you to **Choose your game folder**: pick your installed (or extracted) game folder, or choose **I have the game CD as an .iso file** and pick the `.iso`. Everything is read and unpacked inside the browser; nothing is uploaded. The browser saves imported data and game saves in that browser's storage on that device. Other archives (`.zip`, `.7z`) must be extracted before browser import.
 
 Use **Save backup** in the top-right corner to download your saves and settings as a `.zip` file, and **Restore backup** to load that file again, for example after clearing browser data or on another device.
 
@@ -145,7 +145,7 @@ Put it behind HTTPS on a stable address. Browser saves belong to the exact origi
 
 ## Troubleshooting
 
-- **The launcher says game data is missing:** select the installed game folder containing `Maps`, `System`, and `Textures`; don't select the CD drive or installer.
+- **The launcher says game data is missing:** select the installed game folder containing `Maps`, `System`, and `Textures`, the game CD, or the CD's `.iso` file. If the `.iso` is currently open as a disc on your computer, eject it first.
 - **A browser says it cannot start:** make sure you opened the HTTPS tunnel link, not the host's plain `http://` address. Use a browser that supports WebAssembly Memory64, WebGL2, and cross-origin isolation.
 - **Where are saves stored?** The desktop game keeps saves in your normal user data folder. Browser saves stay in the browser's storage on the device where you played.
 - **Need help?** Open an [issue](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/issues) and include your operating system and the steps that caused the problem. Do not upload copyrighted game files.

@@ -25,13 +25,16 @@ Installed with Homebrew? It already did this for you.
 
 ## 2. Import your game data
 
-The runtime reads data files only. It never launches the original installer or
-the old game executable.
+The runtime reads data files only. It never runs the original installer or the
+old game executable.
 
 Open **HarryPotter2**. On a first run the launcher asks you to **Choose your
 game folder**: pick the folder the game was installed to (it contains `Maps`,
-`System` and `Textures`). Copies made by other tools are rejected; use the
-original install.
+`System` and `Textures`) or the game CD itself. If you have the CD as an `.iso`
+file, choose **I have the game CD as an .iso file** and pick it; if that `.iso`
+is open as a disc on your computer, eject it first. The game files are unpacked
+straight from the CD's installer cabinets. Copies made by other tools are
+rejected; use the original install or disc.
 
 The importer copies the data to:
 

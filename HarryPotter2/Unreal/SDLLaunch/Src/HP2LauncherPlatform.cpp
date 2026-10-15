@@ -70,6 +70,28 @@ bool PickFolder(std::string& Path)
 #endif
 }
 
+bool PickDiscImage(std::string& Path)
+{
+#if defined(__EMSCRIPTEN__)
+	(void)Path;
+	return false;
+#else
+	const nfdu8filteritem_t filter = {"Game CD image", "iso"};
+	FNfdSession session;
+	if (!session.IsReady()) return false;
+	nfdu8char_t* selected = nullptr;
+	const nfdresult_t result = NFD_OpenDialogU8(&selected, &filter, 1U, nullptr);
+	if (result == NFD_OKAY && selected)
+	{
+		Path.assign(selected);
+		NFD_FreePathU8(selected);
+		return true;
+	}
+	if (result == NFD_ERROR) SDL_Log("HP2Launcher: file picker failed: %s", NFD_GetError());
+	return false;
+#endif
+}
+
 #if !defined(__APPLE__)
 
 void RevealPath(const std::string& Path)

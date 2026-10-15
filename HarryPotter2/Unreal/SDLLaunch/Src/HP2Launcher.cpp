@@ -397,6 +397,18 @@ struct FLauncherSession::Impl
 #endif
 	}
 
+	// The game CD image (.iso): the importer reads the installer from it.
+	void ChooseDiscImage()
+	{
+		dataMessage.clear();
+#if defined(__EMSCRIPTEN__)
+		RequestWeb(1,"iso");
+#else
+		std::string image;
+		if(HP2LauncherPlatform::PickDiscImage(image))StartImport(image);
+#endif
+	}
+
 	void StartImport(const std::string& source)
 	{
 		if (importing || source.empty()) return;
@@ -433,8 +445,8 @@ struct FLauncherSession::Impl
 		{
 			// The importer's reason is for the log; the player gets one clear sentence.
 			SDL_Log("HP2Launcher: import failed: %s", importError.empty() ? "unknown error" : importError.c_str());
-			dataMessage = "This doesn\u2019t look like the original game folder. Choose the folder the game was "
-				"installed to (it contains Maps, System and Textures), not a copy made by another tool.";
+			dataMessage = "This doesn\u2019t look like the original game. Choose the folder the game was installed to "
+				"(it contains Maps, System and Textures) or the game CD as an .iso file, not a copy made by another tool.";
 			return;
 		}
 #if defined(__EMSCRIPTEN__)
@@ -531,9 +543,11 @@ struct FLauncherSession::Impl
 
 	void DrawWelcome()
 	{
-		ColoredWrapped(ColorText, "To play, choose the folder where the game is installed on this computer.");
+		ColoredWrapped(ColorText, "To play, choose the folder where the game is installed on this computer, "
+			"or the game CD as an .iso file.");
 		Gap(8.0f);
 		if (PrimaryButton("Choose your game folder")) ChooseGameFolder();
+		if (SecondaryButton("I have the game CD as an .iso file")) ChooseDiscImage();
 		if (!dataMessage.empty()) { Gap(4.0f); ColoredWrapped(ColorWarning, dataMessage); }
 		Gap(16.0f);
 		SmallMuted("Look for the folder named \u201CHarry Potter and the Chamber of Secrets\u201D. "
@@ -720,6 +734,7 @@ struct FLauncherSession::Impl
 			else ColoredWrapped(ColorWarning, "Not installed yet.");
 			Gap(4.0f);
 			if (SecondaryButton(DataReady() ? "Import the game folder again" : "Choose your game folder")) ChooseGameFolder();
+			if (SecondaryButton(DataReady() ? "Import from the game CD (.iso) again" : "Use the game CD (.iso file)")) ChooseDiscImage();
 		}
 		if (!dataMessage.empty()) ColoredWrapped(ColorWarning, dataMessage);
 #if !defined(__EMSCRIPTEN__)
@@ -903,7 +918,7 @@ bool FLauncherSession::Frame()
 					s.RequestWeb(1,"retail");
 				}
 			}
-			else if(type==1 && s.webPendingKind=="retail" && !answer.second.empty())s.StartImport(answer.second);
+			else if(type==1 && (s.webPendingKind=="retail"||s.webPendingKind=="iso") && !answer.second.empty())s.StartImport(answer.second);
 			else if(type==2)
 			{
 				s.webRefreshAfterStage=true;

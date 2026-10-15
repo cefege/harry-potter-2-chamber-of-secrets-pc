@@ -24,7 +24,8 @@
   const MEMORY64_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 1]); // (module (memory i64 1))
   const UNSUPPORTED_BROWSER = 'This browser cannot run the game. Use Chrome, Edge or Firefox on a computer, '
     + 'or Chrome/Firefox on Android. iPhone and iPad are not supported.';
-  const RETAIL_FOLDER_LEAD = 'To play, choose the folder where the game is installed on this computer.';
+  const RETAIL_FOLDER_LEAD = 'To play, choose the folder where the game is installed on this computer, '
+    + 'or the game CD as an .iso file.';
   const RETAIL_FOLDER_HINTS = [
     'Look for the folder named \u201CHarry Potter and the Chamber of Secrets\u201D. '
       + 'It contains the folders Maps, System, Textures, Sounds, Music and Help.',
@@ -101,8 +102,11 @@
     return null;
   }
 
+  const IMPORT_SOURCE = '/hp2import/source';
   const NOT_GAME_FOLDER = 'This folder does not contain the game. Choose the folder that contains '
-    + 'Maps, System and Textures (with HP2_Master.utx inside Textures).';
+    + 'Maps, System and Textures (with HP2_Master.utx inside Textures), or the game CD.';
+  const NOT_GAME_DISC = 'This file is not the game CD. Choose the .iso of the Harry Potter and the '
+    + 'Chamber of Secrets PC CD (it has a setup folder with data1.hdr).';
 
   // The browser prefixes every picked path with the chosen folder's own name,
   // and players may pick a folder above the game. The game root is the
@@ -122,6 +126,89 @@
   // A Windows install keeps Game.exe and its DLLs in System; the game never
   // uses them, so they are not even read into memory.
   const EXECUTABLE = /\.(exe|dll|sys|com|bat|cmd|ocx|drv|lib)$/i;
+
+  // A game CD keeps the game inside InstallShield cabinets; the importer
+  // unpacks them. These are the only CD files it reads (setup/ only).
+  function isInstallerFile(name) { return /^(data1\.hdr|data\d+\.cab|[^/]+\.u)$/i.test(name); }
+  // A mounted game CD picked as a folder: its root holds setup/data1.hdr.
+  const DISC_MARKER = 'setup/data1.hdr';
+  function findDiscRoot(paths) {
+    let best = null;
+    for (const path of paths) {
+      const lower = path.toLowerCase();
+      if (lower !== DISC_MARKER && !lower.endsWith('/' + DISC_MARKER)) continue;
+      const root = path.slice(0, path.length - DISC_MARKER.length).replace(/\/$/, '');
+      if (best === null || root.split('/').length < best.split('/').length) best = root;
+    }
+    return best;
+  }
+
+  function megabytes(bytes) { return Math.round(bytes / 1048576) + ' MB'; }
+
+  // Writes a file or slice into the module's FS in chunks, sized once up
+  // front, so a 480 MB cabinet is never held twice in memory.
+  const WRITE_CHUNK = 16 * 1048576;
+  async function writeBlobToFs(fs, path, blob, onProgress) {
+    const stream = fs.open(path, 'w');
+    try {
+      fs.ftruncate(stream.fd, blob.size);
+      for (let offset = 0; offset < blob.size; offset += WRITE_CHUNK) {
+        const bytes = new Uint8Array(await blob.slice(offset, offset + WRITE_CHUNK).arrayBuffer());
+        fs.write(stream, bytes, 0, bytes.length, offset);
+        if (onProgress) onProgress(offset + bytes.length);
+      }
+    } finally {
+      fs.close(stream);
+    }
+  }
+
+  // Just enough ISO 9660 to find setup/'s installer files in a CD image and
+  // read them straight from the player's file, without loading the image.
+  const ISO_SECTOR = 2048;
+  async function blobBytes(blob, offset, length) {
+    if (offset < 0 || length < 0 || offset + length > blob.size) throw new Error(NOT_GAME_DISC);
+    return new Uint8Array(await blob.slice(offset, offset + length).arrayBuffer());
+  }
+  function le32(bytes, at) {
+    return (bytes[at] | bytes[at + 1] << 8 | bytes[at + 2] << 16 | bytes[at + 3] << 24) >>> 0;
+  }
+  async function isoDirectory(image, extent, size) {
+    if (size > 64 * 1048576) throw new Error(NOT_GAME_DISC);
+    const data = await blobBytes(image, extent * ISO_SECTOR, size);
+    const entries = [];
+    for (let at = 0; at < data.length;) {
+      const length = data[at];
+      if (length === 0) { at = (Math.floor(at / ISO_SECTOR) + 1) * ISO_SECTOR; continue; }
+      if (length < 34 || at + length > data.length) throw new Error(NOT_GAME_DISC);
+      const nameLength = data[at + 32];
+      if (33 + nameLength > length) throw new Error(NOT_GAME_DISC);
+      const raw = String.fromCharCode(...data.subarray(at + 33, at + 33 + nameLength));
+      const entry = { extent: le32(data, at + 2), size: le32(data, at + 10), directory: (data[at + 25] & 2) !== 0 };
+      at += length;
+      if (nameLength === 1 && (raw === '\0' || raw === '\x01')) continue;
+      entry.name = raw.replace(/;.*$/, '').replace(/\.$/, '').toLowerCase();
+      entries.push(entry);
+    }
+    return entries;
+  }
+  async function discInstallerFiles(image) {
+    // The first primary volume descriptor; copy-protected discs carry more.
+    let root = null;
+    for (let sector = 16; root === null; ++sector) {
+      const descriptor = await blobBytes(image, sector * ISO_SECTOR, ISO_SECTOR);
+      if (String.fromCharCode(...descriptor.subarray(1, 6)) !== 'CD001' || descriptor[0] === 255) {
+        throw new Error(NOT_GAME_DISC);
+      }
+      if (descriptor[0] === 1) root = { extent: le32(descriptor, 158), size: le32(descriptor, 166) };
+    }
+    const setup = (await isoDirectory(image, root.extent, root.size))
+      .find((entry) => entry.directory && entry.name === 'setup');
+    if (!setup) throw new Error(NOT_GAME_DISC);
+    const files = (await isoDirectory(image, setup.extent, setup.size))
+      .filter((entry) => !entry.directory && isInstallerFile(entry.name));
+    if (!files.some((entry) => entry.name === 'data1.hdr')) throw new Error(NOT_GAME_DISC);
+    return files.map((entry) => ({ name: entry.name, offset: entry.extent * ISO_SECTOR, size: entry.size }));
+  }
 
   function findDataRoot(paths) {
     const normalized = paths.map((path) => String(path).replace(/\\/g, '/'));
@@ -429,10 +516,11 @@
 
   function nextId() { return nextRequestId++; }
 
-  // Full-page folder prompt. For retail data this is the first thing a new
+  // Full-page game prompt. For retail data this is the first thing a new
   // player sees: the launcher opens it on its own when no game files are
   // installed. It stays up while the files are read, so there is always
-  // something on screen saying what is happening.
+  // something on screen saying what is happening. Players pick either the
+  // installed game folder (or a mounted game CD) or the game CD as an .iso.
   function makeFolderOverlay() {
     if (folderOverlay) return folderOverlay;
     const overlay = document.createElement('div');
@@ -444,13 +532,25 @@
     title.textContent = 'Harry Potter and the Chamber of Secrets';
     const lead = document.createElement('p');
     lead.className = 'lead';
+    lead.textContent = RETAIL_FOLDER_LEAD;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'primary';
+    button.textContent = 'Choose your game folder';
+    const discButton = document.createElement('button');
+    discButton.type = 'button';
+    discButton.className = 'disc';
+    discButton.textContent = 'I have the game CD as an .iso file';
     const progress = document.createElement('p');
     progress.className = 'progress';
     progress.hidden = true;
     const hints = document.createElement('div');
+    hints.replaceChildren(...RETAIL_FOLDER_HINTS.map(function (line) {
+      const paragraph = document.createElement('p');
+      paragraph.className = 'hint';
+      paragraph.textContent = line;
+      return paragraph;
+    }));
     const later = document.createElement('button');
     later.type = 'button';
     later.className = 'secondary';
@@ -460,26 +560,47 @@
     input.multiple = true;
     input.setAttribute('webkitdirectory', '');
     input.hidden = true;
-    card.append(title, lead, button, progress, hints, later);
-    overlay.append(card, input);
+    const discInput = document.createElement('input');
+    discInput.type = 'file';
+    discInput.accept = '.iso';
+    discInput.hidden = true;
+    card.append(title, lead, button, discButton, progress, hints, later);
+    overlay.append(card, input, discInput);
     document.body.appendChild(overlay);
     let overlayRequest = null;
 
     function close() {
       overlay.hidden = true;
       button.hidden = false;
+      discButton.hidden = false;
       later.hidden = false;
       progress.hidden = true;
       input.value = '';
+      discInput.value = '';
     }
     function showProgress(text) {
       button.hidden = true;
+      discButton.hidden = true;
       later.hidden = true;
       progress.hidden = false;
       progress.textContent = text;
     }
+    // Takes the pending request; null when there is none or no file was given.
+    function takeRequest(files) {
+      const request = overlayRequest;
+      if (!request || !files || files.length === 0) return null;
+      overlayRequest = null;
+      return request;
+    }
+    function freshSource() {
+      const fs = currentModule.FS;
+      removeFsTree(fs, IMPORT_SOURCE);
+      mkdirTree(fs, IMPORT_SOURCE);
+      return fs;
+    }
 
     button.addEventListener('click', function () { input.click(); });
+    discButton.addEventListener('click', function () { discInput.click(); });
     // Declining is not an error, so the launcher gets no message to show.
     later.addEventListener('click', function () {
       const request = overlayRequest;
@@ -490,61 +611,90 @@
     // Closing the browser's picker (or refusing its upload prompt) keeps this
     // page up so the player can simply try again.
     input.addEventListener('cancel', function () { input.value = ''; });
+    discInput.addEventListener('cancel', function () { discInput.value = ''; });
     input.addEventListener('change', async function () {
-      const request = overlayRequest;
-      if (!request || !input.files || input.files.length === 0) { input.value = ''; return; }
-      overlayRequest = null;
+      const request = takeRequest(input.files);
+      if (!request) { input.value = ''; return; }
       const selected = Array.from(input.files);
       try {
         showProgress('Reading your game files\u2026');
         const paths = selected.map((file) => (file.webkitRelativePath || file.name).replace(/\\/g, '/'));
         const root = findGameRoot(paths);
-        if (root === null) throw new Error(NOT_GAME_FOLDER);
-        const prefix = root ? root + '/' : '';
-        const m = currentModule;
-        const source = '/hp2import/source';
-        removeFsTree(m.FS, source);
-        mkdirTree(m.FS, source);
-        // Only the game folder itself is read; anything beside it is ignored.
+        const discRoot = root === null ? findDiscRoot(paths) : null;
+        if (root === null && discRoot === null) throw new Error(NOT_GAME_FOLDER);
+        const fs = freshSource();
+        // Only the game itself is read: the installed folder's files, or a
+        // mounted CD's installer files. Anything beside them is ignored.
         const wanted = [];
         for (let i = 0; i < selected.length; ++i) {
-          if (!paths[i].startsWith(prefix) || EXECUTABLE.test(paths[i])) continue;
-          wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
+          if (root !== null) {
+            const prefix = root ? root + '/' : '';
+            if (!paths[i].startsWith(prefix) || EXECUTABLE.test(paths[i])) continue;
+            wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
+          } else {
+            const prefix = discRoot ? discRoot + '/' : '';
+            const rel = paths[i].startsWith(prefix) ? paths[i].slice(prefix.length) : '';
+            const parts = rel.split('/');
+            if (parts.length !== 2 || parts[0].toLowerCase() !== 'setup' || !isInstallerFile(parts[1])) continue;
+            wanted.push({ file: selected[i], rel: 'setup/' + parts[1].toLowerCase() });
+          }
         }
+        const total = wanted.reduce((sum, item) => sum + item.file.size, 0);
+        let done = 0;
         for (let i = 0; i < wanted.length; ++i) {
           const rel = wanted[i].rel;
           if (rel.split('/').some((part) => !part || part === '.' || part === '..')) {
             throw new Error('Unsafe file path: ' + rel);
           }
-          const path = source + '/' + rel;
-          mkdirTree(m.FS, path.slice(0, path.lastIndexOf('/')));
-          m.FS.writeFile(path, new Uint8Array(await wanted[i].file.arrayBuffer()));
-          if ((i & 31) === 31) {
-            showProgress('Reading your game files\u2026 ' + (i + 1) + ' of ' + wanted.length);
-            await new Promise((resolve) => setTimeout(resolve, 0));
-          }
+          const path = IMPORT_SOURCE + '/' + rel;
+          mkdirTree(fs, path.slice(0, path.lastIndexOf('/')));
+          await writeBlobToFs(fs, path, wanted[i].file, function (written) {
+            showProgress('Reading your game files\u2026 ' + megabytes(done + written) + ' of ' + megabytes(total));
+          });
+          done += wanted[i].file.size;
         }
-        bridgeComplete(request.id, true, source);
+        bridgeComplete(request.id, true, IMPORT_SOURCE);
       } catch (err) { bridgeComplete(request.id, false, err && err.message ? err.message : String(err)); }
+      close();
+    });
+    discInput.addEventListener('change', async function () {
+      const request = takeRequest(discInput.files);
+      if (!request) { discInput.value = ''; return; }
+      const image = discInput.files[0];
+      try {
+        showProgress('Reading the game CD\u2026');
+        const entries = await discInstallerFiles(image);
+        const fs = freshSource();
+        mkdirTree(fs, IMPORT_SOURCE + '/setup');
+        const total = entries.reduce((sum, entry) => sum + entry.size, 0);
+        let done = 0;
+        for (const entry of entries) {
+          await writeBlobToFs(fs, IMPORT_SOURCE + '/setup/' + entry.name,
+            image.slice(entry.offset, entry.offset + entry.size), function (written) {
+              showProgress('Reading the game CD\u2026 ' + megabytes(done + written) + ' of ' + megabytes(total));
+            });
+          done += entry.size;
+        }
+        bridgeComplete(request.id, true, IMPORT_SOURCE);
+      } catch (err) {
+        // The browser refuses to read a file that changed or is held open
+        // elsewhere (typically an .iso that is also mounted as a disc).
+        const unreadable = err && (err.name === 'NotReadableError' || err.name === 'InvalidStateError');
+        bridgeComplete(request.id, false, unreadable
+          ? 'The .iso file could not be read. If it is open as a disc on this computer, eject it and try again.'
+          : (err && err.message ? err.message : String(err)));
+      }
       close();
     });
     folderOverlay = {
       show: function (request) {
         overlayRequest = request;
-        lead.textContent = RETAIL_FOLDER_LEAD;
-        button.textContent = 'Choose your game folder';
-        hints.replaceChildren(...RETAIL_FOLDER_HINTS.map(function (line) {
-          const paragraph = document.createElement('p');
-          paragraph.className = 'hint';
-          paragraph.textContent = line;
-          return paragraph;
-        }));
         close();
         overlay.hidden = false;
-        button.focus();
+        (request.iso ? discButton : button).focus();
         // Straight from a click in the launcher the browser still allows
         // opening the picker, which saves the player a second click.
-        if (navigator.userActivation && navigator.userActivation.isActive) input.click();
+        if (navigator.userActivation && navigator.userActivation.isActive) (request.iso ? discInput : input).click();
       },
     };
     return folderOverlay;
@@ -567,13 +717,13 @@
       pickFolder: function (requestId, kind) {
         if (typeof requestId === 'string') { kind = requestId; requestId = nextId(); }
         const id = requestId === undefined ? nextId() : requestId;
-        // Players only ever hand over the game folder: every import is copied
-        // into this browser's storage, so nothing else may be picked here.
-        if (kind !== 'retail') {
+        // Players only ever hand over the game: its installed folder, or the
+        // game CD as an .iso file. Everything is read inside this tab.
+        if (kind !== 'retail' && kind !== 'iso') {
           bridgeComplete(id, false, 'Unknown data source: ' + kind);
           return;
         }
-        makeFolderOverlay().show({ id: id });
+        makeFolderOverlay().show({ id: id, iso: kind === 'iso' });
       },
       persistImport: function (requestId, sourcePath, destinationKind) {
         if (typeof requestId === 'string') {
@@ -587,6 +737,9 @@
             throw new Error('Invalid import destination.');
           }
           await copyFsTreeToOpfs(currentModule, sourcePath, destinationKind);
+          // The installed game is ~470 MB of site storage; ask the browser not
+          // to evict it when the disk runs low (best effort, never blocking).
+          if (navigator.storage.persist) navigator.storage.persist().catch(function () {});
           removeFsTree(currentModule.FS, sourcePath);
           removeFsTree(currentModule.FS, '/hp2import/source');
           bridgeComplete(id, true, '');
