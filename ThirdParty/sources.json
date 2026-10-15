@@ -48,9 +48,10 @@
       "name": "OpenAL Soft",
       "source_type": "git",
       "url": "https://github.com/kcat/openal-soft",
-      "archive_url": "https://codeload.github.com/kcat/openal-soft/tar.gz/b2c48f7718ef3fcf67921a8b6534c4914e328970",
+      "archive_url": "https://codeload.github.com/kcat/openal-soft/tar.gz/b96a19cfd1705cc81b0bae78c782df1cd39966bd",
       "tag": "1.25.2",
-      "commit": "b2c48f7718ef3fcf67921a8b6534c4914e328970",
+      "commit": "b96a19cfd1705cc81b0bae78c782df1cd39966bd",
+      "upstream_version_notes": "1.25.2 plus one upstream commit, b96a19cf \"Work around a Clang 19 issue with emplacing an optional\" (chorus, distortion, fshifter, pshifter). Without it Clang 18/19 with libstdc++ 14 rejects std::optional<std::array<UpsampleParams, 4>>::emplace() and the Linux builds fail.",
       "license": "LGPL-2.0-or-later with BSD-3-Clause and PFFFT notices",
       "upstream_license_paths": [
         "COPYING",

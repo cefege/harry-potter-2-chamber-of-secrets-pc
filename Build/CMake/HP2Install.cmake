@@ -221,9 +221,10 @@ add_custom_target(hp2_linux_dist ALL
 
 elseif(WIN32)
 set(HP2_WINDOWS_DIST_DIR "${PROJECT_SOURCE_DIR}/dist/windows-x64")
-set(HP2_WINDOWS_RUNTIME_DIR "$ENV{LLVM_MINGW_ROOT}/x86_64-w64-mingw32/bin")
+string(REPLACE "\\" "/" _hp2_llvm_mingw_root "$ENV{LLVM_MINGW_ROOT}")
+set(HP2_WINDOWS_RUNTIME_DIR "${_hp2_llvm_mingw_root}/x86_64-w64-mingw32/bin")
 find_program(HP2_LLVM_OBJDUMP NAMES llvm-objdump
-    HINTS "$ENV{LLVM_MINGW_ROOT}/bin" "${HP2_WINDOWS_RUNTIME_DIR}"
+    HINTS "${_hp2_llvm_mingw_root}/bin" "${HP2_WINDOWS_RUNTIME_DIR}"
     REQUIRED
 )
 

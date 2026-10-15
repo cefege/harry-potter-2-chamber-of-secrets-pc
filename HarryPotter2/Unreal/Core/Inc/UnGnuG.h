@@ -275,8 +275,11 @@ static inline bool appVswprintfAppendInt( wchar_t* Dest, std::size_t Count, std:
 }
 // Advances Args past exactly one argument of the promoted type the pending
 // numeric conversion consumes (mirrors the single-conversion va_copy handed
-// to vswprintf above).
-static inline void appVswprintfSkipNumeric( va_list& Args, AppVswLength Length, wchar_t Conversion )
+// to vswprintf above). Args is the caller's va_list parameter: on x86-64 that
+// parameter has decayed to __va_list_tag*, elsewhere it is the list object,
+// so the type is deduced; va_arg advances the caller's state either way.
+template <typename VaList>
+static inline void appVswprintfSkipNumeric( VaList& Args, AppVswLength Length, wchar_t Conversion )
 {
 	switch( Conversion )
 	{

@@ -14,7 +14,7 @@ endif()
 if(NOT EMSCRIPTEN)
     FetchContent_Declare(hp2_openal_soft
         GIT_REPOSITORY https://github.com/kcat/openal-soft.git
-        GIT_TAG b2c48f7718ef3fcf67921a8b6534c4914e328970
+        GIT_TAG b96a19cfd1705cc81b0bae78c782df1cd39966bd
         GIT_SHALLOW FALSE
         GIT_SUBMODULES ""
     )
