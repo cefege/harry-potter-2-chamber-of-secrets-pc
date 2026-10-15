@@ -129,7 +129,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE void hp2_web_bridge_done(int requestId, int ok, 
 EM_JS(void, HP2WebCall, (int requestId, int operation, const char* argument), {
 	const api = Module.hp2Web;
 	if (!api) return;
-	const arg = UTF8ToString(argument);
+	// MEMORY64: the pointer arrives as a BigInt; UTF8ToString needs a Number.
+	const arg = UTF8ToString(Number(argument));
 	switch (operation) {
 	case 0: api.dataSourceStatus(requestId); break;
 	case 1: api.pickFolder(requestId, arg); break;
