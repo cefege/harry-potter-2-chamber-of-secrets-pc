@@ -566,6 +566,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_replay_roundtrip_tests
     hp2_save_wire_oracle
     hp2_input_contract_tests
+    hp2_installer_routing_tests
 )
 if(TARGET hp2_import)
     list(APPEND HP2_EXECUTABLE_TARGETS hp2_import)
