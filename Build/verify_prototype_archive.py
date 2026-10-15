@@ -238,7 +238,7 @@ def list_archive_members(archive: Path) -> list[str]:
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", "replace").strip().splitlines()
         message = detail[-1] if detail else f"{BSDTAR} exited {completed.returncode}"
-        raise VerificationError(f"archive listing failed: {message}")
+        raise VerificationError(f"archive listing failed with bsdtar: {message}")
     archived_files: list[str] = []
     for line in completed.stdout.decode("utf-8", "replace").splitlines():
         if not line:
