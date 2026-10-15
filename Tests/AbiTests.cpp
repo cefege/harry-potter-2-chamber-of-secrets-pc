@@ -113,11 +113,17 @@ namespace
 		if (int Result = CheckWidth("PTRINT", sizeof(PTRINT), sizeof(void*))) return Result;
 		if (int Result = CheckWidth("UPTRINT", sizeof(UPTRINT), sizeof(void*))) return Result;
 		if (int Result = CheckWidth("SIZE_T", sizeof(SIZE_T), sizeof(void*))) return Result;
+#if defined(_WIN32)
+		// Windows host TCHAR is UTF-16 (wchar_t), matching UNICHAR in width
+		// but not in type: see UnGnuG.h.
+		if (int Result = CheckWidth("TCHAR", sizeof(TCHAR), 2)) return Result;
+#else
 		if (int Result = CheckWidth("TCHAR", sizeof(TCHAR), 4)) return Result;
+#endif
 		if (!std::is_signed<INT>::value) return Fail("INT must be signed");
 		if (!std::is_signed<PTRINT>::value) return Fail("PTRINT must be signed");
 		if (std::is_signed<UPTRINT>::value) return Fail("UPTRINT must be unsigned");
-		if (sizeof(TCHAR) == sizeof(UNICHAR)) return Fail("host TCHAR must be distinct from wire UNICHAR");
+		if (std::is_same<TCHAR, UNICHAR>::value) return Fail("host TCHAR must be distinct from wire UNICHAR");
 		if (alignof(FCppPropertyProbe) != alignof(void*))
 			return Fail("non-reflected packing leaked: probe alignment expected %zu, got %zu", alignof(void*), alignof(FCppPropertyProbe));
 		if (alignof(AActor) != 4 || alignof(UClient) != alignof(void*))
@@ -128,7 +134,10 @@ namespace
 			return Fail("CPP_PROPERTY host offset expected %i, got %i", BuiltinOffset, CppOffset);
 		if (CppOffset != 8)
 			return Fail("CPP_PROPERTY pointer-aware offset expected 8, got %i", CppOffset);
-		if (offsetof(FCppPropertyProbe, HostText) != 16 || offsetof(FCppPropertyProbe, WireText) != 20)
+		// The wire field follows the host field with no padding, so its offset
+		// is the host offset plus the host TCHAR width (2 on Windows, 4 elsewhere).
+		if (offsetof(FCppPropertyProbe, HostText) != 16
+			|| offsetof(FCppPropertyProbe, WireText) != offsetof(FCppPropertyProbe, HostText) + sizeof(TCHAR))
 			return Fail("host/wire member separation changed: TCHAR offset=%zu UNICHAR offset=%zu",
 				offsetof(FCppPropertyProbe, HostText), offsetof(FCppPropertyProbe, WireText));
 		return 0;
@@ -442,6 +451,9 @@ namespace
 			static const BYTE Ansi[] = {0x04, 0x48, 0x50, 0x32, 0x00};
 			static const BYTE Utf16[] = {0x83, 0x41, 0x00, 0xa9, 0x03, 0x00, 0x00};
 			static const BYTE NonBmp[] = {0x83, 0x3d, 0xd8, 0x42, 0xde, 0x00, 0x00};
+			// U+1F642 is one host TCHAR on 32-bit-TCHAR hosts and a surrogate pair on UTF-16 hosts.
+			static const TCHAR NonBmpHost[] = TEXT("\U0001f642");
+			const INT NonBmpHostUnits = static_cast<INT>(ARRAY_COUNT(NonBmpHost)) - 1;
 			if (!Result) Result = SaveStringAndCheck("ANSI FString", TEXT("HP2"), Ansi, ARRAY_COUNT(Ansi));
 			if (!Result) Result = SaveStringAndCheck("UTF-16LE FString", TEXT("A\u03a9"), Utf16, ARRAY_COUNT(Utf16));
 			if (!Result) Result = SaveStringAndCheck("non-BMP FString", TEXT("\U0001f642"), NonBmp, ARRAY_COUNT(NonBmp));
@@ -453,8 +465,9 @@ namespace
 				Load << Value;
 				if (Load.IsError()) Result = Fail("non-BMP FString load archive error");
 				else if (Load.Tell() != ARRAY_COUNT(NonBmp)) Result = Fail("non-BMP FString consumed %i of %zu bytes", Load.Tell(), ARRAY_COUNT(NonBmp));
-				else if (Value.Len() != 1 || (*Value)[0] != static_cast<TCHAR>(0x1f642))
-					Result = Fail("non-BMP FString decode expected U+1F642 as one host TCHAR");
+				else if (Value.Len() != NonBmpHostUnits
+					|| std::memcmp(*Value, NonBmpHost, NonBmpHostUnits * sizeof(TCHAR)) != 0)
+					Result = Fail("non-BMP FString decode expected U+1F642 as host TCHAR units");
 				else
 				{
 					FFixedArchive Save;
@@ -490,15 +503,16 @@ namespace
 				  static_cast<ANSICHAR>(0xf0), static_cast<ANSICHAR>(0x9f),
 				  static_cast<ANSICHAR>(0x99), static_cast<ANSICHAR>(0x82), 0 };
 				ANSICHAR Encoded[ARRAY_COUNT(ExpectedUtf8)];
-				TCHAR Decoded[4];
+				// Sized for the widest host encoding (surrogate pairs take two units).
+				TCHAR Decoded[8];
+				static const TCHAR ExpectedHost[] = TEXT("A\u03a9\U0001f642");
 				if (!appToUtf8InPlace(Encoded, TEXT("A\u03a9\U0001f642"), ARRAY_COUNT(Encoded)))
 					Result = Fail("host TCHAR to UTF-8 conversion failed");
 				else if (std::memcmp(Encoded, ExpectedUtf8, sizeof(ExpectedUtf8)) != 0)
 					Result = Fail("host TCHAR to UTF-8 bytes differ");
 				else if (!appFromUtf8InPlace(Decoded, ExpectedUtf8, ARRAY_COUNT(Decoded)))
 					Result = Fail("UTF-8 to host TCHAR conversion failed");
-				else if (Decoded[0] != TEXT('A') || Decoded[1] != static_cast<TCHAR>(0x03a9)
-					|| Decoded[2] != static_cast<TCHAR>(0x1f642) || Decoded[3] != 0)
+				else if (std::memcmp(Decoded, ExpectedHost, sizeof(ExpectedHost)) != 0)
 					Result = Fail("UTF-8 to host TCHAR scalars differ");
 			}
 

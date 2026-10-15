@@ -1250,12 +1250,18 @@ bool EnsureDirectoryTree(const char* Directory, int Mode)
 	const std::filesystem::path Path = std::filesystem::u8path(Directory);
 	if (!Path.is_absolute())
 		return false;
-	std::filesystem::path Current;
-	for (const std::filesystem::path& Component : Path)
+	// Start at the root name and directory ("/" or "C:\"), not at the first
+	// component: on Windows that component is the bare drive name "C:", which
+	// is a drive-relative path that create_directory cannot create, so the
+	// tree was rejected even when the directories below it already existed.
+	std::filesystem::path Current = Path.root_path();
+	if (Current.empty())
+		return false;
+	for (const std::filesystem::path& Component : Path.relative_path())
 	{
-		Current /= Component;
-		if (Current.empty())
+		if (Component.empty())
 			continue;
+		Current /= Component;
 		std::error_code Ec;
 		if (std::filesystem::create_directory(Current, Ec))
 		{

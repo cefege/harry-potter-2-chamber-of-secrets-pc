@@ -2262,7 +2262,25 @@ CORE_API UBOOL appToUtf8InPlace( ANSICHAR* Dest, const TCHAR* Src, INT DestCapac
 	INT DestIndex = 0;
 	for( ; *Src; ++Src )
 	{
-		const DWORD Scalar = static_cast<DWORD>(*Src);
+		DWORD Scalar = static_cast<DWORD>(*Src);
+		if( sizeof(TCHAR)==sizeof(UNICHAR) && Scalar>=0xd800u && Scalar<=0xdbffu )
+		{
+			// A UTF-16 host encodes a supplementary scalar as a surrogate pair.
+			const DWORD Low = Src[1] ? static_cast<DWORD>(Src[1]) : 0u;
+			if( Low<0xdc00u || Low>0xdfffu )
+			{
+				Dest[0] = 0;
+				return 0;
+			}
+			++Src;
+			Scalar = 0x10000u+((Scalar-0xd800u)<<10)+(Low-0xdc00u);
+		}
+		if( Scalar>=0xd800u && Scalar<=0xdfffu )
+		{
+			// An unpaired surrogate has no UTF-8 encoding.
+			Dest[0] = 0;
+			return 0;
+		}
 		ANSICHAR Encoded[4];
 		INT EncodedLength;
 		if( Scalar<=0x7f )
@@ -2358,13 +2376,26 @@ CORE_API UBOOL appFromUtf8InPlace( TCHAR* Dest, const ANSICHAR* Src, INT DestCap
 			}
 			Scalar = (Scalar << 6) | (Next & 0x3f);
 		}
-		if( Scalar<Minimum || Scalar>0x10ffff || (Scalar>=0xd800 && Scalar<=0xdfff)
-		||	DestIndex>=DestCapacity-1 )
+		if( Scalar<Minimum || Scalar>0x10ffff || (Scalar>=0xd800 && Scalar<=0xdfff) )
 		{
 			Dest[0] = 0;
 			return 0;
 		}
-		Dest[DestIndex++] = static_cast<TCHAR>(Scalar);
+		// A UTF-16 host stores a supplementary scalar as a surrogate pair.
+		const bool Pair = sizeof(TCHAR)==sizeof(UNICHAR) && Scalar>0xffff;
+		if( DestIndex>=DestCapacity-(Pair ? 2 : 1) )
+		{
+			Dest[0] = 0;
+			return 0;
+		}
+		if( Pair )
+		{
+			const DWORD Offset = Scalar-0x10000u;
+			Dest[DestIndex++] = static_cast<TCHAR>(0xd800u+(Offset>>10));
+			Dest[DestIndex++] = static_cast<TCHAR>(0xdc00u+(Offset&0x3ffu));
+		}
+		else
+			Dest[DestIndex++] = static_cast<TCHAR>(Scalar);
 	}
 	Dest[DestIndex] = 0;
 	return 1;
