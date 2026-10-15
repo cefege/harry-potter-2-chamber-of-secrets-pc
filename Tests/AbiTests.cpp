@@ -223,6 +223,18 @@ namespace
 
 		TCHAR FileToken[1024];
 		TCHAR NativePath[1024];
+		// The path code below allocates through the overridden global
+		// operator new, which routes to GMalloc. The default MallocError
+		// refuses every request (returns NULL, then libc++ copies into it),
+		// so install a real allocator for this block and restore on exit.
+		FMallocAnsi PathAllocator;
+		PathAllocator.Init();
+		struct ScopedMalloc
+		{
+			FMalloc* Previous;
+			explicit ScopedMalloc(FMalloc* Replacement) : Previous(GMalloc) { GMalloc = Replacement; }
+			~ScopedMalloc() { GMalloc = Previous; }
+		} PathMallocScope(&PathAllocator);
 		std::random_device Random;
 		std::string Unique = "hp2-abi-";
 		for (INT Index = 0; Index < 32; ++Index)

@@ -669,10 +669,14 @@ int main()
 		const std::filesystem::path PreviousCwd = std::filesystem::current_path();
 		setenv("HOME", Home.c_str(), 1);
 
+		// Build the path before the refusing allocator is installed: u8path
+		// allocates through the overridden global operator new, which would
+		// return NULL here. Only PrepareHP2Paths runs under the refusing one.
+		const std::filesystem::path BasePath = std::filesystem::u8path(Base);
 		GMalloc = &RefusingMalloc;
 		bool DiscoveryOk = false;
 		std::error_code CwdError;
-		std::filesystem::current_path(std::filesystem::u8path(Base), CwdError);
+		std::filesystem::current_path(BasePath, CwdError);
 		if (!CwdError)
 		{
 			char* Arguments[1] = {const_cast<char*>("hp2-data-identity-tests")};
