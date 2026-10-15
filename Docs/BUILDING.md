@@ -143,9 +143,9 @@ open dist/macos-arm64/HarryPotter2.app
 ```
 
 In the launcher window:
-- **Game Data** → select retail or prototype data; import a retail folder/archive
-- **New Game** → start a fresh campaign
-- **Continue** → resume from a save
+- First run → **Choose your game folder** (or a .zip/.7z archive) imports retail data
+- **Start playing** / **New game** → start a fresh campaign; **Continue** → resume the latest save
+- **Game files → Advanced** → select retail or prototype data
 
 ## Build Presets
 

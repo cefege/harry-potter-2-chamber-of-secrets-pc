@@ -4,42 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<title>Harry Potter 2</title>
+<title>Harry Potter and the Chamber of Secrets</title>
 <style>
-  :root { color-scheme: dark; --bg: #13141c; --line: #414868; --accent: #7aa2f7; }
+  :root { color-scheme: dark; --bg: #12141c; --surface: #292e3d; --surface-hover: #383e52;
+    --text: #f0ebde; --muted: #a1a6ba; --accent: #d6a83a; --accent-hover: #ebbd4c; --on-accent: #1a1409; }
   * { box-sizing: border-box; }
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
-  body { display: flex; flex-direction: column; font: 14px/1.4 sans-serif; color: #c0caf5; }
-  #status { flex: none; min-height: 28px; padding: 5px 10px; color: var(--accent); }
+  body { display: flex; flex-direction: column; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text); }
+  button { font: inherit; cursor: pointer; }
+  #topbar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px;
+    border-bottom: 1px solid #1f2330; }
+  #status { flex: 1; min-width: 0; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #toolbar { flex: none; display: flex; gap: 6px; }
+  .tool { padding: 6px 12px; border: 0; border-radius: 8px; background: var(--surface); color: var(--text); }
+  .tool:hover { background: var(--surface-hover); }
   #stage { display: flex; flex: 1; min-height: 0; position: relative; }
   #canvas { display: block; flex: 1; min-height: 0; width: 100%; background: #000; outline: none; }
-  #toolbar { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 3; }
-  .corner { width: auto; min-height: 0; padding: 6px 12px;
-    border: 1px solid var(--line); border-radius: 6px; background: rgba(19,20,28,.85);
-    color: #c0caf5; z-index: 3; }
   #log { display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 40%;
     margin: 0; padding: 10px; overflow: auto; z-index: 2; background: #0a0a0a;
-    border-top: 1px solid var(--line); color: #8a8; font: 11px/1.35 monospace; white-space: pre-wrap; }
+    border-top: 1px solid #1f2330; color: #8a8; font: 11px/1.35 monospace; white-space: pre-wrap; }
   #log.open { display: block; }
-  #hp2-folder-overlay { position: fixed; inset: 0; z-index: 10; display: flex;
-    align-items: center; justify-content: center; flex-direction: column; gap: 16px;
-    padding: 24px; background: rgba(10, 10, 15, .94); color: #c0caf5; text-align: center; }
+  #hp2-folder-overlay { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center;
+    justify-content: center; padding: 24px; background: var(--bg); overflow: auto; }
   #hp2-folder-overlay[hidden] { display: none; }
-  #hp2-folder-overlay p { max-width: 36em; }
-  #hp2-folder-overlay button { min-height: 48px; padding: 12px 24px; font: inherit; color: inherit;
-    background: #24283b; border: 1px solid var(--accent); border-radius: 8px; }
+  #hp2-folder-overlay .card { width: 100%; max-width: 640px; }
+  #hp2-folder-overlay h1 { margin: 0 0 20px; font-size: 32px; line-height: 1.2; }
+  #hp2-folder-overlay .lead { margin: 0 0 20px; font-size: 18px; }
+  #hp2-folder-overlay .hint { margin: 0 0 10px; color: var(--muted); }
+  #hp2-folder-overlay .primary { display: block; width: 100%; min-height: 72px; margin: 0 0 20px; padding: 16px 24px;
+    border: 0; border-radius: 12px; background: var(--accent); color: var(--on-accent); font-size: 20px; font-weight: 600; }
+  #hp2-folder-overlay .primary:hover { background: var(--accent-hover); }
+  #hp2-folder-overlay .primary[hidden] { display: none; }
+  #hp2-folder-overlay .progress { margin: 0 0 20px; font-size: 18px; }
+  #hp2-folder-overlay .secondary { margin-top: 12px; padding: 10px 16px; border: 0; border-radius: 8px;
+    background: transparent; color: var(--muted); text-decoration: underline; }
 </style>
 </head>
 <body>
-<div id="status" role="status" aria-live="polite">Starting Harry Potter 2…</div>
-<div id="stage">
+<header id="topbar">
+  <div id="status" role="status" aria-live="polite">Starting Harry Potter 2…</div>
   <div id="toolbar">
-    <button id="backup-save" class="corner" type="button">Save backup</button>
-    <button id="backup-restore" class="corner" type="button">Restore backup</button>
-    <button id="log-toggle" class="corner" type="button">Log</button>
-    <button id="fullscreen-toggle" class="corner" title="Full screen (F)">⤢</button>
+    <button id="backup-save" class="tool" type="button">Save backup</button>
+    <button id="backup-restore" class="tool" type="button">Restore backup</button>
+    <button id="log-toggle" class="tool" type="button">Log</button>
+    <button id="fullscreen-toggle" class="tool" type="button" title="Full screen (F)">⤢</button>
   </div>
-  <input type="file" id="backup-input" accept=".zip,application/zip" hidden>
+</header>
+<input type="file" id="backup-input" accept=".zip,application/zip" hidden>
+<div id="stage">
   <canvas id="canvas" tabindex="-1" oncontextmenu="return false;"></canvas>
   <pre id="log"></pre>
 </div>

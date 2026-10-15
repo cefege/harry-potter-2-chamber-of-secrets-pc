@@ -252,8 +252,6 @@ struct FLauncherRound
 		Request.explicitDataRoot = OverrideRoot;
 		Request.retailDataRoot = ImportDestination;
 		Request.needsGameData = !HasDataRoot;
-		if (!HasDataRoot)
-			Request.errorMessage = "No game data is installed yet. Choose a source in Game Data to get started.";
 
 		for (const DataSource OptionSource : {DataSource::Retail, DataSource::Prototype})
 		{

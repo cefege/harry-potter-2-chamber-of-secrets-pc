@@ -154,7 +154,6 @@ struct LauncherRequest
 	LauncherSettings settings;
 	std::vector<SaveRecord> saves;
 	std::vector<DisplayResolution> displayModes;
-	std::string errorMessage;
 	std::string userRoot;
 	std::string logPath;
 	std::vector<DataSourceOption> dataSourceOptions;

@@ -24,12 +24,13 @@
   const MEMORY64_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 5, 3, 1, 4, 1]); // (module (memory i64 1))
   const UNSUPPORTED_BROWSER = 'This browser cannot run the game. Use Chrome, Edge or Firefox on a computer, '
     + 'or Chrome/Firefox on Android. iPhone and iPad are not supported.';
-  const RETAIL_FOLDER_PROMPT = [
-    'Choose your "Harry Potter and the Chamber of Secrets" game folder: the one that contains '
-      + 'the folders Maps, System, Textures, Sounds, Music and Help.',
-    "Can't find it? Search your computer for HP2_Master.utx. It is inside the Textures folder, "
+  const RETAIL_FOLDER_LEAD = 'To play, choose the folder where the game is installed on this computer.';
+  const RETAIL_FOLDER_HINTS = [
+    'Look for the folder named \u201CHarry Potter and the Chamber of Secrets\u201D. '
+      + 'It contains the folders Maps, System, Textures, Sounds, Music and Help.',
+    'Can\u2019t find it? Search your computer for HP2_Master.utx. It is inside the Textures folder, '
       + 'so choose the folder one level above Textures.',
-    'Your browser may say it will "upload" the files. They stay on this device; nothing is sent anywhere.',
+    'Your browser may say it will \u201Cupload\u201D the files. They stay on this device; nothing is sent anywhere.',
   ];
   let currentModule = null;
   let started = false;
@@ -52,8 +53,10 @@
   function logToBoth(text) {
     logLine(text);
     console.log(text);
-    if (smokeMode === 'launcher' && String(text).indexOf('HP2Launcher: ready') >= 0) {
-      reportSmoke('ready', 'in-engine launcher rendered its first frame');
+    if (String(text).indexOf('HP2Launcher: ready') >= 0) {
+      // The launcher is on screen and speaks for itself from here.
+      if (statusEl.textContent === 'Starting launcher…') setStatus('');
+      if (smokeMode === 'launcher') reportSmoke('ready', 'in-engine launcher rendered its first frame');
     }
   }
 
@@ -96,6 +99,27 @@
       return ['System', 'Cutscenes'].concat(parts.slice(2)).join('/');
     }
     return null;
+  }
+
+  const NOT_GAME_FOLDER = 'This folder does not contain the game. Choose the folder that contains '
+    + 'Maps, System and Textures.';
+
+  // The browser prefixes every picked path with the chosen folder's own name,
+  // and players may pick a folder above the game. The game root is the
+  // shallowest directory with a System folder in it; null when there is none.
+  function findGameRoot(paths) {
+    let best = null;
+    let bestDepth = 0;
+    for (const path of paths) {
+      const parts = path.split('/');
+      for (let i = 0; i < parts.length - 1; ++i) {
+        if (parts[i].toLowerCase() !== 'system') continue;
+        const root = parts.slice(0, i).join('/');
+        if (best === null || i < bestDepth) { best = root; bestDepth = i; }
+        break;
+      }
+    }
+    return best;
   }
 
   function findDataRoot(paths) {
@@ -394,7 +418,9 @@
       if (!pointer) throw new Error('Could not allocate web bridge payload.');
       m.HEAPU8.set(bytes, pointer);
       m.HEAPU8[pointer + bytes.length] = 0;
-      m._hp2_web_bridge_done(id, ok ? 1 : 0, pointer);
+      // MEMORY64: _malloc is wrapped to return a Number, but this export is
+      // the raw wasm function, so its const char* parameter is an i64.
+      m._hp2_web_bridge_done(id, ok ? 1 : 0, BigInt(pointer));
     } finally {
       if (pointer && typeof m._free === 'function') m._free(pointer);
     }
@@ -402,78 +428,130 @@
 
   function nextId() { return nextRequestId++; }
 
+  // Full-page folder prompt. For retail data this is the first thing a new
+  // player sees: the launcher opens it on its own when no game files are
+  // installed. It stays up while the files are read, so there is always
+  // something on screen saying what is happening.
   function makeFolderOverlay() {
     if (folderOverlay) return folderOverlay;
     const overlay = document.createElement('div');
     overlay.id = 'hp2-folder-overlay';
     overlay.hidden = true;
-    const message = document.createElement('div');
+    const card = document.createElement('div');
+    card.className = 'card';
+    const title = document.createElement('h1');
+    title.textContent = 'Harry Potter and the Chamber of Secrets';
+    const lead = document.createElement('p');
+    lead.className = 'lead';
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = 'Choose folder…';
+    button.className = 'primary';
+    const progress = document.createElement('p');
+    progress.className = 'progress';
+    progress.hidden = true;
+    const hints = document.createElement('div');
+    const later = document.createElement('button');
+    later.type = 'button';
+    later.className = 'secondary';
+    later.textContent = 'Not now';
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
     input.setAttribute('webkitdirectory', '');
     input.hidden = true;
-    overlay.append(message, button, input);
+    card.append(title, lead, button, progress, hints, later);
+    overlay.append(card, input);
     document.body.appendChild(overlay);
+    let overlayRequest = null;
+
+    function close() {
+      overlay.hidden = true;
+      button.hidden = false;
+      later.hidden = false;
+      progress.hidden = true;
+      input.value = '';
+    }
+    function showProgress(text) {
+      button.hidden = true;
+      later.hidden = true;
+      progress.hidden = false;
+      progress.textContent = text;
+    }
+
     button.addEventListener('click', function () { input.click(); });
-    input.addEventListener('change', async function () {
+    // Declining is not an error, so the launcher gets no message to show.
+    later.addEventListener('click', function () {
       const request = overlayRequest;
       overlayRequest = null;
-      overlay.hidden = true;
-      if (!request) return;
+      close();
+      if (request) bridgeComplete(request.id, false, '');
+    });
+    // Closing the browser's picker (or refusing its upload prompt) keeps this
+    // page up so the player can simply try again.
+    input.addEventListener('cancel', function () { input.value = ''; });
+    input.addEventListener('change', async function () {
+      const request = overlayRequest;
+      if (!request || !input.files || input.files.length === 0) { input.value = ''; return; }
+      overlayRequest = null;
+      const selected = Array.from(input.files);
       try {
-        if (!input.files || input.files.length === 0) throw new Error('No folder was selected.');
-        const selected = Array.from(input.files);
         if (request.kind === 'prototype') {
+          showProgress('Reading the prototype data…');
           await importEntries(selected.map((file) => ({
             path: file.webkitRelativePath || file.name,
             read: () => file.arrayBuffer(),
           })));
           bridgeComplete(request.id, true, '');
         } else {
+          showProgress('Reading your game files\u2026');
+          const paths = selected.map((file) => (file.webkitRelativePath || file.name).replace(/\\/g, '/'));
+          const root = findGameRoot(paths);
+          if (root === null) throw new Error(NOT_GAME_FOLDER);
+          const prefix = root ? root + '/' : '';
           const m = currentModule;
           const source = '/hp2import/source';
           removeFsTree(m.FS, source);
           mkdirTree(m.FS, source);
+          const wanted = [];
           for (let i = 0; i < selected.length; ++i) {
-            const file = selected[i];
-            const rel = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+            if (paths[i].startsWith(prefix)) wanted.push({ file: selected[i], rel: paths[i].slice(prefix.length) });
+          }
+          for (let i = 0; i < wanted.length; ++i) {
+            const rel = wanted[i].rel;
             if (rel.split('/').some((part) => !part || part === '.' || part === '..')) {
               throw new Error('Unsafe file path: ' + rel);
             }
             const path = source + '/' + rel;
             mkdirTree(m.FS, path.slice(0, path.lastIndexOf('/')));
-            m.FS.writeFile(path, new Uint8Array(await file.arrayBuffer()));
-            if ((i & 31) === 31) await new Promise((resolve) => setTimeout(resolve, 0));
+            m.FS.writeFile(path, new Uint8Array(await wanted[i].file.arrayBuffer()));
+            if ((i & 31) === 31) {
+              showProgress('Reading your game files\u2026 ' + (i + 1) + ' of ' + wanted.length);
+              await new Promise((resolve) => setTimeout(resolve, 0));
+            }
           }
           bridgeComplete(request.id, true, source);
         }
-      } catch (err) { bridgeComplete(request.id, false, String(err)); }
-      input.value = '';
+      } catch (err) { bridgeComplete(request.id, false, err && err.message ? err.message : String(err)); }
+      close();
     });
-    input.addEventListener('cancel', function () {
-      const request = overlayRequest;
-      overlayRequest = null;
-      overlay.hidden = true;
-      input.value = '';
-      if (request) bridgeComplete(request.id, false, 'Folder selection cancelled.');
-    });
-    let overlayRequest = null;
     folderOverlay = {
       show: function (request) {
         overlayRequest = request;
-        const lines = request.kind === 'prototype'
-          ? ['Choose the folder containing your prototype game data.'] : RETAIL_FOLDER_PROMPT;
-        message.replaceChildren(...lines.map(function (line) {
+        const retail = request.kind === 'retail';
+        lead.textContent = retail ? RETAIL_FOLDER_LEAD : 'Choose the folder containing your prototype game data.';
+        button.textContent = retail ? 'Choose your game folder' : 'Choose folder\u2026';
+        hints.replaceChildren(...(retail ? RETAIL_FOLDER_HINTS : []).map(function (line) {
           const paragraph = document.createElement('p');
+          paragraph.className = 'hint';
           paragraph.textContent = line;
           return paragraph;
         }));
+        close();
         overlay.hidden = false;
         button.focus();
+        // Straight from a click in the launcher the browser still allows
+        // opening the picker, which saves the player a second click.
+        if (navigator.userActivation && navigator.userActivation.isActive) input.click();
       },
     };
     return folderOverlay;

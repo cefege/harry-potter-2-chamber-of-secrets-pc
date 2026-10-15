@@ -9,8 +9,8 @@ Play the 2002 game with a modern launcher on macOS, Windows, Linux, and Raspberr
 1. Download the latest **macOS arm64 DMG** from [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest).
 2. Open the DMG and drag **HarryPotter2** into **Applications**.
 3. Open **HarryPotter2**. If macOS blocks the app, open **System Settings → Privacy & Security**, then choose **Open Anyway**.
-4. In the launcher, choose **Game Data → Import retail game…** and select the installed game folder (the folder containing `Maps`, `System`, and `Textures`). You can also choose **Import retail archive…** for a `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.7z` file.
-5. Choose **New Game** or **Continue**.
+4. The launcher asks you to **Choose your game folder**: select the installed game folder (the folder containing `Maps`, `System`, and `Textures`). You can also choose **I have a .zip or .7z of the game instead** for a `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.7z` file.
+5. Choose **Start playing**, or **Continue** once you have a save.
 
 The app also installs through Homebrew:
 
@@ -25,8 +25,8 @@ The published `v0.1.0` release currently has the macOS download only. The Window
 
 1. Download the **Windows x64 ZIP** and choose **Extract All**. Keep all extracted files together.
 2. Double-click **HarryPotter2.exe**.
-3. Import your installed game folder from **Game Data → Import retail game…**, or choose **Import retail archive…** for a supported archive.
-4. Choose **New Game** or **Continue**.
+3. The launcher asks you to **Choose your game folder**: select your installed game folder, or choose **I have a .zip or .7z of the game instead** for a supported archive.
+4. Choose **Start playing**, or **Continue** once you have a save.
 
 This is a portable app; there is no installer. Your game data and saves are kept separately under your Windows user profile. The ZIP contains the runtime files it needs, but not the original game data.
 
@@ -129,7 +129,7 @@ cloudflared tunnel --url http://127.0.0.1:8080
 
 Open the `https://…trycloudflare.com` link printed in that terminal on the phone or tablet. Keep both terminals and the host computer running while you play. The temporary link can be opened by anyone who has it, so close the tunnel when you're done. **Do not add `--data-root`** to the server command; that option is for development and exposes files from a folder on the host.
 
-On the device, choose **Game Data** and select your extracted game-data folder when asked. The browser saves imported data and game saves in that browser's storage on that device. Archives must be extracted before browser import.
+On the device, the page asks you to **Choose your game folder**: pick your installed (or extracted) game folder. The browser saves imported data and game saves in that browser's storage on that device. Archives must be extracted before browser import.
 
 Use **Save backup** in the top-right corner to download your saves and settings as a `.zip` file, and **Restore backup** to load that file again, for example after clearing browser data or on another device.
 

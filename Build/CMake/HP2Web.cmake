@@ -55,7 +55,11 @@ target_link_options(hp2_game PRIVATE
     # AL is exported so the shell can inspect the device/context state and
     # resume contexts the autoplay policy suspended. callMain is the launch
     # entry point: it runs main with the launcher's arguments.
-    "-sEXPORTED_RUNTIME_METHODS=FS,ENV,AL,addRunDependency,removeRunDependency,callMain"
+    # _malloc/_free/HEAPU8 carry the shell's replies to the launcher
+    # (bridgeComplete -> hp2_web_bridge_done); without them no browser
+    # request (status, folder pick, import, staging) ever completes.
+    "-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
+    "-sEXPORTED_RUNTIME_METHODS=FS,ENV,AL,HEAPU8,addRunDependency,removeRunDependency,callMain"
 )
 
 add_custom_target(hp2_web ALL
