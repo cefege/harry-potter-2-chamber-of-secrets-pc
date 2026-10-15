@@ -361,11 +361,12 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             smoke_maps._vulkan_engine_ini(data_root, self.root / "broken.ini")
 
     def test_vulkan_environment_exports_loader_variables(self) -> None:
-        environment = smoke_maps._vulkan_environment(Path("/icd/MoltenVK_icd.json"))
+        icd = Path("/icd/MoltenVK_icd.json")
+        environment = smoke_maps._vulkan_environment(icd)
         self.assertEqual(
             environment,
             {
-                "VK_DRIVER_FILES": "/icd/MoltenVK_icd.json",
+                "VK_DRIVER_FILES": str(icd),
                 "DYLD_LIBRARY_PATH": smoke_maps.VULKAN_DYLD_LIBRARY_PATH,
                 "DYLD_FALLBACK_LIBRARY_PATH":
                     smoke_maps.VULKAN_DYLD_FALLBACK_LIBRARY_PATH,
@@ -404,9 +405,9 @@ class LaunchCommandIniContract(unittest.TestCase):
         self.assertFalse(any(argument.startswith("-INI=") for argument in plain))
         selected = game_test.build_launch_command(
             Path("app"), data_root, "..\\Maps\\Entry.unr", "vulkan", 60,
-            ini_file=Path("/tmp/vulkan.ini"),
+            ini_file=Path(tempfile.gettempdir()) / "vulkan.ini",
         )
-        self.assertIn("-INI=/tmp/vulkan.ini", selected)
+        self.assertIn(f"-INI={Path(tempfile.gettempdir()) / 'vulkan.ini'}", selected)
 
 
 if __name__ == "__main__":
