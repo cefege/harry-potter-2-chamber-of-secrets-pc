@@ -123,6 +123,7 @@ name = "hp2-import"
 version = "0.1.0"
 dependencies = [
  "caseless",
+ "libc",
 ]
 
 [[package]]

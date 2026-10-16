@@ -10,3 +10,4 @@ name = "hp2_import"
 
 [dependencies]
 caseless.workspace = true
+libc.workspace = true
