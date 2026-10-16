@@ -3,5 +3,7 @@
 //! `HarryPotter2/Unreal` overlay). Ported incrementally, one piece at a
 //! time; see the plan for the full scope.
 
+pub mod classify;
 pub mod files;
+pub mod hash;
 pub mod lower;

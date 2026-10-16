@@ -143,6 +143,123 @@ pub fn deterministic_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(keyed.into_iter().map(|(_, f)| f).collect())
 }
 
+/// Replaces `Child(d, w, required)`: the single case-insensitively
+/// matching direct child of `d` named `w`. `Ok(None)` only when
+/// `required` is `false` and no match exists (matching the C++ side's
+/// `fs::path{}` sentinel, which every call site only ever tests with
+/// `.empty()`).
+pub fn child(dir: &Path, want: &str, required: bool) -> Result<Option<PathBuf>, String> {
+    let wanted = lower(want);
+    let mut matches: Vec<PathBuf> = Vec::new();
+    let read = fs::read_dir(dir).map_err(|e| {
+        fail(format!(
+            "cannot inspect {}: {}",
+            utf8(dir).unwrap_or_else(|_| dir.display().to_string()),
+            strerror_of(&e)
+        ))
+    })?;
+    for entry in read {
+        let entry = entry.map_err(|e| {
+            fail(format!(
+                "cannot inspect {}: {}",
+                utf8(dir).unwrap_or_else(|_| dir.display().to_string()),
+                strerror_of(&e)
+            ))
+        })?;
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if lower(name) == wanted {
+            matches.push(path);
+        }
+    }
+    if matches.len() > 1 {
+        return Err(fail(format!(
+            "ambiguous case-insensitive component '{want}' under {}",
+            utf8(dir)?
+        )));
+    }
+    let Some(found) = matches.into_iter().next() else {
+        if required {
+            return Err(fail(format!(
+                "missing {want} directory under {}",
+                utf8(dir)?
+            )));
+        }
+        return Ok(None);
+    };
+    let bad = match fs::symlink_metadata(&found) {
+        Ok(meta) => meta.file_type().is_symlink() || !meta.file_type().is_dir(),
+        Err(_) => true,
+    };
+    if bad {
+        return Err(fail(format!(
+            "expected real directory for {want}: {}",
+            utf8(&found)?
+        )));
+    }
+    Ok(Some(found))
+}
+
+/// Replaces `ChildFile(d, w)`: the single case-insensitively matching
+/// direct child of `d` named `w`, required to be a real regular file.
+///
+/// Known, likely-unreachable discrepancy: C++'s `ChildFile` constructs
+/// `fs::directory_iterator(d)` without an `error_code` overload, so an
+/// unreadable `d` throws `fs::filesystem_error` directly, caught by
+/// `RunImport`'s generic `catch (const std::exception&)` branch and
+/// surfaced as that exception's (implementation-defined,
+/// libstdc++/libc++-specific) `what()` text -- not `Fail`'s clean
+/// "cannot inspect ..." message `Child` produces for the same failure.
+/// This gives the clean message in both cases instead, since replicating
+/// an unspecified per-stdlib string isn't practical. Every real call
+/// site passes `ChildFile` a directory a preceding `Child()` call already
+/// proved exists and is readable, so this path should not be reachable
+/// in practice; not verified against a real failing case.
+pub fn child_file(dir: &Path, want: &str) -> Result<PathBuf, String> {
+    let wanted = lower(want);
+    let mut matches: Vec<PathBuf> = Vec::new();
+    let read = fs::read_dir(dir).map_err(|e| {
+        fail(format!(
+            "cannot inspect {}: {}",
+            utf8(dir).unwrap_or_else(|_| dir.display().to_string()),
+            strerror_of(&e)
+        ))
+    })?;
+    for entry in read {
+        let entry = entry.map_err(|e| {
+            fail(format!(
+                "cannot inspect {}: {}",
+                utf8(dir).unwrap_or_else(|_| dir.display().to_string()),
+                strerror_of(&e)
+            ))
+        })?;
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if lower(name) == wanted {
+            matches.push(path);
+        }
+    }
+    if matches.len() != 1 {
+        return Err(fail(format!(
+            "expected exactly one {want} under {}, found {}",
+            utf8(dir)?,
+            matches.len()
+        )));
+    }
+    let found = matches.into_iter().next().unwrap();
+    let bad = match fs::symlink_metadata(&found) {
+        Ok(meta) => meta.file_type().is_symlink() || !meta.file_type().is_file(),
+        Err(_) => true,
+    };
+    if bad {
+        return Err(fail(format!(
+            "expected real config file: {}",
+            utf8(&found)?
+        )));
+    }
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +316,88 @@ mod tests {
         assert_eq!(
             err,
             format!("symbolic link in input tree: {}", link.to_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn child_finds_a_case_insensitive_match() {
+        let dir = tempdir();
+        fs::create_dir(dir.path().join("Textures")).unwrap();
+        let found = child(dir.path(), "textures", true).unwrap();
+        assert_eq!(found, Some(dir.path().join("Textures")));
+    }
+
+    #[test]
+    fn child_rejects_ambiguous_case_insensitive_matches() {
+        let dir = tempdir();
+        fs::create_dir(dir.path().join("Sounds")).unwrap();
+        // On a case-insensitive filesystem (the default on macOS, this
+        // repo's primary dev platform), "Sounds" and "SOUNDS" are the same
+        // directory entry, so the scenario this test exercises -- two
+        // genuinely distinct entries that only collide under casefold --
+        // cannot be constructed here. Skip rather than fail; it still
+        // runs for real on a case-sensitive filesystem (most Linux ext4
+        // setups, including the linux-arm64 CI preset).
+        if fs::create_dir(dir.path().join("SOUNDS")).is_err() {
+            eprintln!(
+                "skipping child_rejects_ambiguous_case_insensitive_matches: \
+                 filesystem is case-insensitive, cannot construct the fixture"
+            );
+            return;
+        }
+        let err = child(dir.path(), "sounds", true).unwrap_err();
+        assert!(
+            err.starts_with("ambiguous case-insensitive component 'sounds' under "),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn child_optional_returns_none_when_missing_and_errors_when_required() {
+        let dir = tempdir();
+        assert_eq!(child(dir.path(), "Help", false).unwrap(), None);
+        let err = child(dir.path(), "Help", true).unwrap_err();
+        assert!(err.starts_with("missing Help directory under "), "{err}");
+    }
+
+    #[test]
+    fn child_rejects_a_file_with_the_matching_name() {
+        let dir = tempdir();
+        make(dir.path(), "Music");
+        let err = child(dir.path(), "music", true).unwrap_err();
+        assert!(
+            err.starts_with("expected real directory for music: "),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn child_file_requires_exactly_one_match() {
+        let dir = tempdir();
+        let err = child_file(dir.path(), "HP_Menu.utx").unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "expected exactly one HP_Menu.utx under {}, found 0",
+                dir.path().to_str().unwrap()
+            )
+        );
+        make(dir.path(), "hp_menu.UTX");
+        let found = child_file(dir.path(), "HP_Menu.utx").unwrap();
+        assert_eq!(found, dir.path().join("hp_menu.UTX"));
+    }
+
+    #[test]
+    fn child_file_rejects_a_directory_with_the_matching_name() {
+        let dir = tempdir();
+        fs::create_dir(dir.path().join("config.ini")).unwrap();
+        let err = child_file(dir.path(), "config.ini").unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "expected real config file: {}",
+                dir.path().join("config.ini").to_str().unwrap()
+            )
         );
     }
 
