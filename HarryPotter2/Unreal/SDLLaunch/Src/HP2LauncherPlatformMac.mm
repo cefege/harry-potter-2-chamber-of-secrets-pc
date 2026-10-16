@@ -4,6 +4,11 @@
 
 namespace HP2LauncherPlatform
 {
+bool IsLauncherShortcutHeld()
+{
+	return ([NSEvent modifierFlags] & NSEventModifierFlagOption) != 0;
+}
+
 void RevealPath(const std::string& Path)
 {
 	if (Path.empty()) return;

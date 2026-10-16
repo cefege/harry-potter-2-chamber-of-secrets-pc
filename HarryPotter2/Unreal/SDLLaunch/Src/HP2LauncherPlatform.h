@@ -9,6 +9,7 @@
 namespace HP2LauncherPlatform
 {
 HP2Launcher::LauncherCapabilities CurrentCapabilities();
+bool IsLauncherShortcutHeld();
 bool PickFolder(std::string& Path);
 bool PickDiscImage(std::string& Path);
 void RevealPath(const std::string& Path);

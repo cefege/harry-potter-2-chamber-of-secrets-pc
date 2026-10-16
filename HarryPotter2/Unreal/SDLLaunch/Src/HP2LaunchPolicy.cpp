@@ -89,6 +89,27 @@ bool ShouldRunNativeLauncher(int argc, char* const argv[])
 
 
 
+bool BuildAutomaticContinueSelection(
+	const LauncherState& state,
+	bool forceLauncher,
+	LaunchSelection& selection)
+{
+	selection = LaunchSelection();
+	if (forceLauncher || !state.hasSavedSettings) return false;
+	const SaveRecord* latest = nullptr;
+	for (const SaveRecord& save : state.saves)
+	{
+		if (save.saveIndex < 0 || save.size <= 0 ||
+			(save.usesSlotDirectory && save.slot < 0)) continue;
+		if (!latest || save.modifiedSeconds > latest->modifiedSeconds) latest = &save;
+	}
+	if (!latest) return false;
+	selection.action = LaunchAction::Continue;
+	selection.hasSave = true;
+	selection.save = *latest;
+	return true;
+}
+
 bool BuildSelectedCommand(
 	const LaunchSelection& selection,
 	std::string& utf8Prefix,

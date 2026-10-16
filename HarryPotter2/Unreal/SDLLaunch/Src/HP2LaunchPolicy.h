@@ -106,6 +106,13 @@ bool DeserializeLaunchSelection(
 	LaunchSelection& selection,
 	std::string& error);
 
+// Select the newest usable save without changing settings or creating a game.
+// Explicit launcher requests and incomplete setup retain the launcher.
+bool BuildAutomaticContinueSelection(
+	const LauncherState& state,
+	bool forceLauncher,
+	LaunchSelection& selection);
+
 bool ShouldRunNativeLauncher(int argc, char* const argv[]);
 }
 
