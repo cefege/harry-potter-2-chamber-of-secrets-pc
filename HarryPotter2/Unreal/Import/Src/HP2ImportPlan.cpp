@@ -1,4 +1,6 @@
 #include "HP2ImportInternal.h"
+#include "hp2_rs.h"
+#include <cstdint>
 #include <random>
 
 namespace HP2Import::Detail {
@@ -7,8 +9,36 @@ void CollectRetailCutscenes(const fs::path&, std::map<std::string, Asset>&);
 void CollectRetailRequiredNestedTextures(const fs::path&, std::map<std::string, Asset>&);
 std::map<std::string, Asset> CollectPrototypeRuntimeCutscenes(const fs::path&);
 std::map<std::string, Asset> CollectPrototypeCutsceneReferences(const fs::path&);
-std::string BuildDefaultIni(const fs::path&, const fs::path&, Profile);
-std::string BuildDefUserIni(const fs::path&, const fs::path&, Profile);
+
+namespace {
+void IniResultSink(void* ctx, const uint8_t* text, size_t len) {
+    static_cast<std::string*>(ctx)->assign(reinterpret_cast<const char*>(text), len);
+}
+}
+
+// Replaces HP2ImportIni.cpp (deleted); the ini parse/write logic is now
+// crates/hp2-ini, called through the hp2-ffi bridge.
+std::string BuildDefaultIni(const fs::path& templatePath, const fs::path& retailPath, Profile profile) {
+    const std::string tpl = Utf8(templatePath), ret = Utf8(retailPath);
+    std::string out;
+    const bool ok = hp2_rs_ini_build_default(
+        reinterpret_cast<const uint8_t*>(tpl.data()), tpl.size(),
+        reinterpret_cast<const uint8_t*>(ret.data()), ret.size(),
+        static_cast<uint32_t>(profile), &IniResultSink, &out);
+    if (!ok) Fail(out);
+    return out;
+}
+
+std::string BuildDefUserIni(const fs::path& templatePath, const fs::path& retailPath, Profile profile) {
+    const std::string tpl = Utf8(templatePath), ret = Utf8(retailPath);
+    std::string out;
+    const bool ok = hp2_rs_ini_build_def_user(
+        reinterpret_cast<const uint8_t*>(tpl.data()), tpl.size(),
+        reinterpret_cast<const uint8_t*>(ret.data()), ret.size(),
+        static_cast<uint32_t>(profile), &IniResultSink, &out);
+    if (!ok) Fail(out);
+    return out;
+}
 
 namespace {
 constexpr const char* CriticalRetailPaths[] = {

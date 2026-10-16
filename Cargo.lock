@@ -83,6 +83,7 @@ version = "0.1.0"
 dependencies = [
  "cbindgen",
  "hp2-ffi-support",
+ "hp2-ini",
  "log",
 ]
 
@@ -92,6 +93,13 @@ version = "0.1.0"
 dependencies = [
  "log",
  "parking_lot",
+]
+
+[[package]]
+name = "hp2-ini"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

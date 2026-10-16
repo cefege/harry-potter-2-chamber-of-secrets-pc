@@ -288,7 +288,6 @@ set(HP2_IMPORT_SOURCES
     "${HP2_IMPORT_ROOT}/Src/HP2ImportPlan.cpp"
     "${HP2_IMPORT_ROOT}/Src/HP2ImportManifest.cpp"
     "${HP2_IMPORT_ROOT}/Src/HP2ImportOutput.cpp"
-    "${HP2_IMPORT_ROOT}/Src/HP2ImportIni.cpp"
 )
 if(NOT EMSCRIPTEN)
     list(APPEND HP2_IMPORT_SOURCES "${HP2_IMPORT_ROOT}/Src/HP2ImportArchive.cpp")
@@ -302,7 +301,7 @@ if(WIN32)
     target_link_libraries(hp2_import_core PUBLIC bcrypt)
 endif()
 if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_import_core PRIVATE archive_static)
+    target_link_libraries(hp2_import_core PRIVATE archive_static hp2_ffi)
     add_executable(hp2_import "${HP2_IMPORT_ROOT}/Src/HP2ImportMain.cpp")
     target_link_libraries(hp2_import PRIVATE hp2_import_core hp2_compile_policy hp2_ffi)
 endif()
