@@ -19,3 +19,4 @@ cbindgen = { version = "=0.29.4", default-features = false }
 log = "=0.4.34"
 parking_lot = "=0.12.5"
 libc = "=0.2.190"
+lewton = "=0.10.2"

@@ -9,3 +9,4 @@ publish.workspace = true
 name = "hp2_codecs"
 
 [dependencies]
+lewton.workspace = true

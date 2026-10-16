@@ -485,3 +485,140 @@ pub unsafe extern "C" fn hp2_rs_dxt1_decode_block(block: *const u8, out_rgba: *m
         std::ptr::copy_nonoverlapping(decoded.as_ptr(), out_rgba, 64);
     })
 }
+
+/// Opaque handle wrapping one Vorbis streaming decoder, replacing
+/// `OggVorbis_File` everywhere it crosses the `UnFileStream.cpp` /
+/// `ALAudioSubsystem.cpp` boundary (both files call into the same handle
+/// through `FStream::TDD`, exactly like the `OggVorbis_File*` it replaces).
+pub struct Hp2RsVorbisDecoder(hp2_codecs::vorbis::Decoder);
+
+/// Creates an empty, not-yet-opened Vorbis decoder, replacing
+/// `new OggVorbis_File`. Free with [`hp2_rs_vorbis_free`], whether or not
+/// [`hp2_rs_vorbis_open`] is ever called on it (matching `delete OggFile`
+/// being safe on an un-opened `OggVorbis_File`).
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_vorbis_new() -> *mut Hp2RsVorbisDecoder {
+    guard("hp2_rs_vorbis_new", std::ptr::null_mut(), || {
+        Box::into_raw(Box::new(Hp2RsVorbisDecoder(
+            hp2_codecs::vorbis::Decoder::new(),
+        )))
+    })
+}
+
+/// Opens `handle` in place, replacing `ov_open(File, Ogg, NULL, 0)`.
+/// Returns whether it succeeded (matching `ov_open`'s `< 0` failure check,
+/// negated, at the call site); no error detail is reported, matching the
+/// existing contract (the C++ caller only branches on success/failure
+/// here too).
+///
+/// # Safety
+/// `handle` must be a live pointer from [`hp2_rs_vorbis_new`]. `path` must
+/// be valid UTF-8 for reads of `path_len` (or null with `path_len` 0) —
+/// the native path `appToUtf8NativePath` produces (the same conversion
+/// `appFopen` uses), not a raw engine filename.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_open(
+    handle: *mut Hp2RsVorbisDecoder,
+    path: *const u8,
+    path_len: usize,
+) -> bool {
+    guard("hp2_rs_vorbis_open", false, move || unsafe {
+        let Some(path) = str_from_raw(path, path_len) else {
+            return false;
+        };
+        (*handle).0.open(path)
+    })
+}
+
+/// Frees a handle returned by [`hp2_rs_vorbis_open`], replacing `ov_clear`
+/// + `delete`. A null handle is a no-op.
+///
+/// # Safety
+/// `handle` must be a pointer this module returned, not already freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_free(handle: *mut Hp2RsVorbisDecoder) {
+    guard("hp2_rs_vorbis_free", (), move || unsafe {
+        if !handle.is_null() {
+            drop(Box::from_raw(handle));
+        }
+    })
+}
+
+/// Replaces one `ov_read(Ogg, dest, len, 0, 2, 1, &bitstream)` call: fills
+/// at most `len` bytes of interleaved 16-bit signed little-endian PCM.
+/// Returns the byte count written (may be less than `len`), 0 at clean
+/// end of stream, or a negative value on a hard decode error — the same
+/// three-way result `ov_read` gives, so the existing C++ read loop is
+/// unchanged.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module. `dest` must be valid
+/// for writes of `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_read(
+    handle: *mut Hp2RsVorbisDecoder,
+    dest: *mut u8,
+    len: usize,
+) -> i64 {
+    guard("hp2_rs_vorbis_read", -1, move || unsafe {
+        let dest_slice = std::slice::from_raw_parts_mut(dest, len);
+        (*handle).0.read(dest_slice)
+    })
+}
+
+/// Replaces `ov_pcm_seek(Ogg, 0)` (this engine only ever loops back to the
+/// start). Returns whether it succeeded, matching `ov_pcm_seek`'s `== 0`
+/// success check at the call site.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_seek_to_start(handle: *mut Hp2RsVorbisDecoder) -> bool {
+    guard("hp2_rs_vorbis_seek_to_start", false, move || unsafe {
+        (*handle).0.seek_to_start()
+    })
+}
+
+/// Replaces `ov_info(Ogg, -1)->channels`.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_channels(handle: *const Hp2RsVorbisDecoder) -> i32 {
+    guard("hp2_rs_vorbis_channels", 0, move || unsafe {
+        (*handle).0.channels()
+    })
+}
+
+/// Replaces `ov_info(Ogg, -1)->rate`.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_rate(handle: *const Hp2RsVorbisDecoder) -> i32 {
+    guard("hp2_rs_vorbis_rate", 0, move || unsafe {
+        (*handle).0.rate()
+    })
+}
+
+/// Replaces `ov_pcm_total(Ogg, -1)`.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_pcm_total(handle: *const Hp2RsVorbisDecoder) -> i64 {
+    guard("hp2_rs_vorbis_pcm_total", 0, move || unsafe {
+        (*handle).0.pcm_total()
+    })
+}
+
+/// Replaces `ov_time_total(Ogg, -1)`.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_vorbis_time_total(handle: *const Hp2RsVorbisDecoder) -> f64 {
+    guard("hp2_rs_vorbis_time_total", 0.0, move || unsafe {
+        (*handle).0.time_total()
+    })
+}

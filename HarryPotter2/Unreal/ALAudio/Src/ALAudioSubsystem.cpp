@@ -12,14 +12,7 @@ Revision history:
 #include <math.h>
 #include <stdlib.h>
 #include "ALAudioPrivate.h"
-#if SUPPORTS_PRAGMA_PACK
-#pragma pack (push,8)
-#endif
-#include "vorbis/codec.h"
-#include "vorbis/vorbisfile.h"
-#if SUPPORTS_PRAGMA_PACK
-#pragma pack (pop)
-#endif
+#include "hp2_rs.h"
 
 /*------------------------------------------------------------------------------------
 	UALAudioSubsystem.
@@ -379,7 +372,7 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 					}
 				}
 
-				OggVorbis_File* OggFile = new OggVorbis_File;
+				Hp2RsVorbisDecoder* OggFile = hp2_rs_vorbis_new();
 				if (!OggFile)
 				{
 					for (INT i = 0; i < MAX_BUFFERS_PER_STREAM; ++i)
@@ -394,7 +387,7 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				{
 					debugf( NAME_DevSound, TEXT("Failed to register sound: %s"), *Sound->Filename );
 
-					delete OggFile;
+					hp2_rs_vorbis_free(OggFile);
 					for (INT i = 0; i < MAX_BUFFERS_PER_STREAM; ++i)
 						delete [] RefillData[i];
 					delete [] PrimeData;
@@ -402,12 +395,13 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 					return false;
 				}
 
-				if ( ov_pcm_total(OggFile, -1) < iStreamChunkSize * MAX_BUFFERS_PER_STREAM )
+				if ( hp2_rs_vorbis_pcm_total(OggFile) < iStreamChunkSize * MAX_BUFFERS_PER_STREAM )
 					debugf( NAME_DevSound, TEXT("Sound is too short for streaming: %s"), *Sound->Filename );
 
-				vorbis_info *VorbisInfo = ov_info(OggFile, -1);
+				const INT VorbisRate = hp2_rs_vorbis_rate(OggFile);
+				const INT VorbisChannels = hp2_rs_vorbis_channels(OggFile);
 
-				Sound->Duration			= ov_time_total(OggFile, -1);
+				Sound->Duration			= hp2_rs_vorbis_time_total(OggFile);
 				//Sound->Handle			= GetNewStreamStruct() + 1;
 
 				int	iStreamIndex			= GetNewStreamStruct() + 1;
@@ -431,8 +425,8 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				Stream.Processed		= 0;
 				Stream.Alive			= 1;
 				Stream.Reset			= 0;
-				check( VorbisInfo->rate>=0 && VorbisInfo->rate<=MAXINT );
-				Stream.Rate				= static_cast<INT>(VorbisInfo->rate);
+				check( VorbisRate>=0 && VorbisRate<=MAXINT );
+				Stream.Rate				= VorbisRate;
 				Stream.Name				= Sound->GetPathName();
 				Stream.StreamChunkSize	= iStreamChunkSize;
 				Stream.NumBuffers		= MAX_BUFFERS_PER_STREAM;
@@ -445,7 +439,7 @@ UBOOL UALAudioSubsystem::RegisterSound(USound* Sound)
 				alGenBuffers( Stream.NumBuffers, &Stream.Buffer[0] );
 				alError(TEXT("Creating streaming buffer."));
 
-				switch ( VorbisInfo->channels )
+				switch ( VorbisChannels )
 				{
 				case 1:
 					Stream.Format = AL_FORMAT_MONO16;

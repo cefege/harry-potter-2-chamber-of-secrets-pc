@@ -1,24 +1,21 @@
 /*=============================================================================
 	UnFileStream.cpp: Portable asynchronous audio file streaming.
+	Ogg Vorbis decode (ov_open/ov_read/ov_pcm_seek/ov_clear) now lives in
+	crates/hp2-codecs::vorbis, reached through hp2_rs.h.
 =============================================================================*/
 
 #include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "CorePrivate.h"
-
-#if SUPPORTS_PRAGMA_PACK
-#pragma pack(push, 8)
-#endif
-#include "vorbis/vorbisfile.h"
-#if SUPPORTS_PRAGMA_PACK
-#pragma pack(pop)
-#endif
+#include "hp2_rs.h"
 
 namespace
 {
@@ -122,10 +119,7 @@ UBOOL DestroyStreamResourcesLocked(INT StreamId)
 	case ST_Ogg:
 	case ST_OggLooping:
 		if (Stream.TDD)
-		{
-			ov_clear(static_cast<OggVorbis_File*>(Stream.TDD));
-			delete static_cast<OggVorbis_File*>(Stream.TDD);
-		}
+			hp2_rs_vorbis_free(static_cast<Hp2RsVorbisDecoder*>(Stream.TDD));
 		break;
 
 	case ST_XA:
@@ -155,21 +149,17 @@ UBOOL ReadRegularLocked(FStream& Stream, INT Bytes, void* Destination)
 
 UBOOL ReadOggLocked(FStream& Stream, INT Bytes, void* Destination)
 {
-	OggVorbis_File* Ogg = static_cast<OggVorbis_File*>(Stream.TDD);
+	Hp2RsVorbisDecoder* Ogg = static_cast<Hp2RsVorbisDecoder*>(Stream.TDD);
 	char* Dest = static_cast<char*>(Destination);
 	INT Count = 0;
 	UBOOL ProducedSinceSeek = 0;
 
 	while (Count < Bytes)
 	{
-		const long ReadCount = ov_read(
+		const std::int64_t ReadCount = hp2_rs_vorbis_read(
 			Ogg,
-			Dest + Count,
-			Bytes - Count,
-			0,
-			2,
-			1,
-			&Stream.FileSeek);
+			reinterpret_cast<std::uint8_t*>(Dest + Count),
+			static_cast<std::size_t>(Bytes - Count));
 
 		if (ReadCount > 0)
 		{
@@ -193,7 +183,7 @@ UBOOL ReadOggLocked(FStream& Stream, INT Bytes, void* Destination)
 		}
 
 		// A corrupt or empty looping stream must not spin forever at EOF.
-		if (!ProducedSinceSeek || ov_pcm_seek(Ogg, 0) != 0)
+		if (!ProducedSinceSeek || !hp2_rs_vorbis_seek_to_start(Ogg))
 		{
 			std::memset(Dest + Count, 0, static_cast<size_t>(Bytes - Count));
 			Stream.EndOfFile = 1;
@@ -291,33 +281,36 @@ UBOOL CreateFileLocked(INT StreamId, const TCHAR* Filename)
 	if (Stream.Type != ST_Regular && Stream.Type != ST_Ogg && Stream.Type != ST_OggLooping)
 		return 0;
 
-	FILE* File = appFopen(Filename, "rb");
-	if (!File)
-		return 0;
-
 	if (Stream.Type == ST_Regular)
 	{
+		FILE* File = appFopen(Filename, "rb");
+		if (!File)
+			return 0;
 		Stream.Handle = File;
 		Stream.TDD = NULL;
 		Stream.NumSamples = -1;
 		return 1;
 	}
 
-	OggVorbis_File* Ogg = static_cast<OggVorbis_File*>(Stream.TDD);
+	// Ogg: crates/hp2-codecs::vorbis opens its own std::fs::File on the
+	// native UTF-8 path, the same conversion appFopen itself uses, so no
+	// FILE* is needed here.
+	Hp2RsVorbisDecoder* Ogg = static_cast<Hp2RsVorbisDecoder*>(Stream.TDD);
 	if (!Ogg)
+		return 0;
+
+	std::string NativePath;
+	if (!appToUtf8NativePath(Filename, NativePath))
+		return 0;
+
+	if (!hp2_rs_vorbis_open(Ogg, reinterpret_cast<const std::uint8_t*>(NativePath.data()), NativePath.size()))
 	{
-		std::fclose(File);
+		// hp2_rs_vorbis_open leaves Ogg closed on failure, matching
+		// ov_open's "detaches the datasource on header failure".
 		return 0;
 	}
 
-	if (ov_open(File, Ogg, NULL, 0) < 0)
-	{
-		// ov_open deliberately detaches the datasource on header failure.
-		std::fclose(File);
-		return 0;
-	}
-
-	Stream.Handle = File;
+	Stream.Handle = Ogg;
 	Stream.NumSamples = -1;
 	return 1;
 }

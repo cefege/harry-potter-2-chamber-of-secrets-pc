@@ -182,7 +182,6 @@ endif()
 
 hp2_add_engine_object(hp2_core Core ${HP2_CORE_SOURCES})
 target_include_directories(hp2_core PUBLIC ${HP2_CORE_INCLUDE_DIRS})
-target_link_libraries(hp2_core PUBLIC vorbisfile)
 if(NOT EMSCRIPTEN)
     target_link_libraries(hp2_core PUBLIC hp2_ffi)
 endif()
@@ -210,7 +209,10 @@ target_include_directories(hp2_editor_runtime PRIVATE ${HP2_EDITOR_INCLUDE_DIRS}
 
 hp2_add_engine_object(hp2_alaudio ALAudio ${HP2_ALAUDIO_SOURCES})
 target_include_directories(hp2_alaudio PUBLIC ${HP2_ALAUDIO_INCLUDE_DIRS})
-target_link_libraries(hp2_alaudio PUBLIC OpenAL::OpenAL vorbisfile)
+target_link_libraries(hp2_alaudio PUBLIC OpenAL::OpenAL)
+if(NOT EMSCRIPTEN)
+    target_link_libraries(hp2_alaudio PRIVATE hp2_ffi)
+endif()
 
 hp2_add_engine_object(hp2_sdldrv SDLDrv ${HP2_SDLDRV_SOURCES})
 target_include_directories(hp2_sdldrv PUBLIC ${HP2_SDLDRV_INCLUDE_DIRS})
@@ -476,6 +478,11 @@ target_link_libraries(hp2_audio_tests PRIVATE
     hp2_core
     hp2_engine
     hp2_alaudio
+    # Tests/AudioTests.cpp's DecodeOgg() is an independent reference
+    # decoder using the real libvorbisfile, deliberately kept linked here
+    # (not in hp2_core/hp2_alaudio) so the ±1 LSB tolerance this test
+    # checks against crates/hp2-codecs::vorbis has a ground truth.
+    vorbisfile
 )
 
 hp2_add_executable(hp2_launcher_tests
