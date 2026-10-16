@@ -6,19 +6,34 @@
 //! [`deterministic_files`] and [`walk`] are two distinct C++ functions
 //! that both do a symlink-rejecting recursive listing but are *not*
 //! interchangeable: `Walk` takes a `recursive` flag (`DeterministicFiles`
-//! is always recursive) and, more subtly, visits entries within each
-//! directory in the opposite order (`DeterministicFiles` pushes its
-//! sorted entries onto the pending stack in reverse, so popping restores
-//! sorted order -- forward pre-order DFS; `Walk` pushes them in forward
-//! order, so popping gives *reverse* order -- last-sorted-subtree-first).
-//! Both still produce the same final *file list*, since each fully
-//! re-sorts its flat result at the end -- but on a tree with more than
-//! one symlink/unsupported entry, which one `Fail`s first (and so which
-//! exact message text comes out) depends on visiting order, and
-//! `importer_parity`'s stderr-line comparison can observe that. Matching
-//! each function's own two-level sort exactly, not merging them into one
-//! shared implementation, keeps that error-message text byte-identical
-//! to the C++ each one replaces.
+//! is always recursive) and, more subtly, visits entries in the opposite
+//! order -- not just across subdirectories, but within a single
+//! directory's own sorted entry list. `DeterministicFiles` iterates that
+//! list in reverse (`entries.rbegin()..rend()`); `Walk` iterates it
+//! forward. Given `a_link` and `z_link`, both symlinks directly in one
+//! directory (sorted ascending as `a_link`, `z_link`), `DeterministicFiles`
+//! reports `z_link` first (reverse hits the last-sorted entry first);
+//! `Walk` reports `a_link` first (forward hits the first-sorted entry
+//! first). The same reverse-vs-forward choice, applied to *directory*
+//! entries instead of files, also governs subtree order: pushed onto the
+//! shared LIFO pending stack, `DeterministicFiles`'s reverse push makes
+//! popping restore forward sorted order (so it explores subdirectories
+//! in sorted order), while `Walk`'s forward push makes popping restore
+//! reverse order (last-sorted subtree first). Verified against real
+//! compiled probes of both functions on both an in-directory
+//! (`a_link`/`z_link`) fixture and a separate-subdirectories
+//! (`A/alink`, `B/blink`) fixture.
+//!
+//! Both functions still produce the same final *file list* when `walk`
+//! is recursive, since each fully re-sorts its flat result at the end --
+//! but on a tree with more than one symlink/unsupported entry, which one
+//! `Fail`s first (and so which exact message text comes out) depends on
+//! visiting order, and `importer_parity`'s stderr-line comparison can
+//! observe that. Matching each function's own two-level sort exactly,
+//! not merging them into one shared implementation, keeps that
+//! error-message text byte-identical to the C++ each one replaces.
+//! `walk(..., false)` is not comparable to `deterministic_files` at all
+//! -- it returns only direct files, not a recursive listing.
 //!
 //! Known gap, matching [`crate::lower`]'s note: every function here
 //! requires its path components to be valid UTF-8 (`Path::to_str`),
@@ -231,8 +246,8 @@ pub fn child(dir: &Path, want: &str, required: bool) -> Result<Option<PathBuf>, 
             ))
         })?;
         let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if lower(name) == wanted {
+        let name = utf8(Path::new(path.file_name().unwrap_or_default()))?;
+        if lower(&name) == wanted {
             matches.push(path);
         }
     }
@@ -307,8 +322,8 @@ pub fn child_file(dir: &Path, want: &str) -> Result<PathBuf, String> {
             ))
         })?;
         let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if lower(name) == wanted {
+        let name = utf8(Path::new(path.file_name().unwrap_or_default()))?;
+        if lower(&name) == wanted {
             matches.push(path);
         }
     }
@@ -471,6 +486,41 @@ mod tests {
             format!(
                 "symbolic link in input tree: {}",
                 dir.path().join("A").join("alink").to_str().unwrap()
+            )
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn classify_order_differs_within_a_single_directory_too_not_just_across_subtrees() {
+        // Ground truth from real compiled C++ probes of both
+        // DeterministicFiles and Walk on this exact fixture: two
+        // symlinks, "a_link" and "z_link", directly in the same
+        // directory (no subdirectories involved, isolating the
+        // within-directory classify order from the separate
+        // subtree/pending-stack effect the sibling test above covers).
+        // DeterministicFiles iterates its sorted entries in reverse, so
+        // it hits "z_link" (the last-sorted entry) first. Walk iterates
+        // forward, so it hits "a_link" (the first-sorted entry) first.
+        let dir = tempdir();
+        std::os::unix::fs::symlink("/tmp", dir.path().join("a_link")).unwrap();
+        std::os::unix::fs::symlink("/tmp", dir.path().join("z_link")).unwrap();
+
+        let deterministic_err = deterministic_files(dir.path()).unwrap_err();
+        assert_eq!(
+            deterministic_err,
+            format!(
+                "symbolic link in input tree: {}",
+                dir.path().join("z_link").to_str().unwrap()
+            )
+        );
+
+        let walk_err = walk(dir.path(), true).unwrap_err();
+        assert_eq!(
+            walk_err,
+            format!(
+                "symbolic link in input tree: {}",
+                dir.path().join("a_link").to_str().unwrap()
             )
         );
     }

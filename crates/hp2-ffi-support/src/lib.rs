@@ -10,7 +10,6 @@
 //!   must byte-match the C++ side (no trailing `" (os error N)"`, which
 //!   `std::io::Error`'s `Display` appends and C++ never produces).
 use std::any::Any;
-use std::ffi::CStr;
 use std::panic::{UnwindSafe, catch_unwind};
 
 use log::{LevelFilter, Log, Metadata, Record};
@@ -78,20 +77,40 @@ fn panic_message(payload: &(dyn Any + Send)) -> &str {
 }
 
 /// `strerror(3)` / `std::error_code::message()` equivalent: the raw
-/// OS-provided message text for an errno-style code, matching the C++
-/// side byte for byte (both ultimately read the same libc table). Do not
-/// use `std::io::Error`'s `Display` for this instead -- it appends
-/// `" (os error N)"`, which C++ never produces, and any stderr-text
-/// comparison (e.g. `importer_parity`) would see the difference.
+/// OS-provided message text for an errno-style (POSIX) or `GetLastError`-
+/// style (Windows) code, matching the C++ side byte for byte.
+///
+/// Built on `std::io::Error::from_raw_os_error(code).to_string()`, with
+/// its trailing `" (os error {code})"` (which C++ never produces) peeled
+/// off -- not a direct `libc::strerror` call, for two reasons:
+///
+/// 1. **Thread safety.** Plain `strerror` may return a pointer into a
+///    shared static buffer on some libc implementations, not safe to
+///    call concurrently. The importer runs on a worker thread while its
+///    `Progress` atomics are polled from the launcher UI thread, and the
+///    engine's own C++ threads may call `strerror`/`std::error_code`
+///    concurrently too. `io::Error`'s `Display` uses the thread-safe
+///    `strerror_r` on Unix internally.
+/// 2. **Windows correctness.** `std::io::Error::raw_os_error()` on
+///    Windows returns a Win32 `GetLastError` code, not a CRT `errno` --
+///    `libc::strerror` would format it through the wrong table (e.g.
+///    `ERROR_ACCESS_DENIED` = 5 reads as CRT `EIO`, not `EACCES` = 13).
+///    `io::Error::from_raw_os_error` round-trips correctly on Windows
+///    because it interprets its input as a Win32 code too, formatting it
+///    via `FormatMessageW` -- matching what C++'s `std::error_code`
+///    `system_category().message()` does there.
+///
+/// Verified on macOS: `io::Error::from_raw_os_error(code).to_string()`
+/// with the suffix stripped equals `libc::strerror(code)` exactly for
+/// every code checked (0, several real errno values, and an unknown
+/// code) -- confirming the suffix is the only difference, not some
+/// deeper text divergence between the two formatters.
 pub fn strerror(code: i32) -> String {
-    // SAFETY: `libc::strerror` returns a pointer to a static or
-    // thread-local C string; copied out immediately, never retained.
-    unsafe {
-        let ptr = libc::strerror(code);
-        if ptr.is_null() {
-            return String::new();
-        }
-        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    let text = std::io::Error::from_raw_os_error(code).to_string();
+    let suffix = format!(" (os error {code})");
+    match text.strip_suffix(suffix.as_str()) {
+        Some(stripped) => stripped.to_string(),
+        None => text,
     }
 }
 
@@ -134,5 +153,14 @@ mod tests {
         let text = strerror(libc::ENOENT);
         assert_eq!(text, "No such file or directory");
         assert!(!text.contains("os error"));
+    }
+
+    #[test]
+    fn strerror_strips_the_suffix_even_on_an_unrecognized_code() {
+        // An out-of-range code still round-trips through
+        // io::Error::Display's "Unknown error: N (os error N)" shape;
+        // the suffix-stripping must not leave it attached.
+        let text = strerror(999_999);
+        assert!(!text.contains("os error"), "{text}");
     }
 }

@@ -171,7 +171,6 @@ name = "hp2-ini"
 version = "0.1.0"
 dependencies = [
  "hp2-ffi-support",
- "libc",
 ]
 
 [[package]]

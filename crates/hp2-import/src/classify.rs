@@ -2,6 +2,20 @@
 //! classification shared by every collection step, mirroring the oracle's
 //! `is_debris`/`is_prohibited_path`
 //! (`Build/prepare_retail_data.py:301-321`).
+//!
+//! [`is_debris`]/[`is_prohibited`] stay `bool`-returning, not
+//! `Result`-returning like [`crate::files`]'s functions: every real call
+//! site passes a path whose filename already went through
+//! [`crate::files`]'s own `utf8()?` validation (during a `walk`/
+//! `deterministic_files` traversal, or `collect_side`'s own explicit
+//! check before calling these), so by the time these run the name is
+//! already known-valid UTF-8 in practice. A non-UTF-8 name here falls
+//! back to treating it as "no filename"/"no extension" (so `is_debris`
+//! returns `false`, not a crash) rather than erroring -- a deliberately
+//! low-stakes default for a case not expected in this project's actual
+//! data trees, not an oversight; making these fallible would ripple a
+//! `Result` through every `collect_to` accept closure for no change in
+//! real-path behavior.
 
 use std::path::Path;
 

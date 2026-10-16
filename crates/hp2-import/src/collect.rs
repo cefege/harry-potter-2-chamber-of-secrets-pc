@@ -26,6 +26,42 @@ fn fail(message: impl Into<String>) -> String {
     message.into()
 }
 
+/// Replaces `fs::path::lexically_relative`, purely by comparing path
+/// components -- no filesystem access, matching the C++ function. Rust's
+/// `Path::strip_prefix` is not a substitute: it returns `Err` (not an
+/// empty path) for a path outside `base`, and never produces a `../`
+/// prefix, so naively falling back to the original path on its `Err`
+/// would silently accept an escaping path with the absolute path left
+/// in `source_path` instead of erroring -- exactly the bug this
+/// function exists to avoid repeating.
+///
+/// `None` matches C++ returning an empty path: `base`/`path` disagree on
+/// absolute-vs-relative (the only mismatch this project's inputs can hit
+/// in practice; both come from directory walks under an absolute root).
+/// Otherwise returns `base`'s number of non-shared trailing components
+/// worth of `..`, followed by `path`'s own non-shared trailing
+/// components -- e.g. `/a/b/c` relative to `/a/x/y` is `../../b/c`.
+fn lexically_relative(base: &Path, path: &Path) -> Option<PathBuf> {
+    if base.is_absolute() != path.is_absolute() {
+        return None;
+    }
+    let base_components: Vec<_> = base.components().collect();
+    let path_components: Vec<_> = path.components().collect();
+    let common = base_components
+        .iter()
+        .zip(path_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut result = PathBuf::new();
+    for _ in 0..(base_components.len() - common) {
+        result.push("..");
+    }
+    for component in &path_components[common..] {
+        result.push(component.as_os_str());
+    }
+    Some(result)
+}
+
 fn utf8(p: &Path) -> Result<String, String> {
     p.to_str()
         .map(str::to_string)
@@ -79,7 +115,12 @@ impl Default for Asset {
 }
 
 /// Replaces `MakeAsset`. `file` must be a real (non-symlink) regular
-/// file under `root`, and `dest` must not be [`is_prohibited`].
+/// file under `root`, and `dest` must not be [`is_prohibited`]. The
+/// root-escape check (via [`lexically_relative`]) was verified against
+/// the real compiled `MakeAsset` on both an escaping path (two sibling
+/// absolute directories, `file` under the one that isn't `root`) and a
+/// valid one: identical "input asset escapes ... root: ..." text and
+/// identical success `sourcePath` on the matching inputs.
 pub fn make_asset(source: &str, root: &Path, file: &Path, dest: String) -> Result<Asset, String> {
     let is_symlink = fs::symlink_metadata(file)
         .map(|m| m.file_type().is_symlink())
@@ -91,8 +132,8 @@ pub fn make_asset(source: &str, root: &Path, file: &Path, dest: String) -> Resul
             utf8(file)?
         )));
     }
-    let rel = file.strip_prefix(root).unwrap_or(file);
-    let rel_str = utf8(rel)?;
+    let rel = lexically_relative(root, file).unwrap_or_default();
+    let rel_str = utf8(&rel)?;
     if rel_str.is_empty() || rel_str.starts_with("../") {
         return Err(fail(format!(
             "input asset escapes {source} root: {}",
@@ -302,6 +343,50 @@ mod tests {
         assert_eq!(asset.classification, "");
         assert!(!asset.generated);
         assert!(asset.sources.is_empty());
+    }
+
+    #[test]
+    fn lexically_relative_computes_up_and_down_components_without_touching_the_filesystem() {
+        assert_eq!(
+            lexically_relative(Path::new("/a/b/c"), Path::new("/a/b/c/d/e")).unwrap(),
+            Path::new("d/e")
+        );
+        assert_eq!(
+            lexically_relative(Path::new("/a/b/c"), Path::new("/a/x/y")).unwrap(),
+            Path::new("../../x/y")
+        );
+        assert_eq!(
+            lexically_relative(Path::new("/a/b"), Path::new("/a/b")).unwrap(),
+            Path::new("")
+        );
+        assert_eq!(
+            lexically_relative(Path::new("/a/b"), Path::new("relative/path")),
+            None
+        );
+    }
+
+    #[test]
+    fn make_asset_rejects_a_file_genuinely_outside_root() {
+        // The bug this guards: a naive `strip_prefix(root).unwrap_or(file)`
+        // silently falls back to the original (absolute, non-"../"-
+        // prefixed) path on strip_prefix's Err instead of erroring, so
+        // the "rel.is_empty() || starts_with(\"../\")" check never fires
+        // and an out-of-root file sails through with an absolute path
+        // left in source_path.
+        let root = tempdir();
+        let outside = tempdir();
+        write(outside.path(), "secret.txt", b"x");
+        let err = make_asset(
+            "prototype",
+            root.path(),
+            &outside.path().join("secret.txt"),
+            "System/secret.txt".to_string(),
+        )
+        .unwrap_err();
+        assert!(
+            err.starts_with("input asset escapes prototype root: "),
+            "{err}"
+        );
     }
 
     #[test]

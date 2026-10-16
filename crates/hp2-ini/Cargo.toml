@@ -10,4 +10,3 @@ name = "hp2_ini"
 
 [dependencies]
 hp2-ffi-support = { workspace = true }
-libc = { workspace = true }

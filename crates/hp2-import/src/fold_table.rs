@@ -7,10 +7,12 @@
 //! rather than a separately fetched copy of the file, so there is no
 //! version-matching step that could drift from the actual pinned library.
 //!
-//! Regeneration: build `utf8proc_map(UTF8PROC_CASEFOLD)` over every
-//! codepoint against the pinned `out/<preset>/_deps/hp2_utf8proc-src`
-//! sources, diff against this table, and only touch this file if utf8proc's
-//! pinned version changes.
+//! Regeneration: `tools/dump_utf8proc_casefold.c` against the utf8proc
+//! commit pinned in Build/CMake/HP2Dependencies.cmake's hp2_utf8proc
+//! FetchContent declaration (79cdd5ab40c79afa559f689ffc13b76812dee1ac at
+//! the time this was generated), piped through
+//! `tools/generate_fold_table.py`. Only touch this file if that pinned
+//! commit changes.
 //!
 //! Sorted by codepoint; `lower()` binary-searches it.
 pub static FOLD_TABLE: &[(u32, &str)] = &[
