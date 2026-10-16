@@ -48,6 +48,9 @@ using FLauncherFileManager = FFileManagerUnix;
 #include "UnSkeletalMesh.h"
 #include "UnFractal.h"
 #include "UnLinker.h"
+#if !defined(__EMSCRIPTEN__)
+#include "hp2_rs.h"
+#endif
 
 using namespace HP2Launcher;
 
@@ -5780,6 +5783,24 @@ static void ClearTraceReporterGlobals()
 	GGlobalTickTraceReporter = NULL;
 }
 
+#if !defined(__EMSCRIPTEN__)
+// Receives each finished Rust log line (UTF-8, "HP2Rust: " prefix) from the
+// hp2-ffi log bridge. GLog is read per line: before appInit it is the static
+// LogOutError, which discards output, so records emitted that early are
+// dropped; after appInit records follow appInit's log redirection. Rust
+// strings are valid UTF-8, so a failed conversion is a bug and is reported in
+// the log rather than dropped silently.
+static void HP2RustLogSink( const uint8_t* Text, size_t Length )
+{
+	const std::string Utf8( reinterpret_cast<const char*>(Text), Length );
+	std::vector<TCHAR> Converted( Length + 1 );
+	if( appFromUtf8InPlace( Converted.data(), Utf8.c_str(), static_cast<INT>(Converted.size()) ) )
+		GLog->Log( Converted.data() );
+	else
+		GLog->Log( TEXT("HP2Rust: <log record failed UTF-8 conversion>") );
+}
+#endif
+
 static INT FinishProcess( INT ExitCode )
 {
 	GIsGuarded = 0;
@@ -5859,6 +5880,9 @@ static int HP2BootAfterLauncher(
 			&FileManager,
 			FConfigCacheIni::Factory,
 			1 );
+#if !defined(__EMSCRIPTEN__)
+		hp2_rs_log_startup();
+#endif
 
 
 
@@ -6126,6 +6150,9 @@ int main( int ArgC, char* ArgV[] )
 	// this value, so its deliberate std-only window still works; appInit
 	// later reassigns and initializes the same instance.
 	GMalloc = &Malloc;
+#if !defined(__EMSCRIPTEN__)
+	hp2_rs_set_log( HP2RustLogSink );
+#endif
 
 	// Validate and install the initial data/user roots before anything else
 	// touches the filesystem. Finding no game data is a normal first-run

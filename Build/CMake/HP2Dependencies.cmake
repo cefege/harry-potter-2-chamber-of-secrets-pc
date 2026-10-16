@@ -199,6 +199,27 @@ if(NOT EMSCRIPTEN)
     set_property(TARGET archive_static PROPERTY INTERFACE_LINK_LIBRARIES "${_hp2_compression_links}")
 endif()
 
+# Corrosion imports the Rust workspace (Cargo.toml at the repository root) so
+# the hp2-ffi staticlib builds as part of this graph. Its own tests only build
+# when Corrosion is the top-level project. rust-toolchain.toml is the one
+# toolchain pin: Rust_TOOLCHAIN makes Corrosion resolve it through rustup
+# instead of whichever rustc comes first on PATH. Not fetched for Emscripten,
+# which has no Rust target.
+if(NOT EMSCRIPTEN)
+    file(STRINGS "${PROJECT_SOURCE_DIR}/rust-toolchain.toml" _hp2_rust_channel
+        REGEX "^channel = \"[^\"]+\"$")
+    string(REGEX REPLACE "^channel = \"([^\"]+)\"$" "\\1" _hp2_rust_channel "${_hp2_rust_channel}")
+    if(NOT _hp2_rust_channel)
+        message(FATAL_ERROR "rust-toolchain.toml has no channel pin")
+    endif()
+    set(Rust_TOOLCHAIN "${_hp2_rust_channel}" CACHE STRING "rustup toolchain (from rust-toolchain.toml)" FORCE)
+    FetchContent_Declare(hp2_corrosion
+        GIT_REPOSITORY https://github.com/corrosion-rs/corrosion.git
+        GIT_TAG 1499b14e4906a2890f5cee1547c8848db261753d
+    )
+    FetchContent_MakeAvailable(hp2_corrosion)
+endif()
+
 
 # SDL2 is linked statically; its tests, examples, and install surface are not
 # part of the HP2 graph.

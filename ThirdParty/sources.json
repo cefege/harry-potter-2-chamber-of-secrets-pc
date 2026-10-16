@@ -204,6 +204,16 @@
       "role": "native ZIP, TAR, and 7z reader for the importer"
     },
     {
+      "name": "Corrosion",
+      "source_type": "git",
+      "url": "https://github.com/corrosion-rs/corrosion",
+      "tag": "v0.6.1",
+      "commit": "1499b14e4906a2890f5cee1547c8848db261753d",
+      "license": "MIT",
+      "upstream_license_path": "LICENSE",
+      "role": "CMake integration that builds the Rust workspace (hp2-ffi staticlib) inside the native build"
+    },
+    {
       "name": "Dear ImGui",
       "source_type": "git",
       "url": "https://github.com/ocornut/imgui",

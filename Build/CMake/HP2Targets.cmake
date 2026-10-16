@@ -158,9 +158,34 @@ function(hp2_add_engine_object target package_name)
     )
 endfunction()
 
+# The Rust workspace builds one staticlib, hp2-ffi, which re-exports every
+# port crate's extern "C" API. Its build.rs writes the cbindgen header
+# hp2_rs.h into HP2_RS_INCLUDE_DIR. Linking it through hp2_core reaches
+# hp2_game, hp2_ucc, and every executable that links the Core object library.
+# Corrosion copies CMAKE_OSX_DEPLOYMENT_TARGET into MACOSX_DEPLOYMENT_TARGET for
+# every cargo run, host proc-macros included. On macOS 27 with Xcode ld-27037,
+# the host dylib for cbindgen's serde_derive then fails dyld's LINKEDIT check
+# ("mis-aligned LINKEDIT string pool") whenever that variable is set. hp2-ffi
+# has no C sources, so the forwarding does nothing useful for it. Clear it for
+# this import only; the game's own targets keep CMAKE_OSX_DEPLOYMENT_TARGET.
+# Emscripten has no Rust target, so the browser build links no Rust.
+if(NOT EMSCRIPTEN)
+    set(_hp2_saved_osx_deployment_target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "")
+    corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml" CRATES hp2-ffi)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "${_hp2_saved_osx_deployment_target}")
+    set(HP2_RS_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rust-include")
+    file(MAKE_DIRECTORY "${HP2_RS_INCLUDE_DIR}")
+    corrosion_set_env_vars(hp2_ffi "HP2_RS_INCLUDE_DIR=${HP2_RS_INCLUDE_DIR}")
+    target_include_directories(hp2_ffi INTERFACE "${HP2_RS_INCLUDE_DIR}")
+endif()
+
 hp2_add_engine_object(hp2_core Core ${HP2_CORE_SOURCES})
 target_include_directories(hp2_core PUBLIC ${HP2_CORE_INCLUDE_DIRS})
 target_link_libraries(hp2_core PUBLIC vorbisfile)
+if(NOT EMSCRIPTEN)
+    target_link_libraries(hp2_core PUBLIC hp2_ffi)
+endif()
 if(WIN32)
     target_link_libraries(hp2_core PUBLIC SDL2::SDL2-static ole32 shell32 shlwapi ws2_32)
 endif()
@@ -279,7 +304,7 @@ endif()
 if(NOT EMSCRIPTEN)
     target_link_libraries(hp2_import_core PRIVATE archive_static)
     add_executable(hp2_import "${HP2_IMPORT_ROOT}/Src/HP2ImportMain.cpp")
-    target_link_libraries(hp2_import PRIVATE hp2_import_core hp2_compile_policy)
+    target_link_libraries(hp2_import PRIVATE hp2_import_core hp2_compile_policy hp2_ffi)
 endif()
 
 function(hp2_add_executable target)

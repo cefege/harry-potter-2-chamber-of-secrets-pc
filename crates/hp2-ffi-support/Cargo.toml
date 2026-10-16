@@ -1,0 +1,11 @@
+[package]
+name = "hp2-ffi-support"
+description = "Log bridge and panic guard shared by every hp2 extern \"C\" export"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+log.workspace = true
+parking_lot.workspace = true

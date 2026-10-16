@@ -1,0 +1,18 @@
+# In-place Rust port of the HP2 engine. Every crate here replaces a C++
+# subsystem inside the shipping hp2_game; hp2-ffi is the single staticlib the
+# CMake build links (see Build/CMake/HP2Targets.cmake).
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[workspace.dependencies]
+hp2-ffi-support = { path = "crates/hp2-ffi-support" }
+cbindgen = { version = "=0.29.4", default-features = false }
+log = "=0.4.34"
+parking_lot = "=0.12.5"

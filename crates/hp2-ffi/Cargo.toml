@@ -1,0 +1,17 @@
+[package]
+name = "hp2-ffi"
+description = "The one Rust archive hp2_game links: re-exports every port crate's extern \"C\" API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+hp2-ffi-support.workspace = true
+log.workspace = true
+
+[build-dependencies]
+cbindgen.workspace = true

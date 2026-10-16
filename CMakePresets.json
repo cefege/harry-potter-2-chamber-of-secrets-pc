@@ -236,7 +236,9 @@
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/Build/CMake/Toolchains/llvm-mingw-x86_64.cmake",
         "CMAKE_BUILD_TYPE": "Release",
-        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON"
+        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON",
+        "Rust_CARGO_TARGET": "x86_64-pc-windows-gnullvm",
+        "Rust_RUSTUP_INSTALL_MISSING_TARGET": "ON"
       }
     },
     {

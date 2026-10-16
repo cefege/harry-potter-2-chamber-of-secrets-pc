@@ -16,6 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Rust workspace tests
+        run: cargo test --workspace
+
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Configure
         run: cmake --preset macos-arm64
 
@@ -43,6 +49,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Rust workspace tests
+        run: cargo test --workspace
+
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -67,6 +79,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Rust workspace tests
+        run: cargo test --workspace
+
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -90,6 +108,12 @@ jobs:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+
+      - name: Rust workspace tests
+        run: cargo test --workspace
+
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Install pinned llvm-mingw UCRT
         shell: pwsh
@@ -152,6 +176,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Rust has no wasm64-emscripten target, so the browser build checks
+          # out the frozen pure-C++ tag until the web build returns.
+          ref: web-cpp-freeze
 
       # The toolchain is not a repo submodule or an action: it is fetched at
       # the exact tag recorded in ThirdParty/sources.json, so the version

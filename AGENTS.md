@@ -4,11 +4,11 @@ Rules of engagement for autonomous agents working in this repository. The
 canonical operational reference is `Docs/OPERATIONS.md`; this handbook defines
 behavior and boundaries, not procedure detail.
 
-This is a single-era C++ codebase (legacy UE1-derived engine, modernized).
-There is no Rust code in this tree — an earlier effort to rewrite the engine
-in Rust (`crates/`, `cargo`) was removed prior to public release. A handful of
-scripts and doc sections still reference that removed code (see "Known Stale
-References" below); treat those as dead, not as a second live subsystem.
+This is a C++ codebase (legacy UE1-derived engine, modernized) being ported to
+Rust in place. The Rust workspace (`Cargo.toml`, `crates/`) is built by CMake
+through Corrosion as the `hp2-ffi` staticlib; cbindgen writes its C header to
+`out/<preset>/rust-include/hp2_rs.h`. Each subsystem moves from C++ to Rust in
+one change, and the C++ it replaces is deleted in that same change.
 
 ## Ownership / Subsystem Map
 
@@ -48,14 +48,28 @@ truth for what actually exists, not that sentence.
 
 ## Known Stale References
 
-Left over from the removed Rust rewrite; do not treat as live, do not extend:
+Left over from the earlier Rust rewrite that was removed before this port.
+Found by grep at this commit; not yet fixed. Do not treat as live, do not
+extend, and flag before editing:
 
-- `Docs/OPERATIONS.md` "Cargo era (hp2rs)" section — describes a `crates/`
-  workspace that no longer exists in this tree.
-- `Build/package_rust_app.py`, `Build/check_bundle_rs.py`,
-  `Tests/RustBundleTests.py` — reference `dist/macos-arm64-rs/` and a
-  `target/release/hp2rs` binary that are never produced by this repo's build.
-- Anything mentioning `cargo`, `crates/`, or `hp2rs` outside this section.
+- `Build/parity_gate.py` and `Build/cutover.sh` call `Build/check_bundle_rs.py`,
+  which this port deleted. `parity_gate.py` also hardcodes crate names
+  `hp-engine`/`hp-app` (`COMPARATOR_PATHS`, `cargo test -p hp-engine`/`-p
+  hp-app`) from the removed rewrite; those crates do not exist in this port's
+  `crates/` workspace, so those calls fail too.
+- `Build/retail_flow_smoke.py` (`DEFAULT_APP`) and `Build/verify_playable.py`
+  (`DEFAULT_BUNDLE`) default to `dist/macos-arm64-rs/HarryPotter2.app`, a path
+  this repo's build never produces. Pass `--app dist/macos-arm64/HarryPotter2.app`
+  explicitly until someone fixes the default.
+- `hp2rs`, `hp-app`, `hp-engine`, `target/release/`, and `dist/macos-arm64-rs/`
+  references in `Build/game_test.py` (`RUST_REPLAY_MARKER`, `paired`),
+  `Build/cutover.sh`, `Build/*_trace.py`, `Tests/GameTestTests.py`,
+  `Tests/StaticMovementGateTests.py`, `Tests/WorldCollisionGateTests.py`,
+  `Docs/BEHAVIOR_MATRIX.md`, `Docs/REASON_CODES.md`,
+  `Docs/RNG_TICK_DIVERGENCE.md`, and `Tests/Fixtures/render-baseline/rust_vs_cpp.md`.
+- `crates/` by itself is ambiguous in those files: it existed before (removed
+  rewrite, deleted at `167f46a`) and exists again now (this port). Check which
+  era a given mention means before relying on it; do not assume either.
 
 If a task touches these paths, flag the drift to the user rather than quietly
 "fixing" cross-cutting doc/script debt as a side effect of an unrelated
