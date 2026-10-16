@@ -1,8 +1,11 @@
 /*=============================================================================
 	S3tcCompat.cpp: S3TC/DXT1 compatibility over pinned libSquish.
+	Decode (S3TCdecode) uses crates/hp2-codecs::dxt1 instead of
+	squish::Decompress; encode (S3TCencode) still uses squish.
 =============================================================================*/
 
 #include "S3tc.h"
+#include "hp2_rs.h"
 
 #include <atomic>
 #include <cstdint>
@@ -368,7 +371,7 @@ extern "C" void S3TCdecode(DDSURFACEDESC* Source, DDSURFACEDESC* Destination,
 			std::uint8_t Rgba[4 * 4 * 4];
 			const std::uint8_t* Block = Blocks +
 				static_cast<std::size_t>(BlockY) * BlockPitch + BlockX * DXT1_BLOCK_BYTES;
-			squish::Decompress(Rgba, Block, squish::kDxt1);
+			hp2_rs_dxt1_decode_block(Block, Rgba);
 			for (std::uint32_t LocalY = 0; LocalY < 4; ++LocalY)
 			{
 				const std::uint32_t Y = BlockY * 4u + LocalY;

@@ -380,3 +380,108 @@ pub unsafe extern "C" fn hp2_rs_ini_doc_erase(
         (*handle).0.erase(section, key);
     })
 }
+
+/// Opaque handle wrapping one EA-XA block decoder's state (predictor
+/// history and residue buffer), replacing `FEAXABlockDecoder`
+/// (`Core/Src/FEAXABlockDecoder.cpp`). The borrowed-pointer contract of
+/// `feed`/`decode` below exactly matches the original class: `feed` stores
+/// a non-owning pointer that `decode` later reads.
+pub struct Hp2RsEaxaDecoder(hp2_codecs::eaxa::Decoder);
+
+/// Creates a decoder with zeroed history, matching `FEAXABlockDecoder()`.
+/// Free with [`hp2_rs_eaxa_free`].
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_eaxa_new() -> *mut Hp2RsEaxaDecoder {
+    guard("hp2_rs_eaxa_new", std::ptr::null_mut(), || {
+        Box::into_raw(Box::new(Hp2RsEaxaDecoder(hp2_codecs::eaxa::Decoder::new())))
+    })
+}
+
+/// Frees a handle returned by [`hp2_rs_eaxa_new`]. A null handle is a no-op.
+///
+/// # Safety
+/// `handle` must be a pointer this module returned, not already freed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_eaxa_free(handle: *mut Hp2RsEaxaDecoder) {
+    guard("hp2_rs_eaxa_free", (), move || unsafe {
+        if !handle.is_null() {
+            drop(Box::from_raw(handle));
+        }
+    })
+}
+
+/// Replaces `FEAXABlockDecoder::Feed`. Validates and records `data`/`bytes`
+/// as the encoded block source for subsequent [`hp2_rs_eaxa_decode`] calls;
+/// returns whether it was accepted.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module. `data` must be valid
+/// for reads of `bytes` bytes for as long as `decode` is subsequently
+/// called before the next `feed` (or `free`) replaces it — the same
+/// contract `FEAXABlockDecoder::Feed` documents.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_eaxa_feed(
+    handle: *mut Hp2RsEaxaDecoder,
+    data: *const u8,
+    bytes: i32,
+    num_samples: i32,
+) -> bool {
+    guard("hp2_rs_eaxa_feed", false, move || unsafe {
+        (*handle).0.feed(data, bytes, num_samples)
+    })
+}
+
+/// Replaces `FEAXABlockDecoder::Decode`. Writes up to `samples` decoded
+/// `i16` samples to `dest`, returning the number actually produced.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module. `dest` must be valid
+/// for writes of `samples` `i16`s. The buffer passed to the most recent
+/// `feed` must still be valid for reads of its given length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_eaxa_decode(
+    handle: *mut Hp2RsEaxaDecoder,
+    dest: *mut i16,
+    samples: i32,
+) -> i32 {
+    guard("hp2_rs_eaxa_decode", 0, move || unsafe {
+        (*handle).0.decode(dest, samples)
+    })
+}
+
+/// Replaces `FEAXABlockDecoder::ResetState`.
+///
+/// # Safety
+/// `handle` must be a live pointer from this module.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_eaxa_reset_state(
+    handle: *mut Hp2RsEaxaDecoder,
+    sample1: i16,
+    sample2: i16,
+) {
+    guard("hp2_rs_eaxa_reset_state", (), move || unsafe {
+        (*handle).0.reset_state(sample1, sample2)
+    })
+}
+
+/// Decodes one 8-byte DXT1 block into 16 RGBA pixels (64 bytes, row-major,
+/// 4 bytes per pixel). Replaces the single call to `squish::Decompress` in
+/// `Engine/Src/S3tcCompat.cpp`'s `S3TCdecode`; everything else in that
+/// function (DDSURFACEDESC parsing, pitch/bounds checks, BGRA channel
+/// swap, output descriptor) is unchanged C++.
+///
+/// # Safety
+/// `block` must be valid for reads of 8 bytes. `out_rgba` must be valid
+/// for writes of 64 bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_dxt1_decode_block(block: *const u8, out_rgba: *mut u8) {
+    guard("hp2_rs_dxt1_decode_block", (), move || unsafe {
+        if block.is_null() || out_rgba.is_null() {
+            return;
+        }
+        let mut block_array = [0u8; 8];
+        block_array.copy_from_slice(std::slice::from_raw_parts(block, 8));
+        let decoded = hp2_codecs::dxt1::decode_block(&block_array);
+        std::ptr::copy_nonoverlapping(decoded.as_ptr(), out_rgba, 64);
+    })
+}

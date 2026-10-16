@@ -502,26 +502,29 @@ private:
 	~FFileStream() {}
 };
 
-// Allocation-free decoder for mono EA-XA blocks.
+// Allocation-free decoder for mono EA-XA blocks. The predictor/history math
+// now lives in crates/hp2-codecs::eaxa (hp2_rs.h, deleted from this file's
+// own translation unit); Handle is an opaque Rust-owned Hp2RsEaxaDecoder.
+// Forward-declared here rather than including hp2_rs.h so this widely
+// included header does not pull Rust FFI declarations into every TU that
+// uses Core.h — only FEAXABlockDecoder.cpp needs them.
+struct Hp2RsEaxaDecoder;
 class CORE_API FEAXABlockDecoder
 {
 public:
 	FEAXABlockDecoder();
+	~FEAXABlockDecoder();
+	FEAXABlockDecoder( const FEAXABlockDecoder& ) = delete;
+	FEAXABlockDecoder& operator=( const FEAXABlockDecoder& ) = delete;
+	FEAXABlockDecoder( FEAXABlockDecoder&& Other ) noexcept;
+	FEAXABlockDecoder& operator=( FEAXABlockDecoder&& Other ) noexcept;
 
 	UBOOL Feed( const BYTE* Data, INT Bytes, INT NumSamples );
 	INT Decode( SWORD* Dest, INT Samples );
 	void ResetState( SWORD Sample1=0, SWORD Sample2=0 );
 
 private:
-	const BYTE* EncodedData;
-	INT EncodedBytes;
-	INT EncodedOffset;
-	INT SamplesRemaining;
-	SWORD History1;
-	SWORD History2;
-	SWORD Residue[28];
-	INT ResidueOffset;
-	INT ResidueSamples;
+	Hp2RsEaxaDecoder* Handle;
 };
 
 //	End addition for initial port of audio system.  -tg

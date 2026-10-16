@@ -194,6 +194,9 @@ hp2_add_engine_object(hp2_engine Engine ${HP2_ENGINE_SOURCES})
 target_include_directories(hp2_engine PUBLIC ${HP2_ENGINE_INCLUDE_DIRS})
 target_include_directories(hp2_engine PRIVATE "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc")
 target_link_libraries(hp2_engine PUBLIC Squish::Squish)
+if(NOT EMSCRIPTEN)
+    target_link_libraries(hp2_engine PRIVATE hp2_ffi)
+endif()
 
 hp2_add_engine_object(hp2_render Render ${HP2_RENDER_SOURCES})
 target_include_directories(hp2_render PUBLIC ${HP2_RENDER_INCLUDE_DIRS})
@@ -461,6 +464,10 @@ hp2_add_executable(hp2_eaxa_tests
     "${HP2_UNREAL_ROOT}/Core/Src/FEAXABlockDecoder.cpp"
 )
 target_include_directories(hp2_eaxa_tests PRIVATE ${HP2_CORE_INCLUDE_DIRS})
+if(NOT EMSCRIPTEN)
+    target_link_libraries(hp2_dxt1_tests PRIVATE hp2_ffi)
+    target_link_libraries(hp2_eaxa_tests PRIVATE hp2_ffi)
+endif()
 
 hp2_add_executable(hp2_audio_tests
     ${HP2_AUDIO_TEST_SOURCE}
