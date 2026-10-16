@@ -18,7 +18,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::classify::{is_debris, is_prohibited};
-use crate::files::{child, walk};
+use crate::files::{child, child_file, walk};
 use crate::hash::hash;
 use crate::lower::lower;
 
@@ -277,6 +277,106 @@ pub fn collect_side(root: &Path, source: &str) -> Result<BTreeMap<String, Asset>
     Ok(assets)
 }
 
+// All four cutscene collectors below were verified together against the
+// real compiled C++ (`c++ main.cpp
+// HarryPotter2/Unreal/Import/Src/HP2ImportCollect.cpp`, as for
+// `collect_side`): byte-identical asset paths/sources/SHA-256 hashes on
+// matching fixtures for all four, including the CutScenes-directory-
+// absent empty-result case and the unexpected-payload error case.
+
+/// Replaces `CollectRetailCutscenes`. Inserts into `assets` in place
+/// (matching the C++ `&` out-parameter), source `"retail"`.
+pub fn collect_retail_cutscenes(
+    root: &Path,
+    assets: &mut BTreeMap<String, Asset>,
+) -> Result<(), String> {
+    let system = child(root, "System", true)?.expect("required=true never returns Ok(None)");
+    let cutscenes =
+        child(&system, "cutscenes", true)?.expect("required=true never returns Ok(None)");
+    for file in walk(&cutscenes, true)? {
+        if lower_extension(&file) != ".int" {
+            if !is_debris(&file) {
+                return Err(fail(format!(
+                    "unexpected retail cutscene payload: {}",
+                    utf8(&file)?
+                )));
+            }
+            continue;
+        }
+        let rel = lexically_relative(&cutscenes, &file).unwrap_or_default();
+        let destination = format!("System/Cutscenes/{}", posix(&utf8(&rel)?));
+        let asset = source_asset("retail", root, &file, destination)?;
+        insert(assets, asset)?;
+    }
+    Ok(())
+}
+
+/// Replaces `CollectRetailRequiredNestedTextures`. Inserts into `assets`
+/// in place, source `"retail"`.
+pub fn collect_retail_required_nested_textures(
+    root: &Path,
+    assets: &mut BTreeMap<String, Asset>,
+) -> Result<(), String> {
+    let textures = child(root, "Textures", true)?.expect("required=true never returns Ok(None)");
+    let old_textures =
+        child(&textures, "Old textures", true)?.expect("required=true never returns Ok(None)");
+    let menu = child_file(&old_textures, "HP_Menu.utx")?;
+    let asset = source_asset("retail", root, &menu, "Textures/HP_Menu.utx".to_string())?;
+    insert(assets, asset)
+}
+
+/// Replaces `CollectPrototypeRuntimeCutscenes`. Same filtering as
+/// [`collect_retail_cutscenes`] but returns a fresh map, source
+/// `"prototype"`, and a "prototype runtime cutscene" error message.
+pub fn collect_prototype_runtime_cutscenes(root: &Path) -> Result<BTreeMap<String, Asset>, String> {
+    let mut assets: BTreeMap<String, Asset> = BTreeMap::new();
+    let system = child(root, "System", true)?.expect("required=true never returns Ok(None)");
+    let cutscenes =
+        child(&system, "cutscenes", true)?.expect("required=true never returns Ok(None)");
+    for file in walk(&cutscenes, true)? {
+        if lower_extension(&file) != ".int" {
+            if !is_debris(&file) {
+                return Err(fail(format!(
+                    "unexpected prototype runtime cutscene payload: {}",
+                    utf8(&file)?
+                )));
+            }
+            continue;
+        }
+        let rel = lexically_relative(&cutscenes, &file).unwrap_or_default();
+        let destination = format!("System/Cutscenes/{}", posix(&utf8(&rel)?));
+        let asset = source_asset("prototype", root, &file, destination)?;
+        insert(&mut assets, asset)?;
+    }
+    Ok(assets)
+}
+
+/// Replaces `CollectPrototypeCutsceneReferences`: an optional
+/// `CutScenes/` directory of `.txt` cutscene *references* (not the
+/// cutscene payload itself), each becoming a `System/Cutscenes/*.int`
+/// destination -- `.int` replacing the source file's own extension, not
+/// appended. Non-`.txt` files are silently skipped (no [`is_debris`]
+/// check here, matching the C++ source exactly).
+pub fn collect_prototype_cutscene_references(
+    root: &Path,
+) -> Result<BTreeMap<String, Asset>, String> {
+    let mut assets: BTreeMap<String, Asset> = BTreeMap::new();
+    let Some(cutscenes) = child(root, "CutScenes", false)? else {
+        return Ok(assets);
+    };
+    for file in walk(&cutscenes, true)? {
+        if lower_extension(&file) != ".txt" {
+            continue;
+        }
+        let mut relative = lexically_relative(&cutscenes, &file).unwrap_or_default();
+        relative.set_extension("int");
+        let destination = format!("System/Cutscenes/{}", posix(&utf8(&relative)?));
+        let asset = source_asset("prototype", root, &file, destination)?;
+        insert(&mut assets, asset)?;
+    }
+    Ok(assets)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,5 +608,99 @@ mod tests {
         let mut paths: Vec<&str> = assets.values().map(|a| a.path.as_str()).collect();
         paths.sort();
         assert_eq!(paths, vec!["Help/Readme.txt"]);
+    }
+
+    #[test]
+    fn collect_retail_cutscenes_gathers_int_files_and_skips_debris() {
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("System/cutscenes/sub")).unwrap();
+        write(dir.path(), "System/cutscenes/intro.int", b"c1");
+        write(dir.path(), "System/cutscenes/sub/chapter2.int", b"c2");
+        write(dir.path(), "System/cutscenes/Thumbs.db", b"debris");
+
+        let mut assets = BTreeMap::new();
+        collect_retail_cutscenes(dir.path(), &mut assets).unwrap();
+        let mut paths: Vec<&str> = assets.values().map(|a| a.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                "System/Cutscenes/intro.int",
+                "System/Cutscenes/sub/chapter2.int"
+            ]
+        );
+        assert_eq!(assets.values().next().unwrap().source, "retail");
+    }
+
+    #[test]
+    fn collect_retail_cutscenes_fails_on_an_unexpected_non_debris_payload() {
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("System/cutscenes")).unwrap();
+        write(dir.path(), "System/cutscenes/stray.dat", b"x");
+        let mut assets = BTreeMap::new();
+        let err = collect_retail_cutscenes(dir.path(), &mut assets).unwrap_err();
+        assert!(
+            err.starts_with("unexpected retail cutscene payload: "),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn collect_retail_required_nested_textures_finds_hp_menu_utx() {
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("Textures/Old textures")).unwrap();
+        write(dir.path(), "Textures/Old textures/HP_Menu.utx", b"menu");
+        let mut assets = BTreeMap::new();
+        collect_retail_required_nested_textures(dir.path(), &mut assets).unwrap();
+        let asset = assets.values().next().unwrap();
+        assert_eq!(asset.path, "Textures/HP_Menu.utx");
+        assert_eq!(asset.source, "retail");
+    }
+
+    #[test]
+    fn collect_prototype_runtime_cutscenes_uses_prototype_source_and_message() {
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("System/cutscenes")).unwrap();
+        write(dir.path(), "System/cutscenes/intro.int", b"c1");
+        let assets = collect_prototype_runtime_cutscenes(dir.path()).unwrap();
+        let asset = assets.values().next().unwrap();
+        assert_eq!(asset.path, "System/Cutscenes/intro.int");
+        assert_eq!(asset.source, "prototype");
+
+        write(dir.path(), "System/cutscenes/stray.dat", b"x");
+        let err = collect_prototype_runtime_cutscenes(dir.path()).unwrap_err();
+        assert!(
+            err.starts_with("unexpected prototype runtime cutscene payload: "),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn collect_prototype_cutscene_references_is_optional_and_replaces_extension() {
+        let dir = tempdir();
+        // No CutScenes/ directory at all: empty result, not an error.
+        assert!(
+            collect_prototype_cutscene_references(dir.path())
+                .unwrap()
+                .is_empty()
+        );
+
+        stdfs::create_dir_all(dir.path().join("CutScenes/sub")).unwrap();
+        write(dir.path(), "CutScenes/intro.txt", b"reference");
+        write(dir.path(), "CutScenes/sub/chapter2.txt", b"reference2");
+        // Non-.txt files are silently skipped, no Debris/error check.
+        write(dir.path(), "CutScenes/notes.ini", b"ignored");
+
+        let assets = collect_prototype_cutscene_references(dir.path()).unwrap();
+        let mut paths: Vec<&str> = assets.values().map(|a| a.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                "System/Cutscenes/intro.int",
+                "System/Cutscenes/sub/chapter2.int"
+            ]
+        );
+        assert!(assets.values().all(|a| a.source == "prototype"));
     }
 }
