@@ -113,7 +113,14 @@ fn count_pcm_total(path: &str) -> Option<i64> {
             Err(_) => return None,
         }
     }
-    Some(reader.get_last_absgp().unwrap_or(0) as i64)
+    // `None` here means lewton never tracked a granule position at all
+    // (no page completed during decode) -- an open/decode failure, not a
+    // legitimately empty 0-frame stream. Must not default to 0: that
+    // would report success with pcm_total=0, and Decoder::read's clamp
+    // (frames_emitted >= pcm_total) would then return clean EOF on the
+    // very first read, so the file "opens" fine and silently plays as
+    // silence instead of surfacing the real failure.
+    Some(reader.get_last_absgp()? as i64)
 }
 
 struct Opened {
