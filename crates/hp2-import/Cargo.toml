@@ -9,6 +9,5 @@ publish.workspace = true
 name = "hp2_import"
 
 [dependencies]
-caseless.workspace = true
-libc.workspace = true
+hp2-ffi-support.workspace = true
 sha2.workspace = true

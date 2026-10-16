@@ -30,15 +30,6 @@ fn fail(message: impl Into<String>) -> String {
     message.into()
 }
 
-fn strerror(code: i32) -> String {
-    // SAFETY: `libc::strerror` returns a pointer to a static or
-    // thread-local C string; copied out immediately, never retained.
-    unsafe {
-        let ptr = libc::strerror(code);
-        std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
-    }
-}
-
 /// Matches `Utf8(path)`. `None` (mapped to an `Err` by the caller) stands
 /// in for the C++ side's implementation-defined handling of a native path
 /// that is not valid UTF-8 -- see the module doc.
@@ -83,17 +74,26 @@ fn classify(path: &Path) -> Result<Kind, String> {
 
 fn strerror_of(e: &std::io::Error) -> String {
     match e.raw_os_error() {
-        Some(code) => strerror(code),
+        Some(code) => hp2_ffi_support::strerror(code),
         None => e.to_string(),
     }
 }
 
-/// Matches the per-directory and final sort comparator: casefold first,
-/// then the original string as an exact tiebreak (so two names that
-/// casefold equal but differ in case still sort deterministically).
+/// Matches the ordering [`folded_then_exact`] implements: casefold first,
+/// then the original string as an exact tiebreak. Only used directly by
+/// tests that exercise the comparator on plain strings; production sort
+/// sites precompute the fold once per entry and call
+/// [`folded_then_exact`] instead.
+#[cfg(test)]
 fn casefold_then_exact(a: &str, b: &str) -> std::cmp::Ordering {
-    let (la, lb) = (lower(a), lower(b));
-    if la == lb { a.cmp(b) } else { la.cmp(&lb) }
+    folded_then_exact(&lower(a), a, &lower(b), b)
+}
+
+/// Same ordering as [`casefold_then_exact`], taking an already-lowered
+/// key for each side so a sort over many entries lowers each name once
+/// instead of twice per comparison.
+fn folded_then_exact(fa: &str, xa: &str, fb: &str, xb: &str) -> std::cmp::Ordering {
+    if fa == fb { xa.cmp(xb) } else { fa.cmp(fb) }
 }
 
 /// Replaces `DeterministicFiles`. `root` must itself be a readable
@@ -121,26 +121,34 @@ pub fn deterministic_files(root: &Path) -> Result<Vec<PathBuf>, String> {
             })?;
             entries.push(entry.path());
         }
-        entries.sort_by(|a, b| {
-            let xa = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let xb = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            casefold_then_exact(xa, xb)
-        });
-        for entry in entries.into_iter().rev() {
+        // Precompute (casefold key, exact name) before sorting, with `?`
+        // propagating a non-UTF-8 name immediately -- matching Lower()'s
+        // own Fail on invalid UTF-8, rather than letting a name that
+        // can't be read fall back to "" inside the comparator and sort
+        // silently (and surface, if at all, as a different, later error).
+        let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let name = utf8(Path::new(entry.file_name().unwrap_or_default()))?;
+            let folded = lower(&name);
+            keyed.push((folded, name, entry));
+        }
+        keyed.sort_by(|(fa, xa, _), (fb, xb, _)| folded_then_exact(fa, xa, fb, xb));
+        for (_, _, entry) in keyed.into_iter().rev() {
             match classify(&entry)? {
                 Kind::Dir => pending.push(entry),
                 Kind::File => files.push(entry),
             }
         }
     }
-    let mut keyed: Vec<(String, PathBuf)> = Vec::with_capacity(files.len());
+    let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(files.len());
     for f in files {
         let rel = f.strip_prefix(root).unwrap_or(&f).to_path_buf();
         let rel_str = utf8(&rel)?;
-        keyed.push((rel_str, f));
+        let folded = lower(&rel_str);
+        keyed.push((folded, rel_str, f));
     }
-    keyed.sort_by(|(xa, _), (xb, _)| casefold_then_exact(xa, xb));
-    Ok(keyed.into_iter().map(|(_, f)| f).collect())
+    keyed.sort_by(|(fa, xa, _), (fb, xb, _)| folded_then_exact(fa, xa, fb, xb));
+    Ok(keyed.into_iter().map(|(_, _, f)| f).collect())
 }
 
 /// Replaces `Child(d, w, required)`: the single case-insensitively
@@ -203,18 +211,27 @@ pub fn child(dir: &Path, want: &str, required: bool) -> Result<Option<PathBuf>, 
 /// Replaces `ChildFile(d, w)`: the single case-insensitively matching
 /// direct child of `d` named `w`, required to be a real regular file.
 ///
-/// Known, likely-unreachable discrepancy: C++'s `ChildFile` constructs
+/// Known, reachable discrepancy: C++'s `ChildFile` constructs
 /// `fs::directory_iterator(d)` without an `error_code` overload, so an
 /// unreadable `d` throws `fs::filesystem_error` directly, caught by
-/// `RunImport`'s generic `catch (const std::exception&)` branch and
-/// surfaced as that exception's (implementation-defined,
-/// libstdc++/libc++-specific) `what()` text -- not `Fail`'s clean
-/// "cannot inspect ..." message `Child` produces for the same failure.
-/// This gives the clean message in both cases instead, since replicating
-/// an unspecified per-stdlib string isn't practical. Every real call
-/// site passes `ChildFile` a directory a preceding `Child()` call already
-/// proved exists and is readable, so this path should not be reachable
-/// in practice; not verified against a real failing case.
+/// `RunImport`'s generic `catch (const std::exception&)` branch
+/// (`HP2ImportOutput.cpp:273-282`) and surfaced as that exception's
+/// (implementation-defined, libstdc++/libc++-specific) `what()` text --
+/// not `Fail`'s clean "cannot inspect ..." message `Child` produces for
+/// the same failure. This gives the clean message in both cases instead,
+/// since replicating an unspecified per-stdlib string isn't practical.
+///
+/// `Child()` validating a directory before `ChildFile()` reads it does
+/// not make this unreachable: `Child` only `symlink_status`-checks the
+/// matched entry from its *parent*'s listing (confirming it exists and
+/// is a directory), it never reads the directory's own contents. The
+/// first read of a directory's contents is whichever of `Child`
+/// (recursing into it) or `ChildFile` (listing it directly) touches it
+/// next. `CollectRetailRequiredNestedTextures`'s
+/// `ChildFile(oldTextures, "HP_Menu.utx")` is exactly that first read of
+/// `Textures/Old textures` -- an unreadable (e.g. permission-restricted)
+/// `Old textures` on a real retail copy reaches this divergence. Not
+/// reproduced here; not verified against a real failing case.
 pub fn child_file(dir: &Path, want: &str) -> Result<PathBuf, String> {
     let wanted = lower(want);
     let mut matches: Vec<PathBuf> = Vec::new();
@@ -307,6 +324,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn rejects_symlinks_with_the_exact_message_text() {
         let dir = tempdir();
         make(dir.path(), "real.txt");
@@ -327,24 +345,23 @@ mod tests {
         assert_eq!(found, Some(dir.path().join("Textures")));
     }
 
+    // Needs two directory entries that are byte-distinct but collide
+    // under Lower()'s full Unicode case folding -- "Sounds" vs "SOUNDS"
+    // and a "Straße"/"STRASSE" pair were both tried directly against the
+    // real filesystem; both fail to even create a second entry on this
+    // repo's primary dev platform (macOS's default case-insensitive APFS
+    // folds "ß"/"STRASSE" together too, not just ASCII case), so there is
+    // no pair this test can use there. Rather than pass via a silent
+    // runtime skip, gate it to run only where it can actually exercise
+    // the code path (most Linux ext4 setups, including the linux-arm64
+    // CI preset) -- its absence from a macOS test run is the honest
+    // signal that this branch isn't covered there, not a pass.
     #[test]
+    #[cfg(target_os = "linux")]
     fn child_rejects_ambiguous_case_insensitive_matches() {
         let dir = tempdir();
         fs::create_dir(dir.path().join("Sounds")).unwrap();
-        // On a case-insensitive filesystem (the default on macOS, this
-        // repo's primary dev platform), "Sounds" and "SOUNDS" are the same
-        // directory entry, so the scenario this test exercises -- two
-        // genuinely distinct entries that only collide under casefold --
-        // cannot be constructed here. Skip rather than fail; it still
-        // runs for real on a case-sensitive filesystem (most Linux ext4
-        // setups, including the linux-arm64 CI preset).
-        if fs::create_dir(dir.path().join("SOUNDS")).is_err() {
-            eprintln!(
-                "skipping child_rejects_ambiguous_case_insensitive_matches: \
-                 filesystem is case-insensitive, cannot construct the fixture"
-            );
-            return;
-        }
+        fs::create_dir(dir.path().join("SOUNDS")).unwrap();
         let err = child(dir.path(), "sounds", true).unwrap_err();
         assert!(
             err.starts_with("ambiguous case-insensitive component 'sounds' under "),
@@ -411,31 +428,26 @@ mod tests {
     }
 
     #[test]
-    fn mixed_case_same_casefold_breaks_tie_by_exact_bytes() {
-        let dir = tempdir();
-        // "File.txt" and "file.TXT" casefold identically; the exact-bytes
-        // tiebreak must still produce a deterministic, stable order
-        // ("F" < "f" in byte value).
-        make(dir.path(), "sub/File.txt");
-        // Different directories so this isn't a same-name collision, just
-        // exercises the tiebreak path on a casefold tie between two
-        // distinct relative paths that only differ by case elsewhere.
-        make(dir.path(), "Sub/other.txt");
-        let files = deterministic_files(dir.path()).unwrap();
-        let rels: Vec<String> = files
-            .iter()
-            .map(|f| utf8(f.strip_prefix(dir.path()).unwrap()).unwrap())
-            .collect();
-        // casefold("Sub/other.txt") == "sub/other.txt" < "sub/file.txt" ==
-        // casefold("sub/File.txt") alphabetically ('o' < 'f' is false --
-        // 'f' < 'o', so sub/File.txt sorts first); assert on the actual
-        // tiebreak-relevant property instead of re-deriving the whole
-        // order: both entries are present and the list is internally
-        // sorted by the same key the implementation uses.
-        let mut sorted = rels.clone();
-        sorted.sort_by(|a, b| casefold_then_exact(a, b));
-        assert_eq!(rels, sorted);
-        assert_eq!(rels.len(), 2);
+    fn casefold_then_exact_breaks_ties_by_exact_bytes() {
+        use std::cmp::Ordering;
+        // "File.txt" and "file.TXT" casefold identically; the tiebreak on
+        // exact bytes must still give a deterministic order ('F' < 'f').
+        assert_eq!(casefold_then_exact("File.txt", "file.TXT"), Ordering::Less);
+        assert_eq!(
+            casefold_then_exact("file.TXT", "File.txt"),
+            Ordering::Greater
+        );
+        // Different casefold keys order by the fold, not the original
+        // bytes: "B" casefolds to "b", "a" stays "a", and "b" > "a".
+        assert_eq!(casefold_then_exact("B", "a"), Ordering::Greater);
+        // A full-casefold tie (ß -> ss) still breaks on exact bytes, not
+        // just an ASCII-range tie.
+        assert_eq!(
+            casefold_then_exact("Straße", "STRASSE"),
+            "Straße".cmp("STRASSE")
+        );
+        assert_ne!(casefold_then_exact("Straße", "STRASSE"), Ordering::Equal);
+        assert_eq!(casefold_then_exact("same", "same"), Ordering::Equal);
     }
 
     /// Minimal `tempfile`-free scratch directory: unique path under the

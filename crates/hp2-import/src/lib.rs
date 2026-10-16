@@ -5,5 +5,6 @@
 
 pub mod classify;
 pub mod files;
+mod fold_table;
 pub mod hash;
 pub mod lower;

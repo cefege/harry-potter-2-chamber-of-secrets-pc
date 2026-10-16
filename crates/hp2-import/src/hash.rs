@@ -11,14 +11,43 @@
 //! probe against the real macOS `CommonCrypto` branch of
 //! `HP2PortableSha256.h` and compared against `sha2::Sha256` on several
 //! inputs (empty string, "a", a pangram, "hp2"); exact match on all.
+//!
+//! Reads through `io::copy` (see [`HashingSink`]), not a direct
+//! `File::read` loop: `io::copy` retries internally on
+//! `ErrorKind::Interrupted` (EINTR), matching C++'s `ifstream::read`,
+//! which never fails on an interrupted read. A hand-rolled read loop
+//! would turn a transient EINTR into a hard "read error" C++ never
+//! produces there.
 
 use std::fs::File;
-use std::io::Read;
+use std::io::{self, Write};
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-const CHUNK_SIZE: usize = 1024 * 1024;
+/// `io::copy`'s source-side retries on `ErrorKind::Interrupted` (EINTR)
+/// internally; `std::fs::File::read` does not, so reading the file
+/// directly in a loop (the first version of this function did) turned a
+/// transient EINTR into a hard "read error", where C++'s `ifstream::read`
+/// retries and never fails there. Sinking through `io::copy` into this
+/// `Write` that forwards to the hasher and counts bytes gets that retry
+/// for free instead of hand-rolling it.
+struct HashingSink {
+    hasher: Sha256,
+    total: u64,
+}
+
+impl Write for HashingSink {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.hasher.update(buf);
+        self.total += buf.len() as u64;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Replaces `Hash(const fs::path&)`. Returns `(size, lowercase hex
 /// digest)`, matching the C++ return shape and `Hex`'s lowercase-hex
@@ -27,25 +56,18 @@ const CHUNK_SIZE: usize = 1024 * 1024;
 pub fn hash(path: &Path) -> Result<(u64, String), String> {
     let mut file = File::open(path)
         .map_err(|_| format!("cannot hash {}: cannot open file", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; CHUNK_SIZE];
-    let mut total: u64 = 0;
-    loop {
-        let got = file
-            .read(&mut buffer)
-            .map_err(|_| format!("cannot hash {}: read error", path.display()))?;
-        if got == 0 {
-            break;
-        }
-        total += got as u64;
-        hasher.update(&buffer[..got]);
-    }
-    let digest = hasher.finalize();
+    let mut sink = HashingSink {
+        hasher: Sha256::new(),
+        total: 0,
+    };
+    io::copy(&mut file, &mut sink)
+        .map_err(|_| format!("cannot hash {}: read error", path.display()))?;
+    let digest = sink.hasher.finalize();
     let mut hex = String::with_capacity(64);
     for byte in digest {
         hex.push_str(&format!("{byte:02x}"));
     }
-    Ok((total, hex))
+    Ok((sink.total, hex))
 }
 
 #[cfg(test)]
@@ -105,9 +127,10 @@ mod tests {
     }
 
     #[test]
-    fn spans_multiple_chunk_boundaries() {
-        // Exercise the read loop across more than one CHUNK_SIZE read.
-        let content = vec![0xABu8; CHUNK_SIZE * 2 + 17];
+    fn spans_multiple_io_copy_buffer_boundaries() {
+        // io::copy's internal buffer is a few KB; this exercises several
+        // reads regardless of its exact size.
+        let content = vec![0xABu8; 1024 * 1024 * 2 + 17];
         let path = write_temp("multi-chunk", &content);
         let (size, hex) = hash(&path).unwrap();
         assert_eq!(size, content.len() as u64);

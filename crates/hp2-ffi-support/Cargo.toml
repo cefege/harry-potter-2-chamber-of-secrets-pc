@@ -7,5 +7,6 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+libc.workspace = true
 log.workspace = true
 parking_lot.workspace = true

@@ -16,7 +16,6 @@
 
 pub mod launcher;
 
-use std::ffi::CStr;
 use std::io::Read as _;
 
 type Lines = Vec<String>;
@@ -253,23 +252,11 @@ fn read(path: &str) -> Result<Vec<u8>, String> {
         }
         Err(err) => {
             let code = err.raw_os_error().unwrap_or(0);
-            let message = strerror(code);
+            let message = hp2_ffi_support::strerror(code);
             Err(format!(
                 "cannot read config {path}: [Errno {code}] {message}: '{path}'"
             ))
         }
-    }
-}
-
-/// `std::strerror` equivalent: the OS-provided message text, matching the
-/// C++ side byte for byte (both ultimately read the same libc table).
-fn strerror(code: i32) -> String {
-    unsafe {
-        let ptr = libc::strerror(code);
-        if ptr.is_null() {
-            return String::new();
-        }
-        CStr::from_ptr(ptr).to_string_lossy().into_owned()
     }
 }
 

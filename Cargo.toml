@@ -16,7 +16,6 @@ hp2-ffi-support = { path = "crates/hp2-ffi-support" }
 hp2-ini = { path = "crates/hp2-ini" }
 hp2-codecs = { path = "crates/hp2-codecs" }
 hp2-import = { path = "crates/hp2-import" }
-caseless = "=0.2.2"
 sha2 = "=0.10.9"
 cbindgen = { version = "=0.29.4", default-features = false }
 log = "=0.4.34"

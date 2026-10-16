@@ -5,8 +5,12 @@
 //! * [`guard`] runs an export body under `catch_unwind` so a panic never
 //!   unwinds into C++: it is logged as `HP2Rust: panic in <fn>: <msg>` and the
 //!   export returns its error value instead.
-
+//! * [`strerror`] formats an OS error code exactly as C++'s
+//!   `std::error_code::message()`/`strerror(3)` does, for error text that
+//!   must byte-match the C++ side (no trailing `" (os error N)"`, which
+//!   `std::io::Error`'s `Display` appends and C++ never produces).
 use std::any::Any;
+use std::ffi::CStr;
 use std::panic::{UnwindSafe, catch_unwind};
 
 use log::{LevelFilter, Log, Metadata, Record};
@@ -73,6 +77,24 @@ fn panic_message(payload: &(dyn Any + Send)) -> &str {
     }
 }
 
+/// `strerror(3)` / `std::error_code::message()` equivalent: the raw
+/// OS-provided message text for an errno-style code, matching the C++
+/// side byte for byte (both ultimately read the same libc table). Do not
+/// use `std::io::Error`'s `Display` for this instead -- it appends
+/// `" (os error N)"`, which C++ never produces, and any stderr-text
+/// comparison (e.g. `importer_parity`) would see the difference.
+pub fn strerror(code: i32) -> String {
+    // SAFETY: `libc::strerror` returns a pointer to a static or
+    // thread-local C string; copied out immediately, never retained.
+    unsafe {
+        let ptr = libc::strerror(code);
+        if ptr.is_null() {
+            return String::new();
+        }
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +125,14 @@ mod tests {
             lines.as_slice(),
             ["HP2Rust: panic in hp2_rs_test_export: bad index 7"]
         );
+    }
+
+    #[test]
+    fn strerror_matches_libc_text_without_errno_suffix() {
+        // ENOENT: "No such file or directory" on every libc this project
+        // targets. No " (os error N)" suffix, unlike io::Error's Display.
+        let text = strerror(libc::ENOENT);
+        assert_eq!(text, "No such file or directory");
+        assert!(!text.contains("os error"));
     }
 }

@@ -24,15 +24,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
-name = "caseless"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b6fd507454086c8edfd769ca6ada439193cdb209c7681712ef6275cccbfe5d8"
-dependencies = [
- "unicode-normalization",
-]
-
-[[package]]
 name = "cbindgen"
 version = "0.29.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -162,6 +153,7 @@ dependencies = [
 name = "hp2-ffi-support"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "parking_lot",
 ]
@@ -170,8 +162,7 @@ dependencies = [
 name = "hp2-import"
 version = "0.1.0"
 dependencies = [
- "caseless",
- "libc",
+ "hp2-ffi-support",
  "sha2",
 ]
 
@@ -179,6 +170,7 @@ dependencies = [
 name = "hp2-ini"
 version = "0.1.0"
 dependencies = [
+ "hp2-ffi-support",
  "libc",
 ]
 
@@ -492,15 +484,6 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
-
-[[package]]
-name = "unicode-normalization"
-version = "0.1.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
-dependencies = [
- "tinyvec",
-]
 
 [[package]]
 name = "version_check"
