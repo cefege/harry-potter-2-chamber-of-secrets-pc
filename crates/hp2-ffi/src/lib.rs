@@ -561,6 +561,12 @@ pub unsafe extern "C" fn hp2_rs_vorbis_read(
     len: usize,
 ) -> i64 {
     guard("hp2_rs_vorbis_read", -1, move || unsafe {
+        if len == 0 {
+            return 0;
+        }
+        if dest.is_null() {
+            return -1;
+        }
         let dest_slice = std::slice::from_raw_parts_mut(dest, len);
         (*handle).0.read(dest_slice)
     })

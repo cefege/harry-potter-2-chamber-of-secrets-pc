@@ -36,9 +36,19 @@ use std::fs::File;
 
 use lewton::inside_ogg::OggStreamReader;
 
-/// Matches `libvorbis`'s `vorbis_ftoi` on the non-x86 fallback path in
-/// `lib/os.h` (used on aarch64, which has neither the x86 `fistl` inline
-/// asm nor the x86_64 SSE2 `_mm_cvtsd_si32` path): `(int)floor(f + .5)`.
+/// Matches `libvorbis`'s `vorbis_ftoi`, which is rounding-mode-specific in
+/// `lib/os.h`: x86_64 (CI's `linux-x64`/`windows-x64`, both built with
+/// SSE2 math) takes the `_mm_cvtsd_si32` path, round-to-nearest with ties
+/// to even (MXCSR default). Every other architecture — including aarch64,
+/// which is what this engine ships on for macOS/Linux — falls through to
+/// the generic `(int)floor(f + .5)`, which rounds exact `.5` ties up
+/// (toward +∞) rather than to even.
+#[cfg(target_arch = "x86_64")]
+fn vorbis_ftoi(f: f64) -> i32 {
+    f.round_ties_even() as i32
+}
+
+#[cfg(not(target_arch = "x86_64"))]
 fn vorbis_ftoi(f: f64) -> i32 {
     (f + 0.5).floor() as i32
 }
@@ -233,10 +243,18 @@ mod tests {
 
     #[test]
     fn sample_to_i16_rounds_to_nearest_like_libvorbis() {
-        // 0.5/32768 scales to exactly 0.5; libvorbis rounds halves up via
-        // floor(x+.5), not lewton's truncating `as i16`.
+        // 0.5/32768 scales to exactly 0.5, an exact tie: aarch64's
+        // floor(x+.5) rounds it up to 1, x86_64's round_ties_even rounds
+        // it down to the nearest even value, 0. Either way it must not be
+        // lewton's own truncating `as i16`, which would give 0 on aarch64.
+        #[cfg(not(target_arch = "x86_64"))]
         assert_eq!(sample_to_i16(0.5 / 32768.0), 1);
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(sample_to_i16(0.5 / 32768.0), 0);
         assert_eq!(sample_to_i16(-0.5 / 32768.0), 0);
+        // -2.5/32768: floor(-2.5+.5)=-2 and round_ties_even(-2.5)=-2 (-2 is
+        // the even neighbor) agree on both rounding rules.
+        assert_eq!(sample_to_i16(-2.5 / 32768.0), -2);
         assert_eq!(sample_to_i16(1.0), 32767); // clamps, does not wrap
         assert_eq!(sample_to_i16(-1.0), -32768);
     }
@@ -274,12 +292,18 @@ mod tests {
     }
 
     #[test]
-    fn decodes_stock_fixture_matching_libvorbisfile_within_one_lsb() {
+    #[ignore = "needs data-prototype: HarryPotter2/Unreal/Music/sm_bur_PlayfulFail_01.ogg, untracked by git; run with --ignored locally"]
+    fn decodes_stock_fixture_to_libvorbisfile_byte_count() {
+        // Checks decode succeeds, metadata, and exact total byte count
+        // against libvorbisfile's own output on this fixture. The ±1 LSB
+        // sample-level comparison against the real libvorbisfile decoder
+        // lives in Tests/AudioTests.cpp (PcmMatchesWithinOneLsb), which has
+        // the independent oracle this crate does not link.
         let path = stock_fixture_path();
-        if !std::path::Path::new(&path).is_file() {
-            // data-prototype only; skip under data-none.
-            return;
-        }
+        assert!(
+            std::path::Path::new(&path).is_file(),
+            "stock fixture must exist to run this ignored test"
+        );
         let mut decoder = Decoder::new();
         assert!(decoder.open(&path), "stock fixture opens");
         assert_eq!(decoder.channels(), 2);
