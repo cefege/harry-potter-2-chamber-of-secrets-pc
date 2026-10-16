@@ -126,7 +126,8 @@ INT FEAXABlockDecoder::Decode( SWORD* Dest, INT Samples )
 		for( INT Index=0; Index<BlockSamples; ++Index )
 		{
 			const BYTE Packed = Block[1 + Index / 2];
-			const INT UnsignedNibble = (Index & 1) ? (Packed >> 4) : (Packed & 15);
+			// EA-XA stores the first sample in the high nibble.
+			const INT UnsignedNibble = (Index & 1) ? (Packed & 15) : (Packed >> 4);
 			const INT SignedNibble = UnsignedNibble >= 8 ? UnsignedNibble - 16 : UnsignedNibble;
 			const INT Sample = ScaleNibble( SignedNibble, Range );
 			const long long Accumulator =
