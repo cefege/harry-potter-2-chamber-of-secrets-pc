@@ -4,6 +4,7 @@
 #include "HP2LauncherStore.h"
 
 #include "HP2LaunchPolicy.h"
+#include "hp2_rs.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -45,18 +46,31 @@ using StoreMode =
 #define mode_t StoreMode
 #endif
 constexpr std::uintmax_t MaxThumbnailSize = 16 * 1024 * 1024;
-enum class Encoding { Utf8, Utf8Bom, Utf16LE, Utf16BE };
-struct Line { std::string text, ending; };
-struct Document
+// Document's internal line/section/key format, encoding detection and
+// Get/Set/Erase placement rules now live in crates/hp2-ini (hp2_rs.h,
+// Hp2RsIniDoc); this is an RAII wrapper around that opaque handle so every
+// call site below (Decode/Encode/Get/Set/Erase, all unchanged signatures)
+// still just holds a `Document` by value in local scope.
+class Document
 {
-	Encoding encoding = Encoding::Utf8;
-	std::string newline = "\n";
-	std::vector<Line> lines;
-};
-struct ParsedKey
-{
-	std::string key, value;
-	std::size_t valueBegin = 0, valueEnd = 0;
+public:
+	Document() : Handle(hp2_rs_ini_doc_new()) {}
+	~Document() { if (Handle) hp2_rs_ini_doc_free(Handle); }
+	Document(const Document&) = delete;
+	Document& operator=(const Document&) = delete;
+	Document(Document&& Other) noexcept : Handle(Other.Handle) { Other.Handle = nullptr; }
+	Document& operator=(Document&& Other) noexcept
+	{
+		if (this != &Other)
+		{
+			if (Handle) hp2_rs_ini_doc_free(Handle);
+			Handle = Other.Handle;
+			Other.Handle = nullptr;
+		}
+		return *this;
+	}
+
+	Hp2RsIniDoc* Handle;
 };
 struct StagedFile
 {
@@ -287,255 +301,55 @@ bool ReadFile(const std::string& path, std::string& bytes, mode_t* mode, std::st
 #endif
 }
 
-void PutUtf8(std::string& text, std::uint32_t cp)
+void IniStringSink(void* ctx, const uint8_t* text, std::size_t len)
 {
-	if (cp <= 0x7f) text.push_back(static_cast<char>(cp));
-	else if (cp <= 0x7ff)
-	{
-		text.push_back(static_cast<char>(0xc0 | (cp >> 6)));
-		text.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
-	}
-	else if (cp <= 0xffff)
-	{
-		text.push_back(static_cast<char>(0xe0 | (cp >> 12)));
-		text.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
-		text.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
-	}
-	else
-	{
-		text.push_back(static_cast<char>(0xf0 | (cp >> 18)));
-		text.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3f)));
-		text.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
-		text.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
-	}
+	static_cast<std::string*>(ctx)->assign(reinterpret_cast<const char*>(text), len);
 }
-bool Decode16(const std::string& bytes, bool little, std::string& text, std::string& error)
-{
-	if (bytes.size() % 2 != 0)
-	{
-		error = "UTF-16 configuration has an incomplete code unit.";
-		return false;
-	}
-	auto unit = [&](std::size_t i)
-	{
-		const unsigned a = static_cast<unsigned char>(bytes[i]);
-		const unsigned b = static_cast<unsigned char>(bytes[i + 1]);
-		return static_cast<std::uint16_t>(little ? a | b << 8 : a << 8 | b);
-	};
-	text.clear();
-	for (std::size_t i = 2; i < bytes.size(); i += 2)
-	{
-		std::uint32_t cp = unit(i);
-		if (cp >= 0xd800 && cp <= 0xdbff)
-		{
-			if (i + 3 >= bytes.size()) { error = "UTF-16 configuration has an incomplete surrogate."; return false; }
-			const std::uint16_t low = unit(i + 2);
-			if (low < 0xdc00 || low > 0xdfff) { error = "UTF-16 configuration has an invalid surrogate."; return false; }
-			cp = 0x10000 + ((cp - 0xd800) << 10) + low - 0xdc00;
-			i += 2;
-		}
-		else if (cp >= 0xdc00 && cp <= 0xdfff)
-		{
-			error = "UTF-16 configuration has an unmatched surrogate.";
-			return false;
-		}
-		PutUtf8(text, cp);
-	}
-	return true;
-}
-bool GetUtf8(const std::string& text, std::size_t& i, std::uint32_t& cp)
-{
-	const unsigned first = static_cast<unsigned char>(text[i++]);
-	if (first < 0x80) { cp = first; return true; }
-	int count;
-	std::uint32_t minimum;
-	if ((first & 0xe0) == 0xc0) { count = 1; cp = first & 0x1f; minimum = 0x80; }
-	else if ((first & 0xf0) == 0xe0) { count = 2; cp = first & 0x0f; minimum = 0x800; }
-	else if ((first & 0xf8) == 0xf0) { count = 3; cp = first & 7; minimum = 0x10000; }
-	else return false;
-	if (i + count > text.size()) return false;
-	while (count--)
-	{
-		const unsigned next = static_cast<unsigned char>(text[i++]);
-		if ((next & 0xc0) != 0x80) return false;
-		cp = cp << 6 | (next & 0x3f);
-	}
-	return cp >= minimum && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff);
-}
-bool Encode16(const std::string& text, bool little, std::string& bytes, std::string& error)
-{
-	bytes.clear();
-	bytes.push_back(static_cast<char>(little ? 0xff : 0xfe));
-	bytes.push_back(static_cast<char>(little ? 0xfe : 0xff));
-	auto put = [&](std::uint16_t unit)
-	{
-		bytes.push_back(static_cast<char>(little ? unit & 255 : unit >> 8));
-		bytes.push_back(static_cast<char>(little ? unit >> 8 : unit & 255));
-	};
-	for (std::size_t i = 0; i < text.size();)
-	{
-		std::uint32_t cp;
-		if (!GetUtf8(text, i, cp)) { error = "Configuration contains invalid UTF-8 text."; return false; }
-		if (cp <= 0xffff) put(static_cast<std::uint16_t>(cp));
-		else
-		{
-			cp -= 0x10000;
-			put(static_cast<std::uint16_t>(0xd800 | cp >> 10));
-			put(static_cast<std::uint16_t>(0xdc00 | (cp & 0x3ff)));
-		}
-	}
-	return true;
-}
+
+// Document's internal line format, UTF-8/UTF-16 handling, section/key
+// parsing and Get/Set/Erase placement rules now live in crates/hp2-ini
+// (hp2_rs.h); these wrappers keep every call site below unchanged.
 bool Decode(const std::string& bytes, Document& document, std::string& error)
 {
-	std::string text;
-	if (bytes.size() >= 2 && static_cast<unsigned char>(bytes[0]) == 0xff && static_cast<unsigned char>(bytes[1]) == 0xfe)
+	std::string capturedError;
+	Hp2RsIniDoc* handle = hp2_rs_ini_doc_decode(
+		reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size(),
+		&IniStringSink, &capturedError);
+	if (!handle)
 	{
-		document.encoding = Encoding::Utf16LE;
-		if (!Decode16(bytes, true, text, error)) return false;
+		error = std::move(capturedError);
+		return false;
 	}
-	else if (bytes.size() >= 2 && static_cast<unsigned char>(bytes[0]) == 0xfe && static_cast<unsigned char>(bytes[1]) == 0xff)
-	{
-		document.encoding = Encoding::Utf16BE;
-		if (!Decode16(bytes, false, text, error)) return false;
-	}
-	else if (bytes.size() >= 3 && bytes.compare(0, 3, "\xef\xbb\xbf") == 0)
-	{
-		document.encoding = Encoding::Utf8Bom;
-		text = bytes.substr(3);
-	}
-	else { document.encoding = Encoding::Utf8; text = bytes; }
-	for (std::size_t offset = 0; offset < text.size();)
-	{
-		std::uint32_t codePoint;
-		if (!GetUtf8(text, offset, codePoint))
-		{
-			error = "Configuration contains invalid UTF-8 text.";
-			return false;
-		}
-	}
-	document.lines.clear();
-	std::size_t begin = 0, crlf = 0, lf = 0;
-	while (begin < text.size())
-	{
-		const std::size_t end = text.find('\n', begin);
-		if (end == std::string::npos) { document.lines.push_back({text.substr(begin), ""}); break; }
-		if (end > begin && text[end - 1] == '\r')
-		{
-			document.lines.push_back({text.substr(begin, end - begin - 1), "\r\n"});
-			++crlf;
-		}
-		else { document.lines.push_back({text.substr(begin, end - begin), "\n"}); ++lf; }
-		begin = end + 1;
-	}
-	document.newline = crlf > lf ? "\r\n" : "\n";
+	if (document.Handle) hp2_rs_ini_doc_free(document.Handle);
+	document.Handle = handle;
 	return true;
 }
 bool Encode(const Document& document, std::string& bytes, std::string& error)
 {
-	std::string text;
-	for (const Line& line : document.lines) text += line.text + line.ending;
-	if (document.encoding == Encoding::Utf8) { bytes = text; return true; }
-	if (document.encoding == Encoding::Utf8Bom) { bytes = "\xef\xbb\xbf" + text; return true; }
-	return Encode16(text, document.encoding == Encoding::Utf16LE, bytes, error);
-}
-
-bool Section(const std::string& line, std::string& section)
-{
-	const std::string text = Trim(line);
-	if (text.size() < 3 || text.front() != '[' || text.back() != ']') return false;
-	section = Trim(text.substr(1, text.size() - 2));
-	return !section.empty() && section.find('[') == std::string::npos && section.find(']') == std::string::npos;
-}
-bool Key(const std::string& line, ParsedKey& key)
-{
-	std::size_t begin = 0;
-	while (begin < line.size() && Space(line[begin])) ++begin;
-	if (begin == line.size() || line[begin] == ';' || line[begin] == '#') return false;
-	const std::size_t equals = line.find('=', begin);
-	if (equals == std::string::npos || (key.key = Trim(line.substr(begin, equals - begin))).empty()) return false;
-	begin = equals + 1;
-	while (begin < line.size() && Space(line[begin])) ++begin;
-	std::size_t comment = line.size();
-	for (std::size_t i = begin; i < line.size(); ++i)
-	{
-		if ((line[i] == ';' || line[i] == '#') && (i == begin || Space(line[i - 1]))) { comment = i; break; }
-	}
-	std::size_t end = comment;
-	while (end > begin && Space(line[end - 1])) --end;
-	key.valueBegin = begin;
-	key.valueEnd = end;
-	key.value = line.substr(begin, end - begin);
-	return true;
+	std::string out;
+	const bool ok = hp2_rs_ini_doc_encode(document.Handle, &IniStringSink, &out);
+	if (ok) { bytes = std::move(out); return true; }
+	error = std::move(out);
+	return false;
 }
 bool Get(const Document& document, const std::string& wantedSection, const std::string& wantedKey, std::string& value)
 {
-	std::string section;
-	bool found = false;
-	for (const Line& line : document.lines)
-	{
-		std::string next;
-		if (Section(line.text, next)) { section = next; continue; }
-		ParsedKey key;
-		if (Same(section, wantedSection) && Key(line.text, key) && Same(key.key, wantedKey))
-		{
-			value = Trim(key.value);
-			found = true;
-		}
-	}
+	std::string out;
+	const bool found = hp2_rs_ini_doc_get(
+		document.Handle,
+		reinterpret_cast<const uint8_t*>(wantedSection.data()), wantedSection.size(),
+		reinterpret_cast<const uint8_t*>(wantedKey.data()), wantedKey.size(),
+		&IniStringSink, &out);
+	if (found) value = std::move(out);
 	return found;
 }
 void Set(Document& document, const std::string& wantedSection, const std::string& wantedKey, const std::string& value)
 {
-	std::string section;
-	std::size_t final = document.lines.size();
-	for (std::size_t i = 0; i < document.lines.size(); ++i)
-	{
-		std::string next;
-		if (Section(document.lines[i].text, next)) { section = next; continue; }
-		ParsedKey key;
-		if (Same(section, wantedSection) && Key(document.lines[i].text, key) && Same(key.key, wantedKey)) final = i;
-	}
-	if (final != document.lines.size())
-	{
-		ParsedKey key;
-		Key(document.lines[final].text, key);
-		document.lines[final].text.replace(key.valueBegin, key.valueEnd - key.valueBegin, value);
-		return;
-	}
-	std::size_t header = document.lines.size();
-	for (std::size_t i = 0; i < document.lines.size(); ++i)
-	{
-		std::string next;
-		if (Section(document.lines[i].text, next) && Same(next, wantedSection))
-			header = i;
-	}
-	std::size_t insertion = document.lines.size();
-	if (header != document.lines.size())
-	{
-		for (std::size_t i = header + 1; i < document.lines.size(); ++i)
-		{
-			std::string next;
-			if (Section(document.lines[i].text, next))
-			{
-				insertion = i;
-				break;
-			}
-		}
-	}
-	if (header != document.lines.size())
-	{
-		if (insertion && document.lines[insertion - 1].ending.empty()) document.lines[insertion - 1].ending = document.newline;
-		document.lines.insert(document.lines.begin() + static_cast<std::ptrdiff_t>(insertion), {wantedKey + "=" + value, document.newline});
-		return;
-	}
-	if (!document.lines.empty())
-	{
-		if (document.lines.back().ending.empty()) document.lines.back().ending = document.newline;
-		if (!document.lines.back().text.empty()) document.lines.push_back({"", document.newline});
-	}
-	document.lines.push_back({"[" + wantedSection + "]", document.newline});
-	document.lines.push_back({wantedKey + "=" + value, document.newline});
+	hp2_rs_ini_doc_set(
+		document.Handle,
+		reinterpret_cast<const uint8_t*>(wantedSection.data()), wantedSection.size(),
+		reinterpret_cast<const uint8_t*>(wantedKey.data()), wantedKey.size(),
+		reinterpret_cast<const uint8_t*>(value.data()), value.size());
 }
 
 // Removes every key row matching section+key (case-insensitive), leaving the
@@ -543,19 +357,10 @@ void Set(Document& document, const std::string& wantedSection, const std::string
 // commits so replaced generations cannot leave stale coordinate rows behind.
 void Erase(Document& document, const std::string& wantedSection, const std::string& wantedKey)
 {
-	std::string section;
-	std::vector<Line> kept;
-	kept.reserve(document.lines.size());
-	for (Line& line : document.lines)
-	{
-		std::string next;
-		if (Section(line.text, next)) { section = next; kept.push_back(std::move(line)); continue; }
-		ParsedKey key;
-		if (Same(section, wantedSection) && Key(line.text, key) && Same(key.key, wantedKey))
-			continue;
-		kept.push_back(std::move(line));
-	}
-	document.lines = std::move(kept);
+	hp2_rs_ini_doc_erase(
+		document.Handle,
+		reinterpret_cast<const uint8_t*>(wantedSection.data()), wantedSection.size(),
+		reinterpret_cast<const uint8_t*>(wantedKey.data()), wantedKey.size());
 }
 
 bool Integer(const std::string& text, int& value)
@@ -1263,6 +1068,27 @@ void ApplyUser(Document& user, const LauncherSettings& settings)
 	Set(user, "HGame.Harry", "bAutoCenterCamera", BoolText(settings.autoCenterCamera));
 	Set(user, "HGame.Harry", "bMoveWhileCasting", BoolText(settings.moveWhileCasting));
 	Set(user, "HGame.Harry", "bAutoQuaff", BoolText(settings.autoQuaff));
+}
+// Used only by IsValidUtf8 below; the ini codec's own UTF-8 handling moved
+// to crates/hp2-ini with the rest of Decode/Encode.
+bool GetUtf8(const std::string& text, std::size_t& i, std::uint32_t& cp)
+{
+	const unsigned first = static_cast<unsigned char>(text[i++]);
+	if (first < 0x80) { cp = first; return true; }
+	int count;
+	std::uint32_t minimum;
+	if ((first & 0xe0) == 0xc0) { count = 1; cp = first & 0x1f; minimum = 0x80; }
+	else if ((first & 0xf0) == 0xe0) { count = 2; cp = first & 0x0f; minimum = 0x800; }
+	else if ((first & 0xf8) == 0xf0) { count = 3; cp = first & 7; minimum = 0x10000; }
+	else return false;
+	if (i + count > text.size()) return false;
+	while (count--)
+	{
+		const unsigned next = static_cast<unsigned char>(text[i++]);
+		if ((next & 0xc0) != 0x80) return false;
+		cp = cp << 6 | (next & 0x3f);
+	}
+	return cp >= minimum && cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff);
 }
 bool IsValidUtf8(const std::string& text)
 {

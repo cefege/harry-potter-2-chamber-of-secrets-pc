@@ -14,6 +14,8 @@
 //! observably differ here; this crate does not pull in a casefold table to
 //! cover an unexercised path.
 
+pub mod launcher;
+
 use std::ffi::CStr;
 use std::io::Read as _;
 
