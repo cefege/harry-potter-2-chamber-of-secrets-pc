@@ -1,21 +1,27 @@
-//! Replaces `HP2ImportInputs.cpp`'s `DeterministicFiles`: a deterministic,
-//! symlink-rejecting recursive file listing used as the first step of
-//! every import source scan.
+//! Filesystem-walking primitives shared across the importer: `Lower`-
+//! keyed case-insensitive lookup and traversal. Covers
+//! `HP2ImportInputs.cpp`'s `DeterministicFiles`, `HP2ImportInternal.h`'s
+//! `Child`/`ChildFile`, and `HP2ImportCollect.cpp`'s `Walk`.
 //!
-//! The walk uses an explicit stack, sorting each directory's entries by
-//! `(Lower(name), name)` before pushing (reversed, so popping gives sorted
-//! order) -- a pre-order DFS by casefolded name. The final file list is
-//! then fully re-sorted by `(Lower(relative_path), relative_path)`, which
-//! alone determines the returned order regardless of walk order. The
-//! per-directory sort during the walk still matters on an error path: if a
-//! tree has more than one symlink/unsupported entry, which one `Fail`s
-//! first (and so which exact message text comes out) depends on visiting
-//! order, which `importer_parity`'s stderr-line comparison can observe.
-//! Matching the two-level sort exactly, not just the final output, keeps
-//! that error-message text byte-identical to the C++ this replaces.
+//! [`deterministic_files`] and [`walk`] are two distinct C++ functions
+//! that both do a symlink-rejecting recursive listing but are *not*
+//! interchangeable: `Walk` takes a `recursive` flag (`DeterministicFiles`
+//! is always recursive) and, more subtly, visits entries within each
+//! directory in the opposite order (`DeterministicFiles` pushes its
+//! sorted entries onto the pending stack in reverse, so popping restores
+//! sorted order -- forward pre-order DFS; `Walk` pushes them in forward
+//! order, so popping gives *reverse* order -- last-sorted-subtree-first).
+//! Both still produce the same final *file list*, since each fully
+//! re-sorts its flat result at the end -- but on a tree with more than
+//! one symlink/unsupported entry, which one `Fail`s first (and so which
+//! exact message text comes out) depends on visiting order, and
+//! `importer_parity`'s stderr-line comparison can observe that. Matching
+//! each function's own two-level sort exactly, not merging them into one
+//! shared implementation, keeps that error-message text byte-identical
+//! to the C++ each one replaces.
 //!
-//! Known gap, matching [`crate::lower`]'s note: this takes `&Path` and
-//! requires every path component to be valid UTF-8 (`Path::to_str`),
+//! Known gap, matching [`crate::lower`]'s note: every function here
+//! requires its path components to be valid UTF-8 (`Path::to_str`),
 //! whereas C++'s `Utf8()` goes through `fs::path::u8string()`, which does
 //! not reject a non-UTF-8 native encoding the same way. A real-world
 //! non-UTF-8 filename under the data root is not something this crate has
@@ -96,59 +102,109 @@ fn folded_then_exact(fa: &str, xa: &str, fb: &str, xb: &str) -> std::cmp::Orderi
     if fa == fb { xa.cmp(xb) } else { fa.cmp(fb) }
 }
 
-/// Replaces `DeterministicFiles`. `root` must itself be a readable
-/// directory (not validated here, matching the C++ function, which lets
-/// the first `directory_iterator` construction report that).
-pub fn deterministic_files(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut files: Vec<PathBuf> = Vec::new();
-    let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
-    while let Some(current) = pending.pop() {
-        let mut entries: Vec<PathBuf> = Vec::new();
-        let read = fs::read_dir(&current).map_err(|e| {
+/// Reads `dir`'s entries and returns them as `(casefold key, exact name,
+/// path)` triples sorted by `(Lower(name), name)`, matching the
+/// `std::sort` comparator both `DeterministicFiles` and `Walk` use on
+/// their per-directory entry list. Shared by [`deterministic_files`] and
+/// [`walk`]; the two differ only in what they do with this sorted list
+/// (push order onto the pending stack, and whether `Walk`'s `recursive`
+/// flag gates descending into a directory), not in how they read or sort
+/// it.
+fn sorted_dir_entries(dir: &Path) -> Result<Vec<(String, String, PathBuf)>, String> {
+    let mut entries: Vec<PathBuf> = Vec::new();
+    let read = fs::read_dir(dir).map_err(|e| {
+        fail(format!(
+            "cannot inspect {}: {}",
+            utf8(dir).unwrap_or_else(|_| dir.display().to_string()),
+            strerror_of(&e)
+        ))
+    })?;
+    for entry in read {
+        let entry = entry.map_err(|e| {
             fail(format!(
                 "cannot inspect {}: {}",
-                utf8(&current).unwrap_or_else(|_| current.display().to_string()),
+                utf8(dir).unwrap_or_else(|_| dir.display().to_string()),
                 strerror_of(&e)
             ))
         })?;
-        for entry in read {
-            let entry = entry.map_err(|e| {
-                fail(format!(
-                    "cannot inspect {}: {}",
-                    utf8(&current).unwrap_or_else(|_| current.display().to_string()),
-                    strerror_of(&e)
-                ))
-            })?;
-            entries.push(entry.path());
-        }
-        // Precompute (casefold key, exact name) before sorting, with `?`
-        // propagating a non-UTF-8 name immediately -- matching Lower()'s
-        // own Fail on invalid UTF-8, rather than letting a name that
-        // can't be read fall back to "" inside the comparator and sort
-        // silently (and surface, if at all, as a different, later error).
-        let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let name = utf8(Path::new(entry.file_name().unwrap_or_default()))?;
-            let folded = lower(&name);
-            keyed.push((folded, name, entry));
-        }
-        keyed.sort_by(|(fa, xa, _), (fb, xb, _)| folded_then_exact(fa, xa, fb, xb));
-        for (_, _, entry) in keyed.into_iter().rev() {
-            match classify(&entry)? {
-                Kind::Dir => pending.push(entry),
-                Kind::File => files.push(entry),
-            }
-        }
+        entries.push(entry.path());
     }
-    let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(files.len());
-    for f in files {
-        let rel = f.strip_prefix(root).unwrap_or(&f).to_path_buf();
+    // Precompute (casefold key, exact name) before sorting, with `?`
+    // propagating a non-UTF-8 name immediately -- matching Lower()'s own
+    // Fail on invalid UTF-8, rather than letting a name that can't be
+    // read fall back to "" inside the comparator and sort silently (and
+    // surface, if at all, as a different, later error).
+    let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let name = utf8(Path::new(entry.file_name().unwrap_or_default()))?;
+        let folded = lower(&name);
+        keyed.push((folded, name, entry));
+    }
+    keyed.sort_by(|(fa, xa, _), (fb, xb, _)| folded_then_exact(fa, xa, fb, xb));
+    Ok(keyed)
+}
+
+/// Sorts `paths` by `(Lower(relative-to-base), relative-to-base)`,
+/// matching the final-result comparator both `DeterministicFiles` and
+/// `Walk` apply to their flat file list before returning it.
+fn sort_by_relative_path(base: &Path, paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+    let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(paths.len());
+    for f in paths {
+        let rel = f.strip_prefix(base).unwrap_or(&f).to_path_buf();
         let rel_str = utf8(&rel)?;
         let folded = lower(&rel_str);
         keyed.push((folded, rel_str, f));
     }
     keyed.sort_by(|(fa, xa, _), (fb, xb, _)| folded_then_exact(fa, xa, fb, xb));
     Ok(keyed.into_iter().map(|(_, _, f)| f).collect())
+}
+
+/// Replaces `DeterministicFiles`. `root` must itself be a readable
+/// directory (not validated here, matching the C++ function, which lets
+/// the first `directory_iterator` construction report that). Always
+/// recursive; visits each directory's sorted entries in forward order,
+/// pushed onto the pending stack *reversed* so popping restores that
+/// forward order (see the module doc for why this, and not just the
+/// final sort, matters).
+pub fn deterministic_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        for (_, _, entry) in sorted_dir_entries(&current)?.into_iter().rev() {
+            match classify(&entry)? {
+                Kind::Dir => pending.push(entry),
+                Kind::File => files.push(entry),
+            }
+        }
+    }
+    sort_by_relative_path(root, files)
+}
+
+/// Replaces `HP2ImportCollect.cpp`'s `Walk`. *Not* the same algorithm as
+/// [`deterministic_files`] despite the similar shape -- see the module
+/// doc. `recursive = false` still rejects a symlinked directory among
+/// `directory`'s direct entries (every entry is `classify`d regardless),
+/// it just doesn't descend into a plain one.
+pub fn walk(directory: &Path, recursive: bool) -> Result<Vec<PathBuf>, String> {
+    let mut result: Vec<PathBuf> = Vec::new();
+    let mut pending: Vec<PathBuf> = vec![directory.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        // Forward order here (not `.rev()`): pushed onto the same LIFO
+        // `pending` stack, so the *last* sorted entry in this directory
+        // is popped (and so ultimately descended into, if a directory)
+        // next -- the opposite visiting order from `deterministic_files`.
+        for (_, _, entry) in sorted_dir_entries(&current)? {
+            match classify(&entry)? {
+                Kind::Dir => {
+                    if recursive {
+                        pending.push(entry);
+                    }
+                }
+                Kind::File => result.push(entry),
+            }
+        }
+    }
+    sort_by_relative_path(directory, result)
 }
 
 /// Replaces `Child(d, w, required)`: the single case-insensitively
@@ -334,6 +390,88 @@ mod tests {
         assert_eq!(
             err,
             format!("symbolic link in input tree: {}", link.to_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn walk_non_recursive_lists_only_direct_files() {
+        let dir = tempdir();
+        make(dir.path(), "top.txt");
+        make(dir.path(), "sub/nested.txt");
+        let files = walk(dir.path(), false).unwrap();
+        let rels: Vec<String> = files
+            .iter()
+            .map(|f| utf8(f.strip_prefix(dir.path()).unwrap()).unwrap())
+            .collect();
+        assert_eq!(rels, vec!["top.txt"]);
+    }
+
+    #[test]
+    fn walk_recursive_matches_deterministic_files_file_set_and_order() {
+        let dir = tempdir();
+        for rel in [
+            "alpha.TXT",
+            "B/x.txt",
+            "Straße/f.txt",
+            "a/Y.txt",
+            "Zeta.txt",
+        ] {
+            make(dir.path(), rel);
+        }
+        let via_walk = walk(dir.path(), true).unwrap();
+        let via_deterministic = deterministic_files(dir.path()).unwrap();
+        // Same final sort in both (Lower(relative_path), relative_path)
+        // -- the two algorithms only differ in intermediate visiting
+        // order, not in this result, as the module doc says.
+        assert_eq!(via_walk, via_deterministic);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn walk_non_recursive_still_rejects_a_top_level_symlink() {
+        let dir = tempdir();
+        let link = dir.path().join("alink");
+        std::os::unix::fs::symlink("/tmp", &link).unwrap();
+        let err = walk(dir.path(), false).unwrap_err();
+        assert_eq!(
+            err,
+            format!("symbolic link in input tree: {}", link.to_str().unwrap())
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn walk_visits_directory_entries_in_the_opposite_order_from_deterministic_files() {
+        // Ground truth from a throwaway C++ probe built from the exact
+        // Walk source this replaces (HP2ImportCollect.cpp), run on this
+        // same fixture: two top-level directories "A" and "B", each
+        // holding one symlink. Walk pushes each directory's sorted
+        // entries in forward order onto its LIFO pending stack, so the
+        // *last* sorted entry is popped (and descended into) first --
+        // here "B" before "A" -- the opposite of deterministic_files,
+        // which reverses the push so popping restores forward order.
+        let dir = tempdir();
+        fs::create_dir_all(dir.path().join("A")).unwrap();
+        fs::create_dir_all(dir.path().join("B")).unwrap();
+        std::os::unix::fs::symlink("/tmp", dir.path().join("A").join("alink")).unwrap();
+        std::os::unix::fs::symlink("/tmp", dir.path().join("B").join("blink")).unwrap();
+
+        let walk_err = walk(dir.path(), true).unwrap_err();
+        assert_eq!(
+            walk_err,
+            format!(
+                "symbolic link in input tree: {}",
+                dir.path().join("B").join("blink").to_str().unwrap()
+            )
+        );
+
+        let deterministic_err = deterministic_files(dir.path()).unwrap_err();
+        assert_eq!(
+            deterministic_err,
+            format!(
+                "symbolic link in input tree: {}",
+                dir.path().join("A").join("alink").to_str().unwrap()
+            )
         );
     }
 
