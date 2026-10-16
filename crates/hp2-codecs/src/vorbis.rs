@@ -26,11 +26,32 @@
 //! comparison against the real `libvorbisfile` tolerates that ±1.
 //!
 //! `pcm_total`/`time_total`: `lewton` has no direct equivalent of
-//! `ov_pcm_total`'s seek-based lookup. [`Decoder::open`] decodes the whole
-//! file once to count exact total samples, then reopens the file for
-//! sequential streaming — simpler and exact, at the cost of decoding
-//! streamed files twice at registration time (a one-time, non-per-frame
-//! cost).
+//! `ov_pcm_total`'s seek-based lookup. [`count_pcm_total`] decodes the
+//! whole file once to reach the stream's final granule position
+//! (`OggStreamReader::get_last_absgp`, lewton's internal page-tracked
+//! absolute granule position), matching `ov_pcm_total`'s own definition
+//! exactly rather than summing decoded packet lengths — a naive sum runs
+//! a few frames past the granule position on some files (lapped-transform
+//! lookahead/overlap at the stream's end, which `libvorbis` trims).
+//! [`Decoder::read`] then clamps its own output to that same total
+//! (`Opened::frames_emitted` vs `Opened::pcm_total`), so a looping track
+//! can never gain extra frames at the loop seam even if a trailing lewton
+//! packet runs past the granule position. Checked against real
+//! `libvorbisfile`'s `ov_pcm_total`/`ov_time_total` over every `.ogg`
+//! under `HarryPotter2/Unreal/Music`/`Sounds` (111 files, single logical
+//! bitstream each, confirmed via `ov_streams`): exact total-length match
+//! on all 111 after this clamp (one file, `sm_ctr_GhostChamber_LP.ogg`,
+//! was 65 frames — ~1.5 ms of 57.8 s — high before it), and its decoded
+//! PCM byte count matches `ov_read`'s own total exactly (10,192,124
+//! bytes, both sides). Content, not just length, was checked too: the
+//! excess 65 frames are a tail artifact, not encoder priming trimmed from
+//! the head — `libvorbis`'s head-priming case (`vorbis_synthesis_blockin`
+//! dropping samples before the first page's granule position) was
+//! considered and ruled out by comparing both alignments sample-by-sample
+//! against `ov_read`'s PCM for that file: the unclamped decode's first
+//! 2,548,031 frames match `ov_read` exactly (0 differences beyond the ±1
+//! LSB above), while shifting by the 65-frame head-priming hypothesis
+//! does not (99.96% of samples differ, by up to 40,973).
 
 use std::fs::File;
 
@@ -61,11 +82,11 @@ fn sample_to_i16(sample: f32) -> i16 {
     vorbis_ftoi(scaled as f64).clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
 
-fn interleave(packet: &[Vec<f32>]) -> Vec<u8> {
+fn interleave(packet: &[Vec<f32>], frame_limit: usize) -> Vec<u8> {
     if packet.is_empty() {
         return Vec::new();
     }
-    let frames = packet[0].len();
+    let frames = packet[0].len().min(frame_limit);
     let mut out = Vec::with_capacity(frames * packet.len() * 2);
     for frame in 0..frames {
         for channel in packet.iter() {
@@ -75,24 +96,24 @@ fn interleave(packet: &[Vec<f32>]) -> Vec<u8> {
     out
 }
 
-/// Counts total PCM sample frames in the Ogg Vorbis file at `path` by
-/// decoding it once, discarding the audio. `None` on open/decode failure.
+/// Total PCM sample frames in the Ogg Vorbis file at `path`, matching
+/// `ov_pcm_total`'s definition: the stream's final granule position, not a
+/// naive sum of decoded packet lengths (those can run a few frames past
+/// the granule position — lapped-transform lookahead/overlap at the
+/// stream's end that libvorbis trims and this must trim too). Decodes the
+/// whole file once, discarding the audio, to reach the last page; `None`
+/// on open/decode failure.
 fn count_pcm_total(path: &str) -> Option<i64> {
     let file = File::open(path).ok()?;
     let mut reader = OggStreamReader::new(file).ok()?;
-    let mut total: i64 = 0;
     loop {
         match reader.read_dec_packet_generic::<Vec<Vec<f32>>>() {
-            Ok(Some(packet)) => {
-                if let Some(channel) = packet.first() {
-                    total += channel.len() as i64;
-                }
-            }
+            Ok(Some(_)) => {}
             Ok(None) => break,
             Err(_) => return None,
         }
     }
-    Some(total)
+    Some(reader.get_last_absgp().unwrap_or(0) as i64)
 }
 
 struct Opened {
@@ -101,6 +122,7 @@ struct Opened {
     channels: i32,
     rate: i32,
     pcm_total: i64,
+    frames_emitted: i64,
     residue: Vec<u8>,
     residue_offset: usize,
 }
@@ -147,6 +169,7 @@ impl Decoder {
             channels,
             rate,
             pcm_total,
+            frames_emitted: 0,
             residue: Vec::new(),
             residue_offset: 0,
         });
@@ -199,13 +222,30 @@ impl Decoder {
                 state.residue_offset += n;
                 return n as i64;
             }
+            if state.frames_emitted >= state.pcm_total {
+                // Every frame the stream's granule position promises has
+                // already gone out — libvorbis's `ov_read` stops here too
+                // (`ov_pcm_total` is the authoritative length). Any
+                // further lewton packets are trailing lookahead/overlap
+                // past the true end, not real audio; drop them so a
+                // looping track doesn't gain extra frames at the seam.
+                return 0;
+            }
             match state.reader.read_dec_packet_generic::<Vec<Vec<f32>>>() {
                 Ok(Some(packet)) => {
-                    state.residue = interleave(&packet);
+                    let remaining = (state.pcm_total - state.frames_emitted).max(0) as usize;
+                    let frames_taken = packet.first().map(|c| c.len().min(remaining)).unwrap_or(0);
+                    state.residue = interleave(&packet, remaining);
                     state.residue_offset = 0;
+                    state.frames_emitted += frames_taken as i64;
                     if state.residue.is_empty() {
-                        // An empty packet produced no bytes; keep decoding
-                        // rather than reporting a spurious EOF.
+                        // An empty packet, or one truncated to zero frames
+                        // by the budget above, produced no bytes; keep
+                        // decoding rather than reporting a spurious EOF —
+                        // unless the budget itself is now exhausted.
+                        if state.frames_emitted >= state.pcm_total {
+                            return 0;
+                        }
                         continue;
                     }
                 }
@@ -231,8 +271,8 @@ impl Decoder {
             return false;
         };
         state.reader = reader;
+        state.frames_emitted = 0;
         state.residue.clear();
-        state.residue_offset = 0;
         true
     }
 }
@@ -252,6 +292,9 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         assert_eq!(sample_to_i16(0.5 / 32768.0), 0);
         assert_eq!(sample_to_i16(-0.5 / 32768.0), 0);
+        // 1.5/32768: floor(1.5+.5)=2 and round_ties_even(1.5)=2 (2 is the
+        // even neighbor) agree on both rounding rules.
+        assert_eq!(sample_to_i16(1.5 / 32768.0), 2);
         // -2.5/32768: floor(-2.5+.5)=-2 and round_ties_even(-2.5)=-2 (-2 is
         // the even neighbor) agree on both rounding rules.
         assert_eq!(sample_to_i16(-2.5 / 32768.0), -2);
@@ -262,10 +305,19 @@ mod tests {
     #[test]
     fn interleave_orders_channels_within_each_frame() {
         let packet = vec![vec![0.0f32, 1.0 / 32768.0], vec![-1.0 / 32768.0, 0.0]];
-        let bytes = interleave(&packet);
+        let bytes = interleave(&packet, usize::MAX);
         // frame 0: ch0=0, ch1=-1 -> i16 0, -1
         // frame 1: ch0=1, ch1=0 -> i16 1, 0
         assert_eq!(bytes, vec![0, 0, 0xff, 0xff, 1, 0, 0, 0]);
+    }
+
+    #[test]
+    fn interleave_truncates_to_the_frame_limit() {
+        let packet = vec![vec![0.0f32, 1.0 / 32768.0], vec![-1.0 / 32768.0, 0.0]];
+        let bytes = interleave(&packet, 1);
+        // Only frame 0 (ch0=0, ch1=-1), frame 1 dropped entirely.
+        assert_eq!(bytes, vec![0, 0, 0xff, 0xff]);
+        assert_eq!(interleave(&packet, 0), Vec::<u8>::new());
     }
 
     #[test]
