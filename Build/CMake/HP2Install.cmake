@@ -41,6 +41,10 @@ find_program(HP2_CODESIGN
     REQUIRED
 )
 
+# Compile Icon Composer's source package with the active Xcode toolchain.
+find_program(HP2_XCRUN NAMES xcrun REQUIRED)
+set(HP2_MACOS_ICON_SOURCE "${PROJECT_SOURCE_DIR}/Build/Resources/HP2.icon")
+
 set(HP2_MACOS_DIST_DIR "${PROJECT_SOURCE_DIR}/dist/macos-arm64")
 set(HP2_MACOS_APP_DIR "${HP2_MACOS_DIST_DIR}/HarryPotter2.app")
 set(HP2_MACOS_CONTENTS_DIR "${HP2_MACOS_APP_DIR}/Contents")
@@ -98,6 +102,13 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${PROJECT_SOURCE_DIR}/ThirdParty/fonts"
         "${HP2_MACOS_RESOURCES_DIR}/fonts"
+    COMMAND "${HP2_XCRUN}" actool
+        --compile "${HP2_MACOS_RESOURCES_DIR}"
+        --platform macosx
+        --minimum-deployment-target 15.0
+        --app-icon HP2
+        --output-partial-info-plist "${CMAKE_CURRENT_BINARY_DIR}/Packaging/HP2-Icon.plist"
+        "${HP2_MACOS_ICON_SOURCE}"
     COMMAND "${HP2_INSTALL_NAME_TOOL}"
         -id "@rpath/$<TARGET_SONAME_FILE_NAME:OpenAL>"
         "${HP2_MACOS_OPENAL_DYLIB}"
@@ -106,11 +117,11 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
         "@executable_path/../Frameworks"
         "${HP2_MACOS_EXECUTABLE}"
     COMMAND "${HP2_CODESIGN}"
-        --force
-        --deep
-        --sign -
-        --timestamp=none
-        "${HP2_MACOS_APP_DIR}"
+        --force --sign - --timestamp=none "${HP2_MACOS_OPENAL_DYLIB}"
+    COMMAND "${HP2_CODESIGN}"
+        --force --sign - --timestamp=none "${HP2_MACOS_APP_DIR}"
+    COMMAND "${HP2_CODESIGN}"
+        --verify --deep --strict "${HP2_MACOS_APP_DIR}"
     DEPENDS
         hp2_game
         OpenAL
