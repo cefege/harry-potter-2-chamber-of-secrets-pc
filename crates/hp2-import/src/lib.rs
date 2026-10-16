@@ -4,6 +4,7 @@
 //! time; see the plan for the full scope.
 
 pub mod classify;
+pub mod collect;
 pub mod files;
 mod fold_table;
 pub mod hash;
