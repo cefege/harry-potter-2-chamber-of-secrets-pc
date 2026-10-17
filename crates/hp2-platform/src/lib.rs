@@ -38,6 +38,48 @@
 //!   `Tests/InputContractTests.cpp`'s `TestInputEventMapping`,
 //!   registered as the `input_event_mapping` ctest.
 //!
+//! **Scoping finding from reading all of `SDLClient.cpp` (318 lines)
+//! and `SDLViewport.cpp` (817 lines) in full:** Phase 2 (this crate)
+//! and Phase 3 (the wgpu renderer) are not cleanly separable in the
+//! order the plan states them for `USDLViewport` specifically.
+//! `OpenWindow` calls `TryRenderDevice` directly (`SDLViewport.cpp:
+//! 304-309`); `TryRenderDevice` constructs the render device through
+//! UE1's class-loading reflection (`StaticLoadClass`,
+//! `ConstructObject<URenderDevice>`, `SDLViewport.cpp:669-722`) and
+//! stores it in the inherited `RenDev` field; `Lock`/`Unlock`/
+//! `ResizeViewport` all read or call through `RenDev`
+//! (`SDLViewport.cpp:160-212`). None of that can move to Rust before
+//! a render device exists on the Rust side to move it to -- a C++
+//! stub that "forwards every virtual to `hp2_rs_platform_*`" for
+//! `USDLViewport` specifically would need Phase 3's design in hand
+//! for at least those five methods.
+//!
+//! What *can* port independent of Phase 3, once the live-UObject FFI
+//! boundary below is designed: window creation/chrome/cursor
+//! (`OpenWindow`'s `SDL_CreateWindow`/GL-attribute half,
+//! `UpdateWindowFrame`, `SetTitleBar`, `SetModeCursor`,
+//! `ToggleFullscreen`/`EndFullscreen`'s SDL half), the full
+//! `UpdateInput` event pump (already has its mapping logic ported --
+//! `input_event`/`mouse_capture` above -- missing only the joystick
+//! axis/button/hat branches, which are pure given explicit
+//! `JoystickDeadZone`/`ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons`
+//! inputs), mouse grab/capture state (`UpdateMouseGrabState`,
+//! `SetMouseCapture`, `GetMouseState`), clipboard
+//! (`USDLClient::GetClipboardText`/`SetClipboardText`), joystick
+//! open/close (`USDLClient::OpenJoystick`/`CloseJoystick`), and
+//! macOS `TextToSpeech` (`fork`/`execl("/usr/bin/say")`,
+//! `SDLViewport.cpp:770-813`).
+//!
+//! The pump's output can't be a single flat event list: distinct
+//! engine entry points are called per event kind --
+//! `Engine->InputEvent` for ordinary key/button/axis/wheel/joystick
+//! events (`CauseInputEvent`, `SDLViewport.cpp:535-542`),
+//! `Engine->MousePosition` for ungrabbed `SDL_MOUSEMOTION` (raw X/Y,
+//! not a delta, `SDLViewport.cpp:358-366`), and `Engine->Key` for
+//! `SDL_TEXTINPUT` (`SDLViewport.cpp:350-357`) -- `hp2_rs_sdl_poll`'s
+//! batch needs to carry which dispatch each entry needs, not just
+//! `(Key, Action, Delta)`.
+//!
 //! Not yet FFI-wired or called from C++: an additive, isolated crate,
 //! same as every other port crate's first commit in this workspace.
 
