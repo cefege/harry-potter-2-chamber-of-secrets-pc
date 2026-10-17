@@ -2537,3 +2537,51 @@ pub unsafe extern "C" fn hp2_rs_input_fold_joystick_hat(
         count as i32
     })
 }
+
+/// Mirrors the three `ALSource` fields `hp2_audio::priority::
+/// SourceSlot` needs (`crates/hp2-audio/src/priority.rs`). Declared
+/// directly in this crate for the same cbindgen-parsing reason as
+/// the other FFI mirror structs above.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiAudioSourceSlot {
+    pub has_sound: bool,
+    pub id: i32,
+    pub priority: f32,
+}
+
+/// Replaces `UALAudioSubsystem::FindLeastPriorityNonTalkSource`'s
+/// body (`ALAudioSubsystem.cpp:2085-2101`). `sources` must point to
+/// `count` contiguous `FfiAudioSourceSlot`s; the caller builds this
+/// array from its own `TArray<ALSource>` immediately before the call
+/// (no `ALSource` field Rust does not need crosses the boundary).
+///
+/// # Safety
+/// `sources` must be a valid, aligned pointer to at least `count`
+/// readable `FfiAudioSourceSlot`s (or `count == 0`, in which case
+/// `sources` may be dangling).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_audio_find_least_priority_non_talk_source(
+    sources: *const FfiAudioSourceSlot,
+    count: usize,
+) -> i32 {
+    guard(
+        "hp2_rs_audio_find_least_priority_non_talk_source",
+        -1,
+        move || unsafe {
+            let slots: Vec<hp2_audio::priority::SourceSlot> = if count == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(sources, count)
+                    .iter()
+                    .map(|s| hp2_audio::priority::SourceSlot {
+                        has_sound: s.has_sound,
+                        id: s.id,
+                        priority: s.priority,
+                    })
+                    .collect()
+            };
+            hp2_audio::priority::find_least_priority_non_talk_source(&slots)
+        },
+    )
+}

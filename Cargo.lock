@@ -147,6 +147,7 @@ name = "hp2-ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "hp2-audio",
  "hp2-codecs",
  "hp2-ffi-support",
  "hp2-import",

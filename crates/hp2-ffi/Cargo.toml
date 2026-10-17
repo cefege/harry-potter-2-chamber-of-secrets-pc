@@ -15,6 +15,7 @@ hp2-ini.workspace = true
 hp2-codecs.workspace = true
 hp2-import.workspace = true
 hp2-launcher.workspace = true
+hp2-audio.workspace = true
 hp2-platform.workspace = true
 log.workspace = true
 

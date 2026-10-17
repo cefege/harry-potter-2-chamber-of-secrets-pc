@@ -32,7 +32,13 @@
 //! would need its own signature changed to port the same way -- left
 //! alone for now, no caller update bundled into this slice).
 //!
-//! Not yet FFI-wired or called from C++: an additive, isolated crate,
-//! same as every other port crate's first commit in this workspace.
+//! FFI-wired via `hp2_rs_audio_find_least_priority_non_talk_source`
+//! (`crates/hp2-ffi`); `UALAudioSubsystem::FindLeastPriorityNonTalkSource`'s
+//! body now forwards to it, builds the `FfiAudioSourceSlot` array from
+//! its own `TArray<ALSource>` immediately before the call. The real
+//! C++ oracle, `TestTalkRegistrationEvictionPolicy`
+//! (`Tests/AudioTests.cpp:612-636`, part of the `audio_lifecycle`
+//! ctest), exercises this through the real caller path and passes
+//! against the Rust implementation.
 
 pub mod priority;

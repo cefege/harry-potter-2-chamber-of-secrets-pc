@@ -2084,20 +2084,14 @@ UBOOL UALAudioSubsystem::alError( TCHAR* Text, UBOOL Log )
 
 INT UALAudioSubsystem::FindLeastPriorityNonTalkSource( const TArray<ALSource>& InSources )
 {
-	INT Result = INDEX_NONE;
-	FLOAT LowestPriority = 0.f;
+	TArray<FfiAudioSourceSlot> Slots( InSources.Num() );
 	for( INT Index=0; Index<InSources.Num(); ++Index )
 	{
-		const ALSource& Source = InSources(Index);
-		if( Source.Sound
-			&& (Source.Id & 14) != (SLOT_Talk * 2)
-			&& (Result==INDEX_NONE || Source.Priority<LowestPriority) )
-		{
-			Result = Index;
-			LowestPriority = Source.Priority;
-		}
+		Slots(Index).has_sound = InSources(Index).Sound != NULL;
+		Slots(Index).id        = InSources(Index).Id;
+		Slots(Index).priority  = InSources(Index).Priority;
 	}
-	return Result;
+	return hp2_rs_audio_find_least_priority_non_talk_source( Slots.GetData(), Slots.Num() );
 }
 
 #define INITIAL_MIN_COUNT	3	//	we need to find at least this many playing instances of a sound before we'll kill it
