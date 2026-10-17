@@ -1,18 +1,109 @@
 //! Rust port of `ThirdParty/XOpenGLDrv/Src/SetTexture.cpp`'s texture
 //! cache/upload (plan's "Texture upload/cache in Rust" Phase 3 item).
 //! Scope today: the `TEXF_P8` (indexed-palette) -> RGBA8 expansion
-//! only (`SetTexture.cpp`'s own `case TEXF_P8:` conversion loop,
-//! `ConvertP8_RGBA8888`, read in full). Not yet ported: `CacheID`
-//! keying/`FixCacheID`'s masked-vs-unmasked bind-map split (real
-//! logic understood, not yet wired to any cache structure here),
-//! `TEXF_DXT1`/BC upload and the still-undecided mip strategy noted
-//! in this crate's own module doc, the `TEXF_RGBA7`/`RGB16`/`RGB8`
-//! uncompressed-but-not-P8 formats, and the lightmap `GL_BGRA`
+//! (`SetTexture.cpp`'s own `case TEXF_P8:` conversion loop,
+//! `ConvertP8_RGBA8888`, read in full), the real `ETextureFormat`
+//! enum and its small pure helpers (`HP2TextureBytes`/
+//! `HP2TextureFormatName`/`IsHP2CompressedTexture`), and `FixCacheID`'s
+//! real masked-vs-unmasked bind-map-key tagging (the tagging logic
+//! itself, not yet wired to any actual cache/`BindMap` structure --
+//! no cache exists in this crate yet, see below). Not yet ported:
+//! an actual texture cache structure (the real `BindMap`/
+//! `FCachedTexture`, keyed by `CacheID`), `TEXF_DXT1`/BC upload and
+//! the still-undecided mip strategy noted in this crate's own module
+//! doc, actual GPU upload for any format, and the lightmap `GL_BGRA`
 //! swizzle note (`DrawComplex_GLSL.cpp:439-444`'s `OPT_GLES .bgr`
 //! branch) -- upload lightmaps as `Bgra8Unorm` (or CPU-swizzle before
 //! upload) to keep `complex.wgsl`'s plain `.rgb` sampling correct
 //! once lightmap upload is actually implemented; recorded here so the
 //! decision is not lost before that lands.
+
+/// Real `ETextureFormat` (`UnTex.h`): `TEXF_P8=0x00, TEXF_RGBA7=0x01,
+/// TEXF_RGB16=0x02, TEXF_DXT1=0x03, TEXF_RGB8=0x04, TEXF_RGBA8=0x05`
+/// (`TEXF_MAX=0xff` is a bound sentinel the real source never uses as
+/// an actual per-texture format value, so it has no variant here).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextureFormat {
+    P8,
+    Rgba7,
+    Rgb16,
+    Dxt1,
+    Rgb8,
+    Rgba8,
+}
+
+/// `SetTexture.cpp`'s own `IsHP2CompressedTexture`: the only
+/// compressed format in use is `TEXF_DXT1` -- confirmed by reading
+/// every `case` this real source's own format-dispatch switches
+/// handle, not assumed from the format list alone.
+pub fn is_compressed_texture(format: TextureFormat) -> bool {
+    format == TextureFormat::Dxt1
+}
+
+/// `SetTexture.cpp`'s own real `HP2TextureBytes`: BC1/DXT1's real
+/// 4x4-block, 8-bytes-per-block size formula (`Max(1, (U+3)/4) *
+/// Max(1, (V+3)/4) * 8`, correctly rounding a non-multiple-of-4
+/// dimension up to a whole block, down to a 1x1-block floor for tiny
+/// mips) for the one compressed format, plain `width * height *
+/// bytes_per_pixel` for every uncompressed one.
+pub fn texture_bytes(format: TextureFormat, u_size: i32, v_size: i32) -> i32 {
+    if format == TextureFormat::Dxt1 {
+        return 1.max((u_size + 3) / 4) * 1.max((v_size + 3) / 4) * 8;
+    }
+    let bytes_per_pixel = match format {
+        TextureFormat::P8 => 1,
+        TextureFormat::Rgb16 => 2,
+        TextureFormat::Rgb8 => 3,
+        // Rgba7/Rgba8/Dxt1(unreachable here) -- the real source's own
+        // ternary chain falls through to 4 for everything not
+        // explicitly named above, Dxt1 already returned earlier.
+        _ => 4,
+    };
+    u_size * v_size * bytes_per_pixel
+}
+
+/// `SetTexture.cpp`'s own real `HP2TextureFormatName` -- byte-
+/// identical strings, used in real log output this port must not
+/// silently rename.
+pub fn texture_format_name(format: TextureFormat) -> &'static str {
+    match format {
+        TextureFormat::P8 => "P8",
+        TextureFormat::Rgba7 => "RGBA7",
+        TextureFormat::Rgb16 => "RGB16",
+        TextureFormat::Dxt1 => "DXT1",
+        TextureFormat::Rgb8 => "RGB8",
+        TextureFormat::Rgba8 => "RGBA8",
+    }
+}
+
+/// Real `PF_Masked` (`UnObj.h`): `0x00000002`.
+const PF_MASKED: u32 = 0x0000_0002;
+
+/// Real `MASKED_TEXTURE_TAG` (`SetTexture.cpp`): bit 2 (`4`), reused
+/// as a cache-key tag because "the least significant bits of a
+/// CacheID are always zero" (the real source's own comment, not
+/// re-derived here).
+const MASKED_TEXTURE_TAG: u64 = 4;
+
+/// Real `FixCacheID`: makes the masked and unmasked copies of a
+/// `TEXF_P8` texture map to different real cache keys, since
+/// `PF_Masked` drawing needs palette index 0 forced fully transparent
+/// (`p8_to_rgba8`'s own `P8MaskMode::Masked`) while non-masked drawing
+/// needs that same index's real, non-overridden color -- one texture
+/// genuinely needs two different uploaded copies depending on how a
+/// given draw call uses it, confirmed by reading the real source's
+/// own comment on why, not just copying the bit-twiddling. Takes and
+/// returns the real `CacheID` rather than mutating a passed-in
+/// `FTextureInfo`-shaped struct in place: no such cache struct exists
+/// in this crate yet (see this module's own header), so there is
+/// nothing to mutate beyond the one `u64` value itself.
+pub fn fix_cache_id(cache_id: u64, format: TextureFormat, poly_flags: u32) -> u64 {
+    if (poly_flags & PF_MASKED) != 0 && format == TextureFormat::P8 {
+        cache_id | MASKED_TEXTURE_TAG
+    } else {
+        cache_id & !MASKED_TEXTURE_TAG
+    }
+}
 
 /// Real `FColor` (`UnTex.h`), re-used from `hp2-abi` rather than
 /// redefined here (caught on review: an earlier version of this
@@ -98,6 +189,87 @@ pub fn p8_to_rgba8(indices: &[u8], palette: &[FColor; 256], mask_mode: P8MaskMod
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texture_format_name_matches_the_real_source_strings_exactly() {
+        assert_eq!(texture_format_name(TextureFormat::P8), "P8");
+        assert_eq!(texture_format_name(TextureFormat::Rgba7), "RGBA7");
+        assert_eq!(texture_format_name(TextureFormat::Rgb16), "RGB16");
+        assert_eq!(texture_format_name(TextureFormat::Dxt1), "DXT1");
+        assert_eq!(texture_format_name(TextureFormat::Rgb8), "RGB8");
+        assert_eq!(texture_format_name(TextureFormat::Rgba8), "RGBA8");
+    }
+
+    #[test]
+    fn is_compressed_texture_is_true_only_for_dxt1() {
+        assert!(is_compressed_texture(TextureFormat::Dxt1));
+        assert!(!is_compressed_texture(TextureFormat::P8));
+        assert!(!is_compressed_texture(TextureFormat::Rgba7));
+        assert!(!is_compressed_texture(TextureFormat::Rgb16));
+        assert!(!is_compressed_texture(TextureFormat::Rgb8));
+        assert!(!is_compressed_texture(TextureFormat::Rgba8));
+    }
+
+    #[test]
+    fn texture_bytes_matches_the_real_formula_for_every_format() {
+        // Uncompressed: plain width * height * bytes-per-pixel.
+        assert_eq!(texture_bytes(TextureFormat::P8, 64, 64), 64 * 64);
+        assert_eq!(texture_bytes(TextureFormat::Rgb16, 64, 64), 64 * 64 * 2);
+        assert_eq!(texture_bytes(TextureFormat::Rgb8, 64, 64), 64 * 64 * 3);
+        assert_eq!(texture_bytes(TextureFormat::Rgba7, 64, 64), 64 * 64 * 4);
+        assert_eq!(texture_bytes(TextureFormat::Rgba8, 64, 64), 64 * 64 * 4);
+        // DXT1: 4x4 blocks, 8 bytes/block, exact multiple of 4.
+        assert_eq!(texture_bytes(TextureFormat::Dxt1, 64, 64), 16 * 16 * 8);
+        // DXT1 non-multiple-of-4 dimensions round UP to a whole block
+        // (the real source's own Max(1, (U+3)/4) -- not a floor
+        // division, which would silently drop a partial block's real
+        // storage requirement).
+        assert_eq!(texture_bytes(TextureFormat::Dxt1, 5, 5), 2 * 2 * 8);
+        // Tiny mips floor at one whole block, never zero blocks --
+        // the real source's own Max(1, ...) on each axis.
+        assert_eq!(texture_bytes(TextureFormat::Dxt1, 1, 1), 8);
+    }
+
+    #[test]
+    fn fix_cache_id_tags_p8_masked_textures_only() {
+        const PF_MASKED: u32 = 0x0000_0002;
+        const PF_INVISIBLE: u32 = 0x0000_0001;
+        // P8 + masked: real masked-copy tag bit set.
+        assert_eq!(fix_cache_id(0x1000, TextureFormat::P8, PF_MASKED), 0x1004);
+        // P8 + not masked: tag bit cleared (even if some other,
+        // unrelated poly flag is set).
+        assert_eq!(
+            fix_cache_id(0x1004, TextureFormat::P8, PF_INVISIBLE),
+            0x1000
+        );
+        // Non-P8 format + masked flag: the real source's own `&&
+        // Info.Format == TEXF_P8` guard means masking never tags a
+        // non-P8 format's cache key at all, regardless of PF_Masked.
+        assert_eq!(
+            fix_cache_id(0x1000, TextureFormat::Rgba8, PF_MASKED),
+            0x1000
+        );
+        // Already-tagged non-P8 entry still gets the tag bit cleared
+        // on a non-masked call -- the real source's own unconditional
+        // `else` branch, not a no-op when the format isn't P8.
+        assert_eq!(
+            fix_cache_id(0x1004, TextureFormat::Rgba8, PF_INVISIBLE),
+            0x1000
+        );
+    }
+
+    #[test]
+    fn fix_cache_id_only_touches_the_real_tag_bit() {
+        // The real source only ORs/ANDs bit 2 (MASKED_TEXTURE_TAG=4)
+        // -- every other bit of a real CacheID must survive
+        // unchanged, masked or not.
+        let cache_id = 0xDEAD_BEEF_0000_0010u64;
+        let masked = fix_cache_id(cache_id, TextureFormat::P8, 0x0000_0002);
+        assert_eq!(masked & !0b100, cache_id & !0b100);
+        assert_eq!(masked & 0b100, 0b100);
+        let unmasked = fix_cache_id(cache_id, TextureFormat::P8, 0);
+        assert_eq!(unmasked, cache_id);
+    }
 
     fn reference_palette() -> [FColor; 256] {
         let mut palette = [FColor {
