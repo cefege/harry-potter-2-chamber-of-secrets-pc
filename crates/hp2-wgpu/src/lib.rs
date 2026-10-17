@@ -1759,4 +1759,91 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             backend_name(created.backend)
         );
     }
+
+    // Same reasoning as the other real-GPU pipeline tests applied to
+    // complex.wgsl, the fourth and most complex shader in this crate so
+    // far: the first test here to prove a pipeline with *three* texture/
+    // sampler pairs (diffuse/lightmap/fogmap, all in one bind group)
+    // alongside the shared frame uniform and the draw-parameters array.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn complex_wgsl_builds_a_render_pipeline_on_a_real_adapter() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let validation_scope = created
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal_scope = created.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let module = created
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("complex.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(shader_source("complex").into()),
+            });
+        // Matches VertexInput: @location(0) coords: vec3<f32>,
+        // @location(1) draw_id: u32.
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: 12,
+                shader_location: 1,
+            },
+        ];
+        let _pipeline = created
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("complex.wgsl pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: 16, // 3*f32 + u32
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &vertex_attributes,
+                    })],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let internal_err = pollster::block_on(internal_scope.pop());
+        let validation_err = pollster::block_on(validation_scope.pop());
+        if let Some(err) = validation_err.or(internal_err) {
+            panic!(
+                "complex.wgsl's pipeline failed to compile on real adapter {:?} backend {}: {err}",
+                created.adapter_name,
+                backend_name(created.backend)
+            );
+        }
+        println!(
+            "complex.wgsl's pipeline compiled successfully (real MSL translation + Metal \
+             compiler invocation exercised, including three texture/sampler pairs in one \
+             bind group) on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
 }
