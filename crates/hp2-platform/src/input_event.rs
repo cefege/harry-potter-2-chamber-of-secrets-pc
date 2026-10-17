@@ -1,24 +1,26 @@
 //! Normalized input-event adapter, ported from
 //! `HarryPotter2/Unreal/SDLDrv/Inc/HP2InputEvents.h`.
 //!
-//! The real header's own "PREP ONLY -- not yet wired into the
-//! viewport pump" comment is stale: `USDLViewport::UpdateInput`
-//! (`SDLViewport.cpp:318-480`) already calls these exact functions at
-//! live call sites. The constructor fills `KeysymMap` from
-//! `HP2MapKeysym` (`:84-85`); the event loop calls `HP2MakeKeyEvent`
-//! (`:345`), `HP2MakeTextEvent` (`:352`), `HP2MakeMouseButtonEvent`
-//! (`:370`) and `HP2MakeWheelEvents` (`:378`), each immediately
-//! followed by `CauseInputEvent`/`Engine->Key`. The cutover for this
-//! module is switching those five call sites to `hp2_rs_*`
-//! equivalents one at a time, keeping the exact same per-event,
-//! inline-in-the-poll-loop shape the pump has today -- not a new
-//! batch SDL-poll protocol. `CauseInputEvent` itself (`:535-542`)
-//! calls `GetOuterUSDLClient()->Engine->InputEvent(...)`, a live
-//! `UEngine*` virtual dispatch, so that part stays C++ until Phase 5;
-//! only the pure mapping step ahead of it moves. This makes
-//! `HP2InputEvent`'s `#[repr(C)]` layout exactly matching the real
+//! `USDLViewport::UpdateInput` (`SDLViewport.cpp:318-480`) calls
+//! `HP2MapKeysym`/`HP2MakeKeyEvent`/`HP2MakeMouseButtonEvent`/
+//! `HP2MakeWheelEvents`/`HP2MakeTextEvent` at five live call sites
+//! (`:84-85/345/352/370/378`), each immediately followed by
+//! `CauseInputEvent`/`Engine->Key`. Those five names in
+//! `HP2InputEvents.h` are now thin forwards to this module's
+//! functions through `hp2_rs_input_*` (`crates/hp2-ffi/src/lib.rs`);
+//! the C++ switch statement and UTF-8 decoder that used to implement
+//! them are deleted. `SDLViewport.cpp` is unchanged -- it keeps
+//! calling the same names, which now resolve to Rust. This is also
+//! why `HP2InputEvent`'s `#[repr(C)]` layout exactly matching the real
 //! `FHP2InputEvent` (`ANSICHAR Text[8]`, NUL in-band, no separate
-//! length field) a live requirement, not a future-design detail.
+//! length field) is a hard requirement: `hp2_rs_input_*` returns it
+//! (via a separately-declared `FfiInputEvent` mirror in `hp2-ffi`,
+//! which cbindgen needs defined in that crate directly) across the
+//! real FFI boundary the game runs today, not a future design detail.
+//! `CauseInputEvent` itself (`SDLViewport.cpp:535-542`) calls
+//! `GetOuterUSDLClient()->Engine->InputEvent(...)`, a live `UEngine*`
+//! virtual dispatch, so that part stays C++ until Phase 5; only the
+//! pure mapping step ahead of it is Rust.
 //!
 //! `EInputKey`/`EInputAction` (`Engine/Inc/EngineClasses.h:129-401`) are
 //! both plain, dense, zero-based C++ enums (`IK_None=0 .. IK_MAX=255`,

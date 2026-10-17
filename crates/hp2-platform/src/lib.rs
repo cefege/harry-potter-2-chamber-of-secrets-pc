@@ -2,9 +2,9 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: two pure mapping/decision modules plus
-//! one live FFI-wired slice, not the `USDLClient`/`USDLViewport`
-//! classes themselves.** `USDLClient : UClient, FNotifyHook` and
+//! **Scope of this crate today: one pure-decision module plus two
+//! FFI-wired cutovers, not the `USDLClient`/`USDLViewport` classes
+//! themselves.** `USDLClient : UClient, FNotifyHook` and
 //! `USDLViewport : UViewport` are UE1 `UObject`-derived classes
 //! (`DECLARE_CLASS`, `DECLARE_WITHIN(USDLClient)`) with large virtual
 //! interfaces (19 and 25 methods respectively) driven directly by the
@@ -19,19 +19,15 @@
 //!   `Tests/InputContractTests.cpp`'s `TestMouseCapturePolicy`
 //!   (`mouse_capture_policy` ctest). Not yet FFI-wired.
 //! - `input_event`: `HP2InputEvents.h`'s raw-SDL -> normalized-event
-//!   mapping functions. `USDLViewport::UpdateInput`
-//!   (`SDLViewport.cpp:318-480`) already calls these at five live call
-//!   sites -- the constructor fills `KeysymMap` from `HP2MapKeysym`
-//!   (`:84-85`), and the event loop calls `HP2MakeKeyEvent` (`:345`),
-//!   `HP2MakeTextEvent` (`:352`), `HP2MakeMouseButtonEvent` (`:370`)
-//!   and `HP2MakeWheelEvents` (`:378`), each immediately followed by
-//!   `CauseInputEvent`/`Engine->Key`. The cutover is switching those
-//!   five call sites to `hp2_rs_*` equivalents one at a time -- each
-//!   call keeps returning one `HP2InputEvent` (or up to three, for the
-//!   wheel case), C++ keeps doing the `CauseInputEvent`/`Engine->Key`
-//!   dispatch immediately after, same shape as today. Oracle:
-//!   `Tests/InputContractTests.cpp`'s `TestInputEventMapping`
-//!   (`input_event_mapping` ctest). Not yet FFI-wired.
+//!   mapping functions. FFI-wired: `HP2InputEvents.h`'s five functions
+//!   (`HP2MapKeysym`, `HP2MakeKeyEvent`, `HP2MakeMouseButtonEvent`,
+//!   `HP2MakeWheelEvents`, `HP2MakeTextEvent`) are thin forwards to
+//!   `hp2_rs_input_*`; the C++ switch statement and UTF-8 decoder that
+//!   used to implement them are deleted. `USDLViewport::UpdateInput`
+//!   (`SDLViewport.cpp:318-480`, five call sites:
+//!   `:84-85/345/352/370/378`) and `Tests/InputContractTests.cpp`'s
+//!   `TestInputEventMapping` (`input_event_mapping` ctest) are both
+//!   unchanged -- they call the same names, which now resolve to Rust.
 //! - `clipboard`: `USDLClient::GetClipboardText`/`SetClipboardText`.
 //!   FFI-wired; the real C++ caller already calls through it. Ctest:
 //!   `clipboard_round_trip` (`Tests/PlatformClipboardTests.cpp`).

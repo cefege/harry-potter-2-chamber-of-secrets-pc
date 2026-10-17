@@ -2062,6 +2062,12 @@ pub struct FfiInputEvent {
     pub text: [u8; 8],
 }
 
+const _: () = assert!(std::mem::size_of::<FfiInputEvent>() == 20);
+const _: () = assert!(std::mem::offset_of!(FfiInputEvent, key) == 0);
+const _: () = assert!(std::mem::offset_of!(FfiInputEvent, action) == 4);
+const _: () = assert!(std::mem::offset_of!(FfiInputEvent, delta) == 8);
+const _: () = assert!(std::mem::offset_of!(FfiInputEvent, text) == 12);
+
 impl From<hp2_platform::input_event::HP2InputEvent> for FfiInputEvent {
     fn from(e: hp2_platform::input_event::HP2InputEvent) -> Self {
         FfiInputEvent {
