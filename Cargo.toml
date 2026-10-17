@@ -20,6 +20,9 @@ hp2-launcher = { path = "crates/hp2-launcher" }
 hp2-audio = { path = "crates/hp2-audio" }
 hp2-platform = { path = "crates/hp2-platform" }
 hp2-abi = { path = "crates/hp2-abi" }
+hp2-wgpu = { path = "crates/hp2-wgpu" }
+wgpu = "=30.0.1"
+pollster = "=0.4.0"
 sha2 = "=0.10.9"
 cbindgen = { version = "=0.29.4", default-features = false }
 log = "=0.4.34"
