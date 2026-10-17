@@ -7,3 +7,6 @@ publish.workspace = true
 
 [lib]
 name = "hp2_launcher"
+
+[dependencies]
+hp2-ini.workspace = true

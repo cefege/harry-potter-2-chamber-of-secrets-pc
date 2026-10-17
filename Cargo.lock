@@ -178,6 +178,9 @@ dependencies = [
 [[package]]
 name = "hp2-launcher"
 version = "0.1.0"
+dependencies = [
+ "hp2-ini",
+]
 
 [[package]]
 name = "indexmap"
