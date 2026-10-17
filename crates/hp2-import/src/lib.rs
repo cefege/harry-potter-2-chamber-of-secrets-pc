@@ -67,5 +67,6 @@ mod fold_table;
 pub mod hash;
 pub mod lower;
 pub mod manifest;
+pub mod output;
 pub mod plan;
 mod util;
