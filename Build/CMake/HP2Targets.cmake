@@ -1489,4 +1489,49 @@ if(HP2_ENABLE_WGPU_DRIVER)
     # (HP2StaticPackages.cpp).
     target_link_libraries(hp2_game PRIVATE hp2_wgpudrv)
     target_compile_definitions(hp2_game PRIVATE HP2_ENABLE_WGPU_DRIVER=1)
+
+    if(APPLE)
+        # hp2_rs_wgpu_create_surface_from_ns_view_for_testing is only
+        # compiled on macOS (crates/hp2-wgpu/src/lib.rs's `macos`
+        # module, crates/hp2-ffi/src/lib.rs's matching #[cfg(all(
+        # feature = "renderer-wgpu", target_os = "macos"))] export) --
+        # gate this test target the same way so a hypothetical non-
+        # Apple HP2_ENABLE_WGPU_DRIVER build never tries to compile
+        # against a function that does not exist there.
+        set(HP2_WGPU_SURFACE_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/WgpuSurfaceTests.cpp")
+        hp2_add_executable(hp2_wgpu_surface_tests
+            ${HP2_WGPU_SURFACE_TEST_SOURCE}
+        )
+        target_link_libraries(hp2_wgpu_surface_tests PRIVATE
+            hp2_core
+            hp2_engine
+            hp2_render
+            hp2_fire
+            hp2_editor_runtime
+            hp2_sdldrv
+        )
+        # Cannot use the "dummy" SDL video driver (see
+        # Tests/WgpuSurfaceTests.cpp's own header comment): a real
+        # Metal-capable adapter and windowing backend, same
+        # RESOURCE_LOCK as renderer_smoke_wgpu below so the two never
+        # contend for the GPU concurrently.
+        hp2_add_behavior_test(wgpu_surface_round_trip hp2_wgpu_surface_tests)
+        set_tests_properties(wgpu_surface_round_trip PROPERTIES
+            LABELS "smoke;renderer;wgpu"
+            RESOURCE_LOCK hp2_gpu
+        )
+    endif()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME renderer_smoke_wgpu
+        COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/Build/run_wgpu_smoke.py"
+            "--build-dir=${CMAKE_BINARY_DIR}"
+            "--data-root=${HP2_TEST_DATA_ROOT}"
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    )
+    set_tests_properties(renderer_smoke_wgpu PROPERTIES
+        LABELS "smoke;renderer;wgpu"
+        RESOURCE_LOCK hp2_gpu
+        TIMEOUT 600
+    )
 endif()

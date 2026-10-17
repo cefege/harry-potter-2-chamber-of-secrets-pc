@@ -2,40 +2,35 @@
 //! `ThirdParty/UT99VulkanDrv` with one `wgpu`-backed render device.
 //! Phase 3.2 of `local://rust-inplace-port-plan.md`.
 //!
-//! **Scope of this crate today: headless adapter and device/queue
-//! creation**, with no window surface, no `WgpuDrv` C++ package yet,
-//! and nothing wired to `hp2-ffi`. This is deliberately the smallest
-//! verifiable slice: it answers "does `wgpu` actually produce a
-//! working adapter and device on the real hardware this project
-//! targets" before any of the surrounding C++ package scaffolding
-//! (`UWgpuRenderDevice : URenderDevice`, the `IMPLEMENT_PACKAGE(WgpuDrv)`
-//! boilerplate, `AUTO_INITIALIZE_REGISTRANTS_WGPUDRV`, the full
-//! `hp2_rs_wgpu_<method>` virtual-forwarding surface) gets built around
-//! it. Verified on real hardware, not assumed: this machine has a real
-//! Apple M5 GPU (Metal 4, confirmed via `system_profiler
-//! SPDisplaysDataType` before this crate was started), so
-//! `request_adapter_sync`/`create_device_sync`'s own tests confirm a
-//! genuine adapter and a genuine working device from the real Metal
-//! backend, not a software/CI fallback -- but both tests are
-//! `#[ignore]`d (see their own doc) because `.github/workflows/ci.yml`
-//! runs `cargo test --workspace` on GitHub-hosted Linux/Windows runners
-//! with no real GPU; run them explicitly with `cargo test -p hp2-wgpu
-//! -- --ignored` on a machine that has one.
+//! **Scope of this crate today: headless adapter/device creation, plus
+//! macOS window-surface creation from a raw `NSView*`.** Wired to
+//! `hp2-ffi` behind the `renderer-wgpu` feature, consumed by the real
+//! `HarryPotter2/Unreal/WgpuDrv` C++ package (`UWgpuRenderDevice :
+//! URenderDevice`, registered as `WgpuDrv.WgpuRenderDevice`, gated
+//! behind the `HP2_ENABLE_WGPU_DRIVER` CMake option, default OFF).
+//! Verified end to end on real hardware, not assumed: `Init`/`Exit`
+//! forward to `hp2_rs_wgpu_create`/`destroy`; a real `hp2_game` process
+//! launch with `[Engine.Engine] GameRenderDevice=WgpuDrv.
+//! WgpuRenderDevice` logs `WgpuDrv: adapter "Apple M5" backend Metal`
+//! (`Build/run_wgpu_smoke.py`, this machine's real GPU, confirmed
+//! present via `system_profiler SPDisplaysDataType` before this crate
+//! was started). `request_adapter_sync`/`create_device_sync`'s own
+//! `#[ignore]`d tests (CI runners have no GPU, see their own doc) cover
+//! the headless half at the Rust level directly.
 //!
-//! Still open, not started: the window-surface half (`Instance::
-//! create_surface`, needs `raw-window-handle` values built by hand from
-//! `SDL_GetWindowWMInfo`'s output per the plan's "Approved deviations"
-//! SDL2 entry -- no `sdl2` crate, same reasoning as every other
-//! SDL-touching slice this session), the `WgpuDrv` C++ package itself,
-//! the render ABI's remaining pointer-containing types (`hp2-abi`'s own
-//! module doc explains why those wait for this crate's actual consumer
-//! logic to exist), all WGSL shader transcription, and a stronger
-//! device-working proof than the current command-buffer-submit-and-poll
-//! round trip -- the plan's frame capture and editor hit testing will
-//! eventually need a real texture-clear-then-`copy_texture_to_buffer`-
-//! then-`map_async` readback path, which is a reasonable next test to
-//! add but is not required to prove this slice's own claim (a working
-//! device, not yet a working renderer).
+//! Still open, not started: actually attaching the surface this
+//! crate's new `macos` module can create to `UWgpuRenderDevice`'s own
+//! `Init`/device-creation flow (today `create_device_sync` stays
+//! headless, `compatible_surface: None` -- the two are not wired
+//! together yet, so `Init` still cannot actually present a frame),
+//! resize handling, all WGSL shader transcription, real draw-call
+//! forwarding for any of `URenderDevice`'s pure virtuals, and a
+//! stronger device-working proof than the current command-buffer-
+//! submit-and-poll round trip -- the plan's frame capture and editor
+//! hit testing will eventually need a real texture-clear-then-
+//! `copy_texture_to_buffer`-then-`map_async` readback path, a
+//! reasonable next test to add but not required to prove either
+//! existing slice's own narrower claim.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
@@ -78,9 +73,16 @@ pub fn backend_name(backend: wgpu::Backend) -> &'static str {
     }
 }
 
-/// Shared `Instance` construction: the chosen backend set, headless
-/// (`new_without_display_handle`) since there's no `SDL_Window*` yet.
-fn build_instance(choice: BackendChoice) -> wgpu::Instance {
+/// Shared `Instance` construction: the chosen backend set. Used both
+/// for headless adapter/device creation (`request_adapter_sync`/
+/// `create_device_sync` below) and, on macOS, for window-surface
+/// creation (`macos::create_surface_from_ns_view`) -- the same
+/// `Instance` must be shared between the two for `request_adapter`'s
+/// `compatible_surface` check to mean anything once that integration
+/// lands (not yet; see this module's own doc for what's still open).
+/// Public so callers needing that integration can construct one
+/// instance and pass it to both halves themselves.
+pub fn build_instance(choice: BackendChoice) -> wgpu::Instance {
     wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: choice.to_wgpu(),
         ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -168,6 +170,54 @@ pub fn create_device_sync(choice: BackendChoice) -> Option<CreatedDevice> {
         backend: info.backend,
         adapter_limits,
     })
+}
+
+/// Window-surface creation from a C++-owned `SDL_Window*`'s raw view
+/// pointer. Only macOS today -- the plan's "Approved deviations" SDL2
+/// entry's reasoning applies here too: no `sdl2` crate, so no
+/// `raw-window-handle` feature on a crate dependency either; C++ gets
+/// the raw `NSView*` itself via `SDL_Metal_CreateView`/
+/// `SDL_Metal_GetLayer` (SDL functions, not an `sdl2` crate call) and
+/// passes the pointer across FFI, same pattern as every other
+/// SDL-touching slice this session.
+#[cfg(target_os = "macos")]
+pub mod macos {
+    use std::ffi::c_void;
+    use std::ptr::NonNull;
+
+    /// Replaces the window-surface half of `WgpuDrv`'s future `Init`
+    /// (plan's "Window surface" bullet). `ns_view` is the pointer
+    /// `SDL_Metal_CreateView` returns (itself "can be cast directly to
+    /// an NSView", per `SDL_metal.h`'s own doc comment) -- C++ calls
+    /// `SDL_Metal_CreateView`, not this function, since it owns the
+    /// `SDL_Window*` the view is attached to; this function only turns
+    /// the resulting raw pointer into a `wgpu::Surface`.
+    ///
+    /// # Safety
+    /// `ns_view` must be a valid, non-null pointer to an `NSView`
+    /// (typically a `CAMetalLayer`-backed one from
+    /// `SDL_Metal_CreateView`) that outlives the returned `Surface`.
+    /// Must be called from the application's main thread: AppKit views
+    /// are only safely accessed from there (see
+    /// `raw_window_handle::AppKitWindowHandle`'s own doc comment).
+    pub unsafe fn create_surface_from_ns_view(
+        instance: &wgpu::Instance,
+        ns_view: *mut c_void,
+    ) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError> {
+        let ns_view = NonNull::new(ns_view).expect("ns_view must not be null");
+        let raw_window_handle = raw_window_handle::RawWindowHandle::AppKit(
+            raw_window_handle::AppKitWindowHandle::new(ns_view),
+        );
+        let raw_display_handle = raw_window_handle::RawDisplayHandle::AppKit(
+            raw_window_handle::AppKitDisplayHandle::new(),
+        );
+        unsafe {
+            instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                raw_display_handle: Some(raw_display_handle),
+                raw_window_handle,
+            })
+        }
+    }
 }
 
 #[cfg(test)]

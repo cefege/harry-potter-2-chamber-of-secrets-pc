@@ -12,3 +12,4 @@ name = "hp2_wgpu"
 wgpu.workspace = true
 log.workspace = true
 pollster.workspace = true
+raw-window-handle.workspace = true

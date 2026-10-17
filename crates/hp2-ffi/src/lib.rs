@@ -2767,3 +2767,33 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
         }
     })
 }
+
+/// Replaces the window-surface half of `UWgpuRenderDevice::Init`
+/// (`WgpuDrv`'s future C++ body, macOS only -- `hp2-wgpu::macos`'s own
+/// doc explains why). `ns_view` is the pointer `SDL_Metal_CreateView`
+/// returns. This is a standalone smoke check, not yet wired into
+/// `hp2_rs_wgpu_create`'s device: it builds its own throwaway
+/// `wgpu::Instance`, attempts the surface creation, and reports
+/// success/failure, then drops everything -- proving the raw-handle
+/// construction itself works before the larger "one shared Instance,
+/// surface-compatible adapter request" integration (still open, see
+/// `hp2-wgpu`'s own module doc) gets built around it.
+///
+/// # Safety
+/// `ns_view` must be a valid, non-null pointer to an `NSView` (from
+/// `SDL_Metal_CreateView`) that outlives this call. Must be called on
+/// the application's main thread (AppKit requirement).
+#[cfg(all(feature = "renderer-wgpu", target_os = "macos"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_create_surface_from_ns_view_for_testing(
+    ns_view: *mut c_void,
+) -> bool {
+    guard(
+        "hp2_rs_wgpu_create_surface_from_ns_view_for_testing",
+        false,
+        move || unsafe {
+            let instance = hp2_wgpu::build_instance(hp2_wgpu::BackendChoice::Auto);
+            hp2_wgpu::macos::create_surface_from_ns_view(&instance, ns_view).is_ok()
+        },
+    )
+}
