@@ -61,14 +61,21 @@ const HAT_FOLD_BUTTON_THRESHOLD: i32 = 12;
 /// Replaces `USDLClient::OpenJoystick`'s derived-field computation
 /// (`SDLClient.cpp:249-256`), the pure part once the raw SDL counts
 /// are known. Pure logic, no FFI dependency, independently
-/// unit-testable without the `sdl` feature.
+/// unit-testable without the `sdl` feature. `buttons` deliberately
+/// has no lower bound, matching the real C++'s `Min(SDL_
+/// JoystickNumButtons(Joystick), 16)` exactly -- `Min` is a plain
+/// `(A<=B) ? A : B` (`UnTemplate.h:115-118`), so SDL's own -1 error
+/// sentinel for "couldn't determine the count" passes through
+/// unmodified as `-1`, not floored to 0. `hats` and `axes` do have a
+/// floor/clamp in the real C++ (`Max`/`Clamp`), matched here the same
+/// way.
 pub fn derive_joystick_fields(
     physical_buttons: i32,
     physical_hats: i32,
     physical_axes: i32,
     ignore_hat: bool,
 ) -> (i32, i32, i32, bool) {
-    let buttons = physical_buttons.clamp(0, MAX_JOYSTICK_BUTTONS);
+    let buttons = physical_buttons.min(MAX_JOYSTICK_BUTTONS);
     let hats = physical_hats.max(0);
     let axes = physical_axes.clamp(0, MAX_JOYSTICK_AXES);
     let physical_buttons = physical_buttons.max(0);
@@ -164,8 +171,10 @@ mod tests {
         // qualifies.
         assert_eq!(derive_joystick_fields(14, 1, 4, true), (14, 1, 4, false));
 
-        // Negative inputs (SDL's own "unknown" sentinel is -1) floor
-        // to 0, matching Max(..., 0)/Clamp(..., 0, N).
-        assert_eq!(derive_joystick_fields(-1, -1, -1, false), (0, 0, 0, false));
+        // SDL's own "unknown"/error sentinel is -1. buttons passes it
+        // through unmodified (Min has no floor); hats/axes floor to 0
+        // (Max(...,0)/Clamp(...,0,N) do); the fold check reads the
+        // floored-to-0 value, so it never folds on an error read.
+        assert_eq!(derive_joystick_fields(-1, -1, -1, false), (-1, 0, 0, false));
     }
 }

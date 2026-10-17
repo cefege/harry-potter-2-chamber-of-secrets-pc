@@ -101,7 +101,11 @@ int main()
 	Require( bWindowsMouseAvailable == false, "bWindowsMouseAvailable must still reflect capture=true" );
 	Require( SDL_ShowCursor( SDL_QUERY ) == SDL_ENABLE, "no-transition call must leave cursor visibility untouched" );
 
-	// Grabbed -> release: a real transition. Cursor must show.
+	// Grabbed -> release: a real transition. Cursor must show. Force
+	// it to DISABLE first so the ENABLE check below actually proves
+	// release changed it, rather than coincidentally observing the
+	// ENABLE state the prior no-transition check already left behind.
+	SDL_ShowCursor( SDL_DISABLE );
 	bGrabbed = hp2_rs_platform_update_mouse_grab_state( Window, false, true, &bWindowsMouseAvailable );
 	Require( bGrabbed == false, "expected grab to release on a true->false transition" );
 	Require( bWindowsMouseAvailable == true, "expected bWindowsMouseAvailable true once released" );
