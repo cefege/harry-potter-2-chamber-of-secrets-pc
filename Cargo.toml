@@ -22,7 +22,8 @@ hp2-platform = { path = "crates/hp2-platform" }
 hp2-abi = { path = "crates/hp2-abi" }
 hp2-wgpu = { path = "crates/hp2-wgpu" }
 wgpu = "=30.0.1"
-glam = "=0.34.1"
+glam = { version = "=0.34.1", features = ["bytemuck"] }
+bytemuck = { version = "=1.25.2", features = ["derive"] }
 naga = "=30.0.1"
 pollster = "=1.0.1"
 raw-window-handle = "=0.6.2"

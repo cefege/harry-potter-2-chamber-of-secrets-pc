@@ -12,6 +12,7 @@ name = "hp2_wgpu"
 hp2-abi.workspace = true
 wgpu.workspace = true
 glam.workspace = true
+bytemuck.workspace = true
 log.workspace = true
 pollster.workspace = true
 raw-window-handle.workspace = true

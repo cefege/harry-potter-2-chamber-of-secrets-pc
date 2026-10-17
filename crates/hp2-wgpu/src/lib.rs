@@ -972,18 +972,12 @@ impl RenderLoop {
                 mapped_at_creation: false,
             })
         });
-        // Safe: FrameUniforms is #[repr(C)], contains only glam::Mat4
-        // (itself #[repr(C)], Pod-safe per glam's own doc -- "This type
-        // is 16 byte aligned", checked in this file's own header
-        // comment on FrameUniforms before relying on it) and f32
-        // fields, so reinterpreting its bytes is sound; no bytemuck
-        // dependency added for one call site.
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                &uniforms as *const FrameUniforms as *const u8,
-                std::mem::size_of::<FrameUniforms>(),
-            )
-        };
+        // FrameUniforms now derives bytemuck::Pod/Zeroable (this
+        // struct's own doc has the real reasoning) -- bytemuck::
+        // bytes_of is the compile-time-checked replacement for an
+        // earlier version's hand-rolled unsafe raw-pointer
+        // reinterpretation (caught on review).
+        let bytes = bytemuck::bytes_of(&uniforms);
         queue.write_buffer(buffer, 0, bytes);
     }
 
@@ -1007,8 +1001,21 @@ impl RenderLoop {
 /// against WGSL's own uniform-address-space layout rules, not
 /// assumed identical to Rust's own default `#[repr(C)]` rules by
 /// coincidence.
+///
+/// Derives `bytemuck::Pod`/`Zeroable` (glam's own `bytemuck` feature
+/// flag, verified real and exactly named that before enabling it, not
+/// assumed from the dependency name alone -- `glam::Mat4: bytemuck::
+/// Pod` compiles under it) rather than hand-rolling an `unsafe {
+/// std::slice::from_raw_parts(...) }` byte reinterpretation the way
+/// an earlier version of `RenderLoop::set_scene_node` did (caught on
+/// review): `Copy` alone, which that version relied on, does not rule
+/// out padding bytes -- reading them through a `&[u8]` would be real
+/// UB if they ever existed, and nothing in a plain `Copy` bound
+/// enforces that they don't. `bytemuck`'s `Pod` derive rejects a
+/// padded layout at compile time instead of relying on a doc comment
+/// asserting there is none.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct FrameUniforms {
     pub proj_mat: glam::Mat4,
     pub view_mat: glam::Mat4,
@@ -1713,12 +1720,7 @@ mod tests {
         // mapped bytes against compute_frame_uniforms's own output
         // computed independently here, byte for byte.
         let expected = compute_frame_uniforms(&reference_perspective_scene());
-        let expected_bytes = unsafe {
-            std::slice::from_raw_parts(
-                &expected as *const FrameUniforms as *const u8,
-                std::mem::size_of::<FrameUniforms>(),
-            )
-        };
+        let expected_bytes = bytemuck::bytes_of(&expected);
         let readback = created.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame uniforms readback"),
             size: buffer_size,

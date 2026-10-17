@@ -35,8 +35,11 @@ const SIMPLE_WGSL_SOURCE: &str = concat!(
 
 /// Byte-for-byte mirror of `simple.wgsl`'s real `VertexInput`
 /// (`@location(0) coords: vec3<f32>, @location(1) draw_id: u32`).
+/// `bytemuck::Pod`/`Zeroable`, not a hand-rolled `unsafe` byte
+/// reinterpretation (this crate's own `FrameUniforms` doc has the
+/// full reasoning for why, caught on review there first).
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LineVertex {
     pub coords: [f32; 3],
     pub draw_id: u32,
@@ -47,8 +50,9 @@ pub struct LineVertex {
 /// aligned, so no explicit padding is needed to satisfy WGSL's
 /// uniform-address-space array-element alignment rule (confirmed
 /// against the WGSL spec before relying on it, not assumed).
+/// `bytemuck::Pod`/`Zeroable`, same reasoning as `LineVertex` above.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DrawParams {
     pub draw_color: [f32; 4],
 }
@@ -59,7 +63,14 @@ pub struct DrawParams {
 const MAX_DRAWS: usize = 256;
 
 /// Groups `SimpleLinePipeline::render`'s "what to draw" arguments
-/// (see that method's own doc for why they are split out).
+/// (the actual rendering contract is documented on `render` itself,
+/// not repeated here): `device`/`queue`/`&self` stay direct `render`
+/// parameters, matching this crate's own established `RenderLoop::
+/// set_scene_node(&mut self, device, queue, scene)` shape, while
+/// these five are grouped into one struct to keep `render` itself
+/// under clippy's `too_many_arguments` limit (an earlier version with
+/// all eight as direct parameters tripped it) -- not an arbitrary
+/// grouping.
 pub struct LineDrawCall<'a> {
     pub frame_uniforms_buffer: &'a wgpu::Buffer,
     pub vertices: &'a [LineVertex],
@@ -67,6 +78,7 @@ pub struct LineDrawCall<'a> {
     pub target: &'a wgpu::TextureView,
     pub clear_color: wgpu::Color,
 }
+
 /// One real, lazily-built `simple.wgsl` pipeline plus the two bind-
 /// group layouts `layout: None` derives for it from the shader's own
 /// `@group(0)`/`@group(1)` declarations -- kept so a real caller can
@@ -150,12 +162,21 @@ impl SimpleLinePipeline {
         }
     }
 
-    /// Groups a `render` call's "what to draw" arguments (`device`/
-    /// `queue`/`&self` stay direct `render` parameters, matching this
-    /// crate's own established `RenderLoop::set_scene_node(&mut self,
-    /// device, queue, scene)` shape) -- split out to keep `render`
-    /// itself under clippy's `too_many_arguments` limit, not an
-    /// arbitrary grouping.
+    /// Renders `call.vertices` (a flat `LineList`: every consecutive
+    /// pair is one line, matching `Draw2DLine`'s own real `GL_LINES`
+    /// `DrawMode`) into `call.target`, using the already-uploaded
+    /// `call.frame_uniforms_buffer` (this crate's own `RenderLoop::
+    /// set_scene_node` produces one of the right size/layout) and
+    /// `call.draw_params` (one entry per real `DrawID`, indexed by
+    /// each vertex's own `draw_id` field). Submits and blocks until
+    /// GPU work completes before returning, so a caller can safely
+    /// read `call.target` back immediately afterward -- this slice's
+    /// own deliberately simple, non-batched contract; the real
+    /// engine-facing batcher this is a foundation for will not submit
+    /// this eagerly per call. `call`'s own fields are grouped into
+    /// `LineDrawCall` purely to keep this function under clippy's
+    /// `too_many_arguments` limit -- see that struct's own doc for
+    /// why, not repeated here.
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: LineDrawCall<'_>) {
         let LineDrawCall {
             frame_uniforms_buffer,
@@ -181,7 +202,7 @@ impl SimpleLinePipeline {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&vertex_buffer, 0, as_bytes(vertices));
+        queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
 
         // draw_params is a fixed-size MAX_DRAWS array in the real
         // shader (WGSL uniform arrays need a const-expression length,
@@ -203,7 +224,7 @@ impl SimpleLinePipeline {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        queue.write_buffer(&draw_params_buffer, 0, as_bytes(&padded_params));
+        queue.write_buffer(&draw_params_buffer, 0, bytemuck::cast_slice(&padded_params));
 
         let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("draw.rs frame uniforms bind group"),
@@ -250,16 +271,6 @@ impl SimpleLinePipeline {
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("device poll should succeed after a real line render");
     }
-}
-
-/// Safe for any `T: Copy` plain-old-data type with no padding between
-/// fields that would leak uninitialized bytes -- both `LineVertex`
-/// and `DrawParams` are `#[repr(C)]` with every field already
-/// naturally aligned to the next field's own alignment (checked by
-/// hand against their real field lists above, not assumed), so
-/// neither has any such padding.
-fn as_bytes<T: Copy>(data: &[T]) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data)) }
 }
 
 #[cfg(test)]

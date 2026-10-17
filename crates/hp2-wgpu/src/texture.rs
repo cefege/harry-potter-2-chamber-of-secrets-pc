@@ -234,6 +234,36 @@ mod tests {
         assert_eq!(TextureFormat::from_raw(0x06), None);
         assert_eq!(TextureFormat::from_raw(0x80), None);
     }
+
+    #[test]
+    fn enum_discriminants_themselves_match_the_real_un_tex_h_values() {
+        // The test above only checks from_raw's own match arms
+        // return the right variant -- it would not catch the
+        // `#[repr(u8)]` discriminants on TextureFormat itself
+        // silently drifting from the real UnTex.h values while
+        // from_raw's arms stayed internally self-consistent with the
+        // wrong ones (caught on review: a real gap, not covered by
+        // the test above). Checks `as u8` directly against the real
+        // values, and that every discriminant round-trips through
+        // from_raw back to the same variant.
+        assert_eq!(TextureFormat::P8 as u8, 0x00);
+        assert_eq!(TextureFormat::Rgba7 as u8, 0x01);
+        assert_eq!(TextureFormat::Rgb16 as u8, 0x02);
+        assert_eq!(TextureFormat::Dxt1 as u8, 0x03);
+        assert_eq!(TextureFormat::Rgb8 as u8, 0x04);
+        assert_eq!(TextureFormat::Rgba8 as u8, 0x05);
+        for format in [
+            TextureFormat::P8,
+            TextureFormat::Rgba7,
+            TextureFormat::Rgb16,
+            TextureFormat::Dxt1,
+            TextureFormat::Rgb8,
+            TextureFormat::Rgba8,
+        ] {
+            assert_eq!(TextureFormat::from_raw(format as u8), Some(format));
+        }
+    }
+
     #[test]
     fn texture_format_name_matches_the_real_source_strings_exactly() {
         assert_eq!(texture_format_name(TextureFormat::P8), "P8");
