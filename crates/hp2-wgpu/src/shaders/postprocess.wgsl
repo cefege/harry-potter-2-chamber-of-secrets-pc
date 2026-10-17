@@ -49,6 +49,14 @@
 // each other within WebGPU too, but via the *opposite* sign: `uv.y =
 // 0.5 - 0.5*ndc.y`. Ported with the corrected sign below, not the
 // literal GLSL expression.
+//
+// Ported from the always-bound-TMU-0 path the real source's `Draw`
+// function uses directly (`glActiveTexture(GL_TEXTURE0 +
+// DiffuseTextureIndex); glBindTexture(GL_TEXTURE_2D, Texture);`) --
+// there is no bindless/non-bindless split to choose between for this
+// shader at all, since it never goes through `SetTexture`/`GetTexHandle`
+// the way the other four do; it binds whatever source texture the C++
+// side hands it (the just-rendered scene color target) directly.
 
 @group(1) @binding(0) var source_texture: texture_2d<f32>;
 @group(1) @binding(1) var source_sampler: sampler;
