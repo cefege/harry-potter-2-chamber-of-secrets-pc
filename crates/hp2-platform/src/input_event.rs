@@ -1,18 +1,32 @@
 //! Normalized input-event adapter, ported from
 //! `HarryPotter2/Unreal/SDLDrv/Inc/HP2InputEvents.h`.
 //!
-//! The real C++ header is itself "PREP ONLY": it defines the raw-SDL ->
-//! normalized mapping but the real `USDLViewport` event pump is not yet
-//! rewired to use it. This port mirrors that same state honestly: these are
-//! the normalized mapping functions, not yet wired into an FFI-exposed SDL
-//! event pump. They are real infrastructure for the eventual pump rewrite,
-//! not an isolated unwired slice -- because the FFI boundary stays
-//! C++-calls-Rust-only until Phase 5, the real pump can only work as
-//! "C++ calls `hp2_rs_sdl_poll`, Rust drains `SDL_PollEvent`, returns a
-//! batch of `HP2InputEvent` records, C++ dispatches them to
-//! `CauseInputEvent`/`Engine->Key`" -- and `FHP2InputEvent` is exactly the
-//! normalized record shape that pump needs. This file is that shape plus
-//! the pure mapping functions; the SDL-poll loop itself is future work.
+//! **Correction (caught on review): the real header's own "PREP ONLY
+//! -- not yet wired into the viewport pump" comment is stale relative
+//! to the actual C++, and an earlier version of this module doc
+//! repeated that stale claim without cross-checking it against code
+//! already read in this same session.** `USDLViewport`'s real,
+//! live `UpdateInput` (`SDLViewport.cpp:318-480`) already calls these
+//! exact functions at real call sites: the constructor fills
+//! `KeysymMap` from `HP2MapKeysym` (`:84-85`), and the event loop
+//! calls `HP2MakeKeyEvent` (`:345`), `HP2MakeTextEvent` (`:352`),
+//! `HP2MakeMouseButtonEvent` (`:370`) and `HP2MakeWheelEvents`
+//! (`:378`) directly, each immediately followed by `CauseInputEvent`/
+//! `Engine->Key`. So the real cutover is *not* "design a new batch
+//! SDL-poll FFI protocol" (an earlier version of this doc described
+//! exactly that, also wrong) -- it is switching those five call sites
+//! from the local inline C++ functions to `hp2_rs_*` equivalents,
+//! one call at a time, keeping the exact same per-event, inline-in-
+//! the-poll-loop shape the pump already has today. `CauseInputEvent`
+//! itself (`:535-542`) calls `GetOuterUSDLClient()->Engine->
+//! InputEvent(...)` -- a live `UEngine*` virtual dispatch -- so that
+//! part stays C++ until Phase 5; only the pure mapping step ahead of
+//! it moves. This makes the `#[repr(C)]` layout of `HP2InputEvent`
+//! exactly matching `FHP2InputEvent` a live, present-tense
+//! requirement, not a future-design nicety -- see that struct's own
+//! doc comment below for the fix this review caught (an earlier
+//! version omitted `#[repr(C)]` and used a `[u8;7]+len` shape that
+//! did not match the real `ANSICHAR Text[8]` layout at all).
 //!
 //! `EInputKey`/`EInputAction` (`Engine/Inc/EngineClasses.h:129-401`) are
 //! both plain, dense, zero-based C++ enums (`IK_None=0 .. IK_MAX=255`,
@@ -23,7 +37,9 @@
 //! rather than a closed Rust enum because `HP2MakeTextEvent` legitimately
 //! assigns `Key` an arbitrary Unicode codepoint value (e.g. 233 for U+00E9)
 //! that has no corresponding named `IK_*` constant -- exactly mirroring the
-//! real C++'s own `(EInputKey)Codepoint` cast.
+//! real C++'s own `(EInputKey)Codepoint` cast. A `#[repr(i32)] enum EInputKey`
+//! would be undefined behavior the moment a text event's arbitrary codepoint
+//! doesn't match any declared variant.
 
 /// `EInputKey` values this file's logic touches (`EngineClasses.h:131-369`).
 #[allow(dead_code)]
@@ -152,19 +168,32 @@ pub mod ist {
     pub const MAX: i32 = 5;
 }
 
-/// `FHP2InputEvent` (`HP2InputEvents.h:37-43`): the normalized event shape.
+/// `FHP2InputEvent` (`HP2InputEvents.h:37-43`): the normalized event shape,
+/// exactly `#[repr(C)]` matching the real struct's layout -- `EInputKey
+/// Key` and `EInputAction Action` are both plain C++ `enum`s (`int`-sized
+/// by default, no explicit underlying type declared), `FLOAT Delta` is
+/// `f32`, and `ANSICHAR Text[8]` is an 8-byte NUL-terminated buffer with
+/// the terminator stored *in* the array -- not a separate length field,
+/// which an earlier version of this struct had (`[u8;7]+text_len: u8`,
+/// never `#[repr(C)]` at all): same total size by coincidence (8 bytes
+/// either way) but a different byte-for-byte shape, caught on review
+/// before this crossed FFI anywhere. `text`'s contents are only
+/// meaningful for `SDL_TEXTINPUT`-sourced events; every other event
+/// constructor leaves it zeroed, matching `HP2MakeNoneEvent`.
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HP2InputEvent {
     pub key: i32,
     pub action: i32,
     pub delta: f32,
-    /// SDL_TEXTINPUT payload copy, NUL-terminated; empty otherwise. The real
-    /// struct is `ANSICHAR Text[8]`; stored here as the first `len` bytes of
-    /// `text`, `len` always < 8 (room for the NUL the C++ struct keeps
-    /// in-band).
-    pub text: [u8; 7],
-    pub text_len: u8,
+    pub text: [u8; 8],
 }
+
+const _: () = assert!(std::mem::size_of::<HP2InputEvent>() == 20);
+const _: () = assert!(std::mem::offset_of!(HP2InputEvent, key) == 0);
+const _: () = assert!(std::mem::offset_of!(HP2InputEvent, action) == 4);
+const _: () = assert!(std::mem::offset_of!(HP2InputEvent, delta) == 8);
+const _: () = assert!(std::mem::offset_of!(HP2InputEvent, text) == 12);
 
 /// `HP2MakeNoneEvent` (`HP2InputEvents.h:45-50`).
 pub fn make_none_event() -> HP2InputEvent {
@@ -172,8 +201,7 @@ pub fn make_none_event() -> HP2InputEvent {
         key: ik::NONE,
         action: ist::NONE,
         delta: 0.0,
-        text: [0; 7],
-        text_len: 0,
+        text: [0; 8],
     }
 }
 
@@ -501,12 +529,18 @@ pub fn make_wheel_events(wheel_y: i32, out: &mut [HP2InputEvent; 3]) -> i32 {
 /// evaluating outside `0x80..0xC0` to fail the check; callers in this
 /// crate always pass a longer-than-the-claimed-length NUL-terminated byte
 /// slice so that read is always in-bounds, matching the C++'s own
-/// reliance on a NUL-terminated `const char*`).
-pub fn utf8_codepoint(utf8: &[u8]) -> i32 {
-    if utf8.is_empty() {
+/// reliance on a NUL-terminated `const char*`). `utf8` is `None` only for
+/// the real C++'s `Utf8 == NULL` case (-1); a `Some(&[])` empty-but-
+/// present string is *not* the same thing -- the real C++ would read
+/// `Utf8[0]`, the string's own NUL terminator (value 0), and return `0`,
+/// not `-1` (caught on review: an earlier version of this function
+/// treated an empty slice the same as `None`, both returning `-1`, which
+/// is wrong for the empty-string case specifically).
+pub fn utf8_codepoint(utf8: Option<&[u8]>) -> i32 {
+    let Some(utf8) = utf8 else {
         return -1;
-    }
-    let c0 = utf8[0];
+    };
+    let c0 = utf8.first().copied().unwrap_or(0);
     if c0 < 128 {
         return c0 as i32;
     }
@@ -534,15 +568,16 @@ pub fn utf8_codepoint(utf8: &[u8]) -> i32 {
 /// for the C++'s `NULL` case.
 pub fn make_text_event(utf8_text: Option<&[u8]>) -> HP2InputEvent {
     let mut e = make_none_event();
-    let codepoint = match utf8_text {
-        Some(bytes) => utf8_codepoint(bytes),
-        None => -1,
-    };
+    let codepoint = utf8_codepoint(utf8_text);
     e.key = if codepoint >= 0 { codepoint } else { ik::NONE };
     if let Some(bytes) = utf8_text {
+        // `e.text` is already zeroed by `make_none_event()`; copying only
+        // the first `n` bytes (n <= 7, one byte of the 8-byte array always
+        // held back) leaves `e.text[n]` as the in-band NUL terminator,
+        // exactly matching the real C++'s own `Text[Index] = 0` after its
+        // copy loop -- no separate length field.
         let n = bytes.iter().take(7).take_while(|&&b| b != 0).count();
         e.text[..n].copy_from_slice(&bytes[..n]);
-        e.text_len = n as u8;
     }
     e
 }
@@ -612,7 +647,7 @@ mod tests {
         assert_eq!(press.key, ik::SPACE);
         assert_eq!(press.action, ist::PRESS);
         assert_eq!(press.delta, 0.0);
-        assert_eq!(press.text_len, 0);
+        assert_eq!(press.text, [0; 8]);
 
         let release = make_key_event(SDLK_Q, false);
         assert_eq!(release.key, ik::Q);
@@ -670,8 +705,7 @@ mod tests {
         let ascii = make_text_event(Some(b"A"));
         assert_eq!(ascii.key, 65);
         assert_eq!(ascii.action, ist::NONE);
-        assert_eq!(ascii.text_len, 1);
-        assert_eq!(ascii.text[0], b'A');
+        assert_eq!(ascii.text, [b'A', 0, 0, 0, 0, 0, 0, 0]);
 
         let accent = make_text_event(Some(&[0xC3, 0xA9])); // U+00E9
         assert_eq!(accent.key, 233, "two-byte utf8 decode");
@@ -688,6 +722,19 @@ mod tests {
 
         let truncated = make_text_event(Some(&[0xC3]));
         assert_eq!(truncated.key, ik::NONE);
+
+        // Regression for a bug caught on review: an empty-but-present
+        // string (`Some(&[])`, matching the real C++'s `Utf8Text == ""`)
+        // must decode to codepoint 0 (reading the string's own NUL
+        // terminator byte), not -1/IK_None -- -1 is reserved for `None`
+        // (the real C++'s `Utf8Text == NULL`).
+        let empty_but_present = make_text_event(Some(&[]));
+        assert_eq!(
+            empty_but_present.key, 0,
+            "empty string must decode to codepoint 0, not IK_None"
+        );
+        let null = make_text_event(None);
+        assert_eq!(null.key, ik::NONE, "NULL must decode to IK_None (via -1)");
     }
 
     #[test]
@@ -695,7 +742,6 @@ mod tests {
         let e = make_none_event();
         assert_eq!(e.key, ik::NONE);
         assert_eq!(e.action, ist::NONE);
-        assert_eq!(e.delta, 0.0);
-        assert_eq!(e.text_len, 0);
+        assert_eq!(e.text, [0; 8]);
     }
 }
