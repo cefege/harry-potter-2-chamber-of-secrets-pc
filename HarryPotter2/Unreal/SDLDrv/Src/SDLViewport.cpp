@@ -158,16 +158,31 @@ void USDLViewport::Destroy()
 void USDLViewport::ShutdownAfterError()
 {
 	guard(USDLViewport::ShutdownAfterError);
-	// Same ordering concern as Destroy above: SDL_Quit tears down
-	// every SDL window (and any Metal/GL view attached to them)
-	// process-wide, which RenDev's own native resources can still
-	// reference.
+	// Not RenDev->Exit()/delete RenDev the way Destroy above does:
+	// this runs inside crash handling (appError/GError), where the
+	// established UE1 convention is minimal teardown and no object
+	// deletion -- UObject::StaticShutdownAfterError already walks
+	// every live object (including RenDev, a real ConstructObject-
+	// created UObject) and calls ShutdownAfterError on each, inside a
+	// try/catch with an RF_ErrorShutdown guard against double-calling
+	// (UnObj.cpp's own ConditionalShutdownAfterError), specifically so
+	// a second fault during an already-crashing process cannot cascade
+	// the way a raw Exit()+delete here could. XOpenGL implements its
+	// own ShutdownAfterError (XOpenGL.cpp:3249) for exactly this
+	// purpose, gated behind its own "really want noncritical cleanup"
+	// flag; UWgpuRenderDevice does not override it yet (inherits
+	// UObject's no-op default), so RustDevice/MetalView simply leak on
+	// a crash today -- acceptable: the process is terminating anyway
+	// and the OS reclaims everything, matching how XOpenGL's own
+	// ShutdownAfterError deliberately skips some cleanup by default
+	// too. An earlier version of this function called Exit()+delete
+	// here, matching Destroy's own pattern -- caught on review as the
+	// wrong pattern for this specific call site, not just unhelpful:
+	// a real fault inside RenDev->Exit() here would be a second crash
+	// during crash handling, something this whole mechanism exists to
+	// avoid.
 	if( RenDev )
-	{
-		RenDev->Exit();
-		delete RenDev;
-		RenDev = NULL;
-	}
+		RenDev->ShutdownAfterError();
 	SDL_Quit();
 	Super::ShutdownAfterError();
 	unguard;
