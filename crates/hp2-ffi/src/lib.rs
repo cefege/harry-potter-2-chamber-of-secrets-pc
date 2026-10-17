@@ -2246,3 +2246,72 @@ pub extern "C" fn hp2_rs_mouse_capture_on_restore(
         },
     )
 }
+
+/// Replaces `USDLViewport::GetViewportButtonFlags` (`SDLViewport.cpp:544-548`).
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_platform_get_viewport_button_flags() -> u32 {
+    guard("hp2_rs_platform_get_viewport_button_flags", 0, || {
+        hp2_platform::mouse_state::get_viewport_button_flags()
+    })
+}
+
+/// Replaces `USDLViewport::GetMouseState` (`SDLViewport.cpp:550-556`).
+/// Writes the scaled `X`/`Y` into `out_x`/`out_y`, returns the button
+/// flags (matching the real `DWORD` return of
+/// `GetViewportButtonFlags`, reused here since `GetMouseState`'s own
+/// `Buttons` out-param carries the identical value).
+///
+/// # Safety
+/// `out_x`/`out_y` must be valid, aligned, writable pointers for the
+/// duration of this call.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_get_mouse_state(
+    mouse_scale_x: f32,
+    mouse_scale_y: f32,
+    out_x: *mut f32,
+    out_y: *mut f32,
+) -> u32 {
+    guard("hp2_rs_platform_get_mouse_state", 0, move || unsafe {
+        let (x, y, buttons) =
+            hp2_platform::mouse_state::get_mouse_state(mouse_scale_x, mouse_scale_y);
+        *out_x = x;
+        *out_y = y;
+        buttons
+    })
+}
+
+/// Replaces `USDLViewport::UpdateMouseGrabState` (`SDLViewport.cpp:558-579`).
+/// `sdl_window` may be null (matches the real C++'s `if (SdlWindow)`
+/// guard). Writes the new `bWindowsMouseAvailable` into
+/// `out_windows_mouse_available`; returns the new `MouseIsGrabbed`.
+/// Caller stores both back into its own `USDLViewport` fields.
+///
+/// # Safety
+/// `sdl_window`, if non-null, must be a valid `SDL_Window*` for the
+/// duration of this call. `out_windows_mouse_available` must be a
+/// valid, aligned, writable pointer.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_update_mouse_grab_state(
+    sdl_window: *mut c_void,
+    capture: bool,
+    mouse_is_grabbed: bool,
+    out_windows_mouse_available: *mut bool,
+) -> bool {
+    guard(
+        "hp2_rs_platform_update_mouse_grab_state",
+        mouse_is_grabbed,
+        move || unsafe {
+            let (new_grabbed, new_windows_mouse_available) =
+                hp2_platform::mouse_state::update_mouse_grab_state(
+                    sdl_window as *mut hp2_platform::mouse_state::SdlWindow,
+                    capture,
+                    mouse_is_grabbed,
+                );
+            *out_windows_mouse_available = new_windows_mouse_available;
+            new_grabbed
+        },
+    )
+}

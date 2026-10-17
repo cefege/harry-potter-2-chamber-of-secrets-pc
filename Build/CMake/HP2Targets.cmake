@@ -632,6 +632,26 @@ target_link_libraries(hp2_platform_clipboard_tests PRIVATE
 if(WIN32)
     target_link_libraries(hp2_platform_clipboard_tests PRIVATE SDL2::SDL2main)
 endif()
+
+# SDL main-thread checks for hp2_rs_platform_get_viewport_button_flags/
+# get_mouse_state/update_mouse_grab_state (crates/hp2-platform/src/
+# mouse_state.rs); see the file's own header comment for why this needs
+# a dedicated ctest. Same library set as hp2_platform_clipboard_tests
+# above, same reason.
+hp2_add_executable(hp2_platform_mouse_state_tests
+    ${HP2_PLATFORM_MOUSE_STATE_TEST_SOURCE}
+)
+target_link_libraries(hp2_platform_mouse_state_tests PRIVATE
+    hp2_core
+    hp2_engine
+    hp2_render
+    hp2_fire
+    hp2_editor_runtime
+    hp2_sdldrv
+)
+if(WIN32)
+    target_link_libraries(hp2_platform_mouse_state_tests PRIVATE SDL2::SDL2main)
+endif()
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_executable(hp2_native_typography_tests
         ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
@@ -685,6 +705,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_save_wire_oracle
     hp2_input_contract_tests
     hp2_platform_clipboard_tests
+    hp2_platform_mouse_state_tests
 )
 if(TARGET hp2_import)
     list(APPEND HP2_EXECUTABLE_TARGETS hp2_import)
@@ -970,6 +991,7 @@ if(HP2_TEST_DATA_PRESENT)
 endif()
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(clipboard_round_trip hp2_platform_clipboard_tests)
+hp2_add_behavior_test(mouse_state_round_trip hp2_platform_mouse_state_tests)
 hp2_add_behavior_test(data_identity_contracts hp2_data_identity_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"

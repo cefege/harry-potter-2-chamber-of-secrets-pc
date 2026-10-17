@@ -199,6 +199,7 @@ set(HP2_REPLAY_ROUNDTRIP_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/ReplayRoundTri
 set(HP2_SAVE_WIRE_ORACLE_SOURCE "${PROJECT_SOURCE_DIR}/Tests/SaveWireOracle.cpp")
 set(HP2_INPUT_CONTRACT_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/InputContractTests.cpp")
 set(HP2_PLATFORM_CLIPBOARD_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/PlatformClipboardTests.cpp")
+set(HP2_PLATFORM_MOUSE_STATE_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/PlatformMouseStateTests.cpp")
 
 # Every source below is required by the completed native test graph. Keep the
 # list explicit so HP2_REQUIRE_IMPLEMENTED_SOURCES reports a focused error at

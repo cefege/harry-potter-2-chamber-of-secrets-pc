@@ -543,38 +543,33 @@ UBOOL USDLViewport::CauseInputEvent( INT iKey, EInputAction Action, FLOAT Delta 
 
 DWORD USDLViewport::GetViewportButtonFlags()
 {
-	INT X = 0, Y = 0;
-	return ButtonsFromSdlState( SDL_GetMouseState( &X, &Y ) );
+	return hp2_rs_platform_get_viewport_button_flags();
 }
 
 void USDLViewport::GetMouseState( FLOAT& X, FLOAT& Y, DWORD& Buttons )
 {
-	INT PixelX = 0, PixelY = 0;
-	Buttons = ButtonsFromSdlState( SDL_GetMouseState( &PixelX, &PixelY ) );
-	X = (FLOAT)PixelX * MouseScaleX;
-	Y = (FLOAT)PixelY * MouseScaleY;
+	Buttons = hp2_rs_platform_get_mouse_state( MouseScaleX, MouseScaleY, &X, &Y );
 }
 
 void USDLViewport::UpdateMouseGrabState( UBOOL Capture )
 {
 	guard(USDLViewport::UpdateMouseGrabState);
-	Capture = Capture ? 1 : 0;
 	// UWindow's console only adopts an absolute pointer position when this is
 	// set (WindowConsole.uc RenderUWindow); otherwise it accumulates IK_MouseX/Y
 	// deltas, which this driver emits only while grabbed, so a released-for-menu
-	// cursor would never move. Mirrors UWindowsViewport::SetMouseCapture. Assign
-	// above the early return so cold start (MouseIsGrabbed(0) at construction)
-	// still sets the flag on the first UpdateMouseGrabState(0) call.
-	bWindowsMouseAvailable = !Capture;
-	if( Capture == (INT)MouseIsGrabbed )
-		return; // No transition; cursor visibility must stay untouched.
-
-	MouseIsGrabbed = Capture;
-	if( SdlWindow )
-		SDL_SetWindowGrab( SdlWindow, Capture ? SDL_TRUE : SDL_FALSE );
-	SDL_SetRelativeMouseMode( Capture ? SDL_TRUE : SDL_FALSE );
-	// Releasing shows the cursor; grabbing hides it again.
-	SDL_ShowCursor( Capture ? SDL_DISABLE : SDL_ENABLE );
+	// cursor would never move. Mirrors UWindowsViewport::SetMouseCapture.
+	//
+	// hp2_rs_platform_update_mouse_grab_state (crates/hp2-platform/src/
+	// mouse_state.rs) replaces this function's own body: the early-return
+	// guard, SDL_SetWindowGrab/SetRelativeMouseMode/ShowCursor calls, and
+	// the bWindowsMouseAvailable/MouseIsGrabbed transition logic all now
+	// live there. This call site only owns the UObject bitfields Rust
+	// cannot touch directly.
+	bool bOutWindowsMouseAvailable = false;
+	const bool bNewGrabbed = hp2_rs_platform_update_mouse_grab_state(
+		SdlWindow, Capture != 0, MouseIsGrabbed != 0, &bOutWindowsMouseAvailable );
+	bWindowsMouseAvailable = bOutWindowsMouseAvailable;
+	MouseIsGrabbed = bNewGrabbed;
 	unguard;
 }
 

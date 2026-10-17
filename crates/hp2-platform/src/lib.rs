@@ -2,7 +2,7 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: three FFI-wired cutovers, not the
+//! **Scope of this crate today: four FFI-wired cutovers, not the
 //! `USDLClient`/`USDLViewport` classes themselves.** `USDLClient :
 //! UClient, FNotifyHook` and `USDLViewport : UViewport` are UE1
 //! `UObject`-derived classes (`DECLARE_CLASS`,
@@ -35,6 +35,20 @@
 //! - `clipboard`: `USDLClient::GetClipboardText`/`SetClipboardText`.
 //!   FFI-wired; the real C++ caller already calls through it. Ctest:
 //!   `clipboard_round_trip` (`Tests/PlatformClipboardTests.cpp`).
+//! - `mouse_state`: `USDLViewport::GetViewportButtonFlags`/
+//!   `GetMouseState`/`UpdateMouseGrabState` (`SDLViewport.cpp:544-579`).
+//!   FFI-wired: all three bodies now call `hp2_rs_platform_*`,
+//!   passing `SdlWindow` through as an opaque pointer (the real C++
+//!   still owns it; this module never creates/destroys/stores it).
+//!   The C++ bodies (the SDL calls and the grab-transition guard)
+//!   are deleted; the caller only stores the returned
+//!   `MouseIsGrabbed`/`bWindowsMouseAvailable` back into its own
+//!   UObject fields, which Rust cannot touch directly. No existing
+//!   C++ oracle exercised these (UObject member functions, not
+//!   constructible by `Tests/InputContractTests.cpp`'s headless
+//!   harness), so `Tests/PlatformMouseStateTests.cpp`
+//!   (`mouse_state_round_trip` ctest) is new coverage, not a ported
+//!   test.
 //!
 //! **`USDLViewport` and Phase 3 (the wgpu renderer) are not cleanly
 //! separable in the plan's stated order.** `OpenWindow` calls
@@ -55,11 +69,11 @@
 //! `ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons` inputs; ungrabbed
 //! `SDL_MOUSEMOTION` dispatches straight to `Engine->MousePosition`
 //! with no `HP2Make*Event` call, so it is not part of `input_event`'s
-//! scope), mouse grab/capture state (`UpdateMouseGrabState`,
-//! `SetMouseCapture`, `GetMouseState`), joystick open/close
+//! scope), joystick open/close
 //! (`USDLClient::OpenJoystick`/`CloseJoystick`), and macOS
 //! `TextToSpeech` (`fork`/`execl("/usr/bin/say")`, `:770-813`).
 
 pub mod clipboard;
 pub mod input_event;
 pub mod mouse_capture;
+pub mod mouse_state;
