@@ -80,6 +80,106 @@
 //! doc's own "zero frames presented in a real launch" paragraph above
 //! leaves unresolved -- why a real, non-test-harness launch behaves
 //! differently from the dedicated ctest on the same machine.
+//!
+//! Shader transcription scoping, from reading the real GLSL sources
+//! (not assumed): the plan's own "hand-transcribe each GLSL source to
+//! WGSL" undersells the actual work. `ThirdParty/XOpenGLDrv/Src/
+//! ShaderProgram.cpp`'s `#extension GL_ARB_bindless_texture : require`
+//! and `DrawTile_GLSL.cpp`'s `DrawTileCoreProgram::BuildGeometryShader`
+//! (130 lines) both use real GL features with no WGSL/WebGPU
+//! equivalent at all (WebGPU has no bindless-handle model, and
+//! deliberately excludes geometry shaders from its pipeline stages).
+//! A literal line-by-line transcription of the "Core" GL 4.x shader
+//! variants cannot work. Two findings change the actual plan:
+//!
+//! 1. Bindless textures are not load-bearing -- `CheckExtensions.cpp`
+//!    runtime-detects support and disables `UseBindlessTextures`
+//!    whenever the extension is missing, *and* unconditionally on AMD
+//!    GPUs regardless of support ("AMD drivers don't like how we use
+//!    bindless textures and perform very poorly"). The fallback this
+//!    already exercises in production is a complete, working, fixed-
+//!    texture-unit path (`ShaderProgram.cpp`'s `#define TMUDiffuse
+//!    Texture<N>` aliases) that maps directly onto WebGPU's ordinary
+//!    bind-group model -- one texture binding per slot, no handle
+//!    indirection. Port from this path, not the bindless one.
+//!    `UseSSBOParametersBuffer` (`DrawTile.cpp`) has the identical
+//!    shape: defaults `false`, a plain per-draw UBO in the fallback,
+//!    mapping directly onto a WebGPU uniform-buffer bind group with a
+//!    dynamic offset per draw call instead of `gl_DrawID`-indexed SSBO
+//!    lookups.
+//! 2. The two geometry shaders are two genuinely different patterns,
+//!    not one -- `DrawComplex_GLSL.cpp`/`DrawSimple_GLSL.cpp` have
+//!    neither a geometry shader nor an ES/Core split, confirmed by
+//!    grepping all four files, not assumed.
+//!    `DrawGouraudProgram::BuildGeometryShader` does *not* amplify
+//!    topology -- `layout(triangles) in; layout(triangle_strip,
+//!    max_vertices = 3) out;`, one triangle in, one out, read in full.
+//!    It does exactly three things, each with a direct vertex/
+//!    fragment-only replacement: (a) broadcast the first vertex's
+//!    `DrawID` to all three vertices as a flat-interpolated value --
+//!    WGSL's `@interpolate(flat)` on a vertex output does this with no
+//!    geometry stage; (b) under `OPT_BumpMaps`, compute a per-triangle
+//!    tangent/bitangent basis from all three vertices' positions and
+//!    UVs -- the standard modern replacement is either precomputing
+//!    tangents per-vertex at mesh-load time (most engines' actual
+//!    practice) or computing them in the fragment shader from screen-
+//!    space derivatives (WGSL has `dpdx`/`dpdy`, the same primitive);
+//!    (c) under `OPT_ClipDistance`, set a per-vertex `gl_ClipDistance`
+//!    against a custom clip plane -- WGSL/WebGPU has no clip-distance
+//!    equivalent at all; the standard replacement is an explicit
+//!    `discard` in the fragment shader against the same plane
+//!    equation.
+//!
+//!    `DrawTileCoreProgram::BuildGeometryShader` is the opposite
+//!    pattern -- confirmed by reading its full body, not inferred from
+//!    `DrawTileESProgram` lacking one, which turned out to be the
+//!    wrong inference to make without checking (an earlier version of
+//!    this doc guessed `DrawTileCoreProgram` matched `DrawGouraud`'s
+//!    shape; it does not). It genuinely amplifies topology:
+//!    `layout(triangles) in; layout(triangle_strip, max_vertices = 6)
+//!    out;`, and only ever reads vertex 0 of the input "triangle"
+//!    (`In[0].TexCoords`/`gl_in[0].gl_Position`/etc. -- vertices 1 and
+//!    2 are never referenced). This is GPU-side quad expansion from a
+//!    single point: the C++ side uploads one vertex per tile carrying
+//!    the whole quad's parameters (screen-space scale/offset, UV rect,
+//!    width/height), and the geometry shader expands it into six
+//!    vertices (two triangles) using that one vertex's data. The
+//!    direct, idiomatic WebGPU replacement is vertex-shader quad
+//!    expansion from `@builtin(vertex_index)`: draw 6 vertices per
+//!    tile instance (one instance per tile, instance-rate attributes
+//!    or a storage-buffer read carrying today's per-tile parameters),
+//!    and branch on `vertex_index % 6` in the vertex shader to compute
+//!    which of the quad's six corners this invocation is -- the exact
+//!    same per-corner math already in this geometry shader, just moved
+//!    up one stage. A common, well-established technique for sprite/
+//!    particle/UI rendering on hardware with no geometry shaders at
+//!    all (mobile GPUs, WebGPU itself), not a novel design needed for
+//!    this port specifically.
+//!
+//! Net effect, not uniform across all five shaders: `DrawTile` has a
+//! real, working, geometry-shader-free alternative already running in
+//! production (`DrawTileESProgram`) to copy the vertex-submission
+//! shape from (per-vertex `Coords`/`TexCoords` inputs, not a single
+//! point-per-tile) even though the actual per-corner expansion
+//! arithmetic still has to move from the deleted geometry shader into
+//! either the vertex shader (`vertex_index`-based) or C++/Rust-side
+//! CPU quad expansion. `DrawGouraud` has no such alternative to copy
+//! -- there is only one `DrawGouraudProgram` class, no ES/Core split,
+//! and its geometry shader runs unconditionally for every Gouraud
+//! (polygon) draw; the vertex/fragment-only replacement described
+//! above has to be designed fresh from reading what that geometry
+//! shader does, not copied from an existing alternate implementation.
+//! For bindless textures and SSBO draw parameters specifically, the
+//! non-bindless/non-SSBO fallback branches (not a separate `*ESProgram`
+//! class, just an `#if`/runtime-flag branch within the same shader
+//! source) are real alternatives already exercised in production
+//! (disabled on AMD GPUs today) and are the right transcription
+//! source regardless of which shader. Still unexamined:
+//! `DrawComplex_GLSL.cpp`/`DrawSimple_GLSL.cpp`'s own full bodies,
+//! `SetTexture.cpp`'s texture cache/upload path, and the C++-side
+//! draw-call batching (`DrawComplex.cpp`/`DrawGouraud.cpp`/
+//! `DrawTile.cpp`) that would need a parallel Rust rewrite to actually
+//! call any of this.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
