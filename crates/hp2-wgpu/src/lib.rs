@@ -13,8 +13,12 @@
 //! gets built around it. Verified on real hardware, not assumed: this
 //! machine has a real Apple M5 GPU (Metal 4, confirmed via
 //! `system_profiler SPDisplaysDataType` before this crate was started),
-//! so `request_adapter_sync`'s result below is a genuine adapter from
-//! the real Metal backend, not a software/CI fallback.
+//! so `request_adapter_sync`'s own test confirms a genuine adapter from
+//! the real Metal backend, not a software/CI fallback -- but that test
+//! is `#[ignore]`d (see its own doc) because `.github/workflows/ci.yml`
+//! runs `cargo test --workspace` on GitHub-hosted Linux/Windows runners
+//! with no real GPU; run it explicitly with `cargo test -p hp2-wgpu --
+//! --ignored` on a machine that has one.
 //!
 //! Still open, not started: the window-surface half (`Instance::
 //! create_surface`, needs `raw-window-handle` values built by hand from
@@ -97,11 +101,22 @@ mod tests {
 
     // Real hardware test, not a mock: requests a genuine adapter from
     // this machine's actual GPU (Apple M5, Metal 4, confirmed present
-    // via `system_profiler` before this crate was written). Skipped
-    // nowhere -- if this fails in CI, that is itself the fact Phase 3.2
-    // needs to know (a headless CI runner with no GPU would be a real,
-    // separate, open question, not papered over by skipping the test).
+    // via `system_profiler` before this crate was written). `#[ignore]`:
+    // `.github/workflows/ci.yml` runs `cargo test --workspace` on
+    // `ubuntu-24.04`, `ubuntu-24.04-arm`, and `windows-2025` GitHub-hosted
+    // runners -- none of which have a real GPU adapter available. A
+    // genuinely-informative-sounding earlier version of this comment
+    // argued "if this fails in CI, that's a fact worth knowing" -- wrong:
+    // on those runners it is an entirely expected, unavoidable, already-
+    // understood limitation, not a new fact, and letting it fail there
+    // would make `cargo test --workspace` red for a reason unrelated to
+    // any real regression, which risks masking an actual one in the same
+    // run. Run explicitly on a machine with a real adapter:
+    // `cargo test -p hp2-wgpu -- --ignored`. Must not be changed to
+    // silently pass when no adapter is found instead: that would hide
+    // real failures on machines (like this one) that do have a GPU.
     #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
     fn request_adapter_sync_finds_a_real_adapter_on_this_machine() {
         let result = request_adapter_sync(BackendChoice::Auto);
         assert!(
