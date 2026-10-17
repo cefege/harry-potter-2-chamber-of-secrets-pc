@@ -75,8 +75,21 @@
 //   inside non-uniform control flow the same way the parallax loops do,
 //   so it will need the same `textureSampleGrad`/`textureSampleLevel`
 //   treatment when it is ported, not plain `textureSample`).
-// - `OPT_BumpMaps` (needs the fragment-derivative tangent-space
-//   reconstruction noted above, not yet designed).
+// - `OPT_BumpMaps && OPT_HasBumpMap`'s vertex-side tangent basis (the
+//   `!OPT_GeometryShaders` branch's own, read in full:
+//   `T = vec3(1,1,1)` and `B = vec3(1,1,1)`, both literally commented
+//   "Arbitrary" / "Replace with actual values... some day" in the real
+//   source itself, `N = normalize(Normals.xyz)`, `TBNMat =
+//   transpose(mat3(T, B, N))`) is a direct, low-effort vertex-shader-only
+//   transcription target, not an undesigned fragment-derivative problem
+//   as an earlier version of this note wrongly claimed (caught on
+//   review) -- WGSL just can't pass `mat3x3<f32>` as a varying
+//   (inter-stage IO must be scalars/vectors, the same constraint already
+//   noted for `DrawComplex`'s `vTBNMat`), so it would need splitting into
+//   three flat `vec3<f32>` varyings. Simply not implemented in this file
+//   yet -- no bump-map texture binding, `MiscInfo`/specular parameter, or
+//   fragment-side bump lighting loop exists here either, and that
+//   fragment-side loop has not been read yet.
 // - `OPT_Editor`'s debug render modes and hit-testing color override
 //   (editor-only, not needed for core gameplay rendering, same deferral
 //   as `DrawComplex`'s).

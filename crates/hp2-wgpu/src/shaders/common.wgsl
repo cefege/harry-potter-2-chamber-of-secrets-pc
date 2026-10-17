@@ -23,10 +23,11 @@
 //
 // Real, deliberate simplifications from the GLSL source, each because WGSL
 // functions can take parameters GLSL's free global functions relied on
-// implicit shader-wide state for instead, keeping this file composable
+// implicit shader-wide state for instead, keeping the *prelude functions*
+// (not this file's one real binding, `frame` -- see below) composable
 // regardless of which @group/@binding indices a particular consuming
-// shader ends up using (deferred entirely to each consumer, not assumed
-// here):
+// shader ends up using for its own resources (deferred entirely to each
+// consumer, not assumed here):
 // - `GetTexel` takes the texture and sampler as explicit parameters
 //   (`texture_2d<f32>`, `sampler`) instead of relying on a module-level
 //   binding. Ported from the GLSL source's non-bindless (`#else`) branch
@@ -100,6 +101,11 @@ struct FrameUniforms {
     y_scale: f32,
 }
 
+// Group 0, binding 0 is reserved for this shared frame block in every
+// consuming shader -- the one `@group`/`@binding` this prelude *does*
+// fix, unlike the parameter-based functions above. Every other group
+// (draw parameters, textures/samplers, …) stays per-consumer, chosen by
+// each shader file itself, not assumed here.
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
 
 fn plane_dot(plane: vec4<f32>, point: vec3<f32>) -> f32 {

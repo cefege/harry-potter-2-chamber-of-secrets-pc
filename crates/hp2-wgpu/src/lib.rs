@@ -161,12 +161,18 @@
 //!
 //! Net effect, not uniform across all five shaders: `DrawTile` has a
 //! real, working, geometry-shader-free alternative already running in
-//! production (`DrawTileESProgram`) to copy the vertex-submission
-//! shape from (per-vertex `Coords`/`TexCoords` inputs, not a single
-//! point-per-tile) even though the actual per-corner expansion
-//! arithmetic still has to move from the deleted geometry shader into
-//! either the vertex shader (`vertex_index`-based) or C++/Rust-side
-//! CPU quad expansion.
+//! production (`DrawTileESProgram`) to copy the vertex-submission shape
+//! from (per-vertex `Coords`/`TexCoords` inputs, not a single
+//! point-per-tile). This crate's own `tile.wgsl` (second real shader
+//! port) already resolved the per-corner-expansion question this
+//! paragraph originally framed as still open between two options --
+//! not a live "either/or" anymore: it copies the ES path's shape
+//! directly, i.e. the CPU-side expansion `DrawTile.cpp`'s
+//! `SubmitTileBatch` already does for that path today, not the
+//! `vertex_index`-based GPU-side alternative sketched above (which
+//! remains a real, valid *technique* in general, just not the one this
+//! crate ended up using, since a working CPU-side alternative already
+//! existed to copy instead of designing a new GPU-side one).
 //!
 //! `DrawGouraud`'s geometry shader is not a single-path thing to design
 //! a replacement for from scratch, the way an earlier version of this
