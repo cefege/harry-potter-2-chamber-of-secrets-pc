@@ -515,12 +515,10 @@ pub fn make_wheel_events(wheel_y: i32, out: &mut [HP2InputEvent; 3]) -> i32 {
 /// `ucs2_char_code_from_utf8()` in `SDLViewport.cpp` (BMP-only UCS2
 /// semantics, including its silent acceptance of truncated-but-prefixed
 /// sequences -- a 2/3-byte lead whose continuation byte(s) are simply
-/// absent from `utf8` reads past the end via the same indexing the real
-/// C++ does, relying on the NUL terminator or trailing byte at that offset
-/// evaluating outside `0x80..0xC0` to fail the check; callers in this
-/// crate always pass a longer-than-the-claimed-length NUL-terminated byte
-/// slice so that read is always in-bounds, matching the C++'s own
-/// reliance on a NUL-terminated `const char*`). `utf8` is `None` only
+/// absent from `utf8`: missing bytes read as `0` via `.get(i).unwrap_or(&0)`/
+/// `.first().unwrap_or(0)`, synthesizing the same outcome the real C++
+/// gets for free by reading its NUL-terminated `const char*` past the
+/// claimed content and hitting the terminator). `utf8` is `None` only
 /// for the real C++'s `Utf8 == NULL` case (-1); a `Some(&[])`
 /// empty-but-present string is not the same thing -- the real C++
 /// reads `Utf8[0]`, the string's own NUL terminator (value 0), and
