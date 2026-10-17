@@ -1,0 +1,435 @@
+//! First real slice of "wire WgpuDrv.cpp's draw-call stubs to real
+//! Rust draw-call batching" (Phase 3's still-open critical-path item
+//! -- nothing renders a pixel in production without this). Scope
+//! today: a direct, immediate-mode render of `Draw2DLine`-shaped
+//! input through the already-ported `simple.wgsl`, into a caller-
+//! supplied offscreen `wgpu::Texture`. Deliberately NOT yet the full
+//! `DrawBatcher`/ring-buffer/append-only-command-recording
+//! architecture those other open todo items describe -- this is the
+//! first proof the real chain (vertex buffer, per-DrawID parameters
+//! buffer, `FrameUniforms` bind group, pipeline creation, render
+//! pass, draw, readback) works end to end on real hardware at all,
+//! which that larger architecture needs as its own foundation. Not
+//! wired to any FFI call or `WgpuDrv.cpp` override yet.
+//!
+//! Chosen deliberately independent of the real screen-lock confound
+//! this session hit (`WgpuDrv.h`'s own addendum): offscreen render-to-
+//! texture-plus-readback needs no live window surface or visible
+//! display at all, the same technique this crate's own
+//! `postprocess_wgsl_samples_the_top_row_at_ndc_y_plus_one` test
+//! already proved works regardless of session-lock state.
+//!
+//! `simple.wgsl`'s real WGSL source, embedded into the binary via
+//! `include_str!` (not the `#[cfg(test)]`-only `shader_source()` disk-
+//! read helper elsewhere in this crate, which only resolves on a dev
+//! machine with the source tree present) -- the mechanism that
+//! helper's own doc comment named as "not written yet". `simple.wgsl`
+//! needs no per-build specialization (no `#if`-gated branches at all
+//! in its real base path, confirmed by its own header), so a plain
+//! `concat!` is enough here; shaders that do need specialization will
+//! need a real generation step, not this.
+const SIMPLE_WGSL_SOURCE: &str = concat!(
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/simple.wgsl")
+);
+
+/// Byte-for-byte mirror of `simple.wgsl`'s real `VertexInput`
+/// (`@location(0) coords: vec3<f32>, @location(1) draw_id: u32`).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LineVertex {
+    pub coords: [f32; 3],
+    pub draw_id: u32,
+}
+
+/// Byte-for-byte mirror of `simple.wgsl`'s real `DrawParameters`
+/// (`draw_color: vec4<f32>`) -- `vec4<f32>` is already 16-byte
+/// aligned, so no explicit padding is needed to satisfy WGSL's
+/// uniform-address-space array-element alignment rule (confirmed
+/// against the WGSL spec before relying on it, not assumed).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DrawParams {
+    pub draw_color: [f32; 4],
+}
+
+/// Real `simple.wgsl`'s own provisional capacity (`MAX_DRAWS`, that
+/// shader's own doc comment on why it is not yet the real per-build
+/// value).
+const MAX_DRAWS: usize = 256;
+
+/// Groups `SimpleLinePipeline::render`'s "what to draw" arguments
+/// (see that method's own doc for why they are split out).
+pub struct LineDrawCall<'a> {
+    pub frame_uniforms_buffer: &'a wgpu::Buffer,
+    pub vertices: &'a [LineVertex],
+    pub draw_params: &'a [DrawParams],
+    pub target: &'a wgpu::TextureView,
+    pub clear_color: wgpu::Color,
+}
+/// One real, lazily-built `simple.wgsl` pipeline plus the two bind-
+/// group layouts `layout: None` derives for it from the shader's own
+/// `@group(0)`/`@group(1)` declarations -- kept so a real caller can
+/// build matching bind groups without re-deriving the layout by hand
+/// (wgpu's own `get_bind_group_layout` is the only way to retrieve a
+/// derived layout after the fact).
+pub struct SimpleLinePipeline {
+    pipeline: wgpu::RenderPipeline,
+    frame_uniforms_layout: wgpu::BindGroupLayout,
+    draw_params_layout: wgpu::BindGroupLayout,
+}
+
+impl SimpleLinePipeline {
+    /// Builds the real pipeline against `color_format` (the real
+    /// target this pipeline will later render into -- `layout: None`
+    /// plus a fixed `ColorTargetState::blend: None` opaque-replace
+    /// blend state; `None` not an oversight, but this slice's own
+    /// honest scope: the real per-draw blend-state axis
+    /// (`SetBlend`'s seven real combinations, this crate's own module
+    /// doc already has the full read) is not wired here yet, only a
+    /// fixed-opaque first proof).
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("simple.wgsl (draw.rs production)"),
+            source: wgpu::ShaderSource::Wgsl(SIMPLE_WGSL_SOURCE.into()),
+        });
+        // Matches VertexInput: @location(0) coords: vec3<f32>,
+        // @location(1) draw_id: u32 -- same shape already proven
+        // against a real pipeline in this crate's own
+        // simple_wgsl_builds_a_render_pipeline_on_a_real_adapter test.
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: std::mem::size_of::<[f32; 3]>() as u64,
+                shader_location: 1,
+            },
+        ];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("simple.wgsl line pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<LineVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                ..wgpu::PrimitiveState::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let frame_uniforms_layout = pipeline.get_bind_group_layout(0);
+        let draw_params_layout = pipeline.get_bind_group_layout(1);
+        Self {
+            pipeline,
+            frame_uniforms_layout,
+            draw_params_layout,
+        }
+    }
+
+    /// Groups a `render` call's "what to draw" arguments (`device`/
+    /// `queue`/`&self` stay direct `render` parameters, matching this
+    /// crate's own established `RenderLoop::set_scene_node(&mut self,
+    /// device, queue, scene)` shape) -- split out to keep `render`
+    /// itself under clippy's `too_many_arguments` limit, not an
+    /// arbitrary grouping.
+    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: LineDrawCall<'_>) {
+        let LineDrawCall {
+            frame_uniforms_buffer,
+            vertices,
+            draw_params,
+            target,
+            clear_color,
+        } = call;
+        assert!(
+            draw_params.len() <= MAX_DRAWS,
+            "draw_params.len() ({}) exceeds simple.wgsl's real MAX_DRAWS ({MAX_DRAWS})",
+            draw_params.len()
+        );
+        assert!(
+            vertices.len().is_multiple_of(2),
+            "LineList topology needs an even number of vertices, got {}",
+            vertices.len()
+        );
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs line vertex buffer"),
+            size: (std::mem::size_of_val(vertices)) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&vertex_buffer, 0, as_bytes(vertices));
+
+        // draw_params is a fixed-size MAX_DRAWS array in the real
+        // shader (WGSL uniform arrays need a const-expression length,
+        // this crate's own module doc already has the full reasoning
+        // for why), so the uniform buffer backing it is always the
+        // full MAX_DRAWS size regardless of how many entries the
+        // caller actually supplied -- padded with zeroed entries
+        // rather than a buffer sized to just `draw_params.len()`.
+        let mut padded_params = vec![
+            DrawParams {
+                draw_color: [0.0; 4]
+            };
+            MAX_DRAWS
+        ];
+        padded_params[..draw_params.len()].copy_from_slice(draw_params);
+        let draw_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs line draw-params buffer"),
+            size: (MAX_DRAWS * std::mem::size_of::<DrawParams>()) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&draw_params_buffer, 0, as_bytes(&padded_params));
+
+        let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs frame uniforms bind group"),
+            layout: &self.frame_uniforms_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniforms_buffer.as_entire_binding(),
+            }],
+        });
+        let draw_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs draw params bind group"),
+            layout: &self.draw_params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: draw_params_buffer.as_entire_binding(),
+            }],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("draw.rs line render encoder"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("draw.rs line render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+            pass.set_bind_group(1, &draw_params_bind_group, &[]);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.draw(0..vertices.len() as u32, 0..1);
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after a real line render");
+    }
+}
+
+/// Safe for any `T: Copy` plain-old-data type with no padding between
+/// fields that would leak uninitialized bytes -- both `LineVertex`
+/// and `DrawParams` are `#[repr(C)]` with every field already
+/// naturally aligned to the next field's own alignment (checked by
+/// hand against their real field lists above, not assumed), so
+/// neither has any such padding.
+fn as_bytes<T: Copy>(data: &[T]) -> &[u8] {
+    unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data)) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BackendChoice, HeadlessSurfaceCreator, backend_name, create_device_sync};
+
+    // Needs a real GPU adapter. CI runners have none. Run with
+    // `cargo test -p hp2-wgpu -- --ignored`. Not confounded by this
+    // session's real screen-lock finding (see this module's own
+    // header doc): offscreen render-to-texture-plus-readback needs
+    // no live window surface.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn simple_line_pipeline_renders_a_real_line_into_an_offscreen_texture() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        // FrameUniforms with modelviewproj_mat = IDENTITY, so the
+        // vertex buffer's own NDC-space coords pass straight through
+        // to clip space unmodified -- isolates this test from the
+        // real matrix math compute_frame_uniforms already has its own
+        // dedicated, separately-verified tests for. 8 mat4x4<f32> (64
+        // bytes each) + 4 f32 = 528 bytes, matching common.wgsl's
+        // real FrameUniforms layout. modelviewproj_mat is the 5th
+        // matrix (byte offset 4*64=256): identity is already an
+        // all-zero buffer with 1.0 on the diagonal at offsets
+        // 256+0, 256+20, 256+40, 256+60.
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("line render test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = SimpleLinePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+
+        // One line, NDC (-1, 0) to (0, 0): covers only the left half
+        // of the render target's width. DrawColor is bright green,
+        // distinct from the clear color (blue) -- a genuinely
+        // partial-width line is the real negative control here: a
+        // shader/pipeline bug that filled the whole target regardless
+        // of actual vertex geometry (e.g. a hardcoded fragment-shader
+        // output, or a vertex shader that collapsed every vertex to
+        // the same clip position) would make the right half green
+        // too, not blue.
+        let vertices = [
+            LineVertex {
+                coords: [-1.0, 0.0, 0.0],
+                draw_id: 0,
+            },
+            LineVertex {
+                coords: [0.0, 0.0, 0.0],
+                draw_id: 0,
+            },
+        ];
+        let draw_params = [DrawParams {
+            draw_color: [0.0, 1.0, 0.0, 1.0],
+        }];
+
+        // 64x1 Rgba8Unorm: real row bytes (64*4=256) are already a
+        // multiple of 256, wgpu's own copy_texture_to_buffer
+        // requirement (unlike write_texture), so no row padding is
+        // needed in the readback below.
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("line render test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        pipeline.render(
+            device,
+            queue,
+            LineDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                target: &render_target_view,
+                clear_color: wgpu::Color::BLUE,
+            },
+        );
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("line render test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("line render test readback encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        // Pixel 8 (well inside the drawn line's left-half span) must
+        // be the real draw_color, green.
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[0u8, 255, 0, 255],
+            "expected a pixel inside the drawn line's span to read back green (the real \
+             DrawParameters.draw_color), got {left_pixel:?}"
+        );
+        // Pixel 56 (well inside the right half, outside the line's
+        // span) must still be the real clear color, blue -- proves
+        // the line's actual vertex-buffer geometry was respected, not
+        // a degenerate "whole target is green" result.
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected a pixel outside the drawn line's span to still read back the real clear \
+             color, blue -- got {right_pixel:?} (a non-blue value here would mean the line's \
+             own vertex geometry was not actually respected)"
+        );
+        println!(
+            "SimpleLinePipeline::render confirmed empirically: a real Draw2DLine-shaped vertex \
+             buffer, uploaded through real buffers and bind groups, produced the right pixels \
+             at the right positions in a real offscreen texture on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+}

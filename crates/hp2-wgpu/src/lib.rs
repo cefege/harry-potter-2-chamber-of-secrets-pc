@@ -477,6 +477,7 @@
 //! `modelviewproj_mat` must build it directly in WebGPU's 0..1
 //! convention), not duplicated here.
 
+pub mod draw;
 pub mod texture;
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
