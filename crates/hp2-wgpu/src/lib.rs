@@ -212,10 +212,62 @@
 //! with a wgpu-side format chosen per source format -- `P8` in
 //! particular is an indexed-palette format needing CPU-side expansion
 //! to RGBA before upload (the real palette-to-RGBA conversion call
-//! site itself has not been read yet). Still unexamined: the C++-side
-//! draw-call batching (`DrawComplex.cpp`/`DrawGouraud.cpp`/
-//! `DrawTile.cpp`) that would need a parallel Rust rewrite to actually
-//! call any of this.
+//! site itself has not been read yet).
+//!
+//! `DrawComplex.cpp` (304 lines), `DrawGouraud.cpp` (406 lines, also
+//! home to `DrawTriangles`), and `DrawTile.cpp` (379 lines) -- the
+//! C++ orchestration that actually issues draw calls, all currently
+//! no-op stubs in `WgpuDrv.cpp` -- have now been read in full. All
+//! three share one real batching architecture that is good news for
+//! porting: CPU-side ring buffers (`VertBuffer`/`DrawBuffer`/
+//! `ParametersBuffer`) accumulate vertices and one small per-draw-call
+//! parameter struct across multiple draw calls, flushed only when
+//! blend state or shader specialization actually changes or a buffer
+//! fills up -- not one GL draw call per engine draw call. Each
+//! buffered draw call gets a `DrawID`, written per-vertex and used
+//! shader-side to index back into that draw call's own parameter slot
+//! (`GetXAxis(DrawID)` etc. in `DrawComplex_GLSL.cpp`) -- this is
+//! exactly the "`DrawID`-indexed lookup" pattern `simple.wgsl`
+//! deliberately dropped (justified there because the non-SSBO fallback
+//! never actually multi-draws), so wiring multi-draw-call batching
+//! back in for `DrawComplex`/`DrawGouraud`/`DrawTile` will need it
+//! restored, most likely as a dynamic-offset uniform/storage buffer
+//! indexed by instance or vertex, not necessarily the SSBO-array shape
+//! the GLSL uses. Triangulation is already CPU-side for both
+//! `DrawComplex` (`FSavedPoly` n-gon fan triangulated into
+//! `(NumPts-2)*3` vertices) and `DrawGouraud`/`DrawTriangles` (same
+//! fan triangulation, plus real index-buffer support in
+//! `DrawTriangles`) -- no GPU-side amplification to design around for
+//! either. `DrawTile.cpp`'s `SubmitTileBatch` confirms and sharpens
+//! the earlier `DrawTileCoreProgram`-vs-`DrawTileESProgram` finding:
+//! the Core path packs an entire tile's rect and UVs into a single
+//! vertex's attributes and advances the ring buffer by 3 with only
+//! that one vertex actually written, relying on its geometry shader
+//! for the real 1-to-6 expansion before rasterization; the ES path's
+//! C++ computes all 6 corner vertices directly, by hand, right there
+//! in `SubmitTileBatch` (`Out[0..5].Coords`/`TexCoords`, using
+//! `RFX2`/`RFY2`/`Frame->FX2`/`Frame->FY2` the same way the vertex
+//! shader itself would) -- for `DrawTile` this is no longer a
+//! geometry-shader-replacement design problem, it is a direct
+//! transcription target. One real, not-yet-decided architectural gap
+//! surfaced by all three files: GLSL's `#if`-gated shader
+//! specialization (`ShaderCompilationOptions`, lazily compiled and
+//! cached per unique combination of texture layers and blend mode via
+//! `SelectSpecialization`) has no direct WGSL/wgpu equivalent -- wgpu
+//! has no API-level preprocessor. The likely shape, not yet
+//! implemented or further scoped: a Rust-side
+//! `HashMap<ShaderCompilationOptions, wgpu::RenderPipeline>` cache,
+//! built from either N generated WGSL source variants or (preferably,
+//! idiomatic wgpu) one WGSL source using pipeline-overridable
+//! constants. Confirmed in passing: `DrawGouraud.cpp`'s real
+//! `MaxVertices()` also returns a hardcoded `256`, matching
+//! `WgpuDrv.cpp`'s current stub value -- not a shortcut, already
+//! correct. Still unexamined: the ring-buffer/`ShaderProgram::Flush`
+//! machinery itself (`ShaderProgram.cpp`, read only for its
+//! bindless/SSBO-fallback logic so far, not its buffering internals),
+//! and how any of this would connect to `WgpuDrv.cpp`'s current no-op
+//! `DrawComplexSurface`/`DrawTriangles`/`DrawTile`/`Draw2DLine`/
+//! `Draw2DPoint` stubs.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
