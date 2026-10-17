@@ -68,16 +68,23 @@
 // `DrawFlags` when `Surface.LightMap`/`Surface.FogMap` is actually
 // non-null) gate whether the sampled value is used at all, via
 // `select()` rather than an `if` around the sample itself -- see the
-// real comments at each call site below for why. A surface with no
-// lightmap or fogmap renders correctly today (an earlier version of
-// this file applied both unconditionally instead, overbright-
-// multiplying every such surface by whatever was bound to the unused
-// texture slot -- caught on review, fixed). What remains a real, not
-// yet resolved simplification is the broader shader-specialization
-// question this crate's module doc already scopes: the real GLSL still
-// compiles a genuinely different shader per combination of optional
-// texture layers for other reasons (fewer bindings, fewer instructions,
-// no always-bound dummy textures to manage Rust-side), not just to
+// real comments at each call site below for why. This shader's own
+// logic now handles a surface with no lightmap or fogmap correctly
+// (an earlier version of this file applied both unconditionally
+// instead, overbright-multiplying every such surface by whatever was
+// bound to the unused texture slot -- caught on review, fixed) -- not
+// the same claim as a surface actually rendering correctly today,
+// since nothing calls this shader yet; the Rust side still has to
+// bind a real 1x1 dummy texture (white for the lightmap slot, since
+// GLSL's unset-case default is `vec4(1.0)`; transparent black for the
+// fogmap slot, matching `vec4(0.0)`) into these always-declared
+// bindings whenever a real surface has neither layer, which is not
+// written yet either. What remains a real, not yet resolved
+// simplification is the broader shader-specialization question this
+// crate's module doc already scopes: the real GLSL still compiles a
+// genuinely different shader per combination of optional texture
+// layers for other reasons (fewer bindings, fewer instructions, no
+// always-bound dummy textures to manage Rust-side), not just to
 // decide presence/absence the way this file now does at runtime.
 
 struct DrawParameters {
