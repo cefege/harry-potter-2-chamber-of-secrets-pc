@@ -2,7 +2,7 @@
 //! (2304 lines) -- the OpenAL-Soft-backed implementation of
 //! `UAudioSubsystem`, registered as `ALAudio.ALAudioSubsystem`.
 //!
-//! **Scope of this crate today: two functions.** `UALAudioSubsystem`
+//! **Scope of this crate today: three functions.** `UALAudioSubsystem`
 //! is a UE1 `UObject`-derived class (`DECLARE_CLASS(UALAudioSubsystem,
 //! UAudioSubsystem, CLASS_Config, ALAudio)`) whose state and virtual
 //! interface are deeply coupled to the live engine object graph --
@@ -11,37 +11,33 @@
 //! reflection system for config persistence (`StaticConstructor`'s
 //! `UBoolProperty`/`UFloatProperty` registrations). Porting the class
 //! itself (matching the plan's "C++ stub forwards every virtual to
-//! `hp2_rs_audio_*`" design) requires a kind of FFI boundary nothing
-//! in this workspace has needed yet: Rust holding opaque handles to
-//! live `AActor*`/`USound*`/`UViewport*` pointers, with new C++-side
-//! accessor exports for whatever engine state each virtual needs
-//! (there is no existing precedent for this in the codebase --
-//! `hp2_rs_vorbis_*`, the one Rust call this file already makes, only
-//! ever operates on byte streams, never on an engine object). That
-//! design is real, substantial, multi-session work, scoped but not
-//! started.
+//! `hp2_rs_audio_*`" design) requires a kind of FFI boundary this
+//! crate has only just started establishing: Rust holding opaque
+//! identities for live `USound*` pointers (see
+//! `find_least_important_sound` below, its first real use), but not
+//! yet opaque identities for `AActor*`/`UViewport*`, and not yet
+//! holding any handle *across calls* (every function here is still
+//! stateless, called fresh each time with plain data). The full class
+//! port is still real, substantial, multi-session work, scoped but
+//! not started.
 //!
-//! What *is* safely portable today, and ported here: `ALSource` fields
-//! `Sound`/`Id`/`Priority` for `FindLeastPriorityNonTalkSource`
-//! (`ALAudioSubsystem.cpp:2085-2101`) only depend on a `Sound`
-//! null-check, the slot bits of `Id`, and `Priority` -- genuinely pure
-//! data, no object graph traversal, a `static` C++ method already
-//! called with an explicit `TArray<ALSource>` parameter rather than
-//! reading `this->Sources` directly (unlike its neighbor
-//! `FindLeastImportantSound`, which does read `this->Sources` and
-//! would need its own signature changed to port the same way -- left
-//! alone for now, no caller update bundled into this slice).
-//!
-//! FFI-wired via `hp2_rs_audio_find_least_priority_non_talk_source`
-//! (`crates/hp2-ffi`); `UALAudioSubsystem::FindLeastPriorityNonTalkSource`'s
-//! body now forwards to it, builds the `FfiAudioSourceSlot` array from
-//! its own `TArray<ALSource>` immediately before the call. The real
-//! C++ oracle, `TestTalkRegistrationEvictionPolicy`
+//! **First: `FindLeastPriorityNonTalkSource`**
+//! (`ALAudioSubsystem.cpp:2085-2101`). `ALSource` fields `Sound`/
+//! `Id`/`Priority` only depend on a `Sound` null-check, the slot bits
+//! of `Id`, and `Priority` -- genuinely pure data, no object graph
+//! traversal, a `static` C++ method already called with an explicit
+//! `TArray<ALSource>` parameter rather than reading `this->Sources`
+//! directly. FFI-wired via
+//! `hp2_rs_audio_find_least_priority_non_talk_source`
+//! (`crates/hp2-ffi`); `FindLeastPriorityNonTalkSource`'s body now
+//! forwards to it, builds the `FfiAudioSourceSlot` array from its own
+//! `TArray<ALSource>` immediately before the call. The real C++
+//! oracle, `TestTalkRegistrationEvictionPolicy`
 //! (`Tests/AudioTests.cpp:612-636`, part of the `audio_lifecycle`
 //! ctest), exercises this through the real caller path and passes
 //! against the Rust implementation.
 //!
-//! The second: `SoundPriority`'s pure math half
+//! **Second: `SoundPriority`'s pure math half**
 //! (`ALAudioSubsystem.cpp:1946-1961`) -- given `Volume`/`Radius`/
 //! `Flags` and the already-computed `FDistSquared(Location,
 //! ViewTarget->Location)`, compute the priority score. C++ still
@@ -52,16 +48,38 @@
 //! only `DistSquared` before forwarding. `SoundPriority` has five
 //! call sites (`:808` in `PlaySound`, `:1404`/`:1424` gathering
 //! ambient sounds, `:1703` in `Update` for every active source on
-//! every tick, `:2144` in `FindLeastImportantSound`) -- this Rust
-//! path now runs on every tick for every active sound, not just the
-//! one rarely-used eviction helper. `FindLeastImportantSound` itself
-//! stays unported (deeply `this->Sources`-coupled, see above); the
-//! other four callers already called through `SoundPriority`'s C++
-//! body, now forwarding unconditionally. No existing C++ oracle for
-//! any of the five call sites; `audio_lifecycle` only exercises this
-//! function directly via `TestSoundPriorityFfiBoundary`, covered by
-//! `priority.rs`'s own Rust unit tests otherwise.
+//! every tick, `:2134` in `FindLeastImportantSound`) -- this Rust
+//! path now runs on every tick for every active sound. No existing
+//! C++ oracle for any of the five call sites; `audio_lifecycle` only
+//! exercises this function directly via `TestSoundPriorityFfiBoundary`,
+//! covered by `priority.rs`'s own Rust unit tests otherwise.
 //! `Update`/`PlaySound`'s runtime call paths are not exercised by any
 //! automated check.
+//!
+//! **Third: `FindLeastImportantSound`** (`ALAudioSubsystem.cpp:
+//! 2105-2156`), called from `RegisterSound` (`:758`, `:842`) when a
+//! new sound needs a source and every slot is full. Unlike the first
+//! two, this one *does* read `this->Sources`/the live `USound*`
+//! pointers directly in the real C++ -- the first function in this
+//! crate needing a live-object FFI pattern rather than pure data
+//! alone. Resolved as: `Sound` crosses as `sound: usize`, the pointer
+//! bits with no dereference ability on the Rust side, only equality
+//! comparison (matching exactly what the real C++'s `TMap<USound*,
+//! INT>`/`pMaxCountSound` pointer identity and truthiness checks
+//! need) -- `0` doubles as both "never assigned" and "a null `Sound`"
+//! the same way a null `USound*` does in C++. `WorkingFlags` is read
+//! once per source up front in C++ (`Source.Sound ? ->WorkingFlags :
+//! 0`) rather than only for the eventually-selected candidates like
+//! the original's lazier gating -- a deliberate simplification
+//! (same deterministic result, bounded extra `FDistSquared`/pointer
+//! read cost for a typically-small `Sources` array) to keep this to
+//! one FFI round trip instead of two. FFI-wired via
+//! `hp2_rs_audio_find_least_important_sound`; reuses `sound_priority`
+//! internally for the second-pass comparison. No existing C++ oracle;
+//! covered by `priority.rs`'s own Rust unit tests (including the
+//! null-identity and "first sound to strictly exceed the running
+//! max" tie-break edge cases) plus an FFI-boundary check added to
+//! `Tests/AudioTests.cpp` (`TestFindLeastImportantSoundFfiBoundary`,
+//! same `audio_lifecycle` ctest).
 
 pub mod priority;

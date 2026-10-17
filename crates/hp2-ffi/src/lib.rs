@@ -2608,3 +2608,65 @@ pub extern "C" fn hp2_rs_audio_sound_priority(
         )
     })
 }
+
+/// Mirrors `hp2_audio::priority::LeastImportantSlot`
+/// (`crates/hp2-audio/src/priority.rs`). `sound` is a `USound*`'s raw
+/// identity bits (`(uintptr_t)Source.Sound` in C++); this crate never
+/// dereferences it, only compares it for equality.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiLeastImportantSlot {
+    pub sound: usize,
+    pub id: i32,
+    pub dist_squared: f32,
+    pub volume: f32,
+    pub radius: f32,
+    pub flags: i32,
+}
+
+/// Replaces `UALAudioSubsystem::FindLeastImportantSound`'s body
+/// (`ALAudioSubsystem.cpp:2105-2156`). `slots` must point to `count`
+/// contiguous `FfiLeastImportantSlot`s in the same order as the real
+/// C++'s `Sources` array (the "most frequent sound" tie-break depends
+/// on that order -- see `find_least_important_sound`'s own doc).
+/// `incoming_sound` is the raw identity bits of the `USound*` about
+/// to play.
+///
+/// # Safety
+/// `slots` must be a valid, aligned pointer to at least `count`
+/// readable `FfiLeastImportantSlot`s (or `count == 0`, in which case
+/// `slots` may be dangling).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_audio_find_least_important_sound(
+    slots: *const FfiLeastImportantSlot,
+    count: usize,
+    incoming_sound: usize,
+    audio_max_radius_multiplier: f32,
+) -> i32 {
+    guard(
+        "hp2_rs_audio_find_least_important_sound",
+        -1,
+        move || unsafe {
+            let owned: Vec<hp2_audio::priority::LeastImportantSlot> = if count == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(slots, count)
+                    .iter()
+                    .map(|s| hp2_audio::priority::LeastImportantSlot {
+                        sound: s.sound,
+                        id: s.id,
+                        dist_squared: s.dist_squared,
+                        volume: s.volume,
+                        radius: s.radius,
+                        flags: s.flags,
+                    })
+                    .collect()
+            };
+            hp2_audio::priority::find_least_important_sound(
+                &owned,
+                incoming_sound,
+                audio_max_radius_multiplier,
+            )
+        },
+    )
+}

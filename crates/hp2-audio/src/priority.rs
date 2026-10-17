@@ -35,7 +35,7 @@ fn ue_clamp(x: f32, min: f32, max: f32) -> f32 {
 /// Called on every tick for every active source
 /// (`ALAudioSubsystem.cpp:1703`, inside `Update`), for every gathered
 /// ambient sound (`:1404`, `:1424`), from `PlaySound` (`:808`), and
-/// from `FindLeastImportantSound` (`:2144`) -- five call sites, not
+/// from `FindLeastImportantSound` (`:2134`) -- five call sites, not
 /// one. `FindLeastImportantSound` itself stays unported (reads
 /// `this->Sources` directly, deeply object-graph-coupled); the other
 /// four callers already call through `SoundPriority`'s C++ body,
@@ -73,6 +73,73 @@ const SLOT_TALK: i32 = 5;
 
 /// Matches `Core.h:104`'s `INDEX_NONE = -1`.
 const INDEX_NONE: i32 = -1;
+
+/// Mirrors the `ALSource`/`USound` fields `FindLeastImportantSound`
+/// needs, plus the inputs `sound_priority` takes once a source's
+/// `DistSquared` is already known. `sound` is the source's `Sound`
+/// pointer's raw identity bits (`(uintptr_t)Source.Sound` in C++) --
+/// Rust only ever compares it for equality, never dereferences it;
+/// `0` represents a null `Sound` pointer, matching the real C++'s own
+/// `if (pMaxCountSound)` truthiness check on the same field.
+pub struct LeastImportantSlot {
+    pub sound: usize,
+    pub id: i32,
+    pub dist_squared: f32,
+    pub volume: f32,
+    pub radius: f32,
+    pub flags: i32,
+}
+
+/// Replaces `FindLeastImportantSound` (`ALAudioSubsystem.cpp:
+/// 2105-2156`). `slots` must be in the same order as the real C++'s
+/// `Sources` array -- the "most frequent sound" tie-break is "first
+/// source whose running instance count strictly exceeds the current
+/// max," decided inline during a single forward pass over `Sources`,
+/// NOT derived from `TMap` iteration/hash order (the real C++ never
+/// observes that order either: the comparison happens in the same
+/// loop that updates the running count, before any map iteration
+/// could occur).
+pub fn find_least_important_sound(
+    slots: &[LeastImportantSlot],
+    incoming_sound: usize,
+    audio_max_radius_multiplier: f32,
+) -> i32 {
+    const INITIAL_MIN_COUNT: i32 = 3;
+    let mut counts: std::collections::HashMap<usize, i32> = std::collections::HashMap::new();
+    let mut max_count = INITIAL_MIN_COUNT;
+    let mut max_count_sound: usize = 0;
+    for slot in slots {
+        if slot.id != 0 {
+            let count = counts.entry(slot.sound).or_insert(0);
+            *count += 1;
+            if *count > max_count {
+                max_count = *count;
+                max_count_sound = slot.sound;
+            }
+        }
+    }
+
+    let mut result = INDEX_NONE;
+    if max_count_sound != 0 && max_count_sound != incoming_sound {
+        let mut lowest_priority = 1000.0f32;
+        for (index, slot) in slots.iter().enumerate() {
+            if slot.id != 0 && (slot.id & 14) != (SLOT_TALK * 2) && slot.sound == max_count_sound {
+                let priority = sound_priority(
+                    slot.dist_squared,
+                    slot.radius,
+                    audio_max_radius_multiplier,
+                    slot.volume,
+                    slot.flags,
+                );
+                if priority < lowest_priority {
+                    lowest_priority = priority;
+                    result = index as i32;
+                }
+            }
+        }
+    }
+    result
+}
 
 /// Replaces the `ALSource` fields `FindLeastPriorityNonTalkSource`
 /// actually reads: `Sound` (used only for a null check), `Id`, and
@@ -255,5 +322,126 @@ mod tests {
             sound_priority(0.0, 0.0, 100.0, 0.0, SF_HAS_LIP_SYNC | SF_MUSIC | SF_NO3D),
             7.0
         );
+    }
+
+    // find_least_important_sound: derived directly from reading
+    // ALAudioSubsystem.cpp:2105-2156's source -- no existing C++
+    // oracle test exercises this function (grepped Tests/AudioTests.cpp,
+    // no match). Every slot below uses radius=0.0, flags=0 so
+    // sound_priority(slot) == slot.volume exactly, letting volume
+    // double as a direct, unambiguous priority proxy.
+
+    fn li_slot(sound: usize, id: i32, volume: f32) -> LeastImportantSlot {
+        LeastImportantSlot {
+            sound,
+            id,
+            dist_squared: 0.0,
+            volume,
+            radius: 0.0,
+            flags: 0,
+        }
+    }
+
+    #[test]
+    fn empty_slots_returns_index_none() {
+        assert_eq!(find_least_important_sound(&[], 0, 100.0), INDEX_NONE);
+    }
+
+    #[test]
+    fn a_sound_at_or_below_the_initial_min_count_is_never_evicted() {
+        const SLOT_MISC: i32 = 1;
+        // Exactly 3 instances (== INITIAL_MIN_COUNT, not > it) must
+        // never trigger eviction consideration.
+        let slots = [
+            li_slot(0xAAAA, SLOT_MISC * 2, 1.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 2.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 3.0),
+        ];
+        assert_eq!(find_least_important_sound(&slots, 0, 100.0), INDEX_NONE);
+    }
+
+    #[test]
+    fn picks_the_lowest_priority_instance_of_the_most_frequent_sound() {
+        const SLOT_MISC: i32 = 1;
+        const SLOT_TALK_ID: i32 = SLOT_TALK * 2;
+        let slots = [
+            li_slot(0xAAAA, SLOT_MISC * 2, 10.0), // index 0
+            li_slot(0xAAAA, SLOT_MISC * 2, 5.0),  // index 1: lowest eligible
+            li_slot(0xAAAA, SLOT_TALK_ID, 1.0), // index 2: lower still, but SLOT_Talk is protected
+            li_slot(0xAAAA, SLOT_MISC * 2, 5.0), // index 3: ties index 1, must not win
+            li_slot(0xBBBB, SLOT_MISC * 2, 0.5), // index 4: a different sound, never exceeds the count
+        ];
+        assert_eq!(find_least_important_sound(&slots, 0, 100.0), 1);
+    }
+
+    #[test]
+    fn the_incoming_sound_is_never_evicted_for_itself() {
+        const SLOT_MISC: i32 = 1;
+        let slots = [
+            li_slot(0xAAAA, SLOT_MISC * 2, 10.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 5.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 1.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 2.0),
+        ];
+        assert_eq!(
+            find_least_important_sound(&slots, 0xAAAA, 100.0),
+            INDEX_NONE
+        );
+    }
+
+    #[test]
+    fn null_sound_identity_groups_never_trigger_eviction() {
+        // Multiple occupied slots with a null Sound pointer collide
+        // into the same `0` map key, same as C++'s TMap<USound*,INT>
+        // would, but `if (pMaxCountSound)` is a pointer truthiness
+        // check in the real C++ -- a `NULL` max-count "sound" must
+        // never be treated as evictable.
+        const SLOT_MISC: i32 = 1;
+        let slots = [
+            li_slot(0, SLOT_MISC * 2, 10.0),
+            li_slot(0, SLOT_MISC * 2, 5.0),
+            li_slot(0, SLOT_MISC * 2, 1.0),
+            li_slot(0, SLOT_MISC * 2, 2.0),
+        ];
+        assert_eq!(
+            find_least_important_sound(&slots, 0xFFFF, 100.0),
+            INDEX_NONE
+        );
+    }
+
+    #[test]
+    fn the_first_sound_to_strictly_exceed_the_running_max_wins_not_a_later_equal_count() {
+        const SLOT_MISC: i32 = 1;
+        // 0xAAAA reaches count 4 first (indices 0-3); 0xBBBB also
+        // reaches count 4 later (indices 4-7), but 4 is not > the
+        // max_count of 4 already set by 0xAAAA, so 0xBBBB must never
+        // displace it -- matching the real C++'s strict `>` test
+        // against the *running* max, not a final tally comparison.
+        let slots = [
+            li_slot(0xAAAA, SLOT_MISC * 2, 9.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 9.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 9.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 1.0), // index 3: the pick
+            li_slot(0xBBBB, SLOT_MISC * 2, 0.1),
+            li_slot(0xBBBB, SLOT_MISC * 2, 0.1),
+            li_slot(0xBBBB, SLOT_MISC * 2, 0.1),
+            li_slot(0xBBBB, SLOT_MISC * 2, 0.1), // would win on priority alone, must be ignored
+        ];
+        assert_eq!(find_least_important_sound(&slots, 0, 100.0), 3);
+    }
+
+    #[test]
+    fn unoccupied_slots_are_skipped_in_both_passes() {
+        const SLOT_MISC: i32 = 1;
+        let slots = [
+            li_slot(0xAAAA, 0, 0.1), // Id == 0: unoccupied, skipped entirely
+            li_slot(0xAAAA, SLOT_MISC * 2, 10.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 9.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 8.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 7.0),
+        ];
+        // Only 4 occupied instances (index 0 excluded), so count
+        // reaches 4 at index 4, same winner-selection as before.
+        assert_eq!(find_least_important_sound(&slots, 0, 100.0), 4);
     }
 }

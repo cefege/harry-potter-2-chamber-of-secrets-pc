@@ -2090,59 +2090,26 @@ INT UALAudioSubsystem::FindLeastPriorityNonTalkSource( const TArray<ALSource>& I
 	return hp2_rs_audio_find_least_priority_non_talk_source( Slots.GetData(), Slots.Num() );
 }
 
-#define INITIAL_MIN_COUNT	3	//	we need to find at least this many playing instances of a sound before we'll kill it
-
 INT UALAudioSubsystem::FindLeastImportantSound( USound *pIncomingSound )
 {
-	INT					iRet = -1;
-
-	TMap<USound *, INT>	SoundInstances;
-	INT					iMaxCount = INITIAL_MIN_COUNT;			
-	USound				*pMaxCountSound = NULL;
-
-	//	Count the number of instances of each playing sound
-	//
-	for (INT i = 0; i < Sources.Num(); i++ )
+	TArray<FfiLeastImportantSlot> Slots( Sources.Num() );
+	for( INT Index=0; Index<Sources.Num(); ++Index )
 	{
-		if (Sources(i).Id != 0)
+		const ALSource& Source = Sources(Index);
+		FfiLeastImportantSlot& Slot = Slots(Index);
+		Slot.sound = (UPTRINT)Source.Sound;
+		Slot.id = Source.Id;
+		Slot.dist_squared = 0.f;
+		if( Source.Radius )
 		{
-			INT iNumInstances = SoundInstances.FindRef(Sources(i).Sound);
-			iNumInstances++;
-			SoundInstances.Set(Sources(i).Sound, iNumInstances);
-
-			if (iNumInstances > iMaxCount)
-			{
-				iMaxCount = iNumInstances;
-				pMaxCountSound = Sources(i).Sound;
-			}
+			AActor *ViewTarget = Viewport->Actor->ViewTarget ? Viewport->Actor->ViewTarget : Viewport->Actor;
+			Slot.dist_squared = FDistSquared(Source.Location, ViewTarget->Location);
 		}
+		Slot.volume = Source.Volume;
+		Slot.radius = Source.Radius;
+		Slot.flags = Source.Sound ? Source.Sound->WorkingFlags : 0;
 	}
-
-	//	If we found a sound with enough playing instances AND it's not the same
-	//	sound we're trying to play, determine the most distant instance and return it's Sources() index.
-	//
-	if (pMaxCountSound && pMaxCountSound != pIncomingSound)
-	{
-		FLOAT	fLowestPriority = 1000.f;
-
-		for (INT i = 0; i < Sources.Num(); i++ )
-		{
-			//	Don't even check sounds that are playing in SLOT_Talk - we never want to kill them.	
-			//
-			if (Sources(i).Id != 0 && ((Sources(i).Id & 14) != (SLOT_Talk * 2)) && pMaxCountSound == Sources(i).Sound)
-			{
-				FLOAT	fPriority = SoundPriority(Viewport, Sources(i).Location, Sources(i).Volume, Sources(i).Radius, Sources(i).Sound->WorkingFlags);
-
-				if (fPriority < fLowestPriority)
-				{
-					fLowestPriority = fPriority;
-					iRet = i;
-				}
-			}
-		}
-	}
-
-	return iRet;
+	return hp2_rs_audio_find_least_important_sound( Slots.GetData(), Slots.Num(), (UPTRINT)pIncomingSound, GAudioMaxRadiusMultiplier );
 }
 
 
