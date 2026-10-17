@@ -745,3 +745,659 @@ pub unsafe extern "C" fn hp2_rs_import_run(
         )
     })
 }
+
+// --- hp2-launcher: HP2LauncherStore.cpp's/HP2LaunchPolicy.cpp's
+// non-UI orchestration (HP2Launcher.cpp's own SDL/ImGui UI loop
+// stays C++ per the plan and calls through this surface instead of
+// the local implementations it used to have). ---
+
+/// Error-only delivery: called exactly once when an export returns
+/// `false`, never on success (unlike `IniResultSink`, which always
+/// fires exactly once either way). UTF-8, not NUL-terminated.
+pub type ErrorSink = unsafe extern "C" fn(ctx: *mut c_void, text: *const u8, len: usize);
+
+unsafe fn report_error(sink: ErrorSink, ctx: *mut c_void, message: &str) -> bool {
+    unsafe { sink(ctx, message.as_ptr(), message.len()) };
+    false
+}
+
+/// Flat mirror of `HP2Launcher::LauncherSettings`, field order and
+/// type matching exactly -- `DisplayResolution::label` is omitted:
+/// it is purely derived (`"{width} x {height}"`, see
+/// `hp2_launcher::store::load_settings`), never read by any Store/
+/// Policy logic, so the real C++ caller can reconstruct it itself
+/// from `resolution_width`/`resolution_height` without this crossing
+/// the FFI boundary at all. Every enum field is that enum's C++
+/// ordinal (`hp2_launcher::model`'s Rust enums declare variants in
+/// the exact same order as the C++ `enum class`es they replace, with
+/// no explicit discriminants, so `as i32` on either side matches).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiLauncherSettings {
+    pub screen_mode: i32,
+    pub resolution_width: i32,
+    pub resolution_height: i32,
+    pub render_backend: i32,
+    pub vertical_sync: bool,
+    pub render_scale: f64,
+    pub ui_scale: f64,
+    pub frame_rate_limit: i32,
+    pub show_fps: bool,
+    pub maintain_vertical_fov: bool,
+    pub native_text: bool,
+    pub anti_aliasing_samples: i32,
+    pub anisotropy: i32,
+    pub brightness: f64,
+    pub texture_detail: i32,
+    pub object_detail: i32,
+    pub sound_enabled: bool,
+    pub sound_volume: f64,
+    pub music_volume: f64,
+    pub mouse_sensitivity: f64,
+    pub invert_mouse: bool,
+    pub control_mode: i32,
+    pub auto_center_camera: bool,
+    pub move_while_casting: bool,
+    pub auto_quaff: bool,
+    pub screen_flashes: bool,
+    pub difficulty: i32,
+    pub joystick_enabled: bool,
+}
+
+fn settings_from_ffi(ffi: &FfiLauncherSettings) -> hp2_launcher::model::LauncherSettings {
+    use hp2_launcher::model::*;
+    LauncherSettings {
+        screen_mode: match ffi.screen_mode {
+            1 => ScreenMode::Fullscreen,
+            2 => ScreenMode::BorderlessDesktop,
+            _ => ScreenMode::Windowed,
+        },
+        resolution: DisplayResolution {
+            width: ffi.resolution_width,
+            height: ffi.resolution_height,
+            label: String::new(),
+        },
+        render_backend: match ffi.render_backend {
+            1 => RenderBackend::Vulkan,
+            _ => RenderBackend::XOpenGL,
+        },
+        vertical_sync: ffi.vertical_sync,
+        render_scale: ffi.render_scale,
+        ui_scale: ffi.ui_scale,
+        frame_rate_limit: ffi.frame_rate_limit,
+        show_fps: ffi.show_fps,
+        maintain_vertical_fov: ffi.maintain_vertical_fov,
+        native_text: ffi.native_text,
+        anti_aliasing_samples: ffi.anti_aliasing_samples,
+        anisotropy: ffi.anisotropy,
+        brightness: ffi.brightness,
+        texture_detail: match ffi.texture_detail {
+            0 => TextureDetail::Low,
+            1 => TextureDetail::Medium,
+            _ => TextureDetail::High,
+        },
+        object_detail: match ffi.object_detail {
+            0 => ObjectDetail::VeryLow,
+            1 => ObjectDetail::Low,
+            2 => ObjectDetail::Medium,
+            3 => ObjectDetail::High,
+            _ => ObjectDetail::VeryHigh,
+        },
+        sound_enabled: ffi.sound_enabled,
+        sound_volume: ffi.sound_volume,
+        music_volume: ffi.music_volume,
+        mouse_sensitivity: ffi.mouse_sensitivity,
+        invert_mouse: ffi.invert_mouse,
+        control_mode: match ffi.control_mode {
+            1 => ControlMode::Modern,
+            _ => ControlMode::Classic,
+        },
+        auto_center_camera: ffi.auto_center_camera,
+        move_while_casting: ffi.move_while_casting,
+        auto_quaff: ffi.auto_quaff,
+        screen_flashes: ffi.screen_flashes,
+        difficulty: match ffi.difficulty {
+            1 => Difficulty::Medium,
+            2 => Difficulty::Hard,
+            _ => Difficulty::Easy,
+        },
+        joystick_enabled: ffi.joystick_enabled,
+    }
+}
+
+fn settings_to_ffi(settings: &hp2_launcher::model::LauncherSettings) -> FfiLauncherSettings {
+    FfiLauncherSettings {
+        screen_mode: settings.screen_mode as i32,
+        resolution_width: settings.resolution.width,
+        resolution_height: settings.resolution.height,
+        render_backend: settings.render_backend as i32,
+        vertical_sync: settings.vertical_sync,
+        render_scale: settings.render_scale,
+        ui_scale: settings.ui_scale,
+        frame_rate_limit: settings.frame_rate_limit,
+        show_fps: settings.show_fps,
+        maintain_vertical_fov: settings.maintain_vertical_fov,
+        native_text: settings.native_text,
+        anti_aliasing_samples: settings.anti_aliasing_samples,
+        anisotropy: settings.anisotropy,
+        brightness: settings.brightness,
+        texture_detail: settings.texture_detail as i32,
+        object_detail: settings.object_detail as i32,
+        sound_enabled: settings.sound_enabled,
+        sound_volume: settings.sound_volume,
+        music_volume: settings.music_volume,
+        mouse_sensitivity: settings.mouse_sensitivity,
+        invert_mouse: settings.invert_mouse,
+        control_mode: settings.control_mode as i32,
+        auto_center_camera: settings.auto_center_camera,
+        move_while_casting: settings.move_while_casting,
+        auto_quaff: settings.auto_quaff,
+        screen_flashes: settings.screen_flashes,
+        difficulty: settings.difficulty as i32,
+        joystick_enabled: settings.joystick_enabled,
+    }
+}
+
+/// Called once per discovered save. UTF-8 string spans, not
+/// NUL-terminated, valid only for the call's duration.
+pub type SaveRecordSink = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: *const u8,
+    save_path_len: usize,
+    thumbnail_path: *const u8,
+    thumbnail_path_len: usize,
+    display_name: *const u8,
+    display_name_len: usize,
+    size: i64,
+    modified_seconds: i64,
+);
+
+unsafe fn report_save(
+    sink: SaveRecordSink,
+    ctx: *mut c_void,
+    save: &hp2_launcher::model::SaveRecord,
+) {
+    unsafe {
+        sink(
+            ctx,
+            save.slot,
+            save.save_index,
+            save.uses_slot_directory,
+            save.save_path.as_ptr(),
+            save.save_path.len(),
+            save.thumbnail_path.as_ptr(),
+            save.thumbnail_path.len(),
+            save.display_name.as_ptr(),
+            save.display_name.len(),
+            save.size,
+            save.modified_seconds,
+        )
+    };
+}
+
+/// Replaces `HP2Launcher::LoadLauncherState`. Paths are UTF-8, not
+/// NUL-terminated. Writes the settings into `*settings_out` on
+/// success (untouched on failure) and calls `save_sink` once per
+/// discovered save, in the real C++'s own sorted order. Calls
+/// `error_sink` exactly once, only on failure.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `settings_out` must be a valid, aligned
+/// pointer to write an `FfiLauncherSettings` through. `save_sink` and
+/// `error_sink` must be safe to call with their `ctx` and the spans
+/// described above, valid only for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_load_state(
+    user_root: *const u8,
+    user_root_len: usize,
+    system_root: *const u8,
+    system_root_len: usize,
+    settings_out: *mut FfiLauncherSettings,
+    save_sink: SaveRecordSink,
+    save_ctx: *mut c_void,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_load_state", false, move || unsafe {
+        let user_root = match str_from_raw(user_root, user_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(error_sink, error_ctx, "user root path is not valid UTF-8");
+            }
+        };
+        let system_root = match str_from_raw(system_root, system_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(error_sink, error_ctx, "system root path is not valid UTF-8");
+            }
+        };
+        let paths = hp2_launcher::model::LauncherPaths {
+            user_root: user_root.to_string(),
+            system_root: system_root.to_string(),
+        };
+        match hp2_launcher::orchestrate::load_launcher_state(&paths) {
+            Ok(state) => {
+                *settings_out = settings_to_ffi(&state.settings);
+                for save in &state.saves {
+                    report_save(save_sink, save_ctx, save);
+                }
+                true
+            }
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}
+
+/// Replaces `HP2Launcher::CommitLauncherSettings`. Paths are UTF-8,
+/// not NUL-terminated. Calls `error_sink` exactly once, only on
+/// failure.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `settings` must be a valid, aligned pointer
+/// to a live `FfiLauncherSettings`. `error_sink` must be safe to call
+/// with `error_ctx` and the span described above, valid only for the
+/// call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_commit_settings(
+    user_root: *const u8,
+    user_root_len: usize,
+    system_root: *const u8,
+    system_root_len: usize,
+    settings: *const FfiLauncherSettings,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_commit_settings", false, move || unsafe {
+        let user_root = match str_from_raw(user_root, user_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(error_sink, error_ctx, "user root path is not valid UTF-8");
+            }
+        };
+        let system_root = match str_from_raw(system_root, system_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(error_sink, error_ctx, "system root path is not valid UTF-8");
+            }
+        };
+        let paths = hp2_launcher::model::LauncherPaths {
+            user_root: user_root.to_string(),
+            system_root: system_root.to_string(),
+        };
+        let settings = settings_from_ffi(&*settings);
+        match hp2_launcher::orchestrate::commit_launcher_settings(&paths, &settings) {
+            Ok(()) => true,
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}
+
+/// Called once with a loaded/default `DataSourceConfiguration`.
+/// `selected` is `DataSource`'s C++ ordinal (Retail=0, Prototype=1).
+/// UTF-8 string spans, not NUL-terminated, valid only for the call's
+/// duration.
+pub type DataSourceConfigSink = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    selected: i32,
+    retail_root: *const u8,
+    retail_root_len: usize,
+    prototype_root: *const u8,
+    prototype_root_len: usize,
+);
+
+/// Replaces `HP2Launcher::LoadDataSourceConfiguration`. `launcher_root`
+/// is UTF-8, not NUL-terminated. Calls `config_sink` exactly once on
+/// success, `error_sink` exactly once on failure.
+///
+/// # Safety
+/// `(launcher_root, launcher_root_len)` must be valid for reads of
+/// that length (or null with length 0). `config_sink`/`error_sink`
+/// must be safe to call with their `ctx` and the spans described
+/// above, valid only for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_load_data_sources(
+    launcher_root: *const u8,
+    launcher_root_len: usize,
+    config_sink: DataSourceConfigSink,
+    config_ctx: *mut c_void,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_load_data_sources", false, move || unsafe {
+        let launcher_root = match str_from_raw(launcher_root, launcher_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(
+                    error_sink,
+                    error_ctx,
+                    "launcher root path is not valid UTF-8",
+                );
+            }
+        };
+        match hp2_launcher::orchestrate::load_data_source_configuration(launcher_root) {
+            Ok(config) => {
+                config_sink(
+                    config_ctx,
+                    config.selected as i32,
+                    config.retail_root.as_ptr(),
+                    config.retail_root.len(),
+                    config.prototype_root.as_ptr(),
+                    config.prototype_root.len(),
+                );
+                true
+            }
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}
+
+/// Replaces `HP2Launcher::CommitDataSourceConfiguration`.
+/// `launcher_root`/`retail_root`/`prototype_root` are UTF-8, not
+/// NUL-terminated. `selected` is `DataSource`'s C++ ordinal (Retail=0,
+/// Prototype=1); any other value is reported as an error (matching
+/// the real C++'s own "invalid selection" guard, reachable here since
+/// an arbitrary `int32_t` crosses the FFI boundary, unlike the
+/// unreachable Rust-enum-is-total case this same check hits
+/// internally -- see `commit_data_source_configuration`'s own doc
+/// comment). Calls `error_sink` exactly once, only on failure.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `error_sink` must be safe to call with
+/// `error_ctx` and the span described above, valid only for the
+/// call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_commit_data_sources(
+    launcher_root: *const u8,
+    launcher_root_len: usize,
+    selected: i32,
+    retail_root: *const u8,
+    retail_root_len: usize,
+    prototype_root: *const u8,
+    prototype_root_len: usize,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard(
+        "hp2_rs_launcher_commit_data_sources",
+        false,
+        move || unsafe {
+            let launcher_root = match str_from_raw(launcher_root, launcher_root_len) {
+                Some(s) => s,
+                None => {
+                    return report_error(
+                        error_sink,
+                        error_ctx,
+                        "launcher root path is not valid UTF-8",
+                    );
+                }
+            };
+            let retail_root = match str_from_raw(retail_root, retail_root_len) {
+                Some(s) => s,
+                None => {
+                    return report_error(
+                        error_sink,
+                        error_ctx,
+                        "retail root path is not valid UTF-8",
+                    );
+                }
+            };
+            let prototype_root = match str_from_raw(prototype_root, prototype_root_len) {
+                Some(s) => s,
+                None => {
+                    return report_error(
+                        error_sink,
+                        error_ctx,
+                        "prototype root path is not valid UTF-8",
+                    );
+                }
+            };
+            let selected = match selected {
+                0 => hp2_launcher::model::DataSource::Retail,
+                1 => hp2_launcher::model::DataSource::Prototype,
+                other => {
+                    return report_error(
+                        error_sink,
+                        error_ctx,
+                        &format!("unknown data source ordinal {other}"),
+                    );
+                }
+            };
+            let config = hp2_launcher::model::DataSourceConfiguration {
+                selected,
+                retail_root: retail_root.to_string(),
+                prototype_root: prototype_root.to_string(),
+            };
+            match hp2_launcher::orchestrate::commit_data_source_configuration(
+                launcher_root,
+                &config,
+            ) {
+                Ok(()) => true,
+                Err(e) => report_error(error_sink, error_ctx, &e),
+            }
+        },
+    )
+}
+
+/// Replaces `HP2Launcher::PrepareDataSourceProfile`. `launcher_root`
+/// is UTF-8, not NUL-terminated; `source` is `DataSource`'s C++
+/// ordinal (Retail=0, Prototype=1). Calls `sink` exactly once with
+/// the resulting profile root path on success or the error message on
+/// failure; the return value says which.
+///
+/// # Safety
+/// `(launcher_root, launcher_root_len)` must be valid for reads of
+/// that length (or null with length 0). `sink` must be safe to call
+/// with `ctx` and a `(ptr, len)` UTF-8 byte span valid only for the
+/// call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_prepare_profile(
+    launcher_root: *const u8,
+    launcher_root_len: usize,
+    source: i32,
+    sink: IniResultSink,
+    ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_prepare_profile", false, move || unsafe {
+        let launcher_root = match str_from_raw(launcher_root, launcher_root_len) {
+            Some(s) => s,
+            None => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err("launcher root path is not valid UTF-8".to_string()),
+                );
+            }
+        };
+        let source = match source {
+            0 => hp2_launcher::model::DataSource::Retail,
+            1 => hp2_launcher::model::DataSource::Prototype,
+            other => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err(format!("unknown data source ordinal {other}")),
+                );
+            }
+        };
+        deliver(
+            sink,
+            ctx,
+            hp2_launcher::orchestrate::prepare_data_source_profile(launcher_root, source),
+        )
+    })
+}
+
+/// Called once with a loaded/default `LaunchSelection`. `action` is
+/// `LaunchAction`'s C++ ordinal (Continue=0, NewGame=1, Quit=2,
+/// Error=3). UTF-8 string spans, not NUL-terminated, valid only for
+/// the call's duration.
+#[allow(clippy::too_many_arguments)]
+pub type LaunchSelectionSink = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    action: i32,
+    has_save: bool,
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: *const u8,
+    save_path_len: usize,
+    thumbnail_path: *const u8,
+    thumbnail_path_len: usize,
+    display_name: *const u8,
+    display_name_len: usize,
+    size: i64,
+    modified_seconds: i64,
+);
+
+/// Replaces `HP2Launcher::CommitLaunchSelection`. `launcher_root` is
+/// UTF-8, not NUL-terminated; `action` is `LaunchAction`'s C++ ordinal
+/// (Continue=0, NewGame=1, Quit=2, Error=3). String fields are UTF-8,
+/// not NUL-terminated. Calls `error_sink` exactly once, only on
+/// failure.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `error_sink` must be safe to call with
+/// `error_ctx` and the span described above, valid only for the
+/// call's duration.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_commit_selection(
+    launcher_root: *const u8,
+    launcher_root_len: usize,
+    action: i32,
+    has_save: bool,
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: *const u8,
+    save_path_len: usize,
+    thumbnail_path: *const u8,
+    thumbnail_path_len: usize,
+    display_name: *const u8,
+    display_name_len: usize,
+    size: i64,
+    modified_seconds: i64,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_commit_selection", false, move || unsafe {
+        use hp2_launcher::model::{LaunchAction, LaunchSelection, SaveRecord};
+        let launcher_root = match str_from_raw(launcher_root, launcher_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(
+                    error_sink,
+                    error_ctx,
+                    "launcher root path is not valid UTF-8",
+                );
+            }
+        };
+        let save_path = match str_from_raw(save_path, save_path_len) {
+            Some(s) => s,
+            None => return report_error(error_sink, error_ctx, "save path is not valid UTF-8"),
+        };
+        let thumbnail_path = match str_from_raw(thumbnail_path, thumbnail_path_len) {
+            Some(s) => s,
+            None => {
+                return report_error(error_sink, error_ctx, "thumbnail path is not valid UTF-8");
+            }
+        };
+        let display_name = match str_from_raw(display_name, display_name_len) {
+            Some(s) => s,
+            None => return report_error(error_sink, error_ctx, "display name is not valid UTF-8"),
+        };
+        let action = match action {
+            0 => LaunchAction::Continue,
+            1 => LaunchAction::NewGame,
+            2 => LaunchAction::Quit,
+            3 => LaunchAction::Error,
+            other => {
+                return report_error(
+                    error_sink,
+                    error_ctx,
+                    &format!("unknown launch action ordinal {other}"),
+                );
+            }
+        };
+        let selection = LaunchSelection {
+            action,
+            has_save,
+            save: SaveRecord {
+                slot,
+                save_index,
+                uses_slot_directory,
+                save_path: save_path.to_string(),
+                thumbnail_path: thumbnail_path.to_string(),
+                display_name: display_name.to_string(),
+                size,
+                modified_seconds,
+            },
+        };
+        match hp2_launcher::orchestrate::commit_launch_selection(launcher_root, &selection) {
+            Ok(()) => true,
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}
+
+/// Replaces `HP2Launcher::LoadLaunchSelection`. `launcher_root` is
+/// UTF-8, not NUL-terminated. Calls `selection_sink` exactly once on
+/// success, `error_sink` exactly once on failure.
+///
+/// # Safety
+/// `(launcher_root, launcher_root_len)` must be valid for reads of
+/// that length (or null with length 0). `selection_sink`/`error_sink`
+/// must be safe to call with their `ctx` and the spans described
+/// above, valid only for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_load_selection(
+    launcher_root: *const u8,
+    launcher_root_len: usize,
+    selection_sink: LaunchSelectionSink,
+    selection_ctx: *mut c_void,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_load_selection", false, move || unsafe {
+        let launcher_root = match str_from_raw(launcher_root, launcher_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(
+                    error_sink,
+                    error_ctx,
+                    "launcher root path is not valid UTF-8",
+                );
+            }
+        };
+        match hp2_launcher::orchestrate::load_launch_selection(launcher_root) {
+            Ok(selection) => {
+                let save = &selection.save;
+                selection_sink(
+                    selection_ctx,
+                    selection.action as i32,
+                    selection.has_save,
+                    save.slot,
+                    save.save_index,
+                    save.uses_slot_directory,
+                    save.save_path.as_ptr(),
+                    save.save_path.len(),
+                    save.thumbnail_path.as_ptr(),
+                    save.thumbnail_path.len(),
+                    save.display_name.as_ptr(),
+                    save.display_name.len(),
+                    save.size,
+                    save.modified_seconds,
+                );
+                true
+            }
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}

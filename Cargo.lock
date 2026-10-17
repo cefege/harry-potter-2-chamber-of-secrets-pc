@@ -147,6 +147,7 @@ dependencies = [
  "hp2-ffi-support",
  "hp2-import",
  "hp2-ini",
+ "hp2-launcher",
  "log",
 ]
 
