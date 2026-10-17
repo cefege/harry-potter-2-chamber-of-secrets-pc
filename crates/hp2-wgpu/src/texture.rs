@@ -215,12 +215,22 @@ pub fn p8_to_rgba8(indices: &[u8], palette: &[FColor; 256], mask_mode: P8MaskMod
 /// `TextureCache`. `width`/`height` are the real mip-0 `USize`/
 /// `VSize` -- kept alongside the `wgpu::Texture` itself since wgpu
 /// has no cheap "ask the texture its own size back" accessor as
-/// convenient as just storing what was uploaded.
+/// convenient as just storing what was uploaded. `u_mult`/`v_mult`
+/// are the real `FTexInfo::UMult`/`VMult` (`SetTexture.cpp:492-493`:
+/// `Tex.UMult = 1.f / (Info.UScale * static_cast<FLOAT>(Info.USize))`,
+/// confirmed at the real assignment site, not assumed from `1/USize`
+/// alone -- an earlier version of this crate's own design omitted
+/// the real `UScale`/`VScale` factor entirely, caught on review
+/// before any real `DrawTile` UV math depended on it) -- computed
+/// once at upload time, matching the real source's own one-time
+/// `SetTexture` computation, not recomputed per draw.
 pub struct CachedTexture {
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub width: u32,
     pub height: u32,
+    pub u_mult: f32,
+    pub v_mult: f32,
 }
 
 /// Real `BindMap`'s own role (`SetTexture.cpp`'s `TMap<QWORD,
@@ -245,6 +255,23 @@ pub struct CachedTexture {
 /// upload at all).
 pub struct TextureCache {
     entries: std::collections::HashMap<u64, CachedTexture>,
+}
+
+/// Groups `TextureCache::upload_rgba8`'s own size/scale parameters --
+/// real `FTextureInfo::USize`/`VSize`/`UScale`/`VScale` (`UnTex.h:
+/// 388-391`), kept together both because they are only ever
+/// meaningful as a group (there is no real sense in which a caller
+/// would have `width`/`height` without also knowing `u_scale`/
+/// `v_scale` from the same real `FTextureInfo`) and to keep
+/// `upload_rgba8` itself under clippy's `too_many_arguments` limit
+/// (these four fields as direct parameters would have pushed it to 9
+/// parameters including `self`, well past the default 7).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextureDimensions {
+    pub width: u32,
+    pub height: u32,
+    pub u_scale: f32,
+    pub v_scale: f32,
 }
 
 impl Default for TextureCache {
@@ -279,28 +306,37 @@ impl TextureCache {
     /// between `GL_RGBA8`/`GL_SRGB8_ALPHA8` -- `Rgba8Unorm` vs
     /// `Rgba8UnormSrgb` here, the direct wgpu equivalents. Inserts
     /// into (or replaces) this cache under `cache_id` and returns a
-    /// reference to the new entry.
+    /// reference to the new entry, with its real `u_mult`/`v_mult`
+    /// computed from `dims.u_scale`/`v_scale` the same way real
+    /// `SetTexture` does (`CachedTexture`'s own doc has the real
+    /// citation).
     ///
     /// # Panics
-    /// If `rgba8_bytes.len() != width as usize * height as usize * 4`
-    /// -- a caller bug (a real `FTextureInfo`'s own `USize`/`VSize`
-    /// and its mip-0 data length are never inconsistent with each
-    /// other), not a runtime condition to handle gracefully. This
-    /// function is not `extern "C"` itself (no FFI call site calls it
-    /// directly yet -- see this module's own header), so a panic here
-    /// does not yet risk crossing the FFI boundary; whatever future
-    /// FFI wrapper calls this must validate its own inputs before
-    /// calling in, the same discipline `hp2-ffi`'s own `guard` already
-    /// establishes elsewhere in this port.
+    /// If `rgba8_bytes.len() != dims.width as usize * dims.height as
+    /// usize * 4` -- a caller bug (a real `FTextureInfo`'s own
+    /// `USize`/`VSize` and its mip-0 data length are never
+    /// inconsistent with each other), not a runtime condition to
+    /// handle gracefully. This function is not `extern "C"` itself
+    /// (no FFI call site calls it directly yet -- see this module's
+    /// own header), so a panic here does not yet risk crossing the
+    /// FFI boundary; whatever future FFI wrapper calls this must
+    /// validate its own inputs before calling in, the same discipline
+    /// `hp2-ffi`'s own `guard` already establishes elsewhere in this
+    /// port.
     pub fn upload_rgba8(
         &mut self,
         created: &crate::CreatedDevice,
         cache_id: u64,
-        width: u32,
-        height: u32,
+        dims: TextureDimensions,
         rgba8_bytes: &[u8],
         srgb: bool,
     ) -> &CachedTexture {
+        let TextureDimensions {
+            width,
+            height,
+            u_scale,
+            v_scale,
+        } = dims;
         assert_eq!(
             rgba8_bytes.len(),
             width as usize * height as usize * 4,
@@ -354,6 +390,11 @@ impl TextureCache {
             },
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Real UXOpenGLRenderDevice::SetTexture's own exact formula
+        // (SetTexture.cpp:492-493) -- CachedTexture's own doc has the
+        // full citation.
+        let u_mult = 1.0 / (u_scale * width as f32);
+        let v_mult = 1.0 / (v_scale * height as f32);
         self.entries.insert(
             cache_id,
             CachedTexture {
@@ -361,6 +402,8 @@ impl TextureCache {
                 view,
                 width,
                 height,
+                u_mult,
+                v_mult,
             },
         );
         self.entries
@@ -657,9 +700,28 @@ mod tests {
         // (fcolor_memory_layout_is_r_g_b_a_matching_rgba8unorm above),
         // directly as Rgba8Unorm bytes.
         let bytes: [u8; 8] = [255, 0, 0, 255, 0, 255, 0, 255];
-        let cached = cache.upload_rgba8(&created, 42, 2, 1, &bytes, false);
+        // u_scale=2.0, v_scale=0.5 (distinct, non-1.0 values) to
+        // prove the real UMult/VMult formula is actually threaded
+        // through, not just defaulted to 1/width.
+        let cached = cache.upload_rgba8(
+            &created,
+            42,
+            TextureDimensions {
+                width: 2,
+                height: 1,
+                u_scale: 2.0,
+                v_scale: 0.5,
+            },
+            &bytes,
+            false,
+        );
         assert_eq!(cached.width, 2);
         assert_eq!(cached.height, 1);
+        // Real SetTexture.cpp:492-493 formula, hand-computed
+        // independently: UMult = 1/(UScale*USize) = 1/(2.0*2) = 0.25,
+        // VMult = 1/(VScale*VSize) = 1/(0.5*1) = 2.0.
+        assert_eq!(cached.u_mult, 0.25);
+        assert_eq!(cached.v_mult, 2.0);
 
         // Real proof the bytes actually reached the GPU, not just
         // that create_texture/write_texture didn't error: copy the
