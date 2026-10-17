@@ -634,6 +634,22 @@ void TestTalkRegistrationEvictionPolicy()
 		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == INDEX_NONE,
 		"talk-only source sets are protected from registration eviction");
 }
+
+void TestSoundPriorityFfiBoundary()
+{
+	// hp2_rs_audio_sound_priority (crates/hp2-audio/src/priority.rs):
+	// the logic already has its own Rust unit tests; this exists to
+	// prove the FFI boundary itself -- argument marshaling, SF_* flag
+	// bit values -- not to re-litigate the logic. No UViewport is
+	// needed: the pure-math half of SoundPriority takes only
+	// plain floats/ints once DistSquared is computed by the caller.
+	Require(
+		hp2_rs_audio_sound_priority( 999999.f, 0.f, 100.f, 10.f, 0 ) == 10.f,
+		"zero radius should skip the distance factor entirely");
+	Require(
+		hp2_rs_audio_sound_priority( 0.f, 0.f, 100.f, 0.f, SF_HasLipSync|SF_Music|SF_No3D ) == 7.f,
+		"all three flag bonuses should stack to 4+2+1");
+}
 } // namespace
 
 int main()
@@ -654,6 +670,7 @@ int main()
 	TestQueuedDestinationIdentity(TempDir);
 	TestXAPartialsAndLoop();
 	TestTalkRegistrationEvictionPolicy();
+	TestSoundPriorityFfiBoundary();
 	TestRepeatedTeardownHasNoWorker(TempDir);
 
 	FFileStream::Destroy();

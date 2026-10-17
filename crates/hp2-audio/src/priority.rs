@@ -1,5 +1,41 @@
 //! Replaces `UALAudioSubsystem::FindLeastPriorityNonTalkSource`
-//! (`ALAudioSubsystem.cpp:2085-2101`).
+//! (`ALAudioSubsystem.cpp:2085-2101`) and `UALAudioSubsystem::
+//! SoundPriority` (`:1946-1961`).
+
+/// Matches `UnAudio.h:26-39`'s `ESoundFlags` bits this function
+/// reads.
+const SF_MUSIC: i32 = 8;
+const SF_NO3D: i32 = 16;
+const SF_HAS_LIP_SYNC: i32 = 128;
+
+/// Replaces `SoundPriority`. `dist_squared` is the real C++'s own
+/// `FDistSquared(Location, ViewTarget->Location)` -- computed in C++
+/// since it needs live `AActor`/`FVector` state this crate has no
+/// FFI boundary for yet (see this crate's module doc). `radius` of
+/// `0.0` matches the real C++'s `if (Radius)` false branch exactly
+/// (an exact float comparison against zero, not an epsilon check).
+pub fn sound_priority(
+    dist_squared: f32,
+    radius: f32,
+    audio_max_radius_multiplier: f32,
+    volume: f32,
+    flags: i32,
+) -> f32 {
+    let radius_factor = if radius != 0.0 {
+        let denom = (audio_max_radius_multiplier * radius).powi(2);
+        (1.0 - dist_squared / denom).clamp(0.01, 1.0)
+    } else {
+        1.0
+    };
+    volume * radius_factor
+        + if flags & SF_HAS_LIP_SYNC != 0 {
+            4.0
+        } else {
+            0.0
+        }
+        + if flags & SF_MUSIC != 0 { 2.0 } else { 0.0 }
+        + if flags & SF_NO3D != 0 { 1.0 } else { 0.0 }
+}
 
 /// Matches `EngineClasses.h:493`'s `SLOT_Talk = 5` (the
 /// `ESoundSlot` enum `Actor.uc` mirrors as `SLOT_Talk`).
@@ -131,5 +167,44 @@ mod tests {
         assert_eq!(find_least_priority_non_talk_source(&sources), 1);
         sources[1].id = SLOT_TALK * 2;
         assert_eq!(find_least_priority_non_talk_source(&sources), INDEX_NONE);
+    }
+
+    // sound_priority: derived directly from reading
+    // ALAudioSubsystem.cpp:1946-1961's source -- no existing C++
+    // oracle test exercises this function (grepped
+    // Tests/AudioTests.cpp, no match).
+
+    #[test]
+    fn zero_radius_skips_distance_entirely() {
+        // Real C++'s `if (Radius)` is an exact float comparison, so
+        // RadiusFactor is always 1.0 here regardless of dist_squared.
+        assert_eq!(sound_priority(999_999.0, 0.0, 100.0, 10.0, 0), 10.0);
+    }
+
+    #[test]
+    fn radius_factor_is_one_at_zero_distance() {
+        assert_eq!(sound_priority(0.0, 10.0, 100.0, 5.0, 0), 5.0);
+    }
+
+    #[test]
+    fn radius_factor_floors_at_0_01_past_the_radius() {
+        // denom = (100*10)^2 = 1_000_000; dist_squared at or beyond
+        // that makes 1 - dist/denom <= 0, clamped to the 0.01 floor.
+        assert_eq!(sound_priority(1_000_000.0, 10.0, 100.0, 5.0, 0), 5.0 * 0.01);
+        assert_eq!(sound_priority(2_000_000.0, 10.0, 100.0, 5.0, 0), 5.0 * 0.01);
+    }
+
+    #[test]
+    fn flag_bonuses_match_the_real_cpp_weights_and_stack() {
+        const SF_MUSIC: i32 = 8;
+        const SF_NO3D: i32 = 16;
+        const SF_HAS_LIP_SYNC: i32 = 128;
+        assert_eq!(sound_priority(0.0, 0.0, 100.0, 0.0, SF_HAS_LIP_SYNC), 4.0);
+        assert_eq!(sound_priority(0.0, 0.0, 100.0, 0.0, SF_MUSIC), 2.0);
+        assert_eq!(sound_priority(0.0, 0.0, 100.0, 0.0, SF_NO3D), 1.0);
+        assert_eq!(
+            sound_priority(0.0, 0.0, 100.0, 0.0, SF_HAS_LIP_SYNC | SF_MUSIC | SF_NO3D),
+            7.0
+        );
     }
 }

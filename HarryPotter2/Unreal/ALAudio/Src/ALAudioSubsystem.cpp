@@ -1946,17 +1946,13 @@ void UALAudioSubsystem::OldStopSound( INT i )
 FLOAT UALAudioSubsystem::SoundPriority( UViewport* Viewport, FVector Location, FLOAT Volume, FLOAT Radius, INT Flags )
 {
 	guard(UALAudioSubsystem::SoundPriority);
-	FLOAT RadiusFactor;
+	FLOAT DistSquared = 0.f;
 	if ( Radius )
 	{
 		AActor *ViewTarget = Viewport->Actor->ViewTarget ? Viewport->Actor->ViewTarget : Viewport->Actor;
-		RadiusFactor = 1 - FDistSquared(Location, ViewTarget->Location) / Square(GAudioMaxRadiusMultiplier*Radius);
+		DistSquared = FDistSquared(Location, ViewTarget->Location);
 	}
-	else
-		RadiusFactor = 1;
-	RadiusFactor = Clamp(RadiusFactor, 0.01f, 1.f);
-
-	return Volume * RadiusFactor + ((Flags & SF_HasLipSync)? 4 : 0) + ((Flags & SF_Music)? 2 : 0) + ((Flags & SF_No3D)? 1 : 0);
+	return hp2_rs_audio_sound_priority( DistSquared, Radius, GAudioMaxRadiusMultiplier, Volume, Flags );
 	unguard;
 }
 

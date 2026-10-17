@@ -2585,3 +2585,26 @@ pub unsafe extern "C" fn hp2_rs_audio_find_least_priority_non_talk_source(
         },
     )
 }
+
+/// Replaces `UALAudioSubsystem::SoundPriority`'s body
+/// (`ALAudioSubsystem.cpp:1946-1961`). `dist_squared` is the caller's
+/// own `FDistSquared(Location, ViewTarget->Location)`; `flags` is the
+/// sound's `WorkingFlags`/`Flags` bits as-is.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_audio_sound_priority(
+    dist_squared: f32,
+    radius: f32,
+    audio_max_radius_multiplier: f32,
+    volume: f32,
+    flags: i32,
+) -> f32 {
+    guard("hp2_rs_audio_sound_priority", 0.0, move || {
+        hp2_audio::priority::sound_priority(
+            dist_squared,
+            radius,
+            audio_max_radius_multiplier,
+            volume,
+            flags,
+        )
+    })
+}

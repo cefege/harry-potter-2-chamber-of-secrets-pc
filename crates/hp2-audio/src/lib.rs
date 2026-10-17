@@ -2,7 +2,7 @@
 //! (2304 lines) -- the OpenAL-Soft-backed implementation of
 //! `UAudioSubsystem`, registered as `ALAudio.ALAudioSubsystem`.
 //!
-//! **Scope of this crate today: one function.** `UALAudioSubsystem`
+//! **Scope of this crate today: two functions.** `UALAudioSubsystem`
 //! is a UE1 `UObject`-derived class (`DECLARE_CLASS(UALAudioSubsystem,
 //! UAudioSubsystem, CLASS_Config, ALAudio)`) whose state and virtual
 //! interface are deeply coupled to the live engine object graph --
@@ -40,5 +40,20 @@
 //! (`Tests/AudioTests.cpp:612-636`, part of the `audio_lifecycle`
 //! ctest), exercises this through the real caller path and passes
 //! against the Rust implementation.
+//!
+//! The second: `SoundPriority`'s pure math half
+//! (`ALAudioSubsystem.cpp:1946-1961`) -- given `Volume`/`Radius`/
+//! `Flags` and the already-computed `FDistSquared(Location,
+//! ViewTarget->Location)`, compute the priority score. C++ still
+//! resolves `Viewport->Actor->ViewTarget`/`->Actor` and calls
+//! `FDistSquared` itself (live `AActor`/`FVector` state), then passes
+//! the single resulting float across. FFI-wired via
+//! `hp2_rs_audio_sound_priority`; `SoundPriority`'s body now computes
+//! only `DistSquared` before forwarding. No existing C++ oracle
+//! (`FindLeastImportantSound`, `SoundPriority`'s only caller, is
+//! itself unported -- deeply `this->Sources`-coupled, see above);
+//! covered by `priority.rs`'s own Rust unit tests plus an FFI-boundary
+//! check added to `Tests/AudioTests.cpp`
+//! (`TestSoundPriorityFfiBoundary`, same `audio_lifecycle` ctest).
 
 pub mod priority;
