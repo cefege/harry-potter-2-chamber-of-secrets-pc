@@ -217,11 +217,16 @@
 //! specifically need one more real change: both call `GetTexel`
 //! (implicit-derivative texture sampling) from inside a loop whose exit
 //! condition depends on a per-fragment height value read from that same
-//! texture, which is non-uniform control flow -- WGSL (like GLSL under
-//! stricter rules, but enforced here by naga/Tint, not assumed) rejects
-//! `textureSample` in that position. The port needs `textureSampleGrad`
-//! with derivatives (`dpdx`/`dpdy` of the base UV) computed once before
-//! entering the loop, or `textureSampleLevel`, either of which changes
+//! texture, which is non-uniform control flow -- naga/Tint are
+//! expected to reject `textureSample` in that position under WGSL's
+//! uniformity analysis, the same general rule family WGSL/Vulkan-style
+//! shader languages apply here, but this is a documented expectation
+//! only, not something actually attempted and observed to fail in
+//! this crate -- no WGSL translation of either parallax loop has been
+//! written yet to test it against. If true, the port needs
+//! `textureSampleGrad` with derivatives (`dpdx`/`dpdy` of the base UV)
+//! computed once before entering the loop, or `textureSampleLevel`,
+//! either of which changes
 //! mipmap filtering behavior slightly versus the GLSL original -- a
 //! real, not cosmetic, porting change for those two techniques
 //! specifically, not the basic parallax technique (no loop) or any
@@ -291,13 +296,23 @@
 //! Draw<Name>Params[ParametersBufferSize]`) and generates
 //! `Get<Field>(uint DrawID)` accessors indexing it by `DrawID`
 //! identically to the SSBO path. `simple.wgsl` now carries `draw_id`
-//! through and indexes a `var<storage, read> array<DrawParameters>` --
-//! a single storage buffer rather than replicating GLSL's
-//! UBO-size-limited/SSBO-unlimited split, since WebGPU storage buffers
-//! are core and unconditionally available on every backend and web
-//! tier. `DrawComplex`/`DrawGouraud`/`DrawTile`'s eventual WGSL ports
-//! need the same shape, not the version this file originally shipped
-//! with. Triangulation is already CPU-side for both `DrawComplex`
+//! through and indexes a fixed-size `var<uniform>
+//! array<DrawParameters, MAX_DRAWS>` -- not a storage buffer: an
+//! earlier version of this paragraph said storage buffers are "core
+//! and unconditionally available on every backend and web tier",
+//! which is what `simple.wgsl` itself originally shipped with too;
+//! both wrong, caught on review and disproven by reading
+//! `wgpu-types`'s own `Limits::downlevel_webgl2_defaults()`
+//! (`max_storage_buffers_per_shader_stage: 0`,
+//! `max_storage_buffer_binding_size: 0`) -- genuinely zero storage
+//! buffers on WebGL2/GLES3.0, matching this crate's own
+//! `BackendChoice::Gl` and the plan's later Phase 8 web target. A
+//! fixed-size uniform array is the real portable equivalent of GLSL's
+//! UBO fallback this shader already transcribes from.
+//! `DrawComplex`/`DrawGouraud`/`DrawTile`'s eventual WGSL ports need
+//! this uniform-array shape too, not a storage buffer and not the
+//! version this file originally shipped with. Triangulation is
+//! already CPU-side for both `DrawComplex`
 //! (`FSavedPoly` n-gon fan triangulated into `(NumPts-2)*3` vertices)
 //! and `DrawGouraud`/`DrawTriangles` (same fan triangulation, plus
 //! real index-buffer support in `DrawTriangles`) -- no GPU-side
@@ -1111,6 +1126,111 @@ mod tests {
             checked > 0,
             "expected at least one .wgsl file under {shader_dir}, found none -- an empty \
              directory must not make this test vacuously pass"
+        );
+    }
+
+    // `every_wgsl_shader_parses_and_validates`'s naga Capabilities::empty()
+    // check validated `simple.wgsl` even while it still used
+    // `var<storage, read>` for its draw-parameters array -- naga
+    // capabilities gate *language features* (e.g. a binding-array
+    // extension), not per-limit numeric caps like "zero storage
+    // buffers", so that check alone cannot catch a limit regression
+    // like the one this test exists to catch (caught on review).
+    // This creates a real device with `required_limits:
+    // wgpu::Limits::downlevel_webgl2_defaults()` -- not the adapter's
+    // own limits the way `create_device_sync` does for its normal
+    // callers -- and builds the exact same pipeline
+    // `simple_wgsl_builds_a_render_pipeline_on_a_real_adapter` does.
+    // wgpu validates a created pipeline against the *device's* limits,
+    // not the adapter's (confirmed by this test actually running,
+    // same Metal backend as every other real-GPU test here -- there is
+    // no WebGL2/Gl backend available to run this on in this
+    // environment, so this proves the shader survives WebGL2's binding
+    // limits on whatever backend is actually present, not that it
+    // runs correctly under a real WebGL2/Gl backend, which remains
+    // unverified), so a storage binding (or any other
+    // downlevel-incompatible requirement) fails pipeline creation here
+    // even on a desktop GPU that would otherwise happily support it.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn simple_wgsl_pipeline_builds_under_webgl2_downlevel_limits() {
+        let instance = build_instance(BackendChoice::Auto);
+        let adapter =
+            request_adapter_raw(&instance, None).expect("expected a real GPU adapter to exist");
+        let downlevel_limits = wgpu::Limits::downlevel_webgl2_defaults();
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("hp2-wgpu device (WebGL2 downlevel limits)"),
+                required_limits: downlevel_limits,
+                ..Default::default()
+            }))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "expected this adapter to support WebGL2's downlevel limits (it supports \
+                     strictly more than a real WebGL2 backend would): {e}"
+                )
+            });
+        let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal_scope = device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("simple.wgsl (WebGL2 downlevel limits)"),
+            source: wgpu::ShaderSource::Wgsl(shader_source("simple").into()),
+        });
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: 12,
+                shader_location: 1,
+            },
+        ];
+        let _pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("simple.wgsl pipeline (WebGL2 downlevel limits)"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 16,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Bgra8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let internal_err = pollster::block_on(internal_scope.pop());
+        let validation_err = pollster::block_on(validation_scope.pop());
+        if let Some(err) = validation_err.or(internal_err) {
+            panic!(
+                "simple.wgsl's pipeline failed to build under WebGL2 downlevel limits -- this \
+                 is exactly the bug class the storage-buffer-vs-uniform-array fix exists to \
+                 prevent: {err}"
+            );
+        }
+        println!(
+            "simple.wgsl's pipeline built successfully under wgpu::Limits::downlevel_webgl2_defaults()"
         );
     }
 
