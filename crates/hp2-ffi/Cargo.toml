@@ -18,6 +18,7 @@ hp2-launcher.workspace = true
 hp2-audio.workspace = true
 hp2-platform.workspace = true
 hp2-wgpu = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
 log.workspace = true
 
 [build-dependencies]
@@ -35,4 +36,4 @@ platform-sdl = ["hp2-platform/sdl"]
 # package's own CMake block adds. Gated the same way as platform-sdl,
 # not unconditional, so bare `cargo build`/`cargo test` need none of
 # that.
-renderer-wgpu = ["dep:hp2-wgpu"]
+renderer-wgpu = ["dep:hp2-wgpu", "dep:wgpu"]

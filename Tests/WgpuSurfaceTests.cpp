@@ -44,16 +44,25 @@ int main()
 {
 	Require( SDL_Init( SDL_INIT_VIDEO ) == 0, "SDL_Init(SDL_INIT_VIDEO) failed" );
 
-	// Null view: must not crash, matching the real Rust function's own
-	// `NonNull::new(...).expect(...)` -- wait, a null view is a logic
-	// error (the real caller, UWgpuRenderDevice::Init, would never
-	// pass one once that integration lands), not a value this
-	// function is meant to handle gracefully. Not tested here for
-	// that reason -- it is documented as a precondition (`# Safety`
-	// on create_surface_from_ns_view), not a runtime-checked case.
+	// Precondition, not a runtime-checked case: ns_view must be non-null
+	// (create_surface_from_ns_view's own # Safety doc), so a null view
+	// is not exercised here.
 
-	SDL_Window* Window = SDL_CreateWindow( "wgpu surface test", 0, 0, 64, 64, SDL_WINDOW_HIDDEN | SDL_WINDOW_METAL );
-	Require( Window != NULL, "SDL_CreateWindow with SDL_WINDOW_METAL failed" );
+	// SDL_WINDOW_OPENGL, not SDL_WINDOW_METAL: the real engine always
+	// creates its window with SDL_WINDOW_OPENGL (SDLViewport.cpp:268,
+	// unconditional regardless of which render device is selected).
+	// SDL_Metal_CreateView converts it to Metal on the fly (confirmed
+	// directly against the pinned SDL2 source, SDL_video.c:4795-4809:
+	// it clears SDL_WINDOW_OPENGL, calls SDL_GL_UnloadLibrary(), and
+	// sets SDL_WINDOW_METAL) -- that conversion is one-way, so once
+	// UWgpuRenderDevice::Init calls it on the real game window (not
+	// yet wired, see hp2-wgpu's own module doc), a later fallback to
+	// XOpenGL on that same window would have no GL library loaded.
+	// Using SDL_WINDOW_OPENGL here, not SDL_WINDOW_METAL directly,
+	// exercises the actual conversion path Init will take instead of a
+	// window that was already Metal from the start.
+	SDL_Window* Window = SDL_CreateWindow( "wgpu surface test", 0, 0, 64, 64, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL );
+	Require( Window != NULL, "SDL_CreateWindow with SDL_WINDOW_OPENGL failed" );
 
 	SDL_MetalView MetalView = SDL_Metal_CreateView( Window );
 	Require( MetalView != NULL, "SDL_Metal_CreateView failed" );
@@ -62,6 +71,13 @@ int main()
 	void* Layer = SDL_Metal_GetLayer( MetalView );
 	Require( Layer != NULL, "SDL_Metal_GetLayer returned NULL -- no CAMetalLayer attached" );
 
+	// A pass here proves the raw-handle construction and the real
+	// device/adapter sharing one Instance with the surface (see
+	// hp2_rs_wgpu_create_surface_from_ns_view_for_testing's own doc) --
+	// not that the surface actually works for presentation. The
+	// stronger check (surface.configure(&device, ...) plus
+	// get_current_texture() succeeding) is still open; see hp2-wgpu's
+	// own module doc.
 	const bool Created = hp2_rs_wgpu_create_surface_from_ns_view_for_testing( NsView );
 	Require( Created, "hp2_rs_wgpu_create_surface_from_ns_view_for_testing failed to create a wgpu::Surface from a real SDL_Metal_CreateView NSView" );
 

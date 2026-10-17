@@ -1510,6 +1510,19 @@ if(HP2_ENABLE_WGPU_DRIVER)
             hp2_editor_runtime
             hp2_sdldrv
         )
+        # HP2_EXECUTABLE_TARGETS (the hp2_verification_binaries
+        # dependency list) is finalized at line ~769-805, long before
+        # this HP2_ENABLE_WGPU_DRIVER block runs -- adding this target
+        # there would need touching that always-on list for an
+        # experimental, default-OFF feature. Explicit add_dependencies
+        # instead: without it, the documented `cmake --build ... --
+        # target hp2_verification_binaries && ctest` sequence never
+        # builds this executable in a fresh build directory, and
+        # wgpu_surface_round_trip fails with "executable not found"
+        # (caught on review: an earlier version of this block only
+        # "passed" because the executable had already been built by
+        # name directly, not through the documented sequence).
+        add_dependencies(hp2_verification_binaries hp2_wgpu_surface_tests)
         # Cannot use the "dummy" SDL video driver (see
         # Tests/WgpuSurfaceTests.cpp's own header comment): a real
         # Metal-capable adapter and windowing backend, same
@@ -1522,12 +1535,20 @@ if(HP2_ENABLE_WGPU_DRIVER)
         )
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_test(NAME renderer_smoke_wgpu
-        COMMAND "${Python3_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/Build/run_wgpu_smoke.py"
-            "--build-dir=${CMAKE_BINARY_DIR}"
-            "--data-root=${HP2_TEST_DATA_ROOT}"
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    # hp2_add_behavior_test (not a bare add_test, unlike
+    # renderer_smoke_vulkan above): bare add_test sets no
+    # HP2_ARTIFACT_DIR, so run_wgpu_smoke.py's own HP2_ARTIFACT_DIR
+    # fallback (a fresh tempfile.mkdtemp()) would kick in instead,
+    # and its log/report would never reach the per-test artifact
+    # directory -- AGENTS.md Non-Negotiable #2 requires exactly that
+    # path (caught on review; renderer_smoke_vulkan's own bare
+    # add_test has the identical gap, not touched here, out of scope
+    # for this change, same as run_wgpu_smoke.py's own already-noted
+    # parallel to run_vulkan_smoke.py).
+    hp2_add_behavior_test(renderer_smoke_wgpu "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Build/run_wgpu_smoke.py"
+        "--build-dir=${CMAKE_BINARY_DIR}"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
     )
     set_tests_properties(renderer_smoke_wgpu PROPERTIES
         LABELS "smoke;renderer;wgpu"

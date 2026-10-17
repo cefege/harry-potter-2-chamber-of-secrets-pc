@@ -2729,7 +2729,9 @@ const FFI_WGPU_CREATE_FAILURE: FfiWgpuCreateResult = FfiWgpuCreateResult {
 #[unsafe(no_mangle)]
 pub extern "C" fn hp2_rs_wgpu_create() -> FfiWgpuCreateResult {
     guard("hp2_rs_wgpu_create", FFI_WGPU_CREATE_FAILURE, move || {
-        let Some(created) = hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto) else {
+        let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
+        let Some(created) = hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+        else {
             return FFI_WGPU_CREATE_FAILURE;
         };
         let backend_name = hp2_wgpu::backend_name(created.backend).to_string();
@@ -2771,13 +2773,20 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
 /// Replaces the window-surface half of `UWgpuRenderDevice::Init`
 /// (`WgpuDrv`'s future C++ body, macOS only -- `hp2-wgpu::macos`'s own
 /// doc explains why). `ns_view` is the pointer `SDL_Metal_CreateView`
-/// returns. This is a standalone smoke check, not yet wired into
-/// `hp2_rs_wgpu_create`'s device: it builds its own throwaway
-/// `wgpu::Instance`, attempts the surface creation, and reports
-/// success/failure, then drops everything -- proving the raw-handle
-/// construction itself works before the larger "one shared Instance,
-/// surface-compatible adapter request" integration (still open, see
-/// `hp2-wgpu`'s own module doc) gets built around it.
+/// returns. Exercises the *real* integrated path, not just isolated
+/// surface creation: calls `create_device_sync` with a surface-
+/// creation closure, so the surface and the adapter/device it
+/// requests share one `Instance` and the adapter request's
+/// `compatible_surface` check is real (an earlier version of this
+/// function built its own throwaway `Instance` disconnected from any
+/// device -- caught on review, see `hp2-wgpu`'s own `CreatedDevice`/
+/// `create_device_sync` doc for the detail). Drops the whole
+/// `CreatedDevice` (device, queue, surface, instance, in that
+/// declaration order -- Rust drops struct fields in declaration
+/// order) before returning, proving nothing about keeping a surface
+/// alive across calls; `hp2_rs_wgpu_create`/`destroy` remain the real
+/// create/destroy pair for `UWgpuRenderDevice`'s own handle once that
+/// integration lands.
 ///
 /// # Safety
 /// `ns_view` must be a valid, non-null pointer to an `NSView` (from
@@ -2791,9 +2800,16 @@ pub unsafe extern "C" fn hp2_rs_wgpu_create_surface_from_ns_view_for_testing(
     guard(
         "hp2_rs_wgpu_create_surface_from_ns_view_for_testing",
         false,
-        move || unsafe {
-            let instance = hp2_wgpu::build_instance(hp2_wgpu::BackendChoice::Auto);
-            hp2_wgpu::macos::create_surface_from_ns_view(&instance, ns_view).is_ok()
+        move || {
+            let create_surface = move |instance: &wgpu::Instance| unsafe {
+                hp2_wgpu::macos::create_surface_from_ns_view(instance, ns_view)
+            };
+            let Some(created) =
+                hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, Some(create_surface))
+            else {
+                return false;
+            };
+            created.surface.is_some()
         },
     )
 }

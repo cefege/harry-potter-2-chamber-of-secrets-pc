@@ -18,19 +18,26 @@
 //! `#[ignore]`d tests (CI runners have no GPU, see their own doc) cover
 //! the headless half at the Rust level directly.
 //!
-//! Still open, not started: actually attaching the surface this
-//! crate's new `macos` module can create to `UWgpuRenderDevice`'s own
-//! `Init`/device-creation flow (today `create_device_sync` stays
-//! headless, `compatible_surface: None` -- the two are not wired
-//! together yet, so `Init` still cannot actually present a frame),
-//! resize handling, all WGSL shader transcription, real draw-call
-//! forwarding for any of `URenderDevice`'s pure virtuals, and a
-//! stronger device-working proof than the current command-buffer-
-//! submit-and-poll round trip -- the plan's frame capture and editor
-//! hit testing will eventually need a real texture-clear-then-
-//! `copy_texture_to_buffer`-then-`map_async` readback path, a
-//! reasonable next test to add but not required to prove either
-//! existing slice's own narrower claim.
+//! `create_device_sync` now takes an optional surface-creation
+//! closure, sharing one `Instance` between surface and adapter
+//! creation as wgpu's `compatible_surface` check requires (an earlier
+//! version built two separate, unrelated `Instance`s for the headless
+//! device and the standalone surface-creation test, which could never
+//! have been wired together correctly -- caught and redesigned before
+//! anything downstream depended on it, see `CreatedDevice`/
+//! `create_device_sync`'s own doc for the detail). `hp2_rs_wgpu_create`
+//! (`hp2-ffi`) still passes `None` -- still open, not started: actually
+//! calling `SDL_Metal_CreateView` on the real game window from
+//! `UWgpuRenderDevice::Init` and passing the result through (today
+//! `Init` stays headless, so it still cannot present a frame), resize
+//! handling, all WGSL shader transcription, real draw-call forwarding
+//! for any of `URenderDevice`'s pure virtuals, and a stronger surface-
+//! working proof than "a `Surface` value was constructed without
+//! erroring" -- the plan's frame capture and editor hit testing will
+//! eventually need `surface.configure(&device, ...)` plus
+//! `get_current_texture()` to actually succeed, a reasonable next
+//! test to add but not required to prove either existing slice's own
+//! narrower claim.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
@@ -89,13 +96,31 @@ pub fn build_instance(choice: BackendChoice) -> wgpu::Instance {
     })
 }
 
-/// Shared adapter request: `PowerPreference::HighPerformance`, no
-/// compatible surface (headless -- a real window surface requires the
-/// C++-owned `SDL_Window*` this crate doesn't have yet).
-fn request_adapter_raw(instance: &wgpu::Instance) -> Option<wgpu::Adapter> {
+/// Function-pointer shorthand for the "no surface" case when calling
+/// `create_device_sync` headlessly -- `None::<HeadlessSurfaceCreator>`
+/// instead of spelling out the full closure bound every call site
+/// needs (clippy's `type_complexity` lint flagged the inline version).
+pub type HeadlessSurfaceCreator =
+    fn(&wgpu::Instance) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError>;
+
+/// Shared adapter request: `PowerPreference::HighPerformance`.
+/// `compatible_surface` must come from the *same* `Instance` passed
+/// here -- wgpu's adapter/surface compatibility is instance-scoped,
+/// so a surface built from a different `Instance` would make this
+/// check meaningless (a real defect an earlier version of this
+/// module had: `create_device_sync` built and dropped its own
+/// throwaway `Instance` internally, and the standalone surface-
+/// creation test function built a second, unrelated one -- neither
+/// could ever have been wired together correctly without this
+/// rework, caught on review before anything downstream depended on
+/// it).
+fn request_adapter_raw(
+    instance: &wgpu::Instance,
+    compatible_surface: Option<&wgpu::Surface<'_>>,
+) -> Option<wgpu::Adapter> {
     pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
+        compatible_surface,
         ..Default::default()
     }))
     .ok()
@@ -106,17 +131,30 @@ fn request_adapter_raw(instance: &wgpu::Instance) -> Option<wgpu::Adapter> {
 /// backend on success, or `None` on total failure (the real C++
 /// forwarding function will turn that into the plan's `appErrorf(
 /// TEXT("WgpuDrv: no compatible GPU adapter (tried %s)"), ...)` once it
-/// exists).
+/// exists). Headless (no surface) -- `create_device_sync` is the one
+/// that supports an optional surface.
 pub fn request_adapter_sync(choice: BackendChoice) -> Option<(String, wgpu::Backend)> {
-    let adapter = request_adapter_raw(&build_instance(choice))?;
+    let adapter = request_adapter_raw(&build_instance(choice), None)?;
     let info = adapter.get_info();
     Some((info.name, info.backend))
 }
 
 /// Result of `create_device_sync`. A plain struct instead of a growing
-/// tuple: positional `(Device, Queue, String, Backend, Limits)` was
-/// getting hard to read correctly at call sites.
+/// tuple: positional fields were getting hard to read correctly at
+/// call sites. Holds the `Instance` (and `Surface`, if one was
+/// requested) alongside the `Device`/`Queue` so the whole group stays
+/// alive and drops together -- dropping the `Instance` or `Surface`
+/// early while the `Device` is still in use would be a use-after-free
+/// at the API boundary wgpu cannot catch for us.
 pub struct CreatedDevice {
+    pub instance: wgpu::Instance,
+    /// `Some` only if `create_device_sync` was given a
+    /// `create_surface` closure that succeeded. Caller-owned window
+    /// resources behind the surface (e.g. the `SDL_MetalView` on
+    /// macOS) must outlive this field -- drop `CreatedDevice` (or at
+    /// least take and drop `surface` specifically) before destroying
+    /// them.
+    pub surface: Option<wgpu::Surface<'static>>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub adapter_name: String,
@@ -130,19 +168,29 @@ pub struct CreatedDevice {
 }
 
 /// Replaces the device/queue-request half of `WgpuDrv`'s future `Init`
-/// (plan's "Device creation" bullet, same scope note as
-/// `request_adapter_sync`'s own doc above: headless, no window surface
-/// or `compatible_surface` yet). `required_limits: adapter.limits()`,
-/// not `Limits::default()`: `request_device` *panics* (not `Err`,
-/// confirmed in `wgpu-30.0.1/src/api/adapter.rs`'s own doc comment) if
-/// the requested limits exceed what the adapter actually supports, and
-/// `Limits::default()` is a fixed WebGPU-spec baseline that a GL/GLES
-/// backend -- the plan's own Raspberry Pi fallback -- can fall short
-/// of. Asking for exactly `adapter.limits()` can never exceed what the
-/// adapter reports, by construction, so this can never hit that panic.
-/// Placeholder, not the final policy: `adapter.limits()` means renderer
-/// code validated only on a high-end adapter (this machine's M5
-/// reports `max_texture_dimension_2d=32768`) can end up silently
+/// (plan's "Device creation" bullet). `create_surface`, if given, is
+/// called with the freshly-built `Instance` *before* the adapter is
+/// requested, and the resulting `Surface` (if `Ok`) is passed as
+/// `compatible_surface` to `request_adapter` -- wgpu's own
+/// compatibility check is instance-scoped, so sharing one `Instance`
+/// between surface and adapter creation (not two separate ones, an
+/// earlier version of this function's own mistake, caught on review)
+/// is what makes that check mean anything. `None` skips surface
+/// creation entirely (headless, today's only real caller via
+/// `hp2_rs_wgpu_create` until window-surface wiring into
+/// `UWgpuRenderDevice::Init` lands).
+///
+/// `required_limits: adapter.limits()`, not `Limits::default()`:
+/// `request_device` *panics* (not `Err`, confirmed in `wgpu-30.0.1/
+/// src/api/adapter.rs`'s own doc comment) if the requested limits
+/// exceed what the adapter actually supports, and `Limits::default()`
+/// is a fixed WebGPU-spec baseline that a GL/GLES backend -- the
+/// plan's own Raspberry Pi fallback -- can fall short of. Asking for
+/// exactly `adapter.limits()` can never exceed what the adapter
+/// reports, by construction, so this can never hit that panic.
+/// Placeholder, not the final policy: `adapter.limits()` means
+/// renderer code validated only on a high-end adapter (this machine's
+/// M5 reports `max_texture_dimension_2d=32768`) can end up silently
 /// depending on capability a lower-end backend doesn't have -- nothing
 /// here catches that until it's actually run on one. Once the
 /// renderer's real per-feature requirements are known, replace this
@@ -153,8 +201,18 @@ pub struct CreatedDevice {
 /// than silently taking whatever the adapter happens to offer. Returns
 /// `None` on total failure (same real-C++-forwarding note as
 /// `request_adapter_sync`).
-pub fn create_device_sync(choice: BackendChoice) -> Option<CreatedDevice> {
-    let adapter = request_adapter_raw(&build_instance(choice))?;
+pub fn create_device_sync(
+    choice: BackendChoice,
+    create_surface: Option<
+        impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError>,
+    >,
+) -> Option<CreatedDevice> {
+    let instance = build_instance(choice);
+    let surface = match create_surface {
+        Some(f) => Some(f(&instance).ok()?),
+        None => None,
+    };
+    let adapter = request_adapter_raw(&instance, surface.as_ref())?;
     let info = adapter.get_info();
     let adapter_limits = adapter.limits();
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -164,6 +222,8 @@ pub fn create_device_sync(choice: BackendChoice) -> Option<CreatedDevice> {
     }))
     .ok()?;
     Some(CreatedDevice {
+        instance,
+        surface,
         device,
         queue,
         adapter_name: info.name,
@@ -251,7 +311,7 @@ mod tests {
     #[test]
     #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
     fn create_device_sync_produces_a_working_device() {
-        let result = create_device_sync(BackendChoice::Auto);
+        let result = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>);
         assert!(result.is_some(), "expected a real device to be created");
         let created = result.unwrap();
         assert!(!created.adapter_name.is_empty());

@@ -399,6 +399,7 @@ dependencies = [
  "hp2-platform",
  "hp2-wgpu",
  "log",
+ "wgpu",
 ]
 
 [[package]]
