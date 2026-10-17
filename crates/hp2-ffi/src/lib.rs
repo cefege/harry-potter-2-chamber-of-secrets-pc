@@ -2968,13 +2968,14 @@ pub unsafe extern "C" fn hp2_rs_wgpu_frame_counts(handle: *mut c_void) -> hp2_wg
 }
 
 /// Replaces the matrix-math half of `UXOpenGLRenderDevice::
-/// SetSceneNode` (not yet called from any `WgpuDrv.cpp` override --
-/// `URenderDevice::SetSceneNode` has an empty default body, so
-/// `UWgpuRenderDevice` not overriding it yet is a real no-op, not
-/// broken). `scene` is read once by value before this function
-/// returns (`SceneFrame` is `Copy`-shaped, all plain FFI-safe
-/// fields), so the caller's own storage for it does not need to
-/// outlive the call. No-op (not a crash) on a null `handle` or `scene`.
+/// SetSceneNode`. Called from `WgpuDrv.cpp`'s own real
+/// `UWgpuRenderDevice::SetSceneNode` override (`WgpuDrv.cpp:346+` --
+/// an earlier version of this doc said "not yet called from any
+/// WgpuDrv.cpp override", true when written, now stale). `scene` is
+/// read once by value before this function returns (`SceneFrame` is
+/// `Copy`-shaped, all plain FFI-safe fields), so the caller's own
+/// storage for it does not need to outlive the call. No-op (not a
+/// crash) on a null `handle` or `scene`.
 ///
 /// # Safety
 /// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
@@ -2998,10 +2999,11 @@ pub unsafe extern "C" fn hp2_rs_wgpu_set_scene_node(
     })
 }
 
-/// Replaces `UXOpenGLRenderDevice::Draw2DLine` (`DrawSimple.cpp:52-90`
-/// -- not yet called from any `WgpuDrv.cpp` override; `URenderDevice::
-/// Draw2DLine` has an empty default body, so `UWgpuRenderDevice` not
-/// overriding it yet is a real no-op, not broken). `p1`/`p2` are the
+/// Replaces `UXOpenGLRenderDevice::Draw2DLine` (`DrawSimple.cpp:52-90`).
+/// Called from `WgpuDrv.cpp`'s own real `UWgpuRenderDevice::
+/// Draw2DLine` override (`WgpuDrv.cpp:434+` -- an earlier version of
+/// this doc said "not yet called from any WgpuDrv.cpp override",
+/// true when written, now stale). `p1`/`p2` are the
 /// real `FVector P1, P2` parameters (screen pixel X/Y, view-space Z)
 /// -- `hp2_wgpu::RenderLoop::queue_line`'s own doc has the real
 /// screen-to-clip transform this applies internally, using the most

@@ -9,10 +9,14 @@
 	headless (no Metal API to create a view from) until a Vulkan/DX12
 	surface path exists. Lock/Unlock call into the real per-frame
 	configure/acquire/clear/present path (hp2_rs_wgpu_lock/unlock,
-	crates/hp2-wgpu's lock_frame/unlock_frame) -- but nothing is drawn
-	into the frame yet, and there is no WGSL shader pipeline; every
-	virtual past Lock/Unlock/Init/Exit/SetRes is still a safe no-op
-	stub.
+	crates/hp2-wgpu's lock_frame/unlock_frame). SetSceneNode and
+	Draw2DLine are real, wired overrides (hp2_rs_wgpu_set_scene_node/
+	hp2_rs_wgpu_draw_2d_line, crates/hp2-wgpu's real simple.wgsl/
+	tile.wgsl pipelines exist and are GPU-verified by that crate's own
+	tests) -- stale as of an earlier version of this paragraph, which
+	said "nothing is drawn into the frame yet, and there is no WGSL
+	shader pipeline". DrawComplexSurface/DrawTriangles/DrawTile/
+	Draw2DPoint remain safe no-op stubs.
 
 	Observed, not yet explained: a real Build/run_wgpu_smoke.py
 	-testticks=60 run on this project's own development machine (a
