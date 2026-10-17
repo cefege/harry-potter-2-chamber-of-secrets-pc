@@ -1,32 +1,55 @@
 //! Replaces `HP2ImportPlan.cpp`'s `Generated`/`AddRequired`/
-//! `ResolveLinkMode`/`ValidatePlan`. `Plan` itself (the orchestration
-//! that calls `CollectSide`/the cutscene collectors and builds the
-//! actual asset list `ValidatePlan` checks) is not ported yet: this
-//! machine has no retail data tree (`overlay-manifest.json` doesn't
-//! exist anywhere in the repo, and nothing under the tree looks like
-//! retail data), so end-to-end `Plan()` parity isn't something this
-//! environment can verify. `ValidatePlan` itself needs no such data --
-//! it's a pure function of an already-built asset list, tested here
-//! with synthetic `Asset` vectors matching each profile's documented
-//! count contracts, not real collected data.
+//! `ResolveLinkMode`/`ValidatePlan`/`Plan`. `RunImport`, `Options`, and
+//! `ProfileName` are not ported here (nor is `HP2ImportArchive.cpp`'s
+//! `Extract`) -- see `crate::output`'s module doc for why those three
+//! wait on `Plan`'s own orchestration (done, below) and `Extract`
+//! (approved design, not implemented) both existing first.
 //!
-//! `ValidatePlan` is C++-anonymous-namespace (`namespace { ... }`),
-//! so unlike `CollectSide` and the cutscene collectors it cannot be
-//! called from an external probe at all -- there is no real-compiled-
-//! C++ cross-check for this function the way there was for those.
-//! Ported by careful line-by-line transcription instead, verified
-//! against the C++ source's exact conditions and `Fail` message text,
-//! with a synthetic-fixture test for the early checks every profile
-//! shares (collision, invalid path, retail Ogg count) and for a
-//! representative sample of each profile's own branches -- not
-//! exhaustively all ~15 distinct `Fail` call sites, which would be
-//! diminishing-returns repetition of the same transcription-checking
-//! pattern already exercised by the ones that are covered.
+//! **End-to-end parity for [`plan`] (the orchestration function) is not
+//! verified by this port.** This machine has no retail data tree
+//! (`overlay-manifest.json` doesn't exist anywhere in the repo, and
+//! nothing under the tree looks like retail data), so running `plan`
+//! against a real retail+prototype tree and diffing its output against
+//! the real C++ `Plan`'s is not something this environment can do.
+//! `plan` is a careful line-by-line translation of the real source, not
+//! a reimplementation from a description -- a different, weaker claim
+//! than "verified." Every function it calls (`collect_side`, the four
+//! cutscene collectors, `generated`, `resolve_link_mode`,
+//! `hp2_ini::build_default_ini`/`build_def_user_ini`) was independently
+//! verified on its own; `plan` itself has one real test proving the
+//! whole pipeline runs end-to-end on a minimal synthetic fixture and
+//! correctly reaches `validate_plan` with its expected message, plus
+//! the `--prototype-root` precondition check -- not a happy-path test,
+//! since satisfying every one of `validate_plan`'s exact count
+//! contracts (100 prototype maps, 52 prototype textures, 185 prototype
+//! cutscenes, and so on) on a from-scratch synthetic tree is
+//! disproportionate setup for this environment's situation, which
+//! lacks real data to test against anyway.
+//!
+//! `validate_plan` itself needs no such data -- it's a pure function of
+//! an already-built asset list, tested here with synthetic `Asset`
+//! vectors matching each profile's documented count contracts, not real
+//! collected data.
+//!
+//! `ValidatePlan` (and `Plan` itself) are C++-anonymous-namespace
+//! (`namespace { ... }`) or at least not declared in any header other
+//! code includes, so unlike `CollectSide` and the cutscene collectors
+//! they cannot be called from an external probe TU at all -- there is
+//! no real-compiled-C++ cross-check for either function the way there
+//! was for those. Ported by careful line-by-line transcription instead,
+//! verified against the C++ source's exact conditions and `Fail`
+//! message text. `ValidatePlan`'s synthetic-fixture tests cover the
+//! early checks every profile shares (collision, invalid path, retail
+//! Ogg count) and a representative sample of each profile's own
+//! branches -- not exhaustively all ~15 distinct `Fail` call sites,
+//! which would be diminishing-returns repetition of the same
+//! transcription-checking pattern already exercised by the ones that
+//! are covered.
 
 use std::collections::BTreeMap;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use hp2_ini::Profile;
 
@@ -477,6 +500,237 @@ pub fn validate_plan(plan: &[Asset], profile: Profile) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Replaces `Plan`: the top-level orchestration tying `CollectSide`,
+/// the four cutscene collectors, `Generated`, `ResolveLinkMode`, and
+/// `ValidatePlan` together into the final asset list. Takes the
+/// specific `Options` fields it actually reads (`profile`/`linkMode`/
+/// `prototypeRoot`) directly rather than a full `Options` struct --
+/// that type is `RunImport`'s own input shape and isn't ported yet
+/// (see `crate::output`'s module doc for the same reasoning applied
+/// there).
+///
+/// **End-to-end parity with the real C++ `Plan` is not verified by
+/// this port.** Every function `plan` calls (`collect_side`, the four
+/// cutscene collectors, `generated`, `resolve_link_mode`,
+/// `validate_plan`) was individually verified against real compiled
+/// C++ (or, for `validate_plan`, against the anonymous-namespace C++
+/// source directly -- see that function's own doc), but running *this*
+/// function against a real retail+prototype data tree and diffing the
+/// resulting asset list against the real C++ `Plan`'s output is not
+/// something this environment can do: no retail data tree exists
+/// anywhere in this repo (confirmed by search, same finding
+/// `validate_plan`'s doc already recorded). The translation below is a
+/// careful line-by-line port of the real source, not a
+/// reimplementation from a description of what it should do -- but
+/// that is a different, weaker claim than "verified."
+///
+/// One more thing *is* true regardless of data availability: every
+/// branch ends by calling the ALREADY-verified `validate_plan` on the
+/// assembled list before returning, so a `plan` call that returns `Ok`
+/// at all has passed every one of `validate_plan`'s count/classification
+/// contracts -- a real, if partial, correctness check on real data, not
+/// just on synthetic fixtures.
+pub fn plan(
+    profile: Profile,
+    link_mode: LinkMode,
+    prototype_root: Option<&Path>,
+    retail_root: &Path,
+    output_parent: &Path,
+) -> Result<Vec<Asset>, String> {
+    use crate::collect::{
+        collect_prototype_cutscene_references, collect_prototype_runtime_cutscenes,
+        collect_retail_cutscenes, collect_retail_required_nested_textures, collect_side,
+    };
+    use crate::files::{child, child_file};
+    use crate::util::lexically_relative;
+    use std::collections::BTreeSet;
+
+    let mut retail = collect_side(retail_root, "retail")?;
+    let mut assembled: Vec<Asset> = Vec::new();
+
+    if profile == Profile::RetailOnly {
+        collect_retail_cutscenes(retail_root, &mut retail)?;
+        collect_retail_required_nested_textures(retail_root, &mut retail)?;
+        let mut canonical_paths: BTreeMap<String, &str> = BTreeMap::new();
+        for path in CRITICAL_RETAIL_PATHS {
+            canonical_paths.entry(lower(path)).or_insert(path);
+        }
+        for path in RETAIL_FINAL_LOCALIZATION {
+            canonical_paths.entry(lower(path)).or_insert(path);
+        }
+        for path in RETAIL_ONLY_REQUIRED_PATHS {
+            canonical_paths.entry(lower(path)).or_insert(path);
+        }
+        for (_, mut asset) in retail {
+            if let Some(canonical) = canonical_paths.get(&lower(&asset.path)) {
+                asset.path = (*canonical).to_string();
+            }
+            asset.classification = "retail_asset".to_string();
+            assembled.push(asset);
+        }
+    } else {
+        let proto_root = prototype_root
+            .ok_or_else(|| fail("--prototype-root is required for safe and full profiles"))?;
+        let prototype = collect_side(proto_root, "prototype")?;
+        let refs = collect_prototype_cutscene_references(proto_root)?;
+        let runtime = collect_prototype_runtime_cutscenes(proto_root)?;
+        if profile == Profile::Full {
+            collect_retail_cutscenes(retail_root, &mut retail)?;
+            let mut comparison = prototype.clone();
+            for (k, v) in &refs {
+                comparison.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            let mut keys: BTreeSet<String> = BTreeSet::new();
+            keys.extend(prototype.keys().cloned());
+            keys.extend(retail.keys().cloned());
+            for key in keys {
+                if let Some(r) = retail.get(&key) {
+                    let c = comparison.get(&key);
+                    let mut asset = r.clone();
+                    asset.path = c.map(|c| c.path.clone()).unwrap_or_else(|| r.path.clone());
+                    asset.classification = match c {
+                        None => "retail_only".to_string(),
+                        Some(c) if c.hash == r.hash => "identical".to_string(),
+                        Some(_) => "changed".to_string(),
+                    };
+                    assembled.push(asset);
+                } else if let Some(p) = prototype.get(&key) {
+                    let mut asset = p.clone();
+                    asset.classification = "prototype_only".to_string();
+                    assembled.push(asset);
+                }
+            }
+        } else {
+            for asset in prototype.values() {
+                if !lower(&asset.path).starts_with("music/") {
+                    let mut asset = asset.clone();
+                    asset.classification = "prototype_baseline".to_string();
+                    assembled.push(asset);
+                }
+            }
+            for mut asset in runtime.into_values() {
+                asset.classification = "prototype_baseline".to_string();
+                assembled.push(asset);
+            }
+            for (key, asset_ref) in &retail {
+                if !lower(&asset_ref.path).starts_with("music/") {
+                    continue;
+                }
+                let comparison = prototype.get(key);
+                let mut asset = asset_ref.clone();
+                asset.classification = match comparison {
+                    None => "retail_only".to_string(),
+                    Some(c) if c.hash == asset.hash => "identical".to_string(),
+                    Some(_) => "changed".to_string(),
+                };
+                if let Some(c) = comparison {
+                    asset.path = c.path.clone();
+                }
+                assembled.push(asset);
+            }
+            let menu = retail
+                .get("textures/hp2_menu.utx")
+                .ok_or_else(|| fail("safe profile requires retail Textures/HP2_Menu.utx"))?;
+            let mut menu = menu.clone();
+            menu.path = "Textures/HP2_Menu.utx".to_string();
+            menu.classification = "retail_only".to_string();
+            assembled.push(menu);
+        }
+    }
+
+    let retail_system =
+        child(retail_root, "System", true)?.expect("required=true never returns Ok(None)");
+    let retail_default = child_file(&retail_system, "Default.ini")?;
+    let retail_defuser = child_file(&retail_system, "DefUser.ini")?;
+
+    let config_class: String;
+    let default_sources: Vec<String>;
+    let defuser_sources: Vec<String>;
+    let default_template: PathBuf;
+    let defuser_template: PathBuf;
+    if profile == Profile::RetailOnly {
+        config_class = "generated_retail_native".to_string();
+        let default_rel = lexically_relative(retail_root, &retail_default)
+            .expect("retail_default is always under retail_root");
+        let defuser_rel = lexically_relative(retail_root, &retail_defuser)
+            .expect("retail_defuser is always under retail_root");
+        default_sources = vec![format!("retail:{}", utf8(&default_rel)?)];
+        defuser_sources = vec![format!("retail:{}", utf8(&defuser_rel)?)];
+        default_template = retail_default.clone();
+        defuser_template = retail_defuser.clone();
+    } else {
+        let proto_root = prototype_root.expect("checked above when profile != RetailOnly");
+        let prototype_system =
+            child(proto_root, "System", true)?.expect("required=true never returns Ok(None)");
+        default_template = child_file(&prototype_system, "Default.ini")?;
+        defuser_template = child_file(&prototype_system, "DefUser.ini")?;
+        config_class = if profile == Profile::Full {
+            "generated_full_merge"
+        } else {
+            "generated_safe_native"
+        }
+        .to_string();
+        default_sources = if profile == Profile::Full {
+            vec![
+                "prototype:System/Default.ini".to_string(),
+                "retail:System/default.ini".to_string(),
+            ]
+        } else {
+            vec!["prototype:System/Default.ini".to_string()]
+        };
+        defuser_sources = if profile == Profile::Full {
+            vec![
+                "prototype:System/DefUser.ini".to_string(),
+                "retail:System/DefUser.ini".to_string(),
+            ]
+        } else {
+            vec!["prototype:System/DefUser.ini".to_string()]
+        };
+    }
+
+    let default_content =
+        hp2_ini::build_default_ini(&utf8(&default_template)?, &utf8(&retail_default)?, profile)?;
+    let defuser_content =
+        hp2_ini::build_def_user_ini(&utf8(&defuser_template)?, &utf8(&retail_defuser)?, profile)?;
+    assembled.push(generated(
+        "System/Default.ini".to_string(),
+        default_content,
+        default_sources,
+        config_class.clone(),
+    ));
+    assembled.push(generated(
+        "System/DefUser.ini".to_string(),
+        defuser_content,
+        defuser_sources,
+        config_class,
+    ));
+
+    for asset in &mut assembled {
+        asset.link = resolve_link_mode(asset, output_parent, link_mode)?;
+        if asset.classification.is_empty() {
+            asset.classification = if asset.source == "retail" {
+                "retail_asset".to_string()
+            } else {
+                "prototype_baseline".to_string()
+            };
+        }
+        if is_prohibited(&asset.path) {
+            return Err(fail(format!("invalid planned output path: {}", asset.path)));
+        }
+    }
+    assembled.sort_by(|a, b| {
+        let x = lower(&a.path);
+        let y = lower(&b.path);
+        if x == y {
+            a.path.cmp(&b.path)
+        } else {
+            x.cmp(&y)
+        }
+    });
+    validate_plan(&assembled, profile)?;
+    Ok(assembled)
 }
 
 #[cfg(test)]
@@ -1079,5 +1333,96 @@ mod tests {
             err,
             "safe texture contract mismatch: prototype=52, retail=[Textures/HP2_Menu.utx]"
         );
+    }
+
+    fn minimal_valid_default_ini_template() -> &'static [u8] {
+        b"[Core.System]\n"
+    }
+
+    /// Builds a minimal collectible side root: `System`/`Maps`/
+    /// `Textures`/`Sounds`/`Music` subdirectories, each otherwise empty
+    /// except `System/Default.ini`/`System/DefUser.ini` (required by
+    /// `plan`'s own config-generation step regardless of which branch
+    /// the profile takes) and `System/Cutscenes` (required by the
+    /// prototype-side cutscene collectors `plan` always calls for Safe/
+    /// Full profiles).
+    fn minimal_side_root() -> crate::util::test_support::TempDir {
+        let dir = tempdir();
+        for sub in [
+            "System",
+            "Maps",
+            "Textures",
+            "Sounds",
+            "Music",
+            "System/Cutscenes",
+        ] {
+            std::fs::create_dir(dir.path().join(sub)).unwrap();
+        }
+        write(
+            dir.path(),
+            "System/Default.ini",
+            minimal_valid_default_ini_template(),
+        );
+        write(dir.path(), "System/DefUser.ini", b"");
+        dir
+    }
+
+    #[test]
+    fn plan_requires_prototype_root_for_safe_and_full_profiles() {
+        let retail = minimal_side_root();
+        let err = plan(
+            Profile::Safe,
+            LinkMode::Auto,
+            None,
+            retail.path(),
+            retail.path(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "--prototype-root is required for safe and full profiles"
+        );
+        let err = plan(
+            Profile::Full,
+            LinkMode::Auto,
+            None,
+            retail.path(),
+            retail.path(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "--prototype-root is required for safe and full profiles"
+        );
+    }
+
+    /// Not a happy-path test: building a fixture satisfying every one of
+    /// `validate_plan`'s exact count contracts (100 prototype maps, 52
+    /// prototype textures, 185 prototype cutscenes, and so on) is
+    /// disproportionate setup for this environment, which already has
+    /// no real retail/prototype data tree to test against end-to-end
+    /// (see this module's doc and `plan`'s own doc). This instead proves
+    /// the *whole pipeline actually runs*: `collect_side` on both roots,
+    /// the Safe-profile asset-assembly branch, both `hp2_ini` config
+    /// builders succeeding on real template files, `resolve_link_mode`
+    /// resolving every asset, the final sort, and `validate_plan`
+    /// correctly receiving and rejecting the (deliberately too-small)
+    /// result -- a real, specific `validate_plan` contract message
+    /// coming back out, not a crash or an earlier-stage error, confirms
+    /// every one of those stages ran and fed the next one correctly.
+    #[test]
+    fn plan_runs_the_full_pipeline_and_reaches_validate_plan() {
+        let retail = minimal_side_root();
+        write(retail.path(), "Textures/HP2_Menu.utx", b"menu");
+        let prototype = minimal_side_root();
+        let err = plan(
+            Profile::Safe,
+            LinkMode::Auto,
+            Some(prototype.path()),
+            retail.path(),
+            retail.path(),
+        )
+        .unwrap_err();
+        assert_eq!(err, "retail Ogg contract mismatch: expected 141, found 0");
     }
 }
