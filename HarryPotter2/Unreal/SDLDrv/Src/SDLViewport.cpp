@@ -30,9 +30,6 @@ static const EInputKey GJoyAxisKeys[USDLClient::MaxJoystickAxes] =
 	IK_JoyX, IK_JoyY, IK_JoyZ, IK_JoyR, IK_JoyU, IK_JoyV, IK_UnknownEA, IK_UnknownEB
 };
 
-// Hats fold onto buttons starting at IK_Joy13 once twelve real buttons exist.
-static const INT GHatButtonBase = 12;
-
 // Window pixels per viewport pixel; identity until both sizes are known.
 static void UpdateMouseScale( USDLViewport& Viewport )
 {
@@ -372,45 +369,29 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			}
 			case SDL_JOYAXISMOTION:
 			{
-				if( Event.jaxis.axis >= USDLClient::MaxJoystickAxes )
-					break;
-				FLOAT Value = (FLOAT)Event.jaxis.value / 32768.f;
-				if( Value > -C->JoystickDeadZone && Value < C->JoystickDeadZone )
-					Value = 0.f;
-				const FLOAT Scale =
-					Event.jaxis.axis == 0 ? C->ScaleJBX :
-					Event.jaxis.axis == 1 ? C->ScaleJBY : 1.f;
-				if( Scale != 0.f )
-					Value *= Scale;
-				CauseInputEvent( GJoyAxisKeys[Event.jaxis.axis], IST_Axis, Value );
+				INT Key = 0; FLOAT Value = 0.f;
+				if( hp2_rs_input_map_joystick_axis( Event.jaxis.axis, Event.jaxis.value, C->JoystickDeadZone, C->ScaleJBX, C->ScaleJBY, &Key, &Value ) )
+					CauseInputEvent( (EInputKey)Key, IST_Axis, Value );
 				break;
 			}
 			case SDL_JOYBUTTONDOWN:
 			case SDL_JOYBUTTONUP:
 			{
-				if( Event.jbutton.button >= 16 )
-					break;
-				CauseInputEvent( (EInputKey)(IK_Joy1 + Event.jbutton.button), Event.type == SDL_JOYBUTTONDOWN ? IST_Press : IST_Release, 0.f );
+				INT Key = 0, Action = 0;
+				if( hp2_rs_input_map_joystick_button( Event.jbutton.button, Event.type == SDL_JOYBUTTONDOWN, &Key, &Action ) )
+					CauseInputEvent( (EInputKey)Key, (EInputAction)Action, 0.f );
 				break;
 			}
 			case SDL_JOYHATMOTION:
 			{
 				if( !C->JoyHatFoldsToButtons )
 					break;
-				EInputKey Folded = IK_None;
-				const Uint8 Hat = Event.jhat.value;
-				if( Hat & SDL_HAT_UP )         Folded = (EInputKey)(IK_Joy1 + GHatButtonBase + 0);
-				else if( Hat & SDL_HAT_DOWN )  Folded = (EInputKey)(IK_Joy1 + GHatButtonBase + 1);
-				else if( Hat & SDL_HAT_LEFT )  Folded = (EInputKey)(IK_Joy1 + GHatButtonBase + 2);
-				else if( Hat & SDL_HAT_RIGHT ) Folded = (EInputKey)(IK_Joy1 + GHatButtonBase + 3);
-				if( Folded != LastJoyHat )
-				{
-					if( LastJoyHat != IK_None )
-						CauseInputEvent( LastJoyHat, IST_Release, 0.f );
-					if( Folded != IK_None )
-						CauseInputEvent( Folded, IST_Press, 0.f );
-					LastJoyHat = Folded;
-				}
+				FfiKeyAction Events[2];
+				INT NewLastJoyHat = IK_None;
+				const INT Count = hp2_rs_input_fold_joystick_hat( Event.jhat.value, LastJoyHat, Events, &NewLastJoyHat );
+				for( INT Index = 0; Index < Count; ++Index )
+					CauseInputEvent( (EInputKey)Events[Index].key, (EInputAction)Events[Index].action, 0.f );
+				LastJoyHat = (EInputKey)NewLastJoyHat;
 				break;
 			}
 			case SDL_WINDOWEVENT:

@@ -2,7 +2,7 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: six FFI-wired cutovers, not the
+//! **Scope of this crate today: seven FFI-wired cutovers, not the
 //! `USDLClient`/`USDLViewport` classes themselves.** `USDLClient :
 //! UClient, FNotifyHook` and `USDLViewport : UViewport` are UE1
 //! `UObject`-derived classes (`DECLARE_CLASS`,
@@ -32,6 +32,24 @@
 //!   `:84-85/345/352/370/378`) and `Tests/InputContractTests.cpp`'s
 //!   `TestInputEventMapping` (`input_event_mapping` ctest) are both
 //!   unchanged -- they call the same names, which now resolve to Rust.
+//! - `joystick_input`: the `SDL_JOYAXISMOTION`/`SDL_JOYBUTTONDOWN`/
+//!   `SDL_JOYBUTTONUP`/`SDL_JOYHATMOTION` cases inline in
+//!   `UpdateInput` (`SDLViewport.cpp:373-415`). Unlike every other
+//!   bullet in this list, there was no existing named C++ function
+//!   to forward from -- this logic lived directly in the switch
+//!   statement, not behind a header -- so this is new structure
+//!   extracted from inline code, not a header-forward of an existing
+//!   abstraction. FFI-wired: the three cases now call
+//!   `hp2_rs_input_map_joystick_axis`/`map_joystick_button`/
+//!   `fold_joystick_hat`, each immediately followed by
+//!   `CauseInputEvent` as before. `GJoyAxisKeys` stays in C++ (still
+//!   used by `ReleaseJoystickInput`, not converted);
+//!   `GHatButtonBase` became dead once this landed and was deleted.
+//!   No existing oracle (this logic never had one); covered by
+//!   `joystick_input.rs`'s own Rust unit tests plus FFI-boundary
+//!   checks added to `Tests/PlatformJoystickTests.cpp`
+//!   (`joystick_round_trip` ctest, shared with the `joystick` module
+//!   above).
 //! - `clipboard`: `USDLClient::GetClipboardText`/`SetClipboardText`.
 //!   FFI-wired; the real C++ caller already calls through it. Ctest:
 //!   `clipboard_round_trip` (`Tests/PlatformClipboardTests.cpp`).
@@ -97,12 +115,12 @@
 //! self-contained piece of it ported yet; `SetModeCursor`, whose only
 //! real logic -- clamping `SelectedCursor` against the `SystemCursors`
 //! array -- is a C++-owned array index, leaving nothing worth porting
-//! on its own), and the rest of the `UpdateInput` event pump
-//! (joystick axis/button/hat branches, pure given explicit
-//! `JoystickDeadZone`/`ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons`
-//! inputs; ungrabbed `SDL_MOUSEMOTION` dispatches straight to
-//! `Engine->MousePosition` with no `HP2Make*Event` call, so it is not
-//! part of `input_event`'s scope).
+//! on its own), `ReleaseJoystickInput` (still inline C++, now the
+//! only remaining consumer of `GJoyAxisKeys`, called in turn by
+//! `ReleaseAllInput`),
+//! and ungrabbed `SDL_MOUSEMOTION` (dispatches straight to
+//! `Engine->MousePosition` with no `HP2Make*Event` call, so it was
+//! never part of `input_event`'s scope).
 //!
 //! `USDLViewport::TextToSpeech`/`UpdateSpeech` (`fork`/
 //! `execl("/usr/bin/say")`, `:752-795`) are **not** on this list:
@@ -116,6 +134,7 @@
 pub mod clipboard;
 pub mod input_event;
 pub mod joystick;
+pub mod joystick_input;
 pub mod mouse_capture;
 pub mod mouse_state;
 pub mod window_chrome;

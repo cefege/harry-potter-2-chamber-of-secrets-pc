@@ -142,6 +142,33 @@ int main()
 	// `if (Joystick)` guard).
 	hp2_rs_platform_close_joystick( NULL );
 
+	// hp2_rs_input_map_joystick_axis/map_joystick_button/
+	// fold_joystick_hat (crates/hp2-platform/src/joystick_input.rs):
+	// the underlying logic already has its own Rust unit tests; these
+	// checks exist to prove the FFI boundary itself -- argument
+	// marshaling, FfiKeyAction's layout -- not to re-litigate the
+	// logic.
+	{
+		INT Key = -1; FLOAT Value = -1.f;
+		Require( hp2_rs_input_map_joystick_axis( 0, 16384, 0.f, 1.f, 1.f, &Key, &Value ), "axis 0 should map" );
+		Require( Key == IK_JoyX, "axis 0 should map to IK_JoyX" );
+		Require( !hp2_rs_input_map_joystick_axis( 8, 0, 0.f, 1.f, 1.f, &Key, &Value ), "axis 8 is out of range" );
+	}
+	{
+		INT Key = -1, Action = -1;
+		Require( hp2_rs_input_map_joystick_button( 0, true, &Key, &Action ), "button 0 should map" );
+		Require( Key == IK_Joy1 && Action == IST_Press, "button 0 pressed should map to IK_Joy1/IST_Press" );
+		Require( !hp2_rs_input_map_joystick_button( 16, true, &Key, &Action ), "button 16 is out of range" );
+	}
+	{
+		FfiKeyAction Events[2];
+		INT NewLastJoyHat = -1;
+		const INT Count = hp2_rs_input_fold_joystick_hat( SDL_HAT_UP, IK_None, Events, &NewLastJoyHat );
+		Require( Count == 1, "first hat press should produce one event" );
+		Require( NewLastJoyHat == IK_Joy1 + 12, "SDL_HAT_UP should fold to IK_Joy1+12" );
+		Require( Events[0].key == IK_Joy1 + 12 && Events[0].action == IST_Press, "expected a press event" );
+	}
+
 	std::puts( "PlatformJoystickTests: PASS" );
 	return 0;
 }

@@ -145,7 +145,16 @@ pub mod ik {
     pub const BACKSLASH: i32 = 220;
     pub const RIGHT_BRACKET: i32 = 221;
     pub const SINGLE_QUOTE: i32 = 222;
+    pub const JOY1: i32 = 200;
+    pub const JOY_X: i32 = 224;
+    pub const JOY_Y: i32 = 225;
+    pub const JOY_Z: i32 = 226;
+    pub const JOY_R: i32 = 227;
     pub const MOUSE_W: i32 = 231;
+    pub const JOY_U: i32 = 232;
+    pub const JOY_V: i32 = 233;
+    pub const UNKNOWN_EA: i32 = 234;
+    pub const UNKNOWN_EB: i32 = 235;
     pub const MOUSE_WHEEL_UP: i32 = 236;
     pub const MOUSE_WHEEL_DOWN: i32 = 237;
 }

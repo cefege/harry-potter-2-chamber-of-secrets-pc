@@ -2438,3 +2438,102 @@ pub unsafe extern "C" fn hp2_rs_platform_close_joystick(joystick: *mut c_void) {
         hp2_platform::joystick::close_joystick(joystick as *mut hp2_platform::joystick::SdlJoystick)
     })
 }
+
+/// Mirrors `(key, action)` pairs `hp2_rs_input_fold_joystick_hat`
+/// returns. Declared directly in this crate, same reason as the
+/// other FFI mirror structs above.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiKeyAction {
+    pub key: i32,
+    pub action: i32,
+}
+
+/// Replaces the `SDL_JOYAXISMOTION` case
+/// (`SDLViewport.cpp:373-386`). Writes the mapped key/scaled value
+/// into `out_key`/`out_value` and returns `true` on success; returns
+/// `false` (out-params untouched) when `axis` is out of range,
+/// matching the real C++'s own `if (Event.jaxis.axis >=
+/// MaxJoystickAxes) break;` guard.
+///
+/// # Safety
+/// `out_key`/`out_value` must be valid, aligned, writable pointers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_input_map_joystick_axis(
+    axis: i32,
+    raw_value: i32,
+    dead_zone: f32,
+    scale_x: f32,
+    scale_y: f32,
+    out_key: *mut i32,
+    out_value: *mut f32,
+) -> bool {
+    guard("hp2_rs_input_map_joystick_axis", false, move || unsafe {
+        let Some((key, value)) = hp2_platform::joystick_input::map_joystick_axis(
+            axis, raw_value, dead_zone, scale_x, scale_y,
+        ) else {
+            return false;
+        };
+        *out_key = key;
+        *out_value = value;
+        true
+    })
+}
+
+/// Replaces the `SDL_JOYBUTTONDOWN`/`SDL_JOYBUTTONUP` case
+/// (`SDLViewport.cpp:388-395`). Writes the mapped key/action into
+/// `out_key`/`out_action` and returns `true` on success; returns
+/// `false` (out-params untouched) when `button >= 16`, matching the
+/// real C++'s own guard.
+///
+/// # Safety
+/// `out_key`/`out_action` must be valid, aligned, writable pointers.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_input_map_joystick_button(
+    button: i32,
+    pressed: bool,
+    out_key: *mut i32,
+    out_action: *mut i32,
+) -> bool {
+    guard("hp2_rs_input_map_joystick_button", false, move || unsafe {
+        let Some((key, action)) =
+            hp2_platform::joystick_input::map_joystick_button(button, pressed)
+        else {
+            return false;
+        };
+        *out_key = key;
+        *out_action = action;
+        true
+    })
+}
+
+/// Replaces the `SDL_JOYHATMOTION` case (`SDLViewport.cpp:396-415`).
+/// `last_folded` is the real C++'s own `LastJoyHat` field, read
+/// before the call. `out_events` must point to space for at least 2
+/// `FfiKeyAction`s. Returns the number of events written (0, 1, or
+/// 2); `out_new_last_folded` always receives the value to store back
+/// into `LastJoyHat`, regardless of the event count. The real C++'s
+/// own `if (!JoyHatFoldsToButtons) break;` guard happens at the call
+/// site, not here.
+///
+/// # Safety
+/// `out_events` must be valid, aligned, writable for at least 2
+/// `FfiKeyAction` slots. `out_new_last_folded` must be a valid,
+/// aligned, writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_input_fold_joystick_hat(
+    hat_bits: u8,
+    last_folded: i32,
+    out_events: *mut FfiKeyAction,
+    out_new_last_folded: *mut i32,
+) -> i32 {
+    guard("hp2_rs_input_fold_joystick_hat", 0, move || unsafe {
+        let (new_last_folded, events, count) =
+            hp2_platform::joystick_input::fold_joystick_hat(hat_bits, last_folded);
+        *out_new_last_folded = new_last_folded;
+        for (i, &(key, action)) in events.iter().take(count).enumerate() {
+            *out_events.add(i) = FfiKeyAction { key, action };
+        }
+        count as i32
+    })
+}
