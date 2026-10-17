@@ -2853,7 +2853,15 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
 /// ScreenClear.Z, ScreenClear.W)`. `width`/`height` are the real
 /// engine's current `Viewport->SizeX`/`SizeY` -- XOpenGL's own `Lock`
 /// reads the same fields the same way (`Max(1, Viewport->SizeX)`),
-/// confirmed before using this pattern, not guessed. Returns
+/// confirmed before using this pattern, not guessed. `vsync` is the
+/// real `UseVSync` config property's own raw `BYTE` value (0=Off,
+/// 1=On, 2=Adaptive, matching `WgpuDrv.cpp`'s own `VSyncs` UEnum
+/// member order exactly) -- converted here to `wgpu::PresentMode`
+/// (`Immediate`/`Fifo`/`FifoRelaxed`), not assumed already converted
+/// by the caller, matching `BackendChoice::from_ffi_discriminant`'s
+/// own established raw-byte-at-the-FFI-boundary pattern. Any other
+/// raw value falls back to `Fifo` (VSync On) -- the safest default,
+/// not a crash or an unvalidated out-of-range enum. Returns
 /// `hp2_wgpu::FrameOutcome` as a raw `u32` (`0` is `Presented`, the
 /// only success code here too -- see that enum's own doc). A caught
 /// panic returns `Panicked`, distinct from a null `handle`'s
@@ -2877,6 +2885,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_lock(
     g: f32,
     b: f32,
     a: f32,
+    vsync: u8,
 ) -> u32 {
     guard(
         "hp2_rs_wgpu_lock",
@@ -2892,12 +2901,18 @@ pub unsafe extern "C" fn hp2_rs_wgpu_lock(
                 b: b as f64,
                 a: a as f64,
             };
+            let present_mode = match vsync {
+                0 => wgpu::PresentMode::Immediate,
+                2 => wgpu::PresentMode::FifoRelaxed,
+                _ => wgpu::PresentMode::Fifo,
+            };
             hp2_wgpu::lock_frame(
                 &handle.created,
                 &mut handle.render_loop,
                 width.max(1),
                 height.max(1),
                 clear_color,
+                present_mode,
             ) as u32
         },
     )

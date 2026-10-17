@@ -177,7 +177,7 @@ int main()
 		do
 		{
 			SDL_PumpEvents();
-			LockOutcome = hp2_rs_wgpu_lock( Result.handle, 64, 64, 0.25f, 0.5f, 0.75f, 1.0f );
+			LockOutcome = hp2_rs_wgpu_lock( Result.handle, 64, 64, 0.25f, 0.5f, 0.75f, 1.0f, 1 );
 			if( LockOutcome == 0 || LockOutcome != 4 )
 				break;
 			SDL_Delay( 100 );

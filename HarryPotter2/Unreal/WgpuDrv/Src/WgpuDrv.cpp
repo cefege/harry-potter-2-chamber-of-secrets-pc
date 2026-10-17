@@ -59,6 +59,19 @@ void UWgpuRenderDevice::StaticConstructor()
 	new(GetClass(), TEXT("OneXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(OneXBlending), TEXT("Options"), CPF_Config);
 	new(GetClass(), TEXT("ActorXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(ActorXBlending), TEXT("Options"), CPF_Config);
 
+	// Settings carry-over (this class's own header has the real,
+	// per-property wiring status). UEnum member order matches
+	// XOpenGL.cpp's own VSyncs exactly: 0=Off, 1=On, 2=Adaptive.
+	UEnum* VSyncs = new(GetClass(), TEXT("VSyncs"))UEnum(NULL);
+	new(VSyncs->Names)FName(TEXT("Off"));
+	new(VSyncs->Names)FName(TEXT("On"));
+	new(VSyncs->Names)FName(TEXT("Adaptive"));
+	new(GetClass(), TEXT("UseVSync"), RF_Public)UByteProperty(CPP_PROPERTY(UseVSync), TEXT("Options"), CPF_Config, VSyncs);
+	new(GetClass(), TEXT("RenderScale"), RF_Public)UFloatProperty(CPP_PROPERTY(RenderScale), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseAA"), RF_Public)UBoolProperty(CPP_PROPERTY(UseAA), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("NumAASamples"), RF_Public)UIntProperty(CPP_PROPERTY(NumAASamples), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("MaxAnisotropy"), RF_Public)UFloatProperty(CPP_PROPERTY(MaxAnisotropy), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("UseSRGBTextures"), RF_Public)UBoolProperty(CPP_PROPERTY(UseSRGBTextures), TEXT("Options"), CPF_Config);
 	// Real bug fix (caught on review): an earlier version of this
 	// default-seeding assignment lived in Init(), which this class's
 	// own commit history at the time wrongly claimed matched
@@ -81,6 +94,20 @@ void UWgpuRenderDevice::StaticConstructor()
 	// here, not in Init, for the same real reason as the two
 	// properties above.
 	Gamma = 1.0f;
+	// Settings carry-over: real XOpenGL.cpp defaults
+	// (StaticConstructor lines 216-273), seeded here for the same
+	// real reason as every default above -- Init() reruns on every
+	// fullscreen toggle and would stomp a real ini value otherwise.
+#if MACOSX
+	UseVSync = 0; // VS_Off -- XOpenGL.cpp's own `#if MACOSX || UNREAL_TOURNAMENT_OLDUNREAL` branch
+#else
+	UseVSync = 2; // VS_Adaptive -- XOpenGL.cpp's own #else branch
+#endif
+	RenderScale = 1.f;
+	UseAA = 1;
+	NumAASamples = 4;
+	MaxAnisotropy = 16.f;
+	UseSRGBTextures = 0;
 	unguard;
 }
 
@@ -310,7 +337,8 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 #endif
 	const DWORD Outcome = hp2_rs_wgpu_lock( RustDevice,
 		(DWORD)Max( 1, PixelWidth ), (DWORD)Max( 1, PixelHeight ),
-		ScreenClear.X, ScreenClear.Y, ScreenClear.Z, ScreenClear.W );
+		ScreenClear.X, ScreenClear.Y, ScreenClear.Z, ScreenClear.W,
+		UseVSync );
 	// Failure-only, not every call: an earlier version of this logged
 	// every tick's running tally unconditionally, as a workaround for
 	// UWgpuRenderDevice::Exit being unreachable in a -testticks run

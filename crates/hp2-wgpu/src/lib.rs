@@ -904,6 +904,12 @@ pub struct FrameCounts {
 /// owns both together.
 pub struct RenderLoop {
     configured_size: Option<(u32, u32)>,
+    /// Tracks the real `PresentMode` `lock_frame` last configured the
+    /// surface with -- alongside `configured_size`, so a `UseVSync`
+    /// ini-key change (without a matching resolution change) still
+    /// triggers a real `surface.configure` on the next `lock_frame`
+    /// call instead of being silently ignored until the next resize.
+    configured_present_mode: Option<wgpu::PresentMode>,
     in_progress: Option<InProgressFrame>,
     counts: FrameCounts,
     /// Lazily created on the first `set_scene_node` call (needs
@@ -960,6 +966,7 @@ impl RenderLoop {
     pub fn new() -> Self {
         Self {
             configured_size: None,
+            configured_present_mode: None,
             in_progress: None,
             counts: FrameCounts::default(),
             frame_uniforms_buffer: None,
@@ -1400,18 +1407,29 @@ pub fn lock_frame(
     width: u32,
     height: u32,
     clear_color: wgpu::Color,
+    present_mode: wgpu::PresentMode,
 ) -> FrameOutcome {
     let Some(surface) = created.surface.as_ref() else {
         loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
     };
-    if loop_state.configured_size != Some((width, height)) {
-        let Some(config) = surface.get_default_config(&created.adapter, width, height) else {
+    // Real UseVSync ini key support: resolve_present_mode's own doc
+    // has the full reasoning.
+    let present_mode = resolve_present_mode(
+        present_mode,
+        &surface.get_capabilities(&created.adapter).present_modes,
+    );
+    if loop_state.configured_size != Some((width, height))
+        || loop_state.configured_present_mode != Some(present_mode)
+    {
+        let Some(mut config) = surface.get_default_config(&created.adapter, width, height) else {
             loop_state.counts.other_failure += 1;
             return FrameOutcome::NoDefaultConfig;
         };
+        config.present_mode = present_mode;
         surface.configure(&created.device, &config);
         loop_state.configured_size = Some((width, height));
+        loop_state.configured_present_mode = Some(present_mode);
     }
     let (texture, is_suboptimal) = match surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(texture) => (texture, false),
@@ -1487,6 +1505,33 @@ pub fn lock_frame(
     // over-counted relative to what Build/run_wgpu_smoke.py's
     // presented>0 check is meant to mean).
     FrameOutcome::Presented
+}
+
+/// Real `UseVSync` ini key support (`lock_frame`'s own real caller).
+/// `wgpu::PresentMode::Fifo` is the only mode wgpu itself guarantees
+/// is supported on every surface/adapter (its own doc: "Supported
+/// on: All platforms") -- `Immediate`/`FifoRelaxed`/`Mailbox` are
+/// not, so blindly requesting a caller's chosen mode would be a real
+/// `wgpu::Surface::configure` validation error on a surface whose own
+/// real capabilities do not list it. Falls back to `Fifo` (VSync On)
+/// when `requested` is not in `supported` -- an unsupported present
+/// mode is a real, reachable hardware/driver condition, not a caller
+/// bug, so this never panics. A separate, pure function (not inlined
+/// into `lock_frame` itself) specifically so this real decision is
+/// unit-testable without a live `wgpu::Surface` -- `lock_frame`
+/// itself needs a real OS window, unavailable to a Rust `#[test]` on
+/// macOS (this session's own established constraint), but this
+/// function's own `supported` parameter can be any real or
+/// deliberately-constructed slice.
+pub fn resolve_present_mode(
+    requested: wgpu::PresentMode,
+    supported: &[wgpu::PresentMode],
+) -> wgpu::PresentMode {
+    if supported.contains(&requested) {
+        requested
+    } else {
+        wgpu::PresentMode::Fifo
+    }
 }
 
 /// Real `lock_frame`/`unlock_frame` encoder-and-draw-queue machinery,
@@ -2413,6 +2458,52 @@ mod tests {
         assert_eq!(backend_name(wgpu::Backend::Dx12), "Dx12");
         assert_eq!(backend_name(wgpu::Backend::Gl), "Gl");
         assert_eq!(backend_name(wgpu::Backend::BrowserWebGpu), "BrowserWebGpu");
+    }
+
+    #[test]
+    fn resolve_present_mode_uses_the_requested_mode_when_supported() {
+        let supported = [
+            wgpu::PresentMode::Fifo,
+            wgpu::PresentMode::Immediate,
+            wgpu::PresentMode::FifoRelaxed,
+        ];
+        assert_eq!(
+            resolve_present_mode(wgpu::PresentMode::Immediate, &supported),
+            wgpu::PresentMode::Immediate
+        );
+        assert_eq!(
+            resolve_present_mode(wgpu::PresentMode::FifoRelaxed, &supported),
+            wgpu::PresentMode::FifoRelaxed
+        );
+        assert_eq!(
+            resolve_present_mode(wgpu::PresentMode::Fifo, &supported),
+            wgpu::PresentMode::Fifo
+        );
+    }
+
+    #[test]
+    fn resolve_present_mode_falls_back_to_fifo_when_unsupported() {
+        // A real, not hypothetical, case: Fifo is the only mode wgpu
+        // guarantees everywhere, so a surface whose own real
+        // capabilities list only Fifo is a real condition, not a
+        // contrived empty slice.
+        let fifo_only = [wgpu::PresentMode::Fifo];
+        assert_eq!(
+            resolve_present_mode(wgpu::PresentMode::Immediate, &fifo_only),
+            wgpu::PresentMode::Fifo,
+            "expected an unsupported Immediate request to fall back to Fifo"
+        );
+        assert_eq!(
+            resolve_present_mode(wgpu::PresentMode::FifoRelaxed, &fifo_only),
+            wgpu::PresentMode::Fifo,
+            "expected an unsupported FifoRelaxed request to fall back to Fifo"
+        );
+        // Even an empty supported list (degenerate, but not a panic
+        // case) must fall back, not index out of bounds or crash.
+        assert_eq!(
+            resolve_present_mode(wgpu::PresentMode::Fifo, &[]),
+            wgpu::PresentMode::Fifo
+        );
     }
 
     // Pins the Rust half of the real C++/Rust FFI contract

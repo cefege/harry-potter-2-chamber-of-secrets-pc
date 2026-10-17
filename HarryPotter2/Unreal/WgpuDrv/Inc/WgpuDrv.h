@@ -137,11 +137,48 @@ class UWgpuRenderDevice : public URenderDevice
 	// SetGamma/GetViewportGamma are (GammaMultiplier/GammaMultiplierUED
 	// config, a real gamma-ramp subsystem this port has not read yet
 	// at all) -- out of scope for SetSceneNode's own FrameUniforms
-	// wiring, tracked separately under this plan's "Settings
-	// carry-over" item (UseVSync/RenderScale/.../UseSRGBTextures).
-	// Fixed at 1.0f (no correction) until that lands; stated honestly
-	// here rather than silently wrong or left undocumented.
+	// wiring. Fixed at 1.0f (no correction) until that lands; stated
+	// honestly here rather than silently wrong or left undocumented.
 	FLOAT Gamma;
+
+	// `[WgpuDrv.WgpuRenderDevice] UseVSync=Off|On|Adaptive` -- real
+	// config property, UEnum-backed (StaticConstructor registers
+	// VSyncs, matching XOpenGL.cpp's own enum member order: 0=Off,
+	// 1=On, 2=Adaptive). Wired: lock_frame's own real surface
+	// configuration (hp2_rs_wgpu_lock -> hp2_wgpu::lock_frame) reads
+	// this to choose wgpu::PresentMode -- the one of these six
+	// settings with a real, already-existing Rust-side hook to attach
+	// to. XOpenGL.cpp's own real platform-dependent default (`VS_Off`
+	// on MACOSX, `VS_Adaptive` elsewhere) is replicated in this
+	// class's own StaticConstructor, not silently simplified to one
+	// constant for every platform.
+	BYTE UseVSync;
+
+	// `[WgpuDrv.WgpuRenderDevice] RenderScale`/`UseAA`/`NumAASamples`/
+	// `MaxAnisotropy`/`UseSRGBTextures` -- real config properties,
+	// matching XOpenGL.cpp's own StaticConstructor registration and
+	// real defaults exactly (RenderScale=1.f, UseAA=true,
+	// NumAASamples=4, MaxAnisotropy=16.f, UseSRGBTextures=false).
+	// Known, explicitly scoped gap, not silently pretended away: none
+	// of these five are wired to any real Rust-side behavior yet --
+	// unlike UseVSync, none of their real hooks exist in this wgpu
+	// port yet (RenderScale needs a real render-target-scaling+
+	// composite-blit path; UseAA needs a real MSAA-capable pipeline/
+	// framebuffer, not yet built at all; MaxAnisotropy needs a real
+	// per-sampler anisotropic-filtering setup, TilePipeline's own
+	// sampler is currently a hardcoded default; UseSRGBTextures has a
+	// real, already-existing Rust-side parameter -- hp2_wgpu::
+	// texture::TextureCache::upload_rgba8's own `srgb` bool -- but no
+	// real SetTexture call site threads a real value into it yet).
+	// Registered now so a real XOpenGL-style ini file parses without
+	// "unknown property" warnings and the values are available the
+	// moment each real hook is built, rather than registering them
+	// piecemeal alongside each hook later.
+	FLOAT RenderScale;
+	UBOOL UseAA;
+	INT NumAASamples;
+	FLOAT MaxAnisotropy;
+	UBOOL UseSRGBTextures;
 
 	void StaticConstructor();
 

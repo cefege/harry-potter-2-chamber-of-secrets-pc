@@ -163,6 +163,43 @@ endfunction()
 # port crate's extern "C" API. Its build.rs writes the cbindgen header
 # hp2_rs.h into HP2_RS_INCLUDE_DIR. Linking it through hp2_core reaches
 # hp2_game, hp2_ucc, and every executable that links the Core object library.
+#
+# OPEN FINDING, not yet fixed (caught on review, not self-caught, via a
+# real incident, not a hypothetical one -- see Tests/WgpuSurfaceTests.cpp's
+# own git history for the specific call site this actually broke): a
+# single `cmake --build ... --target hp2_verification_binaries` run that
+# both changes an hp2_rs_wgpu_* function's real signature (anywhere in
+# the Rust workspace) *and* rebuilds that same invocation can leave some
+# already-built C++ consumers of hp2_rs.h silently stale -- relinked
+# against the new libhp2_ffi.a unchanged, not recompiled against the
+# regenerated header, producing a real extern "C" ABI mismatch (wrong
+# argument count/types at the call site) with no compile or link error,
+# only undefined behavior at runtime. Root cause, as far as directly
+# observed (not fully proven against corrosion's own internals): nothing
+# declares hp2_rs.h as an explicit Ninja BYPRODUCT/OUTPUT of hp2-ffi's
+# cargo custom command, so Ninja's own dependency graph for a given
+# consumer is only as fresh as whatever `.d`-file record exists from an
+# *earlier* build invocation -- a consumer's staleness relative to a
+# header regenerated *during the current invocation* is not detected
+# until the *next* invocation (confirmed directly: a second, unrelated
+# `hp2_verification_binaries` build recompiled ~37 hp2_rs.h consumers
+# nothing in that session had touched, one full invocation after the
+# header had actually changed). A `target_link_libraries(... PRIVATE
+# hp2_ffi)` edge (the fix `hp2_wgpudrv` already uses below, for a
+# different, narrower first-build-ordering problem) does **not** fix
+# this -- tried and reverted in this same session after a second review
+# caught that it was a no-op (hp2_ffi was already linked transitively
+# through hp2_core/hp2_sdldrv's own PUBLIC links) with a misleading
+# comment claiming it was the fix. Until a real fix lands (likely:
+# declaring hp2_rs.h as a BYPRODUCTS of corrosion's own custom command,
+# or an explicit add_custom_command/DEPENDS edge), the only confirmed-
+# safe workaround after any hp2_rs_wgpu_* signature change is to run
+# `cmake --build ... --target hp2_verification_binaries` *twice* before
+# trusting any binary it produces (or ctest results from running one) --
+# the first run regenerates hp2_rs.h and may miss stale consumers; the
+# second run's fresh Ninja graph load correctly detects and rebuilds
+# them.
+#
 # Corrosion copies CMAKE_OSX_DEPLOYMENT_TARGET into MACOSX_DEPLOYMENT_TARGET for
 # every cargo run, host proc-macros included. On macOS 27 with Xcode ld-27037,
 # the host dylib for cbindgen's serde_derive then fails dyld's LINKEDIT check
