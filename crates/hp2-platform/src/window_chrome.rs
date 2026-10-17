@@ -30,10 +30,24 @@ mod ffi {
 #[cfg(feature = "sdl")]
 pub use ffi::SdlWindow;
 
-#[cfg(feature = "sdl")]
-const SDL_FALSE: i32 = 0;
-#[cfg(feature = "sdl")]
-const SDL_TRUE: i32 = 1;
+/// `SDL_SetWindowBordered`'s `bordered` parameter: the inverse of
+/// `borderless` (`SDL_SetWindowBordered(window, SDL_TRUE)` means
+/// "show a border", so a borderless window passes `SDL_FALSE`).
+/// `SDL_TRUE`/`SDL_FALSE` are `1`/`0` per `<SDL_stdinc.h>`'s
+/// `SDL_bool` -- pure logic, no FFI dependency, independently
+/// unit-testable without the `sdl` feature (unlike the SDL call
+/// itself, which cannot be verified by reading
+/// `SDL_GetWindowFlags`/`SDL_WINDOW_BORDERLESS` back under the
+/// dummy video driver -- confirmed empirically: that flag does not
+/// change in response to `SDL_SetWindowBordered` under that driver
+/// at all, driver limitation, not a port bug).
+pub fn sdl_bordered_flag(borderless: bool) -> i32 {
+    if borderless {
+        0 // SDL_FALSE
+    } else {
+        1 // SDL_TRUE
+    }
+}
 
 /// Replaces `USDLViewport::UpdateWindowFrame` (`SDLViewport.cpp:233-239`).
 /// `sdl_window` may be null (matches the real C++'s `if (SdlWindow)`
@@ -50,7 +64,7 @@ pub unsafe fn update_window_frame(sdl_window: *mut SdlWindow, borderless: bool) 
     // SAFETY: non-null checked above; validity is this function's own
     // contract (see above).
     unsafe {
-        ffi::SDL_SetWindowBordered(sdl_window, if borderless { SDL_FALSE } else { SDL_TRUE });
+        ffi::SDL_SetWindowBordered(sdl_window, sdl_bordered_flag(borderless));
     }
 }
 
@@ -80,5 +94,29 @@ pub unsafe fn set_title_bar(sdl_window: *mut SdlWindow, title: &str) {
     // `SDL_SetWindowTitle` copies it internally.
     unsafe {
         ffi::SDL_SetWindowTitle(sdl_window, c_title.as_ptr());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the `borderless` -> `SDL_TRUE`/`SDL_FALSE` inversion
+    /// directly: this is the only part of `update_window_frame` a
+    /// dummy-driver ctest cannot verify by reading SDL state back
+    /// (see `sdl_bordered_flag`'s own doc comment for why), so it
+    /// gets its own unconditional, no-`sdl`-feature-needed check.
+    #[test]
+    fn sdl_bordered_flag_inverts_borderless() {
+        assert_eq!(
+            sdl_bordered_flag(true),
+            0,
+            "borderless=true must request SDL_FALSE (no border)"
+        );
+        assert_eq!(
+            sdl_bordered_flag(false),
+            1,
+            "borderless=false must request SDL_TRUE (bordered)"
+        );
     }
 }

@@ -12,11 +12,17 @@
 	PlatformMouseStateTests.cpp, which never need one. set_title_bar
 	gets a genuine round trip (set, then read back via
 	SDL_GetWindowTitle, compare); update_window_frame only gets a
-	does-not-crash check, because the dummy driver does not update
-	SDL_GetWindowFlags' SDL_WINDOW_BORDERLESS bit in response to
-	SDL_SetWindowBordered (confirmed empirically before writing this
-	file, not assumed) -- there is nothing stronger to assert under
-	this driver for that specific call.
+	does-not-crash check here, because the dummy driver does not
+	update SDL_GetWindowFlags' SDL_WINDOW_BORDERLESS bit in response
+	to SDL_SetWindowBordered (confirmed empirically before writing
+	this file, not assumed) -- there is nothing stronger to assert
+	through SDL state under this driver for that specific call. The
+	`borderless` -> SDL_TRUE/SDL_FALSE inversion itself (the only real
+	logic in update_window_frame) is independently pinned by a plain
+	Rust unit test instead:
+	crates/hp2-platform/src/window_chrome.rs's
+	sdl_bordered_flag_inverts_borderless, which needs no SDL driver at
+	all.
 =============================================================================*/
 
 #include "SDLDrv.h"

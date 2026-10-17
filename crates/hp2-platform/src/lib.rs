@@ -2,7 +2,7 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: five FFI-wired cutovers, not the
+//! **Scope of this crate today: six FFI-wired cutovers, not the
 //! `USDLClient`/`USDLViewport` classes themselves.** `USDLClient :
 //! UClient, FNotifyHook` and `USDLViewport : UViewport` are UE1
 //! `UObject`-derived classes (`DECLARE_CLASS`,
@@ -62,7 +62,24 @@
 //!   "dummy" video driver doesn't update
 //!   `SDL_GetWindowFlags`/`SDL_WINDOW_BORDERLESS` in response to
 //!   `SDL_SetWindowBordered` (confirmed empirically, not assumed),
-//!   so there is nothing stronger to assert under that driver.
+//!   so there is nothing stronger to assert under that driver --
+//!   the `borderless` inversion itself is pinned by a plain Rust
+//!   unit test instead (`sdl_bordered_flag_inverts_borderless`,
+//!   no SDL driver needed).
+//! - `joystick`: `USDLClient::OpenJoystick`/`CloseJoystick`
+//!   (`SDLClient.cpp:234-274`). FFI-wired: both bodies now call
+//!   `hp2_rs_platform_*`; the real C++'s own `Joystick`/`JoyButtons`/
+//!   `JoyHats`/`JoyAxes`/`JoyHatFoldsToButtons` fields are set from
+//!   the FFI call's results (Rust does not own them). Unlike every
+//!   other cutover here, the device-present path is genuinely
+//!   exercisable headless: `SDL_JoystickAttachVirtual` (SDL2
+//!   2.0.14+) creates a software joystick with no real hardware,
+//!   confirmed empirically to work under the dummy video driver.
+//!   `Tests/PlatformJoystickTests.cpp` (`joystick_round_trip` ctest)
+//!   covers the real branches: button clamp to 16, axis clamp to
+//!   `MaxJoystickAxes` (8), the >12-buttons-and-a-hat fold threshold
+//!   (including the exact boundary, 12 vs 14 buttons), `IgnoreHat`
+//!   suppression, and out-of-range device index failing cleanly.
 //!
 //! **`USDLViewport` and Phase 3 (the wgpu renderer) are not cleanly
 //! separable in the plan's stated order.** `OpenWindow` calls
@@ -85,14 +102,12 @@
 //! `ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons` inputs; ungrabbed
 //! `SDL_MOUSEMOTION` dispatches straight to `Engine->MousePosition`
 //! with no `HP2Make*Event` call, so it is not part of `input_event`'s
-//! scope), joystick open/close (`USDLClient::OpenJoystick`/
-//! `CloseJoystick` -- deferred: this dev environment has no real
-//! joystick hardware, so `SDL_JoystickOpen` always fails here and the
-//! device-present path is untestable without real hardware), and
-//! macOS `TextToSpeech` (`fork`/`execl("/usr/bin/say")`, `:770-813`).
+//! scope), and macOS `TextToSpeech` (`fork`/`execl("/usr/bin/say")`,
+//! `:770-813`).
 
 pub mod clipboard;
 pub mod input_event;
+pub mod joystick;
 pub mod mouse_capture;
 pub mod mouse_state;
 pub mod window_chrome;

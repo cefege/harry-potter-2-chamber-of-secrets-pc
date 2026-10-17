@@ -2181,6 +2181,10 @@ pub struct FfiCaptureDecision {
     pub cursor: i32,
 }
 
+const _: () = assert!(std::mem::size_of::<FfiCaptureDecision>() == 8);
+const _: () = assert!(std::mem::offset_of!(FfiCaptureDecision, action) == 0);
+const _: () = assert!(std::mem::offset_of!(FfiCaptureDecision, cursor) == 4);
+
 impl From<hp2_platform::mouse_capture::Decision> for FfiCaptureDecision {
     fn from(d: hp2_platform::mouse_capture::Decision) -> Self {
         FfiCaptureDecision {
@@ -2359,5 +2363,78 @@ pub unsafe extern "C" fn hp2_rs_platform_set_title_bar(
             sdl_window as *mut hp2_platform::window_chrome::SdlWindow,
             title,
         )
+    })
+}
+
+/// Replaces `ButtonsFromSdlState` (`SDLViewport.cpp:46-53`), the
+/// local static helper the ungrabbed `SDL_MOUSEMOTION` handler
+/// (`:361`) uses. Pure bit translation, no native dependency -- not
+/// gated behind `platform-sdl` (unlike the rest of
+/// `hp2_rs_platform_*`), matching `hp2_platform::mouse_state::
+/// buttons_from_sdl_state`'s own unconditional availability.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_platform_buttons_from_sdl_state(state: u32) -> u32 {
+    guard("hp2_rs_platform_buttons_from_sdl_state", 0, || {
+        hp2_platform::mouse_state::buttons_from_sdl_state(state)
+    })
+}
+
+/// Replaces `USDLClient::OpenJoystick` (`SDLClient.cpp:234-258`),
+/// minus its own `CloseJoystick()` call at the start -- the real C++
+/// caller still makes that call itself (now also FFI-forwarded, see
+/// `hp2_rs_platform_close_joystick` below) before calling this.
+/// Returns the opaque `SDL_Joystick*` handle on success (the caller
+/// stores it in its own `Joystick` field, to hand back to
+/// `hp2_rs_platform_close_joystick` later), or null on any failure --
+/// `out_buttons`/`out_hats`/`out_axes`/`out_hat_folds_to_buttons` are
+/// left unwritten in that case, matching the real C++'s own `return 0`
+/// leaving `JoyButtons` etc. untouched.
+///
+/// # Safety
+/// `out_buttons`/`out_hats`/`out_axes`/`out_hat_folds_to_buttons` must
+/// be valid, aligned, writable pointers for the duration of this call.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_open_joystick(
+    joystick_number: i32,
+    ignore_hat: bool,
+    out_buttons: *mut i32,
+    out_hats: *mut i32,
+    out_axes: *mut i32,
+    out_hat_folds_to_buttons: *mut bool,
+) -> *mut c_void {
+    guard(
+        "hp2_rs_platform_open_joystick",
+        std::ptr::null_mut(),
+        move || unsafe {
+            let Some((handle, buttons, hats, axes, hat_folds_to_buttons)) =
+                hp2_platform::joystick::open_joystick(joystick_number, ignore_hat)
+            else {
+                return std::ptr::null_mut();
+            };
+            *out_buttons = buttons;
+            *out_hats = hats;
+            *out_axes = axes;
+            *out_hat_folds_to_buttons = hat_folds_to_buttons;
+            handle as *mut c_void
+        },
+    )
+}
+
+/// Replaces the SDL half of `USDLClient::CloseJoystick`
+/// (`SDLClient.cpp:261-274`); the caller zeroes its own
+/// `JoyButtons`/`JoyHats`/`JoyAxes`/`JoyHatFoldsToButtons`/`Joystick`
+/// fields, which Rust does not own. `joystick` may be null, matching
+/// the real C++'s own `if (Joystick)` guard.
+///
+/// # Safety
+/// `joystick`, if non-null, must be a valid, still-open
+/// `SDL_Joystick*` obtained from `hp2_rs_platform_open_joystick` and
+/// not already closed.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_close_joystick(joystick: *mut c_void) {
+    guard("hp2_rs_platform_close_joystick", (), move || unsafe {
+        hp2_platform::joystick::close_joystick(joystick as *mut hp2_platform::joystick::SdlJoystick)
     })
 }

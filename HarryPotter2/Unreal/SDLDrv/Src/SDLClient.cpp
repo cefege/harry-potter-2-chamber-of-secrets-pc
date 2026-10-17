@@ -235,25 +235,16 @@ UBOOL USDLClient::OpenJoystick()
 {
 	guard(USDLClient::OpenJoystick);
 	CloseJoystick();
-	if( SDL_InitSubSystem( SDL_INIT_JOYSTICK ) < 0 )
-		return 0;
-	const INT DeviceCount = SDL_NumJoysticks();
-	if( JoystickNumber < 0 || JoystickNumber >= DeviceCount )
-		return 0;
-	Joystick = SDL_JoystickOpen( JoystickNumber );
+	INT NewButtons = 0, NewHats = 0, NewAxes = 0;
+	bool bNewHatFoldsToButtons = false;
+	Joystick = static_cast<SDL_Joystick*>( hp2_rs_platform_open_joystick(
+		JoystickNumber, IgnoreHat != 0, &NewButtons, &NewHats, &NewAxes, &bNewHatFoldsToButtons ) );
 	if( !Joystick )
 		return 0;
-	SDL_JoystickEventState( SDL_ENABLE );
-
-	// Buttons clamp to the engine's IK_Joy1..IK_Joy16 range.
-	JoyButtons = Min( SDL_JoystickNumButtons( Joystick ), 16 );
-	JoyHats    = Max( SDL_JoystickNumHats( Joystick ), 0 );
-	JoyAxes    = Clamp( SDL_JoystickNumAxes( Joystick ), 0, (INT)MaxJoystickAxes );
-
-	// Hats fold onto buttons starting at IK_Joy13, but only when there are
-	// more than twelve real buttons to displace them and hats exist at all.
-	const INT PhysicalButtons = Max( SDL_JoystickNumButtons( Joystick ), 0 );
-	JoyHatFoldsToButtons = (PhysicalButtons > 12 && JoyHats > 0 && !IgnoreHat) ? 1 : 0;
+	JoyButtons = NewButtons;
+	JoyHats = NewHats;
+	JoyAxes = NewAxes;
+	JoyHatFoldsToButtons = bNewHatFoldsToButtons;
 	return 1;
 	unguard;
 }
@@ -261,11 +252,8 @@ UBOOL USDLClient::OpenJoystick()
 void USDLClient::CloseJoystick()
 {
 	guard(USDLClient::CloseJoystick);
-	if( Joystick )
-	{
-		SDL_JoystickClose( Joystick );
-		Joystick = NULL;
-	}
+	hp2_rs_platform_close_joystick( Joystick );
+	Joystick = NULL;
 	JoyButtons = 0;
 	JoyHats = 0;
 	JoyAxes = 0;

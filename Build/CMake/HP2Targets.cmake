@@ -671,6 +671,25 @@ target_link_libraries(hp2_platform_window_chrome_tests PRIVATE
 if(WIN32)
     target_link_libraries(hp2_platform_window_chrome_tests PRIVATE SDL2::SDL2main)
 endif()
+
+# SDL main-thread checks for hp2_rs_platform_open_joystick/
+# close_joystick (crates/hp2-platform/src/joystick.rs); see the
+# file's own header comment for why this needs a dedicated ctest. Same
+# library set as hp2_platform_clipboard_tests above, same reason.
+hp2_add_executable(hp2_platform_joystick_tests
+    ${HP2_PLATFORM_JOYSTICK_TEST_SOURCE}
+)
+target_link_libraries(hp2_platform_joystick_tests PRIVATE
+    hp2_core
+    hp2_engine
+    hp2_render
+    hp2_fire
+    hp2_editor_runtime
+    hp2_sdldrv
+)
+if(WIN32)
+    target_link_libraries(hp2_platform_joystick_tests PRIVATE SDL2::SDL2main)
+endif()
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_executable(hp2_native_typography_tests
         ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
@@ -726,6 +745,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_platform_clipboard_tests
     hp2_platform_mouse_state_tests
     hp2_platform_window_chrome_tests
+    hp2_platform_joystick_tests
 )
 if(TARGET hp2_import)
     list(APPEND HP2_EXECUTABLE_TARGETS hp2_import)
@@ -1013,6 +1033,7 @@ hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(clipboard_round_trip hp2_platform_clipboard_tests)
 hp2_add_behavior_test(mouse_state_round_trip hp2_platform_mouse_state_tests)
 hp2_add_behavior_test(window_chrome_round_trip hp2_platform_window_chrome_tests)
+hp2_add_behavior_test(joystick_round_trip hp2_platform_joystick_tests)
 hp2_add_behavior_test(data_identity_contracts hp2_data_identity_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"

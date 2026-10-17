@@ -65,10 +65,15 @@ pub struct WindowFlags {
 
 /// Replaces `HP2Capture::FDecision`.
 #[derive(Debug, PartialEq, Eq)]
+#[repr(C)]
 pub struct Decision {
     pub action: Action,
     pub cursor: Cursor,
 }
+
+const _: () = assert!(std::mem::size_of::<Decision>() == 8);
+const _: () = assert!(std::mem::offset_of!(Decision, action) == 0);
+const _: () = assert!(std::mem::offset_of!(Decision, cursor) == 4);
 
 /// Replaces `HP2Capture::OnLoss`: decision for one loss event
 /// (`FOCUS_LOST` / `MINIMIZED` / `HIDDEN`). The grab is released only

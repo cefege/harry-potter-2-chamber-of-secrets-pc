@@ -11,11 +11,26 @@
 	this is new coverage, not a port of an existing test. Runs on the
 	dummy SDL video driver for the same reasons as
 	PlatformClipboardTests.cpp: no real window/display touched, works
-	headless on linux-arm64 CI, and the transition behavior (does a
-	call to UpdateMouseGrabState change anything) does not depend on a
-	real window existing -- the real C++ itself guards
-	SDL_SetWindowGrab specifically with `if (SdlWindow)`, so a null
-	window here exercises exactly that guarded path.
+	headless on linux-arm64 CI.
+
+	Two real SDL calls inside update_mouse_grab_state cannot be
+	verified through their own readback under this driver (confirmed
+	empirically with throwaway probes against the pinned SDL2 build
+	before writing these assertions, not assumed):
+	  - SDL_SetRelativeMouseMode fails outright under dummy
+	    ("No relative mode implementation available";
+	    SDL_GetRelativeMouseMode stays false regardless of what was
+	    requested) -- the dummy driver provides neither
+	    SetRelativeMouseMode nor WarpMouse (pinned SDL_mouse.c).
+	  - SDL_SetWindowGrab silently has no effect under dummy either;
+	    SDL_GetWindowGrab reports false no matter what was requested.
+	SDL_ShowCursor(SDL_QUERY) *does* work reliably under dummy (it is
+	a process-global SDL_Mouse toggle, not a per-video-driver window
+	property) and is asserted below for both transitions plus the
+	no-transition early-return case. A real (hidden) SDL_Window is
+	still created and passed through, so SDL_SetWindowGrab's call path
+	is genuinely exercised (not skipped via a null-window guard), even
+	though its effect isn't independently checkable here.
 =============================================================================*/
 
 #include "SDLDrv.h"
@@ -61,24 +76,43 @@ int main()
 	// UpdateMouseGrabState's transition contract, matching the real
 	// C++'s own early-return guard (HP2MouseCapturePolicy.h's "Current
 	// truth" note: capture state changes only on an actual
-	// grabbed/released transition, not every call).
+	// grabbed/released transition, not every call). A real hidden
+	// window exercises the SDL_SetWindowGrab call path genuinely
+	// (see the file header for why its effect isn't independently
+	// checkable under the dummy driver).
+	SDL_Window* Window = SDL_CreateWindow( "mouse-state-test", 0, 0, 64, 64, SDL_WINDOW_HIDDEN );
+	Require( Window != NULL, "SDL_CreateWindow failed under the dummy driver" );
+
 	bool bWindowsMouseAvailable = false;
 
-	// Not grabbed -> grab: a real transition.
-	bool bGrabbed = hp2_rs_platform_update_mouse_grab_state( NULL, true, false, &bWindowsMouseAvailable );
+	// Not grabbed -> grab: a real transition. Cursor must hide.
+	bool bGrabbed = hp2_rs_platform_update_mouse_grab_state( Window, true, false, &bWindowsMouseAvailable );
 	Require( bGrabbed == true, "expected grab to engage on a false->true transition" );
 	Require( bWindowsMouseAvailable == false, "expected bWindowsMouseAvailable false while grabbed" );
+	Require( SDL_ShowCursor( SDL_QUERY ) == SDL_DISABLE, "expected the cursor hidden after grabbing" );
 
 	// Already grabbed -> grab again: no transition (idempotent).
-	bGrabbed = hp2_rs_platform_update_mouse_grab_state( NULL, true, true, &bWindowsMouseAvailable );
+	// "Cursor visibility must stay untouched" (HP2MouseCapturePolicy.h):
+	// show the cursor by hand first, then confirm the no-op call does
+	// NOT hide it again.
+	SDL_ShowCursor( SDL_ENABLE );
+	bGrabbed = hp2_rs_platform_update_mouse_grab_state( Window, true, true, &bWindowsMouseAvailable );
 	Require( bGrabbed == true, "expected grab to remain engaged on a true->true call" );
 	Require( bWindowsMouseAvailable == false, "bWindowsMouseAvailable must still reflect capture=true" );
+	Require( SDL_ShowCursor( SDL_QUERY ) == SDL_ENABLE, "no-transition call must leave cursor visibility untouched" );
 
-	// Grabbed -> release: a real transition.
-	bGrabbed = hp2_rs_platform_update_mouse_grab_state( NULL, false, true, &bWindowsMouseAvailable );
+	// Grabbed -> release: a real transition. Cursor must show.
+	bGrabbed = hp2_rs_platform_update_mouse_grab_state( Window, false, true, &bWindowsMouseAvailable );
 	Require( bGrabbed == false, "expected grab to release on a true->false transition" );
 	Require( bWindowsMouseAvailable == true, "expected bWindowsMouseAvailable true once released" );
+	Require( SDL_ShowCursor( SDL_QUERY ) == SDL_ENABLE, "expected the cursor visible after releasing" );
 
+	// Null window: must still no-op safely, matching the real C++'s
+	// own `if (SdlWindow)` guard around SDL_SetWindowGrab specifically.
+	bGrabbed = hp2_rs_platform_update_mouse_grab_state( NULL, false, true, &bWindowsMouseAvailable );
+	Require( bGrabbed == false, "null window must not prevent the grab/release transition itself" );
+
+	SDL_DestroyWindow( Window );
 	SDL_Quit();
 	std::puts( "PlatformMouseStateTests: PASS" );
 	return 0;

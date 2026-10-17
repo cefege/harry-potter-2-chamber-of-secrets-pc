@@ -97,6 +97,14 @@ struct FDecision
 	ECursor Cursor;
 };
 
+// Pins the exact layout crates/hp2-platform/src/mouse_capture.rs's
+// Decision (and crates/hp2-ffi/src/lib.rs's FfiCaptureDecision,
+// the type that actually crosses the FFI boundary) assert via their
+// own size_of/offset_of consts.
+static_assert( sizeof(FDecision) == 8, "FDecision layout must match crates/hp2-platform/src/mouse_capture.rs's Decision" );
+static_assert( offsetof(FDecision, Action) == 0, "FDecision.Action offset must match Decision.action" );
+static_assert( offsetof(FDecision, Cursor) == 4, "FDecision.Cursor offset must match Decision.cursor" );
+
 // Decision for one loss event (FOCUS_LOST / MINIMIZED / HIDDEN).
 inline FDecision OnLoss(const FState& S)
 {

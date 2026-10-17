@@ -201,6 +201,7 @@ set(HP2_INPUT_CONTRACT_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/InputContractTes
 set(HP2_PLATFORM_CLIPBOARD_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/PlatformClipboardTests.cpp")
 set(HP2_PLATFORM_MOUSE_STATE_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/PlatformMouseStateTests.cpp")
 set(HP2_PLATFORM_WINDOW_CHROME_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/PlatformWindowChromeTests.cpp")
+set(HP2_PLATFORM_JOYSTICK_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/PlatformJoystickTests.cpp")
 
 # Every source below is required by the completed native test graph. Keep the
 # list explicit so HP2_REQUIRE_IMPLEMENTED_SOURCES reports a focused error at

@@ -43,15 +43,6 @@ static void UpdateMouseScale( USDLViewport& Viewport )
 	Viewport.MouseScaleY = (WindowY > 0 && Viewport.SizeY > 0) ? (FLOAT)Viewport.SizeY / (FLOAT)WindowY : 1.f;
 }
 
-static DWORD ButtonsFromSdlState( Uint32 State )
-{
-	DWORD Buttons = 0;
-	if( State & SDL_BUTTON_LMASK ) Buttons |= MOUSE_Left;
-	if( State & SDL_BUTTON_RMASK ) Buttons |= MOUSE_Right;
-	if( State & SDL_BUTTON_MMASK ) Buttons |= MOUSE_Middle;
-	return Buttons;
-}
-
 static void TextToUtf8( const TCHAR* Text, TArray<ANSICHAR>& Out )
 {
 	Out.AddZeroed( appStrlen(Text) * 4 + 1 );
@@ -358,7 +349,7 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 			{
 				if( !MouseIsGrabbed && C->Engine )
 					C->Engine->MousePosition( this,
-						ButtonsFromSdlState( Event.motion.state ),
+						hp2_rs_platform_buttons_from_sdl_state( Event.motion.state ),
 						(FLOAT)Event.motion.x * MouseScaleX,
 						(FLOAT)Event.motion.y * MouseScaleY );
 				break;
