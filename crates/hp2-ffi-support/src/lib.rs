@@ -147,19 +147,46 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn strerror_matches_libc_text_without_errno_suffix() {
         // ENOENT: "No such file or directory" on every libc this project
         // targets. No " (os error N)" suffix, unlike io::Error's Display.
+        // Unix-only: on Windows this code instead goes through
+        // FormatMessageW with a different message ("The system cannot
+        // find the file specified."), and raw_os_error() there returns a
+        // Win32 GetLastError code, not a CRT errno, so the two platforms
+        // aren't just differently worded -- they're different code
+        // spaces entirely (see strerror's own doc comment). This is also
+        // why hp2-ini's io::Error-sourced [Errno N] text in its own
+        // "cannot read config" message will show a different number and
+        // string than the C++ side's fopen/errno on Windows: a known,
+        // not-yet-verified divergence there, unrelated to this function.
         let text = strerror(libc::ENOENT);
         assert_eq!(text, "No such file or directory");
         assert!(!text.contains("os error"));
     }
 
     #[test]
-    fn strerror_strips_the_suffix_even_on_an_unrecognized_code() {
-        // An out-of-range code still round-trips through
-        // io::Error::Display's "Unknown error: N (os error N)" shape;
-        // the suffix-stripping must not leave it attached.
+    #[cfg(windows)]
+    fn strerror_formats_a_win32_code_via_format_message() {
+        // ERROR_ACCESS_DENIED = 5. Confirms the Windows path actually
+        // goes through FormatMessageW (distinct text from Unix's EIO,
+        // which `libc::strerror(5)` would wrongly give for this same
+        // numeric code -- exactly the bug strerror's doc describes).
+        let text = strerror(5);
+        assert_eq!(text, "Access is denied.");
+        assert!(!text.contains("os error"));
+    }
+
+    #[test]
+    fn strerror_never_leaves_the_os_error_suffix_attached() {
+        // Platform-independent: whatever the message text is on this
+        // platform, io::Error::Display's " (os error N)" suffix must
+        // never survive strerror's stripping -- both for a real code
+        // and for one no platform recognizes (which still round-trips
+        // through io::Error::Display's "Unknown error: N (os error N)"
+        // shape and must not leave that suffix attached either).
+        assert!(!strerror(libc::ENOENT).contains("os error"));
         let text = strerror(999_999);
         assert!(!text.contains("os error"), "{text}");
     }

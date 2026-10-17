@@ -46,19 +46,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::lower::lower;
-
-fn fail(message: impl Into<String>) -> String {
-    message.into()
-}
-
-/// Matches `Utf8(path)`. `None` (mapped to an `Err` by the caller) stands
-/// in for the C++ side's implementation-defined handling of a native path
-/// that is not valid UTF-8 -- see the module doc.
-fn utf8(p: &Path) -> Result<String, String> {
-    p.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| fail(format!("non-UTF-8 path: {}", p.to_string_lossy())))
-}
+use crate::util::{fail, lexically_relative, utf8};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -165,7 +153,7 @@ fn sorted_dir_entries(dir: &Path) -> Result<Vec<(String, String, PathBuf)>, Stri
 fn sort_by_relative_path(base: &Path, paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
     let mut keyed: Vec<(String, String, PathBuf)> = Vec::with_capacity(paths.len());
     for f in paths {
-        let rel = f.strip_prefix(base).unwrap_or(&f).to_path_buf();
+        let rel = lexically_relative(base, &f).unwrap_or_default();
         let rel_str = utf8(&rel)?;
         let folded = lower(&rel_str);
         keyed.push((folded, rel_str, f));
@@ -177,10 +165,11 @@ fn sort_by_relative_path(base: &Path, paths: Vec<PathBuf>) -> Result<Vec<PathBuf
 /// Replaces `DeterministicFiles`. `root` must itself be a readable
 /// directory (not validated here, matching the C++ function, which lets
 /// the first `directory_iterator` construction report that). Always
-/// recursive; visits each directory's sorted entries in forward order,
-/// pushed onto the pending stack *reversed* so popping restores that
-/// forward order (see the module doc for why this, and not just the
-/// final sort, matters).
+/// recursive; *classifies* each directory's sorted entries last-sorted
+/// first (`.rev()` below), but because that reverse order is pushed onto
+/// the pending stack, popping it back off restores sorted order for
+/// which *subdirectory* gets explored next -- the two orderings differ
+/// (see the module doc for why both matter, not just the final sort).
 pub fn deterministic_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut pending: Vec<PathBuf> = vec![root.to_path_buf()];
@@ -351,12 +340,11 @@ pub fn child_file(dir: &Path, want: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{self, File};
+    use crate::util::test_support::{tempdir, write};
+    use std::fs;
 
     fn make(root: &Path, rel: &str) {
-        let path = root.join(rel);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        File::create(path).unwrap();
+        write(root, rel, b"");
     }
 
     /// Ground truth hand-verified against a C++ probe built from the exact
@@ -636,32 +624,5 @@ mod tests {
         );
         assert_ne!(casefold_then_exact("Straße", "STRASSE"), Ordering::Equal);
         assert_eq!(casefold_then_exact("same", "same"), Ordering::Equal);
-    }
-
-    /// Minimal `tempfile`-free scratch directory: unique path under the
-    /// OS temp dir, removed on drop.
-    struct TempDir(PathBuf);
-    impl TempDir {
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-    fn tempdir() -> TempDir {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "hp2-import-files-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
     }
 }

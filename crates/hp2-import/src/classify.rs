@@ -20,6 +20,7 @@
 use std::path::Path;
 
 use crate::lower::lower;
+use crate::util::lower_extension;
 
 const DEBRIS_NAMES: [&str; 6] = [
     ".ds_store",
@@ -34,18 +35,21 @@ const PROHIBITED_EXTENSIONS: [&str; 9] = [
     ".bat", ".cmd", ".com", ".dll", ".drv", ".exe", ".lib", ".ocx", ".sys",
 ];
 
-/// Matches `fs::path::extension()`'s string (including the leading `.`,
-/// or empty when there is none), lowercased via [`lower`]. Rust's
-/// `Path::extension()` omits the dot and uses the same "no dot" special
-/// case for a name with no extension or a dotfile like `.gitignore`.
-fn lower_extension(path: &Path) -> String {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => lower(&format!(".{ext}")),
-        None => String::new(),
-    }
-}
-
+/// Precondition every caller in this crate already satisfies: `path`'s
+/// filename came from a `walk`/`deterministic_files` result (or an
+/// explicit `utf8()?` check in `collect_side`'s own System/-prohibited-
+/// file loop before calling `is_prohibited`), both of which already
+/// reject a non-UTF-8 name before this ever sees it. `unwrap_or_default`
+/// below is the fallback for a *hypothetical* future caller that breaks
+/// that precondition, not a case this crate's own call sites can hit;
+/// the assert makes a caller that does break it fail loudly in tests
+/// instead of silently getting a wrong (but not crashing) answer.
 fn lower_file_name(path: &Path) -> String {
+    debug_assert!(
+        path.file_name().is_none_or(|n| n.to_str().is_some()),
+        "lower_file_name's non-UTF-8 fallback is being hit: {}",
+        path.display()
+    );
     path.file_name()
         .and_then(|n| n.to_str())
         .map(lower)

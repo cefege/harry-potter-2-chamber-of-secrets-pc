@@ -21,52 +21,7 @@ use crate::classify::{is_debris, is_prohibited};
 use crate::files::{child, child_file, walk};
 use crate::hash::hash;
 use crate::lower::lower;
-
-fn fail(message: impl Into<String>) -> String {
-    message.into()
-}
-
-/// Replaces `fs::path::lexically_relative`, purely by comparing path
-/// components -- no filesystem access, matching the C++ function. Rust's
-/// `Path::strip_prefix` is not a substitute: it returns `Err` (not an
-/// empty path) for a path outside `base`, and never produces a `../`
-/// prefix, so naively falling back to the original path on its `Err`
-/// would silently accept an escaping path with the absolute path left
-/// in `source_path` instead of erroring -- exactly the bug this
-/// function exists to avoid repeating.
-///
-/// `None` matches C++ returning an empty path: `base`/`path` disagree on
-/// absolute-vs-relative (the only mismatch this project's inputs can hit
-/// in practice; both come from directory walks under an absolute root).
-/// Otherwise returns `base`'s number of non-shared trailing components
-/// worth of `..`, followed by `path`'s own non-shared trailing
-/// components -- e.g. `/a/b/c` relative to `/a/x/y` is `../../b/c`.
-fn lexically_relative(base: &Path, path: &Path) -> Option<PathBuf> {
-    if base.is_absolute() != path.is_absolute() {
-        return None;
-    }
-    let base_components: Vec<_> = base.components().collect();
-    let path_components: Vec<_> = path.components().collect();
-    let common = base_components
-        .iter()
-        .zip(path_components.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut result = PathBuf::new();
-    for _ in 0..(base_components.len() - common) {
-        result.push("..");
-    }
-    for component in &path_components[common..] {
-        result.push(component.as_os_str());
-    }
-    Some(result)
-}
-
-fn utf8(p: &Path) -> Result<String, String> {
-    p.to_str()
-        .map(str::to_string)
-        .ok_or_else(|| fail(format!("non-UTF-8 path: {}", p.to_string_lossy())))
-}
+use crate::util::{fail, lexically_relative, lower_extension, utf8};
 
 /// Replaces `Posix`: backslash-to-forward-slash, nothing else (not a full
 /// path normalization -- callers already work with POSIX-relative
@@ -201,19 +156,12 @@ fn collect_to(
         if !accept(&file) {
             continue;
         }
-        let rel = file.strip_prefix(base).unwrap_or(&file);
-        let destination = format!("{destination_root}/{}", posix(&utf8(rel)?));
+        let rel = lexically_relative(base, &file).unwrap_or_default();
+        let destination = format!("{destination_root}/{}", posix(&utf8(&rel)?));
         let asset = source_asset(source, root, &file, destination)?;
         insert(assets, asset)?;
     }
     Ok(())
-}
-
-fn lower_extension(path: &Path) -> String {
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => lower(&format!(".{ext}")),
-        None => String::new(),
-    }
 }
 
 /// Replaces `CollectSide`.
@@ -380,39 +328,8 @@ pub fn collect_prototype_cutscene_references(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{self as stdfs, File};
-    use std::io::Write;
-
-    struct TempDir(PathBuf);
-    impl TempDir {
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = stdfs::remove_dir_all(&self.0);
-        }
-    }
-    fn tempdir() -> TempDir {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "hp2-import-collect-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        stdfs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-
-    fn write(root: &Path, rel: &str, content: &[u8]) {
-        let path = root.join(rel);
-        stdfs::create_dir_all(path.parent().unwrap()).unwrap();
-        File::create(path).unwrap().write_all(content).unwrap();
-    }
+    use crate::util::test_support::{tempdir, write};
+    use std::fs as stdfs;
 
     fn standard_tree(root: &Path) {
         for dir in ["System", "Maps", "Textures", "Sounds", "Music"] {
