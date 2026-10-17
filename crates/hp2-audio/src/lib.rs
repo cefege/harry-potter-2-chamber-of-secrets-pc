@@ -49,11 +49,19 @@
 //! `FDistSquared` itself (live `AActor`/`FVector` state), then passes
 //! the single resulting float across. FFI-wired via
 //! `hp2_rs_audio_sound_priority`; `SoundPriority`'s body now computes
-//! only `DistSquared` before forwarding. No existing C++ oracle
-//! (`FindLeastImportantSound`, `SoundPriority`'s only caller, is
-//! itself unported -- deeply `this->Sources`-coupled, see above);
-//! covered by `priority.rs`'s own Rust unit tests plus an FFI-boundary
-//! check added to `Tests/AudioTests.cpp`
-//! (`TestSoundPriorityFfiBoundary`, same `audio_lifecycle` ctest).
+//! only `DistSquared` before forwarding. `SoundPriority` has five
+//! call sites (`:808` in `PlaySound`, `:1404`/`:1424` gathering
+//! ambient sounds, `:1703` in `Update` for every active source on
+//! every tick, `:2144` in `FindLeastImportantSound`) -- this Rust
+//! path now runs on every tick for every active sound, not just the
+//! one rarely-used eviction helper. `FindLeastImportantSound` itself
+//! stays unported (deeply `this->Sources`-coupled, see above); the
+//! other four callers already called through `SoundPriority`'s C++
+//! body, now forwarding unconditionally. No existing C++ oracle for
+//! any of the five call sites; `audio_lifecycle` only exercises this
+//! function directly via `TestSoundPriorityFfiBoundary`, covered by
+//! `priority.rs`'s own Rust unit tests otherwise.
+//! `Update`/`PlaySound`'s runtime call paths are not exercised by any
+//! automated check.
 
 pub mod priority;

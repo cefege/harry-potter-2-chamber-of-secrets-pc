@@ -152,6 +152,7 @@ int main()
 		INT Key = -1; FLOAT Value = -1.f;
 		Require( hp2_rs_input_map_joystick_axis( 0, 16384, 0.f, 1.f, 1.f, &Key, &Value ), "axis 0 should map" );
 		Require( Key == IK_JoyX, "axis 0 should map to IK_JoyX" );
+		Require( Value == 0.5f, "raw value 16384 should scale to exactly 0.5" );
 		Require( !hp2_rs_input_map_joystick_axis( 8, 0, 0.f, 1.f, 1.f, &Key, &Value ), "axis 8 is out of range" );
 	}
 	{
@@ -167,6 +168,18 @@ int main()
 		Require( Count == 1, "first hat press should produce one event" );
 		Require( NewLastJoyHat == IK_Joy1 + 12, "SDL_HAT_UP should fold to IK_Joy1+12" );
 		Require( Events[0].key == IK_Joy1 + 12 && Events[0].action == IST_Press, "expected a press event" );
+	}
+	{
+		// Direction change: UP -> DOWN must release the old folded key
+		// and press the new one, exercising the array stride
+		// (out_events.add(i)) and Events[1], not just Events[0].
+		FfiKeyAction Events[2];
+		INT NewLastJoyHat = -1;
+		const INT Count = hp2_rs_input_fold_joystick_hat( SDL_HAT_DOWN, IK_Joy1 + 12, Events, &NewLastJoyHat );
+		Require( Count == 2, "a direction change should produce a release and a press" );
+		Require( NewLastJoyHat == IK_Joy1 + 13, "SDL_HAT_DOWN should fold to IK_Joy1+13" );
+		Require( Events[0].key == IK_Joy1 + 12 && Events[0].action == IST_Release, "Events[0] should release the old direction" );
+		Require( Events[1].key == IK_Joy1 + 13 && Events[1].action == IST_Press, "Events[1] should press the new direction" );
 	}
 
 	std::puts( "PlatformJoystickTests: PASS" );

@@ -8,12 +8,42 @@ const SF_MUSIC: i32 = 8;
 const SF_NO3D: i32 = 16;
 const SF_HAS_LIP_SYNC: i32 = 128;
 
+/// Matches `UnTemplate.h:123-126`'s `Clamp(X,Min,Max) = X<Min ? Min :
+/// X<Max ? X : Max` bit-for-bit, including its NaN behavior: both
+/// comparisons are false for a NaN `x`, so it falls through to
+/// `max`. `f32::clamp` is NOT equivalent here -- it propagates NaN
+/// unchanged instead, which would diverge from the real C++ whenever
+/// `dist_squared / denom` is NaN (e.g. a 0/0 from a zero
+/// `audio_max_radius_multiplier`).
+fn ue_clamp(x: f32, min: f32, max: f32) -> f32 {
+    if x < min {
+        min
+    } else if x < max {
+        x
+    } else {
+        max
+    }
+}
+
 /// Replaces `SoundPriority`. `dist_squared` is the real C++'s own
 /// `FDistSquared(Location, ViewTarget->Location)` -- computed in C++
 /// since it needs live `AActor`/`FVector` state this crate has no
 /// FFI boundary for yet (see this crate's module doc). `radius` of
 /// `0.0` matches the real C++'s `if (Radius)` false branch exactly
 /// (an exact float comparison against zero, not an epsilon check).
+///
+/// Called on every tick for every active source
+/// (`ALAudioSubsystem.cpp:1703`, inside `Update`), for every gathered
+/// ambient sound (`:1404`, `:1424`), from `PlaySound` (`:808`), and
+/// from `FindLeastImportantSound` (`:2144`) -- five call sites, not
+/// one. `FindLeastImportantSound` itself stays unported (reads
+/// `this->Sources` directly, deeply object-graph-coupled); the other
+/// four callers already call through `SoundPriority`'s C++ body,
+/// which now forwards here unconditionally. No ctest exercises
+/// `Update`/`PlaySound`'s runtime call paths -- `audio_lifecycle`
+/// only calls this function directly via
+/// `TestSoundPriorityFfiBoundary`, so the on-tick behavior is
+/// unexercised by any automated check.
 pub fn sound_priority(
     dist_squared: f32,
     radius: f32,
@@ -23,7 +53,7 @@ pub fn sound_priority(
 ) -> f32 {
     let radius_factor = if radius != 0.0 {
         let denom = (audio_max_radius_multiplier * radius).powi(2);
-        (1.0 - dist_squared / denom).clamp(0.01, 1.0)
+        ue_clamp(1.0 - dist_squared / denom, 0.01, 1.0)
     } else {
         1.0
     };
@@ -194,6 +224,25 @@ mod tests {
         assert_eq!(sound_priority(2_000_000.0, 10.0, 100.0, 5.0, 0), 5.0 * 0.01);
     }
 
+    #[test]
+    fn radius_factor_is_correct_in_the_unclamped_middle_of_the_formula() {
+        // denom = (100*10)^2 = 1_000_000 (exact in f32); dist_squared
+        // = 250_000 -> 1 - 0.25 = 0.75 (exact), never touching either
+        // clamp bound. Catches a wrong denominator (e.g. forgetting
+        // to square it, or squaring only radius) that the
+        // zero/zero-distance/past-the-radius cases above cannot.
+        assert_eq!(sound_priority(250_000.0, 10.0, 100.0, 4.0, 0), 3.0);
+    }
+
+    #[test]
+    fn nan_radius_factor_input_clamps_to_one_not_nan() {
+        // Real C++'s Clamp(X,Min,Max) = X<Min ? Min : X<Max ? X : Max
+        // both evaluates false for a NaN X, falling through to Max
+        // (1.0). f32::clamp would propagate NaN instead -- diverges.
+        // Forced here via a zero audio_max_radius_multiplier, making
+        // denom 0.0 and 0.0/0.0 (dist_squared is also 0.0) NaN.
+        assert_eq!(sound_priority(0.0, 10.0, 0.0, 5.0, 0), 5.0);
+    }
     #[test]
     fn flag_bonuses_match_the_real_cpp_weights_and_stack() {
         const SF_MUSIC: i32 = 8;
