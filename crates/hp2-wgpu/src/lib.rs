@@ -905,20 +905,37 @@ impl RenderLoop {
         self.counts
     }
 
-    /// Real per-tick entry point `UWgpuRenderDevice`'s future
-    /// `SetSceneNode` override will call (not wired to any FFI
-    /// function or C++ call site yet -- see this crate's own module
-    /// doc). Computes `FrameUniforms` from `scene` and uploads it to
-    /// `frame_uniforms_buffer`, creating that buffer on first use.
-    /// Unlike the real GLSL source's own change-detection (`StoredGamma
-    /// != ...`, `StoredOrthoFX != ...`, etc., `SetSceneNode`'s own
-    /// early-out when nothing relevant changed), this always
-    /// recomputes and always writes -- correct but not maximally
-    /// efficient; left as a real, known, non-urgent follow-up rather
-    /// than ported now, since it is a pure performance optimization
-    /// with no correctness effect (an extra `queue.write_buffer` call
-    /// on a frame where nothing changed costs a little GPU bandwidth,
-    /// nothing more).
+    /// Real per-tick entry point `UWgpuRenderDevice::SetSceneNode`
+    /// calls through `hp2_rs_wgpu_set_scene_node` (wired, not a
+    /// future plan -- an earlier version of this doc said "not wired
+    /// to any FFI function or C++ call site yet", true when written,
+    /// now stale). Computes `FrameUniforms` from `scene` and uploads
+    /// it to `frame_uniforms_buffer`, creating that buffer on first
+    /// use. Unlike the real GLSL source's own change-detection
+    /// (`StoredGamma != ...`, `StoredOrthoFX != ...`, etc.,
+    /// `SetSceneNode`'s own early-out when nothing relevant changed),
+    /// this always recomputes and always writes.
+    ///
+    /// Real, not yet fixed bug waiting to happen once draw-call
+    /// recording lands (caught on review; an earlier version of this
+    /// doc called the always-recompute choice above "a pure
+    /// performance optimization with no correctness effect" --
+    /// wrong): `queue.write_buffer` does not apply at the call site,
+    /// it stages the write and applies it at the next `queue.submit`,
+    /// before any command in that submit runs. `SetSceneNode` is
+    /// called many times per real frame (3D world, then HUD/Canvas
+    /// with its own ortho projection, plus any mirrors/portals/sub-
+    /// viewports), each currently overwriting the same one 528-byte
+    /// buffer at offset 0 -- harmless today because nothing draws yet,
+    /// but once Draw2DLine/DrawTile/etc. record real commands, every
+    /// draw in one submit would see only the *last* `SetSceneNode`
+    /// call's matrices, not its own segment's. The real fix, not yet
+    /// built: a per-segment slot appended on each call (offset
+    /// aligned to the real `CreatedDevice::adapter_limits.min_uniform_
+    /// buffer_offset_alignment`, a commonly-256 value this crate has
+    /// not yet queried on this specific machine's own adapter),
+    /// bound per draw via a dynamic uniform-buffer offset, not one
+    /// shared buffer overwritten in place.
     pub fn set_scene_node(
         &mut self,
         device: &wgpu::Device,
@@ -1562,33 +1579,40 @@ mod tests {
         // passes a *negative* near (-zFar), confirmed to not panic
         // glam's own `directx::orthographic` (unlike `frustum`, its
         // documented panic conditions never require a positive near).
-        // Checks the range itself (both extremes land in {0.0, 1.0},
-        // in either order), not which specific world point maps to
-        // which specific extreme: an earlier version of this test
-        // asserted a fixed point-to-extreme pairing and failed on a
-        // real run (got 0.99999994 where 0.0 was expected) -- not a
-        // bug in `compute_frame_uniforms`, just a wrong guess about
-        // which of this symmetric ortho volume's two world points
-        // `directx::orthographic` treats as which extreme (caught by
-        // actually running the test, not assumed from the formula).
-        // The real invariant this test exists to prove -- 0..1 range
-        // reached at all, not GL's -1..1 -- holds either way.
-        let a_world = glam::Vec4::new(0.0, 0.0, 65336.0, 1.0);
-        let b_world = glam::Vec4::new(0.0, 0.0, -65336.0, 1.0);
-        let a_ndc_z = (out.modelviewproj_mat * a_world).z;
-        let b_ndc_z = (out.modelviewproj_mat * b_world).z;
-        let (lo, hi) = if a_ndc_z <= b_ndc_z {
-            (a_ndc_z, b_ndc_z)
-        } else {
-            (b_ndc_z, a_ndc_z)
-        };
+        //
+        // Asserts a specific point-to-extreme pairing, not just that
+        // the two extremes land somewhere in {0.0, 1.0} in either
+        // order (caught on review: an earlier version of this test
+        // only checked the sorted range, which is genuinely order-
+        // independent but for the wrong reason -- it would still pass
+        // if ortho depth came out reversed, mapping the forward
+        // direction toward 0 instead of 1; that is not a cosmetic
+        // difference, it would make the editor's orthographic views
+        // depth-test backwards, back geometry winning under a `Less`
+        // compare). `forward_world` (world Z = +65336) is forward
+        // under `view_mat`'s real `vec3(1,-1,-1)` Z-flip -- matching
+        // the perspective test's own same derivation above -- and
+        // must land at NDC z ~= 1.0 (far), not 0.0; `backward_world`
+        // must land at ~= 0.0 (near). This project's own real run
+        // already produces exactly that pairing (verified empirically
+        // before writing this assertion, not assumed from the
+        // formula) -- an earlier version of this same test got this
+        // backwards once already (caught on a real run, see this
+        // test's own prior history), so the fix here is a real,
+        // checked assertion, not a guess repeated a second time.
+        let forward_world = glam::Vec4::new(0.0, 0.0, 65336.0, 1.0);
+        let backward_world = glam::Vec4::new(0.0, 0.0, -65336.0, 1.0);
+        let forward_ndc_z = (out.modelviewproj_mat * forward_world).z;
+        let backward_ndc_z = (out.modelviewproj_mat * backward_world).z;
         assert!(
-            lo.abs() < 1e-3,
-            "expected the ortho volume's near-side NDC z ~= 0.0, got {lo}"
+            (forward_ndc_z - 1.0).abs() < 1e-3,
+            "expected the forward ortho direction (UE Z=+65336) to land at NDC z ~= 1.0 (far), \
+             got {forward_ndc_z}"
         );
         assert!(
-            (hi - 1.0).abs() < 1e-3,
-            "expected the ortho volume's far-side NDC z ~= 1.0, got {hi}"
+            backward_ndc_z.abs() < 1e-3,
+            "expected the backward ortho direction (UE Z=-65336) to land at NDC z ~= 0.0 \
+             (near), got {backward_ndc_z}"
         );
     }
 

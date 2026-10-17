@@ -72,6 +72,18 @@ class UWgpuRenderDevice : public URenderDevice
 	// why: the Surface borrows the view's CAMetalLayer).
 	void* MetalView;
 
+	// Total UWgpuRenderDevice::SetSceneNode calls since the last Init
+	// (not since process start -- Init resets it, matching its own
+	// device-recreate-on-every-toggle behavior). Logged in Exit next
+	// to the frame-presented tally. SetSceneNode runs many times per
+	// real frame (3D world, HUD/Canvas, mirrors/portals/sub-
+	// viewports), not once, so a count across a known-length
+	// -testticks run is real evidence for how many FrameUniforms
+	// segments one frame actually needs -- the input the future
+	// per-segment-slot redesign (hp2_wgpu::RenderLoop::set_scene_
+	// node's own doc) needs, not yet measured.
+	INT SetSceneNodeCallCount;
+
 	// `[WgpuDrv.WgpuRenderDevice] Backend=Auto|Metal|Vulkan|Dx12|Gl` --
 	// config property, UEnum-backed (StaticConstructor registers the
 	// enum). Plain member index: 0=Auto, 1=Metal, 2=Vulkan, 3=Dx12,

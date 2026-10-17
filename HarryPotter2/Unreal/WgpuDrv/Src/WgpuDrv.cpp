@@ -88,6 +88,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 {
 	guard(UWgpuRenderDevice::Init);
 	Viewport = InViewport;
+	SetSceneNodeCallCount = 0;
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -227,6 +228,11 @@ void UWgpuRenderDevice::Exit()
 		const FrameCounts Counts = hp2_rs_wgpu_frame_counts( RustDevice );
 		debugf( NAME_Init, TEXT("WgpuDrv: frames presented=%u occluded=%u outdated=%u other_failure=%u"),
 			Counts.presented, Counts.occluded, Counts.outdated, Counts.other_failure );
+		// Real evidence for the per-segment-slot redesign
+		// (hp2_wgpu::RenderLoop::set_scene_node's own doc): how many
+		// SetSceneNode calls one run actually made, not inferred or
+		// assumed from the engine's own architecture docs.
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i"), SetSceneNodeCallCount );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -377,17 +383,26 @@ void UWgpuRenderDevice::SetSceneNode( FSceneNode* Frame )
 	// pass alone proved no crash, not that this code path was ever
 	// reached -- SetSceneNode could have been skipped entirely by
 	// engine-side logic and the same test would still have passed).
-	// Once only, not every call: SetSceneNode runs many times per
-	// frame (3D world, HUD/Canvas, portals/mirrors/sub-viewports),
-	// so an unconditional debugf here would spam the log on every
-	// single one of those, every tick.
-	static UBOOL LoggedFirstCall = 0;
-	if( !LoggedFirstCall )
+	// Logs only the first call's values, not every call: SetSceneNode
+	// runs many times per real frame (3D world, HUD/Canvas, portals/
+	// mirrors/sub-viewports), so an unconditional debugf here would
+	// spam the log every single one of those, every tick. A member
+	// counter, not a function-local `static` (an earlier version used
+	// one): Init already resets per-run state on every call including
+	// fullscreen toggles, and a `static` would persist across those
+	// toggles too, silently suppressing this log on a second Init
+	// within the same process. The running total itself is also real,
+	// useful evidence: logged in Exit next to the frame-presented
+	// tally, it is the real count of FrameUniforms segments one
+	// -testticks run actually needed -- the measurement the future
+	// per-segment-slot redesign (hp2_wgpu::RenderLoop::set_scene_
+	// node's own doc) needs and does not have yet.
+	if( SetSceneNodeCallCount == 0 )
 	{
-		LoggedFirstCall = 1;
 		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode first call: is_ortho=%i fx=%f fy=%f effective_fov=%f"),
 			Scene.is_ortho, Scene.fx, Scene.fy, Scene.effective_fov_angle );
 	}
+	SetSceneNodeCallCount++;
 
 	hp2_rs_wgpu_set_scene_node( RustDevice, &Scene );
 	unguard;
