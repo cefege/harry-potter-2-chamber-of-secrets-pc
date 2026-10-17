@@ -97,13 +97,21 @@
 //! self-contained piece of it ported yet; `SetModeCursor`, whose only
 //! real logic -- clamping `SelectedCursor` against the `SystemCursors`
 //! array -- is a C++-owned array index, leaving nothing worth porting
-//! on its own), the rest of the `UpdateInput` event pump (joystick
-//! axis/button/hat branches, pure given explicit `JoystickDeadZone`/
-//! `ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons` inputs; ungrabbed
-//! `SDL_MOUSEMOTION` dispatches straight to `Engine->MousePosition`
-//! with no `HP2Make*Event` call, so it is not part of `input_event`'s
-//! scope), and macOS `TextToSpeech` (`fork`/`execl("/usr/bin/say")`,
-//! `:770-813`).
+//! on its own), and the rest of the `UpdateInput` event pump
+//! (joystick axis/button/hat branches, pure given explicit
+//! `JoystickDeadZone`/`ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons`
+//! inputs; ungrabbed `SDL_MOUSEMOTION` dispatches straight to
+//! `Engine->MousePosition` with no `HP2Make*Event` call, so it is not
+//! part of `input_event`'s scope).
+//!
+//! `USDLViewport::TextToSpeech`/`UpdateSpeech` (`fork`/
+//! `execl("/usr/bin/say")`, `:752-795`) are **not** on this list:
+//! confirmed by a repo-wide search, nothing calls `TextToSpeech` at
+//! all -- not from any native code, not from UnrealScript, not even
+//! declared as a base `UViewport` virtual. `TextToSpeechFile`
+//! (`SDLDrv.h:47`) is declared and config-registered but never read.
+//! Dead code (AGENTS.md: gets a short comment, not porting effort);
+//! left as-is in C++, not a pending Rust slice.
 
 pub mod clipboard;
 pub mod input_event;
