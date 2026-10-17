@@ -296,7 +296,7 @@ pub fn create_device_sync(
 /// either.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PresentOnceOutcome {
+pub enum FrameOutcome {
     /// Configured, acquired, and presented a frame.
     Presented = 0,
     /// `created.surface` was `None` (headless device).
@@ -344,22 +344,22 @@ pub fn configure_and_present_once(
     created: &CreatedDevice,
     width: u32,
     height: u32,
-) -> PresentOnceOutcome {
+) -> FrameOutcome {
     let Some(surface) = created.surface.as_ref() else {
-        return PresentOnceOutcome::NoSurface;
+        return FrameOutcome::NoSurface;
     };
     let Some(config) = surface.get_default_config(&created.adapter, width, height) else {
-        return PresentOnceOutcome::NoDefaultConfig;
+        return FrameOutcome::NoDefaultConfig;
     };
     surface.configure(&created.device, &config);
     let frame = match surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(frame) => frame,
         wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-        wgpu::CurrentSurfaceTexture::Timeout => return PresentOnceOutcome::Timeout,
-        wgpu::CurrentSurfaceTexture::Occluded => return PresentOnceOutcome::Occluded,
-        wgpu::CurrentSurfaceTexture::Outdated => return PresentOnceOutcome::Outdated,
-        wgpu::CurrentSurfaceTexture::Lost => return PresentOnceOutcome::Lost,
-        wgpu::CurrentSurfaceTexture::Validation => return PresentOnceOutcome::Validation,
+        wgpu::CurrentSurfaceTexture::Timeout => return FrameOutcome::Timeout,
+        wgpu::CurrentSurfaceTexture::Occluded => return FrameOutcome::Occluded,
+        wgpu::CurrentSurfaceTexture::Outdated => return FrameOutcome::Outdated,
+        wgpu::CurrentSurfaceTexture::Lost => return FrameOutcome::Lost,
+        wgpu::CurrentSurfaceTexture::Validation => return FrameOutcome::Validation,
     };
     let encoder = created
         .device
@@ -368,7 +368,159 @@ pub fn configure_and_present_once(
         });
     created.queue.submit(std::iter::once(encoder.finish()));
     created.queue.present(frame);
-    PresentOnceOutcome::Presented
+    FrameOutcome::Presented
+}
+
+/// One in-flight frame between `lock_frame` and `unlock_frame`:
+/// `surface.get_current_texture()`'s own `SurfaceTexture`, the
+/// `TextureView` built from it (`encoder.begin_render_pass` needs a
+/// `&TextureView`, not the texture itself), and the `CommandEncoder`
+/// the clear render pass was recorded into. `texture`/`view` are both
+/// read in `unlock_frame` (`view` only transitively, via the encoder
+/// already holding everything it needs -- kept here anyway so this
+/// struct, not a borrow of it, is what crosses the `lock_frame`/
+/// `unlock_frame` boundary; `SurfaceTexture`'s own `Drop` impl
+/// discards it safely if `unlock_frame` is never actually called with
+/// `present: true`, matching wgpu's own documented behavior).
+struct InProgressFrame {
+    texture: wgpu::SurfaceTexture,
+    #[allow(dead_code)] // kept alive for texture's sake; never read directly
+    view: wgpu::TextureView,
+    encoder: wgpu::CommandEncoder,
+}
+
+/// Per-`CreatedDevice` state that must persist across the
+/// `lock_frame`/`unlock_frame` pair (`UWgpuRenderDevice::Lock`/
+/// `Unlock`'s future Rust half) and across repeated Lock/Unlock
+/// cycles: `configured_size` so every `lock_frame` call does not
+/// reconfigure the surface (`Surface::configure`'s own doc: "If the
+/// surface is already configured, this will wait for the GPU to come
+/// idle before recreating the swapchain" -- real per-frame cost, not
+/// just wasted work, if done when the size has not actually changed).
+/// One `RenderLoop` per live `CreatedDevice`; `WgpuHandle` (`hp2-ffi`)
+/// owns both together.
+pub struct RenderLoop {
+    configured_size: Option<(u32, u32)>,
+    in_progress: Option<InProgressFrame>,
+}
+
+impl Default for RenderLoop {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderLoop {
+    pub fn new() -> Self {
+        Self {
+            configured_size: None,
+            in_progress: None,
+        }
+    }
+}
+
+/// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`
+/// (plan's still-open "real draw-call forwarding" item's first piece:
+/// nothing is drawn by this function itself, but it is the real
+/// per-tick entry point any future draw-call forwarding will record
+/// into). Reconfigures the surface only when `width`/`height` differ
+/// from the last configured size (`loop_state.configured_size`) --
+/// cheap on every other call, including every call at a steady
+/// resolution, which is the common case. Begins a render pass that
+/// clears to `clear_color` and records nothing else; the pass is
+/// ended (not `unlock_frame`'s concern -- `begin_render_pass` returning
+/// a pass borrowing `encoder` would make storing both in
+/// `InProgressFrame` a self-referential-struct problem) before this
+/// function returns, so a draw-call forwarder landing later will need
+/// its own render pass, not this clear pass still open.
+///
+/// Fails (and leaves `loop_state.in_progress` untouched, i.e. `None`
+/// or whatever a previous successful `lock_frame` left it as) on the
+/// same real conditions `configure_and_present_once` does -- see
+/// `FrameOutcome`'s own doc for what each code means.
+pub fn lock_frame(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    width: u32,
+    height: u32,
+    clear_color: wgpu::Color,
+) -> FrameOutcome {
+    let Some(surface) = created.surface.as_ref() else {
+        return FrameOutcome::NoSurface;
+    };
+    if loop_state.configured_size != Some((width, height)) {
+        let Some(config) = surface.get_default_config(&created.adapter, width, height) else {
+            return FrameOutcome::NoDefaultConfig;
+        };
+        surface.configure(&created.device, &config);
+        loop_state.configured_size = Some((width, height));
+    }
+    let texture = match surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(texture) => texture,
+        wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+        wgpu::CurrentSurfaceTexture::Timeout => return FrameOutcome::Timeout,
+        wgpu::CurrentSurfaceTexture::Occluded => return FrameOutcome::Occluded,
+        wgpu::CurrentSurfaceTexture::Outdated => return FrameOutcome::Outdated,
+        wgpu::CurrentSurfaceTexture::Lost => return FrameOutcome::Lost,
+        wgpu::CurrentSurfaceTexture::Validation => return FrameOutcome::Validation,
+    };
+    let view = texture
+        .texture
+        .create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = created
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("hp2-wgpu frame encoder"),
+        });
+    {
+        let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("hp2-wgpu clear pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+    }
+    loop_state.in_progress = Some(InProgressFrame {
+        texture,
+        view,
+        encoder,
+    });
+    FrameOutcome::Presented
+}
+
+/// Replaces the per-frame-end half of `UWgpuRenderDevice::Unlock`.
+/// `present`, matching the real `Unlock(UBOOL Blit)`'s own parameter
+/// (`ThirdParty/XOpenGLDrv/Src/XOpenGL.cpp`'s own `Unlock` only blits
+/// when `Blit` is set -- used for render passes that should not
+/// actually reach the screen, e.g. hit-testing passes): `true` submits
+/// and presents the frame `lock_frame` began; `false` submits (so the
+/// GPU work still completes, matching XOpenGL's own real behavior of
+/// still finishing the frame) but never calls `queue.present`, letting
+/// `SurfaceTexture::drop` discard it instead (wgpu's own documented,
+/// safe behavior for an un-presented texture).
+///
+/// Returns `false` if `loop_state.in_progress` is `None` -- `unlock_
+/// frame` called without a matching successful `lock_frame` first is a
+/// caller bug, not a real runtime condition to report via
+/// `FrameOutcome`.
+pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, present: bool) -> bool {
+    let Some(frame) = loop_state.in_progress.take() else {
+        return false;
+    };
+    created
+        .queue
+        .submit(std::iter::once(frame.encoder.finish()));
+    if present {
+        created.queue.present(frame.texture);
+    }
+    true
 }
 
 /// Window-surface creation from a C++-owned `SDL_Window*`'s raw view

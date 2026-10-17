@@ -156,7 +156,7 @@ int main()
 	// frame, and present it -- the real per-frame sequence any
 	// renderer's draw loop will need, once draw-call forwarding
 	// exists (hp2-wgpu's own module doc on what's still open). 0 is
-	// the only success code (hp2_wgpu::PresentOnceOutcome::Presented);
+	// the only success code (hp2_wgpu::FrameOutcome::Presented);
 	// every other value is printed so a failure says exactly which
 	// step failed instead of forcing a guess.
 	//
@@ -195,9 +195,39 @@ int main()
 	}
 	if( PresentOutcome != 0 )
 	{
-		std::fprintf( stderr, "WgpuSurfaceTests: FAIL: hp2_rs_wgpu_present_once_for_testing returned outcome code %u (0 = Presented; see hp2_wgpu::PresentOnceOutcome's own doc for what the rest mean)\n", PresentOutcome );
+		std::fprintf( stderr, "WgpuSurfaceTests: FAIL: hp2_rs_wgpu_present_once_for_testing returned outcome code %u (0 = Presented; see hp2_wgpu::FrameOutcome's own doc for what the rest mean)\n", PresentOutcome );
 		std::exit( 1 );
 	}
+
+	// Direct check of hp2_rs_wgpu_lock/hp2_rs_wgpu_unlock themselves
+	// (UWgpuRenderDevice::Lock/Unlock's own real pair) -- the smoke
+	// test (Build/run_wgpu_smoke.py) calls these every tick too, but a
+	// real run of it observed Occluded on all 60 of 60 ticks (see
+	// WgpuDrv.h's own doc), which proves these functions degrade
+	// safely, not that they ever actually succeed. By this point
+	// PresentOutcome == 0 already proved the window is in a state
+	// where a frame CAN be acquired on this machine, so this is not
+	// expected to need its own long poll -- still polled the same way
+	// for consistency and to avoid a flaky single-attempt check.
+	uint32_t LockOutcome = 4;
+	{
+		Uint32 StartTicks = SDL_GetTicks();
+		do
+		{
+			SDL_PumpEvents();
+			LockOutcome = hp2_rs_wgpu_lock( Result.handle, 64, 64, 0.25f, 0.5f, 0.75f, 1.0f );
+			if( LockOutcome == 0 || LockOutcome != 4 )
+				break;
+			SDL_Delay( 100 );
+		} while( SDL_GetTicks() - StartTicks < 2000 );
+	}
+	if( LockOutcome != 0 )
+	{
+		std::fprintf( stderr, "WgpuSurfaceTests: FAIL: hp2_rs_wgpu_lock returned outcome code %u (0 = Presented; see hp2_wgpu::FrameOutcome's own doc)\n", LockOutcome );
+		std::exit( 1 );
+	}
+	const bool Unlocked = hp2_rs_wgpu_unlock( Result.handle, true );
+	Require( Unlocked, "hp2_rs_wgpu_unlock returned false after a successful hp2_rs_wgpu_lock" );
 
 	hp2_rs_wgpu_destroy( Result.handle );
 

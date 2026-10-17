@@ -146,12 +146,42 @@ void UWgpuRenderDevice::Flush( UBOOL AllowPrecache )
 void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize )
 {
 	guard(UWgpuRenderDevice::Lock);
+	// ScreenClear, not FlashScale/FlashFog: XOpenGL.cpp's own Lock
+	// uses exactly ScreenClear.X/Y/Z/W as the real glClearColor value
+	// (confirmed by reading it, not assumed) -- FlashScale/FlashFog
+	// are a separate post-process tint that XOpenGL stores for later,
+	// not the buffer clear. No draw-call forwarding exists yet (this
+	// class's own header doc), so FlashScale/FlashFog/HitData/HitSize/
+	// RenderLockFlags go unused here for now, same as every other
+	// still-stub virtual in this class.
+	//
+	// Viewport->SizeX/SizeY, not a separate stored width/height:
+	// XOpenGL's own Lock reads the same fields the same way
+	// (`Max(1, Viewport->SizeX)`), confirmed before using this
+	// pattern. SetRes does not need to push a new size into Rust
+	// separately -- the next Lock call simply reads the already-
+	// updated Viewport fields, and hp2_rs_wgpu_lock only reconfigures
+	// the surface when the requested size actually changed.
+	const DWORD Outcome = hp2_rs_wgpu_lock( RustDevice,
+		(DWORD)Max( 1, Viewport->SizeX ), (DWORD)Max( 1, Viewport->SizeY ),
+		ScreenClear.X, ScreenClear.Y, ScreenClear.Z, ScreenClear.W );
+	if( Outcome != 0 )
+		// NAME_Dev: the only general developer-log category that
+		// exists and fits here (UnNames.h's REGISTER_NAME list has no
+		// graphics-specific one; a fabricated NAME_DevGraphics was
+		// caught here before this ever compiled).
+		debugf( NAME_Dev, TEXT("WgpuDrv: Lock did not begin a frame (outcome code %i)"), Outcome );
 	unguard;
 }
 
 void UWgpuRenderDevice::Unlock( UBOOL Blit )
 {
 	guard(UWgpuRenderDevice::Unlock);
+	// Safe to call even if Lock above did not actually begin a frame
+	// (Outcome != 0): hp2_rs_wgpu_unlock/unlock_frame's own contract
+	// is to return false, not panic or corrupt state, when there is no
+	// frame in progress.
+	hp2_rs_wgpu_unlock( RustDevice, Blit != 0 );
 	unguard;
 }
 

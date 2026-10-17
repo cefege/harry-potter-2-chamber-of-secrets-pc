@@ -7,10 +7,38 @@
 	real game window (Viewport->GetWindow()), logging the plan's
 	"WgpuDrv: adapter "<name>" backend <X>" line. Non-macOS builds stay
 	headless (no Metal API to create a view from) until a Vulkan/DX12
-	surface path exists. There is still no draw-call forwarding and no
-	shader pipeline -- every other virtual is a safe no-op stub. This
-	class exists to prove the registration/build/ini-selection/surface
-	chain works end to end, not to render a frame yet.
+	surface path exists. Lock/Unlock call into the real per-frame
+	configure/acquire/clear/present path (hp2_rs_wgpu_lock/unlock,
+	crates/hp2-wgpu's lock_frame/unlock_frame) -- but nothing is drawn
+	into the frame yet, and there is no WGSL shader pipeline; every
+	virtual past Lock/Unlock/Init/Exit/SetRes is still a safe no-op
+	stub.
+
+	Observed, not yet explained: a real Build/run_wgpu_smoke.py
+	-testticks=60 run on this project's own development machine (a
+	real MacBook, its own built-in display active -- confirmed via
+	system_profiler/pmset/CGSessionCopyCurrentDictionary before
+	concluding anything about the machine itself) got outcome code 4
+	(Occluded, see hp2_wgpu::FrameOutcome's own doc) on all 60 of 60
+	ticks; zero frames were actually presented in that run. By
+	contrast, Tests/WgpuSurfaceTests.cpp passes reliably on the same
+	machine. The most likely difference between the two, not yet
+	isolated by turning each off one at a time, is that that test
+	applies several precautions Lock does not -- SDL_HINT_MAC_
+	BACKGROUND_APP, SDL_RaiseWindow, SDL_WINDOW_ALWAYS_ON_TOP, and
+	polling the present call itself for up to ~2 seconds -- while a
+	real `hp2_game -window` launch does none of those and Lock makes
+	only one attempt per tick. Lock deliberately does not poll the way
+	that test does: blocking the real game loop for up to ~2 seconds
+	on every single frame to work around this would be a bad trade even
+	if it turned out to help, since a frame failing to acquire is
+	already an expected, transient condition in real usage (minimized
+	window, display asleep) that the next tick's own Lock call
+	naturally retries for free. The engine itself handled the all-
+	Occluded run correctly regardless: Unlock is safe to call even when
+	Lock observed a non-zero outcome (hp2_wgpu::unlock_frame's own
+	contract), and the real run above completed all 60 ticks and shut
+	down cleanly with no crash.
 =============================================================================*/
 
 #ifndef _INCL_WGPUDRV_H_

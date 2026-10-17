@@ -1534,7 +1534,7 @@ if(HP2_ENABLE_WGPU_DRIVER)
             RESOURCE_LOCK hp2_gpu
             # Tests/WgpuSurfaceTests.cpp exits 77 only if the present-
             # once check observes a *persistent*
-            # PresentOnceOutcome::Occluded after ~2 seconds of polling
+            # FrameOutcome::Occluded after ~2 seconds of polling
             # with several activation/visibility precautions applied
             # (see that file's own, extensively-commented
             # investigation): wgpu-hal's Metal backend

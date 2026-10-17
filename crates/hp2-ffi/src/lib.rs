@@ -2682,6 +2682,7 @@ pub unsafe extern "C" fn hp2_rs_audio_find_least_important_sound(
 struct WgpuHandle {
     created: hp2_wgpu::CreatedDevice,
     backend_name: String,
+    render_loop: hp2_wgpu::RenderLoop,
 }
 
 /// Result of `hp2_rs_wgpu_create`. `handle` is null on total failure
@@ -2766,6 +2767,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_create(ns_view: *mut c_void) -> FfiWgpuCrea
         let handle = Box::new(WgpuHandle {
             created,
             backend_name,
+            render_loop: hp2_wgpu::RenderLoop::new(),
         });
         let adapter_name = handle.created.adapter_name.as_ptr();
         let adapter_name_len = handle.created.adapter_name.len();
@@ -2799,7 +2801,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
 }
 
 /// Testing-only: configures `handle`'s surface, acquires a frame, and
-/// presents it. Returns `hp2_wgpu::PresentOnceOutcome` as a raw `u32`
+/// presents it. Returns `hp2_wgpu::FrameOutcome` as a raw `u32`
 /// (`0` is `Presented`, the only success code -- see that enum's own
 /// doc for every other code's meaning) rather than a bare bool: a
 /// bare bool hid the real cause of this function's own first failing
@@ -2828,13 +2830,90 @@ pub unsafe extern "C" fn hp2_rs_wgpu_present_once_for_testing(
 ) -> u32 {
     guard(
         "hp2_rs_wgpu_present_once_for_testing",
-        hp2_wgpu::PresentOnceOutcome::InternalError as u32,
+        hp2_wgpu::FrameOutcome::InternalError as u32,
         move || {
             if handle.is_null() {
-                return hp2_wgpu::PresentOnceOutcome::InternalError as u32;
+                return hp2_wgpu::FrameOutcome::InternalError as u32;
             }
             let handle = unsafe { &*(handle as *mut WgpuHandle) };
             hp2_wgpu::configure_and_present_once(&handle.created, width, height) as u32
         },
     )
+}
+
+/// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`.
+/// `r`/`g`/`b`/`a` are the real engine's `ScreenClear` `FPlane`'s own
+/// `X`/`Y`/`Z`/`W` components -- confirmed the real clear color (not
+/// `FlashScale`/`FlashFog`, which XOpenGL stores for its own separate
+/// post-process tint, not the buffer clear) by reading XOpenGL.cpp's
+/// own `Lock`: `glClearColor(ScreenClear.X, ScreenClear.Y,
+/// ScreenClear.Z, ScreenClear.W)`. `width`/`height` are the real
+/// engine's current `Viewport->SizeX`/`SizeY` -- XOpenGL's own `Lock`
+/// reads the same fields the same way (`Max(1, Viewport->SizeX)`),
+/// confirmed before using this pattern, not guessed. Returns
+/// `hp2_wgpu::FrameOutcome` as a raw `u32` (`0` is `Presented`, the
+/// only success code here too -- see that enum's own doc).
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed). Must be called on the application's main thread
+/// (AppKit requirement, same as surface creation itself) if `handle`
+/// has a live surface.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_lock(
+    handle: *mut c_void,
+    width: u32,
+    height: u32,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> u32 {
+    guard(
+        "hp2_rs_wgpu_lock",
+        hp2_wgpu::FrameOutcome::InternalError as u32,
+        move || {
+            if handle.is_null() {
+                return hp2_wgpu::FrameOutcome::InternalError as u32;
+            }
+            let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+            let clear_color = wgpu::Color {
+                r: r as f64,
+                g: g as f64,
+                b: b as f64,
+                a: a as f64,
+            };
+            hp2_wgpu::lock_frame(
+                &handle.created,
+                &mut handle.render_loop,
+                width.max(1),
+                height.max(1),
+                clear_color,
+            ) as u32
+        },
+    )
+}
+
+/// Replaces the per-frame-end half of `UWgpuRenderDevice::Unlock`.
+/// `present` is the real `Unlock(UBOOL Blit)`'s own `Blit` parameter,
+/// passed through unchanged (`hp2_wgpu::unlock_frame`'s own doc has
+/// the detail on what it does with it). Returns `false` if `handle`
+/// has no frame in progress (`hp2_rs_wgpu_lock` was never called, or
+/// its last call did not return the success code `0`) -- a caller bug,
+/// not a real runtime condition.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_unlock(handle: *mut c_void, present: bool) -> bool {
+    guard("hp2_rs_wgpu_unlock", false, move || {
+        if handle.is_null() {
+            return false;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        hp2_wgpu::unlock_frame(&handle.created, &mut handle.render_loop, present)
+    })
 }
