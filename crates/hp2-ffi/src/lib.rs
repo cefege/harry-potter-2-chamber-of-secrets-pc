@@ -2166,3 +2166,83 @@ pub unsafe extern "C" fn hp2_rs_input_make_text_event(
         },
     )
 }
+
+/// Mirrors `hp2_platform::mouse_capture::Decision`
+/// (`action`: `Action::None/Release/Restore` as `0/1/2`; `cursor`:
+/// `Cursor::Hide/Leave/Show` as `-1/0/1`, both already `#[repr(i32)]`
+/// with explicit discriminants matching `HP2Capture::EAction`/
+/// `ECursor` exactly). Declared directly in this crate, same reason
+/// as `FfiInputEvent` above (cbindgen only parses this crate plus
+/// `hp2-ffi-support`).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiCaptureDecision {
+    pub action: i32,
+    pub cursor: i32,
+}
+
+impl From<hp2_platform::mouse_capture::Decision> for FfiCaptureDecision {
+    fn from(d: hp2_platform::mouse_capture::Decision) -> Self {
+        FfiCaptureDecision {
+            action: d.action as i32,
+            cursor: d.cursor as i32,
+        }
+    }
+}
+
+/// Replaces `HP2Capture::OnLoss` (`HP2MouseCapturePolicy.h:81-90`),
+/// called at `SDLViewport.cpp:434` for a loss-kind `SDL_WINDOWEVENT`.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_mouse_capture_on_loss(
+    currently_grabbed: bool,
+    loss_pending: bool,
+    capture_mouse_config: bool,
+) -> FfiCaptureDecision {
+    guard(
+        "hp2_rs_mouse_capture_on_loss",
+        FfiCaptureDecision {
+            action: 0,
+            cursor: 0,
+        },
+        || {
+            let state = hp2_platform::mouse_capture::State {
+                currently_grabbed,
+                loss_pending,
+                capture_mouse_config,
+            };
+            hp2_platform::mouse_capture::on_loss(&state).into()
+        },
+    )
+}
+
+/// Replaces `HP2Capture::OnRestore` (`HP2MouseCapturePolicy.h:93-102`),
+/// called at `SDLViewport.cpp:451` for a restore-kind
+/// `SDL_WINDOWEVENT`.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_mouse_capture_on_restore(
+    currently_grabbed: bool,
+    loss_pending: bool,
+    capture_mouse_config: bool,
+    has_input_focus: bool,
+    minimized_or_hidden: bool,
+) -> FfiCaptureDecision {
+    guard(
+        "hp2_rs_mouse_capture_on_restore",
+        FfiCaptureDecision {
+            action: 0,
+            cursor: 0,
+        },
+        || {
+            let state = hp2_platform::mouse_capture::State {
+                currently_grabbed,
+                loss_pending,
+                capture_mouse_config,
+            };
+            let window = hp2_platform::mouse_capture::WindowFlags {
+                has_input_focus,
+                minimized_or_hidden,
+            };
+            hp2_platform::mouse_capture::on_restore(&state, &window).into()
+        },
+    )
+}

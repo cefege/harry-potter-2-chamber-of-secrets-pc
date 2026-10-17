@@ -2,22 +2,26 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: one pure-decision module plus two
-//! FFI-wired cutovers, not the `USDLClient`/`USDLViewport` classes
-//! themselves.** `USDLClient : UClient, FNotifyHook` and
-//! `USDLViewport : UViewport` are UE1 `UObject`-derived classes
-//! (`DECLARE_CLASS`, `DECLARE_WITHIN(USDLClient)`) with large virtual
-//! interfaces (19 and 25 methods respectively) driven directly by the
-//! engine's viewport/client machinery. Porting those classes (the
-//! plan's "C++ stub forwards every virtual to `hp2_rs_platform_*`"
-//! design) needs the same kind of live-engine-object FFI boundary
-//! `hp2-audio` is blocked on -- see that crate's own module doc.
+//! **Scope of this crate today: three FFI-wired cutovers, not the
+//! `USDLClient`/`USDLViewport` classes themselves.** `USDLClient :
+//! UClient, FNotifyHook` and `USDLViewport : UViewport` are UE1
+//! `UObject`-derived classes (`DECLARE_CLASS`,
+//! `DECLARE_WITHIN(USDLClient)`) with large virtual interfaces (19 and
+//! 25 methods respectively) driven directly by the engine's viewport/
+//! client machinery. Porting those classes (the plan's "C++ stub
+//! forwards every virtual to `hp2_rs_platform_*`" design) needs the
+//! same kind of live-engine-object FFI boundary `hp2-audio` is
+//! blocked on -- see that crate's own module doc.
 //!
 //! - `mouse_capture`: `HP2MouseCapturePolicy.h`'s pure decision table
-//!   (`OnLoss`/`OnRestore`), consulted by `USDLViewport::UpdateInput`'s
-//!   `SDL_WINDOWEVENT` handler. Oracle:
+//!   (`OnLoss`/`OnRestore`). FFI-wired: both are thin forwards to
+//!   `hp2_rs_mouse_capture_on_loss`/`on_restore`; the C++ decision
+//!   logic that used to implement them is deleted. Called from
+//!   `USDLViewport::UpdateInput`'s `SDL_WINDOWEVENT` handler
+//!   (`SDLViewport.cpp:434/451`, unchanged) and
 //!   `Tests/InputContractTests.cpp`'s `TestMouseCapturePolicy`
-//!   (`mouse_capture_policy` ctest). Not yet FFI-wired.
+//!   (`mouse_capture_policy` ctest, unchanged) -- both now run
+//!   through Rust.
 //! - `input_event`: `HP2InputEvents.h`'s raw-SDL -> normalized-event
 //!   mapping functions. FFI-wired: `HP2InputEvents.h`'s five functions
 //!   (`HP2MapKeysym`, `HP2MakeKeyEvent`, `HP2MakeMouseButtonEvent`,

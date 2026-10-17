@@ -1,20 +1,34 @@
 /*=============================================================================
 	HP2MouseCapturePolicy.h: Pure decision seam for the SDL mouse-grab
-	state machine (wave 3 input-contract work).
+	state machine.
 =============================================================================*/
 
 #ifndef _INC_HP2_MOUSE_CAPTURE_POLICY
 #define _INC_HP2_MOUSE_CAPTURE_POLICY
 
-/*-----------------------------------------------------------------------------
-	This header freezes the mouse-capture decisions that used to live inline
-	in USDLViewport's SDL_WINDOWEVENT handler
-	(HarryPotter2/Unreal/SDLDrv/Src/SDLViewport.cpp). It is deliberately free of SDL and engine includes:
-	callers translate raw SDL events into the plain structs below and apply
-	the returned action through UpdateMouseGrabState().
+#include "hp2_rs.h"
 
-	Current truth frozen here (change only together with the table rows in
-	tests/input_contracts/mouse_capture_policy of Tests/InputContractTests.cpp):
+/*-----------------------------------------------------------------------------
+	`OnLoss`/`OnRestore` are thin forwards to the Rust
+	hp2_rs_mouse_capture_* FFI surface
+	(crates/hp2-platform/src/mouse_capture.rs, exported from
+	crates/hp2-ffi/src/lib.rs); the decision logic itself lives there,
+	not here. Called from USDLViewport's SDL_WINDOWEVENT handler
+	(SDLViewport.cpp:434/451) and from Tests/InputContractTests.cpp's
+	mouse_capture_policy ctest, which is this cutover's real evidence:
+	it calls these same functions, so a passing ctest means the Rust
+	decision table is correct, not a dead C++ copy of it.
+
+	This header stays deliberately free of SDL and engine includes
+	(besides hp2_rs.h): callers translate raw SDL events into the
+	plain structs below and apply the returned action through
+	UpdateMouseGrabState().
+
+	Current truth (change only together with the table rows in
+	tests/input_contracts/mouse_capture_policy of
+	Tests/InputContractTests.cpp, and crates/hp2-platform/src/
+	mouse_capture.rs's own test table, which the oracle is mirrored
+	against):
 
 	  - Loss events are SDL_WINDOWEVENT_FOCUS_LOST, _MINIMIZED and _HIDDEN.
 	    The grab is released only on the FIRST loss while grabbed; repeated
@@ -41,7 +55,10 @@
 
 namespace HP2Capture {
 
-// What the caller must do to the grab state.
+// What the caller must do to the grab state. Values match the Rust
+// port's Action enum (crates/hp2-platform/src/mouse_capture.rs)
+// exactly -- both default-numbered, pinned explicitly on the Rust
+// side since the value crosses this FFI boundary.
 enum EAction
 {
 	Action_None,     // no grab-state change
@@ -51,6 +68,9 @@ enum EAction
 
 // Expected cursor-visibility effect of the transition. Informational: the
 // application site gates Show/Hide on its own ActiveCursor != NULL check.
+// Values match the Rust port's Cursor enum exactly (Hide=-1, Leave=0,
+// Show=1, pinned explicitly on the Rust side since these are non-default
+// enum values that cross this FFI boundary).
 enum ECursor
 {
 	Cursor_Hide  = -1, // transition expects the cursor to become hidden
@@ -80,24 +100,18 @@ struct FDecision
 // Decision for one loss event (FOCUS_LOST / MINIMIZED / HIDDEN).
 inline FDecision OnLoss(const FState& S)
 {
-	if (!S.bLossPending && S.bCurrentlyGrabbed)
-	{
-		FDecision D = { Action_Release, Cursor_Show };
-		return D;
-	}
-	FDecision D = { Action_None, Cursor_Leave };
+	const FfiCaptureDecision Ffi = hp2_rs_mouse_capture_on_loss( S.bCurrentlyGrabbed, S.bLossPending, S.bCaptureMouseConfig );
+	FDecision D = { (EAction)Ffi.action, (ECursor)Ffi.cursor };
 	return D;
 }
 
 // Decision for one restore event (FOCUS_GAINED / RESTORED / SHOWN).
 inline FDecision OnRestore(const FState& S, const FWindowFlags& W)
 {
-	if (S.bLossPending && W.bHasInputFocus && !W.bMinimizedOrHidden)
-	{
-		FDecision D = { Action_Restore, S.bCaptureMouseConfig ? Cursor_Hide : Cursor_Leave };
-		return D;
-	}
-	FDecision D = { Action_None, Cursor_Leave };
+	const FfiCaptureDecision Ffi = hp2_rs_mouse_capture_on_restore(
+		S.bCurrentlyGrabbed, S.bLossPending, S.bCaptureMouseConfig,
+		W.bHasInputFocus, W.bMinimizedOrHidden );
+	FDecision D = { (EAction)Ffi.action, (ECursor)Ffi.cursor };
 	return D;
 }
 
