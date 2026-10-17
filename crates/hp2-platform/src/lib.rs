@@ -2,7 +2,7 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: four FFI-wired cutovers, not the
+//! **Scope of this crate today: five FFI-wired cutovers, not the
 //! `USDLClient`/`USDLViewport` classes themselves.** `USDLClient :
 //! UClient, FNotifyHook` and `USDLViewport : UViewport` are UE1
 //! `UObject`-derived classes (`DECLARE_CLASS`,
@@ -49,6 +49,20 @@
 //!   harness), so `Tests/PlatformMouseStateTests.cpp`
 //!   (`mouse_state_round_trip` ctest) is new coverage, not a ported
 //!   test.
+//! - `window_chrome`: `USDLViewport::UpdateWindowFrame`/`SetTitleBar`
+//!   (`SDLViewport.cpp:233-239/748-755`). FFI-wired: both bodies now
+//!   call `hp2_rs_platform_*`, `SdlWindow` passed through as an
+//!   opaque pointer (same design as `mouse_state`). The C++ `if
+//!   (SdlWindow) SDL_SetWindowBordered`/`SDL_SetWindowTitle` calls are
+//!   deleted. No existing oracle (same reason as `mouse_state`); new
+//!   coverage in `Tests/PlatformWindowChromeTests.cpp`
+//!   (`window_chrome_round_trip` ctest) -- a genuine round trip for
+//!   `set_title_bar` (set, then `SDL_GetWindowTitle` to compare), but
+//!   only a does-not-crash check for `update_window_frame`: SDL's
+//!   "dummy" video driver doesn't update
+//!   `SDL_GetWindowFlags`/`SDL_WINDOW_BORDERLESS` in response to
+//!   `SDL_SetWindowBordered` (confirmed empirically, not assumed),
+//!   so there is nothing stronger to assert under that driver.
 //!
 //! **`USDLViewport` and Phase 3 (the wgpu renderer) are not cleanly
 //! separable in the plan's stated order.** `OpenWindow` calls
@@ -61,19 +75,24 @@
 //! Rust before a render device exists on the Rust side to move it to.
 //!
 //! What can port independent of Phase 3, once the live-UObject FFI
-//! boundary is designed: window creation/chrome/cursor (`OpenWindow`'s
-//! `SDL_CreateWindow`/GL-attribute half, `UpdateWindowFrame`,
-//! `SetTitleBar`, `SetModeCursor`, `ToggleFullscreen`/`EndFullscreen`'s
-//! SDL half), the rest of the `UpdateInput` event pump (joystick axis/
-//! button/hat branches, pure given explicit `JoystickDeadZone`/
+//! boundary is designed: the rest of window creation/cursor
+//! (`OpenWindow`'s `SDL_CreateWindow`/GL-attribute half, no small
+//! self-contained piece of it ported yet; `SetModeCursor`, whose only
+//! real logic -- clamping `SelectedCursor` against the `SystemCursors`
+//! array -- is a C++-owned array index, leaving nothing worth porting
+//! on its own), the rest of the `UpdateInput` event pump (joystick
+//! axis/button/hat branches, pure given explicit `JoystickDeadZone`/
 //! `ScaleJBX`/`ScaleJBY`/`JoyHatFoldsToButtons` inputs; ungrabbed
 //! `SDL_MOUSEMOTION` dispatches straight to `Engine->MousePosition`
 //! with no `HP2Make*Event` call, so it is not part of `input_event`'s
-//! scope), joystick open/close
-//! (`USDLClient::OpenJoystick`/`CloseJoystick`), and macOS
-//! `TextToSpeech` (`fork`/`execl("/usr/bin/say")`, `:770-813`).
+//! scope), joystick open/close (`USDLClient::OpenJoystick`/
+//! `CloseJoystick` -- deferred: this dev environment has no real
+//! joystick hardware, so `SDL_JoystickOpen` always fails here and the
+//! device-present path is untestable without real hardware), and
+//! macOS `TextToSpeech` (`fork`/`execl("/usr/bin/say")`, `:770-813`).
 
 pub mod clipboard;
 pub mod input_event;
 pub mod mouse_capture;
 pub mod mouse_state;
+pub mod window_chrome;

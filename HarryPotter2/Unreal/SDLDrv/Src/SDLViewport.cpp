@@ -233,8 +233,7 @@ void USDLViewport::SetModeCursor()
 void USDLViewport::UpdateWindowFrame()
 {
 	guard(USDLViewport::UpdateWindowFrame);
-	if( SdlWindow )
-		SDL_SetWindowBordered( SdlWindow, GetOuterUSDLClient()->BorderlessWindow ? SDL_FALSE : SDL_TRUE );
+	hp2_rs_platform_update_window_frame( SdlWindow, GetOuterUSDLClient()->BorderlessWindow != 0 );
 	unguard;
 }
 
@@ -749,12 +748,9 @@ void USDLViewport::SetTopness()
 void USDLViewport::SetTitleBar( const TCHAR* Title )
 {
 	guard(USDLViewport::SetTitleBar);
-	if( SdlWindow )
-	{
-		TArray<ANSICHAR> Utf8;
-		TextToUtf8( Title, Utf8 );
-		SDL_SetWindowTitle( SdlWindow, &Utf8(0) );
-	}
+	TArray<ANSICHAR> Utf8;
+	TextToUtf8( Title, Utf8 );
+	hp2_rs_platform_set_title_bar( SdlWindow, reinterpret_cast<const uint8_t*>(&Utf8(0)), strlen(&Utf8(0)) );
 	unguard;
 }
 

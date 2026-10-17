@@ -2315,3 +2315,49 @@ pub unsafe extern "C" fn hp2_rs_platform_update_mouse_grab_state(
         },
     )
 }
+
+/// Replaces `USDLViewport::UpdateWindowFrame` (`SDLViewport.cpp:233-239`).
+/// `sdl_window` may be null, matching the real C++'s own guard.
+///
+/// # Safety
+/// `sdl_window`, if non-null, must be a valid `SDL_Window*` for the
+/// duration of this call.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_update_window_frame(
+    sdl_window: *mut c_void,
+    borderless: bool,
+) {
+    guard("hp2_rs_platform_update_window_frame", (), move || unsafe {
+        hp2_platform::window_chrome::update_window_frame(
+            sdl_window as *mut hp2_platform::window_chrome::SdlWindow,
+            borderless,
+        )
+    })
+}
+
+/// Replaces `USDLViewport::SetTitleBar` (`SDLViewport.cpp:749-759`).
+/// `sdl_window` may be null, matching the real C++'s own guard.
+/// `title`/`title_len` are UTF-8, not NUL-terminated.
+///
+/// # Safety
+/// `sdl_window`, if non-null, must be a valid `SDL_Window*` for the
+/// duration of this call. `(title, title_len)` must be valid for
+/// reads of that length, or null with length 0.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_set_title_bar(
+    sdl_window: *mut c_void,
+    title: *const u8,
+    title_len: usize,
+) {
+    guard("hp2_rs_platform_set_title_bar", (), move || unsafe {
+        let Some(title) = str_from_raw(title, title_len) else {
+            return;
+        };
+        hp2_platform::window_chrome::set_title_bar(
+            sdl_window as *mut hp2_platform::window_chrome::SdlWindow,
+            title,
+        )
+    })
+}
