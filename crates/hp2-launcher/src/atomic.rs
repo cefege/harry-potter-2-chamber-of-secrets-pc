@@ -28,6 +28,21 @@ use std::io::{self, Write};
 use std::os::fd::IntoRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
+/// Replaces `Join`.
+pub(crate) fn join(a: &str, b: &str) -> String {
+    if a.is_empty() {
+        return b.to_string();
+    }
+    if b.is_empty() {
+        return a.to_string();
+    }
+    if a.ends_with('/') {
+        format!("{a}{b}")
+    } else {
+        format!("{a}/{b}")
+    }
+}
+
 /// Replaces `Parent`. Matches the real C++ exactly, including its own
 /// quirk for a path with no `/` at all: `path.substr(0, std::string::
 /// npos)` when no slash is found copies the *entire* input back
@@ -321,39 +336,8 @@ pub fn names(path: &str, missing_okay: bool) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::tempdir;
     use std::os::unix::fs::MetadataExt;
-
-    // Local copy of `hp2_import::util::test_support::TempDir` (that
-    // helper is `pub(crate)` to its own crate, so it can't be shared
-    // across crates): a unique, auto-removed scratch directory per
-    // call, keyed on pid + a monotonic counter rather than wall-clock
-    // time so parallel test threads never collide on the same name.
-    struct TempDir(std::path::PathBuf);
-
-    impl TempDir {
-        fn path(&self) -> &std::path::Path {
-            &self.0
-        }
-    }
-
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn tempdir() -> TempDir {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "hp2-launcher-test-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
 
     // --- parent/base: verified against the real C++ `Parent`/`Base`
     // via a throwaway probe. ---
