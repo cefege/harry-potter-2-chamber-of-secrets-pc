@@ -9,12 +9,13 @@
 //!
 //! **Not in this module: every filesystem-touching function in
 //! `HP2LauncherStore.cpp`** -- `Stage`/`Publish`/`Backup`/`Discard`/
-//! `RestorePublishedFile` (atomic staged writes), the `openat`/
-//! `O_NOFOLLOW`-based directory-fd traversal security hardening
-//! (`OpenDirectoryNoFollow`, `OpenDirectoryAtNoFollow`,
+//! `RestorePublishedFile` (atomic staged writes, see `atomic.rs`), the
+//! `openat`/`O_NOFOLLOW`-based directory-fd traversal security
+//! hardening (`OpenDirectoryNoFollow`, `OpenDirectoryAtNoFollow`,
 //! `DirectoryNamesAt`, `CopyRegularFileAt`, `CopyLegacyTreeAt`,
-//! `RemoveTreeAt`, and friends), save discovery (`DiscoverSaves`),
-//! profile staging/publishing (`StageProfile`/`PublishProfile`/
+//! `RemoveTreeAt`, and friends, see `tree.rs`), save discovery
+//! (`DiscoverSaves` and its helpers, see `saves.rs`), profile
+//! staging/publishing (`StageProfile`/`PublishProfile`/
 //! `RemovePublishedProfile`), legacy-tree migration
 //! (`MigrateLegacySettings` and its helpers), and the top-level
 //! `Load`/`Commit*` orchestration functions that call all of the
@@ -45,7 +46,7 @@ fn lower(value: u8) -> u8 {
 }
 
 /// Replaces `Lowercase`.
-fn lowercase(value: &str) -> String {
+pub(crate) fn lowercase(value: &str) -> String {
     value.bytes().map(lower).map(|b| b as char).collect()
 }
 
