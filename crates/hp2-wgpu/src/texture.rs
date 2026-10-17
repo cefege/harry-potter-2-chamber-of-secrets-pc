@@ -14,25 +14,29 @@
 //! once lightmap upload is actually implemented; recorded here so the
 //! decision is not lost before that lands.
 
-/// Byte-for-byte mirror of the real `FColor` (`UnTex.h`): a union of
-/// one `DWORD` (`Int4`) and four `BYTE`s in `R, G, B, A` memory order
-/// on this project's own real build targets. `__INTEL_BYTE_ORDER__`
-/// is unconditionally `1` for every platform this codebase actually
-/// builds for (`UnGnuG.h`: macOS/Linux arm64 and x86_64, Emscripten --
-/// each with its own `#error ... require little-endian byte order`
-/// assertion right next to the `#define`), so the real in-memory
-/// layout is always `R, G, B, A`, never the big-endian `A, B, G, R`
-/// alternative in the same union -- confirmed by reading `UnTex.h`'s
-/// own union definition and every platform header that sets the
-/// macro, not assumed from the name alone.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct FColor {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
-    pub a: u8,
-}
+/// Real `FColor` (`UnTex.h`), re-used from `hp2-abi` rather than
+/// redefined here (caught on review: an earlier version of this
+/// module defined its own `#[repr(C)] struct FColor` with no
+/// `align(4)`, which would have been a real layout bug if this value
+/// ever became a direct view of raw `FTextureInfo::Palette` memory --
+/// `hp2_abi::FColor` is already probe-verified against the real C++
+/// layout, including that `align(4)` from the real `union { DWORD
+/// Int4; struct {...}; }`, and its own doc already covers the real
+/// R,G,B,A memory order this module's "no swizzle needed for
+/// Rgba8Unorm" claim below depends on, not duplicated here). Rust-
+/// internal only: never crosses the FFI boundary through cbindgen
+/// (this module has no `extern "C"` functions at all yet), so this
+/// does not risk the real redefinition collision a `SceneFrame`-level
+/// change would have -- `hp2_rs.h` is `#include`d in many real C++
+/// translation units that already define their own `class FColor`/
+/// `FCoords`/`FVector` from the real UE1 headers (confirmed before
+/// considering this: WgpuDrv.cpp, SDLClient.cpp, ALAudioSubsystem.cpp,
+/// and others), so cbindgen must never be told to emit a conflicting
+/// typedef for any of those three names -- `SceneFrame`'s own flat
+/// `[f32; 3]` fields deliberately stay as they are for exactly this
+/// reason, not changed to `hp2_abi::FCoords` despite the superficial
+/// appeal of a direct struct-pointer pass-through.
+pub use hp2_abi::FColor;
 
 /// Real source's `MASKED_TEXTURE_TAG`/`FixCacheID`-driven behavior
 /// (`SetTexture.cpp`'s own comment: "we might render the textures
@@ -96,7 +100,12 @@ mod tests {
     use super::*;
 
     fn reference_palette() -> [FColor; 256] {
-        let mut palette = [FColor::default(); 256];
+        let mut palette = [FColor {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }; 256];
         for (i, entry) in palette.iter_mut().enumerate() {
             // Distinct, recognizable per-index values, not all-zero:
             // a bug that only showed up for a non-zero index (e.g. an

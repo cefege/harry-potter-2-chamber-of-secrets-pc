@@ -58,6 +58,29 @@ void UWgpuRenderDevice::StaticConstructor()
 	// same two properties -- plain UBoolProperty, CPF_Config, no enum.
 	new(GetClass(), TEXT("OneXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(OneXBlending), TEXT("Options"), CPF_Config);
 	new(GetClass(), TEXT("ActorXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(ActorXBlending), TEXT("Options"), CPF_Config);
+
+	// Real bug fix (caught on review): an earlier version of this
+	// default-seeding assignment lived in Init(), which this class's
+	// own commit history at the time wrongly claimed matched
+	// XOpenGL.cpp's own Init. It does not -- XOpenGL.cpp's real
+	// OneXBlending = 1; ActorXBlending = 1; sit inside its own
+	// StaticConstructor (lines 122-303), well before its Init starts
+	// at line 367, confirmed by reading the actual function
+	// boundaries, not assumed from a nearby line number. The
+	// distinction is not cosmetic: StaticConstructor runs once on the
+	// class default object, and UE1's CPF_Config loading applies ini
+	// values on top of those defaults when an instance is configured
+	// -- the correct place for a default. Init() runs again on every
+	// fullscreen toggle (this file's own Init has a comment on
+	// exactly that), so seeding these fields there would silently
+	// stomp a real ini-configured value back to the hardcoded default
+	// on every single toggle, not just the first run.
+	OneXBlending = ActorXBlending = 1;
+	// Gamma: see this class's own header comment on why this stays a
+	// fixed 1.0f for now (no gamma-ramp subsystem ported yet). Seeded
+	// here, not in Init, for the same real reason as the two
+	// properties above.
+	Gamma = 1.0f;
 	unguard;
 }
 
@@ -66,17 +89,6 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	guard(UWgpuRenderDevice::Init);
 	Viewport = InViewport;
 
-	// Matches XOpenGL.cpp's own Init (OneXBlending = 1; ActorXBlending
-	// = 1;): real, already-shipped default-seeding behavior, not a new
-	// design choice -- these are CPF_Config properties, so a real ini
-	// value loaded before this runs is overwritten here on every Init
-	// call (including the fullscreen-toggle re-Init noted above),
-	// same as the reference implementation. SetSceneNode's own
-	// FrameUniforms wiring reads these directly.
-	OneXBlending = ActorXBlending = 1;
-	// Gamma: see this class's own header comment on why this stays a
-	// fixed 1.0f for now (no gamma-ramp subsystem ported yet).
-	Gamma = 1.0f;
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
 	// existing device/view first so repeated toggles don't leak one
@@ -359,6 +371,23 @@ void UWgpuRenderDevice::SetSceneNode( FSceneNode* Frame )
 	Scene.gamma = Scene.is_ortho ? 1.0f : Gamma;
 	Scene.light_color_intensity = ActorXBlending ? 1.0f : 1.5f;
 	Scene.light_map_intensity = OneXBlending ? 2.0f : 4.0f;
+
+	// Real evidence this override actually runs, not just that
+	// nothing crashed when it did (caught on review: a prior ctest
+	// pass alone proved no crash, not that this code path was ever
+	// reached -- SetSceneNode could have been skipped entirely by
+	// engine-side logic and the same test would still have passed).
+	// Once only, not every call: SetSceneNode runs many times per
+	// frame (3D world, HUD/Canvas, portals/mirrors/sub-viewports),
+	// so an unconditional debugf here would spam the log on every
+	// single one of those, every tick.
+	static UBOOL LoggedFirstCall = 0;
+	if( !LoggedFirstCall )
+	{
+		LoggedFirstCall = 1;
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode first call: is_ortho=%i fx=%f fy=%f effective_fov=%f"),
+			Scene.is_ortho, Scene.fx, Scene.fy, Scene.effective_fov_angle );
+	}
 
 	hp2_rs_wgpu_set_scene_node( RustDevice, &Scene );
 	unguard;

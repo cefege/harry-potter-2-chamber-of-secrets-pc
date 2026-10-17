@@ -9,6 +9,7 @@ publish.workspace = true
 name = "hp2_wgpu"
 
 [dependencies]
+hp2-abi.workspace = true
 wgpu.workspace = true
 glam.workspace = true
 log.workspace = true

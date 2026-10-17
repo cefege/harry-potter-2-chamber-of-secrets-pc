@@ -451,6 +451,7 @@ name = "hp2-wgpu"
 version = "0.1.0"
 dependencies = [
  "glam",
+ "hp2-abi",
  "log",
  "naga",
  "pollster",

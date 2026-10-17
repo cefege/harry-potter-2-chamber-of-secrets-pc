@@ -424,10 +424,29 @@
 //! of introducing permutation-cache machinery to avoid building at
 //! all; plus a small, separate `HashMap<BlendMode, wgpu::
 //! RenderPipeline>` per draw-call-type shader for the actual pipeline-
-//! level blend-state axis, `BlendMode` being a 3-4-value enum
-//! (Opaque/AlphaBlended/Masked, mirroring `SetBlend`'s own real
-//! `PolyFlags`-driven GL state, not the full `ShaderCompilationOptions`
-//! cross-product). This also means the earlier open question about a
+//! level blend-state axis. `BlendMode` is not a simple 3-4-value enum
+//! (`Opaque`/`AlphaBlended`/`Masked`) as an earlier version of this
+//! paragraph claimed, caught on review after actually reading
+//! `SetTexture.cpp`'s real `SetBlend` in full rather than guessing
+//! its shape from `PolyFlags`' own bit names: it is seven distinct
+//! `glBlendFunc` combinations (Lumos -- `PF_LumosAffected`'s full
+//! mask, HP2-specific, driven by the renderer's own computed `cAlpha`
+//! distance fade; Invisible; Highlighted, two sub-variants gated by
+//! `PF_Translucent`; Translucent, two sub-variants gated by
+//! `SimulateMultiPass` -- the dual-source one needs `wgpu::Features::
+//! DUAL_SOURCE_BLENDING` plus WGSL's `enable dual_source_blending`/
+//! `@blend_src(1)`, unavailable on WebGL2, so not the base path;
+//! Modulated; Opaque, the fallback), plus two more axes `SetBlend`
+//! itself also changes in the same real function (`glColorMask` for
+//! `PF_Invisible`, `glDepthMask` for `PF_Occlude`) and `SetZTestMode`
+//! changes separately (7 depth-compare modes), plus a `HitTesting()`
+//! override that forces `(One, Zero)` unconditionally. The real
+//! pipeline-cache key is this derived blend/depth-write/depth-compare
+//! state, not raw `PolyFlags` or `ShaderCompilationOptions`' `OPT_Is*`
+//! bits directly -- `Masked` itself is not a blend mode at all in the
+//! real source (it is a fragment-shader `discard` plus ordinary
+//! opaque blending, already correctly modeled as a per-pixel branch
+//! in WGSL, not a pipeline-level axis). This also means the earlier
 //! "per-specialization" WGSL inter-stage-location budget (`DrawComplex`
 //! paragraph above) is moot under this design: there is only one real
 //! varying layout per shader module, not one per specialization, so
@@ -911,7 +930,19 @@ impl RenderLoop {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("hp2-wgpu frame uniforms"),
                 size: std::mem::size_of::<FrameUniforms>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                // COPY_SRC: lets this crate's own
+                // set_scene_node_creates_and_writes_a_real_uniform_buffer
+                // test (and any future debug-readback tooling) copy
+                // this buffer's real contents out for verification --
+                // negligible cost on a 528-byte buffer, and an earlier
+                // version without it made that test's own
+                // copy_buffer_to_buffer call fail wgpu's real
+                // validation (confirmed by actually running it, not
+                // assumed: "Usage flags ... do not contain required
+                // usage flags BufferUsages(COPY_SRC)").
+                usage: wgpu::BufferUsages::UNIFORM
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             })
         });
@@ -1563,16 +1594,27 @@ mod tests {
 
     #[test]
     fn frame_uniforms_wireframe_zfar_changes_the_far_plane() {
-        let mut scene = reference_perspective_scene();
-        scene.is_wireframe_zfar = true;
-        let out = compute_frame_uniforms(&scene);
-        let far_world = glam::Vec4::new(0.0, 0.0, 131072.0, 1.0);
-        let far_clip = out.modelviewproj_mat * far_world;
-        assert!(
-            ((far_clip.z / far_clip.w) - 1.0).abs() < 1e-3,
-            "expected the real editor-wireframe zFar (131072, not 65336) to be the far plane \
-             when is_wireframe_zfar is set, got NDC z {}",
-            far_clip.z / far_clip.w
+        // Real bug, caught on review: an earlier version of this test
+        // checked a world point at the real wireframe zFar (131072)
+        // against a 1e-3 NDC-z tolerance -- that passes even when
+        // is_wireframe_zfar is silently ignored and the matrix always
+        // uses 65336, because perspective depth is hyperbolic: with
+        // near=1, far=65336, a point at z=131072 already projects to
+        // NDC z ~= 1.0000077 (empirically computed before relying on
+        // it, not assumed), well inside that tolerance regardless of
+        // which real zFar the matrix was built with. Comparing
+        // proj_mat directly between the two flag settings sidesteps
+        // the whole precision trap: the matrices must differ at all
+        // if is_wireframe_zfar has any effect, with no NDC-precision
+        // question involved.
+        let normal = compute_frame_uniforms(&reference_perspective_scene());
+        let mut wireframe_scene = reference_perspective_scene();
+        wireframe_scene.is_wireframe_zfar = true;
+        let wireframe = compute_frame_uniforms(&wireframe_scene);
+        assert_ne!(
+            normal.proj_mat, wireframe.proj_mat,
+            "expected is_wireframe_zfar to produce a genuinely different projection matrix \
+             (different zFar), not an identical one"
         );
     }
 
@@ -1624,20 +1666,67 @@ mod tests {
             .expect("expected a buffer to exist after set_scene_node")
             .size();
         assert_eq!(buffer_size, std::mem::size_of::<FrameUniforms>() as u64);
-        // Real proof the write actually reached the GPU and the
-        // device is still in a valid state after it, not just that
-        // create_buffer/write_buffer didn't panic: submit an empty
-        // encoder and poll to completion, the same pattern this
-        // crate's own create_device_sync_produces_a_working_device
-        // test already uses.
-        let encoder = created
+        // Real proof the write actually reached the GPU with the
+        // right bytes, not just that create_buffer/write_buffer/
+        // submit didn't error (caught on review: an earlier version
+        // of this test only submitted an empty encoder and polled,
+        // which only proves the device didn't error -- it says
+        // nothing about whether the uploaded bytes are what
+        // compute_frame_uniforms actually produced, and would not
+        // have caught a wrong offset/size in queue.write_buffer's own
+        // call, or a bug in the unsafe FrameUniforms-to-bytes
+        // reinterpretation that call depends on). Copies the real
+        // buffer into a MAP_READ staging buffer and compares the
+        // mapped bytes against compute_frame_uniforms's own output
+        // computed independently here, byte for byte.
+        let expected = compute_frame_uniforms(&reference_perspective_scene());
+        let expected_bytes = unsafe {
+            std::slice::from_raw_parts(
+                &expected as *const FrameUniforms as *const u8,
+                std::mem::size_of::<FrameUniforms>(),
+            )
+        };
+        let readback = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame uniforms readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = created
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(
+            loop_state.frame_uniforms_buffer().unwrap(),
+            0,
+            &readback,
+            0,
+            buffer_size,
+        );
         created.queue.submit(std::iter::once(encoder.finish()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
         created
             .device
             .poll(wgpu::PollType::wait_indefinitely())
-            .expect("device poll should succeed after a real uniform buffer write");
+            .expect("device poll should succeed while mapping the readback buffer");
+        rx.recv()
+            .expect("map_async callback should have fired")
+            .expect("mapping the readback buffer should succeed");
+        let mapped_bytes: Vec<u8> = readback
+            .slice(..)
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async")
+            .to_vec();
+        assert_eq!(
+            mapped_bytes, expected_bytes,
+            "expected the bytes actually uploaded to the GPU buffer to match \
+             compute_frame_uniforms's own real output exactly"
+        );
+        readback.unmap();
         // A second call must reuse the same buffer, not leak a new one
         // every tick -- real per-frame cost if it did (SetSceneNode's
         // own FrameStateBuffer is a persistent, reused GL buffer too).
@@ -1712,80 +1801,61 @@ mod tests {
         );
     }
 
-    // Tries to prove an explicit BackendChoice is genuinely honored
-    // end to end, not silently treated as Auto -- weaker on this
-    // specific machine than intended, stated honestly rather than
-    // overclaimed. The real goal was `BackendChoice::Gl`: a backend
-    // `Auto` (`Backends::PRIMARY | Backends::GL`) would only ever
-    // fall back to, never prefer, so a device genuinely reporting
-    // `wgpu::Backend::Gl` would be real proof the explicit choice
-    // reached `to_wgpu`/`build_instance`, not a coincidence of what
-    // Auto would have picked anyway. Tried that first (caught on
-    // review before committing a weaker `BackendChoice::Metal`
-    // version that could not have told the two apart) -- it failed:
-    // this Apple Silicon development machine genuinely has no GL
-    // adapter at all (confirmed by actually running it and reading
-    // the real panic, not assumed: Apple deprecated and removed
-    // OpenGL support). `enumerate_adapters(Backends::all())` below
-    // confirms that absence directly, rather than inferring it from
-    // one failed request. With no second real backend available on
-    // this hardware, `Metal` is the only backend this test can
-    // exercise end to end here, and `Auto` would pick the exact same
-    // one -- the two really are indistinguishable by result on this
-    // specific machine, not a weaker test by choice. This still
-    // proves `create_device_sync(BackendChoice::Metal, ...)` reaches
-    // a working device (real coverage `create_device_sync_produces_
-    // a_working_device`'s own `Auto` call doesn't add), just not the
-    // stronger "a different backend than Auto would pick" claim this
-    // test's name might otherwise suggest. A machine with a second
-    // real backend (Vulkan on Linux/Windows, Dx12 on Windows) would
-    // let this test request that one instead and actually distinguish
-    // the two paths; not available to run here.
+    // Proves an explicit BackendChoice is genuinely honored end to
+    // end, not silently treated as Auto -- discriminates correctly
+    // on this machine regardless of whether a real GL adapter exists
+    // here or not (caught on review: an earlier version of this test
+    // used `BackendChoice::Metal`, which this machine's `Auto` would
+    // also pick, so it could not tell "the choice was honored" apart
+    // from "Auto happened to land on the same backend anyway"; a
+    // second version then tried `enumerate_adapters` to work around
+    // that, more complex than necessary). The real, simpler proof:
+    // `BackendChoice::Gl` is a backend `Auto` (`Backends::PRIMARY |
+    // Backends::GL`) would only ever fall back to, never prefer over
+    // Metal on this machine -- so if the explicit choice were
+    // silently ignored and treated as Auto, this call would return
+    // `Some(Metal)`. `None` (genuinely no GL adapter) or
+    // `Some(Gl)` (a GL adapter that really exists) both correctly
+    // prove the choice reached `to_wgpu`/`build_instance`; only
+    // `Some(Metal)` (or any other backend) would mean it did not.
+    // This machine genuinely has no GL adapter (confirmed by
+    // actually running this test and reading the real `None` result,
+    // not assumed): not because Apple removed OpenGL -- the
+    // framework still ships on macOS -- but because wgpu's own GL
+    // backend goes through EGL/ANGLE on every platform, and macOS has
+    // neither present by default (an earlier version of this comment
+    // said "Apple deprecated and removed OpenGL support", which
+    // overstated the real cause -- corrected on review). This also
+    // means the real `Backends::GL`-only retry inside
+    // `create_device_sync` genuinely runs and genuinely fails here
+    // too (`choice` is `Gl` already, so the retry is skipped per its
+    // own doc -- this call exercises the no-retry-when-already-Gl
+    // branch specifically, not the retry path itself).
     #[test]
     #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
     fn create_device_sync_honors_an_explicit_backend_choice() {
-        let all_adapters = pollster::block_on(
-            build_instance(BackendChoice::Auto).enumerate_adapters(wgpu::Backends::all()),
-        );
-        let available_backends: std::collections::HashSet<wgpu::Backend> = all_adapters
-            .iter()
-            .map(|adapter| adapter.get_info().backend)
-            .collect();
-        println!("enumerate_adapters(Backends::all()) found: {available_backends:?}");
-        assert!(
-            available_backends.contains(&wgpu::Backend::Metal),
-            "expected at least a Metal adapter on this development machine"
-        );
-
-        let result = create_device_sync(BackendChoice::Metal, None::<HeadlessSurfaceCreator>);
-        let created = result.expect("expected BackendChoice::Metal to produce a real device here");
-        assert_eq!(
-            created.backend,
-            wgpu::Backend::Metal,
-            "expected the explicit BackendChoice::Metal request to produce a device actually \
-             reporting the Metal backend"
-        );
-        if available_backends.len() > 1 {
-            println!(
-                "{} non-Metal backend(s) also available on this machine \
-                 ({available_backends:?}) -- this run's Metal result is genuine \
-                 discriminating proof, not a coincidence of Auto's own preference",
-                available_backends.len() - 1
-            );
-        } else {
-            println!(
-                "only Metal is available on this machine (enumerate_adapters confirmed no \
-                 other real backend exists here) -- Auto would have picked Metal too, so this \
-                 run cannot distinguish \"the explicit choice was honored\" from \"Auto would \
-                 have produced the same result anyway\"; stated honestly, not claimed as \
-                 stronger proof than it is"
-            );
+        let result = create_device_sync(BackendChoice::Gl, None::<HeadlessSurfaceCreator>);
+        match result {
+            None => println!(
+                "BackendChoice::Gl genuinely found no adapter on this machine -- correct \
+                 discriminating result: Auto would have returned Some(Metal) instead if the \
+                 explicit choice had been silently ignored"
+            ),
+            Some(created) => {
+                assert_eq!(
+                    created.backend,
+                    wgpu::Backend::Gl,
+                    "expected BackendChoice::Gl to either find no adapter at all, or a real Gl \
+                     one -- Some(Metal) specifically would mean the explicit choice was \
+                     silently ignored and treated as Auto instead"
+                );
+                println!(
+                    "BackendChoice::Gl honored: created device on adapter {:?} backend {}",
+                    created.adapter_name,
+                    backend_name(created.backend)
+                );
+            }
         }
-        println!(
-            "BackendChoice::Metal honored: created device on adapter {:?} backend {}",
-            created.adapter_name,
-            backend_name(created.backend)
-        );
     }
 
     #[test]
