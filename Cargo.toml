@@ -22,6 +22,7 @@ hp2-platform = { path = "crates/hp2-platform" }
 hp2-abi = { path = "crates/hp2-abi" }
 hp2-wgpu = { path = "crates/hp2-wgpu" }
 wgpu = "=30.0.1"
+naga = "=30.0.1"
 pollster = "=1.0.1"
 raw-window-handle = "=0.6.2"
 sha2 = "=0.10.9"

@@ -13,3 +13,6 @@ wgpu.workspace = true
 log.workspace = true
 pollster.workspace = true
 raw-window-handle.workspace = true
+
+[dev-dependencies]
+naga.workspace = true

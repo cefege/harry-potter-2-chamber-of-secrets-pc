@@ -445,6 +445,7 @@ name = "hp2-wgpu"
 version = "0.1.0"
 dependencies = [
  "log",
+ "naga",
  "pollster",
  "raw-window-handle",
  "wgpu",

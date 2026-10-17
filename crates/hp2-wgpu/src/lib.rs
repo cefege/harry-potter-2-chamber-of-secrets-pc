@@ -811,4 +811,128 @@ mod tests {
         assert_eq!(backend_name(wgpu::Backend::Gl), "Gl");
         assert_eq!(backend_name(wgpu::Backend::BrowserWebGpu), "BrowserWebGpu");
     }
+
+    // Plan's own V2 verification: "cargo test -p hp2-wgpu validates
+    // every .wgsl via naga". No GPU adapter needed -- parsing and
+    // validating WGSL is pure CPU-side work naga does without touching
+    // any backend, so this runs in CI (ci.yml's runners have no GPU)
+    // unlike the two #[ignore]d tests above.
+    //
+    // ValidationFlags::default()/Capabilities::default(): the same
+    // defaults `Validator::new`'s own doc describes as rejecting any
+    // module that uses capabilities beyond `capabilities` -- the
+    // conservative, no-extensions-assumed baseline, appropriate here
+    // since simple.wgsl itself declares no `enable`/capability
+    // requirements.
+    #[test]
+    fn simple_wgsl_parses_and_validates() {
+        let source = include_str!("shaders/simple.wgsl");
+        let module = naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|e| panic!("simple.wgsl failed to parse: {e}"));
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::default(),
+            naga::valid::Capabilities::default(),
+        );
+        validator
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("simple.wgsl failed naga validation: {e}"));
+    }
+
+    // Stronger than naga validation alone -- and stronger than only
+    // calling `create_shader_module`, which an earlier version of this
+    // test did and wrongly described as proving a Metal compile
+    // (caught on review): reading wgpu-hal's own Metal backend
+    // (wgpu-hal-30.0.1/src/metal/device.rs's `create_shader_module`)
+    // shows the `ShaderInput::Naga` case -- what `ShaderSource::Wgsl`
+    // actually produces -- only wraps the naga IR
+    // (`ShaderModuleSource::Naga(naga)`), no MSL text, no
+    // `device.newLibraryWithSource_options_error` call (the real
+    // Metal shader compiler) at all. That real call only happens for
+    // the separate `ShaderInput::Msl` case. The real MSL translation
+    // and compiler invocation for a WGSL-sourced module happens later,
+    // inside `create_render_pipeline` -- so this test creates a real
+    // (if minimal) pipeline, not just a shader module, to actually
+    // exercise that path. `layout: None` lets wgpu derive the bind
+    // group layout from `simple.wgsl`'s own `@group`/`@binding`
+    // declarations instead of this test hand-constructing one that
+    // could itself drift out of sync with the shader and mask a real
+    // mismatch.
+    //
+    // push_error_scope(Validation)/pop_error_scope: wgpu's
+    // create_shader_module/create_render_pipeline return their handles
+    // unconditionally (not a Result), with any real compile error
+    // surfacing later through this out-of-band error-scope mechanism
+    // instead -- confirmed by reading their real signatures before
+    // relying on this, not assumed from create_device_sync's own
+    // device.poll pattern. Same #[ignore] reasoning as the other
+    // real-GPU tests above: needs a real adapter, CI runners have
+    // none.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn simple_wgsl_pipeline_compiles_on_a_real_adapter() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let scope = created
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = created
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("simple.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/simple.wgsl").into()),
+            });
+        let vertex_attributes = [wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0,
+        }];
+        let _pipeline = created
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("simple.wgsl pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: 12, // 3 * size_of::<f32>(), matching Coords: vec3<f32>
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &vertex_attributes,
+                    })],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        if let Some(err) = pollster::block_on(scope.pop()) {
+            panic!(
+                "simple.wgsl's pipeline failed to compile on real adapter {:?} backend {}: {err}",
+                created.adapter_name,
+                backend_name(created.backend)
+            );
+        }
+        println!(
+            "simple.wgsl's pipeline compiled successfully (real MSL translation + Metal \
+             compiler invocation exercised) on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
 }
