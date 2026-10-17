@@ -10,4 +10,5 @@ name = "hp2_import"
 
 [dependencies]
 hp2-ffi-support.workspace = true
+hp2-ini.workspace = true
 sha2.workspace = true

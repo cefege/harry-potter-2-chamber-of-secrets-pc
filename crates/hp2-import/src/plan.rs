@@ -1,14 +1,36 @@
 //! Replaces `HP2ImportPlan.cpp`'s `Generated`/`AddRequired`/
-//! `ResolveLinkMode` -- the self-contained helpers `Plan`'s full
-//! orchestration (not yet ported; needs the real retail/prototype data
-//! trees to verify the profile-specific asset-count contracts
-//! `ValidatePlan` checks) builds on.
+//! `ResolveLinkMode`/`ValidatePlan`. `Plan` itself (the orchestration
+//! that calls `CollectSide`/the cutscene collectors and builds the
+//! actual asset list `ValidatePlan` checks) is not ported yet: this
+//! machine has no retail data tree (`overlay-manifest.json` doesn't
+//! exist anywhere in the repo, and nothing under the tree looks like
+//! retail data), so end-to-end `Plan()` parity isn't something this
+//! environment can verify. `ValidatePlan` itself needs no such data --
+//! it's a pure function of an already-built asset list, tested here
+//! with synthetic `Asset` vectors matching each profile's documented
+//! count contracts, not real collected data.
+//!
+//! `ValidatePlan` is C++-anonymous-namespace (`namespace { ... }`),
+//! so unlike `CollectSide` and the cutscene collectors it cannot be
+//! called from an external probe at all -- there is no real-compiled-
+//! C++ cross-check for this function the way there was for those.
+//! Ported by careful line-by-line transcription instead, verified
+//! against the C++ source's exact conditions and `Fail` message text,
+//! with a synthetic-fixture test for the early checks every profile
+//! shares (collision, invalid path, retail Ogg count) and for a
+//! representative sample of each profile's own branches -- not
+//! exhaustively all ~15 distinct `Fail` call sites, which would be
+//! diminishing-returns repetition of the same transcription-checking
+//! pattern already exercised by the ones that are covered.
 
 use std::collections::BTreeMap;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::path::Path;
 
+use hp2_ini::Profile;
+
+use crate::classify::is_prohibited;
 use crate::collect::Asset;
 use crate::hash::hash_bytes;
 use crate::lower::lower;
@@ -159,6 +181,271 @@ pub enum LinkMode {
     Hardlink = 2,
 }
 
+const CRITICAL_RETAIL_PATHS: [&str; 14] = [
+    "System/Core.u",
+    "System/Editor.u",
+    "System/Engine.u",
+    "System/Fire.u",
+    "System/HGame.u",
+    "System/HPModels.u",
+    "System/HPParticle.u",
+    "System/HProps.u",
+    "System/HPSounds.u",
+    "System/UnrealShare.u",
+    "System/UWindow.u",
+    "Textures/HP2_Master.utx",
+    "Textures/HP2_Menu.utx",
+    "Sounds/AllDialog.USA_uax",
+];
+const RETAIL_ONLY_REQUIRED_PATHS: [&str; 2] = ["Maps/Entry.unr", "Textures/HP_Menu.utx"];
+const RETAIL_FINAL_LOCALIZATION: [&str; 12] = [
+    "System/BumpDialog.int",
+    "System/BumpSet.int",
+    "System/Credits.int",
+    "System/Duelset.int",
+    "System/hpcredits.int",
+    "System/hpdialog.int",
+    "System/HPMenu.int",
+    "System/QuidSet.int",
+    "System/BumpDialog.usa",
+    "System/hpcredits.usa",
+    "System/HpDialog.usa",
+    "System/HpMenu.usa",
+];
+
+/// Replaces `ValidatePlan`. A pure function of an already-built asset
+/// list -- see the module doc for why this is tested with synthetic
+/// fixtures rather than a real compiled-C++ cross-check.
+pub fn validate_plan(plan: &[Asset], profile: Profile) -> Result<(), String> {
+    let mut exact: BTreeMap<String, Asset> = BTreeMap::new();
+    let mut folded: BTreeMap<String, Asset> = BTreeMap::new();
+    for asset in plan {
+        let folded_key = lower(&asset.path);
+        if let Some(prior) = folded.get(&folded_key) {
+            return Err(fail(format!(
+                "case-insensitive planned output collision: {} and {}",
+                prior.path, asset.path
+            )));
+        }
+        folded.insert(folded_key, asset.clone());
+        let root = asset.path.split('/').next().unwrap_or("");
+        if !matches!(
+            root,
+            "System" | "Maps" | "Textures" | "Sounds" | "Music" | "Help"
+        ) || is_prohibited(&asset.path)
+        {
+            return Err(fail(format!("invalid planned output path: {}", asset.path)));
+        }
+        exact.insert(asset.path.clone(), asset.clone());
+    }
+    let count = |source: &str, prefix: &str, suffix: &str| -> usize {
+        let prefix_key = lower(prefix);
+        let suffix_key = lower(suffix);
+        plan.iter()
+            .filter(|a| {
+                a.source == source
+                    && lower(&a.path).starts_with(&prefix_key)
+                    && lower(&a.path).ends_with(&suffix_key)
+            })
+            .count()
+    };
+    let retail_maps = count("retail", "Maps/", ".unr");
+    let prototype_maps = count("prototype", "Maps/", ".unr");
+    let retail_oggs = count("retail", "Music/", ".ogg");
+    if retail_oggs != 141 {
+        return Err(fail(format!(
+            "retail Ogg contract mismatch: expected 141, found {retail_oggs}"
+        )));
+    }
+    match profile {
+        Profile::Full => {
+            let cutscenes = count("retail", "System/Cutscenes/", ".int");
+            if retail_maps != 42 || prototype_maps != 58 {
+                return Err(fail(format!(
+                    "full map contract mismatch: retail={retail_maps}, prototype-only={prototype_maps}"
+                )));
+            }
+            for a in plan {
+                if a.source == "prototype"
+                    && lower(&a.path).starts_with("maps/")
+                    && lower(&a.path).ends_with(".unr")
+                    && a.classification != "prototype_only"
+                {
+                    return Err(fail(
+                        "a full-profile prototype fallback map is not classified prototype_only",
+                    ));
+                }
+            }
+            if cutscenes != 214 {
+                return Err(fail(format!(
+                    "full retail cutscene contract mismatch: expected 214, found {cutscenes}"
+                )));
+            }
+            for path in CRITICAL_RETAIL_PATHS {
+                add_required(&exact, path, "retail")?;
+            }
+            for path in RETAIL_FINAL_LOCALIZATION {
+                add_required(&exact, path, "retail")?;
+            }
+        }
+        Profile::RetailOnly => {
+            let cutscenes = count("retail", "System/Cutscenes/", ".int");
+            if retail_maps != 42 || prototype_maps != 0 {
+                return Err(fail(format!(
+                    "retail-only map contract mismatch: retail={retail_maps}, prototype={prototype_maps}"
+                )));
+            }
+            if cutscenes != 213 && cutscenes != 214 {
+                return Err(fail(format!(
+                    "retail-only cutscene contract mismatch: expected 213 or 214, found {cutscenes}"
+                )));
+            }
+            for a in plan {
+                if a.source != "retail" && a.source != "generated" {
+                    return Err(fail(format!(
+                        "retail-only payload has forbidden source {}: {}",
+                        a.source, a.path
+                    )));
+                }
+                if a.source == "retail" && a.classification != "retail_asset" {
+                    return Err(fail(format!(
+                        "retail-only asset has invalid classification: {}",
+                        a.path
+                    )));
+                }
+                if a.source == "generated" {
+                    if a.path != "System/Default.ini" && a.path != "System/DefUser.ini" {
+                        return Err(fail(format!(
+                            "unexpected generated retail-only payload: {}",
+                            a.path
+                        )));
+                    }
+                    if a.classification != "generated_retail_native" {
+                        return Err(fail(format!(
+                            "generated config is not marked retail-native: {}",
+                            a.path
+                        )));
+                    }
+                    for source in &a.sources {
+                        if !source.starts_with("retail:") {
+                            return Err(fail(format!(
+                                "generated config has a non-retail template: {}",
+                                a.path
+                            )));
+                        }
+                    }
+                }
+            }
+            for path in CRITICAL_RETAIL_PATHS {
+                add_required(&exact, path, "retail")?;
+            }
+            for path in RETAIL_FINAL_LOCALIZATION {
+                add_required(&exact, path, "retail")?;
+            }
+            for path in RETAIL_ONLY_REQUIRED_PATHS {
+                add_required(&exact, path, "retail")?;
+            }
+            add_required(&exact, "System/Default.ini", "generated")?;
+            add_required(&exact, "System/DefUser.ini", "generated")?;
+            for root in ["System", "Maps", "Textures", "Sounds", "Music"] {
+                let found = plan
+                    .iter()
+                    .any(|a| a.source == "retail" && a.path.starts_with(&format!("{root}/")));
+                if !found {
+                    return Err(fail(format!(
+                        "configured retail-only Paths category has no payload: {root}"
+                    )));
+                }
+            }
+            if retail_maps == 0 || retail_oggs == 0 {
+                return Err(fail(
+                    "retail-only requires at least one map and one music file",
+                ));
+            }
+        }
+        Profile::Safe => {
+            let cutscenes = count("prototype", "System/Cutscenes/", ".int");
+            if retail_maps != 0 || prototype_maps != 100 {
+                return Err(fail(format!(
+                    "safe map contract mismatch: retail={retail_maps}, prototype={prototype_maps}"
+                )));
+            }
+            for a in plan {
+                if a.source == "prototype"
+                    && lower(&a.path).starts_with("maps/")
+                    && lower(&a.path).ends_with(".unr")
+                    && a.classification != "prototype_baseline"
+                {
+                    return Err(fail(
+                        "a safe-profile map is not classified prototype_baseline",
+                    ));
+                }
+            }
+            if cutscenes != 185 {
+                return Err(fail(format!(
+                    "safe prototype cutscene contract mismatch: expected 185, found {cutscenes}"
+                )));
+            }
+            for a in plan {
+                if a.source == "retail"
+                    && (lower(&a.path).starts_with("system/")
+                        || lower(&a.path).starts_with("maps/")
+                        || lower(&a.path).starts_with("sounds/")
+                        || lower(&a.path).starts_with("help/"))
+                {
+                    return Err(fail(
+                        "safe profile contains retail runtime packages, maps, sounds, localization, or Help",
+                    ));
+                }
+            }
+            let mut prototype_textures = 0usize;
+            let mut retail_textures: Vec<String> = Vec::new();
+            for a in plan {
+                if a.source == "prototype" && lower(&a.path).starts_with("textures/") {
+                    prototype_textures += 1;
+                }
+                if a.source == "retail" && lower(&a.path).starts_with("textures/") {
+                    retail_textures.push(a.path.clone());
+                }
+            }
+            if prototype_textures != 52
+                || retail_textures != vec!["Textures/HP2_Menu.utx".to_string()]
+            {
+                return Err(fail(format!(
+                    "safe texture contract mismatch: prototype={prototype_textures}, retail=[{}]",
+                    retail_textures.first().map(String::as_str).unwrap_or("")
+                )));
+            }
+            for path in [
+                "System/Core.u",
+                "System/Editor.u",
+                "System/Engine.u",
+                "System/Fire.u",
+                "System/HGame.u",
+                "System/HPModels.u",
+                "System/HPParticle.u",
+                "System/HProps.u",
+                "System/HPSounds.u",
+                "System/UnrealShare.u",
+                "System/UWindow.u",
+                "Textures/HP2_Master.utx",
+                "Sounds/AllDialog.uax",
+            ] {
+                add_required(&exact, path, "prototype")?;
+            }
+            add_required(&exact, "Textures/HP2_Menu.utx", "retail")?;
+            for key in exact.keys() {
+                if key == "Sounds/AllDialog.USA_uax" || lower(key).ends_with(".usa") {
+                    return Err(fail(
+                        "safe profile must use prototype INT/AllDialog localization, not retail USA",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +569,197 @@ mod tests {
         for _ in 0..200 {
             assert!(seen.insert(random_probe_name()));
         }
+    }
+
+    fn asset(source: &str, path: &str, classification: &str) -> Asset {
+        Asset {
+            source: source.to_string(),
+            path: path.to_string(),
+            classification: classification.to_string(),
+            ..Asset::default()
+        }
+    }
+
+    fn many(count: usize, source: &str, root: &str, ext: &str, classification: &str) -> Vec<Asset> {
+        // Embeds `source` in the filename so two `many()` calls with the
+        // same root/ext/index range (e.g. retail and prototype Maps/)
+        // never collide at the same path.
+        (0..count)
+            .map(|i| {
+                asset(
+                    source,
+                    &format!("{root}/{source}-file{i:04}.{ext}"),
+                    classification,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn validate_plan_fails_on_a_case_insensitive_collision_before_any_count_check() {
+        let plan = vec![
+            asset("prototype", "System/Game.u", ""),
+            asset("prototype", "SYSTEM/GAME.U", ""),
+        ];
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(
+            err,
+            "case-insensitive planned output collision: System/Game.u and SYSTEM/GAME.U"
+        );
+    }
+
+    #[test]
+    fn validate_plan_fails_on_a_root_outside_the_six_allowed_categories() {
+        let plan = vec![asset("prototype", "BadRoot/file.txt", "")];
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(err, "invalid planned output path: BadRoot/file.txt");
+    }
+
+    #[test]
+    fn validate_plan_fails_on_a_prohibited_path_under_an_otherwise_valid_root() {
+        let plan = vec![asset("prototype", "System/payload.exe", "")];
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(err, "invalid planned output path: System/payload.exe");
+    }
+
+    #[test]
+    fn validate_plan_fails_on_the_retail_ogg_count_before_any_profile_branch() {
+        // Checked before the profile match, so this applies identically
+        // regardless of which profile is passed.
+        let err = validate_plan(&[], Profile::Safe).unwrap_err();
+        assert_eq!(err, "retail Ogg contract mismatch: expected 141, found 0");
+    }
+
+    /// A fully valid Safe-profile plan: every count contract and every
+    /// `AddRequired` path satisfied simultaneously. Built once and reused
+    /// (cloned, then perturbed) by the negative tests below instead of
+    /// hand-writing a fresh large fixture per test.
+    fn valid_safe_plan() -> Vec<Asset> {
+        let mut plan = Vec::new();
+        plan.extend(many(141, "retail", "Music", "ogg", ""));
+        plan.extend(many(100, "prototype", "Maps", "unr", "prototype_baseline"));
+        plan.extend(many(185, "prototype", "System/Cutscenes", "int", ""));
+        // 51 + the required Textures/HP2_Master.utx below = 52 total
+        // prototype textures (that required path is itself a
+        // "textures/"-prefixed prototype asset, counted the same way).
+        plan.extend(many(51, "prototype", "Textures", "utx", ""));
+        plan.push(asset("retail", "Textures/HP2_Menu.utx", ""));
+        for path in [
+            "System/Core.u",
+            "System/Editor.u",
+            "System/Engine.u",
+            "System/Fire.u",
+            "System/HGame.u",
+            "System/HPModels.u",
+            "System/HPParticle.u",
+            "System/HProps.u",
+            "System/HPSounds.u",
+            "System/UnrealShare.u",
+            "System/UWindow.u",
+            "Textures/HP2_Master.utx",
+            "Sounds/AllDialog.uax",
+        ] {
+            plan.push(asset("prototype", path, ""));
+        }
+        plan
+    }
+
+    #[test]
+    fn validate_plan_accepts_a_fully_valid_safe_profile_plan() {
+        validate_plan(&valid_safe_plan(), Profile::Safe).unwrap();
+    }
+
+    #[test]
+    fn validate_plan_fails_when_a_safe_required_prototype_payload_is_missing() {
+        let mut plan = valid_safe_plan();
+        plan.retain(|a| a.path != "System/Core.u");
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(err, "missing required payload: System/Core.u");
+    }
+
+    #[test]
+    fn validate_plan_fails_when_safe_profile_contains_a_retail_system_asset() {
+        let mut plan = valid_safe_plan();
+        plan.push(asset("retail", "System/Extra.u", ""));
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(
+            err,
+            "safe profile contains retail runtime packages, maps, sounds, localization, or Help"
+        );
+    }
+
+    #[test]
+    fn validate_plan_fails_when_safe_profile_has_a_usa_localization_file() {
+        let mut plan = valid_safe_plan();
+        // Swap the one allowed retail texture for a disallowed .usa file
+        // under a required exact path so the earlier AddRequired checks
+        // still pass before reaching the USA scan.
+        plan.push(asset("prototype", "Sounds/Extra.usa", ""));
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(
+            err,
+            "safe profile must use prototype INT/AllDialog localization, not retail USA"
+        );
+    }
+
+    #[test]
+    fn validate_plan_fails_when_a_safe_map_is_not_classified_prototype_baseline() {
+        let mut plan = valid_safe_plan();
+        // Corrupt one map's classification; it's still counted toward
+        // the 100-map total (classification doesn't affect `count`), so
+        // this reaches the classification check, not the count check.
+        for a in &mut plan {
+            if a.path == "Maps/prototype-file0000.unr" {
+                a.classification = "wrong".to_string();
+            }
+        }
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(
+            err,
+            "a safe-profile map is not classified prototype_baseline"
+        );
+    }
+
+    #[test]
+    fn validate_plan_full_profile_requires_classified_prototype_only_fallback_maps() {
+        let mut plan = Vec::new();
+        plan.extend(many(141, "retail", "Music", "ogg", ""));
+        plan.extend(many(42, "retail", "Maps", "unr", ""));
+        plan.extend(many(58, "prototype", "Maps", "unr", "wrong_classification"));
+        let err = validate_plan(&plan, Profile::Full).unwrap_err();
+        assert_eq!(
+            err,
+            "a full-profile prototype fallback map is not classified prototype_only"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_rejects_a_forbidden_source() {
+        let mut plan = Vec::new();
+        plan.extend(many(141, "retail", "Music", "ogg", "retail_asset"));
+        plan.extend(many(42, "retail", "Maps", "unr", "retail_asset"));
+        plan.extend(many(
+            213,
+            "retail",
+            "System/Cutscenes",
+            "int",
+            "retail_asset",
+        ));
+        plan.push(asset("prototype", "System/Leftover.u", ""));
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "retail-only payload has forbidden source prototype: System/Leftover.u"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_map_count_mismatch_is_reported_with_both_counts() {
+        let plan = many(141, "retail", "Music", "ogg", "");
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "retail-only map contract mismatch: retail=0, prototype=0"
+        );
     }
 }

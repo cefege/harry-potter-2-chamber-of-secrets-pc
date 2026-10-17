@@ -163,6 +163,7 @@ name = "hp2-import"
 version = "0.1.0"
 dependencies = [
  "hp2-ffi-support",
+ "hp2-ini",
  "sha2",
 ]
 
