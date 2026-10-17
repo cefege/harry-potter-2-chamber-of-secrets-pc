@@ -50,10 +50,6 @@
 // `Features::DUAL_SOURCE_BLENDING`, not guaranteed on every backend or
 // web, deferred as a feature-gated follow-up).
 
-struct FrameUniforms {
-    modelviewproj_mat: mat4x4<f32>,
-}
-
 struct DrawParameters {
     draw_color: vec4<f32>,
     draw_flags: u32,
@@ -63,16 +59,21 @@ struct DrawParameters {
 // *provisional* capacity, not yet the real per-build-generated value.
 const MAX_DRAWS: u32 = 256u;
 
-@group(0) @binding(0) var<uniform> frame: FrameUniforms;
+// frame: FrameUniforms (group 0, binding 0) comes from common.wgsl --
+// shared by every shader, not redeclared here (see common.wgsl's own
+// header).
 @group(1) @binding(0) var<uniform> draw_params: array<DrawParameters, MAX_DRAWS>;
-// Bound once per flushed batch, not per draw call -- DrawTile.cpp's
-// SubmitTileBatch only ever has one TMU-bound diffuse texture active at
-// a time (SetTexture before the batch starts), and a texture change is
-// one of the state changes that forces a flush of any already-buffered
-// tiles first (confirmed by reading DrawComplex.cpp's/DrawGouraud.cpp's/
-// DrawTile.cpp's shared flush-on-state-change batching, surveyed in this
-// crate's module doc), so unlike draw_params this never needs per-draw
-// indexing.
+// Bound once per flushed batch, not per draw call -- a texture change
+// is one of the state changes that forces a flush of any
+// already-buffered tiles first, same as a blend/specialization change:
+// `SetTexture.cpp:515`'s `Shaders[ActiveProgram]->Flush(false)`, called
+// right before the new texture's `CacheID` becomes the TMU's
+// `CurrentCacheID` (an earlier version of this comment wrongly cited
+// `DrawTile.cpp`'s own blend/specialization flush instead -- that one
+// is real too, but is not the texture-change trigger; corrected on
+// review to cite the actual call site this crate's Rust batcher will
+// need to reproduce), so unlike `draw_params` this texture never needs
+// per-draw indexing.
 @group(2) @binding(0) var diffuse_texture: texture_2d<f32>;
 @group(2) @binding(1) var diffuse_sampler: sampler;
 

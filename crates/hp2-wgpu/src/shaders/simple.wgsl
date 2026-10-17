@@ -84,10 +84,6 @@
 // GLSL-convention matrix unmodified. Recorded here so the decision is
 // made once, not re-litigated per shader.
 
-struct FrameUniforms {
-    modelviewproj_mat: mat4x4<f32>,
-}
-
 struct DrawParameters {
     draw_color: vec4<f32>,
 }
@@ -96,7 +92,11 @@ struct DrawParameters {
 // not yet the real per-build-generated value.
 const MAX_DRAWS: u32 = 256u;
 
-@group(0) @binding(0) var<uniform> frame: FrameUniforms;
+// frame: FrameUniforms (group 0, binding 0) comes from common.wgsl --
+// shared by every shader, not redeclared here (an earlier version of
+// this file declared its own smaller, incompatible struct; see
+// common.wgsl's own header for why that was a real problem, caught on
+// review).
 // Matches the GLSL array-indexed-by-DrawID shape (see the correction
 // note above): a fixed-size uniform array, the portable equivalent of
 // GLSL's UBO fallback.

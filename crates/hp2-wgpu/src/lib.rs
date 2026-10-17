@@ -166,12 +166,25 @@
 //! point-per-tile) even though the actual per-corner expansion
 //! arithmetic still has to move from the deleted geometry shader into
 //! either the vertex shader (`vertex_index`-based) or C++/Rust-side
-//! CPU quad expansion. `DrawGouraud` has no such alternative to copy
-//! -- there is only one `DrawGouraudProgram` class, no ES/Core split,
-//! and its geometry shader runs unconditionally for every Gouraud
-//! (polygon) draw; the vertex/fragment-only replacement described
-//! above has to be designed fresh from reading what that geometry
-//! shader does, not copied from an existing alternate implementation.
+//! CPU quad expansion.
+//!
+//! `DrawGouraud`'s geometry shader is not a single-path thing to design
+//! a replacement for from scratch, the way an earlier version of this
+//! paragraph wrongly claimed (caught on review, corrected after
+//! confirming `DrawGouraud.cpp:376`'s real `GeoShaderFunc =
+//! RenDev->UsingGeometryShaders ? &BuildGeometryShader : nullptr; //
+//! optional`): it is genuinely optional, gated by a runtime flag, and
+//! `DrawGouraudProgram`'s own vertex shader already has a complete,
+//! already-in-production `#else` branch for when it is off
+//! (`DrawGouraud_GLSL.cpp` lines 100-118) that does the final
+//! `modelviewprojMat` transform directly, no geometry stage involved
+//! -- `gouraud.wgsl` (this crate's third real shader port) already
+//! transcribes exactly that branch, not a freshly-designed
+//! replacement. What *is* still real and undesigned: the
+//! `OPT_BumpMaps && OPT_HasBumpMap` tangent/bitangent computation the
+//! geometry shader does when it does run, which `gouraud.wgsl`'s base
+//! path correctly defers (see that file's own header) rather than
+//! needing to solve to port the base, non-bump-mapped path at all.
 //! For bindless textures and SSBO draw parameters specifically, the
 //! non-bindless/non-SSBO fallback branches (not a separate `*ESProgram`
 //! class, just an `#if`/runtime-flag branch within the same shader

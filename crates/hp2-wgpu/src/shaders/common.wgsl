@@ -60,10 +60,47 @@
 // crate's own module doc) hasn't been designed yet; the function itself is
 // trivial and costs nothing to have ready.
 
-// == `ShaderDrawFlags::DF_Masked`/`DF_AlphaBlended`, confirmed against
-// ThirdParty/XOpenGLDrv/Inc/XOpenGL.h:1221,1227.
+// == `ShaderDrawFlags::DF_Masked`/`DF_Modulated`/`DF_RenderFog`/
+// `DF_AlphaBlended`, confirmed against
+// ThirdParty/XOpenGLDrv/Inc/XOpenGL.h:1221-1227.
 const DRAW_FLAG_MASKED: u32 = 0x0100u;
+const DRAW_FLAG_MODULATED: u32 = 0x0400u;
+const DRAW_FLAG_RENDER_FOG: u32 = 0x2000u;
 const DRAW_FLAG_ALPHA_BLENDED: u32 = 0x4000u;
+
+// == GLSL's shared `FrameState` uniform block, confirmed against
+// ShaderProgram.cpp's real `layout(std140) uniform FrameState { ... };`
+// -- the real source emits this exact struct into *every* shader
+// program, not a per-shader variant, so it is ported here once rather
+// than redeclared per shader file (an earlier version of simple.wgsl/
+// tile.wgsl/gouraud.wgsl each declared their own, smaller, mutually
+// incompatible `FrameUniforms` struct containing only the one or two
+// fields that particular shader happened to read -- caught on review
+// as a real problem: it would have forced the Rust side to keep a
+// separate frame-buffer layout per pipeline instead of the one shared
+// buffer the real engine updates once per frame). Every field from the
+// real struct is ported, including ones no shader in this crate reads
+// yet (`lightSpaceMat`, `Gamma`, etc.) -- `DrawComplex`'s eventual port
+// will need several of them (`FrameCoords`/`FrameUncoords` for its
+// point-light loops, `Gamma` for color correction), and redeclaring
+// this struct a third time with yet another different field subset is
+// exactly the problem being fixed here.
+struct FrameUniforms {
+    proj_mat: mat4x4<f32>,
+    view_mat: mat4x4<f32>,
+    model_mat: mat4x4<f32>,
+    modelview_mat: mat4x4<f32>,
+    modelviewproj_mat: mat4x4<f32>,
+    light_space_mat: mat4x4<f32>,
+    frame_coords: mat4x4<f32>,
+    frame_uncoords: mat4x4<f32>,
+    gamma: f32,
+    light_map_intensity: f32,
+    light_color_intensity: f32,
+    y_scale: f32,
+}
+
+@group(0) @binding(0) var<uniform> frame: FrameUniforms;
 
 fn plane_dot(plane: vec4<f32>, point: vec3<f32>) -> f32 {
     return dot(plane.xyz, point) - plane.w;

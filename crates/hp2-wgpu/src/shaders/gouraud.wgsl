@@ -1,5 +1,4 @@
-// gouraud.wgsl: WGSL port of the *base* (non-bump-mapped,
-// non-hardware-lit) path of ThirdParty/XOpenGLDrv/Src/DrawGouraud_GLSL.cpp's
+// gouraud.wgsl: WGSL port of ThirdParty/XOpenGLDrv/Src/DrawGouraud_GLSL.cpp's
 // `DrawGouraudProgram` (vertex shader read in full, geometry shader read in
 // full, fragment shader read through its main diffuse/light/fog/detail
 // blend path and its OPT_Editor-gated tail -- `OPT_MacroTextures` and
@@ -9,28 +8,27 @@
 // `DrawGouraudProgram`, confirmed by reading `DrawGouraud.cpp` in full
 // per this crate's own module doc).
 //
-// Geometry shader: `layout(triangles) in; layout(triangle_strip,
-// max_vertices = 3) out;`, with a `for (i in 0..3) { ...; EmitVertex(); }`
-// body -- confirmed, by reading the full body, to never amplify topology:
-// exactly one triangle out per triangle in. Its real purpose is
-// `OPT_BumpMaps`-only: computing one tangent/bitangent *per triangle*
-// (`GetTangent`/`GetBitangent`, needing all three vertices' positions and
-// UVs at once, which a per-vertex-only vertex shader cannot do) and
-// deferring the final `modelviewprojMat` transform to this stage (the
-// vertex shader only emits object-space `gl_Position = vec4(Coords, 1.0)`
-// when `OPT_GeometryShaders` is on, because the tangent/bitangent math
-// needs object-space, not clip-space, input). Confirms this crate's own
-// earlier scoping decision rather than changing it: no WGSL geometry-stage
-// equivalent exists, and the portable replacement for the tangent/
-// bitangent computation this geometry shader exists for is fragment-shader
-// screen-space derivatives (`dpdx`/`dpdy`) -- not yet implemented, because
-// it is purely a bump-mapping concern (`OPT_BumpMaps && OPT_HasBumpMap`),
-// out of scope for this base-path port the same way DrawComplex's parallax
-// and bump-mapping sections are. The MVP transform this file's vertex
-// shader does is the plain, always-correct `OPT_GeometryShaders`-off GLSL
-// branch (`gl_Position = modelviewprojMat * vec4(Coords, 1.0)`) -- the
-// right one to port from regardless of bump-map status, since it is what
-// every non-bump-mapped draw already uses today.
+// Geometry shader: genuinely optional, not a mandatory part of this
+// program the way an earlier version of this file's own header claimed
+// (caught on review, corrected after confirming `DrawGouraud.cpp:376`'s
+// real `GeoShaderFunc = RenDev->UsingGeometryShaders ?
+// &BuildGeometryShader : nullptr; // optional`). When it does run:
+// `layout(triangles) in; layout(triangle_strip, max_vertices = 3) out;`,
+// with a `for (i in 0..3) { ...; EmitVertex(); }` body -- confirmed, by
+// reading the full body, to never amplify topology: exactly one triangle
+// out per triangle in. Its real purpose is `OPT_BumpMaps`-only: computing
+// one tangent/bitangent *per triangle* (`GetTangent`/`GetBitangent`,
+// needing all three vertices' positions and UVs at once, which a
+// per-vertex-only vertex shader cannot do) and deferring the final
+// `modelviewprojMat` transform to this stage for that reason. This file
+// transcribes the already-in-production, already-complete `#else`
+// (`!OPT_GeometryShaders`) branch of the same `DrawGouraudProgram`'s own
+// vertex shader (`DrawGouraud_GLSL.cpp` lines 100-118) instead, which
+// does the final MVP transform directly, no geometry stage involved, and
+// is exactly what every non-bump-mapped draw already uses today
+// regardless of whether geometry shaders happen to be enabled -- not a
+// freshly-designed replacement, a direct transcription of an existing
+// code path.
 //
 // Real per-vertex Gouraud shading, not texture-sampled lighting (the
 // architectural distinction this crate's module doc already flagged from
@@ -51,20 +49,32 @@
 // this crate: `GetTexel`'s non-bindless branch (`common.wgsl`'s
 // `get_texel`) needs only the bound texture/sampler, never a handle.
 //
+// The real GLSL fragment shader's diffuse/light/fog blend is a tree of
+// four mutually-exclusive compile-time `#if OPT_IsRenderFog`/`#if
+// OPT_IsModulated` branches (`DrawGouraud_GLSL.cpp` lines 290-351, read
+// in full and ported in full here, not just the one branch an earlier,
+// incomplete version of this file ported -- caught on review: "any actor
+// in a fog zone and every modulated mesh renders incorrectly" without
+// these). Ported as runtime branches on `draw_flags`, following the same
+// pattern `apply_poly_flags` already established in `common.wgsl`, since
+// WGSL has no compile-time per-specialization branch selection matching
+// GLSL's `#if` here (the broader shader-specialization question is still
+// open, scoped elsewhere in this crate's module doc; these four mutually
+// exclusive branches don't need that resolved first, the same reasoning
+// already applied to `apply_poly_flags`).
+//
 // Not yet ported, left honestly absent rather than stubbed, each a real
 // `#if`-gated GLSL branch, not an invented scope cut:
 // - `OPT_HWLighting`'s real per-pixel point-light loop (replaces
-//   `In.LightColor` with a computed sum when on) -- this base path always
-//   uses the real vertex-interpolated `LightColor` instead, which is the
+//   `In.LightColor` with a computed sum when on) -- this file always uses
+//   the real vertex-interpolated `LightColor` instead, which is the
 //   correct, already-production behavior when `OPT_HWLighting` is off.
-// - `OPT_IsRenderFog`'s real-time fog blend (both its `OPT_IsModulated`
-//   and non-modulated sub-branches) -- this base path always takes the
-//   `!OPT_IsRenderFog` branch (`TotalColor = Color * vec4(LightColor.rgb,
-//   1.0)` for the non-modulated case ported here; `OPT_IsModulated`'s
-//   `TotalColor = Color` deferred along with it, both real PolyFlags-
-//   driven branches, not examined deeply enough yet to port correctly).
 // - `OPT_DetailTextures`/`OPT_MacroTextures` (detail/macro texture HSV
-//   recoloring, same technique as `DrawComplex`'s, not yet transcribed).
+//   recoloring, same technique as `DrawComplex`'s, not yet transcribed --
+//   and, per this crate's own module doc, the detail-texture loop samples
+//   inside non-uniform control flow the same way the parallax loops do,
+//   so it will need the same `textureSampleGrad`/`textureSampleLevel`
+//   treatment when it is ported, not plain `textureSample`).
 // - `OPT_BumpMaps` (needs the fragment-derivative tangent-space
 //   reconstruction noted above, not yet designed).
 // - `OPT_Editor`'s debug render modes and hit-testing color override
@@ -72,11 +82,6 @@
 //   as `DrawComplex`'s).
 // - `OPT_SimulateMultiPass`'s second color output (same real
 //   dual-source-blending constraint documented in simple.wgsl's header).
-
-struct FrameUniforms {
-    modelviewproj_mat: mat4x4<f32>,
-    light_color_intensity: f32,
-}
 
 struct DrawParameters {
     // == GLSL's DiffuseInfo.xy (TexCoords scale) and .z/.w (diffuse
@@ -91,7 +96,9 @@ struct DrawParameters {
 // *provisional* capacity, not yet the real per-build-generated value.
 const MAX_DRAWS: u32 = 256u;
 
-@group(0) @binding(0) var<uniform> frame: FrameUniforms;
+// frame: FrameUniforms (group 0, binding 0) comes from common.wgsl --
+// shared by every shader, not redeclared here (see common.wgsl's own
+// header).
 @group(1) @binding(0) var<uniform> draw_params: array<DrawParameters, MAX_DRAWS>;
 // Same reasoning as tile.wgsl: bound once per flushed batch, not per
 // draw call -- PrepareGouraudCall's SetTexture call is one of the state
@@ -148,8 +155,41 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     color = color * diffuse_info.z;
     // == GLSL's `Color.a *= GetDiffuseInfo(DrawID).w;` (alpha)
     color.a = color.a * diffuse_info.w;
+
+    // == GLSL's `#if OPT_IsAlphaBlended Color.a *= In.LightColor.a; #endif`
+    if (draw_flags & DRAW_FLAG_ALPHA_BLENDED) != 0u {
+        color.a = color.a * in.light_color.a;
+    }
+
     color = apply_poly_flags(color, draw_flags);
-    // == GLSL's `!OPT_IsRenderFog` / `!OPT_IsModulated` branch:
-    // `TotalColor = Color * vec4(LightColor.rgb, 1.0)`.
-    return color * vec4<f32>(in.light_color.rgb, 1.0);
+    // `OPT_HWLighting` off: real vertex-interpolated LightColor.
+    let light_color = in.light_color;
+
+    let is_modulated = (draw_flags & DRAW_FLAG_MODULATED) != 0u;
+    var total_color: vec4<f32>;
+    if (draw_flags & DRAW_FLAG_RENDER_FOG) != 0u {
+        if is_modulated {
+            // == GLSL's `#if OPT_IsRenderFog && OPT_IsModulated` branch.
+            var delta = vec3<f32>(0.5) - color.xyz;
+            delta = delta * (1.0 - in.fog_color.a);
+            delta = delta * (vec3<f32>(1.0) - in.fog_color.rgb);
+            total_color = vec4<f32>(vec3<f32>(0.5) - delta, color.a);
+        } else {
+            // == GLSL's `#if OPT_IsRenderFog && !OPT_IsModulated` branch.
+            let fogged = color * light_color;
+            total_color = vec4<f32>(
+                fogged.rgb * (1.0 - in.fog_color.a) + in.fog_color.rgb,
+                fogged.a,
+            );
+        }
+    } else {
+        if is_modulated {
+            // == GLSL's `#if !OPT_IsRenderFog && OPT_IsModulated` branch.
+            total_color = color;
+        } else {
+            // == GLSL's `#if !OPT_IsRenderFog && !OPT_IsModulated` branch.
+            total_color = color * vec4<f32>(light_color.rgb, 1.0);
+        }
+    }
+    return total_color;
 }
