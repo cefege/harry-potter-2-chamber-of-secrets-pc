@@ -448,11 +448,17 @@
 //! `DrawTile`/`Draw2DLine`/`Draw2DPoint` stubs.
 //!
 //! Depth-range convention (GLSL/OpenGL clip-space Z is -1..1; WebGPU's
-//! is 0..1): not yet resolved in code, since no Rust code builds a
-//! real projection matrix yet. Decision recorded in `simple.wgsl`'s
-//! own header comment rather than here, since it is a per-shader
-//! usage contract (whatever populates `modelviewproj_mat` must build
-//! it directly in WebGPU's 0..1 convention), not a crate-wide fact.
+//! is 0..1): resolved in `compute_frame_uniforms` (`glam::camera::
+//! rh::proj::directx`, 0..1, right-handed, Y-up -- see that
+//! function's own doc for the full derivation) -- an earlier version
+//! of this paragraph said "not yet resolved in code, since no Rust
+//! code builds a real projection matrix yet", true when written, now
+//! stale. `simple.wgsl`'s own header comment still states the
+//! per-shader usage contract this satisfies (whatever populates
+//! `modelviewproj_mat` must build it directly in WebGPU's 0..1
+//! convention), not duplicated here.
+
+pub mod texture;
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key -- `from_ffi_discriminant`
