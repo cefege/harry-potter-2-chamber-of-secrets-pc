@@ -1023,23 +1023,25 @@ impl RenderLoop {
         self.counts
     }
 
-    /// Real per-tick entry point `UWgpuRenderDevice::Draw2DLine` will
-    /// call through a future FFI function (not wired yet -- see this
-    /// crate's own module doc). `p1`/`p2` are raw screen-space
+    /// Real per-tick entry point `UWgpuRenderDevice::Draw2DLine`
+    /// calls through `hp2_rs_wgpu_draw_2d_line` (wired, not a future
+    /// plan -- an earlier version of this doc said "not wired yet",
+    /// true when written, now stale). `p1`/`p2` are raw screen-space
     /// `FVector`-shaped points -- `(pixel X, pixel Y, view-space Z)`,
     /// exactly `Draw2DLine`'s own real `P1`/`P2` parameters
-    /// (`DrawSimple.cpp:52`), not already transformed. This function
-    /// applies the real `Draw2DLine` screen-to-clip transform itself
-    /// (`DrawSimple.cpp:80,82`: `Coords = (RFX2 * P.Z * (P.X -
-    /// Frame->FX2), RFY2 * P.Z * (P.Y - Frame->FY2), P.Z)`), using
-    /// `self.last_scene` (the most recent `set_scene_node` call,
-    /// matching `UXOpenGLRenderDevice`'s own `RFX2`/`RFY2` member
-    /// fields, computed once per `SetSceneNode` and reused by every
-    /// `Draw2DLine` call that frame -- not recomputed per line). An
-    /// earlier version of this doc wrongly claimed `p1`/`p2` arrived
-    /// pre-transformed and this function did no transformation of its
-    /// own -- written before `DrawSimple.cpp`'s real math had
-    /// actually been read; corrected here, not left stale.
+    /// (`DrawSimple.cpp:52`), not already transformed. `fx2`/`fy2` are
+    /// the real `Frame->FX2`/`FY2` the actual `Draw2DLine` call site
+    /// itself received (`WgpuDrv.cpp`'s own override reads them
+    /// straight off its own `Frame` parameter) -- not derived from
+    /// `self.last_scene` (the real `rfx2`/`rfy2` computed below
+    /// *are* correctly cached that way, matching `UXOpenGLRenderDevice`'s
+    /// own real `RFX2`/`RFY2` member fields -- `draw_2d_line_screen_
+    /// to_coords`'s own doc has the full real distinction and why an
+    /// earlier version of this function wrongly conflated the two).
+    /// This function applies the real `Draw2DLine` screen-to-clip
+    /// transform itself (`DrawSimple.cpp:80,82`: `Coords = (RFX2 *
+    /// P.Z * (P.X - Frame->FX2), RFY2 * P.Z * (P.Y - Frame->FY2),
+    /// P.Z)`).
     ///
     /// Drops the draw cleanly (not an error, not a panic) when there
     /// is no frame in progress -- a real condition, not a caller bug:
@@ -1054,8 +1056,8 @@ impl RenderLoop {
     /// last_scene` is also `None`, checked explicitly too since the
     /// transform itself needs a real `SceneFrame`, not just a segment
     /// to bind to): `Draw2DLine` called before any real `SetSceneNode`
-    /// this session -- `Frame->FX2`/`FY2` would be undefined, so
-    /// there is nothing correct to draw. Tagged with `self.
+    /// this session -- `RFX2`/`RFY2` would be undefined, so there is
+    /// nothing correct to draw. Tagged with `self.
     /// frame_uniforms_segments.len() - 1` (the *current*, most
     /// recently created segment -- `RenderLoop::frame_uniforms_
     /// segments`'s own doc has the full real bug this fixes), not
@@ -1069,7 +1071,7 @@ impl RenderLoop {
     /// and-rotate ring-buffer behavior yet, the real GLSL batcher's
     /// own `ParametersBuffer`/`VertBuffer` rotation, not ported),
     /// not silently pretended away.
-    pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], color: [f32; 4]) {
+    pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], fx2: f32, fy2: f32, color: [f32; 4]) {
         if self.in_progress.is_none() {
             return;
         }
@@ -1080,8 +1082,8 @@ impl RenderLoop {
             return;
         };
         self.queued_lines.push(QueuedLine {
-            p1: draw_2d_line_screen_to_coords(scene, p1),
-            p2: draw_2d_line_screen_to_coords(scene, p2),
+            p1: draw_2d_line_screen_to_coords(scene, fx2, fy2, p1),
+            p2: draw_2d_line_screen_to_coords(scene, fx2, fy2, p2),
             color,
             segment,
         });
@@ -1386,17 +1388,31 @@ pub fn compute_frame_uniforms(scene: &SceneFrame) -> FrameUniforms {
 /// perspective -- both branches compute them the same way from their
 /// own `RProjZ`/`Aspect`, matching `compute_frame_uniforms`'s own
 /// `r_proj_z`/`aspect` derivation exactly, not duplicated with a
-/// different formula) and `Frame->FX2`/`FY2` (`UnCamera.cpp:351-352`:
-/// `FX2 = FX * 0.5f`, `FY2 = FY * 0.5f` -- confirmed at the real
-/// assignment site, not assumed from `UnRender.h`'s own comment
-/// alone) are real `UXOpenGLRenderDevice`/`FSceneNode` values this
-/// function derives fresh from `scene` every call, matching what a
-/// real `RenderLoop::queue_line` call needs (`scene` is `self.
-/// last_scene`, captured once per `set_scene_node` and reused for
-/// every line queued that frame -- not recomputed per `SetSceneNode`
-/// call's own cost, since this function itself is cheap and has no
-/// GPU/device access).
-pub fn draw_2d_line_screen_to_coords(scene: &SceneFrame, p: [f32; 3]) -> [f32; 3] {
+/// different formula) are real `UXOpenGLRenderDevice` *member*
+/// fields, cached once per `SetSceneNode` and reused by every
+/// `Draw2DLine` call that frame -- `scene` (the caller's own cached
+/// `self.last_scene`) is the right source for those two specifically.
+///
+/// `fx2`/`fy2` are different: the real source reads them fresh off
+/// `Frame->FX2`/`FY2` (`UnCamera.cpp:351-352`: `FX2 = FX * 0.5f`, `FY2
+/// = FY * 0.5f`) on the *`FSceneNode` `Draw2DLine` itself received*
+/// (`DrawSimple.cpp:80,82`), not from any `UXOpenGLRenderDevice`
+/// member field -- nothing in the real source guarantees that frame
+/// is the same one the last `SetSceneNode` call used. An earlier
+/// version of this function derived `fx2`/`fy2` from `scene.fx`/`fy`
+/// internally (the same cached scene `rfx2`/`rfy2` come from),
+/// silently assuming the two always coincide -- a real, unstated
+/// assumption, caught on review, not something the real source
+/// itself relies on or guarantees. Callers must pass the real `Frame->
+/// FX2`/`FY2` from the actual `Draw2DLine` call site (`WgpuDrv.cpp`'s
+/// own override reads them directly off its own `Frame` parameter),
+/// not derive them from whatever scene happens to be cached.
+pub fn draw_2d_line_screen_to_coords(
+    scene: &SceneFrame,
+    fx2: f32,
+    fy2: f32,
+    p: [f32; 3],
+) -> [f32; 3] {
     let aspect = scene.fy / scene.fx;
     let r_proj_z = if scene.is_ortho {
         (scene.viewport_fov_angle * std::f32::consts::PI / 360.0).tan()
@@ -1405,8 +1421,6 @@ pub fn draw_2d_line_screen_to_coords(scene: &SceneFrame, p: [f32; 3]) -> [f32; 3
     };
     let rfx2 = 2.0 * r_proj_z / scene.fx;
     let rfy2 = 2.0 * r_proj_z * aspect / scene.fy;
-    let fx2 = scene.fx * 0.5;
-    let fy2 = scene.fy * 0.5;
     [rfx2 * p[2] * (p[0] - fx2), rfy2 * p[2] * (p[1] - fy2), p[2]]
 }
 
@@ -1886,7 +1900,12 @@ mod tests {
         // -- DrawSimple.cpp:80's own real formula, hand-computed
         // independently of draw_2d_line_screen_to_coords's own
         // implementation.
-        let out = draw_2d_line_screen_to_coords(&reference_perspective_scene(), [0.0, 50.0, 1.0]);
+        let out = draw_2d_line_screen_to_coords(
+            &reference_perspective_scene(),
+            50.0,
+            50.0,
+            [0.0, 50.0, 1.0],
+        );
         assert!(
             (out[0] - (-1.0)).abs() < 1e-5,
             "expected x ~= -1.0, got {}",
@@ -1906,21 +1925,32 @@ mod tests {
         // ->FovAngle (viewport_fov_angle); SetProjection (1868) reads
         // Frame->EffectiveFovAngle (effective_fov_angle) -- a real,
         // deliberate difference between the two paths (SceneFrame's
-        // own doc already notes this), not interchangeable. Setting
-        // them to different values and flipping is_ortho must select
-        // a genuinely different RFX2, proving the real field is read
-        // on each path, not always the same one.
+        // own doc already notes this), not interchangeable. Exact
+        // expected values, not just `assert_ne!` (an earlier version
+        // of this test used `assert_ne!`, which would still pass if
+        // the two branches were swapped -- caught on review): with
+        // fx=fy=100, viewport_fov_angle=60, effective_fov_angle=90,
+        // P=(0,50,1), fx2=fy2=50 -- ortho: r_proj_z=tan(30deg),
+        // rfx2=2*tan(30deg)/100, x=rfx2*(0-50)=-tan(30deg)=-0.57735;
+        // perspective: r_proj_z=tan(45deg)=1.0, rfx2=0.02,
+        // x=0.02*(-50)=-1.0. Hand-verified independently before
+        // relying on it, not just read off the implementation.
         let mut scene = reference_perspective_scene();
         scene.viewport_fov_angle = 60.0;
         scene.effective_fov_angle = 90.0;
         scene.is_ortho = true;
-        let ortho_out = draw_2d_line_screen_to_coords(&scene, [0.0, 50.0, 1.0]);
+        let ortho_out = draw_2d_line_screen_to_coords(&scene, 50.0, 50.0, [0.0, 50.0, 1.0]);
         scene.is_ortho = false;
-        let perspective_out = draw_2d_line_screen_to_coords(&scene, [0.0, 50.0, 1.0]);
-        assert_ne!(
-            ortho_out[0], perspective_out[0],
-            "expected the ortho and perspective paths to read different fov-angle fields and \
-             produce different results when those fields genuinely differ"
+        let perspective_out = draw_2d_line_screen_to_coords(&scene, 50.0, 50.0, [0.0, 50.0, 1.0]);
+        assert!(
+            (ortho_out[0] - (-0.57735)).abs() < 1e-4,
+            "expected ortho x ~= -tan(30deg) ~= -0.57735, got {}",
+            ortho_out[0]
+        );
+        assert!(
+            (perspective_out[0] - (-1.0)).abs() < 1e-5,
+            "expected perspective x ~= -1.0, got {}",
+            perspective_out[0]
         );
     }
 
@@ -2334,7 +2364,13 @@ mod tests {
         // straight through to clip space, the left half of the
         // 64px-wide target (Z is irrelevant: the pipeline has no
         // depth attachment).
-        loop_state.queue_line([0.0, 50.0, 1.0], [50.0, 50.0, 1.0], [0.0, 1.0, 0.0, 1.0]);
+        loop_state.queue_line(
+            [0.0, 50.0, 1.0],
+            [50.0, 50.0, 1.0],
+            50.0,
+            50.0,
+            [0.0, 1.0, 0.0, 1.0],
+        );
         // Real unlock_frame: flushes the queued line into the frame's
         // own still-unsubmitted encoder (Load mode, after the clear),
         // then submits exactly once. present=false: no real surface
@@ -2498,7 +2534,13 @@ mod tests {
         // -> pre-matrix coords (-1,0,1)-(0,0,1) (same real derivation
         // as the single-segment test above) -> under identity, spans
         // NDC x in [-1.0, 0.0] (left half, pixels 0-31).
-        loop_state.queue_line([0.0, 50.0, 1.0], [50.0, 50.0, 1.0], [0.0, 1.0, 0.0, 1.0]);
+        loop_state.queue_line(
+            [0.0, 50.0, 1.0],
+            [50.0, 50.0, 1.0],
+            50.0,
+            50.0,
+            [0.0, 1.0, 0.0, 1.0],
+        );
 
         // Segment 1: a genuinely different modelviewproj_mat -- same
         // identity diagonal except m00 = -1.0 instead of 1.0 (flips X
@@ -2524,7 +2566,13 @@ mod tests {
         // matrix differs, isolating this test to that one real
         // variable. Under the X-flip matrix, spans NDC x in [0.0,
         // 1.0] (right half, pixels 32-63).
-        loop_state.queue_line([0.0, 50.0, 1.0], [50.0, 50.0, 1.0], [1.0, 0.0, 0.0, 1.0]);
+        loop_state.queue_line(
+            [0.0, 50.0, 1.0],
+            [50.0, 50.0, 1.0],
+            50.0,
+            50.0,
+            [1.0, 0.0, 0.0, 1.0],
+        );
 
         unlock_frame(&created, &mut loop_state, false);
         created

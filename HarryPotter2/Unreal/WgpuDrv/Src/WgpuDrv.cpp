@@ -471,7 +471,11 @@ void UWgpuRenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineF
 	// HitTesting, PF_Highlighted blend mode -- none applied yet).
 	// Color.W is not passed at all: the real source always forces it
 	// to 1.f before use (DrawSimple.cpp:64), so there is nothing a
-	// caller-supplied alpha could correctly mean.
+	// caller-supplied alpha could correctly mean. Frame->FX2/FY2 are
+	// read straight off this call's own real Frame, not derived from
+	// whatever scene SetSceneNode last cached -- the real source's
+	// own Draw2DLine does the same (DrawSimple.cpp:80,82), and
+	// nothing guarantees the two coincide (caught on review).
 	//
 	// Logs only the first call -- real evidence this override
 	// actually ran during a given run, not just that nothing crashed
@@ -490,6 +494,7 @@ void UWgpuRenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineF
 	hp2_rs_wgpu_draw_2d_line( RustDevice,
 		P1.X, P1.Y, P1.Z,
 		P2.X, P2.Y, P2.Z,
+		Frame->FX2, Frame->FY2,
 		Color.X, Color.Y, Color.Z );
 	unguard;
 }

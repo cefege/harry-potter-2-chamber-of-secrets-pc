@@ -3007,7 +3007,14 @@ pub unsafe extern "C" fn hp2_rs_wgpu_set_scene_node(
 /// real `FVector P1, P2` parameters (screen pixel X/Y, view-space Z)
 /// -- `hp2_wgpu::RenderLoop::queue_line`'s own doc has the real
 /// screen-to-clip transform this applies internally, using the most
-/// recent `hp2_rs_wgpu_set_scene_node` call. `r`/`g`/`b` are the real
+/// recent `hp2_rs_wgpu_set_scene_node` call for `RFX2`/`RFY2`
+/// specifically. `fx2`/`fy2` are the real `Frame->FX2`/`FY2` the
+/// actual `Draw2DLine` call received (`WgpuDrv.cpp`'s own override
+/// reads them straight off its own `Frame` parameter) -- not derived
+/// from the cached scene the way `RFX2`/`RFY2` correctly are;
+/// `draw_2d_line_screen_to_coords`'s own doc has the full real
+/// distinction and why an earlier version of this whole chain wrongly
+/// conflated the two (caught on review). `r`/`g`/`b` are the real
 /// `FPlane Color`'s first three components; alpha is not a parameter
 /// here at all -- the real source always forces `Color.W = 1.f`
 /// before use (`DrawSimple.cpp:64`, its own comment: "Unfortunately
@@ -3046,6 +3053,8 @@ pub unsafe extern "C" fn hp2_rs_wgpu_draw_2d_line(
     p2x: f32,
     p2y: f32,
     p2z: f32,
+    fx2: f32,
+    fy2: f32,
     r: f32,
     g: f32,
     b: f32,
@@ -3058,6 +3067,8 @@ pub unsafe extern "C" fn hp2_rs_wgpu_draw_2d_line(
         handle.render_loop.queue_line(
             [p1x, p1y, p1z],
             [p2x, p2y, p2z],
+            fx2,
+            fy2,
             // Color.W forced to 1.0 -- see this function's own doc.
             [r, g, b, 1.0],
         );
