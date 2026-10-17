@@ -51,16 +51,23 @@ mod tests {
         }
     }
 
-    // These five scenarios (plus the literal mirror test below) are
-    // checked against `Tests/AudioTests.cpp:612-636`'s
+    // Only the literal-mirror test below
+    // (`mirrors_the_real_cpp_talk_registration_eviction_policy_test`)
+    // is actually checked against `Tests/AudioTests.cpp:612-636`'s
     // `TestTalkRegistrationEvictionPolicy` -- the real, unmodified,
-    // already-passing C++ oracle test for this exact function,
-    // already part of the `audio_lifecycle` ctest baseline. No
-    // separate throwaway probe was built for this one: confirming
-    // `FindLeastPriorityNonTalkSource` has external linkage (via
-    // `nm`, a plain `static` method, no anonymous-namespace
-    // indirection) plus that existing, already-verified C++ test is
-    // the independent confirmation here, not a new compiled probe.
+    // already-passing C++ oracle test, already part of the
+    // `audio_lifecycle` ctest baseline. The five cases below are
+    // NOT drawn from that C++ test (its own three-step sequence
+    // doesn't exercise an empty list, a tie, or an unoccupied-source
+    // skip); they're derived directly from reading
+    // `ALAudioSubsystem.cpp:2085-2101`'s source -- the `Sound`
+    // null check, the strict `<` tie-break, and the `INDEX_NONE`
+    // starting value. No separate throwaway probe was built for any
+    // of this: `FindLeastPriorityNonTalkSource` has external linkage
+    // (confirmed via `nm`, a plain `static` method, no anonymous-
+    // namespace indirection), but the independent confirmation here
+    // is the existing C++ test file for the mirror case, and direct
+    // source reading for the other five.
 
     #[test]
     fn empty_sources_returns_index_none() {
