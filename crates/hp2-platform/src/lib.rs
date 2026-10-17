@@ -128,8 +128,11 @@
 //! all -- not from any native code, not from UnrealScript, not even
 //! declared as a base `UViewport` virtual. `TextToSpeechFile`
 //! (`SDLDrv.h:47`) is declared and config-registered but never read.
-//! Dead code (AGENTS.md: gets a short comment, not porting effort);
-//! left as-is in C++, not a pending Rust slice.
+//! Confirmed dead code, zero real callers; the user chose "leave it
+//! alone" (not delete, not port, not wire up) when asked, so this
+//! stays as-is in C++ -- not a pending Rust slice, and not scheduled
+//! for deletion either. Revisit only if SDLDrv's remaining C++ gets
+//! swept up for an unrelated reason.
 
 pub mod clipboard;
 pub mod input_event;

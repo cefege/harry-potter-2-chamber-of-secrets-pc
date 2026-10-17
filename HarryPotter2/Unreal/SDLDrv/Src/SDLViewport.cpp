@@ -387,7 +387,7 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 				if( !C->JoyHatFoldsToButtons )
 					break;
 				FfiKeyAction Events[2];
-				INT NewLastJoyHat = IK_None;
+				INT NewLastJoyHat = LastJoyHat; // preserved if a caught panic skips the write
 				const INT Count = hp2_rs_input_fold_joystick_hat( Event.jhat.value, LastJoyHat, Events, &NewLastJoyHat );
 				for( INT Index = 0; Index < Count; ++Index )
 					CauseInputEvent( (EInputKey)Events[Index].key, (EInputAction)Events[Index].action, 0.f );
