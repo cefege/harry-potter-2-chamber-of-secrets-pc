@@ -804,23 +804,75 @@ pub struct FfiLauncherSettings {
     pub joystick_enabled: bool,
 }
 
-fn settings_from_ffi(ffi: &FfiLauncherSettings) -> hp2_launcher::model::LauncherSettings {
+/// Converts the flat FFI shape into `hp2_launcher::model::LauncherSettings`,
+/// rejecting an out-of-range enum ordinal rather than silently
+/// coercing it to a valid default. This check exists only here, at
+/// the FFI boundary: the real C++'s `ValidateLauncherSettings` range-
+/// checks each field's raw `int` (an `enum class` is not range-
+/// checked at the language level, so an explicitly-`static_cast`
+/// out-of-range value is a real, reachable state C++ callers can
+/// construct), but `hp2_launcher::store::validate_launcher_settings`
+/// takes an already-typed Rust `LauncherSettings`, whose `ScreenMode`
+/// (etc.) fields are a closed, total enum -- by the time safe Rust
+/// code can observe one, it can only ever be one of the real
+/// variants, so that equivalent check inside the Rust port itself is
+/// unreachable. An earlier version of this function silently mapped
+/// every unrecognized ordinal to a valid fallback instead of
+/// rejecting it, which made that unreachability also swallow the
+/// real C++'s own validation here -- caught by
+/// `Tests/LauncherTests.cpp`'s `TestValidationBoundaries` (the
+/// unmodified, independent C++ oracle this port is verified against)
+/// failing five "invalid X is rejected" cases after the FFI/adapter
+/// layer first went in.
+fn settings_from_ffi(
+    ffi: &FfiLauncherSettings,
+) -> Result<hp2_launcher::model::LauncherSettings, String> {
     use hp2_launcher::model::*;
-    LauncherSettings {
-        screen_mode: match ffi.screen_mode {
-            1 => ScreenMode::Fullscreen,
-            2 => ScreenMode::BorderlessDesktop,
-            _ => ScreenMode::Windowed,
-        },
+    const INVALID_SELECTION: &str = "Launcher settings contain an invalid selection.";
+    let screen_mode = match ffi.screen_mode {
+        0 => ScreenMode::Windowed,
+        1 => ScreenMode::Fullscreen,
+        2 => ScreenMode::BorderlessDesktop,
+        _ => return Err(INVALID_SELECTION.to_string()),
+    };
+    let render_backend = match ffi.render_backend {
+        0 => RenderBackend::XOpenGL,
+        1 => RenderBackend::Vulkan,
+        _ => return Err(INVALID_SELECTION.to_string()),
+    };
+    let texture_detail = match ffi.texture_detail {
+        0 => TextureDetail::Low,
+        1 => TextureDetail::Medium,
+        2 => TextureDetail::High,
+        _ => return Err(INVALID_SELECTION.to_string()),
+    };
+    let object_detail = match ffi.object_detail {
+        0 => ObjectDetail::VeryLow,
+        1 => ObjectDetail::Low,
+        2 => ObjectDetail::Medium,
+        3 => ObjectDetail::High,
+        4 => ObjectDetail::VeryHigh,
+        _ => return Err(INVALID_SELECTION.to_string()),
+    };
+    let control_mode = match ffi.control_mode {
+        0 => ControlMode::Classic,
+        1 => ControlMode::Modern,
+        _ => return Err(INVALID_SELECTION.to_string()),
+    };
+    let difficulty = match ffi.difficulty {
+        0 => Difficulty::Easy,
+        1 => Difficulty::Medium,
+        2 => Difficulty::Hard,
+        _ => return Err(INVALID_SELECTION.to_string()),
+    };
+    Ok(LauncherSettings {
+        screen_mode,
         resolution: DisplayResolution {
             width: ffi.resolution_width,
             height: ffi.resolution_height,
             label: String::new(),
         },
-        render_backend: match ffi.render_backend {
-            1 => RenderBackend::Vulkan,
-            _ => RenderBackend::XOpenGL,
-        },
+        render_backend,
         vertical_sync: ffi.vertical_sync,
         render_scale: ffi.render_scale,
         ui_scale: ffi.ui_scale,
@@ -831,38 +883,21 @@ fn settings_from_ffi(ffi: &FfiLauncherSettings) -> hp2_launcher::model::Launcher
         anti_aliasing_samples: ffi.anti_aliasing_samples,
         anisotropy: ffi.anisotropy,
         brightness: ffi.brightness,
-        texture_detail: match ffi.texture_detail {
-            0 => TextureDetail::Low,
-            1 => TextureDetail::Medium,
-            _ => TextureDetail::High,
-        },
-        object_detail: match ffi.object_detail {
-            0 => ObjectDetail::VeryLow,
-            1 => ObjectDetail::Low,
-            2 => ObjectDetail::Medium,
-            3 => ObjectDetail::High,
-            _ => ObjectDetail::VeryHigh,
-        },
+        texture_detail,
+        object_detail,
         sound_enabled: ffi.sound_enabled,
         sound_volume: ffi.sound_volume,
         music_volume: ffi.music_volume,
         mouse_sensitivity: ffi.mouse_sensitivity,
         invert_mouse: ffi.invert_mouse,
-        control_mode: match ffi.control_mode {
-            1 => ControlMode::Modern,
-            _ => ControlMode::Classic,
-        },
+        control_mode,
         auto_center_camera: ffi.auto_center_camera,
         move_while_casting: ffi.move_while_casting,
         auto_quaff: ffi.auto_quaff,
         screen_flashes: ffi.screen_flashes,
-        difficulty: match ffi.difficulty {
-            1 => Difficulty::Medium,
-            2 => Difficulty::Hard,
-            _ => Difficulty::Easy,
-        },
+        difficulty,
         joystick_enabled: ffi.joystick_enabled,
-    }
+    })
 }
 
 fn settings_to_ffi(settings: &hp2_launcher::model::LauncherSettings) -> FfiLauncherSettings {
@@ -1029,7 +1064,10 @@ pub unsafe extern "C" fn hp2_rs_launcher_commit_settings(
             user_root: user_root.to_string(),
             system_root: system_root.to_string(),
         };
-        let settings = settings_from_ffi(&*settings);
+        let settings = match settings_from_ffi(&*settings) {
+            Ok(s) => s,
+            Err(e) => return report_error(error_sink, error_ctx, &e),
+        };
         match hp2_launcher::orchestrate::commit_launcher_settings(&paths, &settings) {
             Ok(()) => true,
             Err(e) => report_error(error_sink, error_ctx, &e),
@@ -1400,4 +1438,562 @@ pub unsafe extern "C" fn hp2_rs_launcher_load_selection(
             Err(e) => report_error(error_sink, error_ctx, &e),
         }
     })
+}
+
+/// Replaces `HP2Launcher::ValidateLauncherSettings`. Calls
+/// `error_sink` exactly once, only on failure.
+///
+/// # Safety
+/// `settings` must be a valid, aligned pointer to a live
+/// `FfiLauncherSettings`. `error_sink` must be safe to call with
+/// `error_ctx` and the span described above, valid only for the
+/// call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_validate_settings(
+    settings: *const FfiLauncherSettings,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_validate_settings", false, move || unsafe {
+        let settings = match settings_from_ffi(&*settings) {
+            Ok(s) => s,
+            Err(e) => return report_error(error_sink, error_ctx, &e),
+        };
+        match hp2_launcher::store::validate_launcher_settings(&settings) {
+            Ok(()) => true,
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}
+
+/// Replaces `HP2Launcher::DiscoverSaves`. `user_root` is UTF-8, not
+/// NUL-terminated. Calls `save_sink` once per discovered save, in the
+/// real C++'s own sorted order. Calls `error_sink` exactly once, only
+/// on failure.
+///
+/// # Safety
+/// `(user_root, user_root_len)` must be valid for reads of that
+/// length (or null with length 0). `save_sink`/`error_sink` must be
+/// safe to call with their `ctx` and the spans described above, valid
+/// only for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_discover_saves(
+    user_root: *const u8,
+    user_root_len: usize,
+    save_sink: SaveRecordSink,
+    save_ctx: *mut c_void,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_launcher_discover_saves", false, move || unsafe {
+        let user_root = match str_from_raw(user_root, user_root_len) {
+            Some(s) => s,
+            None => {
+                return report_error(error_sink, error_ctx, "user root path is not valid UTF-8");
+            }
+        };
+        match hp2_launcher::saves::discover_saves(user_root) {
+            Ok(saves) => {
+                for save in &saves {
+                    report_save(save_sink, save_ctx, save);
+                }
+                true
+            }
+            Err(e) => report_error(error_sink, error_ctx, &e),
+        }
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn save_record_from_ffi(
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: &str,
+    thumbnail_path: &str,
+    display_name: &str,
+    size: i64,
+    modified_seconds: i64,
+) -> hp2_launcher::model::SaveRecord {
+    hp2_launcher::model::SaveRecord {
+        slot,
+        save_index,
+        uses_slot_directory,
+        save_path: save_path.to_string(),
+        thumbnail_path: thumbnail_path.to_string(),
+        display_name: display_name.to_string(),
+        size,
+        modified_seconds,
+    }
+}
+
+/// Shared by `hp2_rs_launcher_build_selected_command` and
+/// `hp2_rs_launcher_serialize_launch_selection`: decodes the flat
+/// action/has_save/save-field parameter list both functions take into
+/// a `LaunchSelection`, or an error string on invalid UTF-8/an
+/// unknown action ordinal.
+#[allow(clippy::too_many_arguments)]
+unsafe fn launch_selection_from_ffi(
+    action: i32,
+    has_save: bool,
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: *const u8,
+    save_path_len: usize,
+    thumbnail_path: *const u8,
+    thumbnail_path_len: usize,
+    display_name: *const u8,
+    display_name_len: usize,
+    size: i64,
+    modified_seconds: i64,
+) -> Result<hp2_launcher::model::LaunchSelection, String> {
+    use hp2_launcher::model::LaunchAction;
+    let save_path =
+        unsafe { str_from_raw(save_path, save_path_len) }.ok_or("save path is not valid UTF-8")?;
+    let thumbnail_path = unsafe { str_from_raw(thumbnail_path, thumbnail_path_len) }
+        .ok_or("thumbnail path is not valid UTF-8")?;
+    let display_name = unsafe { str_from_raw(display_name, display_name_len) }
+        .ok_or("display name is not valid UTF-8")?;
+    let action = match action {
+        0 => LaunchAction::Continue,
+        1 => LaunchAction::NewGame,
+        2 => LaunchAction::Quit,
+        3 => LaunchAction::Error,
+        other => return Err(format!("unknown launch action ordinal {other}")),
+    };
+    Ok(hp2_launcher::model::LaunchSelection {
+        action,
+        has_save,
+        save: save_record_from_ffi(
+            slot,
+            save_index,
+            uses_slot_directory,
+            save_path,
+            thumbnail_path,
+            display_name,
+            size,
+            modified_seconds,
+        ),
+    })
+}
+
+/// Replaces `HP2Launcher::BuildSelectedCommand`. `action` is
+/// `LaunchAction`'s C++ ordinal (Continue=0, NewGame=1, Quit=2,
+/// Error=3). String fields are UTF-8, not NUL-terminated. Calls
+/// `sink` exactly once with the resulting command prefix on success
+/// or the error message on failure; the return value says which.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `sink` must be safe to call with `ctx` and a
+/// `(ptr, len)` UTF-8 byte span valid only for the call's duration.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_build_selected_command(
+    action: i32,
+    has_save: bool,
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: *const u8,
+    save_path_len: usize,
+    thumbnail_path: *const u8,
+    thumbnail_path_len: usize,
+    display_name: *const u8,
+    display_name_len: usize,
+    size: i64,
+    modified_seconds: i64,
+    sink: IniResultSink,
+    ctx: *mut c_void,
+) -> bool {
+    guard(
+        "hp2_rs_launcher_build_selected_command",
+        false,
+        move || unsafe {
+            let selection = match launch_selection_from_ffi(
+                action,
+                has_save,
+                slot,
+                save_index,
+                uses_slot_directory,
+                save_path,
+                save_path_len,
+                thumbnail_path,
+                thumbnail_path_len,
+                display_name,
+                display_name_len,
+                size,
+                modified_seconds,
+            ) {
+                Ok(s) => s,
+                Err(e) => return deliver(sink, ctx, Err(e)),
+            };
+            deliver(
+                sink,
+                ctx,
+                hp2_launcher::policy::build_selected_command(&selection),
+            )
+        },
+    )
+}
+
+/// Called once per emitted `[LastLaunch]` field row. UTF-8 string
+/// spans, not NUL-terminated, valid only for the call's duration.
+pub type FieldSink = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    key: *const u8,
+    key_len: usize,
+    value: *const u8,
+    value_len: usize,
+);
+
+/// Replaces `HP2Launcher::SerializeLaunchSelection`. `action` is
+/// `LaunchAction`'s C++ ordinal (Continue=0, NewGame=1, Quit=2,
+/// Error=3). String fields are UTF-8, not NUL-terminated. Calls
+/// `field_sink` once per emitted field row on success, `error_sink`
+/// exactly once on failure.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `field_sink`/`error_sink` must be safe to
+/// call with their `ctx` and the spans described above, valid only
+/// for the call's duration.
+#[allow(clippy::too_many_arguments)]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_serialize_launch_selection(
+    action: i32,
+    has_save: bool,
+    slot: i32,
+    save_index: i32,
+    uses_slot_directory: bool,
+    save_path: *const u8,
+    save_path_len: usize,
+    thumbnail_path: *const u8,
+    thumbnail_path_len: usize,
+    display_name: *const u8,
+    display_name_len: usize,
+    size: i64,
+    modified_seconds: i64,
+    field_sink: FieldSink,
+    field_ctx: *mut c_void,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard(
+        "hp2_rs_launcher_serialize_launch_selection",
+        false,
+        move || unsafe {
+            let selection = match launch_selection_from_ffi(
+                action,
+                has_save,
+                slot,
+                save_index,
+                uses_slot_directory,
+                save_path,
+                save_path_len,
+                thumbnail_path,
+                thumbnail_path_len,
+                display_name,
+                display_name_len,
+                size,
+                modified_seconds,
+            ) {
+                Ok(s) => s,
+                Err(e) => return report_error(error_sink, error_ctx, &e),
+            };
+            match hp2_launcher::policy::serialize_launch_selection(&selection) {
+                Ok(fields) => {
+                    for field in &fields {
+                        field_sink(
+                            field_ctx,
+                            field.key.as_ptr(),
+                            field.key.len(),
+                            field.value.as_ptr(),
+                            field.value.len(),
+                        );
+                    }
+                    true
+                }
+                Err(e) => report_error(error_sink, error_ctx, &e),
+            }
+        },
+    )
+}
+
+/// One `(ptr, len)` key/value row, as passed into
+/// `hp2_rs_launcher_deserialize_launch_selection`. Input only: the
+/// pointers must stay valid for the call's duration, same as any
+/// other `(ptr, len)` FFI argument -- not read after the call
+/// returns.
+#[repr(C)]
+pub struct FfiLaunchSelectionField {
+    pub key: *const u8,
+    pub key_len: usize,
+    pub value: *const u8,
+    pub value_len: usize,
+}
+
+/// Replaces `HP2Launcher::DeserializeLaunchSelection`. String fields
+/// are UTF-8, not NUL-terminated. Calls `selection_sink` exactly once
+/// -- with the parsed selection on success, or the `Quit` fallback on
+/// failure, matching the real C++'s own "selection is still populated
+/// with the fallback" contract (see that function's doc comment) --
+/// then, only on failure, calls `error_sink` once more with the
+/// reason.
+///
+/// # Safety
+/// `fields` must be valid for reads of `field_count` elements (each
+/// element's own `(ptr, len)` pairs valid for reads of that length,
+/// or null with length 0). `selection_sink`/`error_sink` must be safe
+/// to call with their `ctx` and the spans described above, valid only
+/// for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_deserialize_launch_selection(
+    fields: *const FfiLaunchSelectionField,
+    field_count: usize,
+    selection_sink: LaunchSelectionSink,
+    selection_ctx: *mut c_void,
+    error_sink: ErrorSink,
+    error_ctx: *mut c_void,
+) -> bool {
+    guard(
+        "hp2_rs_launcher_deserialize_launch_selection",
+        false,
+        move || unsafe {
+            let mut parsed = Vec::with_capacity(field_count);
+            let raw_fields = if field_count == 0 {
+                &[]
+            } else {
+                std::slice::from_raw_parts(fields, field_count)
+            };
+            for field in raw_fields {
+                let key = match str_from_raw(field.key, field.key_len) {
+                    Some(s) => s,
+                    None => {
+                        return report_error(error_sink, error_ctx, "field key is not valid UTF-8");
+                    }
+                };
+                let value = match str_from_raw(field.value, field.value_len) {
+                    Some(s) => s,
+                    None => {
+                        return report_error(
+                            error_sink,
+                            error_ctx,
+                            "field value is not valid UTF-8",
+                        );
+                    }
+                };
+                parsed.push(hp2_launcher::policy::LaunchSelectionField {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                });
+            }
+            let (selection, result) =
+                match hp2_launcher::policy::deserialize_launch_selection(&parsed) {
+                    Ok(selection) => (selection, Ok(())),
+                    Err(e) => (hp2_launcher::model::LaunchSelection::default(), Err(e)),
+                };
+            let save = &selection.save;
+            selection_sink(
+                selection_ctx,
+                selection.action as i32,
+                selection.has_save,
+                save.slot,
+                save.save_index,
+                save.uses_slot_directory,
+                save.save_path.as_ptr(),
+                save.save_path.len(),
+                save.thumbnail_path.as_ptr(),
+                save.thumbnail_path.len(),
+                save.display_name.as_ptr(),
+                save.display_name.len(),
+                save.size,
+                save.modified_seconds,
+            );
+            match result {
+                Ok(()) => true,
+                Err(e) => report_error(error_sink, error_ctx, &e),
+            }
+        },
+    )
+}
+
+/// One `(ptr, len)` argv entry, as passed into
+/// `hp2_rs_launcher_should_run_native_launcher`. Input only, same
+/// validity rule as `FfiLaunchSelectionField`.
+#[repr(C)]
+pub struct FfiStringSpan {
+    pub ptr: *const u8,
+    pub len: usize,
+}
+
+/// Replaces `HP2Launcher::ShouldRunNativeLauncher`. Each `args` entry
+/// is UTF-8, not NUL-terminated (index 0, the program name, is
+/// skipped internally the same way the real C++ skips `argv[0]`).
+/// Invalid UTF-8 in any entry is treated as a non-matching argument
+/// (not an error -- this function has no error path, matching the
+/// real C++'s plain `bool` return).
+///
+/// # Safety
+/// `args` must be valid for reads of `arg_count` elements (each
+/// element's own `(ptr, len)` pair valid for reads of that length, or
+/// null with length 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_should_run_native_launcher(
+    args: *const FfiStringSpan,
+    arg_count: usize,
+) -> bool {
+    guard(
+        "hp2_rs_launcher_should_run_native_launcher",
+        false,
+        move || unsafe {
+            let raw_args = if arg_count == 0 {
+                &[]
+            } else {
+                std::slice::from_raw_parts(args, arg_count)
+            };
+            let args: Vec<String> = raw_args
+                .iter()
+                .map(|a| str_from_raw(a.ptr, a.len).unwrap_or("").to_string())
+                .collect();
+            hp2_launcher::policy::should_run_native_launcher(&args)
+        },
+    )
+}
+
+/// One `(ptr, len)`-tripled legacy INI row, as passed into
+/// `hp2_rs_launcher_migrate_legacy_settings`. Input only, same
+/// validity rule as `FfiLaunchSelectionField`.
+#[repr(C)]
+pub struct FfiLegacySettingValue {
+    pub section: *const u8,
+    pub section_len: usize,
+    pub key: *const u8,
+    pub key_len: usize,
+    pub value: *const u8,
+    pub value_len: usize,
+}
+
+/// Called once per canonicalized output row.
+pub type LegacyValueSink = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    section: *const u8,
+    section_len: usize,
+    key: *const u8,
+    key_len: usize,
+    value: *const u8,
+    value_len: usize,
+);
+
+/// Called once per normalization performed.
+#[allow(clippy::too_many_arguments)]
+pub type MigrationChangeSink = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    section: *const u8,
+    section_len: usize,
+    key: *const u8,
+    key_len: usize,
+    previous_value: *const u8,
+    previous_value_len: usize,
+    new_value: *const u8,
+    new_value_len: usize,
+    reason: *const u8,
+    reason_len: usize,
+);
+
+/// Replaces `HP2Launcher::MigrateLegacySettings`. String fields are
+/// UTF-8, not NUL-terminated. This never fails (a pure data
+/// transformation, matching the real C++'s own `bool`-free return
+/// type): invalid UTF-8 anywhere in `values` is skipped (that row is
+/// dropped, matching the panic-can-never-cross-FFI rule more
+/// cleanly than inventing an error path this function was never
+/// meant to have). Calls `value_sink` once per canonicalized output
+/// row and `change_sink` once per normalization performed.
+///
+/// # Safety
+/// `values` must be valid for reads of `value_count` elements (each
+/// element's own `(ptr, len)` pairs valid for reads of that length,
+/// or null with length 0). `value_sink`/`change_sink` must be safe to
+/// call with their `ctx` and the spans described above, valid only
+/// for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_launcher_migrate_legacy_settings(
+    values: *const FfiLegacySettingValue,
+    value_count: usize,
+    value_sink: LegacyValueSink,
+    value_ctx: *mut c_void,
+    change_sink: MigrationChangeSink,
+    change_ctx: *mut c_void,
+) {
+    guard(
+        "hp2_rs_launcher_migrate_legacy_settings",
+        (),
+        move || unsafe {
+            let raw_values = if value_count == 0 {
+                &[]
+            } else {
+                std::slice::from_raw_parts(values, value_count)
+            };
+            let mut parsed = Vec::with_capacity(value_count);
+            for value in raw_values {
+                let (Some(section), Some(key), Some(text)) = (
+                    str_from_raw(value.section, value.section_len),
+                    str_from_raw(value.key, value.key_len),
+                    str_from_raw(value.value, value.value_len),
+                ) else {
+                    continue;
+                };
+                parsed.push(hp2_launcher::migrate::LegacySettingValue {
+                    section: section.to_string(),
+                    key: key.to_string(),
+                    value: text.to_string(),
+                });
+            }
+            let (migrated, changes) = hp2_launcher::migrate::migrate_legacy_settings(&parsed);
+            for row in &migrated {
+                value_sink(
+                    value_ctx,
+                    row.section.as_ptr(),
+                    row.section.len(),
+                    row.key.as_ptr(),
+                    row.key.len(),
+                    row.value.as_ptr(),
+                    row.value.len(),
+                );
+            }
+            for change in &changes {
+                change_sink(
+                    change_ctx,
+                    change.section.as_ptr(),
+                    change.section.len(),
+                    change.key.as_ptr(),
+                    change.key.len(),
+                    change.previous_value.as_ptr(),
+                    change.previous_value.len(),
+                    change.new_value.as_ptr(),
+                    change.new_value.len(),
+                    change.reason.as_ptr(),
+                    change.reason.len(),
+                );
+            }
+        },
+    )
+}
+
+/// Replaces `SetLauncherPublishFailureForTesting`. Always present
+/// (not conditionally compiled); see
+/// `hp2_launcher::atomic::set_publish_failure_for_testing`'s own doc
+/// comment for why that is safe. The C++ adapter calling this still
+/// gates its own export behind `#ifdef HP2_LAUNCHER_TESTING`, matching
+/// the header exactly.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_launcher_set_publish_failure_for_testing(publication_index: i32) {
+    guard(
+        "hp2_rs_launcher_set_publish_failure_for_testing",
+        (),
+        move || {
+            hp2_launcher::atomic::set_publish_failure_for_testing(publication_index);
+        },
+    )
 }

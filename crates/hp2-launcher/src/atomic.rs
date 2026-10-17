@@ -200,14 +200,55 @@ pub fn sync_parent(directory: &str) -> Result<(), String> {
     }
 }
 
+/// Test-only fault injection, replacing `GFailAfterPublication`/
+/// `GPublicationCount`/`SetLauncherPublishFailureForTesting`: the
+/// real C++ only compiles these under `#ifdef HP2_LAUNCHER_TESTING`
+/// (present only in the `hp2_launcher_tests` binary, never
+/// `hp2_game`). This crate has no equivalent per-target Cargo
+/// feature gating `hp2-ffi`'s single shared staticlib, so the hook is
+/// always compiled in instead -- harmless in production: the
+/// threshold starts at 0, which `publish` never matches (the count
+/// is incremented before comparing, so it is always >= 1), and
+/// nothing outside test code ever calls `set_publish_failure_for_testing`
+/// to change that. The C++ adapter that will call this crate's FFI
+/// still gates its own `SetLauncherPublishFailureForTesting` export
+/// behind `#ifdef HP2_LAUNCHER_TESTING`, matching the header exactly.
+static G_FAIL_AFTER_PUBLICATION: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(0);
+static G_PUBLICATION_COUNT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// Replaces `SetLauncherPublishFailureForTesting`. No dedicated unit
+/// test here deliberately: `G_PUBLICATION_COUNT` is process-wide
+/// state, and `cargo test` runs this crate's tests in parallel by
+/// default -- any test that set a nonzero threshold could race every
+/// other concurrently-running test's own `publish()` calls on the
+/// same counter, making the suite flaky. Real verification is the
+/// `native_launcher_contract` ctest (`Tests/LauncherTests.cpp`,
+/// single-threaded `main()`-style, no such race), which exercises
+/// this exact mechanism directly.
+pub fn set_publish_failure_for_testing(publication_index: i32) {
+    use std::sync::atomic::Ordering;
+    G_FAIL_AFTER_PUBLICATION.store(publication_index, Ordering::SeqCst);
+    G_PUBLICATION_COUNT.store(0, Ordering::SeqCst);
+}
+
 /// Replaces `Publish`.
 pub fn publish(staged: &mut StagedFile) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
     if let Err(e) = fs::rename(&staged.temporary, &staged.destination) {
         let message = error_at("Unable to replace", &staged.destination, &e);
         discard(staged);
         return Err(message);
     }
     staged.active = false;
+    let count = G_PUBLICATION_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
+    if G_FAIL_AFTER_PUBLICATION.load(Ordering::SeqCst) == count {
+        return Err(error_at(
+            "Injected failure after replacing",
+            &staged.destination,
+            &io::Error::from_raw_os_error(libc::EIO),
+        ));
+    }
     sync_parent(&staged.directory)
 }
 

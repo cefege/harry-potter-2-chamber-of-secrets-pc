@@ -156,8 +156,7 @@ set(HP2_XOPENGLDRV_SOURCES
 )
 
 set(HP2_LAUNCHER_CORE_SOURCES
-    "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LaunchPolicy.cpp"
-    "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherStore.cpp"
+    "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherAdapter.cpp"
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2DataImport.cpp"
 )
 set(HP2_LAUNCHER_UI_SOURCES
