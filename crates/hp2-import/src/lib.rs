@@ -15,4 +15,5 @@ pub mod files;
 mod fold_table;
 pub mod hash;
 pub mod lower;
+pub mod plan;
 mod util;

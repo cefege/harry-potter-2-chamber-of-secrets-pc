@@ -49,6 +49,14 @@ impl Write for HashingSink {
     }
 }
 
+fn hex_digest(digest: impl IntoIterator<Item = u8>) -> String {
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
 /// Replaces `Hash(const fs::path&)`. Returns `(size, lowercase hex
 /// digest)`, matching the C++ return shape and `Hex`'s lowercase-hex
 /// formatting exactly (`sha2`/`hex` conventions already agree: hex
@@ -62,12 +70,18 @@ pub fn hash(path: &Path) -> Result<(u64, String), String> {
     };
     io::copy(&mut file, &mut sink)
         .map_err(|_| format!("cannot hash {}: read error", path.display()))?;
-    let digest = sink.hasher.finalize();
-    let mut hex = String::with_capacity(64);
-    for byte in digest {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    Ok((sink.total, hex))
+    Ok((sink.total, hex_digest(sink.hasher.finalize())))
+}
+
+/// Replaces `HP2ImportPlan.cpp`'s `Generated`'s inline `CC_SHA256_*`
+/// call sequence: hashes in-memory content directly (a just-built
+/// `Default.ini`/`DefUser.ini` string, not a file on disk), using the
+/// same SHA-256 and the same lowercase-hex formatting [`hash`] uses for
+/// files -- the two call sites just differ in where the bytes come from.
+pub fn hash_bytes(content: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    hex_digest(hasher.finalize())
 }
 
 #[cfg(test)]
@@ -77,14 +91,12 @@ mod tests {
     use std::io::Write;
 
     fn write_temp(name: &str, content: &[u8]) -> std::path::PathBuf {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let mut path = std::env::temp_dir();
         path.push(format!(
             "hp2-import-hash-test-{}-{}-{name}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let mut f = fs::File::create(&path).unwrap();
         f.write_all(content).unwrap();
@@ -124,6 +136,19 @@ mod tests {
             assert_eq!(&hex, expected_hex, "digest for {name}");
             fs::remove_file(&path).unwrap();
         }
+    }
+
+    #[test]
+    fn hash_bytes_matches_hash_of_the_same_content_on_disk() {
+        // Not an independent oracle -- cross-checks hash_bytes against
+        // hash() on identical content, confirming the two code paths
+        // (streamed-from-file vs in-memory) agree, which the already-
+        // verified reference vectors above transitively cover.
+        let content = b"generated Default.ini content";
+        let path = write_temp("generated", content);
+        let (_, from_file) = hash(&path).unwrap();
+        fs::remove_file(&path).unwrap();
+        assert_eq!(hash_bytes(content), from_file);
     }
 
     #[test]
