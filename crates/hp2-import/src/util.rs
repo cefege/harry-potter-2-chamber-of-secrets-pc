@@ -23,6 +23,21 @@ pub(crate) fn utf8(p: &Path) -> Result<String, String> {
         .ok_or_else(|| fail(format!("non-UTF-8 path: {}", p.to_string_lossy())))
 }
 
+/// `std::error_code::message()`/`ec.message()` equivalent for a Rust
+/// `io::Error`: the raw OS text via the shared, thread-safe,
+/// Windows-correct `hp2_ffi_support::strerror`, *not* `io::Error`'s own
+/// `Display`, which appends `" (os error N)"` that C++ never produces --
+/// any stderr-text comparison (e.g. `importer_parity`) would see that
+/// difference. Falls back to `io::Error`'s own text only when there's no
+/// OS error code at all (a Rust-internal error with no `errno`/Win32
+/// code behind it, which `std::error_code` has no equivalent of either).
+pub(crate) fn strerror_of(e: &std::io::Error) -> String {
+    match e.raw_os_error() {
+        Some(code) => hp2_ffi_support::strerror(code),
+        None => e.to_string(),
+    }
+}
+
 /// Matches `fs::path::extension()`'s string (including the leading `.`,
 /// or empty when there is none), lowercased via [`crate::lower::lower`].
 /// Rust's `Path::extension()` omits the dot and uses the same "no dot"

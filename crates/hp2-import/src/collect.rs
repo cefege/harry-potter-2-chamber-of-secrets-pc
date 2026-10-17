@@ -640,36 +640,42 @@ mod tests {
     }
 
     #[test]
-    fn a_cutscene_payload_and_a_cutscene_reference_can_collide_at_the_same_destination() {
-        // Ground truth from real compiled probes of
-        // CollectPrototypeRuntimeCutscenes and
-        // CollectPrototypeCutsceneReferences on this exact fixture: both
-        // produce an asset at "System/Cutscenes/intro.int" (one from
+    fn a_cutscene_payload_and_a_cutscene_reference_resolve_to_the_same_destination_path() {
+        // Both collectors independently produce an asset at
+        // "System/Cutscenes/intro.int" for this fixture (one from
         // System/cutscenes/intro.int directly, one from
-        // CutScenes/intro.txt via extension replacement). Neither
-        // function sees the other's output on its own (each returns a
-        // fresh map); the collision only becomes observable once a
-        // caller -- HP2ImportPlan.cpp's orchestration, not yet ported --
-        // merges both into one map via insert(), which is exactly what
-        // this test does instead, since insert() is the real, already-
-        // verified collision gate.
+        // CutScenes/intro.txt via extension replacement) -- a real,
+        // observable fact about these two functions in isolation.
+        //
+        // This is *not* a test of insert()'s collision detection: when
+        // HP2ImportPlan.cpp's "Full" profile actually combines a
+        // prototype collection with cutscene references
+        // (HP2ImportPlan.cpp:206-207), it does not call Insert() for
+        // that merge at all -- it's a bespoke first-wins dictionary
+        // build (`comparison.emplace` only when the key isn't already
+        // present), which never errors on a duplicate key. An earlier
+        // version of this test incorrectly asserted that merging these
+        // two collectors' outputs through insert() produces a collision
+        // error; that doesn't correspond to any real C++ code path for
+        // this specific merge and has been removed. The actual
+        // first-wins merge behavior isn't ported yet (it's part of
+        // Plan() itself), so there is nothing correct to assert about
+        // it here yet.
         let dir = tempdir();
         stdfs::create_dir_all(dir.path().join("System/cutscenes")).unwrap();
         stdfs::create_dir_all(dir.path().join("CutScenes")).unwrap();
         write(dir.path(), "System/cutscenes/intro.int", b"payload");
         write(dir.path(), "CutScenes/intro.txt", b"reference");
 
-        let mut assets = collect_prototype_runtime_cutscenes(dir.path()).unwrap();
-        assert_eq!(assets.len(), 1);
+        let runtime = collect_prototype_runtime_cutscenes(dir.path()).unwrap();
         let refs = collect_prototype_cutscene_references(dir.path()).unwrap();
-        assert_eq!(refs.len(), 1);
-
-        let (_, reference_asset) = refs.into_iter().next().unwrap();
-        assert_eq!(reference_asset.path, "System/Cutscenes/intro.int");
-        let err = insert(&mut assets, reference_asset).unwrap_err();
-        assert!(
-            err.starts_with("case-insensitive output collision for System/Cutscenes/intro.int: "),
-            "{err}"
+        assert_eq!(
+            runtime.values().next().unwrap().path,
+            "System/Cutscenes/intro.int"
+        );
+        assert_eq!(
+            refs.values().next().unwrap().path,
+            "System/Cutscenes/intro.int"
         );
     }
 }

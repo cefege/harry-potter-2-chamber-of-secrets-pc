@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::collect::Asset;
 use crate::hash::hash_bytes;
 use crate::lower::lower;
-use crate::util::{fail, utf8};
+use crate::util::{fail, strerror_of, utf8};
 
 /// Replaces `Generated`. Builds a fully-formed, already-hashed
 /// `Asset` for in-memory content (`Default.ini`/`DefUser.ini`'s own
@@ -96,11 +96,12 @@ fn random_probe_name() -> String {
 /// specific error handling: a cross-device probe failure falls back to
 /// `"copy"` (or fails outright if the caller explicitly required
 /// `Hardlink`), but *any other* probe failure still returns `"hardlink"`
-/// optimistically -- the C++ source does this too (not a bug being
-/// preserved, the actual documented contract: the probe failing for some
-/// unrelated reason, e.g. a permissions quirk on the probe name
-/// specifically, doesn't mean the real asset path will fail the same
-/// way later).
+/// optimistically -- the real C++ source does this too, inferred by
+/// reading its control flow (there's no comment there explaining why;
+/// this is the behavior the code actually has, not a documented
+/// contract): the probe failing for some unrelated reason, e.g. a
+/// permissions quirk on the probe name specifically, doesn't mean the
+/// real asset path will fail the same way later.
 ///
 /// The same-device success path (the common case) is verified directly:
 /// this machine's `/tmp` and the repo are on the same filesystem, so a
@@ -128,7 +129,7 @@ pub fn resolve_link_mode(
                 fail(format!(
                     "cannot remove link-mode probe {}: {}",
                     utf8(&probe).unwrap_or_else(|_| probe.display().to_string()),
-                    e
+                    strerror_of(&e)
                 ))
             })?;
             Ok("hardlink".to_string())

@@ -46,7 +46,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::lower::lower;
-use crate::util::{fail, lexically_relative, utf8};
+use crate::util::{fail, lexically_relative, strerror_of, utf8};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -79,13 +79,6 @@ fn classify(path: &Path) -> Result<Kind, String> {
         return Ok(Kind::File);
     }
     Err(fail(format!("unsupported input entry: {}", utf8(path)?)))
-}
-
-fn strerror_of(e: &std::io::Error) -> String {
-    match e.raw_os_error() {
-        Some(code) => hp2_ffi_support::strerror(code),
-        None => e.to_string(),
-    }
 }
 
 /// Matches the ordering [`folded_then_exact`] implements: casefold first,
