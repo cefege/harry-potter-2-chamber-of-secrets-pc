@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -53,7 +54,17 @@ def main() -> int:
     if not (data_root / "System" / "Default.ini").is_file():
         return blocked(args.name, "data.prototype_missing")
 
-    work = Path(os.environ.get("HP2_ARTIFACT_DIR") or (Path.cwd() / "wgpu-smoke"))
+    # `base` is the pre-created directory owned by the caller (ctest's
+    # per-test HP2_ARTIFACT_DIR, or a fresh tempdir for a manual run --
+    # never cwd, which would write into the repo working tree for a
+    # manual run from the repo root). `work` is always a subdirectory
+    # this script creates and owns itself, never `base` directly: an
+    # earlier version of this script used `base` itself as `work` and
+    # called shutil.rmtree(work) on it, which would have deleted
+    # ctest's own pre-created artifact directory out from under it
+    # (caught on review, not self-caught).
+    base = Path(os.environ.get("HP2_ARTIFACT_DIR") or tempfile.mkdtemp(prefix="hp2-wgpu-smoke-"))
+    work = base / "wgpu-smoke"
     home = work / "Home"
     shutil.rmtree(work, ignore_errors=True)
     (home / "Library/Application Support/Harry Potter 2/User").mkdir(parents=True)

@@ -1463,10 +1463,22 @@ if(HP2_ENABLE_WGPU_DRIVER)
     # (WGPUDRV_API= among them) and C++17, matching every other engine
     # object library in this file.
     hp2_add_engine_object(hp2_wgpudrv WgpuDrv ${HP2_WGPUDRV_SOURCES})
+    # PRIVATE hp2_ffi, not just a manual HP2_RS_INCLUDE_DIR include dir:
+    # without this link, ninja has no dependency edge forcing hp2_ffi's
+    # cbindgen-generating custom command to run before WgpuDrv.cpp
+    # compiles -- the real cause of this package's first build attempt
+    # failing with "undeclared hp2_rs_wgpu_create" even though the
+    # header already had the symbol (a prior, separate invocation had
+    # already generated it; the retry only "worked" by accident of
+    # ordering, not because the graph was correct). hp2_ffi's own
+    # INTERFACE include of HP2_RS_INCLUDE_DIR (this file, ~line 227)
+    # propagates automatically through this link, same as hp2_core
+    # gets it via PUBLIC hp2_ffi -- no separate manual include dir
+    # needed or kept here.
+    target_link_libraries(hp2_wgpudrv PRIVATE hp2_ffi)
     target_include_directories(hp2_wgpudrv PUBLIC
         ${HP2_RENDER_INCLUDE_DIRS}
         "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Inc"
-        "${HP2_RS_INCLUDE_DIR}"
     )
 
     # Static registration: adding the object to hp2_game puts
