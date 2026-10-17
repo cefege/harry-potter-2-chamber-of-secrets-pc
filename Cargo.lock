@@ -179,7 +179,9 @@ dependencies = [
 name = "hp2-launcher"
 version = "0.1.0"
 dependencies = [
+ "hp2-ffi-support",
  "hp2-ini",
+ "libc",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@
 //! This is vestigial -- declared, never implemented, never called --
 //! not a gap in this port.
 
+pub mod atomic;
 pub mod model;
 pub mod policy;
 pub mod store;

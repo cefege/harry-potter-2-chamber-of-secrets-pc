@@ -9,4 +9,6 @@ publish.workspace = true
 name = "hp2_launcher"
 
 [dependencies]
+hp2-ffi-support.workspace = true
 hp2-ini.workspace = true
+libc.workspace = true
