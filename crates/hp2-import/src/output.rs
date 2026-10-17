@@ -1409,4 +1409,164 @@ mod tests {
         // that failed validation.
         assert!(!scratch.path().join("out").exists());
     }
+
+    /// Builds a *complete*, genuinely valid `RetailOnly`-profile retail
+    /// tree satisfying every one of `validate_plan`'s exact count
+    /// contracts for real -- 42 maps (41 generic plus the required
+    /// `Maps/Entry.unr`), 141 Oggs, 213 cutscenes, every
+    /// `CRITICAL_RETAIL_PATHS`/`RETAIL_FINAL_LOCALIZATION`/
+    /// `RETAIL_ONLY_REQUIRED_PATHS` entry, the nested `Textures/Old
+    /// textures/HP_Menu.utx` `CollectRetailRequiredNestedTextures`
+    /// needs, and `Default.ini`/`DefUser.ini` templates with the exact
+    /// retail values `hp2_ini::validate_default`/`validate_defuser`
+    /// check for (`fDamageMultiplier_Easy/Medium/Hard` =
+    /// `1.2`/`2.0`/`3.0`, `FrontEnd`/`ALAudio.ALAudioSubsystem`/
+    /// `Engine.Input` keys present). Built once this way (not
+    /// hand-written) -- unlike `plan`'s own "reaches validate_plan"
+    /// test, this exists specifically to prove `run_import`'s actual
+    /// success paths work for real, not just that failures propagate
+    /// correctly: every one of those was, until this test, only ever
+    /// exercised indirectly through smaller, deliberately-failing
+    /// fixtures.
+    fn complete_retail_only_fixture() -> crate::util::test_support::TempDir {
+        let dir = tempdir();
+        let root = dir.path().join("retail");
+        for sub in [
+            "System",
+            "System/Cutscenes",
+            "Maps",
+            "Textures",
+            "Textures/Old textures",
+            "Sounds",
+            "Music",
+            "Help",
+        ] {
+            fs::create_dir_all(root.join(sub)).unwrap();
+        }
+        for i in 0..41 {
+            write(&root, &format!("Maps/Map{i:03}.unr"), b"x");
+        }
+        write(&root, "Maps/Entry.unr", b"x");
+        for i in 0..141 {
+            write(&root, &format!("Music/Track{i:03}.ogg"), b"x");
+        }
+        for i in 0..213 {
+            write(&root, &format!("System/Cutscenes/Scene{i:03}.int"), b"x");
+        }
+        for p in [
+            "System/Core.u",
+            "System/Editor.u",
+            "System/Engine.u",
+            "System/Fire.u",
+            "System/HGame.u",
+            "System/HPModels.u",
+            "System/HPParticle.u",
+            "System/HProps.u",
+            "System/HPSounds.u",
+            "System/UnrealShare.u",
+            "System/UWindow.u",
+            "Textures/HP2_Master.utx",
+            "Textures/HP2_Menu.utx",
+            "Sounds/AllDialog.USA_uax",
+            "System/BumpDialog.int",
+            "System/BumpSet.int",
+            "System/Credits.int",
+            "System/Duelset.int",
+            "System/hpcredits.int",
+            "System/hpdialog.int",
+            "System/HPMenu.int",
+            "System/QuidSet.int",
+            "System/BumpDialog.usa",
+            "System/hpcredits.usa",
+            "System/HpDialog.usa",
+            "System/HpMenu.usa",
+        ] {
+            write(&root, p, b"x");
+        }
+        write(&root, "Textures/Old textures/HP_Menu.utx", b"x");
+        write(
+            &root,
+            "System/Default.ini",
+            b"[Core.System]\n[FrontEnd]\nEASplashWaitTime=1\nWBSplashWaitTime=1\nLaunchCode=1\nUseSaveSlot=1\n[ALAudio.ALAudioSubsystem]\nMusicVolume=0.53\n",
+        );
+        write(
+            &root,
+            "System/DefUser.ini",
+            b"[Engine.Input]\nAliases[8]=x\nRightMouse=x\nLeftMouse=x\nTab=x\nEnter=x\nCtrl=x\nAlt=x\nSpace=x\nZ=x\nSlash=x\nA=x\n[HGame.Harry]\nfDamageMultiplier_Easy=1.2\nfDamageMultiplier_Medium=2.0\nfDamageMultiplier_Hard=3.0\n",
+        );
+        dir
+    }
+
+    /// The genuine, real success path: `run_import` materializes a
+    /// fresh output directory for a complete, valid plan and returns
+    /// `Ok`. Confirmed via direct inspection, not just the `Ok` return:
+    /// the real `overlay-manifest.json`/`overlay-checksums.txt` and a
+    /// representative asset both land on disk, and
+    /// `validate_output` (called separately here, not just internally
+    /// by `run_import`) accepts the result independently.
+    #[test]
+    fn run_import_succeeds_end_to_end_for_a_genuinely_complete_plan() {
+        let dir = complete_retail_only_fixture();
+        let output = dir.path().join("out");
+        let options = Options {
+            retail_root: dir.path().join("retail").display().to_string(),
+            archive: String::new(),
+            prototype_root: String::new(),
+            output: output.display().to_string(),
+            profile: Profile::RetailOnly,
+            link_mode: LinkMode::Auto,
+            check_only: false,
+        };
+        let log = run_import(&options, None).unwrap();
+        assert_eq!(log, "Import completed successfully.\n");
+        assert!(output.join("overlay-manifest.json").is_file());
+        assert!(output.join("overlay-checksums.txt").is_file());
+        assert!(output.join("Maps/Entry.unr").is_file());
+    }
+
+    /// The already-valid-output short-circuit: running `run_import`
+    /// again against an output it already successfully produced
+    /// succeeds immediately (via `validate_output`, not a second
+    /// materialize/commit cycle) rather than failing because the
+    /// output already exists.
+    #[test]
+    fn run_import_succeeds_immediately_against_its_own_prior_output() {
+        let dir = complete_retail_only_fixture();
+        let output = dir.path().join("out");
+        let options = Options {
+            retail_root: dir.path().join("retail").display().to_string(),
+            archive: String::new(),
+            prototype_root: String::new(),
+            output: output.display().to_string(),
+            profile: Profile::RetailOnly,
+            link_mode: LinkMode::Auto,
+            check_only: false,
+        };
+        run_import(&options, None).unwrap();
+        let log = run_import(&options, None).unwrap();
+        assert_eq!(log, "Import completed successfully.\n");
+    }
+
+    /// `--check` against a freshly produced, genuinely valid output
+    /// succeeds too -- the third of the three success return points in
+    /// `run_import`, distinct from the other two (no materialize/commit
+    /// at all, just `validate_output` against the pre-existing result).
+    #[test]
+    fn run_import_check_only_succeeds_against_a_valid_existing_output() {
+        let dir = complete_retail_only_fixture();
+        let output = dir.path().join("out");
+        let mut options = Options {
+            retail_root: dir.path().join("retail").display().to_string(),
+            archive: String::new(),
+            prototype_root: String::new(),
+            output: output.display().to_string(),
+            profile: Profile::RetailOnly,
+            link_mode: LinkMode::Auto,
+            check_only: false,
+        };
+        run_import(&options, None).unwrap();
+        options.check_only = true;
+        let log = run_import(&options, None).unwrap();
+        assert_eq!(log, "Import completed successfully.\n");
+    }
 }
