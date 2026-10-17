@@ -933,6 +933,21 @@ pub struct RenderLoop {
     /// whole real lifetime, so a mismatch here would mean a real
     /// caller bug, not a condition to silently handle).
     line_pipeline: Option<(wgpu::TextureFormat, draw::SimpleLinePipeline)>,
+    /// Set by every `set_scene_node` call -- the real `RFX2`/`RFY2`/
+    /// `Frame->FX2`/`FY2` screen-to-clip transform `Draw2DLine`'s own
+    /// real source applies (`DrawSimple.cpp:80,82`) is derived
+    /// entirely from the most recent `SceneFrame`'s `fx`/`fy`/
+    /// `is_ortho`/`effective_fov_angle`/`viewport_fov_angle` -- not
+    /// from any separate `FSceneNode` parameter `Draw2DLine` itself
+    /// receives beyond what `SetSceneNode` already captured, matching
+    /// `UXOpenGLRenderDevice`'s own real `RFX2`/`RFY2` member fields
+    /// (computed once per `SetSceneNode`, reused by every `Draw2DLine`
+    /// call that frame -- `queue_line`'s own doc has the full
+    /// reasoning). `None` until the first `set_scene_node` call --
+    /// `queue_line` drops the draw cleanly in that case (a real,
+    /// reachable edge case, not a caller bug: `Draw2DLine` called
+    /// before any `SetSceneNode` this session).
+    last_scene: Option<SceneFrame>,
 }
 
 impl Default for RenderLoop {
@@ -951,6 +966,7 @@ impl RenderLoop {
             queued_line_vertices: Vec::new(),
             queued_line_params: Vec::new(),
             line_pipeline: None,
+            last_scene: None,
         }
     }
 
@@ -960,39 +976,57 @@ impl RenderLoop {
 
     /// Real per-tick entry point `UWgpuRenderDevice::Draw2DLine` will
     /// call through a future FFI function (not wired yet -- see this
-    /// crate's own module doc). Appends one line (`p1`/`p2`, already
-    /// in the real screen-space-transformed `Coords` shape
-    /// `DrawSimple.cpp`'s own `Draw2DLine` builds, this function does
-    /// no transformation of its own) to the queue `unlock_frame` will
-    /// later flush. Drops the draw cleanly (not an error, not a
-    /// panic) when there is no frame in progress -- a real condition,
-    /// not a caller bug: the engine keeps calling `SetSceneNode`/
-    /// `Draw*` after a failed/`Occluded` `Lock` (confirmed by reading
-    /// this project's own real `wgpu-smoke.log`, `WgpuDrv: Lock did
-    /// not begin a frame` immediately followed by a real `SetSceneNode`
-    /// call on the very next line), so silently dropping here is the
-    /// correct, already-established behavior, not a gap. Also drops
-    /// cleanly once `simple.wgsl`'s own real `MAX_DRAWS` capacity is
-    /// reached -- this queue has no flush-and-rotate behavior yet
-    /// (the real GLSL batcher's own `ParametersBuffer`/`VertBuffer`
-    /// ring-buffer rotation, not yet ported), so a frame drawing more
-    /// than `MAX_DRAWS` lines silently loses the excess for now rather
+    /// crate's own module doc). `p1`/`p2` are raw screen-space
+    /// `FVector`-shaped points -- `(pixel X, pixel Y, view-space Z)`,
+    /// exactly `Draw2DLine`'s own real `P1`/`P2` parameters
+    /// (`DrawSimple.cpp:52`), not already transformed. This function
+    /// applies the real `Draw2DLine` screen-to-clip transform itself
+    /// (`DrawSimple.cpp:80,82`: `Coords = (RFX2 * P.Z * (P.X -
+    /// Frame->FX2), RFY2 * P.Z * (P.Y - Frame->FY2), P.Z)`), using
+    /// `self.last_scene` (the most recent `set_scene_node` call,
+    /// matching `UXOpenGLRenderDevice`'s own `RFX2`/`RFY2` member
+    /// fields, computed once per `SetSceneNode` and reused by every
+    /// `Draw2DLine` call that frame -- not recomputed per line). An
+    /// earlier version of this doc wrongly claimed `p1`/`p2` arrived
+    /// pre-transformed and this function did no transformation of its
+    /// own -- written before `DrawSimple.cpp`'s real math had
+    /// actually been read; corrected here, not left stale.
+    ///
+    /// Drops the draw cleanly (not an error, not a panic) when there
+    /// is no frame in progress -- a real condition, not a caller bug:
+    /// the engine keeps calling `SetSceneNode`/`Draw*` after a
+    /// failed/`Occluded` `Lock` (confirmed by reading this project's
+    /// own real `wgpu-smoke.log`, `WgpuDrv: Lock did not begin a
+    /// frame` immediately followed by a real `SetSceneNode` call on
+    /// the very next line), so silently dropping here is the correct,
+    /// already-established behavior, not a gap. Also drops cleanly
+    /// when `self.last_scene` is `None` (`Draw2DLine` called before
+    /// any real `SetSceneNode` this session -- `Frame->FX2`/`FY2`
+    /// would be undefined, so there is nothing correct to draw), and
+    /// once `simple.wgsl`'s own real `MAX_DRAWS` capacity is reached
+    /// -- this queue has no flush-and-rotate behavior yet (the real
+    /// GLSL batcher's own `ParametersBuffer`/`VertBuffer` ring-buffer
+    /// rotation, not yet ported), so a frame drawing more than
+    /// `MAX_DRAWS` lines silently loses the excess for now rather
     /// than panicking or corrupting the buffer -- a real, known,
     /// explicitly-scoped limitation, not silently pretended away.
     pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], color: [f32; 4]) {
         if self.in_progress.is_none() {
             return;
         }
+        let Some(scene) = self.last_scene.as_ref() else {
+            return;
+        };
         if self.queued_line_params.len() >= draw::MAX_DRAWS {
             return;
         }
         let draw_id = self.queued_line_params.len() as u32;
         self.queued_line_vertices.push(draw::LineVertex {
-            coords: p1,
+            coords: draw_2d_line_screen_to_coords(scene, p1),
             draw_id,
         });
         self.queued_line_vertices.push(draw::LineVertex {
-            coords: p2,
+            coords: draw_2d_line_screen_to_coords(scene, p2),
             draw_id,
         });
         self.queued_line_params
@@ -1072,6 +1106,7 @@ impl RenderLoop {
         // reinterpretation (caught on review).
         let bytes = bytemuck::bytes_of(&uniforms);
         queue.write_buffer(buffer, 0, bytes);
+        self.last_scene = Some(*scene);
     }
 
     /// `None` until the first `set_scene_node` call -- real callers
@@ -1294,6 +1329,42 @@ pub fn compute_frame_uniforms(scene: &SceneFrame) -> FrameUniforms {
         light_color_intensity: scene.light_color_intensity,
         y_scale: 1.0,
     }
+}
+
+/// Real `Draw2DLine`/`Draw2DPoint`/`Draw2DClippedLine`'s own shared
+/// screen-to-clip transform (`DrawSimple.cpp:80,82` for `Draw2DLine`
+/// itself; `187-197` for `Draw2DClippedLine`, same formula with a
+/// constant 0.5px inset rather than a per-call parameter -- that
+/// variant is not implemented by this function, only the plain
+/// `Draw2DLine` shape). `p` is `(pixel X, pixel Y, view-space Z)`,
+/// exactly `Draw2DLine`'s own real `P1`/`P2` `FVector` parameters.
+///
+/// `RFX2`/`RFY2` (`XOpenGL.cpp:1821-1823` ortho / `1868-1870`
+/// perspective -- both branches compute them the same way from their
+/// own `RProjZ`/`Aspect`, matching `compute_frame_uniforms`'s own
+/// `r_proj_z`/`aspect` derivation exactly, not duplicated with a
+/// different formula) and `Frame->FX2`/`FY2` (`UnCamera.cpp:351-352`:
+/// `FX2 = FX * 0.5f`, `FY2 = FY * 0.5f` -- confirmed at the real
+/// assignment site, not assumed from `UnRender.h`'s own comment
+/// alone) are real `UXOpenGLRenderDevice`/`FSceneNode` values this
+/// function derives fresh from `scene` every call, matching what a
+/// real `RenderLoop::queue_line` call needs (`scene` is `self.
+/// last_scene`, captured once per `set_scene_node` and reused for
+/// every line queued that frame -- not recomputed per `SetSceneNode`
+/// call's own cost, since this function itself is cheap and has no
+/// GPU/device access).
+pub fn draw_2d_line_screen_to_coords(scene: &SceneFrame, p: [f32; 3]) -> [f32; 3] {
+    let aspect = scene.fy / scene.fx;
+    let r_proj_z = if scene.is_ortho {
+        (scene.viewport_fov_angle * std::f32::consts::PI / 360.0).tan()
+    } else {
+        (scene.effective_fov_angle * std::f32::consts::PI / 360.0).tan()
+    };
+    let rfx2 = 2.0 * r_proj_z / scene.fx;
+    let rfy2 = 2.0 * r_proj_z * aspect / scene.fy;
+    let fx2 = scene.fx * 0.5;
+    let fy2 = scene.fy * 0.5;
+    [rfx2 * p[2] * (p[0] - fx2), rfy2 * p[2] * (p[1] - fy2), p[2]]
 }
 
 /// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`
@@ -1685,6 +1756,53 @@ mod tests {
     }
 
     #[test]
+    fn draw_2d_line_screen_to_coords_matches_the_real_source_formula() {
+        // reference_perspective_scene(): fx=fy=100 -> aspect=1.0,
+        // effective_fov_angle=90 -> r_proj_z=tan(45 deg)=1.0 ->
+        // rfx2=rfy2=2.0*1.0/100.0=0.02, fx2=fy2=50.0. P=(0, 50, 1):
+        // x = 0.02*1*(0-50) = -1.0, y = 0.02*1*(50-50) = 0.0, z = 1.0
+        // -- DrawSimple.cpp:80's own real formula, hand-computed
+        // independently of draw_2d_line_screen_to_coords's own
+        // implementation.
+        let out = draw_2d_line_screen_to_coords(&reference_perspective_scene(), [0.0, 50.0, 1.0]);
+        assert!(
+            (out[0] - (-1.0)).abs() < 1e-5,
+            "expected x ~= -1.0, got {}",
+            out[0]
+        );
+        assert!(
+            (out[1] - 0.0).abs() < 1e-5,
+            "expected y ~= 0.0, got {}",
+            out[1]
+        );
+        assert_eq!(out[2], 1.0, "expected z to pass through P.Z unchanged");
+    }
+
+    #[test]
+    fn draw_2d_line_screen_to_coords_uses_viewport_fov_angle_only_on_the_ortho_path() {
+        // SetOrthoProjection (XOpenGL.cpp:1821) reads Viewport->Actor
+        // ->FovAngle (viewport_fov_angle); SetProjection (1868) reads
+        // Frame->EffectiveFovAngle (effective_fov_angle) -- a real,
+        // deliberate difference between the two paths (SceneFrame's
+        // own doc already notes this), not interchangeable. Setting
+        // them to different values and flipping is_ortho must select
+        // a genuinely different RFX2, proving the real field is read
+        // on each path, not always the same one.
+        let mut scene = reference_perspective_scene();
+        scene.viewport_fov_angle = 60.0;
+        scene.effective_fov_angle = 90.0;
+        scene.is_ortho = true;
+        let ortho_out = draw_2d_line_screen_to_coords(&scene, [0.0, 50.0, 1.0]);
+        scene.is_ortho = false;
+        let perspective_out = draw_2d_line_screen_to_coords(&scene, [0.0, 50.0, 1.0]);
+        assert_ne!(
+            ortho_out[0], perspective_out[0],
+            "expected the ortho and perspective paths to read different fov-angle fields and \
+             produce different results when those fields genuinely differ"
+        );
+    }
+
+    #[test]
     fn frame_uniforms_view_and_model_mat_match_the_real_fixed_source_values() {
         let out = compute_frame_uniforms(&reference_perspective_scene());
         // XOpenGL.cpp's own Init: glm::scale(mat4(1), vec3(1,-1,-1)),
@@ -2060,9 +2178,19 @@ mod tests {
 
         // Real lock_frame logic (clear recorded, not submitted).
         begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
-        // Real Draw2DLine accumulation path -- a green line spanning
-        // NDC x in [-1.0, 0.0], the left half of the 64px-wide target.
-        loop_state.queue_line([-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0]);
+        // Real Draw2DLine accumulation path, raw screen-space points
+        // (not pre-transformed -- queue_line's own doc has the real
+        // transform). With reference_perspective_scene()'s fx=fy=100,
+        // effective_fov_angle=90 (so aspect=1.0, r_proj_z=tan(45)=1.0,
+        // rfx2=rfy2=0.02, fx2=fy2=50.0): P1=(0, 50, 1) transforms to
+        // (0.02*1*(0-50), 0.02*1*(50-50), 1) = (-1.0, 0.0, 1.0); P2=
+        // (50, 50, 1) transforms to (0.0, 0.0, 1.0) -- a green line
+        // spanning NDC x in [-1.0, 0.0] once the identity-matrix-
+        // substituted modelviewproj_mat above passes those coords
+        // straight through to clip space, the left half of the
+        // 64px-wide target (Z is irrelevant: the pipeline has no
+        // depth attachment).
+        loop_state.queue_line([0.0, 50.0, 1.0], [50.0, 50.0, 1.0], [0.0, 1.0, 0.0, 1.0]);
         // Real unlock_frame: flushes the queued line into the frame's
         // own still-unsubmitted encoder (Load mode, after the clear),
         // then submits exactly once. present=false: no real surface
