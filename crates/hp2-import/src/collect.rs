@@ -493,6 +493,49 @@ mod tests {
     }
 
     #[test]
+    fn collect_side_handles_mixed_case_roots_nested_textures_and_uppercase_extensions() {
+        // Verified against the real compiled CollectSide (same fixture,
+        // same c++ main.cpp HarryPotter2/Unreal/Import/Src/
+        // HP2ImportCollect.cpp pattern used elsewhere in this crate):
+        // exact match on all four outputs. Covers, in one fixture:
+        // - an on-disk root directory spelled lowercase ("system") still
+        //   produces the canonical "System/" destination, not "system/";
+        // - similarly for an uppercase root ("MUSIC" -> "Music/");
+        // - Textures/Sub/y.utx is skipped entirely: Textures is
+        //   collected non-recursively, so a nested file never reaches
+        //   the accept filter at all;
+        // - Sounds/foo.UAX (uppercase extension) still matches the
+        //   case-insensitive ".uax" check, and the output path preserves
+        //   the file's actual on-disk casing ("foo.UAX"), not lowercased;
+        // - System/.DS_Store is correctly excluded as debris.
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("system")).unwrap();
+        stdfs::create_dir_all(dir.path().join("Maps")).unwrap();
+        stdfs::create_dir_all(dir.path().join("Textures/Sub")).unwrap();
+        stdfs::create_dir_all(dir.path().join("Sounds")).unwrap();
+        stdfs::create_dir_all(dir.path().join("MUSIC")).unwrap();
+        write(dir.path(), "system/Game.u", b"u");
+        write(dir.path(), "system/.DS_Store", b"ds");
+        write(dir.path(), "Textures/Wall.utx", b"tex");
+        write(dir.path(), "Textures/Sub/y.utx", b"nested");
+        write(dir.path(), "Sounds/foo.UAX", b"snd");
+        write(dir.path(), "MUSIC/theme.ogg", b"music");
+
+        let assets = collect_side(dir.path(), "prototype").unwrap();
+        let mut paths: Vec<&str> = assets.values().map(|a| a.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                "Music/theme.ogg",
+                "Sounds/foo.UAX",
+                "System/Game.u",
+                "Textures/Wall.utx",
+            ]
+        );
+    }
+
+    #[test]
     fn collect_side_fails_on_a_prohibited_file_directly_in_system() {
         let dir = tempdir();
         standard_tree(dir.path());
