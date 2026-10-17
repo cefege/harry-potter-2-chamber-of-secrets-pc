@@ -1846,4 +1846,76 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             backend_name(created.backend)
         );
     }
+
+    // Same reasoning as the other real-GPU pipeline tests, applied to
+    // postprocess.wgsl -- the first and only pipeline test in this
+    // crate with zero vertex buffers: the real shader (and this port of
+    // it) derives everything from @builtin(vertex_index) alone, a
+    // well-established fullscreen-triangle-strip idiom, so `vertex.
+    // buffers` is an empty slice here, not a placeholder.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn postprocess_wgsl_builds_a_render_pipeline_on_a_real_adapter() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let validation_scope = created
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal_scope = created.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let module = created
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("postprocess.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(shader_source("postprocess").into()),
+            });
+        let _pipeline = created
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("postprocess.wgsl pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    ..wgpu::PrimitiveState::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let internal_err = pollster::block_on(internal_scope.pop());
+        let validation_err = pollster::block_on(validation_scope.pop());
+        if let Some(err) = validation_err.or(internal_err) {
+            panic!(
+                "postprocess.wgsl's pipeline failed to compile on real adapter {:?} backend {}: {err}",
+                created.adapter_name,
+                backend_name(created.backend)
+            );
+        }
+        println!(
+            "postprocess.wgsl's pipeline compiled successfully (real MSL translation + Metal \
+             compiler invocation exercised, zero vertex buffers) on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
 }
