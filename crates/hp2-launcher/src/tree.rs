@@ -91,7 +91,7 @@ fn fstat(fd: RawFd) -> io::Result<libc::stat> {
     }
 }
 
-fn fstatat_no_follow(parent_fd: RawFd, name: &CStr) -> io::Result<libc::stat> {
+pub(crate) fn fstatat_no_follow(parent_fd: RawFd, name: &CStr) -> io::Result<libc::stat> {
     let mut info = MaybeUninit::<libc::stat>::uninit();
     let result = unsafe {
         libc::fstatat(
@@ -112,7 +112,7 @@ fn fstatat_no_follow(parent_fd: RawFd, name: &CStr) -> io::Result<libc::stat> {
 /// return-value check the real C++ performs (a real, reachable
 /// failure mode on some filesystems, not mere formality) --
 /// `OwnedFd`'s own `Drop` silently discards any close() error.
-fn close_checked(fd: OwnedFd) -> io::Result<()> {
+pub(crate) fn close_checked(fd: OwnedFd) -> io::Result<()> {
     let raw = fd.into_raw_fd();
     if unsafe { libc::close(raw) } == 0 {
         Ok(())

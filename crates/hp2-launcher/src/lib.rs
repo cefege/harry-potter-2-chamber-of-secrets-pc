@@ -16,6 +16,7 @@ pub mod atomic;
 pub mod migrate;
 pub mod model;
 pub mod policy;
+pub mod profile;
 pub mod saves;
 pub mod store;
 pub mod tree;
