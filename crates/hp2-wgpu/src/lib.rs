@@ -138,7 +138,18 @@ pub struct CreatedDevice {
 /// backend -- the plan's own Raspberry Pi fallback -- can fall short
 /// of. Asking for exactly `adapter.limits()` can never exceed what the
 /// adapter reports, by construction, so this can never hit that panic.
-/// Returns `None` on total failure (same real-C++-forwarding note as
+/// Placeholder, not the final policy: `adapter.limits()` means renderer
+/// code validated only on a high-end adapter (this machine's M5
+/// reports `max_texture_dimension_2d=32768`) can end up silently
+/// depending on capability a lower-end backend doesn't have -- nothing
+/// here catches that until it's actually run on one. Once the
+/// renderer's real per-feature requirements are known, replace this
+/// with a fixed, deliberately-chosen baseline (e.g.
+/// `Limits::downlevel_webgl2_defaults()` raised to exactly the texture/
+/// buffer sizes HP2 needs, via `.using_resolution(adapter.limits())`)
+/// and fail with a clear error when an adapter can't meet it, rather
+/// than silently taking whatever the adapter happens to offer. Returns
+/// `None` on total failure (same real-C++-forwarding note as
 /// `request_adapter_sync`).
 pub fn create_device_sync(choice: BackendChoice) -> Option<CreatedDevice> {
     let adapter = request_adapter_raw(&build_instance(choice))?;
