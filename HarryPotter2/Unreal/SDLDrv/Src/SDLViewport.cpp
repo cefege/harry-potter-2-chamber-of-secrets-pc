@@ -163,26 +163,35 @@ void USDLViewport::ShutdownAfterError()
 	// established UE1 convention is minimal teardown and no object
 	// deletion -- UObject::StaticShutdownAfterError already walks
 	// every live object (including RenDev, a real ConstructObject-
-	// created UObject) and calls ShutdownAfterError on each, inside a
-	// try/catch with an RF_ErrorShutdown guard against double-calling
-	// (UnObj.cpp's own ConditionalShutdownAfterError), specifically so
-	// a second fault during an already-crashing process cannot cascade
-	// the way a raw Exit()+delete here could. XOpenGL implements its
-	// own ShutdownAfterError (XOpenGL.cpp:3249) for exactly this
-	// purpose, gated behind its own "really want noncritical cleanup"
-	// flag; UWgpuRenderDevice does not override it yet (inherits
-	// UObject's no-op default), so RustDevice/MetalView simply leak on
-	// a crash today -- acceptable: the process is terminating anyway
-	// and the OS reclaims everything, matching how XOpenGL's own
+	// created UObject) and calls ConditionalShutdownAfterError on each
+	// during the crash sweep. XOpenGL implements its own
+	// ShutdownAfterError (XOpenGL.cpp:3249) for exactly this purpose,
+	// gated behind its own "really want noncritical cleanup" flag;
+	// UWgpuRenderDevice does not override it yet (inherits UObject's
+	// no-op default), so RustDevice/MetalView simply leak on a crash
+	// today -- acceptable: the process is terminating anyway and the
+	// OS reclaims everything, matching how XOpenGL's own
 	// ShutdownAfterError deliberately skips some cleanup by default
-	// too. An earlier version of this function called Exit()+delete
-	// here, matching Destroy's own pattern -- caught on review as the
-	// wrong pattern for this specific call site, not just unhelpful:
-	// a real fault inside RenDev->Exit() here would be a second crash
-	// during crash handling, something this whole mechanism exists to
-	// avoid.
+	// too.
+	//
+	// RenDev->ConditionalShutdownAfterError(), not the bare virtual
+	// RenDev->ShutdownAfterError(): the conditional wrapper
+	// (UnObj.cpp) sets the RF_ErrorShutdown flag and wraps the call in
+	// try/catch, specifically so the later global
+	// StaticShutdownAfterError sweep (which also calls
+	// ConditionalShutdownAfterError on every live object, RenDev
+	// included) sees the flag already set and skips calling it again.
+	// Calling the bare virtual directly here -- an earlier version of
+	// this fix did exactly that -- leaves the flag unset, so that
+	// later sweep calls ShutdownAfterError on RenDev a *second* time;
+	// XOpenGL's own version runs XOpenGLDestroyContext(glContext)
+	// unconditionally on non-WGL builds, so a second call would
+	// destroy the GL context twice during an already-crashing process
+	// (caught on review, not self-caught -- a real double-destroy
+	// risk the bare call would have reintroduced even after the
+	// Exit()+delete removal above already fixed the worse risk).
 	if( RenDev )
-		RenDev->ShutdownAfterError();
+		RenDev->ConditionalShutdownAfterError();
 	SDL_Quit();
 	Super::ShutdownAfterError();
 	unguard;
