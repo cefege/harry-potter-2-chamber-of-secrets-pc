@@ -60,14 +60,25 @@
 // - `OPT_SimulateMultiPass`'s second color output (same real
 //   dual-source-blending constraint documented in simple.wgsl's header).
 //
-// This base path also assumes both the lightmap and fogmap layers are
-// always present (`OPT_HasLightMap`/`OPT_HasFogMap` always true) rather
-// than branching on them -- a real, not yet resolved simplification:
-// the actual GLSL compiles a *different* shader specialization per
-// combination of present/absent optional layers (this crate's own
-// module doc already scopes the open question of how that whole
-// mechanism maps to WGSL/wgpu). A surface with no lightmap or fogmap
-// cannot be drawn correctly with this file as written yet.
+// Lightmap and fogmap textures/samplers are always bound (WGSL can't
+// conditionally declare a binding the way GLSL's `#if OPT_HasLightMap`/
+// `#if OPT_HasFogMap` compile-time specialization can), but the real
+// per-draw `DF_LightMap`/`DF_FogMap` flags (confirmed against
+// `DrawComplex.cpp`'s `SetTextureHelper`, which only ORs them into
+// `DrawFlags` when `Surface.LightMap`/`Surface.FogMap` is actually
+// non-null) gate whether the sampled value is used at all, via
+// `select()` rather than an `if` around the sample itself -- see the
+// real comments at each call site below for why. A surface with no
+// lightmap or fogmap renders correctly today (an earlier version of
+// this file applied both unconditionally instead, overbright-
+// multiplying every such surface by whatever was bound to the unused
+// texture slot -- caught on review, fixed). What remains a real, not
+// yet resolved simplification is the broader shader-specialization
+// question this crate's module doc already scopes: the real GLSL still
+// compiles a genuinely different shader per combination of optional
+// texture layers for other reasons (fewer bindings, fewer instructions,
+// no always-bound dummy textures to manage Rust-side), not just to
+// decide presence/absence the way this file now does at runtime.
 
 struct DrawParameters {
     diffuse_uv: vec4<f32>,
@@ -170,16 +181,45 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // == GLSL's `OPT_HasLightMap` branch (`OPT_HWLighting` off):
     // `LightColor = GetTexel(...LightMapIndex..., vLightMapCoords);
     // LightColor.rgb *= LightMapIntensity * 255.0 / 127.0; LightColor.a
-    // = 1.0;`
-    var light_color = get_texel(light_map_texture, light_map_sampler, in.light_map_coords);
-    light_color = vec4<f32>(
-        light_color.rgb * (frame.light_map_intensity * 255.0 / 127.0),
-        1.0,
+    // = 1.0;` -- GLSL defaults `LightColor = vec4(1.0)` (line 405) and
+    // only overwrites it under `#if OPT_HasLightMap`; an earlier version
+    // of this file applied the lightmap unconditionally instead, which
+    // would have overbright-multiplied every surface without a lightmap
+    // by whatever garbage happened to be in the (always-bound, since
+    // WGSL can't conditionally declare a binding) light_map_texture slot
+    // -- caught on review, confirmed against the real source's default
+    // and its real per-draw gate: `DrawComplex.cpp`'s `SetTextureHelper`
+    // only ORs `ShaderDrawFlags::DF_LightMap` (0x0002, confirmed against
+    // `XOpenGL.h:1212`) into `DrawFlags` when `Surface.LightMap` is
+    // non-null. Sampled unconditionally here (not inside an `if`) and
+    // selected with `select()`: `draw_flags` is a per-draw, not a
+    // uniform-across-the-whole-pipeline, value -- different fragments in
+    // the *same* real GPU draw call can have different `DrawID`s (many
+    // batched UE1 draw calls share one flushed draw call), so branching
+    // on it around a texture sample would be exactly the kind of
+    // non-uniform control flow this crate's own module doc already
+    // flags as a real hazard for the parallax loops; `select()` avoids
+    // the question entirely rather than relying on naga's (confirmed
+    // elsewhere in this crate) non-enforcement of it.
+    let light_map_sample = get_texel(light_map_texture, light_map_sampler, in.light_map_coords);
+    let light_color = select(
+        vec4<f32>(1.0, 1.0, 1.0, 1.0),
+        vec4<f32>(light_map_sample.rgb * (frame.light_map_intensity * 255.0 / 127.0), 1.0),
+        (draw_flags & DRAW_FLAG_LIGHT_MAP) != 0u,
     );
 
     // == GLSL's `FogColor = GetTexel(...FogMapIndex..., vFogMapCoords) *
-    // 2.0;`
-    let fog_color = get_texel(fog_map_texture, fog_map_sampler, in.fog_map_coords) * 2.0;
+    // 2.0;` -- same real default-then-gated shape as LightColor above:
+    // GLSL defaults `FogColor = vec4(0.0)` (line 558), only overwritten
+    // under `#if OPT_HasFogMap`, gated the same way by the real
+    // `ShaderDrawFlags::DF_FogMap` (0x0004, `XOpenGL.h:1213`) `SetTexture
+    // Helper` ORs in only when `Surface.FogMap` is non-null.
+    let fog_map_sample = get_texel(fog_map_texture, fog_map_sampler, in.fog_map_coords) * 2.0;
+    let fog_color = select(
+        vec4<f32>(0.0, 0.0, 0.0, 0.0),
+        fog_map_sample,
+        (draw_flags & DRAW_FLAG_FOG_MAP) != 0u,
+    );
 
     // == GLSL's `#if !OPT_IsModulated TotalColor = TotalColor *
     // LightColor; #endif`

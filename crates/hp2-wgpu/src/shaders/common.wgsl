@@ -65,9 +65,11 @@
 // crate's own module doc) hasn't been designed yet; the function itself is
 // trivial and costs nothing to have ready.
 
-// == `ShaderDrawFlags::DF_Masked`/`DF_Modulated`/`DF_RenderFog`/
-// `DF_AlphaBlended`, confirmed against
-// ThirdParty/XOpenGLDrv/Inc/XOpenGL.h:1221-1227.
+// == `ShaderDrawFlags::DF_LightMap`/`DF_FogMap`/`DF_Masked`/
+// `DF_Modulated`/`DF_RenderFog`/`DF_AlphaBlended`, confirmed against
+// ThirdParty/XOpenGLDrv/Inc/XOpenGL.h:1212-1213,1221-1227.
+const DRAW_FLAG_LIGHT_MAP: u32 = 0x0002u;
+const DRAW_FLAG_FOG_MAP: u32 = 0x0004u;
 const DRAW_FLAG_MASKED: u32 = 0x0100u;
 const DRAW_FLAG_MODULATED: u32 = 0x0400u;
 const DRAW_FLAG_RENDER_FOG: u32 = 0x2000u;
