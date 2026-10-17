@@ -562,6 +562,15 @@ bool FLauncherSession::Open(std::string& Error)
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	s.imguiContext=true;
+	// This launcher's layout is fixed (one window, no dockable panes
+	// worth persisting), so there is nothing worth saving across runs.
+	// Left at ImGui's own default, `io.IniFilename` is the relative
+	// path "imgui.ini", written into whatever the process's current
+	// working directory happens to be -- the repo root for every
+	// ctest-invoked run and most manual launches from a checkout,
+	// which is exactly the ad-hoc-artifacts-outside-HP2_ARTIFACT_DIR
+	// pattern AGENTS.md's Non-Negotiable 2 rules out.
+	ImGui::GetIO().IniFilename=nullptr;
 	ImGui::StyleColorsDark();
 	ImGuiStyle& style=ImGui::GetStyle();
 	style.FramePadding.y=std::max(style.FramePadding.y,16.0f);

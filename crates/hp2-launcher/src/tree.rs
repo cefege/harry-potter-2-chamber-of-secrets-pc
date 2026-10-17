@@ -751,6 +751,41 @@ mod tests {
         assert!(!target.exists());
     }
 
+    // Verified against the real C++ `RemoveTreeAt`: a symlink child
+    // causes the WHOLE removal to fail with "contains a symlink or
+    // irregular file" (matching the exact same reject-with-error
+    // contract already verified for `copy_legacy_tree_at`'s and
+    // `inspect_legacy_tree_at`'s own symlink children) -- it does
+    // NOT silently unlink just the symlink entry and continue. This
+    // is the safety property that matters here: the symlink's
+    // target must be left completely untouched, proving `fstatat`'s
+    // `AT_SYMLINK_NOFOLLOW` actually prevents traversing into (and
+    // therefore deleting through) a symlink that points outside the
+    // tree being removed.
+    #[test]
+    fn remove_tree_no_follow_rejects_a_symlink_child_without_touching_its_target() {
+        let dir = tempdir();
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"untouched").unwrap();
+
+        let target = dir.path().join("dest");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("regular.txt"), b"x").unwrap();
+        symlink(&outside, target.join("evil_link")).unwrap();
+
+        let err = remove_tree_no_follow(target.to_str().unwrap()).unwrap_err();
+        assert!(
+            err.contains("contains a symlink or irregular file"),
+            "unexpected error: {err}"
+        );
+        // The symlink's target directory and its contents must be
+        // completely untouched -- the real failure mode this
+        // hardening exists to prevent.
+        assert!(outside.exists());
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"untouched");
+    }
+
     // --- directory_names_at: a lower-level unit not already fully
     // exercised indirectly above (sorted order, dot/dotdot
     // exclusion). ---

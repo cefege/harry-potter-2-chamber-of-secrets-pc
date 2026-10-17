@@ -642,10 +642,11 @@ mod tests {
     }
 
     // --- commit/load_launch_selection: verified against the real
-    // C++ the same way, including the real serialize/deserialize
-    // contract's own slot-not-persisted behavior (round-tripping
-    // slot=3 comes back as slot=-1, matching policy.rs's already-
-    // verified LaunchSelection schema exactly). ---
+    // C++ the same way, including the full save-coordinate
+    // round-trip (SaveSlot is only serialized when
+    // uses_slot_directory is true, per policy.rs's own
+    // serialize_launch_selection -- set it here so this test
+    // actually exercises that field, not just save_index). ---
 
     #[test]
     fn commit_then_load_launch_selection_round_trips() {
@@ -659,6 +660,7 @@ mod tests {
             save: SaveRecord {
                 slot: 3,
                 save_index: 7,
+                uses_slot_directory: true,
                 ..Default::default()
             },
         };
@@ -668,9 +670,31 @@ mod tests {
         assert_eq!(loaded.action, LaunchAction::Continue);
         assert!(loaded.has_save);
         assert_eq!(loaded.save.save_index, 7);
-        // The real C++'s own serialization schema doesn't persist
-        // `slot` -- this is not a gap in this port.
+        assert!(loaded.save.uses_slot_directory);
+        assert_eq!(loaded.save.slot, 3);
+    }
+
+    #[test]
+    fn commit_then_load_launch_selection_without_a_slot_directory_leaves_slot_unset() {
+        let dir = tempdir();
+        let launcher = dir.path().join("launcher");
+        fs::create_dir_all(&launcher).unwrap();
+
+        let selection = LaunchSelection {
+            action: LaunchAction::Continue,
+            has_save: true,
+            save: SaveRecord {
+                slot: 3, // not persisted: uses_slot_directory is false
+                save_index: 7,
+                ..Default::default()
+            },
+        };
+        commit_launch_selection(launcher.to_str().unwrap(), &selection).unwrap();
+
+        let loaded = load_launch_selection(launcher.to_str().unwrap()).unwrap();
+        assert!(!loaded.save.uses_slot_directory);
         assert_eq!(loaded.save.slot, -1);
+        assert_eq!(loaded.save.save_index, 7);
     }
 
     // --- prepare_data_source_profile: verified against the real C++

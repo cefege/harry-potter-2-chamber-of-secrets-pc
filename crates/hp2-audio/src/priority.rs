@@ -51,14 +51,16 @@ mod tests {
         }
     }
 
-    // Verified against the real C++ `UALAudioSubsystem::
-    // FindLeastPriorityNonTalkSource` via a throwaway probe calling
-    // the function directly (externally linked -- a `static` member,
-    // no anonymous-namespace indirection needed) on the exact three
-    // scenarios `Tests/AudioTests.cpp:625-635` already exercises
-    // against the real C++: eviction picks the lowest-priority
-    // non-talk source, never evicts an existing talk source, and
-    // returns INDEX_NONE when every occupied source is a talk source.
+    // These five scenarios (plus the literal mirror test below) are
+    // checked against `Tests/AudioTests.cpp:612-636`'s
+    // `TestTalkRegistrationEvictionPolicy` -- the real, unmodified,
+    // already-passing C++ oracle test for this exact function,
+    // already part of the `audio_lifecycle` ctest baseline. No
+    // separate throwaway probe was built for this one: confirming
+    // `FindLeastPriorityNonTalkSource` has external linkage (via
+    // `nm`, a plain `static` method, no anonymous-namespace
+    // indirection) plus that existing, already-verified C++ test is
+    // the independent confirmation here, not a new compiled probe.
 
     #[test]
     fn empty_sources_returns_index_none() {

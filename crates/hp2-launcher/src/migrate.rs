@@ -818,6 +818,13 @@ mod tests {
                 ),
             ]
         );
+
+        // Matches `Tests/LauncherTests.cpp:1455-1461`'s own
+        // idempotence check: rerunning migration on already-migrated
+        // output is a no-op with an empty journal.
+        let (rerun_values, rerun_changes) = migrate_legacy_settings(&values);
+        assert_eq!(rerun_values, values);
+        assert!(rerun_changes.is_empty());
     }
 
     // Verified against the real C++ the same way: duplicate rows for

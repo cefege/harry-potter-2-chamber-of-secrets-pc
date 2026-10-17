@@ -17,15 +17,15 @@
 //!
 //! The C++ test-only fault-injection hook (`GFailAfterPublication`/
 //! `GPublicationCount`/`SetLauncherPublishFailureForTesting`, gated on
-//! `HP2_LAUNCHER_TESTING`) is not ported: it exists purely so the real
-//! C++ unit tests can force a `Publish` failure after the rename
-//! succeeds, and this crate's own tests use Rust-native fault
-//! injection instead (a read-only directory, an existing destination,
-//! and so on) where that kind of coverage is needed.
+//! `HP2_LAUNCHER_TESTING`) **is** ported, as
+//! `set_publish_failure_for_testing`/the two `G_*` statics near
+//! `publish` below -- see that function's own doc comment for why it
+//! is always compiled in here rather than conditionally, unlike the
+//! real C++.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
-use std::os::fd::IntoRawFd;
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 /// Replaces `Join`.
@@ -140,10 +140,17 @@ pub fn stage(destination: &str, bytes: &[u8], mode: u32) -> Result<StagedFile, S
     {
         first_error = Some(e);
     }
-    if first_error.is_none()
-        && let Err(e) = file.sync_all()
-    {
-        first_error = Some(e);
+    // `File::sync_all()` would call Rust's own `fsync`/`fdatasync`
+    // wrapper, but on Apple targets std implements it via
+    // `fcntl(fd, F_FULLFSYNC)` (a full drive-cache flush), not plain
+    // `fsync(2)` -- slower, and can fail with ENOTSUP/EINVAL on some
+    // volume types (FAT/exFAT external disks, network shares) where
+    // the real C++'s raw `::fsync` succeeds, which would turn a
+    // working write into a spurious "Unable to stage" failure. Call
+    // `libc::fsync` directly instead, matching `tree.rs`'s own
+    // fd-relative sync calls (and the real C++) exactly.
+    if first_error.is_none() && unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+        first_error = Some(io::Error::last_os_error());
     }
     // Matches the real C++'s explicit `::close(fd)` return-value check
     // (a real, reachable failure mode on some filesystems/NFS setups,
@@ -187,8 +194,11 @@ pub fn sync_parent(directory: &str) -> Result<(), String> {
         Err(e) => return Err(error_at("Unable to open directory", directory, &e)),
     };
     let mut first_error: Option<io::Error> = None;
-    if let Err(e) = file.sync_all() {
-        first_error = Some(e);
+    // `libc::fsync`, not `File::sync_all()`: see `stage`'s identical
+    // fix and comment above (same `F_FULLFSYNC`-on-Apple divergence
+    // applies to syncing a directory fd here).
+    if unsafe { libc::fsync(file.as_raw_fd()) } != 0 {
+        first_error = Some(io::Error::last_os_error());
     }
     let fd = file.into_raw_fd();
     if unsafe { libc::close(fd) } != 0 && first_error.is_none() {
