@@ -186,11 +186,20 @@
 //! `modelviewprojMat` transform directly, no geometry stage involved
 //! -- `gouraud.wgsl` (this crate's third real shader port) already
 //! transcribes exactly that branch, not a freshly-designed
-//! replacement. What *is* still real and undesigned: the
-//! `OPT_BumpMaps && OPT_HasBumpMap` tangent/bitangent computation the
-//! geometry shader does when it does run, which `gouraud.wgsl`'s base
-//! path correctly defers (see that file's own header) rather than
-//! needing to solve to port the base, non-bump-mapped path at all.
+//! replacement. The geometry shader's `OPT_BumpMaps && OPT_HasBumpMap`
+//! per-triangle tangent/bitangent computation is its one genuinely
+//! undesigned piece when it does run -- but that is not the same thing
+//! as bump mapping overall being undesigned: the same
+//! `!OPT_GeometryShaders` branch already carries its own placeholder
+//! vertex-shader-only TBN basis (`T = B = vec3(1,1,1)`, both literally
+//! commented "Arbitrary" in the real source, `N =
+//! normalize(Normals.xyz)`), a direct, already-in-production
+//! transcription target `gouraud.wgsl`'s own header now scopes
+//! correctly -- lower fidelity than the geometry shader's real
+//! per-triangle tangents, but not undesigned. `gouraud.wgsl`'s base
+//! path still correctly defers implementing it at all (see that file's
+//! own header) rather than needing to solve either version to port the
+//! base, non-bump-mapped path.
 //! For bindless textures and SSBO draw parameters specifically, the
 //! non-bindless/non-SSBO fallback branches (not a separate `*ESProgram`
 //! class, just an `#if`/runtime-flag branch within the same shader

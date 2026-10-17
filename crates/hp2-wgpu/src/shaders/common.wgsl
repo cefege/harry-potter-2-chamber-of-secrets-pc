@@ -7,19 +7,23 @@
 // Not a shader module on its own -- no @vertex/@fragment entry points, and
 // not meant to be compiled standalone by anything other than this crate's
 // own naga validation test (every_wgsl_shader_parses_and_validates, which
-// iterates src/shaders/*.wgsl and validates each file in isolation; this
-// file validates on its own because naga accepts a module containing only
-// unused helper functions). WGSL has no `#include`/module-import mechanism
-// at the language level (unlike GLSL's string concatenation, which is how
-// the real source assembles this prelude plus each shader's own body into
-// one compilation unit) -- shaders that need these functions are expected
-// to be combined with this file's source via plain Rust-side string
-// concatenation before being handed to `wgpu::ShaderSource::Wgsl`, the
-// direct WGSL-side equivalent of what the GLSL source already does. Not
-// wired into any shader yet -- simple.wgsl doesn't need any of these
-// (no texture sampling, no fog, no PolyFlags-driven discard), so this file
-// exists ahead of the shader that will actually need it (DrawTile/
-// DrawGouraud/DrawComplex), not retrofitted after.
+// iterates src/shaders/*.wgsl, validates this file on its own once -- naga
+// accepts a module containing only unused helper functions -- and
+// validates every *other* file concatenated with this one via
+// shader_source(), not each in isolation). WGSL has no `#include`/
+// module-import mechanism at the language level (unlike GLSL's string
+// concatenation, which is how the real source assembles this prelude plus
+// each shader's own body into one compilation unit) -- shaders that need
+// these functions are combined with this file's source via plain
+// Rust-side string concatenation (`shader_source()`) before being handed
+// to `wgpu::ShaderSource::Wgsl`, the direct WGSL-side equivalent of what
+// the GLSL source already does. Genuinely wired in now, not still ahead
+// of its first real caller: `tile.wgsl` and `gouraud.wgsl` both call
+// `get_texel`/`apply_poly_flags` from here, and all three shaders in this
+// crate (`simple.wgsl` included) read `frame` from here. `simple.wgsl`
+// itself still only needs `frame` -- no texture sampling, no fog, no
+// PolyFlags-driven discard in that one shader specifically -- but that no
+// longer means this file as a whole sits unused.
 //
 // Real, deliberate simplifications from the GLSL source, each because WGSL
 // functions can take parameters GLSL's free global functions relied on
