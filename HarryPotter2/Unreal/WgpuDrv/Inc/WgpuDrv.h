@@ -103,6 +103,14 @@ class UWgpuRenderDevice : public URenderDevice
 	// node's own doc) needs, not yet measured.
 	INT SetSceneNodeCallCount;
 
+	// Total UWgpuRenderDevice::Draw2DLine calls since the last Init,
+	// same reset/logging convention as SetSceneNodeCallCount above --
+	// real evidence this override actually ran during a given
+	// -testticks run, not just that nothing crashed when it did (the
+	// same caught-on-review reasoning SetSceneNodeCallCount's own doc
+	// already has).
+	INT Draw2DLineCallCount;
+
 	// `[WgpuDrv.WgpuRenderDevice] Backend=Auto|Metal|Vulkan|Dx12|Gl` --
 	// config property, UEnum-backed (StaticConstructor registers the
 	// enum). Plain member index: 0=Auto, 1=Metal, 2=Vulkan, 3=Dx12,

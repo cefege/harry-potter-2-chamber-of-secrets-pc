@@ -2982,3 +2982,67 @@ pub unsafe extern "C" fn hp2_rs_wgpu_set_scene_node(
             .set_scene_node(&handle.created.device, &handle.created.queue, scene);
     })
 }
+
+/// Replaces `UXOpenGLRenderDevice::Draw2DLine` (`DrawSimple.cpp:52-90`
+/// -- not yet called from any `WgpuDrv.cpp` override; `URenderDevice::
+/// Draw2DLine` has an empty default body, so `UWgpuRenderDevice` not
+/// overriding it yet is a real no-op, not broken). `p1`/`p2` are the
+/// real `FVector P1, P2` parameters (screen pixel X/Y, view-space Z)
+/// -- `hp2_wgpu::RenderLoop::queue_line`'s own doc has the real
+/// screen-to-clip transform this applies internally, using the most
+/// recent `hp2_rs_wgpu_set_scene_node` call. `r`/`g`/`b` are the real
+/// `FPlane Color`'s first three components; alpha is not a parameter
+/// here at all -- the real source always forces `Color.W = 1.f`
+/// before use (`DrawSimple.cpp:64`, its own comment: "Unfortunately
+/// this is usually set to 0"), so there is nothing a caller-supplied
+/// alpha could correctly mean.
+///
+/// Known, explicitly scoped gaps, not silently pretended away:
+/// `LineFlags` (depth-cueing etc.) is not a parameter here and has no
+/// effect yet -- the real per-draw depth/blend pipeline-state axis
+/// (`SetBlend`'s seven real combinations, this crate's own module doc
+/// already has the full read) is not built. The real source's
+/// `HitTesting()` override (substituting `HitColor` for `Color`
+/// during an editor hit-test pass) is not applied either -- no
+/// hit-testing readback exists on this render device yet (tracked
+/// separately). `BlendMode = PF_Highlighted` (fixed, not configurable,
+/// in the real source) is not applied -- `SimpleLinePipeline`'s own
+/// doc already states its fixed opaque-replace blend state is a
+/// known, explicit first-proof limitation.
+///
+/// No-op (not a crash) on a null `handle`, when `handle` has no frame
+/// in progress, or when no `hp2_rs_wgpu_set_scene_node` call has ever
+/// been made on this `handle` -- all real, reachable conditions
+/// `hp2_wgpu::RenderLoop::queue_line`'s own doc already covers, not
+/// caller bugs.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_draw_2d_line(
+    handle: *mut c_void,
+    p1x: f32,
+    p1y: f32,
+    p1z: f32,
+    p2x: f32,
+    p2y: f32,
+    p2z: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+) {
+    guard("hp2_rs_wgpu_draw_2d_line", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.queue_line(
+            [p1x, p1y, p1z],
+            [p2x, p2y, p2z],
+            // Color.W forced to 1.0 -- see this function's own doc.
+            [r, g, b, 1.0],
+        );
+    })
+}

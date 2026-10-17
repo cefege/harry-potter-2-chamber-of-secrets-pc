@@ -89,6 +89,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	guard(UWgpuRenderDevice::Init);
 	Viewport = InViewport;
 	SetSceneNodeCallCount = 0;
+	Draw2DLineCallCount = 0;
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -232,7 +233,7 @@ void UWgpuRenderDevice::Exit()
 		// (hp2_wgpu::RenderLoop::set_scene_node's own doc): how many
 		// SetSceneNode calls one run actually made, not inferred or
 		// assumed from the engine's own architecture docs.
-		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i"), SetSceneNodeCallCount );
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -434,6 +435,34 @@ void UWgpuRenderDevice::DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X
 void UWgpuRenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FVector P1, FVector P2 )
 {
 	guard(UWgpuRenderDevice::Draw2DLine);
+	if( !RustDevice )
+		return;
+
+	// hp2_rs_wgpu_draw_2d_line's own doc has the full real-formula
+	// detail and the known, explicitly scoped gaps (LineFlags,
+	// HitTesting, PF_Highlighted blend mode -- none applied yet).
+	// Color.W is not passed at all: the real source always forces it
+	// to 1.f before use (DrawSimple.cpp:64), so there is nothing a
+	// caller-supplied alpha could correctly mean.
+	//
+	// Logs only the first call -- real evidence this override
+	// actually ran during a given run, not just that nothing crashed
+	// when it did (same reasoning as SetSceneNode's own first-call
+	// log). Not gated on NoDrawSimple (unlike the real XOpenGL
+	// source): UWgpuRenderDevice has no such field yet, and this
+	// override unconditionally draws when called, a real, honest
+	// difference from the real source, not an oversight.
+	if( Draw2DLineCallCount == 0 )
+	{
+		debugf( NAME_Init, TEXT("WgpuDrv: Draw2DLine first call: P1=(%f,%f,%f) P2=(%f,%f,%f)"),
+			P1.X, P1.Y, P1.Z, P2.X, P2.Y, P2.Z );
+	}
+	Draw2DLineCallCount++;
+
+	hp2_rs_wgpu_draw_2d_line( RustDevice,
+		P1.X, P1.Y, P1.Z,
+		P2.X, P2.Y, P2.Z,
+		Color.X, Color.Y, Color.Z );
 	unguard;
 }
 
