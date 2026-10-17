@@ -41,15 +41,26 @@
 //! own test, which was vacuous -- caught on review, fixed in the
 //! production function itself, not just the test).
 //!
+//! `configure_and_present_once` proves the stronger claim the above
+//! paragraph's capability check alone could not: `surface.configure`
+//! plus `get_current_texture`/`Queue::present` actually succeeding on
+//! a real window, not just the surface being reported compatible.
+//! `Tests/WgpuSurfaceTests.cpp` exercises it against a real SDL
+//! window; getting that to pass reliably in this project's own dev
+//! environment needed several precautions (activation hints,
+//! `SDL_WINDOW_ALWAYS_ON_TOP`, and polling the call itself for up to
+//! ~2 seconds) documented in detail in that file, where wgpu-hal's own
+//! Metal-backend occlusion check (a workaround for gfx-rs/wgpu#8309)
+//! turned out to need real wall-clock time to see the window as
+//! visible even with those precautions applied -- a *persistent*
+//! failure there is treated as an environment gap (ctest
+//! `SKIP_RETURN_CODE 77`), not a hard failure, but every run so far in
+//! this project's own environment has passed for real, not skipped.
+//!
 //! Still open, not started: resize handling, all WGSL shader
-//! transcription, real draw-call forwarding for any of
-//! `URenderDevice`'s pure virtuals, and a stronger surface-working
-//! proof than "a `Surface` value was constructed and is compatible
-//! with the adapter" -- the plan's frame capture and editor hit
-//! testing will eventually need `surface.configure(&device, ...)` plus
-//! `get_current_texture()` to actually succeed and present, a
-//! reasonable next test to add but not required to prove either
-//! existing slice's own narrower claim.
+//! transcription, and real draw-call forwarding for any of
+//! `URenderDevice`'s pure virtuals -- `configure_and_present_once`
+//! presents an empty (auto-cleared) frame, nothing drawn yet.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
@@ -273,6 +284,91 @@ pub fn create_device_sync(
         adapter_limits,
         instance,
     })
+}
+
+/// Specific result of `configure_and_present_once`, not a bare bool:
+/// a bool here would hide exactly which step failed and which real
+/// `wgpu::CurrentSurfaceTexture` variant was observed -- needed both
+/// to diagnose failures (a bare bool hid the real cause of this
+/// function's own first failing run, caught on review before the
+/// false "confirmed empirically" comment that guessed at the cause
+/// ever landed) and so this crate's own callers never have to guess
+/// either.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresentOnceOutcome {
+    /// Configured, acquired, and presented a frame.
+    Presented = 0,
+    /// `created.surface` was `None` (headless device).
+    NoSurface = 1,
+    /// `Surface::get_default_config` returned `None`: the surface has
+    /// zero supported formats or present modes for this adapter.
+    NoDefaultConfig = 2,
+    /// `get_current_texture` returned `Timeout`.
+    Timeout = 3,
+    /// `get_current_texture` returned `Occluded` (window minimized or
+    /// behind another window -- or, on macOS, possibly never actually
+    /// mapped to the screen).
+    Occluded = 4,
+    /// `get_current_texture` returned `Outdated`.
+    Outdated = 5,
+    /// `get_current_texture` returned `Lost`.
+    Lost = 6,
+    /// `get_current_texture` returned `Validation`.
+    Validation = 7,
+    /// Not returned by `configure_and_present_once` itself -- reserved
+    /// for its FFI wrapper (`hp2-ffi`'s `hp2_rs_wgpu_present_once_for_
+    /// testing`) to report a null `handle` or a caught panic (panics
+    /// never cross FFI in this codebase), without reusing any of the
+    /// above codes to mean something they do not.
+    InternalError = 8,
+}
+
+/// Stronger proof than "the surface is compatible with the adapter"
+/// (which `create_device_sync` itself already enforces): actually
+/// configures the surface, acquires a frame, and presents it --
+/// exactly the sequence any real renderer's per-frame loop will need,
+/// just with nothing drawn (an empty command buffer; `Queue::present`'s
+/// own doc says an un-submitted-to texture "will be cleared
+/// automatically before presenting", so this still exercises the real
+/// swapchain path end to end, not a no-op). No C++ caller yet -- there
+/// is no draw-call forwarding for `URenderDevice`'s pure virtuals to
+/// drive this from yet (`hp2-wgpu`'s own module doc) -- this exists
+/// for the plan's "stronger surface-working proof" item, exercised
+/// directly from a C++ ctest against a real SDL window.
+///
+/// `Suboptimal` counts as `Presented`: it is still a real, presentable
+/// frame -- `Surface::get_current_texture`'s own doc says so, just
+/// recommends reconfiguring soon.
+pub fn configure_and_present_once(
+    created: &CreatedDevice,
+    width: u32,
+    height: u32,
+) -> PresentOnceOutcome {
+    let Some(surface) = created.surface.as_ref() else {
+        return PresentOnceOutcome::NoSurface;
+    };
+    let Some(config) = surface.get_default_config(&created.adapter, width, height) else {
+        return PresentOnceOutcome::NoDefaultConfig;
+    };
+    surface.configure(&created.device, &config);
+    let frame = match surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(frame) => frame,
+        wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+        wgpu::CurrentSurfaceTexture::Timeout => return PresentOnceOutcome::Timeout,
+        wgpu::CurrentSurfaceTexture::Occluded => return PresentOnceOutcome::Occluded,
+        wgpu::CurrentSurfaceTexture::Outdated => return PresentOnceOutcome::Outdated,
+        wgpu::CurrentSurfaceTexture::Lost => return PresentOnceOutcome::Lost,
+        wgpu::CurrentSurfaceTexture::Validation => return PresentOnceOutcome::Validation,
+    };
+    let encoder = created
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("hp2-wgpu present-once encoder"),
+        });
+    created.queue.submit(std::iter::once(encoder.finish()));
+    created.queue.present(frame);
+    PresentOnceOutcome::Presented
 }
 
 /// Window-surface creation from a C++-owned `SDL_Window*`'s raw view

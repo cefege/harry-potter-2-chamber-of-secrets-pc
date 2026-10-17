@@ -1532,6 +1532,23 @@ if(HP2_ENABLE_WGPU_DRIVER)
         set_tests_properties(wgpu_surface_round_trip PROPERTIES
             LABELS "smoke;renderer;wgpu"
             RESOURCE_LOCK hp2_gpu
+            # Tests/WgpuSurfaceTests.cpp exits 77 only if the present-
+            # once check observes a *persistent*
+            # PresentOnceOutcome::Occluded after ~2 seconds of polling
+            # with several activation/visibility precautions applied
+            # (see that file's own, extensively-commented
+            # investigation): wgpu-hal's Metal backend
+            # (wgpu-hal-30.0.1/src/metal/surface.rs) refuses to even
+            # attempt nextDrawable() unless NSWindow.occlusionState
+            # reports the window visible, and in this project's own
+            # dev environment that bit was observed to need real time
+            # and several combined precautions, not the environment
+            # entirely lacking a window compositor (an earlier, wrong
+            # conclusion drawn from a `ps aux` grep that does not list
+            # every process; corrected once `pmset -g assertions`
+            # showed a real WindowServer pid directly). 77 is the
+            # long-standing autotools/CMake skip-exit-code convention.
+            SKIP_RETURN_CODE 77
         )
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

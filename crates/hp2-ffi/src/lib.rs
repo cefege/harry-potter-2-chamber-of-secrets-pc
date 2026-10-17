@@ -2797,3 +2797,44 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
         }
     })
 }
+
+/// Testing-only: configures `handle`'s surface, acquires a frame, and
+/// presents it. Returns `hp2_wgpu::PresentOnceOutcome` as a raw `u32`
+/// (`0` is `Presented`, the only success code -- see that enum's own
+/// doc for every other code's meaning) rather than a bare bool: a
+/// bare bool hid the real cause of this function's own first failing
+/// run (caught on review before a comment guessing at the cause, and
+/// wrongly claiming it was "confirmed empirically", ever landed). No
+/// production C++ caller yet -- there is no draw-call forwarding for
+/// `URenderDevice`'s pure virtuals to drive this from yet
+/// (`hp2-wgpu`'s own module doc); this exists for the plan's
+/// "stronger surface-working proof" item, called directly from a C++
+/// ctest against a real SDL window and a `handle` that was itself
+/// created with a non-null `ns_view`.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), created with a non-null `ns_view` (a `handle`
+/// created headless has no surface and this always returns
+/// `NoSurface` for it, but is not itself unsound to call). Must be
+/// called on the application's main thread (AppKit requirement, same
+/// as surface creation itself).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_present_once_for_testing(
+    handle: *mut c_void,
+    width: u32,
+    height: u32,
+) -> u32 {
+    guard(
+        "hp2_rs_wgpu_present_once_for_testing",
+        hp2_wgpu::PresentOnceOutcome::InternalError as u32,
+        move || {
+            if handle.is_null() {
+                return hp2_wgpu::PresentOnceOutcome::InternalError as u32;
+            }
+            let handle = unsafe { &*(handle as *mut WgpuHandle) };
+            hp2_wgpu::configure_and_present_once(&handle.created, width, height) as u32
+        },
+    )
+}
