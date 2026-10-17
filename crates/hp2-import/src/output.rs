@@ -1,43 +1,46 @@
-//! Replaces the self-contained half of `HP2ImportOutput.cpp`:
-//! `SafeDirectory`, `Overlap`, `WalkOutput`, `ValidateOutput`,
-//! `Materialize`, `CommitStage`, and `Progress`. These operate on an
-//! already-built `&[Asset]` plan and real directories, so (like
-//! [`crate::plan`]'s `validate_plan`) they need no retail/prototype
-//! data tree -- every test here uses a throwaway temp directory.
+//! Replaces `HP2ImportOutput.cpp` in full: `SafeDirectory`, `Overlap`,
+//! `WalkOutput`, `ValidateOutput`, `Materialize`, `CommitStage`,
+//! `Progress`, `Options`, `ProfileName`, and `RunImport` itself.
 //!
-//! **Not ported in this change: `RunImport` itself, `ProfileName`, and
-//! `Options`.** `RunImport` is the top-level orchestration function
-//! tying `Detail::Plan` and (for the `--archive` path) `Detail::Extract`
-//! to the functions in this module; neither of those two dependencies
-//! exists in this crate yet (`Plan`'s own orchestration is unported, and
-//! `HP2ImportArchive.cpp`'s libarchive extraction has an approved
-//! design -- hand-written `extern "C"` against the pinned
-//! `archive_static` -- but no implementation). Porting `RunImport`
-//! before either exists would mean compiling against functions that
-//! don't exist, so it waits. `ProfileName` (`Profile` -> `"safe"`/
-//! `"full"`/`"retail-only"`) is only used by `RunImport`'s call to
-//! `Manifest`, so it is deferred alongside it. `Options` (the C++
-//! struct bundling `retailRoot`/`archive`/`prototypeRoot`/`output`/
-//! `profile`/`linkMode`/`checkOnly`) is `RunImport`'s own input type;
-//! [`materialize`] takes the one field of it ([`crate::plan::LinkMode`])
-//! it actually needs directly, rather than a struct with six fields
-//! nothing here reads yet.
+//! [`safe_directory`] through [`commit_stage`] (plus [`Progress`])
+//! operate on an already-built `&[Asset]` plan and real directories, so
+//! (like [`crate::plan`]'s `validate_plan`) they need no retail/
+//! prototype data tree -- every one of their own tests uses a
+//! throwaway temp directory. [`run_import`] is the top-level
+//! orchestration tying all of those together with [`crate::plan::plan`]
+//! and (for the `--archive` input path) [`crate::archive::extract`];
+//! porting it waited until both of those existed, since calling
+//! functions that don't exist yet isn't an option. Its own tests follow
+//! the same honest-scoping pattern [`crate::plan::plan`]'s doc explains
+//! in full: the cheap argument-validation/overlap-check branches are
+//! tested directly, and one more test proves the *entire* pipeline --
+//! argument validation, output-path resolution (creating the output's
+//! real parent directory), the retail/prototype root checks, the
+//! overlap check, and finally `plan` itself -- runs correctly end to
+//! end and the real `validate_plan` error comes back out through every
+//! layer intact, not a full happy-path run (which would need a complete
+//! synthetic retail+prototype tree satisfying every one of
+//! `validate_plan`'s exact count contracts, disproportionate setup for
+//! an environment that has no real data to test against anyway).
 //!
-//! [`Progress`] *is* ported, unlike the other two `RunImport`-adjacent
-//! types: [`materialize`] checks `cancel_requested` before each asset
-//! (matching C++'s per-asset `cancelRequested` check, "Import
-//! cancelled." on trip) and increments `files_done` after each one
-//! (matching C++'s `++progress->filesDone`) -- real, caller-visible
-//! behavior differences from dropping it, not solely an FFI-layer
-//! concern the way `RunImport`'s own orchestration is. `files_total` is
-//! set by `RunImport` before calling `Materialize` in the real C++, not
-//! by `Materialize` itself, so nothing here sets it either; a future
-//! `RunImport` port does that, matching the C++ division of
-//! responsibility exactly.
+//! `run_import`'s own end-to-end parity with the real C++ is -- like
+//! `plan`'s -- not verified against real retail data, for the same
+//! reason: no retail/prototype data tree exists anywhere in this repo.
 //!
-//! Two more divergences were found and fixed during this port, both
-//! confirmed via throwaway probes against the real stdlib/compiler
-//! behavior directly, not just the C++ source reading:
+//! [`materialize`] checks `cancel_requested` before each asset (matching
+//! C++'s per-asset `cancelRequested` check, "Import cancelled." on
+//! trip) and increments `files_done` after each one (matching C++'s
+//! `++progress->filesDone`); `run_import` sets `files_total`/
+//! `files_done` once, right after `plan` returns, matching the real
+//! C++'s own division of responsibility (`RunImport` sets them,
+//! `Materialize` only increments the one).
+//!
+//! Three real divergences from the real C++ were found and fixed
+//! during this port, each confirmed directly (a throwaway probe against
+//! the real stdlib/compiler behavior for the first two; careful,
+//! repeated empirical testing for the third -- see `crate::archive`'s
+//! module doc for that one, caught in that module but structurally the
+//! same kind of finding):
 //! - `std::fs::copy` silently overwrites an existing destination; the
 //!   real C++'s `fs::copy_file(..., fs::copy_options::none)` fails with
 //!   "File exists" instead. [`copy_file_no_overwrite`] replicates the
@@ -51,6 +54,13 @@
 //!   module -- the per-asset `destination.parent()` creation already
 //!   uses `create_dir_all`, confirmed independently idempotent in Rust
 //!   too, matching C++'s equally-idempotent `create_directories`).
+//!
+//! [`lexically_normal`] (used by `run_import` to normalize the
+//! `--output` argument before splitting it into parent+filename) has
+//! lower verification confidence than the rest of this module: a
+//! well-known standard algorithm, not a C++ transcription, and not
+//! exercised by any test with a `..`-laden `--output` argument -- see
+//! its own doc comment.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -64,6 +74,7 @@ use crate::lower::lower;
 use crate::manifest::checksums;
 use crate::plan::LinkMode;
 use crate::util::{fail, lexically_relative, strerror_of, utf8};
+use hp2_ini::Profile;
 
 fn display(p: &Path) -> String {
     utf8(p).unwrap_or_else(|_| p.display().to_string())
@@ -546,6 +557,264 @@ pub fn commit_stage(stage: &Path, output: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Mirrors `HarryPotter2/Unreal/Import/Inc/HP2Import.h`'s `struct
+/// Options`. The whole bundle is only needed here, by `run_import`
+/// itself -- every other function in this crate so far takes just the
+/// specific fields it reads directly (see this module's and `plan`'s
+/// own doc comments for why), the same way the real C++'s own
+/// `Options` only exists to be passed around as a bundle by
+/// `RunImport`'s own callers.
+pub struct Options {
+    pub retail_root: String,
+    pub archive: String,
+    pub prototype_root: String,
+    pub output: String,
+    pub profile: Profile,
+    pub link_mode: LinkMode,
+    pub check_only: bool,
+}
+
+/// Replaces `ProfileName`.
+fn profile_name(profile: Profile) -> &'static str {
+    match profile {
+        Profile::Safe => "safe",
+        Profile::Full => "full",
+        Profile::RetailOnly => "retail-only",
+    }
+}
+
+/// Replaces `fs::path::lexically_normal()`: resolves `.`/`..`
+/// components and redundant separators purely lexically, without
+/// touching the filesystem (so it works on a path that may not exist
+/// yet, unlike `canonicalize`). A `..` cancels the immediately
+/// preceding `Normal` component if there is one; otherwise (at the
+/// start of a relative path, or following another un-cancelled `..`)
+/// it is kept literally. Lower verification confidence than the rest
+/// of this port: this is a well-known, standard algorithm (the same
+/// one `realpath -s`/most "lexical path clean" implementations use),
+/// not a line-by-line C++ transcription, and `run_import`'s own tests
+/// don't exercise a `..`-laden `--output` argument (real callers
+/// overwhelmingly pass a plain relative or already-clean absolute
+/// path) -- flagged, not silently assumed equivalent to the C++ in
+/// every edge case.
+fn lexically_normal(path: &Path) -> PathBuf {
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match result.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    result.pop();
+                }
+                _ => result.push(".."),
+            },
+            other => result.push(other.as_os_str()),
+        }
+    }
+    if result.as_os_str().is_empty() {
+        result.push(".");
+    }
+    result
+}
+
+/// Dispatches to the real [`crate::archive::extract`] when the
+/// `archive` Cargo feature is enabled, or fails with the same
+/// user-facing message the real C++ gives its `__EMSCRIPTEN__` build
+/// (generalized: "not compiled into this build" covers both a future
+/// wasm target and simply building without the feature, which is the
+/// only way this branch is reachable today since no wasm target exists
+/// yet for this crate).
+fn extract_archive(archive_path: &Path, destination: &Path) -> Result<PathBuf, String> {
+    #[cfg(feature = "archive")]
+    {
+        crate::archive::extract(archive_path, destination)
+    }
+    #[cfg(not(feature = "archive"))]
+    {
+        let _ = (archive_path, destination);
+        Err(fail(
+            "Archives are not supported in this build; extract the archive and choose the folder.",
+        ))
+    }
+}
+
+/// Replaces `RunImport`. Returns `Ok(log)` (always `"Import completed
+/// successfully.\n"`, matching the C++'s one success message) or
+/// `Err(message)`, replacing the C++'s `bool` return plus `Log`/`Error`
+/// out-parameters with this crate's established `Result<String,
+/// String>` convention.
+///
+/// `archive_temporary`'s cleanup is restructured from the C++'s six
+/// separate `if (!archiveTemporary.empty()) fs::remove_all(...)` call
+/// sites (one before each of the three success returns, one in each of
+/// the two catch blocks) into one, run exactly once after the inner
+/// logic finishes regardless of outcome -- equivalent because every one
+/// of the six C++ call sites does the exact same unconditional cleanup,
+/// not because any of them behaves differently from the others.
+pub fn run_import(options: &Options, progress: Option<&Progress>) -> Result<String, String> {
+    let mut archive_temporary: Option<PathBuf> = None;
+    let result = run_import_inner(options, progress, &mut archive_temporary);
+    if let Some(temp) = &archive_temporary {
+        let _ = fs::remove_dir_all(temp);
+    }
+    result
+}
+
+fn run_import_inner(
+    options: &Options,
+    progress: Option<&Progress>,
+    archive_temporary: &mut Option<PathBuf>,
+) -> Result<String, String> {
+    use std::sync::atomic::Ordering;
+
+    if options.retail_root.is_empty() == options.archive.is_empty() {
+        return Err(fail(
+            "exactly one of --retail-root and --archive is required",
+        ));
+    }
+    if options.output.is_empty() {
+        return Err(fail("--output is required"));
+    }
+    if options.profile != Profile::RetailOnly && options.prototype_root.is_empty() {
+        return Err(fail(
+            "--prototype-root is required for safe and full profiles",
+        ));
+    }
+
+    let mut output = PathBuf::from(&options.output);
+    if !output.is_absolute() {
+        let cwd = std::env::current_dir().map_err(|e| {
+            fail(format!(
+                "cannot resolve current directory: {}",
+                strerror_of(&e)
+            ))
+        })?;
+        output = cwd.join(output);
+    }
+    let output = lexically_normal(&output);
+    let parent = output
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(""));
+    if options.check_only {
+        let ok = fs::symlink_metadata(&parent)
+            .map(|m| !m.file_type().is_symlink() && m.is_dir())
+            .unwrap_or(false);
+        if !ok {
+            return Err(fail(format!(
+                "output parent does not exist for --check: {}",
+                display(&parent)
+            )));
+        }
+    } else {
+        fs::create_dir_all(&parent).map_err(|e| {
+            fail(format!(
+                "cannot prepare output parent {}: {}",
+                display(&parent),
+                strerror_of(&e)
+            ))
+        })?;
+    }
+    let resolved_parent = fs::canonicalize(&parent).map_err(|e| {
+        fail(format!(
+            "cannot prepare output parent {}: {}",
+            display(&parent),
+            strerror_of(&e)
+        ))
+    })?;
+    let output = resolved_parent.join(output.file_name().unwrap_or_default());
+
+    let mut retail: Option<PathBuf> = None;
+    if !options.archive.is_empty() {
+        let archive_path = PathBuf::from(&options.archive);
+        let is_regular_file = fs::symlink_metadata(&archive_path)
+            .map(|m| !m.file_type().is_symlink() && m.is_file())
+            .unwrap_or(false);
+        if !is_regular_file {
+            return Err(fail(format!(
+                "retail archive is not a regular file: {}",
+                display(&archive_path)
+            )));
+        }
+        let temp = resolved_parent.join(format!(".hp2-import-archive-{}", random_hex()));
+        fs::create_dir(&temp).map_err(|e| {
+            fail(format!(
+                "cannot create archive staging directory {}: {}",
+                display(&temp),
+                strerror_of(&e)
+            ))
+        })?;
+        *archive_temporary = Some(temp.clone());
+        retail = Some(extract_archive(&archive_path, &temp)?);
+    }
+    let retail = match retail {
+        Some(r) => r,
+        None => safe_directory(Path::new(&options.retail_root), "retail root")?,
+    };
+    let mut prototype: Option<PathBuf> = None;
+    if !options.prototype_root.is_empty() {
+        prototype = Some(safe_directory(
+            Path::new(&options.prototype_root),
+            "prototype root",
+        )?);
+    }
+    if prototype.as_deref().is_some_and(|p| overlap(&output, p)) || overlap(&output, &retail) {
+        return Err(fail("output and source trees must not overlap"));
+    }
+
+    let assets = crate::plan::plan(
+        options.profile,
+        options.link_mode,
+        prototype.as_deref(),
+        &retail,
+        &resolved_parent,
+    )?;
+    let manifest = crate::manifest::manifest(&assets, profile_name(options.profile));
+    if let Some(p) = progress {
+        p.files_total.store(assets.len() as i64, Ordering::Relaxed);
+        p.files_done.store(0, Ordering::Relaxed);
+    }
+
+    if options.check_only {
+        validate_output(&output, &assets, &manifest)?;
+        return Ok("Import completed successfully.\n".to_string());
+    }
+    if (output.exists() || output.is_symlink())
+        && validate_output(&output, &assets, &manifest).is_ok()
+    {
+        return Ok("Import completed successfully.\n".to_string());
+    }
+
+    let stage_name = format!(
+        ".{}.tmp-{}",
+        display(Path::new(output.file_name().unwrap_or_default())),
+        random_hex()
+    );
+    let stage = resolved_parent.join(stage_name);
+    fs::create_dir(&stage).map_err(|e| {
+        fail(format!(
+            "cannot create staging directory {}: {}",
+            display(&stage),
+            strerror_of(&e)
+        ))
+    })?;
+    let commit_result: Result<(), String> = (|| {
+        materialize(&stage, &assets, &manifest, options.link_mode, progress)?;
+        validate_output(&stage, &assets, &manifest)?;
+        if let Some(p) = progress
+            && p.cancel_requested.load(Ordering::Relaxed)
+        {
+            return Err(fail("Import cancelled."));
+        }
+        commit_stage(&stage, &output)
+    })();
+    if let Err(e) = commit_result {
+        let _ = fs::remove_dir_all(&stage);
+        return Err(e);
+    }
+    Ok("Import completed successfully.\n".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1002,5 +1271,128 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains(".old-"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    fn default_options() -> Options {
+        Options {
+            retail_root: String::new(),
+            archive: String::new(),
+            prototype_root: String::new(),
+            output: String::new(),
+            profile: Profile::Safe,
+            link_mode: LinkMode::Auto,
+            check_only: false,
+        }
+    }
+
+    #[test]
+    fn run_import_requires_exactly_one_of_retail_root_or_archive() {
+        let mut options = default_options();
+        options.output = "/tmp/wherever".to_string();
+        options.prototype_root = "/tmp/wherever".to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert_eq!(
+            err,
+            "exactly one of --retail-root and --archive is required"
+        );
+        options.retail_root = "/a".to_string();
+        options.archive = "/b".to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert_eq!(
+            err,
+            "exactly one of --retail-root and --archive is required"
+        );
+    }
+
+    #[test]
+    fn run_import_requires_output() {
+        let mut options = default_options();
+        options.retail_root = "/a".to_string();
+        options.prototype_root = "/b".to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert_eq!(err, "--output is required");
+    }
+
+    #[test]
+    fn run_import_requires_prototype_root_for_non_retail_only_profiles() {
+        let dir = tempdir();
+        let mut options = default_options();
+        options.retail_root = dir.path().display().to_string();
+        options.output = dir.path().join("out").display().to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert_eq!(
+            err,
+            "--prototype-root is required for safe and full profiles"
+        );
+    }
+
+    #[test]
+    fn run_import_rejects_an_archive_path_that_is_not_a_regular_file() {
+        let dir = tempdir();
+        let mut options = default_options();
+        options.archive = dir.path().join("nonexistent.zip").display().to_string();
+        options.prototype_root = dir.path().display().to_string();
+        options.output = dir.path().join("out").display().to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert!(
+            err.starts_with("retail archive is not a regular file: "),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn run_import_rejects_overlapping_output_and_retail_root() {
+        let dir = tempdir();
+        for sub in ["System", "Maps", "Textures", "Sounds", "Music"] {
+            fs::create_dir(dir.path().join(sub)).unwrap();
+        }
+        let mut options = default_options();
+        options.retail_root = dir.path().display().to_string();
+        options.profile = Profile::RetailOnly;
+        // The output is *inside* the retail root -- a real overlap.
+        options.output = dir.path().join("out").display().to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert_eq!(err, "output and source trees must not overlap");
+    }
+
+    /// Not a happy-path test -- same reasoning as `plan`'s own pipeline
+    /// test (satisfying every one of `validate_plan`'s exact count
+    /// contracts is disproportionate setup for an environment with no
+    /// real data to test against anyway). This proves `run_import`'s
+    /// own orchestration layer -- argument validation, output-path
+    /// resolution (including creating the output's parent directory for
+    /// real), the retail/prototype root checks, the overlap check, and
+    /// finally calling `plan` -- all run correctly and the real
+    /// `validate_plan` error comes back out through every layer intact,
+    /// not swallowed, altered, or replaced by a generic wrapper message.
+    #[test]
+    fn run_import_runs_the_full_pipeline_and_reaches_validate_plan() {
+        let scratch = tempdir();
+        let retail = scratch.path().join("retail");
+        let prototype = scratch.path().join("prototype");
+        for root in [&retail, &prototype] {
+            for sub in [
+                "System",
+                "Maps",
+                "Textures",
+                "Sounds",
+                "Music",
+                "System/Cutscenes",
+            ] {
+                fs::create_dir_all(root.join(sub)).unwrap();
+            }
+            write(root, "System/Default.ini", b"[Core.System]\n");
+            write(root, "System/DefUser.ini", b"");
+        }
+        write(&retail, "Textures/HP2_Menu.utx", b"menu");
+        let mut options = default_options();
+        options.retail_root = retail.display().to_string();
+        options.prototype_root = prototype.display().to_string();
+        options.output = scratch.path().join("out").display().to_string();
+        let err = run_import(&options, None).unwrap_err();
+        assert_eq!(err, "retail Ogg contract mismatch: expected 141, found 0");
+        // Confirms run_import never materialized anything for a plan
+        // that failed validation.
+        assert!(!scratch.path().join("out").exists());
     }
 }
