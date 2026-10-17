@@ -131,6 +131,26 @@ namespace
 		if (offsetof(FCppPropertyProbe, HostText) != 16 || offsetof(FCppPropertyProbe, WireText) != 20)
 			return Fail("host/wire member separation changed: TCHAR offset=%zu UNICHAR offset=%zu",
 				offsetof(FCppPropertyProbe, HostText), offsetof(FCppPropertyProbe, WireText));
+
+		// Phase 3.1 render ABI (crates/hp2-abi): the same facts are
+		// pinned there via `const _: () = assert!(size_of/offset_of...)`.
+		// This half exists so an accidental change to either side's
+		// struct is caught by a full ctest/cargo test run, not just one
+		// of the two.
+		if (int Result = CheckWidth("FVector", sizeof(FVector), 12)) return Result;
+		if (alignof(FVector) != 4) return Fail("alignof(FVector) expected 4, got %zu", alignof(FVector));
+		if (int Result = CheckWidth("FPlane", sizeof(FPlane), 16)) return Result;
+		if (offsetof(FPlane, W) != 12) return Fail("offsetof(FPlane,W) expected 12, got %zu", offsetof(FPlane, W));
+		if (int Result = CheckWidth("FColor", sizeof(FColor), 4)) return Result;
+		if (alignof(FColor) != 4) return Fail("alignof(FColor) expected 4, got %zu", alignof(FColor));
+		if (offsetof(FColor, R) != 0 || offsetof(FColor, G) != 1 || offsetof(FColor, B) != 2 || offsetof(FColor, A) != 3)
+			return Fail("FColor byte order changed: R=%zu G=%zu B=%zu A=%zu",
+				offsetof(FColor, R), offsetof(FColor, G), offsetof(FColor, B), offsetof(FColor, A));
+		if (int Result = CheckWidth("FCoords", sizeof(FCoords), 48)) return Result;
+		if (offsetof(FCoords, Origin) != 0 || offsetof(FCoords, XAxis) != 12 || offsetof(FCoords, YAxis) != 24 || offsetof(FCoords, ZAxis) != 36)
+			return Fail("FCoords axis layout changed: Origin=%zu XAxis=%zu YAxis=%zu ZAxis=%zu",
+				offsetof(FCoords, Origin), offsetof(FCoords, XAxis), offsetof(FCoords, YAxis), offsetof(FCoords, ZAxis));
+
 		return 0;
 	}
 
