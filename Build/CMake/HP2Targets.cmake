@@ -173,6 +173,23 @@ if(NOT EMSCRIPTEN)
     set(_hp2_saved_osx_deployment_target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "")
     corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml" CRATES hp2-ffi)
+    # hp2-import's `archive` Cargo feature links the real pinned
+    # archive_static for its Extract/HP2ImportArchive.cpp replacement
+    # (crates/hp2-import/src/archive.rs) -- off by default so bare
+    # `cargo build`/`cargo test` never need libarchive, enabled here for
+    # the real product build where it's actually needed. See
+    # crates/hp2-import/Cargo.toml's `[features]` doc comment.
+    corrosion_set_features(hp2_ffi FEATURES hp2-import/archive)
+    # libhp2_ffi.a's compiled code (not just the Import-specific part)
+    # has real, unresolved archive_read_*/archive_entry_*/archive_error_*
+    # symbol references now that the feature above is enabled -- the
+    # Cargo feature is a property of the whole crate, not something
+    # selectable per consumer, so every target linking hp2_ffi (hp2_core
+    # included, transitively reaching nearly every executable in this
+    # project) needs archive_static resolvable at its own final link,
+    # not just hp2_import_core's consumers. Linked on hp2_ffi's own
+    # INTERFACE so it propagates everywhere hp2_ffi already does.
+    target_link_libraries(hp2_ffi INTERFACE archive_static)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "${_hp2_saved_osx_deployment_target}")
     set(HP2_RS_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rust-include")
     file(MAKE_DIRECTORY "${HP2_RS_INCLUDE_DIR}")
@@ -287,26 +304,54 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
 endif()
 
 set(HP2_IMPORT_ROOT "${HP2_UNREAL_ROOT}/Import")
-set(HP2_IMPORT_SOURCES
-    "${HP2_IMPORT_ROOT}/Src/HP2ImportInputs.cpp"
-    "${HP2_IMPORT_ROOT}/Src/HP2ImportCollect.cpp"
-    "${HP2_IMPORT_ROOT}/Src/HP2ImportPlan.cpp"
-    "${HP2_IMPORT_ROOT}/Src/HP2ImportManifest.cpp"
-    "${HP2_IMPORT_ROOT}/Src/HP2ImportOutput.cpp"
-)
-if(NOT EMSCRIPTEN)
-    list(APPEND HP2_IMPORT_SOURCES "${HP2_IMPORT_ROOT}/Src/HP2ImportArchive.cpp")
-endif()
-add_library(hp2_import_core STATIC ${HP2_IMPORT_SOURCES})
-target_include_directories(hp2_import_core PUBLIC "${HP2_IMPORT_ROOT}/Inc"
-    PRIVATE "${HP2_IMPORT_ROOT}/Src" "${HP2_UNREAL_ROOT}/Core/Inc")
-target_compile_features(hp2_import_core PUBLIC cxx_std_17)
-target_link_libraries(hp2_import_core PUBLIC hp2_compile_policy PRIVATE utf8proc::utf8proc)
-if(WIN32)
-    target_link_libraries(hp2_import_core PUBLIC bcrypt)
-endif()
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_import_core PRIVATE archive_static hp2_ffi)
+if(EMSCRIPTEN)
+    # The web build has no Rust at all: HP2Dependencies.cmake excludes
+    # both Corrosion and libarchive entirely under EMSCRIPTEN, and
+    # stable Rust has no wasm64-unknown-emscripten target to begin with
+    # (confirmed directly: `rustc --print target-list` has no such
+    # entry; the one wasm64 target that exists,
+    # wasm64-unknown-unknown, has no prebuilt std on this pinned stable
+    # toolchain -- `rustup target add` reports "no prebuilt artifacts",
+    # requiring nightly + `-Z build-std` -- and still lacks Emscripten's
+    # runtime glue regardless of that). The C++ importer stays for this
+    # one platform until Rust gains a stable wasm64 Emscripten target,
+    # or the project reconsiders wasm64 (`-sMEMORY64=1`, see the
+    # web-wasm64 preset) vs wasm32 for the web build; this is a verified
+    # upstream limitation, not a scope choice -- native (macOS/Linux)
+    # fully replaces this with crates/hp2-import via hp2-ffi, below.
+    add_library(hp2_import_core STATIC
+        "${HP2_IMPORT_ROOT}/Src/HP2ImportInputs.cpp"
+        "${HP2_IMPORT_ROOT}/Src/HP2ImportCollect.cpp"
+        "${HP2_IMPORT_ROOT}/Src/HP2ImportPlan.cpp"
+        "${HP2_IMPORT_ROOT}/Src/HP2ImportManifest.cpp"
+        "${HP2_IMPORT_ROOT}/Src/HP2ImportOutput.cpp"
+    )
+    target_include_directories(hp2_import_core PUBLIC "${HP2_IMPORT_ROOT}/Inc"
+        PRIVATE "${HP2_IMPORT_ROOT}/Src" "${HP2_UNREAL_ROOT}/Core/Inc")
+    target_compile_features(hp2_import_core PUBLIC cxx_std_17)
+    target_link_libraries(hp2_import_core PUBLIC hp2_compile_policy PRIVATE utf8proc::utf8proc)
+else()
+    # Native builds: crates/hp2-import (via hp2-ffi's hp2_rs_import_run)
+    # fully replaces HP2Import{Inputs,Collect,Plan,Manifest,Output,
+    # Archive}.cpp -- none of them compile here. hp2_import_core becomes
+    # an INTERFACE library instead of a static one so every existing
+    # consumer (hp2_import, hp2_game, hp2_launcher_tests) keeps its
+    # unchanged `target_link_libraries(... hp2_import_core ...)` line
+    # and transitively gets hp2_ffi (the real implementation, including
+    # the real archive_static-backed Extract replacement -- see the
+    # corrosion_import_crate block above for where hp2_ffi itself picks
+    # up archive_static on its own INTERFACE, propagating to every
+    # consumer including this one) plus HP2Import.h's public include
+    # dir (Options/Progress/Profile/LinkMode and the RunImport
+    # declaration -- still the real C++ surface HP2DataImport.cpp/
+    # HP2ImportMain.cpp construct and call across the FFI boundary
+    # with).
+    add_library(hp2_import_core INTERFACE)
+    target_include_directories(hp2_import_core INTERFACE "${HP2_IMPORT_ROOT}/Inc")
+    target_link_libraries(hp2_import_core INTERFACE hp2_compile_policy hp2_ffi)
+    if(WIN32)
+        target_link_libraries(hp2_import_core INTERFACE bcrypt)
+    endif()
     add_executable(hp2_import "${HP2_IMPORT_ROOT}/Src/HP2ImportMain.cpp")
     target_link_libraries(hp2_import PRIVATE hp2_import_core hp2_compile_policy hp2_ffi)
 endif()
