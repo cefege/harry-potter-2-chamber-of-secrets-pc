@@ -192,8 +192,27 @@
 //! two using real texture-sampling loops) are all optional branches of
 //! one vertex+fragment shader pair, each individually portable with
 //! the same non-bindless-fallback strategy as every other shader here;
-//! none of them have been transcribed yet. Still unexamined:
-//! `SetTexture.cpp`'s texture cache/upload path, and the C++-side
+//! none of them have been transcribed yet.
+//!
+//! `SetTexture.cpp` (747 lines, texture cache/upload) has been read in
+//! enough depth to scope its shape, though not line-for-line the way
+//! the shader sources above were: textures are keyed by `CacheID`
+//! (`FTextureInfo::CacheID`, with a reused low tag bit distinguishing
+//! the alpha-premultiplied-for-`PF_Masked` copy of a `TEXF_P8` texture
+//! from its unmasked copy -- two real cache entries can exist for one
+//! source texture). Upload is one of: a full upload
+//! (`glTexImage2D`/`glCompressedTexImage2D` for the one compressed
+//! format in use, `TEXF_DXT1`, followed by `glGenerateMipmap`) or an
+//! incremental/partial mip upload (`glTexSubImage2D`/
+//! `glCompressedTexImage2D` at an explicit, manually incremented mip
+//! level, no mipmap generation). `TEXF_DXT1` maps to wgpu's
+//! `Features::TEXTURE_COMPRESSION_BC` (not asserted anywhere yet in
+//! this crate); the other formats (`P8`/`RGBA7`/`RGB16`/`RGB8`/
+//! `RGBA8`) upload uncompressed and would map to `Queue::write_texture`
+//! with a wgpu-side format chosen per source format -- `P8` in
+//! particular is an indexed-palette format needing CPU-side expansion
+//! to RGBA before upload (the real palette-to-RGBA conversion call
+//! site itself has not been read yet). Still unexamined: the C++-side
 //! draw-call batching (`DrawComplex.cpp`/`DrawGouraud.cpp`/
 //! `DrawTile.cpp`) that would need a parallel Rust rewrite to actually
 //! call any of this.
