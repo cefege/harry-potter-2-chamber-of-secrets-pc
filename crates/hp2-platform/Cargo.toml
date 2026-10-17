@@ -7,3 +7,13 @@ publish.workspace = true
 
 [lib]
 name = "hp2_platform"
+
+[features]
+# Links against the pinned `SDL2::SDL2-static` (built by CMake's
+# FetchContent) for `clipboard`'s real SDL2 FFI calls. Off by default so
+# `cargo build`/`cargo test` work standalone with no SDL2 binary to find
+# -- only CMake's build (which already builds SDL2::SDL2-static and
+# links it on every other SDL2 consumer in this project) enables this
+# feature. See `src/clipboard.rs`'s own doc comment for the full design
+# and why it has no `sdl2`/`sdl2-sys` crate dependency at all.
+sdl = []

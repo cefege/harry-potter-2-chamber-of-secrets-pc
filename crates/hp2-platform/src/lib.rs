@@ -80,8 +80,11 @@
 //! batch needs to carry which dispatch each entry needs, not just
 //! `(Key, Action, Delta)`.
 //!
-//! Not yet FFI-wired or called from C++: an additive, isolated crate,
-//! same as every other port crate's first commit in this workspace.
+//! `clipboard` is the exception: FFI-wired, real `USDLClient` caller
+//! switched to it (`GetClipboardText`/`SetClipboardText`). Everything
+//! else above is additive and not yet called from C++, same as every
+//! other port crate's first commit in this workspace.
 
+pub mod clipboard;
 pub mod input_event;
 pub mod mouse_capture;

@@ -15,7 +15,15 @@ hp2-ini.workspace = true
 hp2-codecs.workspace = true
 hp2-import.workspace = true
 hp2-launcher.workspace = true
+hp2-platform.workspace = true
 log.workspace = true
 
 [build-dependencies]
 cbindgen.workspace = true
+
+[features]
+# Propagates to hp2-platform's own `sdl` feature; see that crate's
+# clipboard.rs doc comment. Named separately (not just re-using
+# "hp2-platform/sdl" at every call site) so this crate's own source can
+# `#[cfg(feature = "platform-sdl")]` the FFI exports that call into it.
+platform-sdl = ["hp2-platform/sdl"]

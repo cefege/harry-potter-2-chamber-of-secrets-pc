@@ -1997,3 +1997,52 @@ pub extern "C" fn hp2_rs_launcher_set_publish_failure_for_testing(publication_in
         },
     )
 }
+
+/// Replaces `USDLClient::GetClipboardText` (`SDLClient.cpp:279-294`).
+/// Calls `text_sink` exactly once, only when the clipboard has usable
+/// UTF-8 text; returns whether it did. UTF-8, not NUL-terminated.
+///
+/// # Safety
+/// `text_sink` must be safe to call with `text_ctx` and the span
+/// described above, valid only for the call's duration.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_get_clipboard_text(
+    text_sink: ErrorSink,
+    text_ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_platform_get_clipboard_text", false, move || {
+        match hp2_platform::clipboard::get_clipboard_text() {
+            Some(text) => {
+                unsafe { text_sink(text_ctx, text.as_ptr(), text.len()) };
+                true
+            }
+            None => false,
+        }
+    })
+}
+
+/// Replaces `USDLClient::SetClipboardText` (`SDLClient.cpp:296-304`).
+/// `text` is UTF-8, not NUL-terminated. Returns whether
+/// `SDL_SetClipboardText` succeeded.
+///
+/// # Safety
+/// `(text, text_len)` must be valid for reads of that length, or null
+/// with length 0.
+#[cfg(feature = "platform-sdl")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_platform_set_clipboard_text(
+    text: *const u8,
+    text_len: usize,
+) -> bool {
+    guard(
+        "hp2_rs_platform_set_clipboard_text",
+        false,
+        move || unsafe {
+            match str_from_raw(text, text_len) {
+                Some(text) => hp2_platform::clipboard::set_clipboard_text(text),
+                None => false,
+            }
+        },
+    )
+}

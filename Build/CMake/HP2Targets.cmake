@@ -179,7 +179,7 @@ if(NOT EMSCRIPTEN)
     # `cargo build`/`cargo test` never need libarchive, enabled here for
     # the real product build where it's actually needed. See
     # crates/hp2-import/Cargo.toml's `[features]` doc comment.
-    corrosion_set_features(hp2_ffi FEATURES hp2-import/archive)
+    corrosion_set_features(hp2_ffi FEATURES hp2-import/archive platform-sdl)
     # libhp2_ffi.a's compiled code (not just the Import-specific part)
     # has real, unresolved archive_read_*/archive_entry_*/archive_error_*
     # symbol references now that the feature above is enabled -- the
@@ -189,7 +189,19 @@ if(NOT EMSCRIPTEN)
     # project) needs archive_static resolvable at its own final link,
     # not just hp2_import_core's consumers. Linked on hp2_ffi's own
     # INTERFACE so it propagates everywhere hp2_ffi already does.
-    target_link_libraries(hp2_ffi INTERFACE archive_static)
+    #
+    # Same reasoning for SDL2::SDL2-static, enabled by the platform-sdl
+    # feature above (crates/hp2-platform/src/clipboard.rs's doc comment
+    # has the full design and why it is hand-written extern "C"
+    # declarations rather than an `sdl2`/`sdl2-sys` crate dependency --
+    # deliberately so, to avoid the staticlib-bundling duplicate-SDL2
+    # risk a crate-managed static link would have). SDL2::SDL2-static is
+    # the exact same FetchContent-built archive every other SDL2
+    # consumer in this project already links (SDLDrv, SDLLaunch,
+    # HP2LauncherPlatform.cpp) -- this adds no second copy, just one
+    # more consumer of the one archive, resolved once at hp2_game's
+    # final link.
+    target_link_libraries(hp2_ffi INTERFACE archive_static SDL2::SDL2-static)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "${_hp2_saved_osx_deployment_target}")
     set(HP2_RS_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rust-include")
     file(MAKE_DIRECTORY "${HP2_RS_INCLUDE_DIR}")
@@ -234,6 +246,15 @@ endif()
 hp2_add_engine_object(hp2_sdldrv SDLDrv ${HP2_SDLDRV_SOURCES})
 target_include_directories(hp2_sdldrv PUBLIC ${HP2_SDLDRV_INCLUDE_DIRS})
 target_link_libraries(hp2_sdldrv PUBLIC SDL2::SDL2-static)
+if(NOT EMSCRIPTEN)
+    # SDLClient.cpp calls hp2_rs_platform_get_clipboard_text/
+    # set_clipboard_text (crates/hp2-platform/src/clipboard.rs) directly;
+    # needs hp2_ffi's generated hp2_rs.h on its own account, same as
+    # hp2_core's own `target_link_libraries(hp2_core PUBLIC hp2_ffi)`
+    # above -- hp2_sdldrv is a separate object library that does not
+    # itself link hp2_core, so it does not inherit that propagation.
+    target_link_libraries(hp2_sdldrv PUBLIC hp2_ffi)
+endif()
 
 set(HP2_IMGUI_ROOT "${hp2_imgui_SOURCE_DIR}")
 add_library(hp2_imgui STATIC
@@ -588,6 +609,29 @@ target_link_libraries(hp2_input_contract_tests PRIVATE
 if(WIN32)
     target_link_libraries(hp2_input_contract_tests PRIVATE SDL2::SDL2main)
 endif()
+
+# SDL main-thread round trip for hp2_rs_platform_get/set_clipboard_text
+# (crates/hp2-platform/src/clipboard.rs); see the file's own header
+# comment for why this needs a dedicated ctest rather than a Rust-level
+# #[test]. Links the same library set as hp2_input_contract_tests above
+# (SDLClient.cpp/SDLViewport.cpp's own object code needs hp2_core's
+# symbols resolvable, even though this test itself touches no UObject
+# machinery) for a known-working combination rather than a guessed
+# minimal one.
+hp2_add_executable(hp2_platform_clipboard_tests
+    ${HP2_PLATFORM_CLIPBOARD_TEST_SOURCE}
+)
+target_link_libraries(hp2_platform_clipboard_tests PRIVATE
+    hp2_core
+    hp2_engine
+    hp2_render
+    hp2_fire
+    hp2_editor_runtime
+    hp2_sdldrv
+)
+if(WIN32)
+    target_link_libraries(hp2_platform_clipboard_tests PRIVATE SDL2::SDL2main)
+endif()
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     hp2_add_executable(hp2_native_typography_tests
         ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
@@ -640,6 +684,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_replay_roundtrip_tests
     hp2_save_wire_oracle
     hp2_input_contract_tests
+    hp2_platform_clipboard_tests
 )
 if(TARGET hp2_import)
     list(APPEND HP2_EXECUTABLE_TARGETS hp2_import)
@@ -924,6 +969,7 @@ if(HP2_TEST_DATA_PRESENT)
     )
 endif()
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
+hp2_add_behavior_test(clipboard_round_trip hp2_platform_clipboard_tests)
 hp2_add_behavior_test(data_identity_contracts hp2_data_identity_tests)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"

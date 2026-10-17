@@ -4,6 +4,7 @@
 
 #include "SDLDrv.h"
 #include "UnRenDev.h"
+#include "hp2_rs.h"
 
 #include <string.h>
 
@@ -274,21 +275,38 @@ void USDLClient::CloseJoystick()
 
 /*-----------------------------------------------------------------------------
 	System integration.
+
+	GetClipboardText/SetClipboardText are replaced by the hp2_rs_platform_*
+	FFI surface (crates/hp2-platform/src/clipboard.rs) -- hand-written
+	extern "C" declarations against the pinned SDL2 headers, resolved at
+	this binary's final link via Build/CMake/HP2Targets.cmake's
+	SDL2::SDL2-static interface link on hp2_ffi, not a second vendored
+	SDL2 copy. See that module's doc comment for the full design and the
+	"Approved deviations" entry in local://rust-inplace-port-plan.md for
+	why (an earlier `sdl2` crate design was reverted: it would have
+	bundled a second copy of SDL2's object code into libhp2_ffi.a).
 -----------------------------------------------------------------------------*/
+
+namespace
+{
+void ClipboardSinkToFString( void* Ctx, const BYTE* Text, SIZE_T Len )
+{
+	TArray<ANSICHAR> Utf8;
+	Utf8.AddZeroed( (INT)Len + 1 );
+	if( Len )
+		appMemcpy( &Utf8(0), Text, (INT)Len );
+	TArray<TCHAR> Buffer;
+	Buffer.AddZeroed( (INT)Len + 1 );
+	appFromUtf8InPlace( &Buffer(0), &Utf8(0), Buffer.Num() );
+	*static_cast<FString*>(Ctx) = FString( &Buffer(0) );
+}
+} // namespace
 
 FString USDLClient::GetClipboardText() const
 {
 	guard(USDLClient::GetClipboardText);
 	FString Result;
-	char* Utf8 = SDL_GetClipboardText();
-	if( Utf8 )
-	{
-		TArray<TCHAR> Buffer;
-		Buffer.AddZeroed( (INT)strlen( Utf8 ) + 1 );
-		appFromUtf8InPlace( &Buffer(0), Utf8, Buffer.Num() );
-		Result = FString( &Buffer(0) );
-		SDL_free( Utf8 );
-	}
+	hp2_rs_platform_get_clipboard_text( &ClipboardSinkToFString, &Result );
 	return Result;
 	unguard;
 }
@@ -299,7 +317,7 @@ UBOOL USDLClient::SetClipboardText( const TCHAR* Text )
 	TArray<ANSICHAR> Utf8;
 	Utf8.AddZeroed( appStrlen(Text) * 4 + 1 );
 	appToUtf8InPlace( &Utf8(0), Text, Utf8.Num() );
-	return SDL_SetClipboardText( &Utf8(0) ) == 0 ? 1 : 0;
+	return hp2_rs_platform_set_clipboard_text( reinterpret_cast<const BYTE*>(&Utf8(0)), strlen(&Utf8(0)) ) ? 1 : 0;
 	unguard;
 }
 
