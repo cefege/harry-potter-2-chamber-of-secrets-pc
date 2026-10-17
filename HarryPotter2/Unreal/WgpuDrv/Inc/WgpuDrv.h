@@ -38,7 +38,14 @@
 	Occluded run correctly regardless: Unlock is safe to call even when
 	Lock observed a non-zero outcome (hp2_wgpu::unlock_frame's own
 	contract), and the real run above completed all 60 ticks and shut
-	down cleanly with no crash.
+	down cleanly with no crash. (Separately, UWgpuRenderDevice::Exit
+	itself was not being reached at all during that same -testticks
+	run -- a real, pre-existing gap in USDLViewport::Destroy shared by
+	every render device, not specific to this one -- since fixed at
+	the source; see SDLViewport.cpp's own Destroy/ShutdownAfterError.
+	That fix is unrelated to why frames are not presented above: it
+	only means Exit's own frame-count summary line is now reliably
+	logged, not that any frame reaches the screen.)
 =============================================================================*/
 
 #ifndef _INCL_WGPUDRV_H_

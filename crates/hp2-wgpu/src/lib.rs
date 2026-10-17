@@ -366,6 +366,15 @@ struct InProgressFrame {
     #[allow(dead_code)] // kept alive for texture's sake; never read directly
     view: wgpu::TextureView,
     encoder: wgpu::CommandEncoder,
+    /// `true` if `get_current_texture` returned `Suboptimal`, not
+    /// `Success` -- `unlock_frame` clears `configured_size` for this
+    /// case the same way `lock_frame` already does for `Outdated`,
+    /// since `Suboptimal`'s own meaning is "usable now, but
+    /// reconfigure soon" (`Surface::get_current_texture`'s own doc).
+    /// Deferred to `unlock_frame`, not done here: the frame is still
+    /// in flight at this point, and reconfiguring before it is
+    /// submitted/presented would be premature.
+    suboptimal: bool,
 }
 
 /// Per-live-`CreatedDevice` tally of every `lock_frame` outcome, not
@@ -470,9 +479,9 @@ pub fn lock_frame(
         surface.configure(&created.device, &config);
         loop_state.configured_size = Some((width, height));
     }
-    let texture = match surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(texture) => texture,
-        wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+    let (texture, is_suboptimal) = match surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(texture) => (texture, false),
+        wgpu::CurrentSurfaceTexture::Suboptimal(texture) => (texture, true),
         wgpu::CurrentSurfaceTexture::Timeout => {
             loop_state.counts.other_failure += 1;
             return FrameOutcome::Timeout;
@@ -487,6 +496,15 @@ pub fn lock_frame(
             return FrameOutcome::Outdated;
         }
         wgpu::CurrentSurfaceTexture::Lost => {
+            // Same reconfigure-on-next-call treatment as Outdated:
+            // without this, a later Lock at the same (width, height)
+            // would skip surface.configure (since the cached size
+            // still matches) and keep getting Lost forever instead of
+            // ever recovering -- e.g. after a display or Space change,
+            // or a fullscreen toggle. Missing here was a real bug, not
+            // just an inconsistency with Outdated's own handling
+            // (caught on review).
+            loop_state.configured_size = None;
             loop_state.counts.other_failure += 1;
             return FrameOutcome::Lost;
         }
@@ -522,8 +540,16 @@ pub fn lock_frame(
         texture,
         view,
         encoder,
+        suboptimal: is_suboptimal,
     });
-    loop_state.counts.presented += 1;
+    // Not counted as `presented` here: a successful lock_frame only
+    // means a frame was *acquired*, not that it will actually reach
+    // the screen -- unlock_frame(present: false) (Blit=0, e.g. a
+    // hit-testing pass) never presents it at all. The real `presented`
+    // tally belongs in unlock_frame, counting only calls that actually
+    // present (caught on review: counting here would have
+    // over-counted relative to what Build/run_wgpu_smoke.py's
+    // presented>0 check is meant to mean).
     FrameOutcome::Presented
 }
 
@@ -538,6 +564,20 @@ pub fn lock_frame(
 /// `SurfaceTexture::drop` discard it instead (wgpu's own documented,
 /// safe behavior for an un-presented texture).
 ///
+/// `loop_state.counts.presented` is incremented here, not in
+/// `lock_frame`, and only when `present` is `true` -- a successful
+/// `lock_frame` only acquired a frame; `unlock_frame(present: false)`
+/// never actually presents it, and counting it as `presented` would
+/// have over-counted relative to what callers like
+/// `Build/run_wgpu_smoke.py`'s `presented > 0` check mean by the name
+/// (caught on review, not self-caught). A `Suboptimal` frame
+/// (`lock_frame`'s own `InProgressFrame::suboptimal`) clears
+/// `loop_state.configured_size` regardless of `present` -- it is a
+/// property of the surface itself (`Surface::get_current_texture`'s
+/// own doc: "usable now, but reconfigure soon"), not of what this one
+/// call chose to do with the frame it got, so the next `lock_frame`
+/// reconfigures either way.
+///
 /// Returns `false` if `loop_state.in_progress` is `None` -- `unlock_
 /// frame` called without a matching successful `lock_frame` first is a
 /// caller bug, not a real runtime condition to report via
@@ -551,6 +591,10 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
         .submit(std::iter::once(frame.encoder.finish()));
     if present {
         created.queue.present(frame.texture);
+        loop_state.counts.presented += 1;
+    }
+    if frame.suboptimal {
+        loop_state.configured_size = None;
     }
     true
 }

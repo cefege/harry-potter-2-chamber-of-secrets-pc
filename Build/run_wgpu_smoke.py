@@ -99,42 +99,44 @@ def main() -> int:
                         r"no compatible GPU adapter|Failed to initialize", text, re.I)
     adapter = re.search(r'WgpuDrv: adapter "(.+?)" backend (\S+)', text)
 
-    # Last "WgpuDrv: Lock outcome=... tally presented=N occluded=M
-    # outdated=K other_failure=J" line, if any: the running cumulative
-    # tally as of the final tick, logged by WgpuDrv.cpp's own Lock on
-    # every call (not just Exit, which is confirmed NOT reached in a
-    # -testticks run -- WgpuDrv.h's own doc on why). A real -window
-    # run with zero presented frames is not the same claim as "the
-    # renderer works": this script hardcodes -window above, so every
-    # run here is exactly the scenario that distinction matters for
+    # "WgpuDrv: frames presented=N occluded=M outdated=K
+    # other_failure=J", logged once by UWgpuRenderDevice::Exit. Used
+    # to require more than "did not crash while trying": a real
+    # -window run (hardcoded above) that booted cleanly but never
+    # actually presented a frame is a known, honestly-reported
+    # condition (WgpuDrv.h's own doc on a real such run on this
+    # project's own dev machine), not silently treated as success
     # (caught on review: an earlier version of this script reported
-    # "pass" on a run that, per this same tally, presented zero frames
-    # the entire time).
-    tally_matches = list(re.finditer(
-        r"WgpuDrv: Lock outcome=(\d+) tally presented=(\d+) occluded=(\d+) "
-        r"outdated=(\d+) other_failure=(\d+)", text))
+    # "pass" on exactly such a run). Exit itself was confirmed
+    # unreachable in a -testticks run until a real, separate fix
+    # landed (USDLViewport::Destroy was independently destroying the
+    # SDL window via GC before the viewport's own RenDev cleanup ever
+    # ran -- SDLViewport.cpp's own Destroy/ShutdownAfterError now
+    # fix this at the source); a missing tally line here, even on an
+    # otherwise-clean boot, is its own distinct finding -- something
+    # broke the Exit path again, or the log line's own format
+    # changed -- and must not be silently read the same as "tally
+    # found, presented is zero" (caught on review).
+    tally_match = re.search(
+        r"WgpuDrv: frames presented=(\d+) occluded=(\d+) outdated=(\d+) "
+        r"other_failure=(\d+)", text)
     tally = None
-    if tally_matches:
-        last = tally_matches[-1]
+    if tally_match:
         tally = {
-            "last_outcome": int(last.group(1)),
-            "presented": int(last.group(2)),
-            "occluded": int(last.group(3)),
-            "outdated": int(last.group(4)),
-            "other_failure": int(last.group(5)),
-            "ticks_logged": len(tally_matches),
+            "presented": int(tally_match.group(1)),
+            "occluded": int(tally_match.group(2)),
+            "outdated": int(tally_match.group(3)),
+            "other_failure": int(tally_match.group(4)),
         }
 
     booted = (rc == 0) and (not timed_out) and bool(adapter) and not failure
     presented_frames = bool(tally and tally["presented"] > 0)
-    # "pass" needs more than "did not crash while trying": a real
-    # -window run (hardcoded above) that booted cleanly but never
-    # actually presented a frame is a known, honestly-reported
-    # condition (WgpuDrv.h's own doc on a real such run on this
-    # project's own dev machine), not silently treated as success.
     passed = booted and presented_frames
 
-    if booted and not presented_frames:
+    if booted and tally is None:
+        status = "blocked"
+        reason_code = "renderer.no_frame_tally"
+    elif booted and not presented_frames:
         status = "blocked"
         reason_code = "renderer.zero_frames_presented"
     elif not booted:

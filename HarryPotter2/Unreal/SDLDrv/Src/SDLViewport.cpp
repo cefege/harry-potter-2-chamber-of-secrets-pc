@@ -116,6 +116,28 @@ void USDLViewport::Destroy()
 	guard(USDLViewport::Destroy);
 
 	UpdateMouseGrabState( 0 );
+	// RenDev before SdlWindow: a render device's wgpu/GL/Vulkan
+	// resources can hold a reference into the window's own surface
+	// (e.g. WgpuDrv's wgpu::Surface borrows the SDL_MetalView's
+	// CAMetalLayer -- WgpuDrv.h's own field comment), so it must be
+	// torn down first, not left for GC to reach independently after
+	// SDL_DestroyWindow has already freed what it pointed into. Same
+	// explicit Exit()/delete/NULL pattern already used at
+	// USDLClient::Destroy and USDLViewport::TryRenderDevice -- this
+	// call site was simply missing it (a real, pre-existing gap
+	// outside those two, not introduced here): confirmed directly via
+	// a real -testticks run that UWgpuRenderDevice::Exit was never
+	// reached at all before this fix -- USDLClient::Destroy's own
+	// RenDev-cleanup loop found Viewports.Num() already 0 by the time
+	// it ran, meaning the viewport (and the RenDev it owned) had
+	// already been independently garbage-collected via this method,
+	// bypassing both of the other two cleanup sites entirely.
+	if( RenDev )
+	{
+		RenDev->Exit();
+		delete RenDev;
+		RenDev = NULL;
+	}
 	if( SdlWindow )
 	{
 		SDL_DestroyWindow( SdlWindow );
@@ -136,6 +158,16 @@ void USDLViewport::Destroy()
 void USDLViewport::ShutdownAfterError()
 {
 	guard(USDLViewport::ShutdownAfterError);
+	// Same ordering concern as Destroy above: SDL_Quit tears down
+	// every SDL window (and any Metal/GL view attached to them)
+	// process-wide, which RenDev's own native resources can still
+	// reference.
+	if( RenDev )
+	{
+		RenDev->Exit();
+		delete RenDev;
+		RenDev = NULL;
+	}
 	SDL_Quit();
 	Super::ShutdownAfterError();
 	unguard;

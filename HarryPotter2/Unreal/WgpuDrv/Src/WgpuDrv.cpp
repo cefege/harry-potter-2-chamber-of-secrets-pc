@@ -143,17 +143,16 @@ void UWgpuRenderDevice::Exit()
 	if( RustDevice )
 	{
 		// Queried before destroy: the counts live inside RustDevice's
-		// own RenderLoop, gone once hp2_rs_wgpu_destroy runs. Correct
-		// for a real interactive shutdown (window close/quit), but
-		// confirmed NOT reached at all in a -testticks run (verified
-		// directly: an unconditional debugf placed at the very top of
-		// this function never printed in a real -testticks=60 run --
-		// appRequestExit's fast-exit path does not reach
-		// USDLViewport::Destroy/RenDev->Exit the way a normal
-		// interactive quit does), so Lock below also logs the running
-		// tally every call -- Build/run_wgpu_smoke.py reads that one,
-		// not this one, since -testticks is exactly the scenario this
-		// summary line cannot help with.
+		// own RenderLoop, gone once hp2_rs_wgpu_destroy runs. A real
+		// -testticks=60 run was first observed to never reach this
+		// function at all (confirmed directly: an unconditional
+		// debugf at the top of this function never printed) --
+		// USDLViewport::Destroy was independently destroying the SDL
+		// window via UObject GC before the viewport's own RenDev
+		// cleanup had a chance to run, a real, pre-existing gap now
+		// fixed at the source in SDLViewport.cpp's own Destroy/
+		// ShutdownAfterError (not worked around here). This line is
+		// what Build/run_wgpu_smoke.py reads.
 		const FrameCounts Counts = hp2_rs_wgpu_frame_counts( RustDevice );
 		debugf( NAME_Init, TEXT("WgpuDrv: frames presented=%u occluded=%u outdated=%u other_failure=%u"),
 			Counts.presented, Counts.occluded, Counts.outdated, Counts.other_failure );
@@ -189,20 +188,29 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 	// still-stub virtual in this class.
 	//
 	// Real physical pixel dimensions, not Viewport->SizeX/SizeY
-	// (logical/point units): on a Retina display those differ by the
-	// backing scale factor, and configuring the swapchain at the
-	// logical size would under-run the real drawable by that factor.
-	// XOpenGL's own present path makes exactly this distinction --
-	// SDL_GL_GetDrawableSize for the real blit target, Viewport->
-	// SizeX/SizeY only for its own internal FBO sizing -- confirmed by
-	// reading XOpenGL.cpp before using this pattern, not guessed (an
-	// earlier version of this function used Viewport->SizeX/SizeY
-	// directly, matching XOpenGL's FBO-sizing use but not its present-
-	// time one, caught on review). SetRes does not need to push a new
-	// size into Rust separately -- the next Lock call simply queries
-	// the window's current drawable size again, and hp2_rs_wgpu_lock
-	// only reconfigures the surface when the requested size actually
-	// changed.
+	// (logical/point units): XOpenGL's own present path makes exactly
+	// this distinction -- SDL_GL_GetDrawableSize for the real blit
+	// target, Viewport->SizeX/SizeY only for its own internal FBO
+	// sizing -- confirmed by reading XOpenGL.cpp before using this
+	// pattern, not guessed (an earlier version of this function used
+	// Viewport->SizeX/SizeY directly, matching XOpenGL's FBO-sizing
+	// use but not its present-time one, caught on review). On a
+	// Retina display with HiDPI requested, those two differ by the
+	// backing scale factor; using the wrong one would under-run the
+	// real drawable. Not a confirmed *current* bug, though: the real
+	// game window (SDLViewport.cpp:268) does not pass
+	// SDL_WINDOW_ALLOW_HIGHDPI (only HP2Launcher.cpp:557's separate
+	// launcher window does), so SDL_Metal_GetDrawableSize and
+	// Viewport->SizeX/SizeY are confirmed equal for it today -- this
+	// is the correct API choice regardless, so it stays correct if
+	// HiDPI is ever enabled for the game window, not a fix for an
+	// observed half-resolution bug (an earlier version of this
+	// comment overclaimed that it was, caught on review: the two
+	// sizes were never actually logged and compared). SetRes does not
+	// need to push a new size into Rust separately -- the next Lock
+	// call simply queries the window's current drawable size again,
+	// and hp2_rs_wgpu_lock only reconfigures the surface when the
+	// requested size actually changed.
 #if MACOSX
 	INT PixelWidth = 0, PixelHeight = 0;
 	if( SDL_Window* Window = (SDL_Window*)Viewport->GetWindow() )
@@ -225,22 +233,25 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 	const DWORD Outcome = hp2_rs_wgpu_lock( RustDevice,
 		(DWORD)Max( 1, PixelWidth ), (DWORD)Max( 1, PixelHeight ),
 		ScreenClear.X, ScreenClear.Y, ScreenClear.Z, ScreenClear.W );
-	// Logged every call, success or failure, with the running tally --
-	// not only on failure. Exit's own tally log (WgpuDrv.cpp's own
-	// Exit comment) is confirmed unreachable in a -testticks run
-	// (appRequestExit's fast-exit path skips RenDev->Exit entirely),
-	// so Build/run_wgpu_smoke.py needs a per-tick line it can rely on
-	// seeing regardless of how the process exits; this is that line
-	// (caught on review: an earlier version only logged on failure,
-	// which would have given run_wgpu_smoke.py nothing to read at all
-	// in exactly the all-Occluded case it most needs to detect).
-	// NAME_Dev: the only general developer-log category that exists
-	// and fits here (UnNames.h's REGISTER_NAME list has no graphics-
-	// specific one; a fabricated NAME_DevGraphics was caught here
-	// before this ever compiled).
-	const FrameCounts Counts = hp2_rs_wgpu_frame_counts( RustDevice );
-	debugf( NAME_Dev, TEXT("WgpuDrv: Lock outcome=%u tally presented=%u occluded=%u outdated=%u other_failure=%u"),
-		Outcome, Counts.presented, Counts.occluded, Counts.outdated, Counts.other_failure );
+	// Failure-only, not every call: an earlier version of this logged
+	// every tick's running tally unconditionally, as a workaround for
+	// UWgpuRenderDevice::Exit being unreachable in a -testticks run
+	// (USDLViewport::Destroy was independently destroying the SDL
+	// window via GC before the viewport's own RenDev cleanup ever ran
+	// -- a real, pre-existing bug, now fixed at the source in
+	// SDLViewport.cpp's own Destroy/ShutdownAfterError, not worked
+	// around here). With Exit now reliably reached, logging every
+	// single tick (roughly 60 lines/second in real interactive play)
+	// was needless log spam kept only because the real fix had not
+	// landed yet (caught on review). Exit's own tally line
+	// (WgpuDrv.cpp's own Exit, below) is what Build/run_wgpu_smoke.py
+	// reads now.
+	if( Outcome != 0 )
+		// NAME_Dev: the only general developer-log category that
+		// exists and fits here (UnNames.h's REGISTER_NAME list has no
+		// graphics-specific one; a fabricated NAME_DevGraphics was
+		// caught here before this ever compiled).
+		debugf( NAME_Dev, TEXT("WgpuDrv: Lock did not begin a frame (outcome code %i)"), Outcome );
 	unguard;
 }
 
