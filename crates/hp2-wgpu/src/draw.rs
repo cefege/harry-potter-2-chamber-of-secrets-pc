@@ -322,6 +322,352 @@ impl SimpleLinePipeline {
     }
 }
 
+/// Real `GetPolyFlagsAndDrawFlags`'s own core `PolyFlags` ->
+/// `DrawFlags` translation (`SetTexture.cpp:578-617`), the part that
+/// determines actual shader behavior -- not its `CachedPolyFlags`
+/// memoization (a GL-call-avoidance optimization, not a behavior
+/// difference: this function is pure and cheap, nothing here needs
+/// caching) nor its `PolyFlags` mutation for `PF_Occlude` (that feeds
+/// `SetBlend`'s own real blend-state selection, a separate, still-
+/// unbuilt axis -- see `TilePipeline`'s own doc). Also skips `DF_
+/// DiffuseTexture`, which `SubmitTileBatch` ORs in itself right after
+/// calling the real function this ports, not something `GetPolyFlags
+/// AndDrawFlags` sets -- a future `queue_tile` wiring's own
+/// responsibility, not this pure function's.
+///
+/// The one real behavior difference from a naive flag-for-flag
+/// mapping: `PF_RenderFog` is first cleared from a local copy of
+/// `poly_flags` whenever `(PolyFlags & (PF_RenderFog |
+/// PF_Translucent)) != PF_RenderFog` -- true in every case except
+/// "`PF_RenderFog` set, `PF_Translucent` not set" (verified by hand
+/// truth table over all four combinations before relying on it, not
+/// just read off the condition's own English-sounding shape, which
+/// is easy to misread backwards -- an earlier version of this exact
+/// doc comment did). So `DF_RenderFog` only ever comes out set when
+/// `PF_RenderFog` is present *without* `PF_Translucent`; it is
+/// cleared (not set) when neither is present, when only
+/// `PF_Translucent` is present, and -- the least obvious case --
+/// even when *both* are present together.
+pub fn compute_tile_draw_flags(poly_flags: u32) -> u32 {
+    const PF_MASKED: u32 = 0x0000_0002;
+    const PF_TRANSLUCENT: u32 = 0x0000_0004;
+    const PF_ENVIRONMENT: u32 = 0x0000_0010;
+    const PF_MODULATED: u32 = 0x0000_0040;
+    const PF_HIGHLIGHTED: u32 = 0x1000_0000;
+    const PF_RENDER_FOG: u32 = 0x4000_0000;
+
+    const DF_MASKED: u32 = 0x0100;
+    const DF_MODULATED: u32 = 0x0400;
+    const DF_TRANSLUCENT: u32 = 0x0800;
+    const DF_ENVIRONMENT: u32 = 0x1000;
+    const DF_RENDER_FOG: u32 = 0x2000;
+    const DF_ALPHA_BLENDED: u32 = 0x4000;
+
+    let mut poly_flags = poly_flags;
+    if (poly_flags & (PF_RENDER_FOG | PF_TRANSLUCENT)) != PF_RENDER_FOG {
+        poly_flags &= !PF_RENDER_FOG;
+    }
+
+    let mut draw_flags = 0u32;
+    if poly_flags & PF_MODULATED != 0 {
+        draw_flags |= DF_MODULATED;
+    }
+    if poly_flags & PF_RENDER_FOG != 0 {
+        draw_flags |= DF_RENDER_FOG;
+    }
+    if poly_flags & PF_MASKED != 0 {
+        draw_flags |= DF_MASKED;
+    }
+    if poly_flags & PF_HIGHLIGHTED != 0 {
+        draw_flags |= DF_ALPHA_BLENDED;
+    }
+    if poly_flags & PF_TRANSLUCENT != 0 {
+        draw_flags |= DF_TRANSLUCENT;
+    }
+    if poly_flags & PF_ENVIRONMENT != 0 {
+        draw_flags |= DF_ENVIRONMENT;
+    }
+    draw_flags
+}
+
+/// `tile.wgsl`'s real WGSL source, embedded the same way `simple.wgsl`
+/// is (`SIMPLE_WGSL_SOURCE`'s own doc has the full reasoning).
+const TILE_WGSL_SOURCE: &str = concat!(
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/tile.wgsl")
+);
+
+/// Byte-for-byte mirror of `tile.wgsl`'s real `VertexInput`
+/// (`@location(0) coords: vec3<f32>, @location(1) draw_id: u32,
+/// @location(2) tex_coords: vec2<f32>`), matching the already-proven
+/// vertex layout from this crate's own `tile_wgsl_builds_a_render_
+/// pipeline_on_a_real_adapter` test (`array_stride: 24`).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TileVertex {
+    pub coords: [f32; 3],
+    pub draw_id: u32,
+    pub tex_coords: [f32; 2],
+}
+
+/// Byte-for-byte mirror of `tile.wgsl`'s real `DrawParameters`
+/// (`draw_color: vec4<f32>, draw_flags: u32`). Unlike `simple.wgsl`'s
+/// `DrawParams` (a bare `vec4<f32>`, already 16-byte aligned with
+/// nothing trailing it), this struct's raw size (16 + 4 = 20 bytes)
+/// is *not* a multiple of 16 -- WGSL's uniform-address-space layout
+/// rules round a struct's own size up to its own alignment (16, from
+/// the `vec4<f32>` field) before using it as this array's real
+/// per-element stride, giving a real stride of 32 bytes, not 20.
+/// `_padding` makes this struct's own `size_of` match that exactly;
+/// without it, writing `[TileDrawParams; N]` as a flat byte buffer
+/// would silently misalign every entry after the first against the
+/// real shader's own expected layout. `bytemuck::Pod`/`Zeroable`,
+/// same reasoning as `LineVertex`/`DrawParams` above -- `_padding`
+/// stays `pub` (not a private field defeating `Pod`'s own
+/// requirements) and is always zeroed by `Zeroable`/by construction
+/// in this module's own code, never read.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TileDrawParams {
+    pub draw_color: [f32; 4],
+    pub draw_flags: u32,
+    pub _padding: [u32; 3],
+}
+
+/// Groups `TilePipeline::record`/`::render`'s "what to draw"
+/// arguments, same reasoning as `LineDrawCall` (clippy's
+/// `too_many_arguments`, now with two more real fields this pipeline
+/// needs that `SimpleLinePipeline` does not: the bound texture and
+/// its sampler, `tile.wgsl`'s real `@group(2)`).
+pub struct TileDrawCall<'a> {
+    pub frame_uniforms_buffer: &'a wgpu::Buffer,
+    pub vertices: &'a [TileVertex],
+    pub draw_params: &'a [TileDrawParams],
+    pub texture_view: &'a wgpu::TextureView,
+    pub sampler: &'a wgpu::Sampler,
+    pub target: &'a wgpu::TextureView,
+    /// Same real correctness contract as `LineDrawCall::load` --
+    /// `Load` plus recording into the live frame's own still-
+    /// unsubmitted `CommandEncoder` (via `record`, never `render`)
+    /// for any draw composited into a real `RenderLoop` frame.
+    pub load: wgpu::LoadOp<wgpu::Color>,
+}
+
+/// One real, lazily-built `tile.wgsl` pipeline plus the three bind-
+/// group layouts `layout: None` derives for it (`@group(0)` frame
+/// uniforms, `@group(1)` draw params, `@group(2)` diffuse texture/
+/// sampler), same reasoning as `SimpleLinePipeline`.
+///
+/// Known, explicitly scoped limitation, not silently pretended away:
+/// a single fixed blend state (standard non-premultiplied `SrcAlpha`/
+/// `OneMinusSrcAlpha` over both color and alpha), not the real
+/// `SetBlend`'s own seven `PolyFlags`-driven combinations (this
+/// crate's own module doc already has the full read of those). This
+/// is *not* the same gap as `apply_poly_flags`'s masked/alpha-blended
+/// `discard` logic (`common.wgsl`, already fully real and applied via
+/// `compute_tile_draw_flags`'s own output) -- that is real, per-draw,
+/// shader-side behavior requiring no pipeline variant at all; this
+/// fixed blend state only affects how a surviving (non-discarded)
+/// fragment's color actually composites against what is already in
+/// the target, which `SetBlend`'s real GL blend-function selection
+/// does differently per `PolyFlags` combination. A real, known gap
+/// until the still-unbuilt blend-state pipeline cache lands.
+pub struct TilePipeline {
+    pipeline: wgpu::RenderPipeline,
+    frame_uniforms_layout: wgpu::BindGroupLayout,
+    draw_params_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+}
+
+impl TilePipeline {
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tile.wgsl (draw.rs production)"),
+            source: wgpu::ShaderSource::Wgsl(TILE_WGSL_SOURCE.into()),
+        });
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: std::mem::size_of::<[f32; 3]>() as u64,
+                shader_location: 1,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: std::mem::size_of::<[f32; 3]>() as u64 + std::mem::size_of::<u32>() as u64,
+                shader_location: 2,
+            },
+        ];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tile.wgsl pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<TileVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let frame_uniforms_layout = pipeline.get_bind_group_layout(0);
+        let draw_params_layout = pipeline.get_bind_group_layout(1);
+        let texture_layout = pipeline.get_bind_group_layout(2);
+        Self {
+            pipeline,
+            frame_uniforms_layout,
+            draw_params_layout,
+            texture_layout,
+        }
+    }
+
+    /// Same real contract as `SimpleLinePipeline::record` (its own
+    /// doc has the full correctness reasoning for `encoder`/`call.
+    /// load`): uploads `call`'s buffers and records (does **not**
+    /// submit) a real render pass drawing `call.vertices` (a flat
+    /// `TriangleList`: matching `DrawTileESProgram`'s own real
+    /// `GL_TRIANGLES` `DrawMode` -- every consecutive 3 vertices is
+    /// one triangle, two triangles per quad, matching `SubmitTileBatch`'s
+    /// own real 6-vertices-per-tile layout) into `call.target`.
+    pub fn record(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        call: TileDrawCall<'_>,
+    ) {
+        let TileDrawCall {
+            frame_uniforms_buffer,
+            vertices,
+            draw_params,
+            texture_view,
+            sampler,
+            target,
+            load,
+        } = call;
+        assert!(
+            draw_params.len() <= MAX_DRAWS,
+            "draw_params.len() ({}) exceeds tile.wgsl's real MAX_DRAWS ({MAX_DRAWS})",
+            draw_params.len()
+        );
+        assert!(
+            vertices.len().is_multiple_of(3),
+            "TriangleList topology needs a vertex count that is a multiple of 3, got {}",
+            vertices.len()
+        );
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs tile vertex buffer"),
+            size: (std::mem::size_of_val(vertices)) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
+
+        let mut padded_params = vec![
+            TileDrawParams {
+                draw_color: [0.0; 4],
+                draw_flags: 0,
+                _padding: [0; 3],
+            };
+            MAX_DRAWS
+        ];
+        padded_params[..draw_params.len()].copy_from_slice(draw_params);
+        let draw_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs tile draw-params buffer"),
+            size: (MAX_DRAWS * std::mem::size_of::<TileDrawParams>()) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&draw_params_buffer, 0, bytemuck::cast_slice(&padded_params));
+
+        let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs tile frame uniforms bind group"),
+            layout: &self.frame_uniforms_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniforms_buffer.as_entire_binding(),
+            }],
+        });
+        let draw_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs tile draw params bind group"),
+            layout: &self.draw_params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: draw_params_buffer.as_entire_binding(),
+            }],
+        });
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs tile texture bind group"),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("draw.rs tile render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+        pass.set_bind_group(1, &draw_params_bind_group, &[]);
+        pass.set_bind_group(2, &texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+
+    /// Standalone wrapper around `record`, same reasoning and same
+    /// correctness scope as `SimpleLinePipeline::render`.
+    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: TileDrawCall<'_>) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("draw.rs tile render encoder"),
+        });
+        self.record(device, queue, &mut encoder, call);
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after a real tile render");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -699,6 +1045,238 @@ mod tests {
              clear-recorded-not-submitted pattern: a clear pass and a Load-mode line draw, both \
              recorded into one shared CommandEncoder and submitted together exactly once, \
              produced the right pixels in both the clear-only and drawn regions on adapter \
+             {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    fn compute_tile_draw_flags_matches_the_real_source_translation() {
+        const PF_MASKED: u32 = 0x0000_0002;
+        const PF_TRANSLUCENT: u32 = 0x0000_0004;
+        const PF_MODULATED: u32 = 0x0000_0040;
+        const PF_HIGHLIGHTED: u32 = 0x1000_0000;
+        const PF_RENDER_FOG: u32 = 0x4000_0000;
+        const DF_MASKED: u32 = 0x0100;
+        const DF_MODULATED: u32 = 0x0400;
+        const DF_TRANSLUCENT: u32 = 0x0800;
+        const DF_RENDER_FOG: u32 = 0x2000;
+        const DF_ALPHA_BLENDED: u32 = 0x4000;
+
+        assert_eq!(compute_tile_draw_flags(0), 0, "no flags in, no flags out");
+        assert_eq!(compute_tile_draw_flags(PF_MASKED), DF_MASKED);
+        assert_eq!(compute_tile_draw_flags(PF_MODULATED), DF_MODULATED);
+        assert_eq!(compute_tile_draw_flags(PF_TRANSLUCENT), DF_TRANSLUCENT);
+        // PF_Highlighted maps to DF_AlphaBlended, not a same-named bit
+        // -- a real, confirmed (not assumed-symmetric) mapping.
+        assert_eq!(compute_tile_draw_flags(PF_HIGHLIGHTED), DF_ALPHA_BLENDED);
+        // PF_RenderFog alone (without PF_Translucent) must produce
+        // DF_RenderFog -- the condition that clears it,
+        // `(PolyFlags & (PF_RenderFog|PF_Translucent)) != PF_RenderFog`,
+        // is false in exactly this one case (verified by hand truth
+        // table on compute_tile_draw_flags's own doc, not re-derived
+        // here -- an earlier version of this test got this backwards
+        // by misreading the condition's own English-sounding shape).
+        assert_eq!(
+            compute_tile_draw_flags(PF_RENDER_FOG),
+            DF_RENDER_FOG,
+            "PF_RenderFog alone must survive translation into DF_RenderFog, matching the real \
+             source"
+        );
+        // PF_RenderFog together with PF_Translucent clears PF_RenderFog
+        // again (the least obvious case) -- so DF_RenderFog must NOT
+        // be set here, only DF_Translucent.
+        assert_eq!(
+            compute_tile_draw_flags(PF_RENDER_FOG | PF_TRANSLUCENT),
+            DF_TRANSLUCENT,
+            "PF_RenderFog + PF_Translucent together must clear PF_RenderFog before \
+             translation, leaving only DF_Translucent set, matching the real source"
+        );
+    }
+
+    // Needs a real GPU adapter. CI runners have none. Run with
+    // `cargo test -p hp2-wgpu -- --ignored`. Not confounded by this
+    // session's real screen-lock finding (see this module's own
+    // header doc): offscreen render-to-texture-plus-readback needs
+    // no live window surface.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn tile_pipeline_renders_a_real_textured_quad_into_an_offscreen_texture() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        // Identity modelviewproj_mat, same real technique and byte
+        // layout as simple_line_pipeline_renders_a_real_line_into_an_
+        // offscreen_texture above.
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tile render test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+
+        // A real 1x1 solid-red texture via TextureCache::upload_rgba8
+        // (the real crate this pipeline is meant to be fed by, not a
+        // bespoke texture built only for this test) -- a solid color
+        // makes the result independent of UV/V-flip orientation,
+        // which is not what this test exists to check (the real
+        // vertex geometry/NDC placement is).
+        let mut texture_cache = crate::texture::TextureCache::new();
+        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        // One quad (2 triangles, 6 vertices, matching SubmitTileBatch's
+        // own real ES-path layout), covering only NDC x in [-1.0, 0.0]
+        // (the left half of the 64px-wide target) -- a genuinely
+        // partial-width quad is the real negative control here, same
+        // reasoning as the line test above: a bug that filled the
+        // whole target regardless of actual vertex geometry would
+        // make the right half red too, not the clear color.
+        let vertices = [
+            TileVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+            },
+            TileVertex {
+                coords: [0.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 1.0],
+            },
+            TileVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+            },
+            TileVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+            },
+            TileVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+            },
+            TileVertex {
+                coords: [-1.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        // White draw_color (multiplies with the sampled red texel
+        // unchanged) and draw_flags=0 (no masking/alpha-blend discard
+        // -- compute_tile_draw_flags's own tests cover that
+        // translation separately, in isolation).
+        let draw_params = [TileDrawParams {
+            draw_color: [1.0, 1.0, 1.0, 1.0],
+            draw_flags: 0,
+            _padding: [0; 3],
+        }];
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tile render test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        pipeline.render(
+            device,
+            queue,
+            TileDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                texture_view: &cached.view,
+                sampler: &sampler,
+                target: &render_target_view,
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+            },
+        );
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tile render test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("tile render test readback encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected a pixel inside the drawn quad's span to read back red (the real sampled \
+             texel times the real white draw_color), got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected a pixel outside the drawn quad's span to still read back the real clear \
+             color, blue -- got {right_pixel:?} (a non-blue value here would mean the quad's own \
+             vertex geometry was not actually respected)"
+        );
+        println!(
+            "TilePipeline::render confirmed empirically: a real DrawTile-shaped textured quad, \
+             uploaded through a real TextureCache entry and real buffers/bind groups, produced \
+             the right pixels at the right positions in a real offscreen texture on adapter \
              {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
