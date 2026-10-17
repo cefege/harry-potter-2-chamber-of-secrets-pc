@@ -147,7 +147,10 @@
 //!    direct, idiomatic WebGPU replacement is vertex-shader quad
 //!    expansion from `@builtin(vertex_index)`: draw 6 vertices per
 //!    tile instance (one instance per tile, instance-rate attributes
-//!    or a storage-buffer read carrying today's per-tile parameters),
+//!    or a fixed-size uniform array carrying today's per-tile
+//!    parameters -- not a storage buffer, per the DrawID-indexing
+//!    correction elsewhere in this doc: WebGL2/GLES3.0 has zero
+//!    storage buffers available),
 //!    and branch on `vertex_index % 6` in the vertex shader to compute
 //!    which of the quad's six corners this invocation is -- the exact
 //!    same per-corner math already in this geometry shader, just moved
@@ -217,18 +220,25 @@
 //! specifically need one more real change: both call `GetTexel`
 //! (implicit-derivative texture sampling) from inside a loop whose exit
 //! condition depends on a per-fragment height value read from that same
-//! texture, which is non-uniform control flow -- naga/Tint are
-//! expected to reject `textureSample` in that position under WGSL's
-//! uniformity analysis, the same general rule family WGSL/Vulkan-style
-//! shader languages apply here, but this is a documented expectation
-//! only, not something actually attempted and observed to fail in
-//! this crate -- no WGSL translation of either parallax loop has been
-//! written yet to test it against. If true, the port needs
+//! texture, which is non-uniform control flow -- WGSL's spec restricts
+//! implicit-derivative texture sampling (`textureSample`) to uniform
+//! control flow in exactly this situation, so the port should use
 //! `textureSampleGrad` with derivatives (`dpdx`/`dpdy` of the base UV)
 //! computed once before entering the loop, or `textureSampleLevel`,
-//! either of which changes
-//! mipmap filtering behavior slightly versus the GLSL original -- a
-//! real, not cosmetic, porting change for those two techniques
+//! instead. This crate's own `naga_accepts_texture_sample_in_non_
+//! uniform_control_flow` test settles, empirically, a real surprise
+//! here: naga's validator does *not* reject the minimal repro of this
+//! exact shape -- it does not implement (or does not apply) WGSL's
+//! full uniformity-analysis restriction. `every_wgsl_shader_parses_
+//! and_validates`'s naga-based CI check therefore cannot be relied on
+//! to catch a parallax loop ported with plain `textureSample` left in
+//! by mistake; a real backend might still reject it or silently
+//! produce wrong derivatives, but naga accepting it is not evidence of
+//! correctness either way. The `textureSampleGrad`/`textureSampleLevel`
+//! requirement above still stands on the WGSL spec's own written text,
+//! independent of naga's enforcement gap -- it changes mipmap
+//! filtering behavior slightly versus the GLSL original, a real, not
+//! cosmetic, porting change for those two techniques
 //! specifically, not the basic parallax technique (no loop) or any
 //! other `#if`-gated branch in this file. None of them have been
 //! transcribed yet. The file also has a second genuinely-dead `#if 0`
@@ -1129,6 +1139,68 @@ mod tests {
         );
     }
 
+    // Settles, empirically, what the DrawComplex_GLSL.cpp scoping
+    // paragraph above said about `textureSample` inside non-uniform
+    // control flow (a loop whose exit depends on a per-fragment
+    // texture-read value) -- rather than leaving it an unverified
+    // expectation, or (worse) restating it as a "fact" without ever
+    // actually trying it, which is what happened before this was
+    // caught on review. Real, surprising result: naga's validator
+    // accepts this. It does not implement (or does not apply here)
+    // WGSL's full uniformity-analysis restriction on implicit-
+    // derivative texture sampling the way the spec describes it --
+    // confirmed by running this exact repro, not assumed from how
+    // strict WGSL/Tint's rules are described in general. This means
+    // `every_wgsl_shader_parses_and_validates`'s naga-based CI check
+    // cannot be relied on to catch a parallax loop ported with plain
+    // `textureSample` left in -- a real backend (Metal/Tint, or
+    // whatever a web build's WebGPU implementation uses) may still
+    // reject it, or worse, silently produce wrong derivatives, but
+    // naga validation passing is not evidence either way. The
+    // `textureSampleGrad`/`textureSampleLevel` porting note in that
+    // scoping paragraph still stands on its own correctness grounds
+    // (matching the WGSL spec's own written restriction), just not on
+    // "naga will catch it if we get it wrong". Not real shader code
+    // from this crate -- a minimal, self-contained repro of the exact
+    // shape the parallax loops have, small enough to keep inline
+    // rather than as a separate `.wgsl` fixture file.
+    #[test]
+    fn naga_accepts_texture_sample_in_non_uniform_control_flow() {
+        let source = r#"
+@group(0) @binding(0) var t: texture_2d<f32>;
+@group(0) @binding(1) var s: sampler;
+
+@fragment
+fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    var c = vec4<f32>(0.0);
+    var h = 1.0;
+    loop {
+        if h <= 0.0 {
+            break;
+        }
+        c = textureSample(t, s, uv);
+        h -= c.r;
+    }
+    return c;
+}
+"#;
+        let module = naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|e| panic!("repro shader failed to parse: {e}"));
+        let mut validator = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::default(),
+            naga::valid::Capabilities::empty(),
+        );
+        let result = validator.validate(&module);
+        assert!(
+            result.is_ok(),
+            "expected naga to accept textureSample inside non-uniform control flow (this test \
+             exists to document and pin that real, surprising behavior -- if naga now rejects \
+             it, a naga upgrade changed this and every_wgsl_shader_parses_and_validates can \
+             newly be relied on to catch it; update the doc paragraph this test references, \
+             don't just loosen this assertion): {result:?}"
+        );
+    }
+
     // `every_wgsl_shader_parses_and_validates`'s naga Capabilities::empty()
     // check validated `simple.wgsl` even while it still used
     // `var<storage, read>` for its draw-parameters array -- naga
@@ -1170,6 +1242,21 @@ mod tests {
                      strictly more than a real WebGL2 backend would): {e}"
                 )
             });
+        // Proves the constraint is actually in force on this device,
+        // not merely requested -- wgpu's own docs describe
+        // required_limits as a *minimum* the device must support, not
+        // a hard ceiling every backend enforces downward, so without
+        // this check a backend that silently granted more than asked
+        // could make the rest of this test pass for the wrong reason
+        // (plenty of real storage buffers available) rather than the
+        // one it claims to prove (the shader has none to begin with).
+        assert_eq!(
+            device.limits().max_storage_buffers_per_shader_stage,
+            0,
+            "expected the device to actually report zero storage buffers under \
+             downlevel_webgl2_defaults -- if this fails, the device granted more than \
+             requested and the rest of this test no longer proves what its name claims"
+        );
         let validation_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let internal_scope = device.push_error_scope(wgpu::ErrorFilter::Internal);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
