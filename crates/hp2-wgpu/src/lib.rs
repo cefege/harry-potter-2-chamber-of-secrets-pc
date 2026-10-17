@@ -174,8 +174,25 @@
 //! class, just an `#if`/runtime-flag branch within the same shader
 //! source) are real alternatives already exercised in production
 //! (disabled on AMD GPUs today) and are the right transcription
-//! source regardless of which shader. Still unexamined:
-//! `DrawComplex_GLSL.cpp`/`DrawSimple_GLSL.cpp`'s own full bodies,
+//! source regardless of which shader.
+//!
+//! `DrawSimple_GLSL.cpp` has been read in full and ported:
+//! `shaders/simple.wgsl`. `DrawComplex_GLSL.cpp` (BSP surface
+//! rendering, 732 lines, by far the largest of the five) has been read
+//! in full too, with one load-bearing finding: it has no geometry
+//! shader at all, and its bump-map tangent space (`vTBNMat`) is
+//! computed directly in the vertex shader from the surface's own
+//! known `XAxis`/`YAxis`/`ZAxis` UV mapping axes -- not derived from
+//! adjacent-triangle geometry the way a typical mesh normal/tangent
+//! would be -- so it needs no geometry-shader replacement design at
+//! all, unlike `DrawGouraud`. Its real complexity is breadth, not
+//! architecture: lightmaps, fogmaps, detail/macro textures,
+//! environment maps, height maps, and three alternate parallax-mapping
+//! techniques (basic/occlusion/relief, each `#if`-gated and the latter
+//! two using real texture-sampling loops) are all optional branches of
+//! one vertex+fragment shader pair, each individually portable with
+//! the same non-bindless-fallback strategy as every other shader here;
+//! none of them have been transcribed yet. Still unexamined:
 //! `SetTexture.cpp`'s texture cache/upload path, and the C++-side
 //! draw-call batching (`DrawComplex.cpp`/`DrawGouraud.cpp`/
 //! `DrawTile.cpp`) that would need a parallel Rust rewrite to actually
