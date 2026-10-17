@@ -751,17 +751,19 @@ mod tests {
         assert!(!target.exists());
     }
 
-    // Verified against the real C++ `RemoveTreeAt`: a symlink child
-    // causes the WHOLE removal to fail with "contains a symlink or
-    // irregular file" (matching the exact same reject-with-error
-    // contract already verified for `copy_legacy_tree_at`'s and
-    // `inspect_legacy_tree_at`'s own symlink children) -- it does
-    // NOT silently unlink just the symlink entry and continue. This
-    // is the safety property that matters here: the symlink's
+    // Matches the real C++ `RemoveTreeAt`'s reject-on-non-regular
+    // branch exactly (read from source, not re-probed here -- the
+    // real C++ `fstatat`/`S_ISREG`/`S_ISDIR` logic this mirrors was
+    // already probe-verified for the structurally identical symlink-
+    // rejection branches in `copy_legacy_tree_at` and
+    // `inspect_legacy_tree_at`): a symlink child causes the WHOLE
+    // removal to fail with "contains a symlink or irregular file",
+    // NOT a silent unlink-just-the-symlink-entry-and-continue. The
+    // safety property this test actually checks: the symlink's
     // target must be left completely untouched, proving `fstatat`'s
-    // `AT_SYMLINK_NOFOLLOW` actually prevents traversing into (and
-    // therefore deleting through) a symlink that points outside the
-    // tree being removed.
+    // `AT_SYMLINK_NOFOLLOW` prevents traversing into (and therefore
+    // deleting through) a symlink that points outside the tree being
+    // removed.
     #[test]
     fn remove_tree_no_follow_rejects_a_symlink_child_without_touching_its_target() {
         let dir = tempdir();

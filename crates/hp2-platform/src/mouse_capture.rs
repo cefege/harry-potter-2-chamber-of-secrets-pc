@@ -7,28 +7,42 @@
 //! reworded.
 
 /// Replaces `HP2Capture::EAction`: what the caller must do to the
-/// grab state.
+/// grab state. `enum EAction { Action_None, Action_Release,
+/// Action_Restore };` assigns no explicit values in the real C++,
+/// so its ordinals are the default 0/1/2 -- matching Rust's own
+/// default enum numbering already, but pinned explicitly here (not
+/// relying on declaration order staying untouched) since this value
+/// is meant to cross an eventual FFI boundary as a raw `i32`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
 pub enum Action {
     /// No grab-state change.
-    None,
+    None = 0,
     /// `UpdateMouseGrabState(FALSE); LostGrab = 1`.
-    Release,
+    Release = 1,
     /// `UpdateMouseGrabState(CaptureMouse config); LostGrab = 0`.
-    Restore,
+    Restore = 2,
 }
 
 /// Replaces `HP2Capture::ECursor`: expected cursor-visibility effect
 /// of the transition. Informational -- the real call site gates
-/// Show/Hide on its own `ActiveCursor != NULL` check.
+/// Show/Hide on its own `ActiveCursor != NULL` check. Unlike
+/// `EAction`, the real C++ `enum ECursor { Cursor_Hide = -1,
+/// Cursor_Leave = 0, Cursor_Show = 1 };` assigns explicit,
+/// non-default values -- Rust's own default enum numbering
+/// (`Hide=0, Leave=1, Show=2`) would NOT match, and an eventual
+/// `cursor as i32` at an FFI cutover would hand the real C++ caller
+/// the wrong action (`Hide` crossing as `0`, the real `Leave`
+/// value) without these pinned explicitly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(i32)]
 pub enum Cursor {
     /// Transition expects the cursor to become hidden.
-    Hide,
+    Hide = -1,
     /// No cursor-visibility change expected.
-    Leave,
+    Leave = 0,
     /// Transition expects the cursor to become visible.
-    Show,
+    Show = 1,
 }
 
 /// Replaces `HP2Capture::FState`.
@@ -98,6 +112,22 @@ pub fn on_restore(state: &State, window: &WindowFlags) -> Decision {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Matches `HP2MouseCapturePolicy.h:45-59`'s explicit C++
+    // discriminants exactly: `EAction` assigns none (so its real
+    // ordinals are the default 0/1/2), `ECursor` assigns
+    // `Hide=-1, Leave=0, Show=1`. This guards the `#[repr(i32)]`
+    // values above against silent drift (e.g. a reordered variant)
+    // at whatever point these cross an FFI boundary as a raw `i32`.
+    #[test]
+    fn action_and_cursor_discriminants_match_the_real_cpp_enums() {
+        assert_eq!(Action::None as i32, 0);
+        assert_eq!(Action::Release as i32, 1);
+        assert_eq!(Action::Restore as i32, 2);
+        assert_eq!(Cursor::Hide as i32, -1);
+        assert_eq!(Cursor::Leave as i32, 0);
+        assert_eq!(Cursor::Show as i32, 1);
+    }
 
     // Literal transcription of the real, unmodified C++ oracle test
     // tables (`Tests/InputContractTests.cpp:501-568`,
