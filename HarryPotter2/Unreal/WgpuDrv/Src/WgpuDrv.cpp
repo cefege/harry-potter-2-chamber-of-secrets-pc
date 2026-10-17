@@ -36,6 +36,23 @@ FString Utf8SpanToFString( const BYTE* Text, SIZE_T Len )
 void UWgpuRenderDevice::StaticConstructor()
 {
 	guard(UWgpuRenderDevice::StaticConstructor);
+	// Matches the plan's `[WgpuDrv.WgpuRenderDevice] Backend=
+	// Auto|Metal|Vulkan|Dx12|Gl` ini key. Member order matters: it is
+	// the real C++/Rust FFI contract (see hp2_wgpu::BackendChoice::
+	// from_ffi_discriminant's own doc) -- UE1's UByteProperty stores
+	// an enum-backed config property as the member's plain index, so
+	// Backend (the BYTE field below) is 0 for Auto, 1 for Metal, and
+	// so on, read directly by hp2_rs_wgpu_create with no separate
+	// string-to-enum mapping on either side. Same real pattern as
+	// XOpenGL.cpp's own UEnum-backed config properties (e.g. its
+	// VSyncs enum for UseVSync), not an invented convention.
+	UEnum* Backends = new(GetClass(), TEXT("Backends"))UEnum(NULL);
+	new(Backends->Names)FName(TEXT("Auto"));
+	new(Backends->Names)FName(TEXT("Metal"));
+	new(Backends->Names)FName(TEXT("Vulkan"));
+	new(Backends->Names)FName(TEXT("Dx12"));
+	new(Backends->Names)FName(TEXT("Gl"));
+	new(GetClass(), TEXT("Backend"), RF_Public)UByteProperty(CPP_PROPERTY(Backend), TEXT("Options"), CPF_Config, Backends);
 	unguard;
 }
 
@@ -101,7 +118,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	void* NsView = NULL;
 #endif
 
-	FfiWgpuCreateResult Result = hp2_rs_wgpu_create( NsView );
+	FfiWgpuCreateResult Result = hp2_rs_wgpu_create( NsView, Backend );
 	if( !Result.handle )
 	{
 #if MACOSX
@@ -111,7 +128,15 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 			MetalView = NULL;
 		}
 #endif
-		appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried Auto)") );
+		// Matches StaticConstructor's Backends UEnum member order
+		// (0=Auto..4=Gl) so the error names the real backend that was
+		// actually tried, not a hardcoded "Auto" that would have been
+		// wrong as soon as this ini key became real (an earlier
+		// version of this message always said "Auto" unconditionally,
+		// from before the Backend config property existed).
+		static const TCHAR* BackendNames[] = { TEXT("Auto"), TEXT("Metal"), TEXT("Vulkan"), TEXT("Dx12"), TEXT("Gl") };
+		const TCHAR* TriedBackend = ( Backend < ARRAY_COUNT(BackendNames) ) ? BackendNames[Backend] : TEXT("Unknown");
+		appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls)"), TriedBackend );
 	}
 
 	RustDevice = Result.handle;

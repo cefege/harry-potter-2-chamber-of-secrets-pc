@@ -144,7 +144,7 @@ int main()
 	// see hp2-wgpu's own create_device_sync doc), so a non-null
 	// handle here already proves the surface is genuinely usable with
 	// the adapter, not just that a Result was constructed.
-	FfiWgpuCreateResult Result = hp2_rs_wgpu_create( NsView );
+	FfiWgpuCreateResult Result = hp2_rs_wgpu_create( NsView, 0 ); // 0 = Auto, matching the production default
 	Require( Result.handle != NULL, "hp2_rs_wgpu_create failed to create a real wgpu device from a real SDL_Metal_CreateView NSView" );
 	Require( Result.adapter_name_len > 0, "hp2_rs_wgpu_create returned an empty adapter name" );
 

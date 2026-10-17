@@ -2734,6 +2734,16 @@ const FFI_WGPU_CREATE_FAILURE: FfiWgpuCreateResult = FfiWgpuCreateResult {
 /// device's `Init` logs its own adapter info today (see `XOpenGL.cpp`'s
 /// `debugf(NAME_Init, ...)` calls).
 ///
+/// `backend` is the plan's `[WgpuDrv.WgpuRenderDevice] Backend=
+/// Auto|Metal|Vulkan|Dx12|Gl` ini key's real `BYTE` config-property
+/// value (`WgpuDrv.cpp`'s `UEnum`-backed `Backend` field), converted
+/// via `hp2_wgpu::BackendChoice::from_ffi_discriminant` -- see that
+/// function's own doc for the exact member-order contract with the C++
+/// side. An out-of-range value (hand-edited ini, or a stale ini from a
+/// future version with more members) falls back to `Auto`, logged here
+/// (not silently) so the real invalid value is visible, not just that
+/// a fallback happened.
+///
 /// # Safety
 /// `ns_view`, if non-null, must be a valid pointer to an `NSView`
 /// (from `SDL_Metal_CreateView`) that outlives the returned `handle`
@@ -2745,17 +2755,28 @@ const FFI_WGPU_CREATE_FAILURE: FfiWgpuCreateResult = FfiWgpuCreateResult {
 /// by C++ (opaque).
 #[cfg(feature = "renderer-wgpu")]
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hp2_rs_wgpu_create(ns_view: *mut c_void) -> FfiWgpuCreateResult {
+pub unsafe extern "C" fn hp2_rs_wgpu_create(
+    ns_view: *mut c_void,
+    backend: u32,
+) -> FfiWgpuCreateResult {
     guard("hp2_rs_wgpu_create", FFI_WGPU_CREATE_FAILURE, move || {
+        let backend_choice = hp2_wgpu::BackendChoice::from_ffi_discriminant(backend)
+            .unwrap_or_else(|| {
+                log::warn!(
+                    "hp2_rs_wgpu_create: invalid Backend config value {backend} (expected \
+                     0..=4), falling back to Auto"
+                );
+                hp2_wgpu::BackendChoice::Auto
+            });
         #[cfg(target_os = "macos")]
         let created = if ns_view.is_null() {
             let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
-            hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+            hp2_wgpu::create_device_sync(backend_choice, no_surface)
         } else {
             let create_surface = move |instance: &wgpu::Instance| unsafe {
                 hp2_wgpu::macos::create_surface_from_ns_view(instance, ns_view)
             };
-            hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, Some(create_surface))
+            hp2_wgpu::create_device_sync(backend_choice, Some(create_surface))
         };
         #[cfg(not(target_os = "macos"))]
         let created = {
@@ -2780,7 +2801,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_create(ns_view: *mut c_void) -> FfiWgpuCrea
                 None
             } else {
                 let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
-                hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+                hp2_wgpu::create_device_sync(backend_choice, no_surface)
             }
         };
         let Some(created) = created else {

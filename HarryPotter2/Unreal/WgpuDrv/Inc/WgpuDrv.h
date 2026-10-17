@@ -72,6 +72,17 @@ class UWgpuRenderDevice : public URenderDevice
 	// why: the Surface borrows the view's CAMetalLayer).
 	void* MetalView;
 
+	// `[WgpuDrv.WgpuRenderDevice] Backend=Auto|Metal|Vulkan|Dx12|Gl` --
+	// config property, UEnum-backed (StaticConstructor registers the
+	// enum). Plain member index: 0=Auto, 1=Metal, 2=Vulkan, 3=Dx12,
+	// 4=Gl, read directly as hp2_rs_wgpu_create's `backend` FFI
+	// parameter (hp2_wgpu::BackendChoice::from_ffi_discriminant's own
+	// doc has the full contract). Defaults to 0 (Auto): UE1 zero-
+	// initializes config BYTE properties with no explicit default,
+	// matching this enum's own member-0 value, so an ini with no
+	// Backend key at all still resolves to Auto correctly.
+	BYTE Backend;
+
 	void StaticConstructor();
 
 	// URenderDevice pure virtuals -- every one of URenderDevice's

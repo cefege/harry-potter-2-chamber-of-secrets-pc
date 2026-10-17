@@ -423,10 +423,14 @@
 //! it directly in WebGPU's 0..1 convention), not a crate-wide fact.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
-/// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
-/// file by this crate -- the ini key's C++ side doesn't exist yet
-/// either; this enum is the Rust-side vocabulary that key will
-/// eventually map onto).
+/// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key -- `from_ffi_discriminant`
+/// is this enum's C++ side: `WgpuDrv.cpp`'s `StaticConstructor`
+/// registers a `UEnum` with members in exactly this order (`Auto`,
+/// `Metal`, `Vulkan`, `Dx12`, `Gl`), and UE1's `UByteProperty` stores an
+/// enum-backed config property as the member's plain index -- `Backend`
+/// (the C++ `BYTE` field) is 0 for `Auto`, 1 for `Metal`, and so on by
+/// construction, not a value this crate invents a mapping for
+/// independently of what the UE1 side actually does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendChoice {
     Auto,
@@ -444,6 +448,24 @@ impl BackendChoice {
             BackendChoice::Vulkan => wgpu::Backends::VULKAN,
             BackendChoice::Dx12 => wgpu::Backends::DX12,
             BackendChoice::Gl => wgpu::Backends::GL,
+        }
+    }
+
+    /// `WgpuDrv.cpp`'s real `UEnum` member order (see this type's own
+    /// doc). Values outside 0..=4 (a config file hand-edited to an
+    /// invalid value, or a stale ini from a future version with more
+    /// members) fall back to `Auto` rather than panicking across FFI --
+    /// logged by the caller (`hp2_rs_wgpu_create`), not silently here,
+    /// so the real invalid value reaches the log, not just "it fell
+    /// back to Auto".
+    pub fn from_ffi_discriminant(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(BackendChoice::Auto),
+            1 => Some(BackendChoice::Metal),
+            2 => Some(BackendChoice::Vulkan),
+            3 => Some(BackendChoice::Dx12),
+            4 => Some(BackendChoice::Gl),
+            _ => None,
         }
     }
 }
