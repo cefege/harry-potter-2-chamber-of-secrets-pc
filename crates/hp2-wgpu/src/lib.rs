@@ -1918,4 +1918,243 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             backend_name(created.backend)
         );
     }
+
+    // Proves the UV-flip fix empirically, not just reasoned from the
+    // WebGPU spec (the other postprocess.wgsl test only proves the
+    // pipeline compiles, not that it samples the right texel). Uploads
+    // a real 2x2 source texture, red on top row (y=0 in upload order,
+    // which is WebGPU's top-left texel per the spec facts documented in
+    // postprocess.wgsl's own header), blue on bottom row; renders
+    // through the real postprocess pipeline into a 2x2 render target
+    // with gamma=1/y_scale=1 (so GammaCorrect and the YScale multiply
+    // are both no-ops, isolating the UV computation as the only thing
+    // under test); reads the render target back and asserts its own
+    // top row is red -- if the UV flip were wrong (the literal GLSL
+    // formula), the top row would read back blue instead. Also doubles
+    // as this crate's first real render-to-texture + readback path,
+    // the same mechanism frame capture and editor hit-testing will
+    // need later.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn postprocess_wgsl_samples_the_top_row_at_ndc_y_plus_one() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        // 2x2 RGBA8 source texture: row 0 (first in upload order, i.e.
+        // WebGPU's top texel row) is red, row 1 is blue.
+        let source_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("uv flip test source"),
+            size: wgpu::Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        #[rustfmt::skip]
+        let source_pixels: [u8; 16] = [
+            255, 0, 0, 255,   255, 0, 0, 255, // row 0: red, red
+            0, 0, 255, 255,   0, 0, 255, 255, // row 1: blue, blue
+        ];
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &source_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &source_pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(8),
+                rows_per_image: Some(2),
+            },
+            wgpu::Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+        );
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let source_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        // frame: FrameUniforms -- only gamma (byte offset 512) and
+        // y_scale (byte offset 524) matter to postprocess.wgsl; both
+        // set to 1.0 (a no-op gamma correct, no vertical flip from
+        // YScale) so the UV computation is the only thing under test.
+        // 8 mat4x4<f32> (64 bytes each) + 4 f32 = 528 bytes total,
+        // matching common.wgsl's real FrameUniforms layout.
+        let mut frame_bytes = [0u8; 528];
+        frame_bytes[512..516].copy_from_slice(&1.0f32.to_le_bytes()); // gamma
+        frame_bytes[524..528].copy_from_slice(&1.0f32.to_le_bytes()); // y_scale
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uv flip test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("postprocess.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(shader_source("postprocess").into()),
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("uv flip test pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..wgpu::PrimitiveState::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("uv flip test frame bind group"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_buffer.as_entire_binding(),
+            }],
+        });
+        let source_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("uv flip test source bind group"),
+            layout: &pipeline.get_bind_group_layout(1),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&source_sampler),
+                },
+            ],
+        });
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("uv flip test render target"),
+            size: wgpu::Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("uv flip test render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &render_target_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &frame_bind_group, &[]);
+            pass.set_bind_group(1, &source_bind_group, &[]);
+            pass.draw(0..4, 0..1);
+        }
+
+        // Readback buffer: copy_texture_to_buffer requires bytes_per_row
+        // to be a multiple of 256 (unlike write_texture), so this pads
+        // each 8-byte real row out to 256 bytes.
+        let padded_bytes_per_row = 256u32;
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("uv flip test readback buffer"),
+            size: (padded_bytes_per_row as u64) * 2,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(2),
+                },
+            },
+            wgpu::Extent3d {
+                width: 2,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+        let top_row_red_pixel = &mapped[0..4];
+        assert_eq!(
+            top_row_red_pixel,
+            &[255u8, 0, 0, 255],
+            "expected the render target's top row to read back red (sampling the source \
+             texture's top row at NDC y=+1) -- if this reads blue instead, the UV flip fix \
+             regressed back to the literal GLSL formula; got {top_row_red_pixel:?}"
+        );
+        println!(
+            "postprocess.wgsl's UV flip confirmed empirically: top row of the render target \
+             sampled red (top row of the source texture), not blue, on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
 }
