@@ -1063,14 +1063,15 @@ impl RenderLoop {
     /// segments`'s own doc has the full real bug this fixes), not
     /// drawn with whichever segment happens to be bound when
     /// `unlock_frame` later flushes the queue. `unlock_frame`'s own
-    /// flush groups queued lines by segment and caps each segment's
-    /// own group at `simple.wgsl`'s real `MAX_DRAWS` capacity --
-    /// not checked here, since how many *other* lines will end up
-    /// sharing this call's own segment is not yet known at queue
-    /// time; a real, known, explicitly-scoped limitation (no flush-
-    /// and-rotate ring-buffer behavior yet, the real GLSL batcher's
-    /// own `ParametersBuffer`/`VertBuffer` rotation, not ported),
-    /// not silently pretended away.
+    /// flush groups queued lines by segment and chunks each segment's
+    /// own group into one `record()` call per `simple.wgsl`'s real
+    /// `MAX_DRAWS` capacity worth of lines (matching the real GLSL
+    /// batcher's own `Flush(true)`-when-full behavior, `DrawSimple.
+    /// cpp:68-69` -- not checked here, since how many *other* lines
+    /// will end up sharing this call's own segment is not yet known
+    /// at queue time; no line is ever lost, unlike an earlier version
+    /// of this doc and the flush logic it described, caught on
+    /// review).
     pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], fx2: f32, fy2: f32, color: [f32; 4]) {
         if self.in_progress.is_none() {
             return;
@@ -1725,14 +1726,41 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
             .expect("line_pipeline was just set to Some above");
         for (segment, buffer) in loop_state.frame_uniforms_segments.iter().enumerate() {
             let mut vertices = Vec::new();
-            let mut draw_params = Vec::new();
+            let mut draw_params: Vec<draw::DrawParams> = Vec::new();
             for line in loop_state
                 .queued_lines
                 .iter()
                 .filter(|line| line.segment == segment)
             {
+                // Real GLSL batcher's own Flush(true)-when-full
+                // behavior (`DrawSimple.cpp:68-69`: `if (Shader->
+                // DrawBuffer.IsFull()...) Shader->Flush(true);`),
+                // not dropping the excess -- an earlier version of
+                // this loop broke out of the inner loop once
+                // `draw_params.len() >= MAX_DRAWS`, silently losing
+                // every later line in the same segment (caught on
+                // review: real editor wireframe/grid views can queue
+                // more than 256 lines in one segment). Records the
+                // full chunk into the same shared, still-unsubmitted
+                // `frame.encoder` (Load mode throughout -- every
+                // chunk only adds to what is already there, never
+                // re-clears) and starts a fresh chunk, rather than
+                // losing anything.
                 if draw_params.len() >= draw::MAX_DRAWS {
-                    break;
+                    pipeline.record(
+                        &created.device,
+                        &created.queue,
+                        &mut frame.encoder,
+                        draw::LineDrawCall {
+                            frame_uniforms_buffer: buffer,
+                            vertices: &vertices,
+                            draw_params: &draw_params,
+                            target: &frame.view,
+                            load: wgpu::LoadOp::Load,
+                        },
+                    );
+                    vertices.clear();
+                    draw_params.clear();
                 }
                 let draw_id = draw_params.len() as u32;
                 vertices.push(draw::LineVertex {
@@ -2648,6 +2676,157 @@ mod tests {
             "RenderLoop confirmed empirically to draw each queued line with its own real \
              segment's matrices, not whichever SetSceneNode call happened to run last, on \
              adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    // The real regression test the MAX_DRAWS chunking fix exists for:
+    // queues draw::MAX_DRAWS (256) "filler" lines, all landing on the
+    // left half of the target, forcing unlock_frame's own flush to
+    // chunk -- then one more line (the 257th, the real first line of
+    // the second chunk) at a distinct, non-overlapping position.
+    // Proves the 257th line actually renders (an earlier version of
+    // this crate's own flush logic silently dropped every line past
+    // MAX_DRAWS in a given segment -- caught on review, fixed, this
+    // is the real regression test for that fix, not present before).
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_chunks_more_than_max_draws_lines_instead_of_dropping_them() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("max-draws chunking test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        begin_offscreen_frame(
+            &created,
+            &mut loop_state,
+            &render_target,
+            wgpu::Color::BLACK,
+        );
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+        // draw::MAX_DRAWS (256, private to the draw module) filler
+        // lines, all P1=(0,50,1)-P2=(50,50,1) (left half, NDC x in
+        // [-1.0, 0.0], same real derivation as the other RenderLoop
+        // tests above) -- forces exactly one chunk flush inside
+        // unlock_frame.
+        for _ in 0..256 {
+            loop_state.queue_line(
+                [0.0, 50.0, 1.0],
+                [50.0, 50.0, 1.0],
+                50.0,
+                50.0,
+                [0.0, 0.0, 1.0, 1.0],
+            );
+        }
+        // The 257th line: P1=(50,50,1)-P2=(100,50,1) -> NDC x in
+        // [0.0, 1.0] (right half, hand-verified independently before
+        // relying on it, not assumed from the left-half case alone),
+        // a genuinely different, non-overlapping position from every
+        // filler line above.
+        loop_state.queue_line(
+            [50.0, 50.0, 1.0],
+            [100.0, 50.0, 1.0],
+            50.0,
+            50.0,
+            [0.0, 1.0, 0.0, 1.0],
+        );
+        unlock_frame(&created, &mut loop_state, false);
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("max-draws chunking test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("max-draws chunking test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let filler_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            filler_pixel,
+            &[0u8, 0, 255, 255],
+            "expected a filler-line pixel (left half) to read back blue, got {filler_pixel:?}"
+        );
+        let chunked_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            chunked_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the 257th line (the real first line of the second chunk) to actually \
+             render green, got {chunked_pixel:?} -- a black (clear-color) result here would \
+             mean lines past MAX_DRAWS are still being silently dropped"
+        );
+        println!(
+            "RenderLoop confirmed empirically to chunk more than MAX_DRAWS queued lines into \
+             multiple record() calls instead of dropping the excess, on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );
