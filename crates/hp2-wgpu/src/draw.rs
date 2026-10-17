@@ -459,19 +459,33 @@ pub struct TileDrawCall<'a> {
 /// sampler), same reasoning as `SimpleLinePipeline`.
 ///
 /// Known, explicitly scoped limitation, not silently pretended away:
-/// a single fixed blend state (standard non-premultiplied `SrcAlpha`/
-/// `OneMinusSrcAlpha` over both color and alpha), not the real
+/// a single fixed `blend: None` (opaque-replace) state, not the real
 /// `SetBlend`'s own seven `PolyFlags`-driven combinations (this
-/// crate's own module doc already has the full read of those). This
-/// is *not* the same gap as `apply_poly_flags`'s masked/alpha-blended
-/// `discard` logic (`common.wgsl`, already fully real and applied via
-/// `compute_tile_draw_flags`'s own output) -- that is real, per-draw,
-/// shader-side behavior requiring no pipeline variant at all; this
-/// fixed blend state only affects how a surviving (non-discarded)
-/// fragment's color actually composites against what is already in
-/// the target, which `SetBlend`'s real GL blend-function selection
-/// does differently per `PolyFlags` combination. A real, known gap
-/// until the still-unbuilt blend-state pipeline cache lands.
+/// crate's own module doc already has the full read of those).
+/// `None`, not a fixed alpha-blend state -- an earlier version of
+/// this pipeline used `BlendState::ALPHA_BLENDING` unconditionally,
+/// which is wrong for the common case, not just imprecise (caught on
+/// review): real `SetBlend` only enables blending for `PF_Translucent`/
+/// `PF_Modulated`/`PF_Highlighted` tiles -- an ordinary opaque tile
+/// (the overwhelming majority of real `DrawTile` calls, e.g. most HUD
+/// elements) gets no blending in the real source at all, and
+/// `DrawTile.cpp`'s own real `Color.W` default is `1.0f` only when
+/// `Info.Texture->Alpha <= 0.f` -- otherwise it is read straight from
+/// the real texture's `Alpha` field, with no guarantee it is `1.0`
+/// (`DrawSimple.cpp:64`'s own comment on `Draw2DLine`'s unrelated but
+/// analogous `Color.W` field: "Unfortunately this is usually set to
+/// 0"). Under a fixed alpha-blend pipeline, an ordinary opaque tile
+/// whose real `Color.W` is not `1.0` would blend `texel.a * Color.W`
+/// against the background instead of replacing it outright -- a real,
+/// visible transparency bug for ordinary, non-translucent tiles, not
+/// just a missing effect on the translucent ones. `blend: None` is
+/// correct for every tile that does not carry `PF_Translucent`/
+/// `PF_Modulated`/`PF_Highlighted`; those three remain visibly wrong
+/// (rendered fully opaque) until the real blend-state pipeline cache
+/// lands -- a real, known, explicitly scoped gap, not silently
+/// pretended away, and the right trade for right now: wrong-but-
+/// opaque on the minority (translucent effects) rather than wrong-
+/// and-invisible on the majority (ordinary tiles).
 pub struct TilePipeline {
     pipeline: wgpu::RenderPipeline,
     frame_uniforms_layout: wgpu::BindGroupLayout,
@@ -524,7 +538,7 @@ impl TilePipeline {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: color_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -1277,6 +1291,184 @@ mod tests {
             "TilePipeline::render confirmed empirically: a real DrawTile-shaped textured quad, \
              uploaded through a real TextureCache entry and real buffers/bind groups, produced \
              the right pixels at the right positions in a real offscreen texture on adapter \
+             {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    // The real test the blend-state review finding asked for: proves
+    // blend: None (not the earlier, wrong ALPHA_BLENDING default)
+    // actually matters for the common case. draw_color.W = 0.0 here
+    // -- a real, reachable value (DrawTile.cpp's own real Color.W
+    // comes from Info.Texture->Alpha when that is > 0.f, with no
+    // guarantee it is ever 1.0, this struct's own doc has the full
+    // real-source citation) -- must still render fully opaque red,
+    // not blend away to the clear color the way a fixed alpha-blend
+    // pipeline would (texel.a * 0.0 blended over blue stays blue,
+    // never red).
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn tile_pipeline_stays_opaque_with_a_zero_alpha_draw_color() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("zero-alpha tile test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let mut texture_cache = crate::texture::TextureCache::new();
+        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        // Full-width quad this time (simpler: only the blend result
+        // matters here, not vertex geometry, which the other tile
+        // test already covers).
+        let vertices = [
+            TileVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+            },
+            TileVertex {
+                coords: [1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 1.0],
+            },
+            TileVertex {
+                coords: [1.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+            },
+            TileVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+            },
+            TileVertex {
+                coords: [1.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+            },
+            TileVertex {
+                coords: [-1.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        // The one real variable under test: draw_color.W = 0.0.
+        let draw_params = [TileDrawParams {
+            draw_color: [1.0, 1.0, 1.0, 0.0],
+            draw_flags: 0,
+            _padding: [0; 3],
+        }];
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("zero-alpha tile test target"),
+            size: wgpu::Extent3d {
+                width: 4,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        pipeline.render(
+            device,
+            queue,
+            TileDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                texture_view: &cached.view,
+                sampler: &sampler,
+                target: &render_target_view,
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+            },
+        );
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("zero-alpha tile test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("zero-alpha tile test readback encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 4,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        // RGB only, not the full RGBA: write_mask::ALL means the
+        // fragment shader's own output alpha (texel.a * draw_color.W
+        // = 1.0 * 0.0 = 0.0) is still written straight to the
+        // texture's alpha channel -- blend: None disables blending
+        // math, not which channels get written. That stored 0 alpha
+        // is an expected, real consequence of this test's own W=0.0
+        // input, not itself evidence of (or against) the real bug
+        // this test exists to catch, which is specifically about
+        // whether the *color* channels replaced the clear color
+        // outright or blended with it.
+        let pixel_rgb = &mapped[0..3];
+        assert_eq!(
+            pixel_rgb,
+            &[255u8, 0, 0],
+            "expected the tile to render fully opaque red (RGB) despite draw_color.W = 0.0 \
+             (blend: None must replace, not blend, the clear color), got {pixel_rgb:?} -- a \
+             blue-leaning result here would mean the pipeline is still alpha-blending"
+        );
+        println!(
+            "TilePipeline::render confirmed empirically to stay fully opaque with a zero-alpha \
+             draw_color (blend: None, not the earlier wrong ALPHA_BLENDING default) on adapter \
              {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
