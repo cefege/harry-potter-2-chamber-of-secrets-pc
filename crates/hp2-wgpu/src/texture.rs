@@ -211,6 +211,164 @@ pub fn p8_to_rgba8(indices: &[u8], palette: &[FColor; 256], mask_mode: P8MaskMod
         .collect()
 }
 
+/// One real uploaded GPU texture, keyed by the real `CacheID` in a
+/// `TextureCache`. `width`/`height` are the real mip-0 `USize`/
+/// `VSize` -- kept alongside the `wgpu::Texture` itself since wgpu
+/// has no cheap "ask the texture its own size back" accessor as
+/// convenient as just storing what was uploaded.
+pub struct CachedTexture {
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Real `BindMap`'s own role (`SetTexture.cpp`'s `TMap<QWORD,
+/// FCachedTexture> *BindMap`) -- GPU texture objects keyed by the
+/// real `CacheID` (`fix_cache_id`'s own output), looked up before
+/// deciding whether a new upload is needed. Scope today, explicitly:
+/// single mip level only (mip 0 -- the real `FTextureInfo::Mips[]`
+/// chain and its own mipmap generation/upload are not ported yet);
+/// every `upload_rgba8` call allocates a brand new `wgpu::Texture`
+/// and replaces whatever was cached under that `cache_id`, rather
+/// than reusing existing GPU storage in place the way the real
+/// source's own `IsFirstUpload`/`PartialUpload` distinction does
+/// (`UploadTexture`'s own real logic -- `glTexSubImage2D` for an
+/// already-allocated texture, not a fresh `glTexImage2D` every time) --
+/// correct, but reallocates GPU memory on every re-upload of an
+/// already-cached, realtime-changing texture instead of streaming
+/// into the existing allocation. A real, known, explicitly scoped
+/// limitation, not silently pretended away -- not a correctness bug
+/// for any texture that is only ever uploaded once, which is the
+/// overwhelming majority of real textures (only realtime-changed ones,
+/// e.g. dynamic light palettes or render-to-texture surfaces, re-
+/// upload at all).
+pub struct TextureCache {
+    entries: std::collections::HashMap<u64, CachedTexture>,
+}
+
+impl Default for TextureCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TextureCache {
+    pub fn new() -> Self {
+        Self {
+            entries: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Real `BindMap->Find(Info.CacheID)` -- `cache_id` must already
+    /// be the real `fix_cache_id`'s own output, not a raw, untagged
+    /// `FTextureInfo::CacheID`, matching the real source's own
+    /// `FixCacheID(Info, PolyFlags)` call immediately before its own
+    /// `BindMap->Find` (`SetTexture.cpp:88-89`).
+    pub fn get(&self, cache_id: u64) -> Option<&CachedTexture> {
+        self.entries.get(&cache_id)
+    }
+
+    /// Real `UploadTexture`'s `TEXF_RGBA8`/expanded-`TEXF_P8` path,
+    /// scoped to this struct's own doc (single mip, always a fresh
+    /// allocation). `rgba8_bytes` must be exactly `width * height * 4`
+    /// bytes, tightly packed (`FColor`'s own real `R,G,B,A` byte
+    /// order, matching `Rgba8Unorm` directly -- `p8_to_rgba8`'s own
+    /// doc already covers why no swizzle is needed for a P8-sourced
+    /// buffer specifically). `srgb`: `UnpackSRGB`'s own real choice
+    /// between `GL_RGBA8`/`GL_SRGB8_ALPHA8` -- `Rgba8Unorm` vs
+    /// `Rgba8UnormSrgb` here, the direct wgpu equivalents. Inserts
+    /// into (or replaces) this cache under `cache_id` and returns a
+    /// reference to the new entry.
+    ///
+    /// # Panics
+    /// If `rgba8_bytes.len() != width as usize * height as usize * 4`
+    /// -- a caller bug (a real `FTextureInfo`'s own `USize`/`VSize`
+    /// and its mip-0 data length are never inconsistent with each
+    /// other), not a runtime condition to handle gracefully. This
+    /// function is not `extern "C"` itself (no FFI call site calls it
+    /// directly yet -- see this module's own header), so a panic here
+    /// does not yet risk crossing the FFI boundary; whatever future
+    /// FFI wrapper calls this must validate its own inputs before
+    /// calling in, the same discipline `hp2-ffi`'s own `guard` already
+    /// establishes elsewhere in this port.
+    pub fn upload_rgba8(
+        &mut self,
+        created: &crate::CreatedDevice,
+        cache_id: u64,
+        width: u32,
+        height: u32,
+        rgba8_bytes: &[u8],
+        srgb: bool,
+    ) -> &CachedTexture {
+        assert_eq!(
+            rgba8_bytes.len(),
+            width as usize * height as usize * 4,
+            "rgba8_bytes length must be exactly width * height * 4 bytes"
+        );
+        let format = if srgb {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
+        };
+        let texture = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hp2-wgpu cached texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            // COPY_SRC: lets this crate's own
+            // upload_rgba8_round_trips_real_bytes_through_a_real_gpu_
+            // texture test (and any future debug-readback tooling)
+            // copy an uploaded texture's real contents out for
+            // verification -- negligible cost, same reasoning as
+            // RenderLoop::set_scene_node's own frame_uniforms_buffer
+            // already established for the equivalent buffer case.
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        created.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba8_bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.entries.insert(
+            cache_id,
+            CachedTexture {
+                texture,
+                view,
+                width,
+                height,
+            },
+        );
+        self.entries
+            .get(&cache_id)
+            .expect("just inserted this cache_id above")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,5 +633,99 @@ mod tests {
         };
         let bytes: [u8; 4] = unsafe { std::mem::transmute::<FColor, [u8; 4]>(color) };
         assert_eq!(bytes, [0x11, 0x22, 0x33, 0x44]);
+    }
+
+    // Needs a real GPU adapter. CI runners (ci.yml) have none. Run with
+    // `cargo test -p hp2-wgpu -- --ignored`. Don't make it pass when no
+    // adapter is found: that would hide real failures on machines that
+    // do have one.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn upload_rgba8_round_trips_real_bytes_through_a_real_gpu_texture() {
+        let created = crate::create_device_sync(
+            crate::BackendChoice::Auto,
+            None::<crate::HeadlessSurfaceCreator>,
+        )
+        .expect("expected a real device to be created");
+        let mut cache = TextureCache::new();
+        assert!(
+            cache.get(42).is_none(),
+            "no entry should exist before the first upload"
+        );
+        // 2x1 texture: left texel red, right texel green, both full
+        // alpha -- matches FColor's own real R,G,B,A byte order
+        // (fcolor_memory_layout_is_r_g_b_a_matching_rgba8unorm above),
+        // directly as Rgba8Unorm bytes.
+        let bytes: [u8; 8] = [255, 0, 0, 255, 0, 255, 0, 255];
+        let cached = cache.upload_rgba8(&created, 42, 2, 1, &bytes, false);
+        assert_eq!(cached.width, 2);
+        assert_eq!(cached.height, 1);
+
+        // Real proof the bytes actually reached the GPU, not just
+        // that create_texture/write_texture didn't error: copy the
+        // real uploaded texture back out and compare.
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("texture cache readback buffer"),
+            size: 256, // one row's min bytes_per_row alignment
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let cached_texture = cache
+            .get(42)
+            .expect("expected the entry just uploaded above to be found by get")
+            .texture
+            .clone();
+        let mut encoder = created
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &cached_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created.queue.submit(std::iter::once(encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+        assert_eq!(
+            &mapped[0..4],
+            &[255u8, 0, 0, 255],
+            "expected the left texel to read back red"
+        );
+        assert_eq!(
+            &mapped[4..8],
+            &[0u8, 255, 0, 255],
+            "expected the right texel to read back green"
+        );
+        println!(
+            "TextureCache::upload_rgba8 confirmed empirically to round-trip real bytes through a \
+             real GPU texture on adapter {:?} backend {}",
+            created.adapter_name,
+            crate::backend_name(created.backend)
+        );
     }
 }
