@@ -8,8 +8,8 @@
 //! a session-local artifact, not part of this repo, so the decisions
 //! are recorded here instead of just pointed at:
 //!
-//! - **Archive extraction's crate choice** (not yet implemented;
-//!   `HP2ImportArchive.cpp` isn't ported). Plan text: the
+//! - **Archive extraction's crate choice** (implemented; see
+//!   [`archive`]). Plan text: the
 //!   `compress-tools` crate, pinned in Cargo instead of FetchContent.
 //!   Tested empirically: `compress-tools` (0.15.1 and 0.16.1, source
 //!   read directly) has no vendoring or `cc`-based build at all -- on
@@ -60,6 +60,7 @@
 //!   link fails for a reason other than `EXDEV` -- expected, not a
 //!   regression to chase down later.
 
+pub mod archive;
 pub mod classify;
 pub mod collect;
 pub mod files;

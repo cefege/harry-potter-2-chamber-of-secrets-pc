@@ -12,3 +12,13 @@ name = "hp2_import"
 hp2-ffi-support.workspace = true
 hp2-ini.workspace = true
 sha2.workspace = true
+
+[features]
+# Links against the pinned `archive_static` (libarchive, built by CMake's
+# FetchContent) for `extract()`'s real archive-reading FFI calls. Off by
+# default so `cargo build`/`cargo test` work standalone, with no
+# libarchive binary to find -- only CMake's build (which already builds
+# `archive_static` and can tell Corrosion's Cargo invocation where to
+# find it) enables this feature. `member_path`'s path-safety validation
+# has no FFI dependency and is always compiled/tested regardless.
+archive = []
