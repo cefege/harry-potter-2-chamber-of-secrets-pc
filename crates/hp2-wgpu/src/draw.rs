@@ -60,7 +60,7 @@ pub struct DrawParams {
 /// Real `simple.wgsl`'s own provisional capacity (`MAX_DRAWS`, that
 /// shader's own doc comment on why it is not yet the real per-build
 /// value).
-const MAX_DRAWS: usize = 256;
+pub(crate) const MAX_DRAWS: usize = 256;
 
 /// Groups `SimpleLinePipeline::render`'s "what to draw" arguments
 /// (the actual rendering contract is documented on `render` itself,
@@ -587,6 +587,17 @@ mod tests {
         // Step 2, matching a real Draw2DLine call between Lock and
         // Unlock: record the line into the SAME still-unsubmitted
         // encoder, Load mode (not Clear -- must not erase step 1).
+        // Negative control actually run (caught on review): swapped
+        // this `record` call for `pipeline.render(...)` (its own
+        // encoder, submits immediately) with the clear recorded and
+        // submitted *afterwards* -- the real historical bug shape,
+        // not just a missing-draw check. Result: the real printed
+        // failure was `left: [0, 0, 255, 255]` (blue) where `[0, 255,
+        // 0, 255]` (green) was expected -- the late clear wiped the
+        // already-submitted draw out entirely, exactly reproducing
+        // what a same-frame Draw2DLine with its own separate submit
+        // would have done to every real frame. Reverted to the real
+        // `record`-based version below before committing either state.
         pipeline.record(
             device,
             queue,

@@ -817,22 +817,48 @@ pub enum FrameOutcome {
     Panicked = 9,
 }
 
-/// One in-flight frame between `lock_frame` and `unlock_frame`:
-/// `surface.get_current_texture()`'s own `SurfaceTexture`, the
+/// What `lock_frame`/`begin_offscreen_frame` actually acquired:
+/// either a real `wgpu::SurfaceTexture` (the only variant any real
+/// production `WgpuDrv.cpp` call site ever produces), or a plain
+/// `()` marker for an offscreen target with nothing to present.
+/// Split out specifically so this crate's own tests can exercise the
+/// real `lock_frame`/`unlock_frame` encoder-and-draw-queue machinery
+/// end to end against an offscreen texture, not a hand-rolled replica
+/// of it (caught on review: wgpu surfaces are always backed by a real
+/// OS window -- there is no "offscreen surface" -- so without this
+/// split, the real bug class this whole refactor exists to catch
+/// could only ever be tested by manually reproducing lock_frame's own
+/// logic by hand, which cannot prove the *actual* `RenderLoop` code
+/// is correct, only that a hand-written copy of its reasoning is).
+enum FramePresentable {
+    Surface(wgpu::SurfaceTexture),
+    Offscreen,
+}
+
+/// One in-flight frame between `lock_frame`/`begin_offscreen_frame`
+/// and `unlock_frame`: what was acquired (`FramePresentable`), the
 /// `TextureView` built from it (`encoder.begin_render_pass` needs a
 /// `&TextureView`, not the texture itself), and the `CommandEncoder`
-/// the clear render pass was recorded into. `texture`/`view` are both
-/// read in `unlock_frame` (`view` only transitively, via the encoder
-/// already holding everything it needs -- kept here anyway so this
-/// struct, not a borrow of it, is what crosses the `lock_frame`/
-/// `unlock_frame` boundary; `SurfaceTexture`'s own `Drop` impl
-/// discards it safely if `unlock_frame` is never actually called with
-/// `present: true`, matching wgpu's own documented behavior).
+/// the clear render pass -- and now, any queued draws -- are recorded
+/// into. `presentable`/`view` are both read in `unlock_frame` (`view`
+/// only transitively, via the encoder already holding everything it
+/// needs -- kept here anyway so this struct, not a borrow of it, is
+/// what crosses the `lock_frame`/`unlock_frame` boundary;
+/// `SurfaceTexture`'s own `Drop` impl discards it safely if
+/// `unlock_frame` is never actually called with `present: true`,
+/// matching wgpu's own documented behavior).
 struct InProgressFrame {
-    texture: wgpu::SurfaceTexture,
-    #[allow(dead_code)] // kept alive for texture's sake; never read directly
+    presentable: FramePresentable,
+    #[allow(dead_code)] // kept alive for presentable's sake; never read directly
     view: wgpu::TextureView,
     encoder: wgpu::CommandEncoder,
+    /// The real color target format, needed to lazily build/reuse a
+    /// `draw::SimpleLinePipeline` matching it when flushing queued
+    /// line draws in `unlock_frame` -- read directly from the real
+    /// acquired texture (`lock_frame`) or the caller-given offscreen
+    /// one (`begin_offscreen_frame`), not assumed or re-derived from
+    /// surface config each time.
+    color_format: wgpu::TextureFormat,
     /// `true` if `get_current_texture` returned `Suboptimal`, not
     /// `Success` -- `unlock_frame` clears `configured_size` for this
     /// case the same way `lock_frame` already does for `Outdated`,
@@ -840,7 +866,9 @@ struct InProgressFrame {
     /// reconfigure soon" (`Surface::get_current_texture`'s own doc).
     /// Deferred to `unlock_frame`, not done here: the frame is still
     /// in flight at this point, and reconfiguring before it is
-    /// submitted/presented would be premature.
+    /// submitted/presented would be premature. Always `false` for
+    /// `FramePresentable::Offscreen` -- no surface, nothing to
+    /// reconfigure.
     suboptimal: bool,
 }
 
@@ -884,6 +912,27 @@ pub struct RenderLoop {
     /// below rather than assumed to stay in sync if the struct's
     /// field list ever changes.
     frame_uniforms_buffer: Option<wgpu::Buffer>,
+    /// Appended by `queue_line`, drained and recorded into the real
+    /// in-progress frame's own `CommandEncoder` by `unlock_frame`,
+    /// *after* the clear pass that encoder already holds -- not
+    /// drawn immediately per call (this crate's own todo list already
+    /// tracked that as a real, serious bug: `lock_frame` only records
+    /// its clear pass without submitting it, so an immediate per-call
+    /// submit would run before the still-unsubmitted clear and get
+    /// wiped out by it; see `draw::LineDrawCall`'s own doc for the
+    /// full reasoning). `vertices`/`params` grow in lockstep: each
+    /// `queue_line` call appends exactly 2 vertices (one line) and 1
+    /// `DrawParams`, with the vertices' own `draw_id` pointing at
+    /// that params entry's real index.
+    queued_line_vertices: Vec<draw::LineVertex>,
+    queued_line_params: Vec<draw::DrawParams>,
+    /// Lazily built on first use against whichever `color_format` the
+    /// first real in-progress frame actually has -- cached and
+    /// *checked* against that format on every later use (a `RenderLoop`
+    /// is only ever used against one `CreatedDevice`/surface for its
+    /// whole real lifetime, so a mismatch here would mean a real
+    /// caller bug, not a condition to silently handle).
+    line_pipeline: Option<(wgpu::TextureFormat, draw::SimpleLinePipeline)>,
 }
 
 impl Default for RenderLoop {
@@ -899,11 +948,55 @@ impl RenderLoop {
             in_progress: None,
             counts: FrameCounts::default(),
             frame_uniforms_buffer: None,
+            queued_line_vertices: Vec::new(),
+            queued_line_params: Vec::new(),
+            line_pipeline: None,
         }
     }
 
     pub fn counts(&self) -> FrameCounts {
         self.counts
+    }
+
+    /// Real per-tick entry point `UWgpuRenderDevice::Draw2DLine` will
+    /// call through a future FFI function (not wired yet -- see this
+    /// crate's own module doc). Appends one line (`p1`/`p2`, already
+    /// in the real screen-space-transformed `Coords` shape
+    /// `DrawSimple.cpp`'s own `Draw2DLine` builds, this function does
+    /// no transformation of its own) to the queue `unlock_frame` will
+    /// later flush. Drops the draw cleanly (not an error, not a
+    /// panic) when there is no frame in progress -- a real condition,
+    /// not a caller bug: the engine keeps calling `SetSceneNode`/
+    /// `Draw*` after a failed/`Occluded` `Lock` (confirmed by reading
+    /// this project's own real `wgpu-smoke.log`, `WgpuDrv: Lock did
+    /// not begin a frame` immediately followed by a real `SetSceneNode`
+    /// call on the very next line), so silently dropping here is the
+    /// correct, already-established behavior, not a gap. Also drops
+    /// cleanly once `simple.wgsl`'s own real `MAX_DRAWS` capacity is
+    /// reached -- this queue has no flush-and-rotate behavior yet
+    /// (the real GLSL batcher's own `ParametersBuffer`/`VertBuffer`
+    /// ring-buffer rotation, not yet ported), so a frame drawing more
+    /// than `MAX_DRAWS` lines silently loses the excess for now rather
+    /// than panicking or corrupting the buffer -- a real, known,
+    /// explicitly-scoped limitation, not silently pretended away.
+    pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], color: [f32; 4]) {
+        if self.in_progress.is_none() {
+            return;
+        }
+        if self.queued_line_params.len() >= draw::MAX_DRAWS {
+            return;
+        }
+        let draw_id = self.queued_line_params.len() as u32;
+        self.queued_line_vertices.push(draw::LineVertex {
+            coords: p1,
+            draw_id,
+        });
+        self.queued_line_vertices.push(draw::LineVertex {
+            coords: p2,
+            draw_id,
+        });
+        self.queued_line_params
+            .push(draw::DrawParams { draw_color: color });
     }
 
     /// Real per-tick entry point `UWgpuRenderDevice::SetSceneNode`
@@ -1283,6 +1376,7 @@ pub fn lock_frame(
             return FrameOutcome::Validation;
         }
     };
+    let color_format = texture.texture.format();
     let view = texture
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
@@ -1307,9 +1401,10 @@ pub fn lock_frame(
         });
     }
     loop_state.in_progress = Some(InProgressFrame {
-        texture,
+        presentable: FramePresentable::Surface(texture),
         view,
         encoder,
+        color_format,
         suboptimal: is_suboptimal,
     });
     // Not counted as `presented` here: a successful lock_frame only
@@ -1323,6 +1418,64 @@ pub fn lock_frame(
     FrameOutcome::Presented
 }
 
+/// Real `lock_frame`/`unlock_frame` encoder-and-draw-queue machinery,
+/// exercised against a caller-owned offscreen `&wgpu::Texture`
+/// instead of acquiring one from a real surface -- the real
+/// production entry point for every actual `WgpuDrv.cpp` call site is
+/// still `lock_frame` alone; this exists only so this crate's own
+/// tests can drive the *real* `RenderLoop` code (not a hand-written
+/// replica of its reasoning) while no real OS window is available
+/// (this session's own established constraint: a Rust `#[test]`
+/// cannot create one on macOS). Always succeeds (no `Occluded`/
+/// `Timeout`/etc. to report -- those are real `Surface::
+/// get_current_texture` outcomes an offscreen `wgpu::Texture` has no
+/// equivalent of) and always marks the frame non-suboptimal (no
+/// surface to reconfigure). Panics (`debug_assert!`-free, a real
+/// `assert!`, since a caller passing a non-`RENDER_ATTACHMENT`
+/// texture is a real programming error, not a runtime condition) if
+/// `target` was not created with `TextureUsages::RENDER_ATTACHMENT`.
+pub fn begin_offscreen_frame(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    target: &wgpu::Texture,
+    clear_color: wgpu::Color,
+) {
+    assert!(
+        target
+            .usage()
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+        "begin_offscreen_frame's target must be created with TextureUsages::RENDER_ATTACHMENT"
+    );
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let mut encoder = created
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("hp2-wgpu offscreen frame encoder"),
+        });
+    {
+        let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("hp2-wgpu offscreen clear pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+    }
+    loop_state.in_progress = Some(InProgressFrame {
+        presentable: FramePresentable::Offscreen,
+        view,
+        encoder,
+        color_format: target.format(),
+        suboptimal: false,
+    });
+}
+
 /// Replaces the per-frame-end half of `UWgpuRenderDevice::Unlock`.
 /// `present`, matching the real `Unlock(UBOOL Blit)`'s own parameter
 /// (`ThirdParty/XOpenGLDrv/Src/XOpenGL.cpp`'s own `Unlock` only blits
@@ -1332,7 +1485,25 @@ pub fn lock_frame(
 /// GPU work still completes, matching XOpenGL's own real behavior of
 /// still finishing the frame) but never calls `queue.present`, letting
 /// `SurfaceTexture::drop` discard it instead (wgpu's own documented,
-/// safe behavior for an un-presented texture).
+/// safe behavior for an un-presented texture). Never calls
+/// `queue.present` at all for a `FramePresentable::Offscreen` frame
+/// (`begin_offscreen_frame`'s own doc), regardless of `present` --
+/// there is no real surface to present to.
+///
+/// Before submitting, flushes `loop_state`'s own queued line draws
+/// (`RenderLoop::queue_line`) into the frame's own `CommandEncoder`,
+/// *after* the clear pass already recorded into it, as one combined
+/// `Load`-mode pass -- not as N separate per-call passes, matching
+/// this crate's own real GLSL-batching precedent (one real GPU draw
+/// call batches many logical ones via `DrawID`, not one GPU operation
+/// per engine draw call) and avoiding N redundant render-pass
+/// begin/end pairs for one frame's worth of lines. Skipped (queue
+/// cleared either way) if the queue is empty, or if `set_scene_node`
+/// was never called for this `RenderLoop` (no `frame_uniforms_buffer`
+/// to bind yet -- a real, reachable condition, not a caller bug: a
+/// render device whose first real frame draws lines before its first
+/// `SetSceneNode` call would hit this, and silently not drawing them
+/// is more correct than binding garbage or panicking across FFI).
 ///
 /// `loop_state.counts.presented` is incremented here, not in
 /// `lock_frame`, and only when `present` is `true` -- a successful
@@ -1353,14 +1524,46 @@ pub fn lock_frame(
 /// caller bug, not a real runtime condition to report via
 /// `FrameOutcome`.
 pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, present: bool) -> bool {
-    let Some(frame) = loop_state.in_progress.take() else {
+    let Some(mut frame) = loop_state.in_progress.take() else {
         return false;
     };
+    if !loop_state.queued_line_vertices.is_empty() {
+        if let Some(frame_uniforms_buffer) = loop_state.frame_uniforms_buffer.as_ref() {
+            let needs_new_pipeline = !matches!(
+                &loop_state.line_pipeline,
+                Some((format, _)) if *format == frame.color_format
+            );
+            if needs_new_pipeline {
+                loop_state.line_pipeline = Some((
+                    frame.color_format,
+                    draw::SimpleLinePipeline::new(&created.device, frame.color_format),
+                ));
+            }
+            let (_, pipeline) = loop_state
+                .line_pipeline
+                .as_ref()
+                .expect("line_pipeline was just set to Some above");
+            pipeline.record(
+                &created.device,
+                &created.queue,
+                &mut frame.encoder,
+                draw::LineDrawCall {
+                    frame_uniforms_buffer,
+                    vertices: &loop_state.queued_line_vertices,
+                    draw_params: &loop_state.queued_line_params,
+                    target: &frame.view,
+                    load: wgpu::LoadOp::Load,
+                },
+            );
+        }
+        loop_state.queued_line_vertices.clear();
+        loop_state.queued_line_params.clear();
+    }
     created
         .queue
         .submit(std::iter::once(frame.encoder.finish()));
-    if present {
-        created.queue.present(frame.texture);
+    if present && let FramePresentable::Surface(texture) = frame.presentable {
+        created.queue.present(texture);
         loop_state.counts.presented += 1;
     }
     if frame.suboptimal {
@@ -1781,6 +1984,188 @@ mod tests {
             loop_state.frame_uniforms_buffer().unwrap(),
             &first_buffer,
             "expected the second set_scene_node call to reuse the same buffer, not create a new one"
+        );
+    }
+
+    // The real test the review that caught the clear-vs-draw-ordering
+    // bug asked for (Finding B): draw.rs's own
+    // record_composites_correctly_into_a_shared_unsubmitted_encoder
+    // only manually *replicates* lock_frame/unlock_frame's own
+    // reasoning -- it proves SimpleLinePipeline::record composites
+    // correctly into a hand-built encoder, not that RenderLoop's own
+    // real lock/unlock/queue code actually does the right thing. This
+    // test instead drives the real production functions end to end:
+    // begin_offscreen_frame (the real lock_frame logic, against a
+    // caller-owned offscreen texture instead of a real OS-backed
+    // surface -- no literal "offscreen surface" exists in wgpu, and a
+    // real Surface-backed lock_frame needs a real window, unavailable
+    // to a Rust #[test] on macOS), RenderLoop::queue_line (the real
+    // Draw2DLine accumulation path), and unlock_frame (the real flush
+    // + single combined submit). Only the SceneFrame -> identity
+    // matrix substitution below is not the literal real path end to
+    // end -- matching the same known-good technique
+    // record_composites_correctly_into_a_shared_unsubmitted_encoder's
+    // own manual replica already uses, for the same reason: a real
+    // perspective SceneFrame's own modelviewproj_mat is not a simple
+    // number to predict screen position from by hand, and that is not
+    // what this test exists to check (compute_frame_uniforms's own
+    // tests already cover that math).
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_flushes_queued_line_draws_through_the_real_lock_unlock_path() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        // Real production call: creates frame_uniforms_buffer via the
+        // same lazy-get_or_insert_with path a real SetSceneNode call
+        // uses.
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        // Overwrite modelviewproj_mat (bytes [256..320), the last of
+        // FrameUniforms' five leading Mat4 fields -- proj_mat/
+        // view_mat/model_mat/modelview_mat/modelviewproj_mat, each 64
+        // bytes) with an identity matrix: diagonal floats at relative
+        // offsets 0, 20, 40, 60 (column-major Mat4: col0 row0, col1
+        // row1, col2 row2, col3 row3), matching the exact technique
+        // draw.rs's own manual replica test already uses, for the
+        // same reason -- predictable screen-space geometry instead of
+        // a real lens projection's own math.
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_buffer().unwrap(),
+            256,
+            &identity_diagonal,
+        );
+
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Real lock_frame logic (clear recorded, not submitted).
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        // Real Draw2DLine accumulation path -- a green line spanning
+        // NDC x in [-1.0, 0.0], the left half of the 64px-wide target.
+        loop_state.queue_line([-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.0]);
+        // Real unlock_frame: flushes the queued line into the frame's
+        // own still-unsubmitted encoder (Load mode, after the clear),
+        // then submits exactly once. present=false: no real surface
+        // to present to anyway (FramePresentable::Offscreen), and
+        // this matches a real hit-testing-style Unlock(Blit=0) call.
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        assert_eq!(
+            loop_state.counts().presented,
+            0,
+            "present=false must not count as presented, and Offscreen frames never call \
+             queue.present regardless"
+        );
+        // A second unlock_frame call with no matching lock must report
+        // no frame in progress -- proves the first call actually took
+        // loop_state.in_progress, not left it behind.
+        assert!(!unlock_frame(&created, &mut loop_state, false));
+
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        // Left half (inside the queued line's span): must be green --
+        // proves RenderLoop::queue_line's real accumulation plus
+        // unlock_frame's real flush-then-submit actually reached the
+        // GPU, through the real production RenderLoop API, not a
+        // manual replica of it.
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the line queued via RenderLoop::queue_line and flushed by the real \
+             unlock_frame to actually render, got {left_pixel:?}"
+        );
+        // Right half: must still be the real begin_offscreen_frame
+        // clear color -- proves the clear (recorded first, same as a
+        // real lock_frame) survived the combined submit alongside the
+        // later-recorded draw, through the real production code path.
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected begin_offscreen_frame's own clear pass to survive the real unlock_frame's \
+             combined submit outside the drawn line's span, got {right_pixel:?}"
+        );
+        println!(
+            "RenderLoop's real begin_offscreen_frame/queue_line/unlock_frame path confirmed \
+             empirically to composite a queued line draw correctly on top of its own clear, in \
+             one combined submit, on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
         );
     }
 
