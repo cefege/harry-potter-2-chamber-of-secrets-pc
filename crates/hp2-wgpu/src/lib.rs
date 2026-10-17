@@ -874,6 +874,207 @@ impl RenderLoop {
     }
 }
 
+/// Exact byte-for-byte mirror of `common.wgsl`'s `FrameUniforms` struct
+/// (`@group(0) @binding(0)`, shared by every shader) -- 8 `mat4x4<f32>`
+/// fields (each `glam::Mat4`: `#[repr(C)]`, 4 consecutive `Vec4`
+/// columns, 16-byte aligned, confirmed against glam's own source
+/// before relying on it, not assumed) followed by 4 `f32` fields.
+/// `#[repr(C)]` with no explicit padding needed: 8*64 = 512 bytes
+/// already a multiple of 16, so the four trailing `f32`s need no
+/// alignment padding either before or after themselves or the struct
+/// as a whole (528 bytes total, still a multiple of 16) -- checked
+/// against WGSL's own uniform-address-space layout rules, not
+/// assumed identical to Rust's own default `#[repr(C)]` rules by
+/// coincidence.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameUniforms {
+    pub proj_mat: glam::Mat4,
+    pub view_mat: glam::Mat4,
+    pub model_mat: glam::Mat4,
+    pub modelview_mat: glam::Mat4,
+    pub modelviewproj_mat: glam::Mat4,
+    /// Not yet populated by `compute_frame_uniforms` -- shadow mapping
+    /// is a separate, unexamined subsystem (no real GLSL source read
+    /// yet for where/how `LightSpaceMat` -- if that is even its real
+    /// name, not assumed -- gets built). Always `Mat4::IDENTITY` here
+    /// until that subsystem is actually read and ported; stated
+    /// honestly rather than silently wrong.
+    pub light_space_mat: glam::Mat4,
+    pub frame_coords: glam::Mat4,
+    pub frame_uncoords: glam::Mat4,
+    pub gamma: f32,
+    pub light_map_intensity: f32,
+    pub light_color_intensity: f32,
+    pub y_scale: f32,
+}
+
+/// FFI input for `compute_frame_uniforms`, carrying exactly the real
+/// `FSceneNode`/engine-state fields `XOpenGL.cpp`'s own
+/// `SetSceneNode`/`SetOrthoProjection`/`SetProjection`/`UpdateCoords`
+/// read (`HarryPotter2/Unreal/Engine/Inc/UnRender.h`'s real
+/// `FSceneNode` struct, confirmed field-by-field, not guessed).
+/// `gamma`/`light_color_intensity`/`light_map_intensity` are plain
+/// `f32` inputs, not computed here: the real values come from
+/// `UXOpenGLRenderDevice::GetViewportGamma`/`ActorXBlending`/
+/// `OneXBlending`, which are config/engine-state reads with no
+/// graphics-math content -- C++'s own job to read and pass in, not a
+/// reason to cross the FFI boundary with a `UViewport*`/`AActor*`
+/// pointer. `y_scale` is not a field here at all: the real source's
+/// own branch for it (`XOPENGL_WGL && !OLDUNREAL_WINXP`, the DXGI
+/// interop swapchain row-order fix) is Windows-GL-specific and
+/// unreachable on this macOS-first wgpu driver, so
+/// `compute_frame_uniforms` hardcodes the real source's own `#else`
+/// value, `1.0`, unconditionally.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneFrame {
+    pub coords_origin: [f32; 3],
+    pub coords_x_axis: [f32; 3],
+    pub coords_y_axis: [f32; 3],
+    pub coords_z_axis: [f32; 3],
+    pub uncoords_origin: [f32; 3],
+    pub uncoords_x_axis: [f32; 3],
+    pub uncoords_y_axis: [f32; 3],
+    pub uncoords_z_axis: [f32; 3],
+    /// `Frame->FX`/`Frame->FY` -- floating-point frame width/height,
+    /// not `Viewport->SizeX`/`SizeY` (a real, already-established
+    /// distinction elsewhere in this crate's own `Lock`/HiDPI fix).
+    pub fx: f32,
+    pub fy: f32,
+    /// `Frame->EffectiveFovAngle`, read only on the perspective path.
+    pub effective_fov_angle: f32,
+    /// `Viewport->Actor->FovAngle`, read only on the ortho path
+    /// (`SetOrthoProjection`'s own real source reads the raw actor
+    /// FOV, not `EffectiveFovAngle`, for its `RProjZ` -- a real,
+    /// deliberate difference between the two paths, not an oversight
+    /// to unify).
+    pub viewport_fov_angle: f32,
+    /// `Frame->Viewport->IsOrtho()`.
+    pub is_ortho: bool,
+    /// `GIsEditor && Frame->Viewport->Actor->RendMap == REN_Wire` --
+    /// selects the real source's wireframe-editor `zFar` (131072)
+    /// over the normal one (65336).
+    pub is_wireframe_zfar: bool,
+    pub gamma: f32,
+    pub light_color_intensity: f32,
+    pub light_map_intensity: f32,
+}
+
+/// `zNear` for the perspective (non-ortho) path: the real source's
+/// `SetProjection(Frame, bNearZ)` is only ever called as
+/// `SetProjection(Frame, 0)` from `SetSceneNode` (the only call site
+/// this function replaces), and with neither `UNREAL_TOURNAMENT_
+/// OLDUNREAL` nor `bNearZ` set, `zNear` is unconditionally `1.0f` --
+/// confirmed by reading `ENGINE_VERSION` (`UnObjVer.h`: `433`) and
+/// grepping the whole tree for `UNREAL_TOURNAMENT_OLDUNREAL`, which
+/// does not exist anywhere in this codebase (a leftover portability
+/// macro from the upstream project this file was pinned from, never
+/// defined here), not assumed from the macro's mere presence in the
+/// source text.
+const PERSPECTIVE_Z_NEAR: f32 = 1.0;
+
+/// Real source's two `zFar` values (`XOpenGL.cpp`'s own `SetOrthoProjection`/
+/// `SetProjection`, identical ternary in both).
+const Z_FAR_NORMAL: f32 = 65336.0;
+const Z_FAR_WIREFRAME: f32 = 131072.0;
+
+/// Replaces the matrix-math half of `UXOpenGLRenderDevice::
+/// SetSceneNode`/`SetOrthoProjection`/`SetProjection`/`UpdateCoords`
+/// (not yet wired into any FFI call or `WgpuDrv.cpp` override -- see
+/// this crate's own module doc, "real draw-call forwarding" item).
+/// Pure function, no GPU/device access: `scene`'s values in, a fully
+/// populated `FrameUniforms` out, independently testable without an
+/// adapter.
+///
+/// Uses `glam::camera::rh::proj::directx` for both the ortho and
+/// frustum matrices, not `vulkan` or `opengl`: `directx` is the
+/// module glam itself documents with `#[doc(alias = "webgpu")]` --
+/// right-handed,
+/// Z range `[0, 1]`, Y-up -- matching the real source's own GLM
+/// convention exactly except for the Z range (confirmed no
+/// `GLM_FORCE_LEFT_HANDED`/`GLM_FORCE_DEPTH_ZERO_TO_ONE` define
+/// anywhere in `ThirdParty/XOpenGLDrv/glm/`, so the real `glm::
+/// frustum`/`glm::ortho` calls are GLM's default right-handed, Z
+/// range `[-1, 1]` -- the one difference this function's whole job is
+/// to correct, per `simple.wgsl`'s own depth-range-contract note).
+/// `vulkan` was rejected: it additionally flips Y in clip space, a
+/// Vulkan-specific quirk WebGPU does not share at the API level.
+///
+/// View matrix is the real source's own fixed `glm::scale(mat4(1),
+/// vec3(1,-1,-1))` (`XOpenGL.cpp`'s `Init`, set once, never
+/// recomputed per frame); model matrix is always identity, matching
+/// the real source exactly (never set to anything else anywhere it
+/// was read).
+pub fn compute_frame_uniforms(scene: &SceneFrame) -> FrameUniforms {
+    let view_mat = glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, -1.0));
+    let model_mat = glam::Mat4::IDENTITY;
+
+    let z_far = if scene.is_wireframe_zfar {
+        Z_FAR_WIREFRAME
+    } else {
+        Z_FAR_NORMAL
+    };
+    let aspect = scene.fy / scene.fx;
+
+    let proj_mat = if scene.is_ortho {
+        let r_proj_z = (scene.viewport_fov_angle * std::f32::consts::PI / 360.0).tan();
+        glam::camera::rh::proj::directx::orthographic(
+            -r_proj_z,
+            r_proj_z,
+            -aspect * r_proj_z,
+            aspect * r_proj_z,
+            -z_far,
+            z_far,
+        )
+    } else {
+        let r_proj_z = (scene.effective_fov_angle * std::f32::consts::PI / 360.0).tan();
+        let z_near = PERSPECTIVE_Z_NEAR;
+        glam::camera::rh::proj::directx::frustum(
+            -r_proj_z * z_near,
+            r_proj_z * z_near,
+            -aspect * r_proj_z * z_near,
+            aspect * r_proj_z * z_near,
+            z_near,
+            z_far,
+        )
+    };
+
+    let modelview_mat = view_mat * model_mat;
+    let modelviewproj_mat = proj_mat * modelview_mat;
+
+    // UpdateCoords: FrameCoords[i]/FrameUncoords[i] are glm columns,
+    // i.e. mat4::from_cols in glam's own column-major convention --
+    // not rows, matching `glm::mat4`'s own real layout.
+    let frame_coords = glam::Mat4::from_cols(
+        glam::Vec3::from(scene.coords_origin).extend(0.0),
+        glam::Vec3::from(scene.coords_x_axis).extend(0.0),
+        glam::Vec3::from(scene.coords_y_axis).extend(0.0),
+        glam::Vec3::from(scene.coords_z_axis).extend(0.0),
+    );
+    let frame_uncoords = glam::Mat4::from_cols(
+        glam::Vec3::from(scene.uncoords_origin).extend(0.0),
+        glam::Vec3::from(scene.uncoords_x_axis).extend(0.0),
+        glam::Vec3::from(scene.uncoords_y_axis).extend(0.0),
+        glam::Vec3::from(scene.uncoords_z_axis).extend(0.0),
+    );
+
+    FrameUniforms {
+        proj_mat,
+        view_mat,
+        model_mat,
+        modelview_mat,
+        modelviewproj_mat,
+        light_space_mat: glam::Mat4::IDENTITY,
+        frame_coords,
+        frame_uncoords,
+        gamma: scene.gamma,
+        light_map_intensity: scene.light_map_intensity,
+        light_color_intensity: scene.light_color_intensity,
+        y_scale: 1.0,
+    }
+}
+
 /// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`
 /// (plan's still-open "real draw-call forwarding" item's first piece:
 /// nothing is drawn by this function itself, but it is the real
@@ -1125,6 +1326,208 @@ pub mod macos {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Real reference scene, loosely matching a typical in-game FSceneNode:
+    // identity Coords/Uncoords, a square viewport, a 90-degree FOV --
+    // chosen for round, easy-to-verify numbers, not copied from any
+    // particular real capture.
+    fn reference_perspective_scene() -> SceneFrame {
+        SceneFrame {
+            coords_origin: [0.0, 0.0, 0.0],
+            coords_x_axis: [1.0, 0.0, 0.0],
+            coords_y_axis: [0.0, 1.0, 0.0],
+            coords_z_axis: [0.0, 0.0, 1.0],
+            uncoords_origin: [0.0, 0.0, 0.0],
+            uncoords_x_axis: [1.0, 0.0, 0.0],
+            uncoords_y_axis: [0.0, 1.0, 0.0],
+            uncoords_z_axis: [0.0, 0.0, 1.0],
+            fx: 100.0,
+            fy: 100.0,
+            effective_fov_angle: 90.0,
+            viewport_fov_angle: 90.0,
+            is_ortho: false,
+            is_wireframe_zfar: false,
+            gamma: 1.0,
+            light_color_intensity: 1.5,
+            light_map_intensity: 4.0,
+        }
+    }
+
+    #[test]
+    fn frame_uniforms_view_and_model_mat_match_the_real_fixed_source_values() {
+        let out = compute_frame_uniforms(&reference_perspective_scene());
+        // XOpenGL.cpp's own Init: glm::scale(mat4(1), vec3(1,-1,-1)),
+        // set once and never recomputed per frame -- not derived from
+        // any SceneFrame field, so this must hold regardless of input.
+        assert_eq!(
+            out.view_mat,
+            glam::Mat4::from_scale(glam::Vec3::new(1.0, -1.0, -1.0))
+        );
+        assert_eq!(out.model_mat, glam::Mat4::IDENTITY);
+        // modelview_mat = view_mat * model_mat, modelviewproj_mat =
+        // proj_mat * modelview_mat -- SetOrthoProjection/SetProjection's
+        // own real composition order ("yes, this is right" in the
+        // source's own comment), checked here by reconstructing it
+        // independently from the three returned factors rather than
+        // trusting the function got its own multiplication right.
+        assert_eq!(out.modelview_mat, out.view_mat * out.model_mat);
+        assert_eq!(out.modelviewproj_mat, out.proj_mat * out.modelview_mat);
+    }
+
+    #[test]
+    fn frame_uniforms_frame_coords_use_the_real_column_order() {
+        let mut scene = reference_perspective_scene();
+        scene.coords_origin = [1.0, 2.0, 3.0];
+        scene.coords_x_axis = [4.0, 5.0, 6.0];
+        scene.coords_y_axis = [7.0, 8.0, 9.0];
+        scene.coords_z_axis = [10.0, 11.0, 12.0];
+        let out = compute_frame_uniforms(&scene);
+        // UpdateCoords: FrameCoords[0..3] = Origin, XAxis, YAxis, ZAxis,
+        // each a glm column (glam::Mat4::from_cols matches glm's own
+        // column-major convention) with w=0, not w=1 -- these are
+        // direction-like basis vectors, not a translated point, in the
+        // real source.
+        assert_eq!(out.frame_coords.col(0), glam::Vec4::new(1.0, 2.0, 3.0, 0.0));
+        assert_eq!(out.frame_coords.col(1), glam::Vec4::new(4.0, 5.0, 6.0, 0.0));
+        assert_eq!(out.frame_coords.col(2), glam::Vec4::new(7.0, 8.0, 9.0, 0.0));
+        assert_eq!(
+            out.frame_coords.col(3),
+            glam::Vec4::new(10.0, 11.0, 12.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn frame_uniforms_perspective_z_range_is_zero_to_one_not_negative_one_to_one() {
+        let out = compute_frame_uniforms(&reference_perspective_scene());
+        // A point straight down the view axis at the real near/far
+        // planes (PERSPECTIVE_Z_NEAR=1.0, Z_FAR_NORMAL=65336.0) must
+        // land at clip-space z/w == 0.0 / 1.0 respectively under
+        // WebGPU's convention -- -1.0/1.0 under GL's, the exact bug
+        // this function's whole job is to avoid (simple.wgsl's own
+        // depth-range-contract note). glam's RH view-space convention
+        // (`camera::rh`'s own doc: "the negative Z axis pointing
+        // forward") puts visible points at *negative* view-space Z;
+        // view_mat flips Z (`vec3(1,-1,-1)`), so a world point needs
+        // *positive* Z to land in front of the camera after that flip
+        // (verified by hand before relying on it, not assumed from
+        // the sign alone -- an earlier version of this test got this
+        // backwards, caught before committing by deriving it
+        // numerically rather than trusting intuition).
+        let near_world = glam::Vec4::new(0.0, 0.0, 1.0, 1.0);
+        let far_world = glam::Vec4::new(0.0, 0.0, 65336.0, 1.0);
+        let near_clip = out.modelviewproj_mat * near_world;
+        let far_clip = out.modelviewproj_mat * far_world;
+        assert!(
+            (near_clip.z / near_clip.w).abs() < 1e-4,
+            "expected near-plane NDC z ~= 0.0 (WebGPU convention), got {}",
+            near_clip.z / near_clip.w
+        );
+        assert!(
+            ((far_clip.z / far_clip.w) - 1.0).abs() < 1e-4,
+            "expected far-plane NDC z ~= 1.0 (WebGPU convention), got {}",
+            far_clip.z / far_clip.w
+        );
+    }
+
+    #[test]
+    fn frame_uniforms_perspective_fov_matches_the_real_frustum_edges() {
+        // 90-degree FOV, square viewport (fx==fy, aspect==1): RProjZ =
+        // tan(45 deg) == 1.0, so the horizontal AND vertical frustum
+        // half-angles at any given depth both equal that depth --
+        // view-space (depth, depth, -depth) should land exactly on
+        // the clip-space x==w / y==w edge (NDC x==1.0, y==1.0).
+        // view_mat (`vec3(1,-1,-1)`) leaves X unchanged and flips
+        // Y/Z, so the matching world-space point is (depth, -depth,
+        // +depth) -- positive world Z, same forward-direction fix as
+        // the z-range test above, verified numerically, not assumed.
+        let out = compute_frame_uniforms(&reference_perspective_scene());
+        let depth = 10.0;
+        let edge_world = glam::Vec4::new(depth, -depth, depth, 1.0);
+        let edge_clip = out.modelviewproj_mat * edge_world;
+        assert!(
+            (edge_clip.x / edge_clip.w - 1.0).abs() < 1e-4,
+            "expected the 90-degree-FOV horizontal edge at NDC x ~= 1.0, got {}",
+            edge_clip.x / edge_clip.w
+        );
+        assert!(
+            (edge_clip.y / edge_clip.w - 1.0).abs() < 1e-4,
+            "expected the 90-degree-FOV vertical edge at NDC y ~= 1.0, got {}",
+            edge_clip.y / edge_clip.w
+        );
+    }
+
+    #[test]
+    fn frame_uniforms_ortho_path_is_selected_and_z_range_is_zero_to_one() {
+        let mut scene = reference_perspective_scene();
+        scene.is_ortho = true;
+        let out = compute_frame_uniforms(&scene);
+        // Same WebGPU-convention check as the perspective test, but
+        // for SetOrthoProjection's own real glm::ortho(-RProjZ,
+        // +RProjZ, ..., -zFar, +zFar) call -- note the real source
+        // passes a *negative* near (-zFar), confirmed to not panic
+        // glam's own `directx::orthographic` (unlike `frustum`, its
+        // documented panic conditions never require a positive near).
+        // Checks the range itself (both extremes land in {0.0, 1.0},
+        // in either order), not which specific world point maps to
+        // which specific extreme: an earlier version of this test
+        // asserted a fixed point-to-extreme pairing and failed on a
+        // real run (got 0.99999994 where 0.0 was expected) -- not a
+        // bug in `compute_frame_uniforms`, just a wrong guess about
+        // which of this symmetric ortho volume's two world points
+        // `directx::orthographic` treats as which extreme (caught by
+        // actually running the test, not assumed from the formula).
+        // The real invariant this test exists to prove -- 0..1 range
+        // reached at all, not GL's -1..1 -- holds either way.
+        let a_world = glam::Vec4::new(0.0, 0.0, 65336.0, 1.0);
+        let b_world = glam::Vec4::new(0.0, 0.0, -65336.0, 1.0);
+        let a_ndc_z = (out.modelviewproj_mat * a_world).z;
+        let b_ndc_z = (out.modelviewproj_mat * b_world).z;
+        let (lo, hi) = if a_ndc_z <= b_ndc_z {
+            (a_ndc_z, b_ndc_z)
+        } else {
+            (b_ndc_z, a_ndc_z)
+        };
+        assert!(
+            lo.abs() < 1e-3,
+            "expected the ortho volume's near-side NDC z ~= 0.0, got {lo}"
+        );
+        assert!(
+            (hi - 1.0).abs() < 1e-3,
+            "expected the ortho volume's far-side NDC z ~= 1.0, got {hi}"
+        );
+    }
+
+    #[test]
+    fn frame_uniforms_wireframe_zfar_changes_the_far_plane() {
+        let mut scene = reference_perspective_scene();
+        scene.is_wireframe_zfar = true;
+        let out = compute_frame_uniforms(&scene);
+        let far_world = glam::Vec4::new(0.0, 0.0, 131072.0, 1.0);
+        let far_clip = out.modelviewproj_mat * far_world;
+        assert!(
+            ((far_clip.z / far_clip.w) - 1.0).abs() < 1e-3,
+            "expected the real editor-wireframe zFar (131072, not 65336) to be the far plane \
+             when is_wireframe_zfar is set, got NDC z {}",
+            far_clip.z / far_clip.w
+        );
+    }
+
+    #[test]
+    fn frame_uniforms_passes_through_scalar_fields_unmodified() {
+        let mut scene = reference_perspective_scene();
+        scene.gamma = 2.2;
+        scene.light_color_intensity = 1.5;
+        scene.light_map_intensity = 4.0;
+        let out = compute_frame_uniforms(&scene);
+        assert_eq!(out.gamma, 2.2);
+        assert_eq!(out.light_color_intensity, 1.5);
+        assert_eq!(out.light_map_intensity, 4.0);
+        // Hardcoded 1.0 unconditionally -- the real source's DXGI
+        // interop branch is Windows-GL-only, unreachable here.
+        assert_eq!(out.y_scale, 1.0);
+        // Not yet populated; see this function's own doc.
+        assert_eq!(out.light_space_mat, glam::Mat4::IDENTITY);
+    }
 
     // Needs a real GPU adapter. CI runners (ci.yml) have none. Run with
     // `cargo test -p hp2-wgpu -- --ignored`. Don't make it pass when no

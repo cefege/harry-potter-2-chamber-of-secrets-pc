@@ -10,6 +10,7 @@ name = "hp2_wgpu"
 
 [dependencies]
 wgpu.workspace = true
+glam.workspace = true
 log.workspace = true
 pollster.workspace = true
 raw-window-handle.workspace = true
