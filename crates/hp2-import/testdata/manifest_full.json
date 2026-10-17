@@ -1,0 +1,96 @@
+{
+  "config_merges": {
+    "System/DefUser.ini": [
+      "base: prototype System/DefUser.ini, retaining prototype controller fallback",
+      "Engine.Input: retail final keyboard/mouse broom, map, cutscene, potion, and duel bindings",
+      "Engine.PlayerPawn: ObjectDetailVeryHigh (max-quality first-run default, overriding retail's own Medium) and Modern controls disabled by default",
+      "HGame.Harry: retail final difficulty damage multipliers"
+    ],
+    "System/Default.ini": [
+      "base: prototype System/Default.ini",
+      "FrontEnd: retail EASplashWaitTime, WBSplashWaitTime, LaunchCode, UseSaveSlot",
+      "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
+      "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
+      "Core.System: forward-slash portable relative data paths",
+      "SDLDrv.SDLClient: native portable client defaults",
+      "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+      "ALAudio.ALAudioSubsystem: retail final MusicVolume=0.53",
+      "HGame console: retail final debug mode disabled"
+    ]
+  },
+  "entries": [
+    {
+      "classification": "prototype_baseline",
+      "link_mode": "hardlink",
+      "path": "System/B.u",
+      "sha256": "hb",
+      "size": 100,
+      "source": "prototype",
+      "source_path": "System/B.u"
+    },
+    {
+      "classification": "retail_asset",
+      "link_mode": "copy",
+      "path": "System/a.int",
+      "sha256": "ha",
+      "size": 50,
+      "source": "retail",
+      "source_path": "System/a.int"
+    },
+    {
+      "classification": "generated_retail_native",
+      "link_mode": "generated",
+      "path": "System/Default.ini",
+      "sha256": "hg1",
+      "size": 10,
+      "source": "generated",
+      "source_paths": [
+        "prototype:System/Default.ini",
+        "prototype:System/Default2.ini"
+      ]
+    },
+    {
+      "classification": "generated_retail_native",
+      "link_mode": "generated",
+      "path": "System/DefUser.ini",
+      "sha256": "hg2",
+      "size": 11,
+      "source": "generated",
+      "source_paths": [
+        "retail:System/DefUser.ini"
+      ]
+    }
+  ],
+  "format": "hp2-retail-data-overlay",
+  "policy": {
+    "compatibility": "candidate retail class/package surface; requires complete retail native parity",
+    "cutscenes": "complete retail System/Cutscenes bundle; no prototype raw TXT mixing",
+    "help": "canonical outer Help only; nested help/help excluded",
+    "localization": "retail coherent USA bundle with prototype-only INT fallback",
+    "precedence": "retail changed/identical/retail-only runtime data, then prototype-only fallback",
+    "prohibited": "Windows binaries/installers/scripts, source-control metadata, and debris"
+  },
+  "profile": "full",
+  "schema_version": 2,
+  "summary": {
+    "classification": {
+      "generated_retail_native": 2,
+      "prototype_baseline": 1,
+      "retail_asset": 1
+    },
+    "entry_count": 4,
+    "link_mode": {
+      "copy": 1,
+      "generated": 2,
+      "hardlink": 1
+    },
+    "root": {
+      "System": 4
+    },
+    "source": {
+      "generated": 2,
+      "prototype": 1,
+      "retail": 1
+    }
+  }
+}
