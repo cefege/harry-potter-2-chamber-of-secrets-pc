@@ -441,9 +441,24 @@ pub enum BackendChoice {
 }
 
 impl BackendChoice {
+    /// Matches the plan's own "Device creation" bullet exactly:
+    /// `wgpu::Instance with Backends::from_env().unwrap_or(Backends::
+    /// PRIMARY | Backends::GL)`. Only the `Auto` case consults the
+    /// `WGPU_BACKEND` environment variable (confirmed real, reads that
+    /// exact variable: `wgpu-types-30.0.1/src/backend.rs`'s own
+    /// `Backends::from_env`) -- the explicit `Metal`/`Vulkan`/`Dx12`/
+    /// `Gl` choices are themselves the plan's ini-key-driven way to
+    /// pin one backend ("the ini key ... restricts the backend set",
+    /// the plan's own next sentence), and letting an environment
+    /// variable silently override an explicit ini choice would defeat
+    /// that restriction's whole purpose -- `WGPU_BACKEND` is a
+    /// developer/CI override for the *default* case only, not a
+    /// universal one.
     fn to_wgpu(self) -> wgpu::Backends {
         match self {
-            BackendChoice::Auto => wgpu::Backends::PRIMARY | wgpu::Backends::GL,
+            BackendChoice::Auto => {
+                wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY | wgpu::Backends::GL)
+            }
             BackendChoice::Metal => wgpu::Backends::METAL,
             BackendChoice::Vulkan => wgpu::Backends::VULKAN,
             BackendChoice::Dx12 => wgpu::Backends::DX12,
@@ -620,10 +635,41 @@ pub struct CreatedDevice {
 /// than silently taking whatever the adapter happens to offer. Returns
 /// `None` on total failure (same real-C++-forwarding note as
 /// `request_adapter_sync`).
+/// Matches the plan's "on `None`, retry with `force_fallback_adapter:
+/// false` and `Backends::GL` only" exactly: if `choice`'s own backend
+/// set finds no adapter at all, and `choice` was not itself already
+/// GL-only, this tries once more with a fresh `Instance` built from
+/// `Backends::GL` alone before giving up for real. `force_fallback_
+/// adapter` is already `false` by default on `RequestAdapterOptions`
+/// (confirmed in `wgpu-types-30.0.1/src/adapter.rs`'s own struct
+/// definition -- a plain `bool` field, `..Default::default()` already
+/// used by `request_adapter_raw`), so nothing extra is needed there.
+/// `create_surface` takes `Fn`, not `FnOnce`: the retry needs to call
+/// it a second time against the second, GL-only `Instance` -- every
+/// real caller's closure (e.g. `hp2_rs_wgpu_create`'s, capturing a
+/// `Copy` raw `ns_view` pointer and forwarding it to `macos::
+/// create_surface_from_ns_view`) is trivially re-callable, so this is
+/// not a real constraint on callers, just a tighter bound than the
+/// single-attempt version needed.
 pub fn create_device_sync(
     choice: BackendChoice,
     create_surface: Option<
-        impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError>,
+        impl Fn(&wgpu::Instance) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError>,
+    >,
+) -> Option<CreatedDevice> {
+    if let Some(created) = try_create_device_once(choice, create_surface.as_ref()) {
+        return Some(created);
+    }
+    if choice == BackendChoice::Gl {
+        return None;
+    }
+    try_create_device_once(BackendChoice::Gl, create_surface.as_ref())
+}
+
+fn try_create_device_once(
+    choice: BackendChoice,
+    create_surface: Option<
+        &impl Fn(&wgpu::Instance) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError>,
     >,
 ) -> Option<CreatedDevice> {
     let instance = build_instance(choice);
@@ -1100,6 +1146,43 @@ mod tests {
         );
     }
 
+    // Proves an explicit BackendChoice is genuinely honored end to
+    // end, not silently treated as Auto regardless of what was asked
+    // for -- the gap this test exists to close: create_device_sync's
+    // own control flow (BackendChoice::Metal -> Backends::METAL only
+    // in to_wgpu, no from_env involvement for non-Auto choices) could
+    // have a typo'd match arm or similar that still produces *a*
+    // working device on this Metal-only test machine even if the
+    // chosen backend were silently ignored; asserting the real
+    // CreatedDevice.backend is specifically wgpu::Backend::Metal is
+    // what actually distinguishes "the choice worked" from "any
+    // backend happened to work". macOS-only in practice (this is the
+    // only backend this development machine can honor), but not
+    // `#[cfg(target_os = "macos")]`-gated: it already correctly
+    // reports a real failure (not a false pass) on a machine with no
+    // Metal adapter at all, same as every other `--ignored` test here.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn create_device_sync_honors_an_explicit_backend_choice() {
+        let result = create_device_sync(BackendChoice::Metal, None::<HeadlessSurfaceCreator>);
+        let created = result.expect(
+            "expected BackendChoice::Metal to produce a real device on a machine with a Metal \
+             adapter (this development machine's own M5)",
+        );
+        assert_eq!(
+            created.backend,
+            wgpu::Backend::Metal,
+            "expected the explicit BackendChoice::Metal request to produce a device actually \
+             reporting the Metal backend, not some other backend chosen as if Auto had been \
+             requested instead"
+        );
+        println!(
+            "BackendChoice::Metal honored: created device on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
     #[test]
     fn backend_name_covers_every_plan_named_backend() {
         assert_eq!(backend_name(wgpu::Backend::Metal), "Metal");
@@ -1107,6 +1190,43 @@ mod tests {
         assert_eq!(backend_name(wgpu::Backend::Dx12), "Dx12");
         assert_eq!(backend_name(wgpu::Backend::Gl), "Gl");
         assert_eq!(backend_name(wgpu::Backend::BrowserWebGpu), "BrowserWebGpu");
+    }
+
+    // Pins the real C++/Rust FFI contract (`BackendChoice::
+    // from_ffi_discriminant`'s own doc): `WgpuDrv.cpp`'s `StaticConstructor`
+    // registers a UEnum with members in exactly this order, and this
+    // test is what would catch a future accidental reordering on
+    // either side before it silently started selecting the wrong
+    // backend from a correctly-set ini value. No GPU needed.
+    #[test]
+    fn from_ffi_discriminant_matches_the_real_ue1_enum_order() {
+        assert_eq!(
+            BackendChoice::from_ffi_discriminant(0),
+            Some(BackendChoice::Auto)
+        );
+        assert_eq!(
+            BackendChoice::from_ffi_discriminant(1),
+            Some(BackendChoice::Metal)
+        );
+        assert_eq!(
+            BackendChoice::from_ffi_discriminant(2),
+            Some(BackendChoice::Vulkan)
+        );
+        assert_eq!(
+            BackendChoice::from_ffi_discriminant(3),
+            Some(BackendChoice::Dx12)
+        );
+        assert_eq!(
+            BackendChoice::from_ffi_discriminant(4),
+            Some(BackendChoice::Gl)
+        );
+        assert_eq!(
+            BackendChoice::from_ffi_discriminant(5),
+            None,
+            "expected an out-of-range discriminant (one past the real UEnum's last member) to \
+             return None, not silently wrap to a valid variant"
+        );
+        assert_eq!(BackendChoice::from_ffi_discriminant(u32::MAX), None);
     }
 
     // Plan's own V2 verification: "cargo test -p hp2-wgpu validates

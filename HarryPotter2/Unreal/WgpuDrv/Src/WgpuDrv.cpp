@@ -133,10 +133,18 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 		// actually tried, not a hardcoded "Auto" that would have been
 		// wrong as soon as this ini key became real (an earlier
 		// version of this message always said "Auto" unconditionally,
-		// from before the Backend config property existed).
+		// from before the Backend config property existed). For an
+		// out-of-range Backend value, names what hp2_rs_wgpu_create
+		// itself actually falls back to (BackendChoice::
+		// from_ffi_discriminant returning None -> Auto), not "Unknown"
+		// -- an earlier version of this message said "Unknown" there
+		// instead, misreporting what was actually attempted (caught on
+		// review).
 		static const TCHAR* BackendNames[] = { TEXT("Auto"), TEXT("Metal"), TEXT("Vulkan"), TEXT("Dx12"), TEXT("Gl") };
-		const TCHAR* TriedBackend = ( Backend < ARRAY_COUNT(BackendNames) ) ? BackendNames[Backend] : TEXT("Unknown");
-		appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls)"), TriedBackend );
+		if( Backend < ARRAY_COUNT(BackendNames) )
+			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls)"), BackendNames[Backend] );
+		else
+			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried Auto, invalid Backend=%i)"), Backend );
 	}
 
 	RustDevice = Result.handle;
