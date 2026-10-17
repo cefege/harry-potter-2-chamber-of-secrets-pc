@@ -13,6 +13,7 @@
 //! not a gap in this port.
 
 pub mod atomic;
+pub mod migrate;
 pub mod model;
 pub mod policy;
 pub mod saves;

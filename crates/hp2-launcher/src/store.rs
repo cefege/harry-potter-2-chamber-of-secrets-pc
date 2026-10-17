@@ -224,7 +224,7 @@ pub(crate) fn bool_text(value: bool) -> &'static str {
 }
 
 /// Replaces `ValidCap`.
-fn valid_cap(value: i32) -> bool {
+pub(crate) fn valid_cap(value: i32) -> bool {
     FRAME_RATE_LIMIT_VALUES.contains(&value)
 }
 
