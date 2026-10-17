@@ -141,13 +141,15 @@ pub fn request_adapter_sync(choice: BackendChoice) -> Option<(String, wgpu::Back
 
 /// Result of `create_device_sync`. A plain struct instead of a growing
 /// tuple: positional fields were getting hard to read correctly at
-/// call sites. Holds the `Instance` (and `Surface`, if one was
-/// requested) alongside the `Device`/`Queue` so the whole group stays
-/// alive and drops together -- dropping the `Instance` or `Surface`
-/// early while the `Device` is still in use would be a use-after-free
-/// at the API boundary wgpu cannot catch for us.
+/// call sites. Holds the `Instance`/`Adapter` (and `Surface`, if one
+/// was requested) alongside the `Device`/`Queue` so the whole group
+/// stays alive and drops together -- dropping the `Instance` early
+/// while the `Device`/`Surface` are still in use would be a use-
+/// after-free at the API boundary wgpu cannot catch for us. Field
+/// order is drop order (Rust drops struct fields in declaration
+/// order): `surface` first, `instance` last, so the root owner of
+/// everything outlives every resource built from it.
 pub struct CreatedDevice {
-    pub instance: wgpu::Instance,
     /// `Some` only if `create_device_sync` was given a
     /// `create_surface` closure that succeeded. Caller-owned window
     /// resources behind the surface (e.g. the `SDL_MetalView` on
@@ -157,6 +159,17 @@ pub struct CreatedDevice {
     pub surface: Option<wgpu::Surface<'static>>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    /// Kept (not dropped once `request_device` returns -- it takes
+    /// `&self`, not `self`) so callers can query real
+    /// surface/adapter compatibility themselves, e.g.
+    /// `surface.get_capabilities(&adapter)`, rather than only trusting
+    /// that `surface.is_some()` means something (it doesn't by
+    /// itself: a failed `create_surface` closure already makes
+    /// `create_device_sync` return `None` before this struct exists
+    /// at all, so `surface.is_some()` alone is tautological once you
+    /// have a `CreatedDevice` -- caught on review, see this crate's
+    /// own tests for the real check).
+    pub adapter: wgpu::Adapter,
     pub adapter_name: String,
     pub backend: wgpu::Backend,
     /// The adapter's own limits, which `required_limits` was set to --
@@ -165,6 +178,7 @@ pub struct CreatedDevice {
     /// can check that guarantee against the real API instead of taking
     /// it on faith).
     pub adapter_limits: wgpu::Limits,
+    pub instance: wgpu::Instance,
 }
 
 /// Replaces the device/queue-request half of `WgpuDrv`'s future `Init`
@@ -222,13 +236,14 @@ pub fn create_device_sync(
     }))
     .ok()?;
     Some(CreatedDevice {
-        instance,
         surface,
         device,
         queue,
+        adapter,
         adapter_name: info.name,
         backend: info.backend,
         adapter_limits,
+        instance,
     })
 }
 

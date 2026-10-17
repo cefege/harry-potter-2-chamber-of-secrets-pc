@@ -2780,13 +2780,22 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
 /// `compatible_surface` check is real (an earlier version of this
 /// function built its own throwaway `Instance` disconnected from any
 /// device -- caught on review, see `hp2-wgpu`'s own `CreatedDevice`/
-/// `create_device_sync` doc for the detail). Drops the whole
-/// `CreatedDevice` (device, queue, surface, instance, in that
-/// declaration order -- Rust drops struct fields in declaration
-/// order) before returning, proving nothing about keeping a surface
-/// alive across calls; `hp2_rs_wgpu_create`/`destroy` remain the real
-/// create/destroy pair for `UWgpuRenderDevice`'s own handle once that
-/// integration lands.
+/// `create_device_sync` doc for the detail). Checks
+/// `surface.get_capabilities(&adapter).formats` is non-empty -- an
+/// empty list is wgpu's own documented signal that "the surface is
+/// incompatible with the adapter" (`wgpu-types-30.0.1/src/surface.rs`'s
+/// own doc comment on `SurfaceCapabilities::formats`). Checking only
+/// `created.surface.is_some()` would have been vacuous: a failed
+/// `create_surface` closure already makes `create_device_sync` return
+/// `None` before any `CreatedDevice` exists, so `surface` is
+/// guaranteed `Some` on every path that reaches this point regardless
+/// -- caught on review, not self-caught. `CreatedDevice`'s whole group
+/// (surface, device, queue, adapter, instance, in that declaration/
+/// drop order -- Rust drops struct fields in declaration order, root
+/// owner `instance` last) drops when this function returns, proving
+/// nothing about keeping a surface alive across calls;
+/// `hp2_rs_wgpu_create`/`destroy` remain the real create/destroy pair
+/// for `UWgpuRenderDevice`'s own handle once that integration lands.
 ///
 /// # Safety
 /// `ns_view` must be a valid, non-null pointer to an `NSView` (from
@@ -2809,7 +2818,11 @@ pub unsafe extern "C" fn hp2_rs_wgpu_create_surface_from_ns_view_for_testing(
             else {
                 return false;
             };
-            created.surface.is_some()
+            let Some(surface) = created.surface.as_ref() else {
+                return false;
+            };
+            let capabilities = surface.get_capabilities(&created.adapter);
+            !capabilities.formats.is_empty()
         },
     )
 }
