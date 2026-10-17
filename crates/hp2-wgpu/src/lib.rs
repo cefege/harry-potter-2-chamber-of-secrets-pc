@@ -2,29 +2,15 @@
 //! `ThirdParty/UT99VulkanDrv` with one `wgpu`-backed render device.
 //! Phase 3.2 of `local://rust-inplace-port-plan.md`.
 //!
-//! **Scope of this crate today: adapter/device creation, plus macOS
-//! window-surface creation from a raw `NSView*`, wired into the real
-//! `UWgpuRenderDevice::Init`.** Wired to `hp2-ffi` behind the
-//! `renderer-wgpu` feature, consumed by the real `HarryPotter2/Unreal/
-//! WgpuDrv` C++ package (`UWgpuRenderDevice : URenderDevice`,
-//! registered as `WgpuDrv.WgpuRenderDevice`, gated behind the
-//! `HP2_ENABLE_WGPU_DRIVER` CMake option, default OFF). Verified end
-//! to end on real hardware, not assumed: `Init` calls
-//! `SDL_Metal_CreateView` on the real game window
-//! (`Viewport->GetWindow()`) and passes the resulting `NSView*` to
-//! `hp2_rs_wgpu_create`, which shares one `wgpu::Instance` between
-//! surface and adapter/device creation; `Exit` tears both down in the
-//! safe order (device/surface before the `SDL_MetalView`). A real
-//! `hp2_game -window` process launch with `[Engine.Engine]
-//! GameRenderDevice=WgpuDrv.WgpuRenderDevice` logs `WgpuDrv: adapter
-//! "Apple M5" backend Metal` with no "continuing headless" fallback
-//! line (`Build/run_wgpu_smoke.py`, this machine's real GPU, confirmed
-//! present via `system_profiler SPDisplaysDataType` before this crate
-//! was started) -- the absence of that fallback line is itself the
-//! evidence the real surface path, not the headless one, ran.
-//! `request_adapter_sync`/`create_device_sync`'s own `#[ignore]`d
-//! tests (CI runners have no GPU, see their own doc) cover the
-//! headless half at the Rust level directly.
+//! **Scope of this crate today: adapter/device creation, macOS
+//! window-surface creation from a raw `NSView*`, and a real per-tick
+//! configure/acquire/clear/present loop (`lock_frame`/`unlock_frame`),
+//! all wired into the real `UWgpuRenderDevice::Init`/`Lock`/`Unlock`/
+//! `Exit`.** Wired to `hp2-ffi` behind the `renderer-wgpu` feature,
+//! consumed by the real `HarryPotter2/Unreal/WgpuDrv` C++ package
+//! (`UWgpuRenderDevice : URenderDevice`, registered as
+//! `WgpuDrv.WgpuRenderDevice`, gated behind the
+//! `HP2_ENABLE_WGPU_DRIVER` CMake option, default OFF).
 //!
 //! `create_device_sync` shares one `Instance` between surface and
 //! adapter creation, as wgpu's `compatible_surface` check requires (an
@@ -41,26 +27,59 @@
 //! own test, which was vacuous -- caught on review, fixed in the
 //! production function itself, not just the test).
 //!
-//! `configure_and_present_once` proves the stronger claim the above
-//! paragraph's capability check alone could not: `surface.configure`
-//! plus `get_current_texture`/`Queue::present` actually succeeding on
-//! a real window, not just the surface being reported compatible.
-//! `Tests/WgpuSurfaceTests.cpp` exercises it against a real SDL
-//! window; getting that to pass reliably in this project's own dev
-//! environment needed several precautions (activation hints,
-//! `SDL_WINDOW_ALWAYS_ON_TOP`, and polling the call itself for up to
-//! ~2 seconds) documented in detail in that file, where wgpu-hal's own
-//! Metal-backend occlusion check (a workaround for gfx-rs/wgpu#8309)
-//! turned out to need real wall-clock time to see the window as
-//! visible even with those precautions applied -- a *persistent*
-//! failure there is treated as an environment gap (ctest
-//! `SKIP_RETURN_CODE 77`), not a hard failure, but every run so far in
-//! this project's own environment has passed for real, not skipped.
+//! `lock_frame`/`unlock_frame` prove the stronger claim the capability
+//! check alone could not: `surface.configure` plus `get_current_
+//! texture`/`Queue::present` actually succeeding on a real window, not
+//! just the surface being reported compatible. `Tests/
+//! WgpuSurfaceTests.cpp` exercises the real `hp2_rs_wgpu_lock`/
+//! `hp2_rs_wgpu_unlock` pair against a real SDL window and passes
+//! reliably on this project's own dev machine, confirmed over several
+//! repeated runs; getting there needed several precautions
+//! (`SDL_HINT_MAC_BACKGROUND_APP`, `SDL_RaiseWindow`,
+//! `SDL_WINDOW_ALWAYS_ON_TOP`, and polling the lock call itself for up
+//! to ~2 seconds) documented in detail in that file. Which single
+//! element of that combination is actually necessary was not isolated
+//! (no ablation study was run); a *persistent* `Occluded` outcome
+//! after that polling window is treated as an environment gap (ctest
+//! `SKIP_RETURN_CODE 77` on that one check) rather than a hard
+//! failure, but every run so far in this project's own dev environment
+//! has passed for real, not skipped.
 //!
-//! Still open, not started: resize handling, all WGSL shader
-//! transcription, and real draw-call forwarding for any of
-//! `URenderDevice`'s pure virtuals -- `configure_and_present_once`
-//! presents an empty (auto-cleared) frame, nothing drawn yet.
+//! That same test-harness pass does **not** mean the real game
+//! presents frames, and this doc does not claim otherwise: a real
+//! `hp2_game -window -testticks=60` launch (`Build/run_wgpu_smoke.py`)
+//! on the same machine got `FrameOutcome::Occluded` on all 60 of 60
+//! real per-tick `Lock` calls -- zero frames ever actually reached the
+//! screen in that run, confirmed via the real cumulative tally
+//! `Lock` itself logs every call (`WgpuDrv: Lock outcome=... tally
+//! presented=... occluded=...`), not inferred from anything indirect.
+//! The most likely difference from the passing test-harness case is
+//! that a real `hp2_game -window` launch applies none of the
+//! precautions above and makes only one attempt per tick (deliberately
+//! -- blocking the real game loop for up to ~2 seconds on every single
+//! frame to work around this would be a bad trade even if it helped,
+//! since a frame failing to acquire is already an expected, transient
+//! condition in real usage that the next tick's own `Lock` call
+//! retries for free), but this was not isolated either.
+//! `run_wgpu_smoke.py` reports this run as `blocked`, not `pass` --
+//! deliberately not suppressed via ctest's `SKIP_RETURN_CODE` either,
+//! since that would hide a real, current gap behind a green summary
+//! (an earlier version of this change did exactly that to keep a
+//! build directory's ctest count looking stable, caught on review as
+//! the wrong tradeoff before it was committed).
+//!
+//! `request_adapter_sync`/`create_device_sync`'s own `#[ignore]`d
+//! tests (CI runners have no GPU, see their own doc) cover the
+//! headless half at the Rust level directly.
+//!
+//! Still open, not started: resize handling beyond what `lock_frame`'s
+//! own per-call drawable-size query already gets for free, all WGSL
+//! shader transcription, real draw-call forwarding for any of
+//! `URenderDevice`'s pure virtuals (`lock_frame` presents an empty,
+//! cleared frame, nothing drawn yet), and -- the open question this
+//! doc's own "zero frames presented in a real launch" paragraph above
+//! leaves unresolved -- why a real, non-test-harness launch behaves
+//! differently from the dedicated ctest on the same machine.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
@@ -286,14 +305,14 @@ pub fn create_device_sync(
     })
 }
 
-/// Specific result of `configure_and_present_once`, not a bare bool:
-/// a bool here would hide exactly which step failed and which real
+/// Specific result of `lock_frame`, not a bare bool: a bool would
+/// hide exactly which step failed and which real
 /// `wgpu::CurrentSurfaceTexture` variant was observed -- needed both
 /// to diagnose failures (a bare bool hid the real cause of this
-/// function's own first failing run, caught on review before the
-/// false "confirmed empirically" comment that guessed at the cause
-/// ever landed) and so this crate's own callers never have to guess
-/// either.
+/// enum's own predecessor's first failing run, caught on review
+/// before a comment that guessed at the cause, wrongly claiming it
+/// was "confirmed empirically", ever landed) and so this crate's own
+/// callers never have to guess either.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameOutcome {
@@ -316,59 +335,19 @@ pub enum FrameOutcome {
     Lost = 6,
     /// `get_current_texture` returned `Validation`.
     Validation = 7,
-    /// Not returned by `configure_and_present_once` itself -- reserved
-    /// for its FFI wrapper (`hp2-ffi`'s `hp2_rs_wgpu_present_once_for_
-    /// testing`) to report a null `handle` or a caught panic (panics
-    /// never cross FFI in this codebase), without reusing any of the
-    /// above codes to mean something they do not.
+    /// Not returned by `lock_frame` itself -- reserved for its FFI
+    /// wrapper (`hp2-ffi`'s `hp2_rs_wgpu_lock`) to report a null
+    /// `handle`, without reusing any of the above codes to mean
+    /// something they do not.
     InternalError = 8,
-}
-
-/// Stronger proof than "the surface is compatible with the adapter"
-/// (which `create_device_sync` itself already enforces): actually
-/// configures the surface, acquires a frame, and presents it --
-/// exactly the sequence any real renderer's per-frame loop will need,
-/// just with nothing drawn (an empty command buffer; `Queue::present`'s
-/// own doc says an un-submitted-to texture "will be cleared
-/// automatically before presenting", so this still exercises the real
-/// swapchain path end to end, not a no-op). No C++ caller yet -- there
-/// is no draw-call forwarding for `URenderDevice`'s pure virtuals to
-/// drive this from yet (`hp2-wgpu`'s own module doc) -- this exists
-/// for the plan's "stronger surface-working proof" item, exercised
-/// directly from a C++ ctest against a real SDL window.
-///
-/// `Suboptimal` counts as `Presented`: it is still a real, presentable
-/// frame -- `Surface::get_current_texture`'s own doc says so, just
-/// recommends reconfiguring soon.
-pub fn configure_and_present_once(
-    created: &CreatedDevice,
-    width: u32,
-    height: u32,
-) -> FrameOutcome {
-    let Some(surface) = created.surface.as_ref() else {
-        return FrameOutcome::NoSurface;
-    };
-    let Some(config) = surface.get_default_config(&created.adapter, width, height) else {
-        return FrameOutcome::NoDefaultConfig;
-    };
-    surface.configure(&created.device, &config);
-    let frame = match surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-        wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-        wgpu::CurrentSurfaceTexture::Timeout => return FrameOutcome::Timeout,
-        wgpu::CurrentSurfaceTexture::Occluded => return FrameOutcome::Occluded,
-        wgpu::CurrentSurfaceTexture::Outdated => return FrameOutcome::Outdated,
-        wgpu::CurrentSurfaceTexture::Lost => return FrameOutcome::Lost,
-        wgpu::CurrentSurfaceTexture::Validation => return FrameOutcome::Validation,
-    };
-    let encoder = created
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("hp2-wgpu present-once encoder"),
-        });
-    created.queue.submit(std::iter::once(encoder.finish()));
-    created.queue.present(frame);
-    FrameOutcome::Presented
+    /// Not returned by `lock_frame` itself -- reserved for its FFI
+    /// wrapper to pass as `guard`'s `on_panic` value, distinct from
+    /// `InternalError`, so a caught panic (`hp2-ffi-support::guard`
+    /// logs it via `log::error!`, which a standalone ctest binary may
+    /// have no logger installed to show) is still distinguishable
+    /// from a plain null-handle call in the returned code itself, not
+    /// only in a log that might not be visible.
+    Panicked = 9,
 }
 
 /// One in-flight frame between `lock_frame` and `unlock_frame`:
@@ -389,6 +368,26 @@ struct InProgressFrame {
     encoder: wgpu::CommandEncoder,
 }
 
+/// Per-live-`CreatedDevice` tally of every `lock_frame` outcome, not
+/// just the latest one: a single real/production run can mix
+/// `Presented` and `Occluded` calls across many ticks (confirmed on
+/// this project's own real `hp2_game -window -testticks=60` run,
+/// which got `Occluded` on all 60 of 60 ticks -- see `WgpuDrv.h`'s
+/// own doc), so a single last-outcome value would hide that a run
+/// consisting entirely of failures still "completed" without ever
+/// actually drawing anything. `UWgpuRenderDevice::Exit` logs these
+/// counts; `Build/run_wgpu_smoke.py` uses that log line to tell a run
+/// that really presented frames apart from one that merely didn't
+/// crash while trying to.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrameCounts {
+    pub presented: u32,
+    pub occluded: u32,
+    pub outdated: u32,
+    pub other_failure: u32,
+}
+
 /// Per-`CreatedDevice` state that must persist across the
 /// `lock_frame`/`unlock_frame` pair (`UWgpuRenderDevice::Lock`/
 /// `Unlock`'s future Rust half) and across repeated Lock/Unlock
@@ -402,6 +401,7 @@ struct InProgressFrame {
 pub struct RenderLoop {
     configured_size: Option<(u32, u32)>,
     in_progress: Option<InProgressFrame>,
+    counts: FrameCounts,
 }
 
 impl Default for RenderLoop {
@@ -415,7 +415,12 @@ impl RenderLoop {
         Self {
             configured_size: None,
             in_progress: None,
+            counts: FrameCounts::default(),
         }
+    }
+
+    pub fn counts(&self) -> FrameCounts {
+        self.counts
     }
 }
 
@@ -434,10 +439,18 @@ impl RenderLoop {
 /// function returns, so a draw-call forwarder landing later will need
 /// its own render pass, not this clear pass still open.
 ///
+/// `Outdated` additionally clears `loop_state.configured_size`, so the
+/// *next* `lock_frame` call reconfigures rather than repeating the
+/// same stale configuration -- `Surface::get_current_texture`'s own
+/// doc says exactly that ("Call Surface::configure() and try again")
+/// for this code.
+///
 /// Fails (and leaves `loop_state.in_progress` untouched, i.e. `None`
-/// or whatever a previous successful `lock_frame` left it as) on the
-/// same real conditions `configure_and_present_once` does -- see
-/// `FrameOutcome`'s own doc for what each code means.
+/// or whatever a previous successful `lock_frame` left it as) on a
+/// non-`None` surface whose format/present-mode list is empty, or on
+/// `get_current_texture` returning anything other than `Success`/
+/// `Suboptimal` -- see `FrameOutcome`'s own doc for what each code
+/// means. Every outcome is tallied into `loop_state.counts()`.
 pub fn lock_frame(
     created: &CreatedDevice,
     loop_state: &mut RenderLoop,
@@ -446,10 +459,12 @@ pub fn lock_frame(
     clear_color: wgpu::Color,
 ) -> FrameOutcome {
     let Some(surface) = created.surface.as_ref() else {
+        loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
     };
     if loop_state.configured_size != Some((width, height)) {
         let Some(config) = surface.get_default_config(&created.adapter, width, height) else {
+            loop_state.counts.other_failure += 1;
             return FrameOutcome::NoDefaultConfig;
         };
         surface.configure(&created.device, &config);
@@ -458,11 +473,27 @@ pub fn lock_frame(
     let texture = match surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(texture) => texture,
         wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
-        wgpu::CurrentSurfaceTexture::Timeout => return FrameOutcome::Timeout,
-        wgpu::CurrentSurfaceTexture::Occluded => return FrameOutcome::Occluded,
-        wgpu::CurrentSurfaceTexture::Outdated => return FrameOutcome::Outdated,
-        wgpu::CurrentSurfaceTexture::Lost => return FrameOutcome::Lost,
-        wgpu::CurrentSurfaceTexture::Validation => return FrameOutcome::Validation,
+        wgpu::CurrentSurfaceTexture::Timeout => {
+            loop_state.counts.other_failure += 1;
+            return FrameOutcome::Timeout;
+        }
+        wgpu::CurrentSurfaceTexture::Occluded => {
+            loop_state.counts.occluded += 1;
+            return FrameOutcome::Occluded;
+        }
+        wgpu::CurrentSurfaceTexture::Outdated => {
+            loop_state.configured_size = None;
+            loop_state.counts.outdated += 1;
+            return FrameOutcome::Outdated;
+        }
+        wgpu::CurrentSurfaceTexture::Lost => {
+            loop_state.counts.other_failure += 1;
+            return FrameOutcome::Lost;
+        }
+        wgpu::CurrentSurfaceTexture::Validation => {
+            loop_state.counts.other_failure += 1;
+            return FrameOutcome::Validation;
+        }
     };
     let view = texture
         .texture
@@ -492,6 +523,7 @@ pub fn lock_frame(
         view,
         encoder,
     });
+    loop_state.counts.presented += 1;
     FrameOutcome::Presented
 }
 

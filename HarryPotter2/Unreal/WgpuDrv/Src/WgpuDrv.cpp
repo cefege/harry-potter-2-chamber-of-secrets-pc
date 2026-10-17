@@ -87,6 +87,16 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 			debugf( NAME_Init, TEXT("WgpuDrv: SDL_Metal_CreateView failed, continuing headless") );
 		}
 	}
+	else
+	{
+		// Viewport->GetWindow() returning NULL silently skipped this
+		// whole block before this log existed, so a later success
+		// line ("adapter ...") looked identical whether or not a real
+		// surface was ever attempted -- AGENTS.md's Forbidden Actions
+		// rules out swallowing a real condition like this to make a
+		// run look clean (caught on review).
+		debugf( NAME_Init, TEXT("WgpuDrv: Viewport->GetWindow() returned NULL, continuing headless") );
+	}
 #else
 	void* NsView = NULL;
 #endif
@@ -108,6 +118,14 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	debugf( NAME_Init, TEXT("WgpuDrv: adapter \"%ls\" backend %ls"),
 		*Utf8SpanToFString( Result.adapter_name, Result.adapter_name_len ),
 		*Utf8SpanToFString( Result.backend_name, Result.backend_name_len ) );
+	// Positive evidence a real window surface was created, not just
+	// the absence of a "continuing headless" line -- the latter alone
+	// is not proof: a NULL Viewport->GetWindow() (now logged above
+	// too) would also leave this function on the headless path with
+	// no "continuing headless" line ever printed, making that
+	// absence alone misleading evidence (caught on review).
+	if( NsView )
+		debugf( NAME_Init, TEXT("WgpuDrv: surface created on SDL_MetalView") );
 	return 1;
 	unguard;
 }
@@ -124,6 +142,21 @@ void UWgpuRenderDevice::Exit()
 	guard(UWgpuRenderDevice::Exit);
 	if( RustDevice )
 	{
+		// Queried before destroy: the counts live inside RustDevice's
+		// own RenderLoop, gone once hp2_rs_wgpu_destroy runs. Correct
+		// for a real interactive shutdown (window close/quit), but
+		// confirmed NOT reached at all in a -testticks run (verified
+		// directly: an unconditional debugf placed at the very top of
+		// this function never printed in a real -testticks=60 run --
+		// appRequestExit's fast-exit path does not reach
+		// USDLViewport::Destroy/RenDev->Exit the way a normal
+		// interactive quit does), so Lock below also logs the running
+		// tally every call -- Build/run_wgpu_smoke.py reads that one,
+		// not this one, since -testticks is exactly the scenario this
+		// summary line cannot help with.
+		const FrameCounts Counts = hp2_rs_wgpu_frame_counts( RustDevice );
+		debugf( NAME_Init, TEXT("WgpuDrv: frames presented=%u occluded=%u outdated=%u other_failure=%u"),
+			Counts.presented, Counts.occluded, Counts.outdated, Counts.other_failure );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -155,22 +188,59 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 	// RenderLockFlags go unused here for now, same as every other
 	// still-stub virtual in this class.
 	//
-	// Viewport->SizeX/SizeY, not a separate stored width/height:
-	// XOpenGL's own Lock reads the same fields the same way
-	// (`Max(1, Viewport->SizeX)`), confirmed before using this
-	// pattern. SetRes does not need to push a new size into Rust
-	// separately -- the next Lock call simply reads the already-
-	// updated Viewport fields, and hp2_rs_wgpu_lock only reconfigures
-	// the surface when the requested size actually changed.
+	// Real physical pixel dimensions, not Viewport->SizeX/SizeY
+	// (logical/point units): on a Retina display those differ by the
+	// backing scale factor, and configuring the swapchain at the
+	// logical size would under-run the real drawable by that factor.
+	// XOpenGL's own present path makes exactly this distinction --
+	// SDL_GL_GetDrawableSize for the real blit target, Viewport->
+	// SizeX/SizeY only for its own internal FBO sizing -- confirmed by
+	// reading XOpenGL.cpp before using this pattern, not guessed (an
+	// earlier version of this function used Viewport->SizeX/SizeY
+	// directly, matching XOpenGL's FBO-sizing use but not its present-
+	// time one, caught on review). SetRes does not need to push a new
+	// size into Rust separately -- the next Lock call simply queries
+	// the window's current drawable size again, and hp2_rs_wgpu_lock
+	// only reconfigures the surface when the requested size actually
+	// changed.
+#if MACOSX
+	INT PixelWidth = 0, PixelHeight = 0;
+	if( SDL_Window* Window = (SDL_Window*)Viewport->GetWindow() )
+		SDL_Metal_GetDrawableSize( Window, &PixelWidth, &PixelHeight );
+	if( PixelWidth <= 0 || PixelHeight <= 0 )
+	{
+		// No window, or SDL reported nothing useful -- not expected
+		// once Lock is reachable at all (Init already required a
+		// live window to get this far with a real surface), but fall
+		// back to the logical size rather than passing 0 through
+		// (Max(1, ...) below still guards the final values either
+		// way).
+		PixelWidth = Viewport->SizeX;
+		PixelHeight = Viewport->SizeY;
+	}
+#else
+	const INT PixelWidth = Viewport->SizeX;
+	const INT PixelHeight = Viewport->SizeY;
+#endif
 	const DWORD Outcome = hp2_rs_wgpu_lock( RustDevice,
-		(DWORD)Max( 1, Viewport->SizeX ), (DWORD)Max( 1, Viewport->SizeY ),
+		(DWORD)Max( 1, PixelWidth ), (DWORD)Max( 1, PixelHeight ),
 		ScreenClear.X, ScreenClear.Y, ScreenClear.Z, ScreenClear.W );
-	if( Outcome != 0 )
-		// NAME_Dev: the only general developer-log category that
-		// exists and fits here (UnNames.h's REGISTER_NAME list has no
-		// graphics-specific one; a fabricated NAME_DevGraphics was
-		// caught here before this ever compiled).
-		debugf( NAME_Dev, TEXT("WgpuDrv: Lock did not begin a frame (outcome code %i)"), Outcome );
+	// Logged every call, success or failure, with the running tally --
+	// not only on failure. Exit's own tally log (WgpuDrv.cpp's own
+	// Exit comment) is confirmed unreachable in a -testticks run
+	// (appRequestExit's fast-exit path skips RenDev->Exit entirely),
+	// so Build/run_wgpu_smoke.py needs a per-tick line it can rely on
+	// seeing regardless of how the process exits; this is that line
+	// (caught on review: an earlier version only logged on failure,
+	// which would have given run_wgpu_smoke.py nothing to read at all
+	// in exactly the all-Occluded case it most needs to detect).
+	// NAME_Dev: the only general developer-log category that exists
+	// and fits here (UnNames.h's REGISTER_NAME list has no graphics-
+	// specific one; a fabricated NAME_DevGraphics was caught here
+	// before this ever compiled).
+	const FrameCounts Counts = hp2_rs_wgpu_frame_counts( RustDevice );
+	debugf( NAME_Dev, TEXT("WgpuDrv: Lock outcome=%u tally presented=%u occluded=%u outdated=%u other_failure=%u"),
+		Outcome, Counts.presented, Counts.occluded, Counts.outdated, Counts.other_failure );
 	unguard;
 }
 

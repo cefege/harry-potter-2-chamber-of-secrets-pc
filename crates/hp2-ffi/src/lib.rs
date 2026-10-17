@@ -2678,11 +2678,19 @@ pub unsafe extern "C" fn hp2_rs_audio_find_least_important_sound(
 /// so `hp2_rs_wgpu_create`'s result can point into memory the handle
 /// itself owns, valid for the handle's whole lifetime -- not a
 /// temporary that would dangle the moment the function returns.
+/// Field order is drop order (Rust drops struct fields in declaration
+/// order): `render_loop` first, `created` last. `render_loop` can
+/// hold an in-flight `wgpu::SurfaceTexture`/`CommandEncoder` (e.g. if
+/// `Exit` runs between a `Lock` and its matching `Unlock`) that
+/// borrows from `created`'s own `Surface`/`Device`/`Instance` --
+/// dropping `created` first would drop those out from under the
+/// still-held frame, the same drop-order hazard `CreatedDevice`
+/// itself was fixed for (caught on review, not self-caught).
 #[cfg(feature = "renderer-wgpu")]
 struct WgpuHandle {
+    render_loop: hp2_wgpu::RenderLoop,
     created: hp2_wgpu::CreatedDevice,
     backend_name: String,
-    render_loop: hp2_wgpu::RenderLoop,
 }
 
 /// Result of `hp2_rs_wgpu_create`. `handle` is null on total failure
@@ -2753,21 +2761,36 @@ pub unsafe extern "C" fn hp2_rs_wgpu_create(ns_view: *mut c_void) -> FfiWgpuCrea
         let created = {
             // No window-surface path on this platform yet (hp2-wgpu's
             // `macos` module is macOS-only -- see its own doc for
-            // why); a non-null ns_view here would be a caller bug, not
-            // something this function can act on, so it is silently
-            // ignored rather than causing total failure.
-            let _ = ns_view;
-            let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
-            hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+            // why). A non-null ns_view here is unreachable from the
+            // real C++ call site today (WgpuDrv.cpp only ever builds
+            // one under #if MACOSX), but if it ever happened it would
+            // be a caller bug silently producing a device that can
+            // never present to the view the caller asked for --
+            // AGENTS.md's Forbidden Actions rules out swallowing that
+            // rather than failing loudly (an earlier version of this
+            // branch did exactly that, caught on review). Logged, not
+            // just failed: the real game does install a log sink
+            // (SDLLaunch.cpp's hp2_rs_set_log), so this is visible
+            // there even though standalone ctest binaries that never
+            // call hp2_rs_set_log will not see it.
+            if !ns_view.is_null() {
+                log::warn!(
+                    "hp2_rs_wgpu_create: non-null ns_view on a platform with no window-surface path, failing rather than silently continuing headless"
+                );
+                None
+            } else {
+                let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
+                hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+            }
         };
         let Some(created) = created else {
             return FFI_WGPU_CREATE_FAILURE;
         };
         let backend_name = hp2_wgpu::backend_name(created.backend).to_string();
         let handle = Box::new(WgpuHandle {
+            render_loop: hp2_wgpu::RenderLoop::new(),
             created,
             backend_name,
-            render_loop: hp2_wgpu::RenderLoop::new(),
         });
         let adapter_name = handle.created.adapter_name.as_ptr();
         let adapter_name_len = handle.created.adapter_name.len();
@@ -2800,47 +2823,6 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
     })
 }
 
-/// Testing-only: configures `handle`'s surface, acquires a frame, and
-/// presents it. Returns `hp2_wgpu::FrameOutcome` as a raw `u32`
-/// (`0` is `Presented`, the only success code -- see that enum's own
-/// doc for every other code's meaning) rather than a bare bool: a
-/// bare bool hid the real cause of this function's own first failing
-/// run (caught on review before a comment guessing at the cause, and
-/// wrongly claiming it was "confirmed empirically", ever landed). No
-/// production C++ caller yet -- there is no draw-call forwarding for
-/// `URenderDevice`'s pure virtuals to drive this from yet
-/// (`hp2-wgpu`'s own module doc); this exists for the plan's
-/// "stronger surface-working proof" item, called directly from a C++
-/// ctest against a real SDL window and a `handle` that was itself
-/// created with a non-null `ns_view`.
-///
-/// # Safety
-/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
-/// yet destroyed), created with a non-null `ns_view` (a `handle`
-/// created headless has no surface and this always returns
-/// `NoSurface` for it, but is not itself unsound to call). Must be
-/// called on the application's main thread (AppKit requirement, same
-/// as surface creation itself).
-#[cfg(feature = "renderer-wgpu")]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hp2_rs_wgpu_present_once_for_testing(
-    handle: *mut c_void,
-    width: u32,
-    height: u32,
-) -> u32 {
-    guard(
-        "hp2_rs_wgpu_present_once_for_testing",
-        hp2_wgpu::FrameOutcome::InternalError as u32,
-        move || {
-            if handle.is_null() {
-                return hp2_wgpu::FrameOutcome::InternalError as u32;
-            }
-            let handle = unsafe { &*(handle as *mut WgpuHandle) };
-            hp2_wgpu::configure_and_present_once(&handle.created, width, height) as u32
-        },
-    )
-}
-
 /// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`.
 /// `r`/`g`/`b`/`a` are the real engine's `ScreenClear` `FPlane`'s own
 /// `X`/`Y`/`Z`/`W` components -- confirmed the real clear color (not
@@ -2852,7 +2834,12 @@ pub unsafe extern "C" fn hp2_rs_wgpu_present_once_for_testing(
 /// reads the same fields the same way (`Max(1, Viewport->SizeX)`),
 /// confirmed before using this pattern, not guessed. Returns
 /// `hp2_wgpu::FrameOutcome` as a raw `u32` (`0` is `Presented`, the
-/// only success code here too -- see that enum's own doc).
+/// only success code here too -- see that enum's own doc). A caught
+/// panic returns `Panicked`, distinct from a null `handle`'s
+/// `InternalError` -- `guard`'s own panic log goes through
+/// `log::error!`, which a standalone ctest binary may have no logger
+/// installed to show, so the distinction needs to survive in the
+/// return value itself, not only in a log that might not appear.
 ///
 /// # Safety
 /// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
@@ -2872,7 +2859,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_lock(
 ) -> u32 {
     guard(
         "hp2_rs_wgpu_lock",
-        hp2_wgpu::FrameOutcome::InternalError as u32,
+        hp2_wgpu::FrameOutcome::Panicked as u32,
         move || {
             if handle.is_null() {
                 return hp2_wgpu::FrameOutcome::InternalError as u32;
@@ -2916,4 +2903,30 @@ pub unsafe extern "C" fn hp2_rs_wgpu_unlock(handle: *mut c_void, present: bool) 
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
         hp2_wgpu::unlock_frame(&handle.created, &mut handle.render_loop, present)
     })
+}
+
+/// Replaces the frame-outcome-reporting half of
+/// `UWgpuRenderDevice::Exit`. Returns the live tally of every
+/// `hp2_rs_wgpu_lock` outcome since `handle` was created
+/// (`hp2_wgpu::FrameCounts`'s own doc has the detail on why a tally,
+/// not just the latest outcome, matters). Returns all-zero counts for
+/// a null `handle`.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_frame_counts(handle: *mut c_void) -> hp2_wgpu::FrameCounts {
+    guard(
+        "hp2_rs_wgpu_frame_counts",
+        hp2_wgpu::FrameCounts::default(),
+        move || {
+            if handle.is_null() {
+                return hp2_wgpu::FrameCounts::default();
+            }
+            let handle = unsafe { &*(handle as *mut WgpuHandle) };
+            handle.render_loop.counts()
+        },
+    )
 }

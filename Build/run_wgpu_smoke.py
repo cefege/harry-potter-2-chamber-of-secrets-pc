@@ -98,17 +98,61 @@ def main() -> int:
     failure = re.search(r"History:|General protection|Assertion|Access violation|"
                         r"no compatible GPU adapter|Failed to initialize", text, re.I)
     adapter = re.search(r'WgpuDrv: adapter "(.+?)" backend (\S+)', text)
-    passed = (rc == 0) and (not timed_out) and bool(adapter) and not failure
+
+    # Last "WgpuDrv: Lock outcome=... tally presented=N occluded=M
+    # outdated=K other_failure=J" line, if any: the running cumulative
+    # tally as of the final tick, logged by WgpuDrv.cpp's own Lock on
+    # every call (not just Exit, which is confirmed NOT reached in a
+    # -testticks run -- WgpuDrv.h's own doc on why). A real -window
+    # run with zero presented frames is not the same claim as "the
+    # renderer works": this script hardcodes -window above, so every
+    # run here is exactly the scenario that distinction matters for
+    # (caught on review: an earlier version of this script reported
+    # "pass" on a run that, per this same tally, presented zero frames
+    # the entire time).
+    tally_matches = list(re.finditer(
+        r"WgpuDrv: Lock outcome=(\d+) tally presented=(\d+) occluded=(\d+) "
+        r"outdated=(\d+) other_failure=(\d+)", text))
+    tally = None
+    if tally_matches:
+        last = tally_matches[-1]
+        tally = {
+            "last_outcome": int(last.group(1)),
+            "presented": int(last.group(2)),
+            "occluded": int(last.group(3)),
+            "outdated": int(last.group(4)),
+            "other_failure": int(last.group(5)),
+            "ticks_logged": len(tally_matches),
+        }
+
+    booted = (rc == 0) and (not timed_out) and bool(adapter) and not failure
+    presented_frames = bool(tally and tally["presented"] > 0)
+    # "pass" needs more than "did not crash while trying": a real
+    # -window run (hardcoded above) that booted cleanly but never
+    # actually presented a frame is a known, honestly-reported
+    # condition (WgpuDrv.h's own doc on a real such run on this
+    # project's own dev machine), not silently treated as success.
+    passed = booted and presented_frames
+
+    if booted and not presented_frames:
+        status = "blocked"
+        reason_code = "renderer.zero_frames_presented"
+    elif not booted:
+        status = "fail"
+        reason_code = (
+            "process.timeout" if timed_out else
+            ("engine.wgpu_adapter_absent" if not adapter else
+             ("process.exit_status" if rc else "marker.failure")))
+    else:
+        status = "pass"
+        reason_code = None
 
     report = {
         "schema": 1, "name": args.name,
-        "status": "pass" if passed else "fail",
+        "status": status,
         "invariant": "wgpu_renderer_boots_and_ticks_a_map",
-        "reason_code": None if passed else (
-            "process.timeout" if timed_out else
-            ("engine.wgpu_adapter_absent" if not adapter else
-             ("process.exit_status" if rc else "marker.failure"))),
-        "data": {"profile": "prototype"},
+        "reason_code": reason_code,
+        "data": {"profile": "prototype", "frame_tally": tally},
         "artifacts": [{"kind": "log", "path": str(log_path)}],
         "command": cmd,
         "exit_reason": ("timeout" if timed_out else
@@ -119,7 +163,7 @@ def main() -> int:
     }
     print(json.dumps(report))
     (work / "wgpu-smoke-report.json").write_text(json.dumps(report, indent=2))
-    return 0 if passed else 1
+    return 0 if passed else (2 if status == "blocked" else 1)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,12 @@ no_includes = true
 
 [parse]
 # Port crates' exports are re-exported through hp2-ffi; list each here as it
-# lands so their extern "C" items reach hp2_rs.h.
+# lands so their extern "C" items reach hp2_rs.h. hp2-wgpu added once its
+# FrameCounts became the first #[repr(C)] type an hp2-ffi export returns
+# that is actually *defined* in a dependency crate rather than hp2-ffi
+# itself -- without this, cbindgen emitted the function declaration but
+# silently never generated the struct typedef it depends on, leaving
+# hp2_rs.h referencing an undeclared type (caught on review, not
+# self-caught: the header still "generated" with no error).
 parse_deps = true
-include = ["hp2-ffi-support"]
+include = ["hp2-ffi-support", "hp2-wgpu"]

@@ -1,18 +1,17 @@
 /*=============================================================================
 	WgpuSurfaceTests.cpp: real-window check for hp2_rs_wgpu_create's
-	window-surface path (crates/hp2-wgpu/src/lib.rs's macos module),
-	macOS only, gated the same as WgpuDrv itself (HP2_ENABLE_WGPU_DRIVER).
-	Exercises the exact same hp2_rs_wgpu_create/hp2_rs_wgpu_destroy pair
-	UWgpuRenderDevice::Init/Exit call -- not a parallel test-only
-	function (an earlier version of this test called a now-deleted
-	hp2_rs_wgpu_create_surface_from_ns_view_for_testing; merged into
-	the real function once Init actually needed the same ns_view
-	parameter, caught on review as worth consolidating rather than
-	keeping two near-identical code paths). Also exercises
-	hp2_rs_wgpu_present_once_for_testing: configure/acquire/present a
-	real frame, the stronger proof noted as still-open in hp2-wgpu's
-	own module doc, beyond "the surface is compatible with the
-	adapter" (which create_device_sync itself already enforces).
+	window-surface path and hp2_rs_wgpu_lock/hp2_rs_wgpu_unlock
+	(crates/hp2-wgpu/src/lib.rs's macos module and lock_frame/
+	unlock_frame), macOS only, gated the same as WgpuDrv itself
+	(HP2_ENABLE_WGPU_DRIVER). Exercises the exact same create/lock/
+	unlock/destroy calls UWgpuRenderDevice::Init/Lock/Unlock/Exit make
+	-- not a parallel test-only function (two earlier versions of this
+	test called now-deleted test-only functions,
+	hp2_rs_wgpu_create_surface_from_ns_view_for_testing and
+	hp2_rs_wgpu_present_once_for_testing; both were merged into real
+	production entry points once one existed to merge into, caught on
+	review as worth consolidating rather than keeping near-identical
+	parallel code paths).
 
 	Unlike every other SDL-touching ctest in this project, this one
 	cannot use the "dummy" video driver: SDL_Metal_CreateView needs a
@@ -25,7 +24,7 @@
 
 	No existing C++ oracle: this logic (SDL_Metal_CreateView ->
 	SDL_Metal_GetLayer's NSView pointer -> wgpu::Surface, and the
-	configure/acquire/present sequence) has no XOpenGL/Vulkan
+	configure/acquire/clear/present sequence) has no XOpenGL/Vulkan
 	equivalent to port from; it is new.
 =============================================================================*/
 
@@ -59,22 +58,21 @@ int main()
 	// (SDL_cocoaevents.m's own Cocoa_RegisterApp, called from
 	// SDL_Init(SDL_INIT_VIDEO)'s Cocoa_VideoInit), which skips
 	// [NSApp activateIgnoringOtherApps:YES]. Set here as a precaution.
-	// On its own (a single, non-retried present-once attempt) this did
-	// not stop this project's own dev environment from reporting
-	// Occluded, same as SDL_RaiseWindow and SDL_WINDOW_ALWAYS_ON_TOP
-	// below on their own, and same as an isolated AppKit diagnostic
-	// run outside this codebase (app.activate(ignoringOtherApps: true)
-	// plus run-loop pumping did not make NSApp.isActive true;
-	// window.level = .floating did not set occlusionState's Visible
-	// bit). What does work reliably, confirmed over several repeated
-	// runs of this actual test binary: all of these precautions
-	// together, plus polling the present-once call itself for up to
-	// ~2 seconds (below) rather than trying it once. Which single
-	// element of that combination is the one actually necessary was
-	// not isolated (no ablation study was run) -- all are kept rather
-	// than guessing which to drop. Must be set before SDL_Init if it
-	// is to have any effect at all: Cocoa_RegisterApp runs during
-	// video init, not window creation.
+	// On its own (a single, non-retried attempt) this did not stop
+	// this project's own dev environment from reporting Occluded, same
+	// as SDL_RaiseWindow and SDL_WINDOW_ALWAYS_ON_TOP below on their
+	// own, and same as an isolated AppKit diagnostic run outside this
+	// codebase (app.activate(ignoringOtherApps: true) plus run-loop
+	// pumping did not make NSApp.isActive true; window.level =
+	// .floating did not set occlusionState's Visible bit). What does
+	// work reliably, confirmed over several repeated runs of this
+	// actual test binary: all of these precautions together, plus
+	// polling the lock call itself for up to ~2 seconds (below) rather
+	// than trying it once. Which single element of that combination is
+	// the one actually necessary was not isolated (no ablation study
+	// was run) -- all are kept rather than guessing which to drop.
+	// Must be set before SDL_Init if it is to have any effect at all:
+	// Cocoa_RegisterApp runs during video init, not window creation.
 	SDL_SetHint( SDL_HINT_MAC_BACKGROUND_APP, "0" );
 	Require( SDL_Init( SDL_INIT_VIDEO ) == 0, "SDL_Init(SDL_INIT_VIDEO) failed" );
 
@@ -150,15 +148,15 @@ int main()
 	Require( Result.handle != NULL, "hp2_rs_wgpu_create failed to create a real wgpu device from a real SDL_Metal_CreateView NSView" );
 	Require( Result.adapter_name_len > 0, "hp2_rs_wgpu_create returned an empty adapter name" );
 
-	// Stronger proof than "the surface is compatible with the
-	// adapter" (already proven inside create_device_sync itself, see
-	// hp2-wgpu's own doc): actually configure the surface, acquire a
-	// frame, and present it -- the real per-frame sequence any
-	// renderer's draw loop will need, once draw-call forwarding
-	// exists (hp2-wgpu's own module doc on what's still open). 0 is
-	// the only success code (hp2_wgpu::FrameOutcome::Presented);
-	// every other value is printed so a failure says exactly which
-	// step failed instead of forcing a guess.
+	// Direct check of hp2_rs_wgpu_lock/hp2_rs_wgpu_unlock themselves
+	// (UWgpuRenderDevice::Lock/Unlock's own real pair): configure the
+	// surface, acquire a frame, clear it, and present it -- the real
+	// per-frame sequence any renderer's draw loop will need, once
+	// draw-call forwarding exists (hp2-wgpu's own module doc on what's
+	// still open). 0 is the only success code
+	// (hp2_wgpu::FrameOutcome::Presented); every other value is
+	// printed so a failure says exactly which step failed instead of
+	// forcing a guess.
 	//
 	// Polled, not a single call: wgpu-hal's own Metal backend
 	// (wgpu-hal-30.0.1/src/metal/surface.rs, a workaround for
@@ -173,43 +171,7 @@ int main()
 	// configured in HP2Targets.cmake) rather than failed -- any other
 	// non-Presented code fails immediately, on the first observation,
 	// with no retry.
-	uint32_t PresentOutcome = 4; // Occluded, until proven otherwise below
-	{
-		Uint32 StartTicks = SDL_GetTicks();
-		do
-		{
-			SDL_PumpEvents();
-			PresentOutcome = hp2_rs_wgpu_present_once_for_testing( Result.handle, 64, 64 );
-			if( PresentOutcome == 0 || PresentOutcome != 4 )
-				break;
-			SDL_Delay( 100 );
-		} while( SDL_GetTicks() - StartTicks < 2000 );
-	}
-	if( PresentOutcome == 4 )
-	{
-		std::fprintf( stderr, "WgpuSurfaceTests: SKIP: hp2_rs_wgpu_present_once_for_testing reported Occluded even after SDL_WINDOW_ALWAYS_ON_TOP and ~2s of polling -- this execution environment never sets NSWindow.occlusionState's Visible bit (confirmed via an isolated AppKit diagnostic outside this codebase), not a code regression\n" );
-		SDL_Metal_DestroyView( MetalView );
-		SDL_DestroyWindow( Window );
-		SDL_Quit();
-		return 77;
-	}
-	if( PresentOutcome != 0 )
-	{
-		std::fprintf( stderr, "WgpuSurfaceTests: FAIL: hp2_rs_wgpu_present_once_for_testing returned outcome code %u (0 = Presented; see hp2_wgpu::FrameOutcome's own doc for what the rest mean)\n", PresentOutcome );
-		std::exit( 1 );
-	}
-
-	// Direct check of hp2_rs_wgpu_lock/hp2_rs_wgpu_unlock themselves
-	// (UWgpuRenderDevice::Lock/Unlock's own real pair) -- the smoke
-	// test (Build/run_wgpu_smoke.py) calls these every tick too, but a
-	// real run of it observed Occluded on all 60 of 60 ticks (see
-	// WgpuDrv.h's own doc), which proves these functions degrade
-	// safely, not that they ever actually succeed. By this point
-	// PresentOutcome == 0 already proved the window is in a state
-	// where a frame CAN be acquired on this machine, so this is not
-	// expected to need its own long poll -- still polled the same way
-	// for consistency and to avoid a flaky single-attempt check.
-	uint32_t LockOutcome = 4;
+	uint32_t LockOutcome = 4; // Occluded, until proven otherwise below
 	{
 		Uint32 StartTicks = SDL_GetTicks();
 		do
@@ -221,9 +183,28 @@ int main()
 			SDL_Delay( 100 );
 		} while( SDL_GetTicks() - StartTicks < 2000 );
 	}
+	if( LockOutcome == 4 )
+	{
+		// Only the directly observed facts -- not "this environment
+		// never sets the Visible bit" as a general claim: that was
+		// true on one run on one machine, not something this message
+		// can know about every future run or every other machine.
+		std::fprintf( stderr, "WgpuSurfaceTests: SKIP: hp2_rs_wgpu_lock reported Occluded (outcome code 4) after SDL_WINDOW_ALWAYS_ON_TOP, SDL_RaiseWindow, SDL_HINT_MAC_BACKGROUND_APP, and ~2s of polling on this run\n" );
+		// Destroy the handle (and its wgpu::Surface, which borrows the
+		// NSView's CAMetalLayer) before tearing down the view/window
+		// it borrows from -- the same order Exit/WgpuDrv.h's own field
+		// comment requires, on every exit path including this one
+		// (missing here on an earlier version of this test, caught on
+		// review).
+		hp2_rs_wgpu_destroy( Result.handle );
+		SDL_Metal_DestroyView( MetalView );
+		SDL_DestroyWindow( Window );
+		SDL_Quit();
+		return 77;
+	}
 	if( LockOutcome != 0 )
 	{
-		std::fprintf( stderr, "WgpuSurfaceTests: FAIL: hp2_rs_wgpu_lock returned outcome code %u (0 = Presented; see hp2_wgpu::FrameOutcome's own doc)\n", LockOutcome );
+		std::fprintf( stderr, "WgpuSurfaceTests: FAIL: hp2_rs_wgpu_lock returned outcome code %u (0 = Presented; see hp2_wgpu::FrameOutcome's own doc for what the rest mean)\n", LockOutcome );
 		std::exit( 1 );
 	}
 	const bool Unlocked = hp2_rs_wgpu_unlock( Result.handle, true );

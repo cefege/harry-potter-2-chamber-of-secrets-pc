@@ -1491,13 +1491,12 @@ if(HP2_ENABLE_WGPU_DRIVER)
     target_compile_definitions(hp2_game PRIVATE HP2_ENABLE_WGPU_DRIVER=1)
 
     if(APPLE)
-        # hp2_rs_wgpu_create_surface_from_ns_view_for_testing is only
-        # compiled on macOS (crates/hp2-wgpu/src/lib.rs's `macos`
-        # module, crates/hp2-ffi/src/lib.rs's matching #[cfg(all(
-        # feature = "renderer-wgpu", target_os = "macos"))] export) --
-        # gate this test target the same way so a hypothetical non-
-        # Apple HP2_ENABLE_WGPU_DRIVER build never tries to compile
-        # against a function that does not exist there.
+        # hp2_rs_wgpu_lock/hp2_rs_wgpu_create's window-surface path are
+        # only meaningful on macOS (crates/hp2-wgpu/src/lib.rs's
+        # `macos` module) -- gate this test target the same way so a
+        # hypothetical non-Apple HP2_ENABLE_WGPU_DRIVER build never
+        # tries to compile against a window-surface path that does not
+        # exist there.
         set(HP2_WGPU_SURFACE_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/WgpuSurfaceTests.cpp")
         hp2_add_executable(hp2_wgpu_surface_tests
             ${HP2_WGPU_SURFACE_TEST_SOURCE}
@@ -1532,22 +1531,23 @@ if(HP2_ENABLE_WGPU_DRIVER)
         set_tests_properties(wgpu_surface_round_trip PROPERTIES
             LABELS "smoke;renderer;wgpu"
             RESOURCE_LOCK hp2_gpu
-            # Tests/WgpuSurfaceTests.cpp exits 77 only if the present-
-            # once check observes a *persistent*
-            # FrameOutcome::Occluded after ~2 seconds of polling
-            # with several activation/visibility precautions applied
-            # (see that file's own, extensively-commented
-            # investigation): wgpu-hal's Metal backend
-            # (wgpu-hal-30.0.1/src/metal/surface.rs) refuses to even
-            # attempt nextDrawable() unless NSWindow.occlusionState
-            # reports the window visible, and in this project's own
-            # dev environment that bit was observed to need real time
-            # and several combined precautions, not the environment
-            # entirely lacking a window compositor (an earlier, wrong
-            # conclusion drawn from a `ps aux` grep that does not list
-            # every process; corrected once `pmset -g assertions`
-            # showed a real WindowServer pid directly). 77 is the
-            # long-standing autotools/CMake skip-exit-code convention.
+            # Tests/WgpuSurfaceTests.cpp exits 77 only if its
+            # hp2_rs_wgpu_lock check observes a *persistent*
+            # FrameOutcome::Occluded after ~2 seconds of polling, with
+            # several activation/visibility precautions applied (see
+            # that file's own, extensively-commented investigation):
+            # wgpu-hal's Metal backend (wgpu-hal-30.0.1/src/metal/
+            # surface.rs) refuses to even attempt nextDrawable() unless
+            # NSWindow.occlusionState reports the window visible. An
+            # earlier comment here claimed this project's own dev
+            # environment lacks a window compositor entirely -- wrong,
+            # drawn from a `ps aux` grep that does not list every
+            # process; corrected once `pmset -g assertions` showed a
+            # real WindowServer pid directly. Exactly why that bit does
+            # not set without the precautions/polling above was not
+            # isolated (no ablation study was run); stated as not
+            # isolated, not guessed at further. 77 is the long-standing
+            # autotools/CMake skip-exit-code convention.
             SKIP_RETURN_CODE 77
         )
     endif()
@@ -1571,5 +1571,25 @@ if(HP2_ENABLE_WGPU_DRIVER)
         LABELS "smoke;renderer;wgpu"
         RESOURCE_LOCK hp2_gpu
         TIMEOUT 600
+        # No SKIP_RETURN_CODE here, deliberately: run_wgpu_smoke.py's
+        # exit 2 ("blocked") now also covers a real -window run that
+        # boots and ticks cleanly but never actually presents a frame
+        # (data.frame_tally.presented == 0 in its own JSON report,
+        # confirmed on a real run on this project's own dev machine --
+        # WgpuDrv.h's own doc has the detail). Marking that a skip
+        # would hide a real, current gap (no frames ever reach the
+        # screen in this environment today) behind a green ctest
+        # summary -- AGENTS.md's Forbidden Actions rule out exactly
+        # that ("skipping assertions to make a run pass"), and its own
+        # "Data-profile honesty" section treats a missing renderer-
+        # smoke prerequisite as "a configuration gap, not a skip",
+        # which this is closer to than to wgpu_surface_round_trip's
+        # SKIP_RETURN_CODE 77 above (a narrowly-scoped, positively-
+        # observed environment condition on one specific check, not a
+        # blanket cover for the whole smoke test). Left failing on
+        # purpose (an earlier version of this change added
+        # SKIP_RETURN_CODE 2 here specifically to keep this build
+        # dir's ctest count looking stable -- caught on review as the
+        # wrong tradeoff before it was ever committed).
     )
 endif()
