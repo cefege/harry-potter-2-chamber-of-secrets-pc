@@ -73,6 +73,9 @@ void RegisterHP2RuntimeClasses()
 #if defined(HP2_ENABLE_VULKAN_DRIVER) && HP2_ENABLE_VULKAN_DRIVER
 extern "C" void autoInitializeRegistrantsVulkanDrv(void);
 #endif
+#if defined(HP2_ENABLE_WGPU_DRIVER) && HP2_ENABLE_WGPU_DRIVER
+extern "C" void autoInitializeRegistrantsWgpuDrv(void);
+#endif
 
 	void RegisterHP2ClientClasses()
 	{
@@ -81,6 +84,9 @@ extern "C" void autoInitializeRegistrantsVulkanDrv(void);
 		AUTO_INITIALIZE_REGISTRANTS_ALAUDIO;
 #if defined(HP2_ENABLE_VULKAN_DRIVER) && HP2_ENABLE_VULKAN_DRIVER
 		autoInitializeRegistrantsVulkanDrv();
+#endif
+#if defined(HP2_ENABLE_WGPU_DRIVER) && HP2_ENABLE_WGPU_DRIVER
+		autoInitializeRegistrantsWgpuDrv();
 #endif
 	}
 #endif

@@ -88,6 +88,7 @@ set(HP2_EMPTY_MODULE_API_DEFINITIONS
     ALAUDIO_API=
     SDLDRV_API=
     XOPENGLDRV_API=
+    WGPUDRV_API=
 )
 
 set(HP2_CORE_INCLUDE_DIRS
@@ -169,6 +170,15 @@ endfunction()
 # has no C sources, so the forwarding does nothing useful for it. Clear it for
 # this import only; the game's own targets keep CMAKE_OSX_DEPLOYMENT_TARGET.
 # Emscripten has no Rust target, so the browser build links no Rust.
+#
+# Declared here (not next to the rest of its own WgpuDrv block further
+# down, unlike HP2_ENABLE_VULKAN_DRIVER) because corrosion_set_features
+# below is a property of the whole hp2-ffi crate and runs once, at
+# import time -- it must already know whether to enable hp2-ffi's
+# renderer-wgpu Cargo feature before the WgpuDrv C++ package (which
+# needs that feature's hp2_rs_wgpu_* exports) is even declared.
+option(HP2_ENABLE_WGPU_DRIVER
+    "Build the experimental wgpu render device port (HarryPotter2/Unreal/WgpuDrv)" OFF)
 if(NOT EMSCRIPTEN)
     set(_hp2_saved_osx_deployment_target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "")
@@ -179,7 +189,16 @@ if(NOT EMSCRIPTEN)
     # `cargo build`/`cargo test` never need libarchive, enabled here for
     # the real product build where it's actually needed. See
     # crates/hp2-import/Cargo.toml's `[features]` doc comment.
-    corrosion_set_features(hp2_ffi FEATURES hp2-import/archive platform-sdl)
+    set(HP2_FFI_FEATURES hp2-import/archive platform-sdl)
+    if(HP2_ENABLE_WGPU_DRIVER)
+        # Same reasoning as archive/platform-sdl: off by default so bare
+        # cargo build/test never needs wgpu's platform backends
+        # (objc2-metal and friends), on only for the experimental build
+        # that actually wants WgpuDrv.WgpuRenderDevice. See crates/
+        # hp2-ffi/Cargo.toml's `[features]` doc comment.
+        list(APPEND HP2_FFI_FEATURES renderer-wgpu)
+    endif()
+    corrosion_set_features(hp2_ffi FEATURES ${HP2_FFI_FEATURES})
     # libhp2_ffi.a's compiled code (not just the Import-specific part)
     # has real, unresolved archive_read_*/archive_entry_*/archive_error_*
     # symbol references now that the feature above is enabled -- the
@@ -202,6 +221,26 @@ if(NOT EMSCRIPTEN)
     # more consumer of the one archive, resolved once at hp2_game's
     # final link.
     target_link_libraries(hp2_ffi INTERFACE archive_static SDL2::SDL2-static)
+    if(HP2_ENABLE_WGPU_DRIVER AND APPLE)
+        # Not guessed: `cargo rustc -p hp2-ffi --lib --crate-type=staticlib
+        # --features=hp2-import/archive,platform-sdl,renderer-wgpu --
+        # --print native-static-libs` printed the authoritative list
+        # libhp2_ffi.a actually needs once renderer-wgpu (wgpu's Metal
+        # backend: objc2-metal, raw-window-metal, ...) is enabled:
+        # QuartzCore, CoreGraphics, Metal, Foundation, CoreFoundation,
+        # objc, iconv (System/c/m already resolve implicitly). The link
+        # succeeded even before this list was added -- AppKit, already
+        # linked unconditionally into hp2_game, pulls some of these in
+        # transitively -- but relying on that would be fragile; this is
+        # the real, verified list, not a guess. Linux's Vulkan/GL
+        # backends are not covered here -- wgpu's non-Apple hals load
+        # their native libraries dynamically rather than needing
+        # link-time framework linking, unverified in this project's own
+        # build yet.
+        target_link_libraries(hp2_ffi INTERFACE
+            "-framework QuartzCore" "-framework CoreGraphics" "-framework Metal"
+            "-framework Foundation" "-framework CoreFoundation" objc iconv)
+    endif()
     set(CMAKE_OSX_DEPLOYMENT_TARGET "${_hp2_saved_osx_deployment_target}")
     set(HP2_RS_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rust-include")
     file(MAKE_DIRECTORY "${HP2_RS_INCLUDE_DIR}")
@@ -1392,4 +1431,50 @@ if(HP2_ENABLE_VULKAN_DRIVER)
         TIMEOUT 600
     )
 
+endif()
+
+# ---------------------------------------------------------------------------
+# WgpuDrv: experimental wgpu-backed render device.
+# HP2_ENABLE_WGPU_DRIVER itself is declared earlier (next to the
+# corrosion_import_crate block above), because that block needs it
+# before this point to decide whether hp2-ffi's renderer-wgpu Cargo
+# feature is on. Layout mirrors the Vulkan block above: one OBJECT
+# library, linked into hp2_game so the engine's static class registry
+# finds WgpuDrv.WgpuRenderDevice at boot.
+# ---------------------------------------------------------------------------
+if(HP2_ENABLE_WGPU_DRIVER)
+    set(HP2_WGPUDRV_SOURCES
+        "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Src/WgpuDrv.cpp"
+    )
+    # hp2_add_engine_object (not bare add_library): IMPLEMENT_CLASS
+    # (UnObjBas.h:351-385) references the bare preprocessor token
+    # GPackage directly as the package-name argument to UClass's
+    # constructor. Only this helper's `GPackage=LocalPackageName${name}`
+    # compile definition makes that token resolve to the real symbol
+    # IMPLEMENT_PACKAGE(WgpuDrv) defines (LocalPackageNameWgpuDrv).
+    # Without it (an earlier version of this block used bare
+    # add_library and compiled/linked successfully anyway -- caught on
+    # review, not self-caught: a token with no local #define still
+    # compiles if it accidentally resolves to some other TU's extern
+    # GPackage in scope, it just registers the class under the wrong
+    # package silently, not a build failure), WgpuDrv.WgpuRenderDevice
+    # would not reliably resolve as an ini class name. Also sets
+    # __STATIC_LINK=1 and the HP2_EMPTY_MODULE_API_DEFINITIONS list
+    # (WGPUDRV_API= among them) and C++17, matching every other engine
+    # object library in this file.
+    hp2_add_engine_object(hp2_wgpudrv WgpuDrv ${HP2_WGPUDRV_SOURCES})
+    target_include_directories(hp2_wgpudrv PUBLIC
+        ${HP2_RENDER_INCLUDE_DIRS}
+        "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Inc"
+        "${HP2_RS_INCLUDE_DIR}"
+    )
+
+    # Static registration: adding the object to hp2_game puts
+    # WgpuDrv.WgpuRenderDevice into the engine class registry next to
+    # XOpenGLDrv.XOpenGLRenderDevice/VulkanDrv.VulkanRenderDevice;
+    # config/-flag selection stays lead-owned. The define gates
+    # RegisterHP2ClientClasses' registrant call
+    # (HP2StaticPackages.cpp).
+    target_link_libraries(hp2_game PRIVATE hp2_wgpudrv)
+    target_compile_definitions(hp2_game PRIVATE HP2_ENABLE_WGPU_DRIVER=1)
 endif()

@@ -22,6 +22,16 @@ jobs:
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Rust clippy (renderer-wgpu feature)
+        # cargo clippy --workspace (above) never touches code behind
+        # hp2-ffi's renderer-wgpu feature (off by default, matching
+        # platform-sdl/hp2-import/archive), so it could silently stop
+        # compiling until someone builds with -DHP2_ENABLE_WGPU_DRIVER=ON.
+        # Clippy only type-checks, not links, so this needs none of the
+        # Metal/QuartzCore framework linking HP2Targets.cmake adds for the
+        # real CMake build.
+        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
+
       - name: Configure
         run: cmake --preset macos-arm64
 
@@ -55,6 +65,9 @@ jobs:
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Rust clippy (renderer-wgpu feature)
+        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -85,6 +98,9 @@ jobs:
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Rust clippy (renderer-wgpu feature)
+        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -114,6 +130,9 @@ jobs:
 
       - name: Rust clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust clippy (renderer-wgpu feature)
+        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
 
       - name: Install pinned llvm-mingw UCRT
         shell: pwsh

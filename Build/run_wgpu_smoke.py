@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Deterministic single-map wgpu renderer smoke for HP2.
+
+Wraps a gate-on (HP2_ENABLE_WGPU_DRIVER=ON) hp2_game build with:
+  - a generated Engine.ini selecting WgpuDrv.WgpuRenderDevice
+    (ApplyPortableConfig preserves valid custom selections),
+  - fixed ticks/timeout, isolated HOME, structured schema-v1 report.
+
+No ICD/loader environment needed unlike run_vulkan_smoke.py: wgpu's
+Metal backend talks to the system Metal framework directly, nothing
+to point at. Mirrors run_vulkan_smoke.py's structure closely since
+the two scripts solve the same problem for two different experimental
+render devices.
+
+Exit codes: 0 pass, 1 fail, 2 blocked(reason).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def blocked(name: str, reason: str) -> int:
+    print(json.dumps({"schema": 1, "name": name, "status": "blocked",
+                      "invariant": "wgpu_renderer_boots_and_ticks_a_map",
+                      "reason_code": reason, "data": {}, "artifacts": [],
+                      "exit_reason": "prerequisite_missing"}))
+    return 2
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--build-dir", required=True, help="gate-on build dir containing hp2_game")
+    ap.add_argument("--data-root", default="HarryPotter2/Unreal")
+    ap.add_argument("--map", default="Entry")
+    ap.add_argument("--ticks", type=int, default=60)
+    ap.add_argument("--timeout", type=float, default=180)
+    ap.add_argument("--name", default="renderer_smoke_wgpu")
+    args = ap.parse_args()
+
+    repo = Path(__file__).resolve().parent.parent
+    binary = (Path(args.build_dir) / "hp2_game").resolve()
+    data_root = (repo / args.data_root).resolve()
+
+    if not binary.is_file():
+        return blocked(args.name, "renderer.binary_missing")
+    if not (data_root / "System" / "Default.ini").is_file():
+        return blocked(args.name, "data.prototype_missing")
+
+    work = Path(os.environ.get("HP2_ARTIFACT_DIR") or (Path.cwd() / "wgpu-smoke"))
+    home = work / "Home"
+    shutil.rmtree(work, ignore_errors=True)
+    (home / "Library/Application Support/Harry Potter 2/User").mkdir(parents=True)
+
+    engine_ini = (data_root / "System" / "Default.ini").read_text(errors="replace")
+    for key in ("GameRenderDevice", "WindowedRenderDevice", "RenderDevice"):
+        engine_ini = re.sub(rf"{key}=.*", f"{key}=WgpuDrv.WgpuRenderDevice", engine_ini)
+    ini_path = work / "Engine.ini"
+    ini_path.write_text(engine_ini)
+
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    env["TMPDIR"] = str(work)
+
+    cmd = [str(binary), f"-datadir={data_root}", f"-INI={ini_path}",
+           args.map, "-NOFRONTEND", "-window", "-nosound",
+           f"-testticks={args.ticks}", "-log"]
+    try:
+        proc = subprocess.run(cmd, cwd=work, env=env,
+                               capture_output=True, timeout=args.timeout)
+        log_bytes = proc.stdout + proc.stderr
+        rc, timed_out = proc.returncode, False
+    except subprocess.TimeoutExpired as e:
+        log_bytes = e.stdout or b""
+        rc, timed_out = None, True
+
+    log_path = work / "wgpu-smoke.log"
+    log_path.write_bytes(log_bytes)
+    text = log_bytes.decode("utf-8", errors="replace")
+
+    failure = re.search(r"History:|General protection|Assertion|Access violation|"
+                        r"no compatible GPU adapter|Failed to initialize", text, re.I)
+    adapter = re.search(r'WgpuDrv: adapter "(.+?)" backend (\S+)', text)
+    passed = (rc == 0) and (not timed_out) and bool(adapter) and not failure
+
+    report = {
+        "schema": 1, "name": args.name,
+        "status": "pass" if passed else "fail",
+        "invariant": "wgpu_renderer_boots_and_ticks_a_map",
+        "reason_code": None if passed else (
+            "process.timeout" if timed_out else
+            ("engine.wgpu_adapter_absent" if not adapter else
+             ("process.exit_status" if rc else "marker.failure"))),
+        "data": {"profile": "prototype"},
+        "artifacts": [{"kind": "log", "path": str(log_path)}],
+        "command": cmd,
+        "exit_reason": ("timeout" if timed_out else
+                        f"exit_{rc}" if rc is not None else "unknown"),
+        "adapter": adapter.group(1).strip() if adapter else None,
+        "backend": adapter.group(2).strip() if adapter else None,
+        "ticks_requested": args.ticks,
+    }
+    print(json.dumps(report))
+    (work / "wgpu-smoke-report.json").write_text(json.dumps(report, indent=2))
+    return 0 if passed else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

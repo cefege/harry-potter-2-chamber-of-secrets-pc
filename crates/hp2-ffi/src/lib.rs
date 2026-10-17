@@ -2670,3 +2670,100 @@ pub unsafe extern "C" fn hp2_rs_audio_find_least_important_sound(
         },
     )
 }
+
+/// Boxed on the heap, handed to C++ as an opaque `void* RustDevice`
+/// (`UWgpuRenderDevice`'s only field, per the plan's Phase 3.2 "class
+/// owns only an opaque `void* RustDevice`" design). Caches
+/// `backend_name` as an owned `String` alongside the `CreatedDevice`
+/// so `hp2_rs_wgpu_create`'s result can point into memory the handle
+/// itself owns, valid for the handle's whole lifetime -- not a
+/// temporary that would dangle the moment the function returns.
+#[cfg(feature = "renderer-wgpu")]
+struct WgpuHandle {
+    created: hp2_wgpu::CreatedDevice,
+    backend_name: String,
+}
+
+/// Result of `hp2_rs_wgpu_create`. `handle` is null on total failure
+/// (no adapter/device could be created); every other field is
+/// meaningless in that case. `adapter_name`/`backend_name` point into
+/// memory the handle itself owns -- valid exactly as long as `handle`
+/// is (i.e. until `hp2_rs_wgpu_destroy` is called on it), not a moment
+/// longer; the caller must copy them out (e.g. into a `debugf` call)
+/// before destroying the handle, never store the raw pointers past
+/// that point.
+#[cfg(feature = "renderer-wgpu")]
+#[repr(C)]
+pub struct FfiWgpuCreateResult {
+    pub handle: *mut c_void,
+    pub adapter_name: *const u8,
+    pub adapter_name_len: usize,
+    pub backend_name: *const u8,
+    pub backend_name_len: usize,
+}
+
+#[cfg(feature = "renderer-wgpu")]
+const FFI_WGPU_CREATE_FAILURE: FfiWgpuCreateResult = FfiWgpuCreateResult {
+    handle: std::ptr::null_mut(),
+    adapter_name: std::ptr::null(),
+    adapter_name_len: 0,
+    backend_name: std::ptr::null(),
+    backend_name_len: 0,
+};
+
+/// Replaces the adapter/device-creation half of `UWgpuRenderDevice::
+/// Init` (`WgpuDrv`'s future C++ body; see `local://
+/// rust-inplace-port-plan.md`'s Phase 3.2). Headless: no window
+/// surface yet (`hp2-wgpu`'s own module doc explains why), so this
+/// alone cannot actually render anything -- it proves the adapter and
+/// device exist and lets C++ log the plan's `WgpuDrv: adapter "<name>"
+/// backend <X>` line, same as every other render device's `Init`
+/// logs its own adapter info today (see `XOpenGL.cpp`'s `debugf(
+/// NAME_Init, ...)` calls).
+///
+/// # Safety
+/// The returned `handle`, if non-null, must be passed to
+/// `hp2_rs_wgpu_destroy` exactly once, and never dereferenced
+/// directly by C++ (opaque).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_wgpu_create() -> FfiWgpuCreateResult {
+    guard("hp2_rs_wgpu_create", FFI_WGPU_CREATE_FAILURE, move || {
+        let Some(created) = hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto) else {
+            return FFI_WGPU_CREATE_FAILURE;
+        };
+        let backend_name = hp2_wgpu::backend_name(created.backend).to_string();
+        let handle = Box::new(WgpuHandle {
+            created,
+            backend_name,
+        });
+        let adapter_name = handle.created.adapter_name.as_ptr();
+        let adapter_name_len = handle.created.adapter_name.len();
+        let backend_name_ptr = handle.backend_name.as_ptr();
+        let backend_name_len = handle.backend_name.len();
+        FfiWgpuCreateResult {
+            handle: Box::into_raw(handle) as *mut c_void,
+            adapter_name,
+            adapter_name_len,
+            backend_name: backend_name_ptr,
+            backend_name_len,
+        }
+    })
+}
+
+/// Replaces the destruction half of `UWgpuRenderDevice::Exit`. `NULL`
+/// is a safe no-op (matches the real C++'s own `if (Pointer)`-guard
+/// convention used throughout this codebase for destroy-style calls).
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (or
+/// null), not yet destroyed, and never used again after this call.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
+    guard("hp2_rs_wgpu_destroy", (), move || unsafe {
+        if !handle.is_null() {
+            drop(Box::from_raw(handle as *mut WgpuHandle));
+        }
+    })
+}

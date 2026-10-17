@@ -17,6 +17,7 @@ hp2-import.workspace = true
 hp2-launcher.workspace = true
 hp2-audio.workspace = true
 hp2-platform.workspace = true
+hp2-wgpu = { workspace = true, optional = true }
 log.workspace = true
 
 [build-dependencies]
@@ -28,3 +29,10 @@ cbindgen.workspace = true
 # "hp2-platform/sdl" at every call site) so this crate's own source can
 # `#[cfg(feature = "platform-sdl")]` the FFI exports that call into it.
 platform-sdl = ["hp2-platform/sdl"]
+# hp2-wgpu pulls in wgpu's platform backends (objc2-metal on macOS,
+# ash on Vulkan platforms, ...), which need CMake-level framework/lib
+# linking (Metal/QuartzCore/Foundation on macOS) only the WgpuDrv C++
+# package's own CMake block adds. Gated the same way as platform-sdl,
+# not unconditional, so bare `cargo build`/`cargo test` need none of
+# that.
+renderer-wgpu = ["dep:hp2-wgpu"]

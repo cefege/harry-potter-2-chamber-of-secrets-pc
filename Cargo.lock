@@ -397,6 +397,7 @@ dependencies = [
  "hp2-ini",
  "hp2-launcher",
  "hp2-platform",
+ "hp2-wgpu",
  "log",
 ]
 
