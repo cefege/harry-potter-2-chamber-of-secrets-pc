@@ -892,6 +892,22 @@ pub struct FrameCounts {
     pub other_failure: u32,
 }
 
+/// One real queued `Draw2DLine` call (`RenderLoop::queue_line`'s own
+/// doc has the full contract): `p1`/`p2` already screen-to-clip-
+/// transformed (`draw_2d_line_screen_to_coords`'s own real output,
+/// not raw screen pixels), `color` the real `DrawColor`, and
+/// `segment` the real index into `RenderLoop::frame_uniforms_segments`
+/// this line was queued under -- the real `SetSceneNode` call whose
+/// matrices this specific line must be drawn with, not necessarily
+/// the frame's *last* `SetSceneNode` call (the real bug this whole
+/// per-segment design exists to fix).
+struct QueuedLine {
+    p1: [f32; 3],
+    p2: [f32; 3],
+    color: [f32; 4],
+    segment: usize,
+}
+
 /// Per-`CreatedDevice` state that must persist across the
 /// `lock_frame`/`unlock_frame` pair (`UWgpuRenderDevice::Lock`/
 /// `Unlock`'s future Rust half) and across repeated Lock/Unlock
@@ -912,12 +928,36 @@ pub struct RenderLoop {
     configured_present_mode: Option<wgpu::PresentMode>,
     in_progress: Option<InProgressFrame>,
     counts: FrameCounts,
-    /// Lazily created on the first `set_scene_node` call (needs
-    /// `&wgpu::Device`, not available in `RenderLoop::new`). `528`
-    /// bytes, `FrameUniforms`' own real size -- checked by a test
-    /// below rather than assumed to stay in sync if the struct's
-    /// field list ever changes.
-    frame_uniforms_buffer: Option<wgpu::Buffer>,
+    /// One real GPU buffer per `set_scene_node` call since the last
+    /// `lock_frame`/`begin_offscreen_frame` -- the real per-segment
+    /// fix for a real bug an earlier version of this crate's own
+    /// design had (caught on review before any draw call ever shipped
+    /// against it): `SetSceneNode` runs many times per real frame
+    /// (confirmed: exactly 3 per tick in a real wgpu-smoke.log run --
+    /// the 3D world, editor orthographic viewports, HUD/Canvas, plus
+    /// any mirrors/portals/sub-viewports), and `queue.write_buffer`
+    /// does not apply at the call site -- it stages the write,
+    /// applied at the next `queue.submit`, before any command in that
+    /// submit runs. A single shared buffer overwritten in place on
+    /// every call would mean every draw in one submit saw only the
+    /// *last* `SetSceneNode` call's matrices, not its own segment's.
+    /// Each segment is `528` bytes (`FrameUniforms`' own real size --
+    /// checked by a test below rather than assumed to stay in sync if
+    /// the struct's own field list ever changes); a small, separate
+    /// `wgpu::Buffer` per segment, not one larger buffer with dynamic-
+    /// offset slots -- real per-frame segment counts are small
+    /// (single digits, per the same real log evidence above), so N
+    /// tiny allocations is simpler and no less correct than dynamic
+    /// offsets, and avoids rewriting `SimpleLinePipeline`/
+    /// `TilePipeline`'s own already-verified `layout: None`-derived
+    /// bind group layouts (switching to dynamic offsets needs an
+    /// explicit, hand-written layout for every group in every
+    /// pipeline, not just group 0 -- a real, separate, higher-risk
+    /// change this fix does not need). Cleared at the start of every
+    /// real `lock_frame`/`begin_offscreen_frame` call (regardless of
+    /// that call's own outcome -- a stale segment from a previous,
+    /// already-flushed frame must never leak into the next one).
+    frame_uniforms_segments: Vec<wgpu::Buffer>,
     /// Appended by `queue_line`, drained and recorded into the real
     /// in-progress frame's own `CommandEncoder` by `unlock_frame`,
     /// *after* the clear pass that encoder already holds -- not
@@ -926,12 +966,15 @@ pub struct RenderLoop {
     /// its clear pass without submitting it, so an immediate per-call
     /// submit would run before the still-unsubmitted clear and get
     /// wiped out by it; see `draw::LineDrawCall`'s own doc for the
-    /// full reasoning). `vertices`/`params` grow in lockstep: each
-    /// `queue_line` call appends exactly 2 vertices (one line) and 1
-    /// `DrawParams`, with the vertices' own `draw_id` pointing at
-    /// that params entry's real index.
-    queued_line_vertices: Vec<draw::LineVertex>,
-    queued_line_params: Vec<draw::DrawParams>,
+    /// full reasoning). Each entry already carries its own real
+    /// screen-to-clip-transformed `Coords` (`queue_line`'s own doc)
+    /// and the real segment index (`frame_uniforms_segments`' own
+    /// index) it was queued under -- `unlock_frame` groups by that
+    /// index and issues one real `record()` call per non-empty
+    /// segment, each with its own correctly re-indexed local
+    /// `draw_id`s, not one call for the whole frame sharing a single
+    /// (wrong, per the field above) `FrameUniforms` buffer.
+    queued_lines: Vec<QueuedLine>,
     /// Lazily built on first use against whichever `color_format` the
     /// first real in-progress frame actually has -- cached and
     /// *checked* against that format on every later use (a `RenderLoop`
@@ -969,9 +1012,8 @@ impl RenderLoop {
             configured_present_mode: None,
             in_progress: None,
             counts: FrameCounts::default(),
-            frame_uniforms_buffer: None,
-            queued_line_vertices: Vec::new(),
-            queued_line_params: Vec::new(),
+            frame_uniforms_segments: Vec::new(),
+            queued_lines: Vec::new(),
             line_pipeline: None,
             last_scene: None,
         }
@@ -1007,16 +1049,26 @@ impl RenderLoop {
     /// frame` immediately followed by a real `SetSceneNode` call on
     /// the very next line), so silently dropping here is the correct,
     /// already-established behavior, not a gap. Also drops cleanly
-    /// when `self.last_scene` is `None` (`Draw2DLine` called before
-    /// any real `SetSceneNode` this session -- `Frame->FX2`/`FY2`
-    /// would be undefined, so there is nothing correct to draw), and
-    /// once `simple.wgsl`'s own real `MAX_DRAWS` capacity is reached
-    /// -- this queue has no flush-and-rotate behavior yet (the real
-    /// GLSL batcher's own `ParametersBuffer`/`VertBuffer` ring-buffer
-    /// rotation, not yet ported), so a frame drawing more than
-    /// `MAX_DRAWS` lines silently loses the excess for now rather
-    /// than panicking or corrupting the buffer -- a real, known,
-    /// explicitly-scoped limitation, not silently pretended away.
+    /// when no `set_scene_node` call has happened yet this frame
+    /// (`self.frame_uniforms_segments` empty -- implies `self.
+    /// last_scene` is also `None`, checked explicitly too since the
+    /// transform itself needs a real `SceneFrame`, not just a segment
+    /// to bind to): `Draw2DLine` called before any real `SetSceneNode`
+    /// this session -- `Frame->FX2`/`FY2` would be undefined, so
+    /// there is nothing correct to draw. Tagged with `self.
+    /// frame_uniforms_segments.len() - 1` (the *current*, most
+    /// recently created segment -- `RenderLoop::frame_uniforms_
+    /// segments`'s own doc has the full real bug this fixes), not
+    /// drawn with whichever segment happens to be bound when
+    /// `unlock_frame` later flushes the queue. `unlock_frame`'s own
+    /// flush groups queued lines by segment and caps each segment's
+    /// own group at `simple.wgsl`'s real `MAX_DRAWS` capacity --
+    /// not checked here, since how many *other* lines will end up
+    /// sharing this call's own segment is not yet known at queue
+    /// time; a real, known, explicitly-scoped limitation (no flush-
+    /// and-rotate ring-buffer behavior yet, the real GLSL batcher's
+    /// own `ParametersBuffer`/`VertBuffer` rotation, not ported),
+    /// not silently pretended away.
     pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], color: [f32; 4]) {
         if self.in_progress.is_none() {
             return;
@@ -1024,61 +1076,36 @@ impl RenderLoop {
         let Some(scene) = self.last_scene.as_ref() else {
             return;
         };
-        if self.queued_line_params.len() >= draw::MAX_DRAWS {
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
             return;
-        }
-        let draw_id = self.queued_line_params.len() as u32;
-        self.queued_line_vertices.push(draw::LineVertex {
-            coords: draw_2d_line_screen_to_coords(scene, p1),
-            draw_id,
+        };
+        self.queued_lines.push(QueuedLine {
+            p1: draw_2d_line_screen_to_coords(scene, p1),
+            p2: draw_2d_line_screen_to_coords(scene, p2),
+            color,
+            segment,
         });
-        self.queued_line_vertices.push(draw::LineVertex {
-            coords: draw_2d_line_screen_to_coords(scene, p2),
-            draw_id,
-        });
-        self.queued_line_params
-            .push(draw::DrawParams { draw_color: color });
     }
 
     /// Real per-tick entry point `UWgpuRenderDevice::SetSceneNode`
     /// calls through `hp2_rs_wgpu_set_scene_node` (wired, not a
     /// future plan -- an earlier version of this doc said "not wired
     /// to any FFI function or C++ call site yet", true when written,
-    /// now stale). Computes `FrameUniforms` from `scene` and uploads
-    /// it to `frame_uniforms_buffer`, creating that buffer on first
-    /// use. Unlike the real GLSL source's own change-detection
+    /// now stale). Computes `FrameUniforms` from `scene` and appends
+    /// a *new* real segment buffer (`RenderLoop::frame_uniforms_
+    /// segments`'s own doc has the full real bug this fixes and why a
+    /// small buffer per segment, not dynamic offsets) -- every call
+    /// gets its own buffer, never reusing a previous one, so later
+    /// `queue_line`/`queue_tile` calls this same real frame correctly
+    /// bind the matrices that were actually current when each was
+    /// queued, not whatever `SetSceneNode` call happened to run last.
+    /// Unlike the real GLSL source's own change-detection
     /// (`StoredGamma != ...`, `StoredOrthoFX != ...`, etc.,
     /// `SetSceneNode`'s own early-out when nothing relevant changed),
-    /// this always recomputes and always writes.
-    ///
-    /// Real, not yet fixed bug waiting to happen once draw-call
-    /// recording lands (caught on review; an earlier version of this
-    /// doc called the always-recompute choice above "a pure
-    /// performance optimization with no correctness effect" --
-    /// wrong): `queue.write_buffer` does not apply at the call site,
-    /// it stages the write and applies it at the next `queue.submit`,
-    /// before any command in that submit runs. `SetSceneNode` is
-    /// called many times per real frame (the 3D world, editor
-    /// orthographic viewports -- `Viewport->IsOrtho()` is the real
-    /// source's own real gate, confirmed by reading `SetSceneNode`'s
-    /// actual dispatch, XOpenGL.cpp:1682-1685; HUD/Canvas uses the
-    /// same perspective projection with points pre-scaled to `z=1`,
-    /// not its own ortho projection -- an earlier version of this
-    /// paragraph wrongly said "HUD/Canvas with its own ortho
-    /// projection", repeating an error already caught and corrected
-    /// once elsewhere this session; fixed here too, not re-copied --
-    /// plus any mirrors/portals/sub-viewports), each currently
-    /// overwriting the same one 528-byte
-    /// buffer at offset 0 -- harmless today because nothing draws yet,
-    /// but once Draw2DLine/DrawTile/etc. record real commands, every
-    /// draw in one submit would see only the *last* `SetSceneNode`
-    /// call's matrices, not its own segment's. The real fix, not yet
-    /// built: a per-segment slot appended on each call (offset
-    /// aligned to the real `CreatedDevice::adapter_limits.min_uniform_
-    /// buffer_offset_alignment`, a commonly-256 value this crate has
-    /// not yet queried on this specific machine's own adapter),
-    /// bound per draw via a dynamic uniform-buffer offset, not one
-    /// shared buffer overwritten in place.
+    /// this always recomputes and always writes -- a known, non-
+    /// urgent performance gap (one extra small buffer allocation per
+    /// call even when nothing relevant changed), not a correctness
+    /// one.
     pub fn set_scene_node(
         &mut self,
         device: &wgpu::Device,
@@ -1086,25 +1113,23 @@ impl RenderLoop {
         scene: &SceneFrame,
     ) {
         let uniforms = compute_frame_uniforms(scene);
-        let buffer = self.frame_uniforms_buffer.get_or_insert_with(|| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("hp2-wgpu frame uniforms"),
-                size: std::mem::size_of::<FrameUniforms>() as u64,
-                // COPY_SRC: lets this crate's own
-                // set_scene_node_creates_and_writes_a_real_uniform_buffer
-                // test (and any future debug-readback tooling) copy
-                // this buffer's real contents out for verification --
-                // negligible cost on a 528-byte buffer, and an earlier
-                // version without it made that test's own
-                // copy_buffer_to_buffer call fail wgpu's real
-                // validation (confirmed by actually running it, not
-                // assumed: "Usage flags ... do not contain required
-                // usage flags BufferUsages(COPY_SRC)").
-                usage: wgpu::BufferUsages::UNIFORM
-                    | wgpu::BufferUsages::COPY_DST
-                    | wgpu::BufferUsages::COPY_SRC,
-                mapped_at_creation: false,
-            })
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("hp2-wgpu frame uniforms segment"),
+            size: std::mem::size_of::<FrameUniforms>() as u64,
+            // COPY_SRC: lets this crate's own
+            // set_scene_node_creates_and_writes_a_real_uniform_buffer
+            // test (and any future debug-readback tooling) copy this
+            // buffer's real contents out for verification --
+            // negligible cost on a 528-byte buffer, and an earlier
+            // version without it made that test's own
+            // copy_buffer_to_buffer call fail wgpu's real validation
+            // (confirmed by actually running it, not assumed: "Usage
+            // flags ... do not contain required usage flags
+            // BufferUsages(COPY_SRC)").
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
         });
         // FrameUniforms now derives bytemuck::Pod/Zeroable (this
         // struct's own doc has the real reasoning) -- bytemuck::
@@ -1112,15 +1137,26 @@ impl RenderLoop {
         // earlier version's hand-rolled unsafe raw-pointer
         // reinterpretation (caught on review).
         let bytes = bytemuck::bytes_of(&uniforms);
-        queue.write_buffer(buffer, 0, bytes);
+        queue.write_buffer(&buffer, 0, bytes);
+        self.frame_uniforms_segments.push(buffer);
         self.last_scene = Some(*scene);
     }
 
-    /// `None` until the first `set_scene_node` call -- real callers
-    /// (the future draw-call-wiring bind-group creation) need to
-    /// handle that, not assume a buffer always exists.
-    pub fn frame_uniforms_buffer(&self) -> Option<&wgpu::Buffer> {
-        self.frame_uniforms_buffer.as_ref()
+    /// How many real `set_scene_node` segments exist for the current
+    /// (or most recently cleared) frame -- `0` before the first call
+    /// since the last `lock_frame`/`begin_offscreen_frame`.
+    pub fn frame_uniforms_segment_count(&self) -> usize {
+        self.frame_uniforms_segments.len()
+    }
+
+    /// The real segment buffer `set_scene_node` created on its
+    /// `index`-th call since the last `lock_frame`/
+    /// `begin_offscreen_frame` (`0`-based). `None` if `index` is out
+    /// of range -- real callers (tests, future debug-readback
+    /// tooling) need to handle that, not assume a given segment
+    /// exists.
+    pub fn frame_uniforms_segment(&self, index: usize) -> Option<&wgpu::Buffer> {
+        self.frame_uniforms_segments.get(index)
     }
 }
 
@@ -1409,6 +1445,14 @@ pub fn lock_frame(
     clear_color: wgpu::Color,
     present_mode: wgpu::PresentMode,
 ) -> FrameOutcome {
+    // Cleared here, regardless of this call's own outcome below --
+    // segments/queued draws are strictly per-frame (RenderLoop::
+    // frame_uniforms_segments's own doc has the full real reasoning),
+    // so a stale leftover from a frame whose own unlock_frame was
+    // never reached (e.g. a skipped Unlock) must never leak into the
+    // next one.
+    loop_state.frame_uniforms_segments.clear();
+    loop_state.queued_lines.clear();
     let Some(surface) = created.surface.as_ref() else {
         loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
@@ -1562,6 +1606,10 @@ pub fn begin_offscreen_frame(
             .contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
         "begin_offscreen_frame's target must be created with TextureUsages::RENDER_ATTACHMENT"
     );
+    // Same real per-frame reset lock_frame itself does -- see its own
+    // comment at the equivalent point for the full reasoning.
+    loop_state.frame_uniforms_segments.clear();
+    loop_state.queued_lines.clear();
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut encoder = created
         .device
@@ -1608,18 +1656,21 @@ pub fn begin_offscreen_frame(
 ///
 /// Before submitting, flushes `loop_state`'s own queued line draws
 /// (`RenderLoop::queue_line`) into the frame's own `CommandEncoder`,
-/// *after* the clear pass already recorded into it, as one combined
-/// `Load`-mode pass -- not as N separate per-call passes, matching
-/// this crate's own real GLSL-batching precedent (one real GPU draw
-/// call batches many logical ones via `DrawID`, not one GPU operation
-/// per engine draw call) and avoiding N redundant render-pass
-/// begin/end pairs for one frame's worth of lines. Skipped (queue
-/// cleared either way) if the queue is empty, or if `set_scene_node`
-/// was never called for this `RenderLoop` (no `frame_uniforms_buffer`
-/// to bind yet -- a real, reachable condition, not a caller bug: a
-/// render device whose first real frame draws lines before its first
-/// `SetSceneNode` call would hit this, and silently not drawing them
-/// is more correct than binding garbage or panicking across FFI).
+/// *after* the clear pass already recorded into it, grouped by the
+/// real segment each line was queued under (`RenderLoop::
+/// frame_uniforms_segments`'s own doc has the full real bug this
+/// fixes): one combined `Load`-mode pass *per non-empty segment*, not
+/// one pass for the whole frame sharing a single `FrameUniforms`
+/// buffer (which would draw every line with only the *last*
+/// `SetSceneNode` call's matrices) and not N separate per-line passes
+/// either (matching this crate's own real GLSL-batching precedent:
+/// one real GPU draw call batches many logical ones via `DrawID`
+/// within a segment, not one GPU operation per engine draw call).
+/// Each segment's own real `DrawID`s are re-indexed to start at `0`
+/// for that segment's own local draw call, and capped at `simple.
+/// wgsl`'s real `MAX_DRAWS` -- `RenderLoop::queue_line`'s own doc has
+/// the full reasoning for why that cap is applied here, not at queue
+/// time. Skipped (queue cleared either way) if no lines were queued.
 ///
 /// `loop_state.counts.presented` is incremented here, not in
 /// `lock_frame`, and only when `present` is `true` -- a successful
@@ -1643,38 +1694,64 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
     let Some(mut frame) = loop_state.in_progress.take() else {
         return false;
     };
-    if !loop_state.queued_line_vertices.is_empty() {
-        if let Some(frame_uniforms_buffer) = loop_state.frame_uniforms_buffer.as_ref() {
-            let needs_new_pipeline = !matches!(
-                &loop_state.line_pipeline,
-                Some((format, _)) if *format == frame.color_format
-            );
-            if needs_new_pipeline {
-                loop_state.line_pipeline = Some((
-                    frame.color_format,
-                    draw::SimpleLinePipeline::new(&created.device, frame.color_format),
-                ));
+    if !loop_state.queued_lines.is_empty() {
+        let needs_new_pipeline = !matches!(
+            &loop_state.line_pipeline,
+            Some((format, _)) if *format == frame.color_format
+        );
+        if needs_new_pipeline {
+            loop_state.line_pipeline = Some((
+                frame.color_format,
+                draw::SimpleLinePipeline::new(&created.device, frame.color_format),
+            ));
+        }
+        let (_, pipeline) = loop_state
+            .line_pipeline
+            .as_ref()
+            .expect("line_pipeline was just set to Some above");
+        for (segment, buffer) in loop_state.frame_uniforms_segments.iter().enumerate() {
+            let mut vertices = Vec::new();
+            let mut draw_params = Vec::new();
+            for line in loop_state
+                .queued_lines
+                .iter()
+                .filter(|line| line.segment == segment)
+            {
+                if draw_params.len() >= draw::MAX_DRAWS {
+                    break;
+                }
+                let draw_id = draw_params.len() as u32;
+                vertices.push(draw::LineVertex {
+                    coords: line.p1,
+                    draw_id,
+                });
+                vertices.push(draw::LineVertex {
+                    coords: line.p2,
+                    draw_id,
+                });
+                draw_params.push(draw::DrawParams {
+                    draw_color: line.color,
+                });
             }
-            let (_, pipeline) = loop_state
-                .line_pipeline
-                .as_ref()
-                .expect("line_pipeline was just set to Some above");
+            if draw_params.is_empty() {
+                continue;
+            }
             pipeline.record(
                 &created.device,
                 &created.queue,
                 &mut frame.encoder,
                 draw::LineDrawCall {
-                    frame_uniforms_buffer,
-                    vertices: &loop_state.queued_line_vertices,
-                    draw_params: &loop_state.queued_line_params,
+                    frame_uniforms_buffer: buffer,
+                    vertices: &vertices,
+                    draw_params: &draw_params,
                     target: &frame.view,
                     load: wgpu::LoadOp::Load,
                 },
             );
         }
-        loop_state.queued_line_vertices.clear();
-        loop_state.queued_line_params.clear();
+        loop_state.queued_lines.clear();
     }
+    loop_state.frame_uniforms_segments.clear();
     created
         .queue
         .submit(std::iter::once(frame.encoder.finish()));
@@ -2058,18 +2135,20 @@ mod tests {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device on this machine");
         let mut loop_state = RenderLoop::new();
-        assert!(
-            loop_state.frame_uniforms_buffer().is_none(),
-            "no buffer should exist before the first set_scene_node call"
+        assert_eq!(
+            loop_state.frame_uniforms_segment_count(),
+            0,
+            "no segment should exist before the first set_scene_node call"
         );
         loop_state.set_scene_node(
             &created.device,
             &created.queue,
             &reference_perspective_scene(),
         );
+        assert_eq!(loop_state.frame_uniforms_segment_count(), 1);
         let buffer_size = loop_state
-            .frame_uniforms_buffer()
-            .expect("expected a buffer to exist after set_scene_node")
+            .frame_uniforms_segment(0)
+            .expect("expected segment 0 to exist after one set_scene_node call")
             .size();
         assert_eq!(buffer_size, std::mem::size_of::<FrameUniforms>() as u64);
         // Real proof the write actually reached the GPU with the
@@ -2097,7 +2176,7 @@ mod tests {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_buffer_to_buffer(
-            loop_state.frame_uniforms_buffer().unwrap(),
+            loop_state.frame_uniforms_segment(0).unwrap(),
             0,
             &readback,
             0,
@@ -2128,25 +2207,35 @@ mod tests {
              compute_frame_uniforms's own real output exactly"
         );
         readback.unmap();
-        // A second call must reuse the same buffer, not leak a new one
-        // every tick -- real per-frame cost if it did (SetSceneNode's
-        // own FrameStateBuffer is a persistent, reused GL buffer too).
-        // `Buffer: Clone + PartialEq` (confirmed against wgpu's own
-        // source, `impl_eq_ord_hash_proxy!(Buffer => .inner)`, before
-        // relying on it -- an earlier version of this test tried a
+        // A second call must append a *new* segment, not reuse the
+        // first one -- the real fix this per-segment redesign exists
+        // for (RenderLoop::frame_uniforms_segments's own doc has the
+        // full real bug reusing a single shared buffer caused once
+        // real draw calls existed). `Buffer: Clone + PartialEq`
+        // (confirmed against wgpu's own source,
+        // `impl_eq_ord_hash_proxy!(Buffer => .inner)`, before relying
+        // on it -- an earlier version of this test tried a
         // `global_id()` method that does not exist on wgpu 30.0.1's
         // real `Buffer` at all, caught by actually building it, not
         // assumed from memory of a different wgpu version's API).
-        let first_buffer = loop_state.frame_uniforms_buffer().unwrap().clone();
+        let first_buffer = loop_state.frame_uniforms_segment(0).unwrap().clone();
         loop_state.set_scene_node(
             &created.device,
             &created.queue,
             &reference_perspective_scene(),
         );
+        assert_eq!(loop_state.frame_uniforms_segment_count(), 2);
         assert_eq!(
-            loop_state.frame_uniforms_buffer().unwrap(),
+            loop_state.frame_uniforms_segment(0).unwrap(),
             &first_buffer,
-            "expected the second set_scene_node call to reuse the same buffer, not create a new one"
+            "expected the first segment to still exist, unchanged, after a second \
+             set_scene_node call"
+        );
+        assert_ne!(
+            loop_state.frame_uniforms_segment(1).unwrap(),
+            &first_buffer,
+            "expected the second set_scene_node call to create a genuinely new segment buffer, \
+             not reuse the first one -- the real bug this redesign fixes"
         );
     }
 
@@ -2179,9 +2268,36 @@ mod tests {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");
         let mut loop_state = RenderLoop::new();
-        // Real production call: creates frame_uniforms_buffer via the
-        // same lazy-get_or_insert_with path a real SetSceneNode call
-        // uses.
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Real lock_frame logic (clear recorded, not submitted).
+        // Must come *before* set_scene_node: begin_offscreen_frame
+        // clears frame_uniforms_segments at its own start, matching
+        // the real engine's own real call order (SetSceneNode always
+        // runs between Lock and Unlock, never before Lock) -- an
+        // earlier version of this test called set_scene_node first,
+        // which begin_offscreen_frame's own clear then silently wiped
+        // out, making queue_line drop the line entirely (no segment
+        // to tag it with) and the final assertion below fail with the
+        // real clear color instead of the real drawn line -- a real
+        // bug in this test's own ordering, not in the production
+        // code, caught by this test's own failure.
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        // Real production call: creates frame_uniforms_segments[0]
+        // via the same real path a real SetSceneNode call uses.
         loop_state.set_scene_node(
             &created.device,
             &created.queue,
@@ -2201,28 +2317,11 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_buffer().unwrap(),
+            loop_state.frame_uniforms_segment(0).unwrap(),
             256,
             &identity_diagonal,
         );
 
-        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("render_loop offscreen test target"),
-            size: wgpu::Extent3d {
-                width: 64,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-
-        // Real lock_frame logic (clear recorded, not submitted).
-        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
         // Real Draw2DLine accumulation path, raw screen-space points
         // (not pre-transformed -- queue_line's own doc has the real
         // transform). With reference_perspective_scene()'s fx=fy=100,
@@ -2337,6 +2436,170 @@ mod tests {
             "RenderLoop's real begin_offscreen_frame/queue_line/unlock_frame path confirmed \
              empirically to composite a queued line draw correctly on top of its own clear, in \
              one combined submit, on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    // The real regression test the per-segment redesign exists for:
+    // two SetSceneNode calls in one frame, each with a genuinely
+    // different modelviewproj_mat, with one line queued under each --
+    // proving each line is drawn with *its own* segment's matrices,
+    // not whichever SetSceneNode call happened to run last (the real
+    // bug this redesign fixes: RenderLoop::frame_uniforms_segments's
+    // own doc has the full reasoning).
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_draws_each_queued_line_with_its_own_segments_matrices() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("multi-segment test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        // Real lock_frame logic, clear BLACK (distinct from both
+        // lines' own real colors below).
+        begin_offscreen_frame(
+            &created,
+            &mut loop_state,
+            &render_target,
+            wgpu::Color::BLACK,
+        );
+
+        // Segment 0: identity modelviewproj_mat (same real technique
+        // as render_loop_flushes_queued_line_draws_through_the_real_
+        // lock_unlock_path above).
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+        // Green line queued under segment 0: P1=(0,50,1), P2=(50,50,1)
+        // -> pre-matrix coords (-1,0,1)-(0,0,1) (same real derivation
+        // as the single-segment test above) -> under identity, spans
+        // NDC x in [-1.0, 0.0] (left half, pixels 0-31).
+        loop_state.queue_line([0.0, 50.0, 1.0], [50.0, 50.0, 1.0], [0.0, 1.0, 0.0, 1.0]);
+
+        // Segment 1: a genuinely different modelviewproj_mat -- same
+        // identity diagonal except m00 = -1.0 instead of 1.0 (flips X
+        // only; m33 stays 1.0, so the homogeneous divide is still by
+        // w=1, not also flipped -- confirmed by hand before relying
+        // on it: a point at pre-matrix x=-1 maps to x=-1*-1=1, a point
+        // at x=0 maps to x=0*-1=0, so a line spanning [-1,0] under
+        // identity spans [0,1] under this matrix instead).
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut x_flip_diagonal = identity_diagonal;
+        x_flip_diagonal[0..4].copy_from_slice(&(-1.0f32).to_le_bytes());
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(1).unwrap(),
+            256,
+            &x_flip_diagonal,
+        );
+        // Red line queued under segment 1: the exact same raw screen
+        // coords as the green line above -- only the segment's own
+        // matrix differs, isolating this test to that one real
+        // variable. Under the X-flip matrix, spans NDC x in [0.0,
+        // 1.0] (right half, pixels 32-63).
+        loop_state.queue_line([0.0, 50.0, 1.0], [50.0, 50.0, 1.0], [1.0, 0.0, 0.0, 1.0]);
+
+        unlock_frame(&created, &mut loop_state, false);
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("multi-segment test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("multi-segment test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the segment-0 (identity matrix) line to render green in the left half, \
+             got {left_pixel:?} -- a wrong value here means it was drawn with the wrong \
+             segment's matrix"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[255u8, 0, 0, 255],
+            "expected the segment-1 (X-flip matrix) line to render red in the right half, got \
+             {right_pixel:?} -- a wrong value here means it was drawn with the wrong segment's \
+             matrix"
+        );
+        println!(
+            "RenderLoop confirmed empirically to draw each queued line with its own real \
+             segment's matrices, not whichever SetSceneNode call happened to run last, on \
+             adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );
