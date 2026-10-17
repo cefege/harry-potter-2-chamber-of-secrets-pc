@@ -46,6 +46,25 @@
 	That fix is unrelated to why frames are not presented above: it
 	only means Exit's own frame-count summary line is now reliably
 	logged, not that any frame reaches the screen.)
+
+	2026-10-17 addendum: a later ctest run in this same long session
+	hit a NEW, different confound -- not a retroactive correction of
+	the paragraph above, which checked session-lock state at the time
+	and found it genuinely unlocked. A compiled probe calling the real
+	`CGSessionCopyCurrentDictionary()` (the exact function named above)
+	at 19:56 that day found `CGSSessionScreenIsLocked = 1`, locked
+	since 19:47 -- directly explaining why that one later run's
+	`wgpu_surface_round_trip` ctest (which normally passes for real,
+	per the paragraph above) hit its own `SKIP_RETURN_CODE=77`
+	environment-gap path instead: macOS reports every window occluded
+	to the WindowServer/Metal compositor while the session is locked,
+	independent of any application code. Any `renderer_smoke_wgpu`/
+	`wgpu_surface_round_trip` result captured during a locked session
+	is uninterpretable noise, not evidence toward or against the
+	original all-Occluded finding above -- that finding still needs
+	its own genuinely-unlocked re-run (with a fresh `CGSessionCopy
+	CurrentDictionary` check immediately beforehand, not assumed from
+	an earlier check) before its root cause can be narrowed further.
 =============================================================================*/
 
 #ifndef _INCL_WGPUDRV_H_

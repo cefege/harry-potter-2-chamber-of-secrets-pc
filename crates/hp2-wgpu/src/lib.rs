@@ -923,9 +923,17 @@ impl RenderLoop {
     /// wrong): `queue.write_buffer` does not apply at the call site,
     /// it stages the write and applies it at the next `queue.submit`,
     /// before any command in that submit runs. `SetSceneNode` is
-    /// called many times per real frame (3D world, then HUD/Canvas
-    /// with its own ortho projection, plus any mirrors/portals/sub-
-    /// viewports), each currently overwriting the same one 528-byte
+    /// called many times per real frame (the 3D world, editor
+    /// orthographic viewports -- `Viewport->IsOrtho()` is the real
+    /// source's own real gate, confirmed by reading `SetSceneNode`'s
+    /// actual dispatch, XOpenGL.cpp:1682-1685; HUD/Canvas uses the
+    /// same perspective projection with points pre-scaled to `z=1`,
+    /// not its own ortho projection -- an earlier version of this
+    /// paragraph wrongly said "HUD/Canvas with its own ortho
+    /// projection", repeating an error already caught and corrected
+    /// once elsewhere this session; fixed here too, not re-copied --
+    /// plus any mirrors/portals/sub-viewports), each currently
+    /// overwriting the same one 528-byte
     /// buffer at offset 0 -- harmless today because nothing draws yet,
     /// but once Draw2DLine/DrawTile/etc. record real commands, every
     /// draw in one submit would see only the *last* `SetSceneNode`
