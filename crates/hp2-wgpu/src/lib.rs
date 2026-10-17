@@ -178,21 +178,36 @@
 //!
 //! `DrawSimple_GLSL.cpp` has been read in full and ported:
 //! `shaders/simple.wgsl`. `DrawComplex_GLSL.cpp` (BSP surface
-//! rendering, 732 lines, by far the largest of the five) has been read
-//! in full too, with one load-bearing finding: it has no geometry
-//! shader at all, and its bump-map tangent space (`vTBNMat`) is
-//! computed directly in the vertex shader from the surface's own
-//! known `XAxis`/`YAxis`/`ZAxis` UV mapping axes -- not derived from
-//! adjacent-triangle geometry the way a typical mesh normal/tangent
-//! would be -- so it needs no geometry-shader replacement design at
-//! all, unlike `DrawGouraud`. Its real complexity is breadth, not
-//! architecture: lightmaps, fogmaps, detail/macro textures,
-//! environment maps, height maps, and three alternate parallax-mapping
-//! techniques (basic/occlusion/relief, each `#if`-gated and the latter
-//! two using real texture-sampling loops) are all optional branches of
-//! one vertex+fragment shader pair, each individually portable with
-//! the same non-bindless-fallback strategy as every other shader here;
-//! none of them have been transcribed yet.
+//! rendering, 732 lines, by far the largest of the five) has now
+//! actually been read in full -- an earlier version of this doc
+//! claimed that after reading only its first 300 lines (vertex shader
+//! plus parallax helpers), caught on review before the fragment
+//! shader (301-732) was ever read. One load-bearing finding holds up: it has
+//! no geometry shader at all, and its bump-map tangent space
+//! (`vTBNMat`) is computed directly in the vertex shader from the
+//! surface's own known `XAxis`/`YAxis`/`ZAxis` UV mapping axes -- not
+//! derived from adjacent-triangle geometry the way a typical mesh
+//! normal/tangent would be -- so it needs no geometry-shader
+//! replacement design at all, unlike `DrawGouraud`. Its real
+//! complexity is breadth, not architecture: lightmaps, fogmaps,
+//! detail/macro textures (both with real HSV recoloring, not plain
+//! multiply), environment maps, height maps, three alternate
+//! parallax-mapping techniques (basic/occlusion/relief, the latter two
+//! using real texture-sampling loops), and -- only visible once the
+//! fragment body itself was actually read -- a real per-pixel
+//! hardware point-light loop used twice (`OPT_HWLighting` base
+//! lighting, and a second pass inside `OPT_BumpMaps` for tangent-space
+//! diffuse+specular), distance fog mixing, and an `OPT_Editor`-gated
+//! block of debug render modes (zone/poly-cut/walkable-surface
+//! visualization, hit-test color override) that is editor-only, not
+//! needed for core gameplay rendering. All `#if`-gated optional
+//! branches of one vertex+fragment pair, each individually portable
+//! with the same non-bindless-fallback strategy as every other shader
+//! here; none of them have been transcribed yet. The file also has a
+//! second genuinely-dead `#if 0` block (an unused parallax
+//! soft-shadow function, lines 673-732) -- confirmed dead the same way
+//! `DrawSimple_GLSL.cpp`'s stipple block is, and likewise not a
+//! transcription target.
 //!
 //! `SetTexture.cpp` (747 lines, texture cache/upload) has been read in
 //! enough depth to scope its shape, though not line-for-line the way
@@ -212,62 +227,125 @@
 //! with a wgpu-side format chosen per source format -- `P8` in
 //! particular is an indexed-palette format needing CPU-side expansion
 //! to RGBA before upload (the real palette-to-RGBA conversion call
-//! site itself has not been read yet).
+//! site itself has not been read yet). `glGenerateMipmap` itself has
+//! no wgpu equivalent at all -- wgpu never generates mipmaps for you,
+//! full stop -- so a real Rust port needs its own mip-generation step:
+//! a render/blit downsample pass per level for uncompressed formats,
+//! but that path does not exist for `TEXF_DXT1`/BC specifically, since
+//! BC-compressed textures cannot be render or storage targets in
+//! wgpu -- the options there are a CPU decode-downsample-re-encode
+//! pass, uploading only the mips the asset already ships
+//! (`Info.NumMips`, skipping GPU mip generation for compressed
+//! textures entirely), or expanding `TEXF_DXT1` to RGBA8 on upload.
+//! Not yet decided which.
 //!
 //! `DrawComplex.cpp` (304 lines), `DrawGouraud.cpp` (406 lines, also
-//! home to `DrawTriangles`), and `DrawTile.cpp` (379 lines) -- the
-//! C++ orchestration that actually issues draw calls, all currently
-//! no-op stubs in `WgpuDrv.cpp` -- have now been read in full. All
-//! three share one real batching architecture that is good news for
-//! porting: CPU-side ring buffers (`VertBuffer`/`DrawBuffer`/
+//! home to `DrawTriangles`), and `DrawTile.cpp` (379 lines) -- the C++
+//! orchestration that actually issues draw calls, all currently no-op
+//! stubs in `WgpuDrv.cpp` -- have now been read for their `RenDev`
+//! interface entry points, shared private helpers (`SetTextureHelper`
+//! in both `DrawComplex.cpp` and `DrawGouraud.cpp`, `BufferVert`,
+//! `DrawNativeTextTile`, `FlushNativeTextTileBatch`), and
+//! `SubmitTileBatch` in full; an earlier version of this doc claimed
+//! all three "read in full", which overclaimed past what was actually
+//! read at the time (those helper bodies, caught on review) -- each
+//! shader class's own constructor/`CreateInputLayout`/
+//! `Activate`/`DeactivateShader` bodies in these three files remain
+//! genuinely unread, stated here rather than implied. All three share
+//! one real batching architecture that is good news for porting:
+//! CPU-side ring buffers (`VertBuffer`/`DrawBuffer`/
 //! `ParametersBuffer`) accumulate vertices and one small per-draw-call
 //! parameter struct across multiple draw calls, flushed only when
 //! blend state or shader specialization actually changes or a buffer
 //! fills up -- not one GL draw call per engine draw call. Each
 //! buffered draw call gets a `DrawID`, written per-vertex and used
 //! shader-side to index back into that draw call's own parameter slot
-//! (`GetXAxis(DrawID)` etc. in `DrawComplex_GLSL.cpp`) -- this is
-//! exactly the "`DrawID`-indexed lookup" pattern `simple.wgsl`
-//! deliberately dropped (justified there because the non-SSBO fallback
-//! never actually multi-draws), so wiring multi-draw-call batching
-//! back in for `DrawComplex`/`DrawGouraud`/`DrawTile` will need it
-//! restored, most likely as a dynamic-offset uniform/storage buffer
-//! indexed by instance or vertex, not necessarily the SSBO-array shape
-//! the GLSL uses. Triangulation is already CPU-side for both
-//! `DrawComplex` (`FSavedPoly` n-gon fan triangulated into
-//! `(NumPts-2)*3` vertices) and `DrawGouraud`/`DrawTriangles` (same
-//! fan triangulation, plus real index-buffer support in
-//! `DrawTriangles`) -- no GPU-side amplification to design around for
-//! either. `DrawTile.cpp`'s `SubmitTileBatch` confirms and sharpens
-//! the earlier `DrawTileCoreProgram`-vs-`DrawTileESProgram` finding:
-//! the Core path packs an entire tile's rect and UVs into a single
-//! vertex's attributes and advances the ring buffer by 3 with only
-//! that one vertex actually written, relying on its geometry shader
-//! for the real 1-to-6 expansion before rasterization; the ES path's
-//! C++ computes all 6 corner vertices directly, by hand, right there
-//! in `SubmitTileBatch` (`Out[0..5].Coords`/`TexCoords`, using
+//! (`GetXAxis(DrawID)` etc. in `DrawComplex_GLSL.cpp`). `simple.wgsl`
+//! originally dropped this indexing on an unverified claim that the
+//! non-SSBO fallback only ever binds one `DrawColor` at a time --
+//! caught on review, then disproven by reading
+//! `ShaderProgram.cpp`'s `EmitDrawCallParametersHeader`: the UBO path
+//! emits a bounded *array* (`DrawCallParameters
+//! Draw<Name>Params[ParametersBufferSize]`) and generates
+//! `Get<Field>(uint DrawID)` accessors indexing it by `DrawID`
+//! identically to the SSBO path. `simple.wgsl` now carries `draw_id`
+//! through and indexes a `var<storage, read> array<DrawParameters>` --
+//! a single storage buffer rather than replicating GLSL's
+//! UBO-size-limited/SSBO-unlimited split, since WebGPU storage buffers
+//! are core and unconditionally available on every backend and web
+//! tier. `DrawComplex`/`DrawGouraud`/`DrawTile`'s eventual WGSL ports
+//! need the same shape, not the version this file originally shipped
+//! with. Triangulation is already CPU-side for both `DrawComplex`
+//! (`FSavedPoly` n-gon fan triangulated into `(NumPts-2)*3` vertices)
+//! and `DrawGouraud`/`DrawTriangles` (same fan triangulation, plus
+//! real index-buffer support in `DrawTriangles`) -- no GPU-side
+//! amplification to design around for either. `DrawGouraud`'s
+//! `BufferVert` helper also confirms a real architectural distinction
+//! from `DrawComplex`: per-vertex `LightColor`/`FogColor` are carried
+//! directly on each vertex (true Gouraud shading, interpolated by the
+//! rasterizer) rather than sampled from a lightmap/fogmap texture in
+//! the fragment shader the way `DrawComplex` does. `DrawTile.cpp`'s
+//! `SubmitTileBatch` confirms and sharpens the earlier
+//! `DrawTileCoreProgram`-vs-`DrawTileESProgram` finding: the Core path
+//! packs an entire tile's rect and UVs into a single vertex's
+//! attributes and advances the ring buffer by 3 with only that one
+//! vertex actually written, relying on its geometry shader for the
+//! real 1-to-6 expansion before rasterization; the ES path's C++
+//! computes all 6 corner vertices directly, by hand, right there in
+//! `SubmitTileBatch` (`Out[0..5].Coords`/`TexCoords`, using
 //! `RFX2`/`RFY2`/`Frame->FX2`/`Frame->FY2` the same way the vertex
 //! shader itself would) -- for `DrawTile` this is no longer a
 //! geometry-shader-replacement design problem, it is a direct
-//! transcription target. One real, not-yet-decided architectural gap
-//! surfaced by all three files: GLSL's `#if`-gated shader
-//! specialization (`ShaderCompilationOptions`, lazily compiled and
-//! cached per unique combination of texture layers and blend mode via
+//! transcription target. `DrawNativeTextTile` -- the native-text
+//! rendering path, `default_enabled: true` per AGENTS.md #4 and
+//! distinct from the `NativeText=False` bitmap-font path AGENTS.md #5
+//! requires stay reachable -- is not a separate rendering path at all
+//! -- it is a thin wrapper that binds an externally-supplied GL
+//! texture/sampler (from the CoreText/FreeType backend, bypassing the
+//! normal `FTextureInfo` cache) and then calls the exact same
+//! `SubmitTileBatch` regular `DrawTile` uses; `FlushNativeTextTileBatch`
+//! just forwards to the same `Shader->Flush`. A real Rust port's
+//! native-text path needs no separate design from `DrawTile`'s, only a
+//! way to bind an already-created wgpu texture/sampler instead of
+//! going through the texture cache.
+//!
+//! One real, not-yet-decided architectural gap surfaced by all three
+//! orchestration files: GLSL's `#if`-gated shader specialization
+//! (`ShaderCompilationOptions`, lazily compiled and cached per unique
+//! combination of texture layers and blend mode via
 //! `SelectSpecialization`) has no direct WGSL/wgpu equivalent -- wgpu
 //! has no API-level preprocessor. The likely shape, not yet
 //! implemented or further scoped: a Rust-side
-//! `HashMap<ShaderCompilationOptions, wgpu::RenderPipeline>` cache,
-//! built from either N generated WGSL source variants or (preferably,
-//! idiomatic wgpu) one WGSL source using pipeline-overridable
+//! `HashMap<ShaderCompilationOptions, wgpu::RenderPipeline>` cache. An
+//! earlier version of this doc suggested WGSL pipeline-overridable
+//! constants as the preferred mechanism for this -- wrong, caught on
+//! review: an override constant can disable a branch's *logic*, but
+//! WGSL still counts a `@group`/`@binding` as statically used if any
+//! code references it at all, even code a constant switches off, so a
+//! single WGSL source with every optional texture layer behind
+//! override-disabled branches would still require every one of those
+//! bindings to be populated (dummy textures for absent lightmap/
+//! fog/detail/etc. layers) in every specialization, which the GLSL
+//! `#if`-compiled-out approach never needs. Generating N actual WGSL
+//! source variants (string substitution, or naga's own preprocessing
+//! if it offers one) avoids that and is the better fit, not pipeline
 //! constants. Confirmed in passing: `DrawGouraud.cpp`'s real
 //! `MaxVertices()` also returns a hardcoded `256`, matching
 //! `WgpuDrv.cpp`'s current stub value -- not a shortcut, already
 //! correct. Still unexamined: the ring-buffer/`ShaderProgram::Flush`
 //! machinery itself (`ShaderProgram.cpp`, read only for its
 //! bindless/SSBO-fallback logic so far, not its buffering internals),
-//! and how any of this would connect to `WgpuDrv.cpp`'s current no-op
-//! `DrawComplexSurface`/`DrawTriangles`/`DrawTile`/`Draw2DLine`/
+//! the shader class constructors/`CreateInputLayout` bodies named
+//! above, and how any of this would connect to `WgpuDrv.cpp`'s current
+//! no-op `DrawComplexSurface`/`DrawTriangles`/`DrawTile`/`Draw2DLine`/
 //! `Draw2DPoint` stubs.
+//!
+//! Depth-range convention (GLSL/OpenGL clip-space Z is -1..1; WebGPU's
+//! is 0..1): not yet resolved in code, since no Rust code builds a
+//! real projection matrix yet. Decision recorded in `simple.wgsl`'s
+//! own header comment rather than here, since it is a per-shader
+//! usage contract (whatever populates `modelviewproj_mat` must build
+//! it directly in WebGPU's 0..1 convention), not a crate-wide fact.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
@@ -904,26 +982,147 @@ mod tests {
     // every .wgsl via naga". No GPU adapter needed -- parsing and
     // validating WGSL is pure CPU-side work naga does without touching
     // any backend, so this runs in CI (ci.yml's runners have no GPU)
-    // unlike the two #[ignore]d tests above.
+    // unlike the two #[ignore]d tests above. Iterates
+    // `src/shaders/*.wgsl` by directory listing rather than naming
+    // `simple.wgsl` specifically, so a future shader file can't skip
+    // validation just by existing without a matching test update; a
+    // non-empty-directory assertion guards against an empty glob
+    // silently "passing".
     //
-    // ValidationFlags::default()/Capabilities::default(): the same
-    // defaults `Validator::new`'s own doc describes as rejecting any
-    // module that uses capabilities beyond `capabilities` -- the
-    // conservative, no-extensions-assumed baseline, appropriate here
-    // since simple.wgsl itself declares no `enable`/capability
-    // requirements.
+    // Capabilities::empty(), not ::default(): checked naga's own
+    // source (naga-30.0.1/src/valid/mod.rs's `impl Default for
+    // Capabilities`) before relying on either -- `default()` is
+    // `MULTISAMPLED_SHADING | CUBE_ARRAY_TEXTURES`, not an
+    // empty/no-extensions baseline as an earlier version of this
+    // comment wrongly claimed (caught on review). `empty()` is the
+    // real conservative choice, and the right one for this plan: it
+    // matches baseline WebGPU with no optional capabilities assumed,
+    // so a shader that accidentally relies on a native-only capability
+    // fails here instead of surfacing later as a Phase 8 web-target
+    // regression.
     #[test]
-    fn simple_wgsl_parses_and_validates() {
-        let source = include_str!("shaders/simple.wgsl");
-        let module = naga::front::wgsl::parse_str(source)
-            .unwrap_or_else(|e| panic!("simple.wgsl failed to parse: {e}"));
-        let mut validator = naga::valid::Validator::new(
-            naga::valid::ValidationFlags::default(),
-            naga::valid::Capabilities::default(),
+    fn every_wgsl_shader_parses_and_validates() {
+        let shader_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(shader_dir)
+            .unwrap_or_else(|e| panic!("failed to list {shader_dir}: {e}"))
+        {
+            let path = entry
+                .unwrap_or_else(|e| panic!("failed to list {shader_dir}: {e}"))
+                .path();
+            if path.extension().and_then(|e| e.to_str()) != Some("wgsl") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
+            let mut validator = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::default(),
+                naga::valid::Capabilities::empty(),
+            );
+            validator
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{} failed naga validation: {e}", path.display()));
+            checked += 1;
+        }
+        assert!(
+            checked > 0,
+            "expected at least one .wgsl file under {shader_dir}, found none -- an empty \
+             directory must not make this test vacuously pass"
         );
-        validator
-            .validate(&module)
-            .unwrap_or_else(|e| panic!("simple.wgsl failed naga validation: {e}"));
+    }
+
+    // Negative control for the two real-GPU pipeline tests below: proves
+    // the push_error_scope/pop_error_scope mechanism they both rely on
+    // actually catches a real failure, rather than only ever observing
+    // `None` regardless of whether anything went wrong (which an error
+    // scope that silently never captures anything would also produce).
+    // Deliberately creates a pipeline whose vertex buffer layout
+    // declares only one Float32x3 attribute at location 0 while
+    // simple.wgsl's vs_main also requires a location-1 `u32` --
+    // asserts the resulting pipeline creation reports a real error
+    // through the Validation-filtered scope.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn mismatched_vertex_layout_is_caught_by_the_error_scope() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let scope = created
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = created
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("simple.wgsl (negative control)"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/simple.wgsl").into()),
+            });
+        // Only location 0 (coords) -- vs_main's location 1 (draw_id) is
+        // left undeclared on purpose.
+        let incomplete_attributes = [wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0,
+        }];
+        let _pipeline = created
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("simple.wgsl pipeline (negative control)"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: 12,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &incomplete_attributes,
+                    })],
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                // Real fragment stage + color target, identical to the
+                // passing pipeline test below -- the *only* difference
+                // from that test is the incomplete vertex attributes
+                // above, so a caught error here can only be attributed
+                // to that mismatch, not (as an earlier draft of this
+                // test did, caught by actually reading its real error
+                // message instead of trusting `is_some()`) to an
+                // unrelated "no render target specified" error from
+                // `fragment: None`.
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let err = pollster::block_on(scope.pop());
+        let err = err.unwrap_or_else(|| {
+            panic!(
+                "expected a real validation error for a vertex buffer layout missing the \
+                 shader's location-1 input -- if this is None, the error-scope mechanism the \
+                 other real-GPU pipeline tests rely on is not actually catching failures"
+            )
+        });
+        let message = format!("{err:?}");
+        assert!(
+            message.contains("location: 1") && message.contains("Missing"),
+            "expected the caught error to specifically mention the missing location-1 \
+             input, not some unrelated validation failure -- got: {message}"
+        );
+        println!("negative control confirmed: error scope caught {err:?}");
     }
 
     // Stronger than naga validation alone -- and stronger than only
@@ -946,34 +1145,52 @@ mod tests {
     // could itself drift out of sync with the shader and mask a real
     // mismatch.
     //
+    // Two nested error scopes, not one: a failed MSL translation or
+    // Metal compile inside create_render_pipeline could in principle
+    // surface as an Internal error rather than a Validation error, and
+    // a Validation-only scope would silently miss it -- so this pops
+    // both and fails on either.
+    //
     // push_error_scope(Validation)/pop_error_scope: wgpu's
     // create_shader_module/create_render_pipeline return their handles
     // unconditionally (not a Result), with any real compile error
     // surfacing later through this out-of-band error-scope mechanism
     // instead -- confirmed by reading their real signatures before
     // relying on this, not assumed from create_device_sync's own
-    // device.poll pattern. Same #[ignore] reasoning as the other
+    // device.poll pattern. The negative-control test above proves this
+    // mechanism actually catches a real failure rather than only ever
+    // observing `None`. Same #[ignore] reasoning as the other
     // real-GPU tests above: needs a real adapter, CI runners have
     // none.
     #[test]
     #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
-    fn simple_wgsl_pipeline_compiles_on_a_real_adapter() {
+    fn simple_wgsl_builds_a_render_pipeline_on_a_real_adapter() {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");
-        let scope = created
+        let validation_scope = created
             .device
             .push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal_scope = created.device.push_error_scope(wgpu::ErrorFilter::Internal);
         let module = created
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("simple.wgsl"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("shaders/simple.wgsl").into()),
             });
-        let vertex_attributes = [wgpu::VertexAttribute {
-            format: wgpu::VertexFormat::Float32x3,
-            offset: 0,
-            shader_location: 0,
-        }];
+        // Matches VertexInput: @location(0) coords: vec3<f32>,
+        // @location(1) draw_id: u32.
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: 12, // size_of::<[f32; 3]>()
+                shader_location: 1,
+            },
+        ];
         let _pipeline = created
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -984,7 +1201,7 @@ mod tests {
                     entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &[Some(wgpu::VertexBufferLayout {
-                        array_stride: 12, // 3 * size_of::<f32>(), matching Coords: vec3<f32>
+                        array_stride: 16, // 3 * size_of::<f32>() + size_of::<u32>()
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &vertex_attributes,
                     })],
@@ -1009,7 +1226,9 @@ mod tests {
             .device
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("device poll should succeed on a working device");
-        if let Some(err) = pollster::block_on(scope.pop()) {
+        let internal_err = pollster::block_on(internal_scope.pop());
+        let validation_err = pollster::block_on(validation_scope.pop());
+        if let Some(err) = validation_err.or(internal_err) {
             panic!(
                 "simple.wgsl's pipeline failed to compile on real adapter {:?} backend {}: {err}",
                 created.adapter_name,
