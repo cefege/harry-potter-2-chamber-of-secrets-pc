@@ -1,8 +1,14 @@
 /*=============================================================================
-	WgpuSurfaceTests.cpp: real-window check for
-	hp2_rs_wgpu_create_surface_from_ns_view_for_testing
-	(crates/hp2-wgpu/src/lib.rs's macos module), macOS only, gated the
-	same as WgpuDrv itself (HP2_ENABLE_WGPU_DRIVER).
+	WgpuSurfaceTests.cpp: real-window check for hp2_rs_wgpu_create's
+	window-surface path (crates/hp2-wgpu/src/lib.rs's macos module),
+	macOS only, gated the same as WgpuDrv itself (HP2_ENABLE_WGPU_DRIVER).
+	Exercises the exact same hp2_rs_wgpu_create/hp2_rs_wgpu_destroy pair
+	UWgpuRenderDevice::Init/Exit call -- not a parallel test-only
+	function (an earlier version of this test called a now-deleted
+	hp2_rs_wgpu_create_surface_from_ns_view_for_testing; merged into
+	the real function once Init actually needed the same ns_view
+	parameter, caught on review as worth consolidating rather than
+	keeping two near-identical code paths).
 
 	Unlike every other SDL-touching ctest in this project, this one
 	cannot use the "dummy" video driver: SDL_Metal_CreateView needs a
@@ -44,23 +50,16 @@ int main()
 {
 	Require( SDL_Init( SDL_INIT_VIDEO ) == 0, "SDL_Init(SDL_INIT_VIDEO) failed" );
 
-	// Precondition, not a runtime-checked case: ns_view must be non-null
-	// (create_surface_from_ns_view's own # Safety doc), so a null view
-	// is not exercised here.
-
 	// SDL_WINDOW_OPENGL, not SDL_WINDOW_METAL: the real engine always
 	// creates its window with SDL_WINDOW_OPENGL (SDLViewport.cpp:268,
 	// unconditional regardless of which render device is selected).
 	// SDL_Metal_CreateView converts it to Metal on the fly (confirmed
 	// directly against the pinned SDL2 source, SDL_video.c:4795-4809:
 	// it clears SDL_WINDOW_OPENGL, calls SDL_GL_UnloadLibrary(), and
-	// sets SDL_WINDOW_METAL) -- that conversion is one-way, so once
-	// UWgpuRenderDevice::Init calls it on the real game window (not
-	// yet wired, see hp2-wgpu's own module doc), a later fallback to
-	// XOpenGL on that same window would have no GL library loaded.
-	// Using SDL_WINDOW_OPENGL here, not SDL_WINDOW_METAL directly,
-	// exercises the actual conversion path Init will take instead of a
-	// window that was already Metal from the start.
+	// sets SDL_WINDOW_METAL) -- that conversion is one-way. Using
+	// SDL_WINDOW_OPENGL here, not SDL_WINDOW_METAL directly, exercises
+	// the actual conversion path UWgpuRenderDevice::Init takes instead
+	// of a window that was already Metal from the start.
 	SDL_Window* Window = SDL_CreateWindow( "wgpu surface test", 0, 0, 64, 64, SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL );
 	Require( Window != NULL, "SDL_CreateWindow with SDL_WINDOW_OPENGL failed" );
 
@@ -71,15 +70,18 @@ int main()
 	void* Layer = SDL_Metal_GetLayer( MetalView );
 	Require( Layer != NULL, "SDL_Metal_GetLayer returned NULL -- no CAMetalLayer attached" );
 
-	// A pass here proves the raw-handle construction and the real
-	// device/adapter sharing one Instance with the surface (see
-	// hp2_rs_wgpu_create_surface_from_ns_view_for_testing's own doc) --
-	// not that the surface actually works for presentation. The
-	// stronger check (surface.configure(&device, ...) plus
-	// get_current_texture() succeeding) is still open; see hp2-wgpu's
-	// own module doc.
-	const bool Created = hp2_rs_wgpu_create_surface_from_ns_view_for_testing( NsView );
-	Require( Created, "hp2_rs_wgpu_create_surface_from_ns_view_for_testing failed to create a wgpu::Surface from a real SDL_Metal_CreateView NSView" );
+	// The real create/destroy pair UWgpuRenderDevice::Init/Exit use.
+	// create_device_sync (crates/hp2-wgpu) itself now validates
+	// surface.get_capabilities(&adapter).formats is non-empty before
+	// returning a device at all (an earlier version of this check
+	// lived only in this test and was vacuous -- caught on review,
+	// see hp2-wgpu's own create_device_sync doc), so a non-null
+	// handle here already proves the surface is genuinely usable with
+	// the adapter, not just that a Result was constructed.
+	FfiWgpuCreateResult Result = hp2_rs_wgpu_create( NsView );
+	Require( Result.handle != NULL, "hp2_rs_wgpu_create failed to create a real wgpu device from a real SDL_Metal_CreateView NSView" );
+	Require( Result.adapter_name_len > 0, "hp2_rs_wgpu_create returned an empty adapter name" );
+	hp2_rs_wgpu_destroy( Result.handle );
 
 	SDL_Metal_DestroyView( MetalView );
 	SDL_DestroyWindow( Window );

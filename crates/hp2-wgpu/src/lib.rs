@@ -2,42 +2,54 @@
 //! `ThirdParty/UT99VulkanDrv` with one `wgpu`-backed render device.
 //! Phase 3.2 of `local://rust-inplace-port-plan.md`.
 //!
-//! **Scope of this crate today: headless adapter/device creation, plus
-//! macOS window-surface creation from a raw `NSView*`.** Wired to
-//! `hp2-ffi` behind the `renderer-wgpu` feature, consumed by the real
-//! `HarryPotter2/Unreal/WgpuDrv` C++ package (`UWgpuRenderDevice :
-//! URenderDevice`, registered as `WgpuDrv.WgpuRenderDevice`, gated
-//! behind the `HP2_ENABLE_WGPU_DRIVER` CMake option, default OFF).
-//! Verified end to end on real hardware, not assumed: `Init`/`Exit`
-//! forward to `hp2_rs_wgpu_create`/`destroy`; a real `hp2_game` process
-//! launch with `[Engine.Engine] GameRenderDevice=WgpuDrv.
-//! WgpuRenderDevice` logs `WgpuDrv: adapter "Apple M5" backend Metal`
-//! (`Build/run_wgpu_smoke.py`, this machine's real GPU, confirmed
+//! **Scope of this crate today: adapter/device creation, plus macOS
+//! window-surface creation from a raw `NSView*`, wired into the real
+//! `UWgpuRenderDevice::Init`.** Wired to `hp2-ffi` behind the
+//! `renderer-wgpu` feature, consumed by the real `HarryPotter2/Unreal/
+//! WgpuDrv` C++ package (`UWgpuRenderDevice : URenderDevice`,
+//! registered as `WgpuDrv.WgpuRenderDevice`, gated behind the
+//! `HP2_ENABLE_WGPU_DRIVER` CMake option, default OFF). Verified end
+//! to end on real hardware, not assumed: `Init` calls
+//! `SDL_Metal_CreateView` on the real game window
+//! (`Viewport->GetWindow()`) and passes the resulting `NSView*` to
+//! `hp2_rs_wgpu_create`, which shares one `wgpu::Instance` between
+//! surface and adapter/device creation; `Exit` tears both down in the
+//! safe order (device/surface before the `SDL_MetalView`). A real
+//! `hp2_game -window` process launch with `[Engine.Engine]
+//! GameRenderDevice=WgpuDrv.WgpuRenderDevice` logs `WgpuDrv: adapter
+//! "Apple M5" backend Metal` with no "continuing headless" fallback
+//! line (`Build/run_wgpu_smoke.py`, this machine's real GPU, confirmed
 //! present via `system_profiler SPDisplaysDataType` before this crate
-//! was started). `request_adapter_sync`/`create_device_sync`'s own
-//! `#[ignore]`d tests (CI runners have no GPU, see their own doc) cover
-//! the headless half at the Rust level directly.
+//! was started) -- the absence of that fallback line is itself the
+//! evidence the real surface path, not the headless one, ran.
+//! `request_adapter_sync`/`create_device_sync`'s own `#[ignore]`d
+//! tests (CI runners have no GPU, see their own doc) cover the
+//! headless half at the Rust level directly.
 //!
-//! `create_device_sync` now takes an optional surface-creation
-//! closure, sharing one `Instance` between surface and adapter
-//! creation as wgpu's `compatible_surface` check requires (an earlier
-//! version built two separate, unrelated `Instance`s for the headless
-//! device and the standalone surface-creation test, which could never
-//! have been wired together correctly -- caught and redesigned before
-//! anything downstream depended on it, see `CreatedDevice`/
-//! `create_device_sync`'s own doc for the detail). `hp2_rs_wgpu_create`
-//! (`hp2-ffi`) still passes `None` -- still open, not started: actually
-//! calling `SDL_Metal_CreateView` on the real game window from
-//! `UWgpuRenderDevice::Init` and passing the result through (today
-//! `Init` stays headless, so it still cannot present a frame), resize
-//! handling, all WGSL shader transcription, real draw-call forwarding
-//! for any of `URenderDevice`'s pure virtuals, and a stronger surface-
-//! working proof than "a `Surface` value was constructed without
-//! erroring" -- the plan's frame capture and editor hit testing will
-//! eventually need `surface.configure(&device, ...)` plus
-//! `get_current_texture()` to actually succeed, a reasonable next
-//! test to add but not required to prove either existing slice's own
-//! narrower claim.
+//! `create_device_sync` shares one `Instance` between surface and
+//! adapter creation, as wgpu's `compatible_surface` check requires (an
+//! earlier version built two separate, unrelated `Instance`s for the
+//! headless device and the standalone surface-creation test, which
+//! could never have been wired together correctly -- caught and
+//! redesigned before anything downstream depended on it, see
+//! `CreatedDevice`/`create_device_sync`'s own doc for the detail), and
+//! validates `surface.get_capabilities(&adapter).formats` is
+//! non-empty before returning a device at all -- an empty list is
+//! wgpu's own documented signal that the surface is incompatible with
+//! the adapter, so this is a real failure, not a cosmetic check (an
+//! earlier version only checked `surface.is_some()` in one caller's
+//! own test, which was vacuous -- caught on review, fixed in the
+//! production function itself, not just the test).
+//!
+//! Still open, not started: resize handling, all WGSL shader
+//! transcription, real draw-call forwarding for any of
+//! `URenderDevice`'s pure virtuals, and a stronger surface-working
+//! proof than "a `Surface` value was constructed and is compatible
+//! with the adapter" -- the plan's frame capture and editor hit
+//! testing will eventually need `surface.configure(&device, ...)` plus
+//! `get_current_texture()` to actually succeed and present, a
+//! reasonable next test to add but not required to prove either
+//! existing slice's own narrower claim.
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key (not yet read from an ini
@@ -227,6 +239,22 @@ pub fn create_device_sync(
         None => None,
     };
     let adapter = request_adapter_raw(&instance, surface.as_ref())?;
+    // A non-null surface that is actually incompatible with the
+    // adapter (empty format list -- wgpu-types-30.0.1/src/surface.rs's
+    // own doc comment on `SurfaceCapabilities::formats`: "Returns an
+    // empty vector if the surface is incompatible with the adapter")
+    // is as much a real failure as no adapter at all: a surface that
+    // can never be configured is useless to the caller. Checked here,
+    // not left for callers to discover later -- an earlier version of
+    // this crate only checked `surface.is_some()` in one caller's own
+    // test, which was vacuous (caught on review): this validates the
+    // actual production path every caller goes through, not just a
+    // test-only assertion.
+    if let Some(surface) = &surface
+        && surface.get_capabilities(&adapter).formats.is_empty()
+    {
+        return None;
+    }
     let info = adapter.get_info();
     let adapter_limits = adapter.limits();
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {

@@ -2713,25 +2713,53 @@ const FFI_WGPU_CREATE_FAILURE: FfiWgpuCreateResult = FfiWgpuCreateResult {
 
 /// Replaces the adapter/device-creation half of `UWgpuRenderDevice::
 /// Init` (`WgpuDrv`'s future C++ body; see `local://
-/// rust-inplace-port-plan.md`'s Phase 3.2). Headless: no window
-/// surface yet (`hp2-wgpu`'s own module doc explains why), so this
-/// alone cannot actually render anything -- it proves the adapter and
-/// device exist and lets C++ log the plan's `WgpuDrv: adapter "<name>"
-/// backend <X>` line, same as every other render device's `Init`
-/// logs its own adapter info today (see `XOpenGL.cpp`'s `debugf(
-/// NAME_Init, ...)` calls).
+/// rust-inplace-port-plan.md`'s Phase 3.2). `ns_view` is the pointer
+/// `SDL_Metal_CreateView` returns on macOS; null means headless (no
+/// window surface -- every non-macOS caller, and any macOS caller
+/// that has not created a Metal view yet). When non-null, the surface
+/// and the adapter/device it requests share one `Instance`, so the
+/// adapter request's `compatible_surface` check is real (see
+/// `hp2-wgpu`'s own `CreatedDevice`/`create_device_sync` doc for why
+/// that matters). Headless still lets C++ log the plan's `WgpuDrv:
+/// adapter "<name>" backend <X>` line, same as every other render
+/// device's `Init` logs its own adapter info today (see `XOpenGL.cpp`'s
+/// `debugf(NAME_Init, ...)` calls).
 ///
 /// # Safety
-/// The returned `handle`, if non-null, must be passed to
-/// `hp2_rs_wgpu_destroy` exactly once, and never dereferenced
-/// directly by C++ (opaque).
+/// `ns_view`, if non-null, must be a valid pointer to an `NSView`
+/// (from `SDL_Metal_CreateView`) that outlives the returned `handle`
+/// -- the caller must destroy `handle` (via `hp2_rs_wgpu_destroy`)
+/// before calling `SDL_Metal_DestroyView` on it. Must be called on the
+/// application's main thread if non-null (AppKit requirement). The
+/// returned `handle`, if non-null, must be passed to
+/// `hp2_rs_wgpu_destroy` exactly once, and never dereferenced directly
+/// by C++ (opaque).
 #[cfg(feature = "renderer-wgpu")]
 #[unsafe(no_mangle)]
-pub extern "C" fn hp2_rs_wgpu_create() -> FfiWgpuCreateResult {
+pub unsafe extern "C" fn hp2_rs_wgpu_create(ns_view: *mut c_void) -> FfiWgpuCreateResult {
     guard("hp2_rs_wgpu_create", FFI_WGPU_CREATE_FAILURE, move || {
-        let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
-        let Some(created) = hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
-        else {
+        #[cfg(target_os = "macos")]
+        let created = if ns_view.is_null() {
+            let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
+            hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+        } else {
+            let create_surface = move |instance: &wgpu::Instance| unsafe {
+                hp2_wgpu::macos::create_surface_from_ns_view(instance, ns_view)
+            };
+            hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, Some(create_surface))
+        };
+        #[cfg(not(target_os = "macos"))]
+        let created = {
+            // No window-surface path on this platform yet (hp2-wgpu's
+            // `macos` module is macOS-only -- see its own doc for
+            // why); a non-null ns_view here would be a caller bug, not
+            // something this function can act on, so it is silently
+            // ignored rather than causing total failure.
+            let _ = ns_view;
+            let no_surface: Option<hp2_wgpu::HeadlessSurfaceCreator> = None;
+            hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, no_surface)
+        };
+        let Some(created) = created else {
             return FFI_WGPU_CREATE_FAILURE;
         };
         let backend_name = hp2_wgpu::backend_name(created.backend).to_string();
@@ -2768,61 +2796,4 @@ pub unsafe extern "C" fn hp2_rs_wgpu_destroy(handle: *mut c_void) {
             drop(Box::from_raw(handle as *mut WgpuHandle));
         }
     })
-}
-
-/// Replaces the window-surface half of `UWgpuRenderDevice::Init`
-/// (`WgpuDrv`'s future C++ body, macOS only -- `hp2-wgpu::macos`'s own
-/// doc explains why). `ns_view` is the pointer `SDL_Metal_CreateView`
-/// returns. Exercises the *real* integrated path, not just isolated
-/// surface creation: calls `create_device_sync` with a surface-
-/// creation closure, so the surface and the adapter/device it
-/// requests share one `Instance` and the adapter request's
-/// `compatible_surface` check is real (an earlier version of this
-/// function built its own throwaway `Instance` disconnected from any
-/// device -- caught on review, see `hp2-wgpu`'s own `CreatedDevice`/
-/// `create_device_sync` doc for the detail). Checks
-/// `surface.get_capabilities(&adapter).formats` is non-empty -- an
-/// empty list is wgpu's own documented signal that "the surface is
-/// incompatible with the adapter" (`wgpu-types-30.0.1/src/surface.rs`'s
-/// own doc comment on `SurfaceCapabilities::formats`). Checking only
-/// `created.surface.is_some()` would have been vacuous: a failed
-/// `create_surface` closure already makes `create_device_sync` return
-/// `None` before any `CreatedDevice` exists, so `surface` is
-/// guaranteed `Some` on every path that reaches this point regardless
-/// -- caught on review, not self-caught. `CreatedDevice`'s whole group
-/// (surface, device, queue, adapter, instance, in that declaration/
-/// drop order -- Rust drops struct fields in declaration order, root
-/// owner `instance` last) drops when this function returns, proving
-/// nothing about keeping a surface alive across calls;
-/// `hp2_rs_wgpu_create`/`destroy` remain the real create/destroy pair
-/// for `UWgpuRenderDevice`'s own handle once that integration lands.
-///
-/// # Safety
-/// `ns_view` must be a valid, non-null pointer to an `NSView` (from
-/// `SDL_Metal_CreateView`) that outlives this call. Must be called on
-/// the application's main thread (AppKit requirement).
-#[cfg(all(feature = "renderer-wgpu", target_os = "macos"))]
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hp2_rs_wgpu_create_surface_from_ns_view_for_testing(
-    ns_view: *mut c_void,
-) -> bool {
-    guard(
-        "hp2_rs_wgpu_create_surface_from_ns_view_for_testing",
-        false,
-        move || {
-            let create_surface = move |instance: &wgpu::Instance| unsafe {
-                hp2_wgpu::macos::create_surface_from_ns_view(instance, ns_view)
-            };
-            let Some(created) =
-                hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, Some(create_surface))
-            else {
-                return false;
-            };
-            let Some(surface) = created.surface.as_ref() else {
-                return false;
-            };
-            let capabilities = surface.get_capabilities(&created.adapter);
-            !capabilities.formats.is_empty()
-        },
-    )
 }

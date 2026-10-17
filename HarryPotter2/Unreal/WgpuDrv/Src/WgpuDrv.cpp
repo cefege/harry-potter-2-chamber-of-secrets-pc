@@ -5,6 +5,10 @@
 #include "WgpuDrv.h"
 #include "hp2_rs.h"
 
+#if MACOSX
+#include <SDL_metal.h>
+#endif
+
 IMPLEMENT_PACKAGE(WgpuDrv);
 IMPLEMENT_CLASS(UWgpuRenderDevice);
 
@@ -42,17 +46,63 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
-	// existing device first so repeated toggles don't leak one wgpu
-	// device per call.
+	// existing device/view first so repeated toggles don't leak one
+	// wgpu device (or SDL_MetalView) per call. RustDevice before
+	// MetalView: RustDevice's wgpu::Surface borrows the view's
+	// CAMetalLayer, so the view must outlive it (WgpuDrv.h's own
+	// field comment).
 	if( RustDevice )
 	{
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
+#if MACOSX
+	if( MetalView )
+	{
+		SDL_Metal_DestroyView( (SDL_MetalView)MetalView );
+		MetalView = NULL;
+	}
 
-	FfiWgpuCreateResult Result = hp2_rs_wgpu_create();
+	// SDL_WINDOW_OPENGL -> SDL_WINDOW_METAL is a one-way conversion
+	// (confirmed against the pinned SDL2 source, SDL_video.c:4795-
+	// 4809): SDLViewport.cpp:268 always creates the window with
+	// SDL_WINDOW_OPENGL regardless of which render device is
+	// selected, and SDL_Metal_CreateView flips it to Metal on the
+	// fly, clearing SDL_WINDOW_OPENGL and unloading the GL library.
+	// A later fallback to XOpenGL on this same window would have no
+	// GL library loaded -- not a concern today (HP2_ENABLE_WGPU_DRIVER
+	// is an opt-in alternate GameRenderDevice, not a fallback chain).
+	void* NsView = NULL;
+	SDL_Window* Window = (SDL_Window*)Viewport->GetWindow();
+	if( Window )
+	{
+		SDL_MetalView View = SDL_Metal_CreateView( Window );
+		if( View )
+		{
+			MetalView = View;
+			NsView = View; // "can be cast directly to a NSView" -- SDL_metal.h's own doc comment
+		}
+		else
+		{
+			debugf( NAME_Init, TEXT("WgpuDrv: SDL_Metal_CreateView failed, continuing headless") );
+		}
+	}
+#else
+	void* NsView = NULL;
+#endif
+
+	FfiWgpuCreateResult Result = hp2_rs_wgpu_create( NsView );
 	if( !Result.handle )
+	{
+#if MACOSX
+		if( MetalView )
+		{
+			SDL_Metal_DestroyView( (SDL_MetalView)MetalView );
+			MetalView = NULL;
+		}
+#endif
 		appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried Auto)") );
+	}
 
 	RustDevice = Result.handle;
 	debugf( NAME_Init, TEXT("WgpuDrv: adapter \"%ls\" backend %ls"),
@@ -77,6 +127,13 @@ void UWgpuRenderDevice::Exit()
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
+#if MACOSX
+	if( MetalView )
+	{
+		SDL_Metal_DestroyView( (SDL_MetalView)MetalView );
+		MetalView = NULL;
+	}
+#endif
 	unguard;
 }
 

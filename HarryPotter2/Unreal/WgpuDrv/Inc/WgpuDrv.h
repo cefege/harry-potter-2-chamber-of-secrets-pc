@@ -2,13 +2,15 @@
 	WgpuDrv.h: wgpu-backed render device, forwarding to crates/hp2-wgpu.
 	Phase 3.2 of local://rust-inplace-port-plan.md.
 
-	Scope today: Init/Exit forward to hp2_rs_wgpu_create/destroy, which
-	create a real headless wgpu adapter+device and log the plan's
-	"WgpuDrv: adapter "<name>" backend <X>" line. Every other virtual is
-	a safe no-op stub -- there is no window surface integration, no
-	draw-call forwarding, and no shader pipeline yet. This class exists
-	to prove the registration/build/ini-selection chain works end to
-	end, not to render anything.
+	Scope today: Init creates a real wgpu adapter+device, and on macOS
+	(MACOSX) also a real window surface via SDL_Metal_CreateView on the
+	real game window (Viewport->GetWindow()), logging the plan's
+	"WgpuDrv: adapter "<name>" backend <X>" line. Non-macOS builds stay
+	headless (no Metal API to create a view from) until a Vulkan/DX12
+	surface path exists. There is still no draw-call forwarding and no
+	shader pipeline -- every other virtual is a safe no-op stub. This
+	class exists to prove the registration/build/ini-selection/surface
+	chain works end to end, not to render a frame yet.
 =============================================================================*/
 
 #ifndef _INCL_WGPUDRV_H_
@@ -28,6 +30,12 @@ class UWgpuRenderDevice : public URenderDevice
 	// this class never looks inside it, only passes it back to
 	// hp2_rs_wgpu_destroy in Exit. NULL when no device is live.
 	void* RustDevice;
+
+	// Opaque SDL_MetalView (macOS only; always NULL elsewhere). Must
+	// outlive RustDevice's wgpu::Surface -- destroyed only after
+	// RustDevice, never before (hp2-wgpu::CreatedDevice's own doc on
+	// why: the Surface borrows the view's CAMetalLayer).
+	void* MetalView;
 
 	void StaticConstructor();
 
