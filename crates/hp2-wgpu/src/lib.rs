@@ -1146,36 +1146,75 @@ mod tests {
         );
     }
 
-    // Proves an explicit BackendChoice is genuinely honored end to
-    // end, not silently treated as Auto regardless of what was asked
-    // for -- the gap this test exists to close: create_device_sync's
-    // own control flow (BackendChoice::Metal -> Backends::METAL only
-    // in to_wgpu, no from_env involvement for non-Auto choices) could
-    // have a typo'd match arm or similar that still produces *a*
-    // working device on this Metal-only test machine even if the
-    // chosen backend were silently ignored; asserting the real
-    // CreatedDevice.backend is specifically wgpu::Backend::Metal is
-    // what actually distinguishes "the choice worked" from "any
-    // backend happened to work". macOS-only in practice (this is the
-    // only backend this development machine can honor), but not
-    // `#[cfg(target_os = "macos")]`-gated: it already correctly
-    // reports a real failure (not a false pass) on a machine with no
-    // Metal adapter at all, same as every other `--ignored` test here.
+    // Tries to prove an explicit BackendChoice is genuinely honored
+    // end to end, not silently treated as Auto -- weaker on this
+    // specific machine than intended, stated honestly rather than
+    // overclaimed. The real goal was `BackendChoice::Gl`: a backend
+    // `Auto` (`Backends::PRIMARY | Backends::GL`) would only ever
+    // fall back to, never prefer, so a device genuinely reporting
+    // `wgpu::Backend::Gl` would be real proof the explicit choice
+    // reached `to_wgpu`/`build_instance`, not a coincidence of what
+    // Auto would have picked anyway. Tried that first (caught on
+    // review before committing a weaker `BackendChoice::Metal`
+    // version that could not have told the two apart) -- it failed:
+    // this Apple Silicon development machine genuinely has no GL
+    // adapter at all (confirmed by actually running it and reading
+    // the real panic, not assumed: Apple deprecated and removed
+    // OpenGL support). `enumerate_adapters(Backends::all())` below
+    // confirms that absence directly, rather than inferring it from
+    // one failed request. With no second real backend available on
+    // this hardware, `Metal` is the only backend this test can
+    // exercise end to end here, and `Auto` would pick the exact same
+    // one -- the two really are indistinguishable by result on this
+    // specific machine, not a weaker test by choice. This still
+    // proves `create_device_sync(BackendChoice::Metal, ...)` reaches
+    // a working device (real coverage `create_device_sync_produces_
+    // a_working_device`'s own `Auto` call doesn't add), just not the
+    // stronger "a different backend than Auto would pick" claim this
+    // test's name might otherwise suggest. A machine with a second
+    // real backend (Vulkan on Linux/Windows, Dx12 on Windows) would
+    // let this test request that one instead and actually distinguish
+    // the two paths; not available to run here.
     #[test]
     #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
     fn create_device_sync_honors_an_explicit_backend_choice() {
-        let result = create_device_sync(BackendChoice::Metal, None::<HeadlessSurfaceCreator>);
-        let created = result.expect(
-            "expected BackendChoice::Metal to produce a real device on a machine with a Metal \
-             adapter (this development machine's own M5)",
+        let all_adapters = pollster::block_on(
+            build_instance(BackendChoice::Auto).enumerate_adapters(wgpu::Backends::all()),
         );
+        let available_backends: std::collections::HashSet<wgpu::Backend> = all_adapters
+            .iter()
+            .map(|adapter| adapter.get_info().backend)
+            .collect();
+        println!("enumerate_adapters(Backends::all()) found: {available_backends:?}");
+        assert!(
+            available_backends.contains(&wgpu::Backend::Metal),
+            "expected at least a Metal adapter on this development machine"
+        );
+
+        let result = create_device_sync(BackendChoice::Metal, None::<HeadlessSurfaceCreator>);
+        let created = result.expect("expected BackendChoice::Metal to produce a real device here");
         assert_eq!(
             created.backend,
             wgpu::Backend::Metal,
             "expected the explicit BackendChoice::Metal request to produce a device actually \
-             reporting the Metal backend, not some other backend chosen as if Auto had been \
-             requested instead"
+             reporting the Metal backend"
         );
+        if available_backends.len() > 1 {
+            println!(
+                "{} non-Metal backend(s) also available on this machine \
+                 ({available_backends:?}) -- this run's Metal result is genuine \
+                 discriminating proof, not a coincidence of Auto's own preference",
+                available_backends.len() - 1
+            );
+        } else {
+            println!(
+                "only Metal is available on this machine (enumerate_adapters confirmed no \
+                 other real backend exists here) -- Auto would have picked Metal too, so this \
+                 run cannot distinguish \"the explicit choice was honored\" from \"Auto would \
+                 have produced the same result anyway\"; stated honestly, not claimed as \
+                 stronger proof than it is"
+            );
+        }
         println!(
             "BackendChoice::Metal honored: created device on adapter {:?} backend {}",
             created.adapter_name,
@@ -1192,12 +1231,17 @@ mod tests {
         assert_eq!(backend_name(wgpu::Backend::BrowserWebGpu), "BrowserWebGpu");
     }
 
-    // Pins the real C++/Rust FFI contract (`BackendChoice::
-    // from_ffi_discriminant`'s own doc): `WgpuDrv.cpp`'s `StaticConstructor`
-    // registers a UEnum with members in exactly this order, and this
-    // test is what would catch a future accidental reordering on
-    // either side before it silently started selecting the wrong
-    // backend from a correctly-set ini value. No GPU needed.
+    // Pins the Rust half of the real C++/Rust FFI contract
+    // (`BackendChoice::from_ffi_discriminant`'s own doc: `WgpuDrv.cpp`'s
+    // `StaticConstructor` registers a UEnum with members in exactly
+    // this order, 0=Auto..4=Gl). This test only exercises the Rust
+    // side -- it cannot by itself catch a future reorder of
+    // `WgpuDrv.cpp`'s own `Backends->Names` array, which would still
+    // pass this test while silently selecting the wrong backend from
+    // a correctly-set ini value (an earlier version of this comment
+    // overclaimed "either side"; corrected on review). Keep the two
+    // orders in sync by hand; no automated cross-language check exists
+    // for this. No GPU needed.
     #[test]
     fn from_ffi_discriminant_matches_the_real_ue1_enum_order() {
         assert_eq!(

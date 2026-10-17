@@ -129,11 +129,17 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 		}
 #endif
 		// Matches StaticConstructor's Backends UEnum member order
-		// (0=Auto..4=Gl) so the error names the real backend that was
-		// actually tried, not a hardcoded "Auto" that would have been
-		// wrong as soon as this ini key became real (an earlier
+		// (0=Auto..4=Gl) so the error names the real backend(s) that
+		// were actually tried, not a hardcoded "Auto" that would have
+		// been wrong as soon as this ini key became real (an earlier
 		// version of this message always said "Auto" unconditionally,
-		// from before the Backend config property existed). For an
+		// from before the Backend config property existed). Also
+		// names the GL-only retry create_device_sync (hp2-wgpu's own
+		// Rust side) always performs on total failure when the
+		// requested backend wasn't already Gl -- an earlier version of
+		// this message named only the originally-requested backend,
+		// which under-reported what was genuinely attempted whenever
+		// that retry also failed (caught on review). For an
 		// out-of-range Backend value, names what hp2_rs_wgpu_create
 		// itself actually falls back to (BackendChoice::
 		// from_ffi_discriminant returning None -> Auto), not "Unknown"
@@ -141,10 +147,14 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 		// instead, misreporting what was actually attempted (caught on
 		// review).
 		static const TCHAR* BackendNames[] = { TEXT("Auto"), TEXT("Metal"), TEXT("Vulkan"), TEXT("Dx12"), TEXT("Gl") };
-		if( Backend < ARRAY_COUNT(BackendNames) )
-			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls)"), BackendNames[Backend] );
+		const INT GlIndex = ARRAY_COUNT(BackendNames) - 1; // "Gl", the real retry target
+		const TCHAR* RequestedName = ( Backend < ARRAY_COUNT(BackendNames) ) ? BackendNames[Backend] : TEXT("Auto");
+		if( Backend == GlIndex )
+			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls)"), RequestedName );
+		else if( Backend < ARRAY_COUNT(BackendNames) )
+			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls, %ls)"), RequestedName, BackendNames[GlIndex] );
 		else
-			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried Auto, invalid Backend=%i)"), Backend );
+			appErrorf( TEXT("WgpuDrv: no compatible GPU adapter (tried %ls, %ls, invalid Backend=%i)"), RequestedName, BackendNames[GlIndex], Backend );
 	}
 
 	RustDevice = Result.handle;
