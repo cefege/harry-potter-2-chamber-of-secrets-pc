@@ -30,13 +30,29 @@
 // draw call.
 //
 // This WGSL file threads `draw_id` through exactly as the GLSL does,
-// but backs it with a *storage* buffer (`var<storage, read>`) rather
-// than replicating GLSL's UBO-vs-SSBO split: WebGPU storage buffers are
-// core, unconditionally available on every backend and web tier (no
-// feature gate, unlike GLSL's SSBO extension), so there is no
-// capability reason to keep two separate paths the way the GLSL source
-// has to for GL driver compatibility -- one array-indexed storage
-// buffer covers both GLSL paths' semantics.
+// backed by a fixed-size *uniform* array, not a storage buffer -- an
+// earlier version of this file used `var<storage, read>` here, on the
+// claim that WebGPU storage buffers are "core, unconditionally
+// available on every backend and web tier"; wrong, caught on review
+// and confirmed by reading wgpu-types's own
+// `Limits::downlevel_webgl2_defaults()`:
+// `max_storage_buffers_per_shader_stage: 0` and
+// `max_storage_buffer_binding_size: 0` -- genuinely zero storage
+// buffers, matching this crate's own `BackendChoice::Gl` and the
+// plan's later Phase 8 web target. A fixed-size uniform array is the
+// real portable equivalent of GLSL's UBO fallback path (the one this
+// shader is already transcribed from) and the one `GetMaximumUniform
+// BufferSize` computes a capacity for in the real source. WGSL
+// requires a uniform-buffer array's element count to be a
+// const-expression, not a pipeline-overridable one (confirmed against
+// the WGSL spec's address-space-layout rules before relying on it,
+// not assumed) -- `MAX_DRAWS` below is a concrete, conservative,
+// *provisional* constant (256 draws * 16 bytes = 4096 bytes, well
+// within even the WebGL2-downlevel 16 KiB `max_uniform_buffer_
+// binding_size` floor), not yet the generated-per-build value the
+// real engine computes at compile time; making it real needs the same
+// WGSL-source-generation mechanism this crate's module doc already
+// scopes as open for GLSL's `#if`-gated shader specialization.
 //
 // Not yet ported, left honestly absent rather than stubbed: the
 // `OPT_ClipDistance` custom clip-plane path (WGSL has no
@@ -76,11 +92,15 @@ struct DrawParameters {
     draw_color: vec4<f32>,
 }
 
+// See the correction note above: provisional, conservative capacity,
+// not yet the real per-build-generated value.
+const MAX_DRAWS: u32 = 256u;
+
 @group(0) @binding(0) var<uniform> frame: FrameUniforms;
 // Matches the GLSL array-indexed-by-DrawID shape (see the correction
-// note above), backed by a storage buffer rather than replicating
-// GLSL's separate bounded-UBO-array/unbounded-SSBO-array paths.
-@group(1) @binding(0) var<storage, read> draw_params: array<DrawParameters>;
+// note above): a fixed-size uniform array, the portable equivalent of
+// GLSL's UBO fallback.
+@group(1) @binding(0) var<uniform> draw_params: array<DrawParameters, MAX_DRAWS>;
 
 struct VertexInput {
     // == GLSL's `layout(location = 0) in vec3 Coords; // == gl_Vertex`

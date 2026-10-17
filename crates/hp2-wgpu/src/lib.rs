@@ -188,26 +188,48 @@
 //! surface's own known `XAxis`/`YAxis`/`ZAxis` UV mapping axes -- not
 //! derived from adjacent-triangle geometry the way a typical mesh
 //! normal/tangent would be -- so it needs no geometry-shader
-//! replacement design at all, unlike `DrawGouraud`. Its real
-//! complexity is breadth, not architecture: lightmaps, fogmaps,
-//! detail/macro textures (both with real HSV recoloring, not plain
-//! multiply), environment maps, height maps, three alternate
-//! parallax-mapping techniques (basic/occlusion/relief, the latter two
-//! using real texture-sampling loops), and -- only visible once the
-//! fragment body itself was actually read -- a real per-pixel
-//! hardware point-light loop used twice (`OPT_HWLighting` base
-//! lighting, and a second pass inside `OPT_BumpMaps` for tangent-space
-//! diffuse+specular), distance fog mixing, and an `OPT_Editor`-gated
-//! block of debug render modes (zone/poly-cut/walkable-surface
-//! visualization, hit-test color override) that is editor-only, not
-//! needed for core gameplay rendering. All `#if`-gated optional
-//! branches of one vertex+fragment pair, each individually portable
-//! with the same non-bindless-fallback strategy as every other shader
-//! here; none of them have been transcribed yet. The file also has a
-//! second genuinely-dead `#if 0` block (an unused parallax
-//! soft-shadow function, lines 673-732) -- confirmed dead the same way
-//! `DrawSimple_GLSL.cpp`'s stipple block is, and likewise not a
-//! transcription target.
+//! replacement design at all, unlike `DrawGouraud`. One real WGSL
+//! translation detail for that same tangent space: `flat in mat3
+//! vTBNMat` has no direct WGSL equivalent -- inter-stage IO values
+//! must be scalars or vectors, not matrices -- so the port needs to
+//! split it into three separate `@location(n) @interpolate(flat)
+//! vec3<f32>` varyings (the matrix's three columns) and reassemble
+//! `mat3x3<f32>` from them in `fs_main`; those three extra locations
+//! count against WGSL's 16-location inter-stage-variable limit
+//! alongside every optional UV varying this shader has, so the real
+//! per-specialization location budget needs counting once all of
+//! `DrawComplex`'s optional outputs are actually laid out, not just
+//! assumed to fit. Its real complexity is breadth, not architecture:
+//! lightmaps, fogmaps, detail/macro textures (both with real HSV
+//! recoloring, not plain multiply), environment maps, height maps,
+//! three alternate parallax-mapping techniques (basic/occlusion/relief,
+//! the latter two using real texture-sampling loops), and -- only
+//! visible once the fragment body itself was actually read -- a real
+//! per-pixel hardware point-light loop used twice (`OPT_HWLighting`
+//! base lighting, and a second pass inside `OPT_BumpMaps` for
+//! tangent-space diffuse+specular), distance fog mixing, and an
+//! `OPT_Editor`-gated block of debug render modes (zone/poly-cut/
+//! walkable-surface visualization, hit-test color override) that is
+//! editor-only, not needed for core gameplay rendering. All `#if`-gated
+//! optional branches of one vertex+fragment pair, each individually
+//! portable with the same non-bindless-fallback strategy as every other
+//! shader here -- except the occlusion/relief parallax loops
+//! specifically need one more real change: both call `GetTexel`
+//! (implicit-derivative texture sampling) from inside a loop whose exit
+//! condition depends on a per-fragment height value read from that same
+//! texture, which is non-uniform control flow -- WGSL (like GLSL under
+//! stricter rules, but enforced here by naga/Tint, not assumed) rejects
+//! `textureSample` in that position. The port needs `textureSampleGrad`
+//! with derivatives (`dpdx`/`dpdy` of the base UV) computed once before
+//! entering the loop, or `textureSampleLevel`, either of which changes
+//! mipmap filtering behavior slightly versus the GLSL original -- a
+//! real, not cosmetic, porting change for those two techniques
+//! specifically, not the basic parallax technique (no loop) or any
+//! other `#if`-gated branch in this file. None of them have been
+//! transcribed yet. The file also has a second genuinely-dead `#if 0`
+//! block (an unused parallax soft-shadow function, lines 673-732) --
+//! confirmed dead the same way `DrawSimple_GLSL.cpp`'s stipple block
+//! is, and likewise not a transcription target.
 //!
 //! `SetTexture.cpp` (747 lines, texture cache/upload) has been read in
 //! enough depth to scope its shape, though not line-for-line the way
@@ -865,6 +887,40 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
     true
 }
 
+/// `src/shaders/common.wgsl`'s source, concatenated in front of every
+/// named shader's own source. WGSL has no `#include`/import mechanism
+/// (unlike the GLSL source this crate ports from, which assembles its
+/// own shared prelude plus each shader's body into one compilation
+/// unit via plain C++ string concatenation) -- this is the direct
+/// WGSL-side equivalent of that, one real mechanism used by this
+/// crate's own tests (`every_wgsl_shader_parses_and_validates`'s naga
+/// validation and the real-GPU pipeline tests) rather than each
+/// inventing its own ad hoc concatenation. `common.wgsl` itself has no
+/// `@vertex`/`@fragment` entry points and is never passed to this
+/// function as `name` -- it is always the prefix, never a standalone
+/// shader.
+///
+/// Test/dev-only, deliberately `#[cfg(test)]`, not a real production
+/// API despite reading real shader sources -- this reads from disk via
+/// `CARGO_MANIFEST_DIR` at runtime (`include_str!`'s path argument
+/// must be a string literal, not a runtime-formatted one, so it can't
+/// be used with a parameterized `name` the way this function takes
+/// one), which only resolves on a dev machine with the source tree
+/// present, not in a shipped game binary. Real production pipeline
+/// creation -- not written yet -- needs shader source compiled into
+/// the binary (e.g. `concat!(include_str!("shaders/common.wgsl"),
+/// include_str!("shaders/simple.wgsl"))` per shader, or a `build.rs`
+/// step), a separate mechanism from this one, not yet designed.
+#[cfg(test)]
+fn shader_source(name: &str) -> String {
+    let shader_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders");
+    let common = std::fs::read_to_string(format!("{shader_dir}/common.wgsl"))
+        .unwrap_or_else(|e| panic!("failed to read {shader_dir}/common.wgsl: {e}"));
+    let shader = std::fs::read_to_string(format!("{shader_dir}/{name}.wgsl"))
+        .unwrap_or_else(|e| panic!("failed to read {shader_dir}/{name}.wgsl: {e}"));
+    format!("{common}\n{shader}")
+}
+
 /// Window-surface creation from a C++-owned `SDL_Window*`'s raw view
 /// pointer. Only macOS today -- the plan's "Approved deviations" SDL2
 /// entry's reasoning applies here too: no `sdl2` crate, so no
@@ -1002,6 +1058,18 @@ mod tests {
     // regression.
     #[test]
     fn every_wgsl_shader_parses_and_validates() {
+        fn validate(label: &str, source: &str) {
+            let module = naga::front::wgsl::parse_str(source)
+                .unwrap_or_else(|e| panic!("{label} failed to parse: {e}"));
+            let mut validator = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::default(),
+                naga::valid::Capabilities::empty(),
+            );
+            validator
+                .validate(&module)
+                .unwrap_or_else(|e| panic!("{label} failed naga validation: {e}"));
+        }
+
         let shader_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders");
         let mut checked = 0usize;
         for entry in std::fs::read_dir(shader_dir)
@@ -1013,17 +1081,30 @@ mod tests {
             if path.extension().and_then(|e| e.to_str()) != Some("wgsl") {
                 continue;
             }
-            let source = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-            let module = naga::front::wgsl::parse_str(&source)
-                .unwrap_or_else(|e| panic!("{} failed to parse: {e}", path.display()));
-            let mut validator = naga::valid::Validator::new(
-                naga::valid::ValidationFlags::default(),
-                naga::valid::Capabilities::empty(),
-            );
-            validator
-                .validate(&module)
-                .unwrap_or_else(|e| panic!("{} failed naga validation: {e}", path.display()));
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_else(|| panic!("non-UTF-8 shader filename: {}", path.display()));
+            if stem == "common" {
+                // common.wgsl has no @vertex/@fragment entry points and
+                // is never a standalone shader -- validated here on its
+                // own (naga accepts a module of only unused helper
+                // functions) rather than via shader_source(), which
+                // would concatenate it with itself.
+                let source = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+                validate("common.wgsl", &source);
+            } else {
+                // Every other shader is validated the same way real
+                // pipeline creation will eventually build it --
+                // common.wgsl concatenated in front, via the same
+                // shader_source() helper, not a second ad hoc
+                // concatenation that could drift out of sync with it.
+                validate(
+                    &format!("{stem}.wgsl (+ common.wgsl)"),
+                    &shader_source(stem),
+                );
+            }
             checked += 1;
         }
         assert!(
@@ -1055,7 +1136,7 @@ mod tests {
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("simple.wgsl (negative control)"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/simple.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(shader_source("simple").into()),
             });
         // Only location 0 (coords) -- vs_main's location 1 (draw_id) is
         // left undeclared on purpose.
@@ -1175,7 +1256,7 @@ mod tests {
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("simple.wgsl"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/simple.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(shader_source("simple").into()),
             });
         // Matches VertexInput: @location(0) coords: vec3<f32>,
         // @location(1) draw_id: u32.
