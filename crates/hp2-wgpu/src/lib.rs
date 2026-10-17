@@ -852,6 +852,12 @@ pub struct RenderLoop {
     configured_size: Option<(u32, u32)>,
     in_progress: Option<InProgressFrame>,
     counts: FrameCounts,
+    /// Lazily created on the first `set_scene_node` call (needs
+    /// `&wgpu::Device`, not available in `RenderLoop::new`). `528`
+    /// bytes, `FrameUniforms`' own real size -- checked by a test
+    /// below rather than assumed to stay in sync if the struct's
+    /// field list ever changes.
+    frame_uniforms_buffer: Option<wgpu::Buffer>,
 }
 
 impl Default for RenderLoop {
@@ -866,11 +872,63 @@ impl RenderLoop {
             configured_size: None,
             in_progress: None,
             counts: FrameCounts::default(),
+            frame_uniforms_buffer: None,
         }
     }
 
     pub fn counts(&self) -> FrameCounts {
         self.counts
+    }
+
+    /// Real per-tick entry point `UWgpuRenderDevice`'s future
+    /// `SetSceneNode` override will call (not wired to any FFI
+    /// function or C++ call site yet -- see this crate's own module
+    /// doc). Computes `FrameUniforms` from `scene` and uploads it to
+    /// `frame_uniforms_buffer`, creating that buffer on first use.
+    /// Unlike the real GLSL source's own change-detection (`StoredGamma
+    /// != ...`, `StoredOrthoFX != ...`, etc., `SetSceneNode`'s own
+    /// early-out when nothing relevant changed), this always
+    /// recomputes and always writes -- correct but not maximally
+    /// efficient; left as a real, known, non-urgent follow-up rather
+    /// than ported now, since it is a pure performance optimization
+    /// with no correctness effect (an extra `queue.write_buffer` call
+    /// on a frame where nothing changed costs a little GPU bandwidth,
+    /// nothing more).
+    pub fn set_scene_node(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &SceneFrame,
+    ) {
+        let uniforms = compute_frame_uniforms(scene);
+        let buffer = self.frame_uniforms_buffer.get_or_insert_with(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("hp2-wgpu frame uniforms"),
+                size: std::mem::size_of::<FrameUniforms>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        // Safe: FrameUniforms is #[repr(C)], contains only glam::Mat4
+        // (itself #[repr(C)], Pod-safe per glam's own doc -- "This type
+        // is 16 byte aligned", checked in this file's own header
+        // comment on FrameUniforms before relying on it) and f32
+        // fields, so reinterpreting its bytes is sound; no bytemuck
+        // dependency added for one call site.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &uniforms as *const FrameUniforms as *const u8,
+                std::mem::size_of::<FrameUniforms>(),
+            )
+        };
+        queue.write_buffer(buffer, 0, bytes);
+    }
+
+    /// `None` until the first `set_scene_node` call -- real callers
+    /// (the future draw-call-wiring bind-group creation) need to
+    /// handle that, not assume a buffer always exists.
+    pub fn frame_uniforms_buffer(&self) -> Option<&wgpu::Buffer> {
+        self.frame_uniforms_buffer.as_ref()
     }
 }
 
@@ -1527,6 +1585,73 @@ mod tests {
         assert_eq!(out.y_scale, 1.0);
         // Not yet populated; see this function's own doc.
         assert_eq!(out.light_space_mat, glam::Mat4::IDENTITY);
+    }
+
+    #[test]
+    fn frame_uniforms_byte_size_matches_common_wgsl_and_the_buffer_size_comment() {
+        // 8 mat4x4<f32> (64 bytes each) + 4 f32 (4 bytes each) = 528,
+        // matching common.wgsl's FrameUniforms exactly -- checked here
+        // so RenderLoop::set_scene_node's buffer-size doc comment
+        // cannot silently drift from the real struct size if a field
+        // is ever added or removed.
+        assert_eq!(std::mem::size_of::<FrameUniforms>(), 8 * 64 + 4 * 4);
+        assert_eq!(std::mem::size_of::<FrameUniforms>(), 528);
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn set_scene_node_creates_and_writes_a_real_uniform_buffer() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device on this machine");
+        let mut loop_state = RenderLoop::new();
+        assert!(
+            loop_state.frame_uniforms_buffer().is_none(),
+            "no buffer should exist before the first set_scene_node call"
+        );
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let buffer_size = loop_state
+            .frame_uniforms_buffer()
+            .expect("expected a buffer to exist after set_scene_node")
+            .size();
+        assert_eq!(buffer_size, std::mem::size_of::<FrameUniforms>() as u64);
+        // Real proof the write actually reached the GPU and the
+        // device is still in a valid state after it, not just that
+        // create_buffer/write_buffer didn't panic: submit an empty
+        // encoder and poll to completion, the same pattern this
+        // crate's own create_device_sync_produces_a_working_device
+        // test already uses.
+        let encoder = created
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        created.queue.submit(std::iter::once(encoder.finish()));
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after a real uniform buffer write");
+        // A second call must reuse the same buffer, not leak a new one
+        // every tick -- real per-frame cost if it did (SetSceneNode's
+        // own FrameStateBuffer is a persistent, reused GL buffer too).
+        // `Buffer: Clone + PartialEq` (confirmed against wgpu's own
+        // source, `impl_eq_ord_hash_proxy!(Buffer => .inner)`, before
+        // relying on it -- an earlier version of this test tried a
+        // `global_id()` method that does not exist on wgpu 30.0.1's
+        // real `Buffer` at all, caught by actually building it, not
+        // assumed from memory of a different wgpu version's API).
+        let first_buffer = loop_state.frame_uniforms_buffer().unwrap().clone();
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        assert_eq!(
+            loop_state.frame_uniforms_buffer().unwrap(),
+            &first_buffer,
+            "expected the second set_scene_node call to reuse the same buffer, not create a new one"
+        );
     }
 
     // Needs a real GPU adapter. CI runners (ci.yml) have none. Run with
