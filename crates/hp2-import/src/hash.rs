@@ -87,20 +87,20 @@ pub fn hash_bytes(content: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::io::Write;
+    use crate::util::test_support::{TempDir, tempdir, write};
 
-    fn write_temp(name: &str, content: &[u8]) -> std::path::PathBuf {
-        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let mut path = std::env::temp_dir();
-        path.push(format!(
-            "hp2-import-hash-test-{}-{}-{name}",
-            std::process::id(),
-            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let mut f = fs::File::create(&path).unwrap();
-        f.write_all(content).unwrap();
-        path
+    /// Returns the owning `TempDir` alongside the file path: the caller
+    /// must keep it alive for the duration of the test (just bind it to
+    /// a variable) so `Drop` removes the scratch directory automatically
+    /// at the end, including if an assertion panics first -- unlike the
+    /// previous version of this helper, which required the caller to
+    /// remember a manual `fs::remove_file` and would leak the file on an
+    /// early panic.
+    fn write_temp(name: &str, content: &[u8]) -> (TempDir, std::path::PathBuf) {
+        let dir = tempdir();
+        write(dir.path(), name, content);
+        let path = dir.path().join(name);
+        (dir, path)
     }
 
     /// Ground truth from a throwaway probe linked against the real macOS
@@ -130,11 +130,11 @@ mod tests {
             ),
         ];
         for (name, content, expected_hex) in cases {
-            let path = write_temp(name, content);
+            let (_dir, path) = write_temp(name, content);
             let (size, hex) = hash(&path).unwrap();
             assert_eq!(size, content.len() as u64, "size for {name}");
             assert_eq!(&hex, expected_hex, "digest for {name}");
-            fs::remove_file(&path).unwrap();
+            assert_eq!(&hash_bytes(content), expected_hex, "hash_bytes for {name}");
         }
     }
 
@@ -145,9 +145,8 @@ mod tests {
         // (streamed-from-file vs in-memory) agree, which the already-
         // verified reference vectors above transitively cover.
         let content = b"generated Default.ini content";
-        let path = write_temp("generated", content);
+        let (_dir, path) = write_temp("generated", content);
         let (_, from_file) = hash(&path).unwrap();
-        fs::remove_file(&path).unwrap();
         assert_eq!(hash_bytes(content), from_file);
     }
 
@@ -156,7 +155,7 @@ mod tests {
         // io::copy's internal buffer is a few KB; this exercises several
         // reads regardless of its exact size.
         let content = vec![0xABu8; 1024 * 1024 * 2 + 17];
-        let path = write_temp("multi-chunk", &content);
+        let (_dir, path) = write_temp("multi-chunk", &content);
         let (size, hex) = hash(&path).unwrap();
         assert_eq!(size, content.len() as u64);
         // Cross-check against a single-shot sha2 digest of the same bytes.
@@ -168,7 +167,6 @@ mod tests {
             .map(|b| format!("{b:02x}"))
             .collect();
         assert_eq!(hex, expected);
-        fs::remove_file(&path).unwrap();
     }
 
     #[test]

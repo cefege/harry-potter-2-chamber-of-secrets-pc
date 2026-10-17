@@ -816,4 +816,295 @@ mod tests {
             "retail-only map contract mismatch: retail=0, prototype=0"
         );
     }
+
+    /// A fully valid Full-profile plan: every count contract and every
+    /// `AddRequired` path satisfied simultaneously.
+    fn valid_full_plan() -> Vec<Asset> {
+        let mut plan = Vec::new();
+        plan.extend(many(141, "retail", "Music", "ogg", ""));
+        plan.extend(many(42, "retail", "Maps", "unr", ""));
+        plan.extend(many(58, "prototype", "Maps", "unr", "prototype_only"));
+        plan.extend(many(214, "retail", "System/Cutscenes", "int", ""));
+        for path in CRITICAL_RETAIL_PATHS {
+            plan.push(asset("retail", path, ""));
+        }
+        for path in RETAIL_FINAL_LOCALIZATION {
+            plan.push(asset("retail", path, ""));
+        }
+        plan
+    }
+
+    #[test]
+    fn validate_plan_accepts_a_fully_valid_full_profile_plan() {
+        validate_plan(&valid_full_plan(), Profile::Full).unwrap();
+    }
+
+    #[test]
+    fn validate_plan_full_map_contract_mismatch_is_reported_with_both_counts() {
+        let plan = many(141, "retail", "Music", "ogg", "");
+        let err = validate_plan(&plan, Profile::Full).unwrap_err();
+        assert_eq!(
+            err,
+            "full map contract mismatch: retail=0, prototype-only=0"
+        );
+    }
+
+    #[test]
+    fn validate_plan_full_retail_cutscene_count_mismatch() {
+        let mut plan = valid_full_plan();
+        plan.retain(|a| !a.path.starts_with("System/Cutscenes/"));
+        let err = validate_plan(&plan, Profile::Full).unwrap_err();
+        assert_eq!(
+            err,
+            "full retail cutscene contract mismatch: expected 214, found 0"
+        );
+    }
+
+    #[test]
+    fn validate_plan_full_fails_when_a_critical_retail_path_is_missing() {
+        let mut plan = valid_full_plan();
+        plan.retain(|a| a.path != "System/Core.u");
+        let err = validate_plan(&plan, Profile::Full).unwrap_err();
+        assert_eq!(err, "missing required payload: System/Core.u");
+    }
+
+    #[test]
+    fn validate_plan_full_fails_when_a_retail_final_localization_path_is_missing() {
+        let mut plan = valid_full_plan();
+        plan.retain(|a| a.path != "System/Credits.int");
+        let err = validate_plan(&plan, Profile::Full).unwrap_err();
+        assert_eq!(err, "missing required payload: System/Credits.int");
+    }
+
+    /// A fully valid RetailOnly-profile plan: every count contract,
+    /// classification rule, and every `AddRequired` path satisfied
+    /// simultaneously. `Maps/Entry.unr` (from `RETAIL_ONLY_REQUIRED_PATHS`)
+    /// is pushed separately, not via `many()`, since it counts toward the
+    /// 42-map total alongside the 41 generic ones below (41 + 1 = 42).
+    fn valid_retail_only_plan() -> Vec<Asset> {
+        let mut plan = Vec::new();
+        plan.extend(many(141, "retail", "Music", "ogg", "retail_asset"));
+        plan.extend(many(41, "retail", "Maps", "unr", "retail_asset"));
+        plan.extend(many(
+            214,
+            "retail",
+            "System/Cutscenes",
+            "int",
+            "retail_asset",
+        ));
+        for path in CRITICAL_RETAIL_PATHS {
+            plan.push(asset("retail", path, "retail_asset"));
+        }
+        for path in RETAIL_FINAL_LOCALIZATION {
+            plan.push(asset("retail", path, "retail_asset"));
+        }
+        for path in RETAIL_ONLY_REQUIRED_PATHS {
+            plan.push(asset("retail", path, "retail_asset"));
+        }
+        let mut default_ini = generated(
+            "System/Default.ini".to_string(),
+            "[Core.System]\n".to_string(),
+            vec!["retail:System/default.ini".to_string()],
+            String::new(),
+        );
+        default_ini.classification = "generated_retail_native".to_string();
+        plan.push(default_ini);
+        let mut defuser_ini = generated(
+            "System/DefUser.ini".to_string(),
+            "[Core.System]\n".to_string(),
+            vec!["retail:System/DefUser.ini".to_string()],
+            String::new(),
+        );
+        defuser_ini.classification = "generated_retail_native".to_string();
+        plan.push(defuser_ini);
+        plan
+    }
+
+    #[test]
+    fn validate_plan_accepts_a_fully_valid_retail_only_plan() {
+        validate_plan(&valid_retail_only_plan(), Profile::RetailOnly).unwrap();
+    }
+
+    #[test]
+    fn validate_plan_retail_only_cutscene_count_mismatch() {
+        let mut plan = valid_retail_only_plan();
+        plan.retain(|a| !a.path.starts_with("System/Cutscenes/"));
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "retail-only cutscene contract mismatch: expected 213 or 214, found 0"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_rejects_a_wrong_classification_on_a_retail_asset() {
+        let mut plan = valid_retail_only_plan();
+        for a in &mut plan {
+            if a.path == "System/Core.u" {
+                a.classification = "wrong".to_string();
+            }
+        }
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "retail-only asset has invalid classification: System/Core.u"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_rejects_an_unexpected_generated_payload() {
+        let mut plan = valid_retail_only_plan();
+        let mut extra = generated(
+            "System/Extra.ini".to_string(),
+            "x".to_string(),
+            vec!["retail:System/extra.ini".to_string()],
+            String::new(),
+        );
+        extra.classification = "generated_retail_native".to_string();
+        plan.push(extra);
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "unexpected generated retail-only payload: System/Extra.ini"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_rejects_a_generated_config_not_marked_retail_native() {
+        let mut plan = valid_retail_only_plan();
+        for a in &mut plan {
+            if a.path == "System/Default.ini" {
+                a.classification = "wrong".to_string();
+            }
+        }
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "generated config is not marked retail-native: System/Default.ini"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_rejects_a_generated_config_with_a_non_retail_template() {
+        let mut plan = valid_retail_only_plan();
+        for a in &mut plan {
+            if a.path == "System/Default.ini" {
+                a.sources = vec!["prototype:System/Default.ini".to_string()];
+            }
+        }
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(
+            err,
+            "generated config has a non-retail template: System/Default.ini"
+        );
+    }
+
+    #[test]
+    fn validate_plan_retail_only_fails_when_a_required_path_is_missing() {
+        let mut plan = valid_retail_only_plan();
+        plan.retain(|a| a.path != "Textures/HP_Menu.utx");
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(err, "missing required payload: Textures/HP_Menu.utx");
+    }
+
+    #[test]
+    fn validate_plan_retail_only_paths_category_check_is_unreachable_given_the_required_path_lists()
+    {
+        // The "configured retail-only Paths category has no payload"
+        // check (one per root: System/Maps/Textures/Sounds/Music) runs
+        // *after* every AddRequired call for CRITICAL_RETAIL_PATHS,
+        // RETAIL_FINAL_LOCALIZATION, and RETAIL_ONLY_REQUIRED_PATHS, and
+        // after the unconditional retail-Ogg-count-141 check earlier in
+        // the function. Every one of those five roots already has at
+        // least one required retail-source path baked into those lists
+        // (System/Core.u, Maps/Entry.unr, Textures/HP2_Master.utx,
+        // Sounds/AllDialog.USA_uax, and the 141 required Music oggs) --
+        // so by the time this check runs, it can never actually fail:
+        // removing the one retail Sounds asset the baseline has doesn't
+        // reach this check at all, it fails the earlier AddRequired
+        // check for that same path instead, confirmed by actually
+        // running this exact fixture (the original version of this test
+        // asserted the "no payload" message and failed, with the real
+        // output being "missing required payload: Sounds/AllDialog.USA_uax"
+        // -- this is that finding, not a guess). This mirrors the real
+        // C++ source exactly: the same redundancy exists there too (read
+        // directly, not inferred), so this isn't a porting bug to fix,
+        // just a dead branch this port faithfully carries over.
+        let mut plan = valid_retail_only_plan();
+        plan.retain(|a| a.path != "Sounds/AllDialog.USA_uax");
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(err, "missing required payload: Sounds/AllDialog.USA_uax");
+    }
+
+    #[test]
+    fn validate_plan_retail_only_final_count_check_is_unreachable_given_the_ogg_count_check() {
+        // Similarly, "retail-only requires at least one map and one
+        // music file" (checked last, after everything else) can only
+        // fire when retail_maps==0 or retail_oggs==0 -- but
+        // retail_oggs is already required to be exactly 141
+        // unconditionally, before the profile match even runs, and
+        // retail_maps==42 is enforced by this same function's own
+        // earlier "retail-only map contract mismatch" check. So by the
+        // time this final check would run, both counts are already
+        // pinned to nonzero values; it cannot fail. Confirmed the same
+        // way as the sibling test above: the original version of this
+        // test asserted the "requires at least one" message and failed,
+        // with the real output being the retail Ogg count check firing
+        // first (retail_oggs==0 here, checked before any profile-
+        // specific logic at all). Faithful to the real C++ source, which
+        // has the identical redundancy.
+        let mut plan = Vec::new();
+        plan.extend(many(
+            214,
+            "retail",
+            "System/Cutscenes",
+            "int",
+            "retail_asset",
+        ));
+        for path in CRITICAL_RETAIL_PATHS {
+            plan.push(asset("retail", path, "retail_asset"));
+        }
+        for path in RETAIL_FINAL_LOCALIZATION {
+            plan.push(asset("retail", path, "retail_asset"));
+        }
+        plan.extend(many(42, "retail", "Maps", "unr", "retail_asset"));
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(err, "retail Ogg contract mismatch: expected 141, found 0");
+    }
+
+    #[test]
+    fn validate_plan_safe_map_contract_mismatch_is_reported_with_both_counts() {
+        let plan = many(141, "retail", "Music", "ogg", "");
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(err, "safe map contract mismatch: retail=0, prototype=0");
+    }
+
+    #[test]
+    fn validate_plan_safe_cutscene_count_mismatch() {
+        let mut plan = valid_safe_plan();
+        plan.retain(|a| !a.path.starts_with("System/Cutscenes/"));
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        assert_eq!(
+            err,
+            "safe prototype cutscene contract mismatch: expected 185, found 0"
+        );
+    }
+
+    #[test]
+    fn validate_plan_safe_texture_contract_mismatch_lists_only_the_first_retail_texture() {
+        let mut plan = valid_safe_plan();
+        // Add a second retail texture; the message must still show only
+        // the *first* retail texture found (C++'s `.front()`), not a
+        // joined list of all of them.
+        plan.push(asset("retail", "Textures/Another.utx", ""));
+        let err = validate_plan(&plan, Profile::Safe).unwrap_err();
+        // BTreeMap/Vec iteration order for `plan` itself is insertion
+        // order (a plain `&[Asset]` slice, not a map), so
+        // "Textures/HP2_Menu.utx" (pushed before "Textures/Another.utx"
+        // in valid_safe_plan) is the first retail texture found.
+        assert_eq!(
+            err,
+            "safe texture contract mismatch: prototype=52, retail=[Textures/HP2_Menu.utx]"
+        );
+    }
 }
