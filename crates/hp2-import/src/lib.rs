@@ -54,6 +54,11 @@
 //!   `"copy"` (or fails outright with the real OS error text if the
 //!   caller explicitly required `Hardlink`). This is a deliberate
 //!   behavior change, not a byte-for-byte port, at this one function.
+//!   **Intended divergence:** `importer_parity`'s comparison against
+//!   the real C++ importer will differ (copy vs. hardlink, or an error
+//!   where C++ would silently succeed) on any filesystem where a hard
+//!   link fails for a reason other than `EXDEV` -- expected, not a
+//!   regression to chase down later.
 
 pub mod classify;
 pub mod collect;

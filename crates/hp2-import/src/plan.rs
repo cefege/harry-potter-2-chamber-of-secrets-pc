@@ -366,6 +366,13 @@ pub fn validate_plan(plan: &[Asset], profile: Profile) -> Result<(), String> {
             }
             add_required(&exact, "System/Default.ini", "generated")?;
             add_required(&exact, "System/DefUser.ini", "generated")?;
+            // Unreachable: CRITICAL_RETAIL_PATHS/RETAIL_FINAL_LOCALIZATION/
+            // RETAIL_ONLY_REQUIRED_PATHS already force a retail-sourced
+            // asset under every one of these five roots (via the
+            // add_required calls above), so this loop can never actually
+            // find a root with none. Dead code inherited from the real
+            // C++ source (confirmed by reading it directly, not inferred);
+            // not a porting bug to fix.
             for root in ["System", "Maps", "Textures", "Sounds", "Music"] {
                 let found = plan
                     .iter()
@@ -376,6 +383,11 @@ pub fn validate_plan(plan: &[Asset], profile: Profile) -> Result<(), String> {
                     )));
                 }
             }
+            // Unreachable: retail_maps must already equal 42 (the
+            // earlier map-count check) and retail_oggs must already
+            // equal 141 (the unconditional count check before the
+            // profile match), so neither can be 0 by the time this
+            // runs. Same inherited C++ dead code as above.
             if retail_maps == 0 || retail_oggs == 0 {
                 return Err(fail(
                     "retail-only requires at least one map and one music file",
@@ -612,6 +624,31 @@ mod tests {
             disk: dir.path().join("a_directory"),
             ..Asset::default()
         };
+        let err = resolve_link_mode(&asset, dir.path(), LinkMode::Hardlink).unwrap_err();
+        assert!(err.starts_with("cannot hardlink "), "{err}");
+        assert!(!err.contains("os error"), "{err}");
+    }
+
+    #[test]
+    fn resolve_link_mode_falls_back_to_copy_on_every_platform_for_a_missing_source() {
+        // Portable complement to the two #[cfg(unix)] tests above (which
+        // rely on EPERM from hard-linking a directory, a Unix-specific
+        // failure mode): a missing source file fails fs::hard_link with
+        // ErrorKind::NotFound (ENOENT) on every platform this project
+        // targets, including Windows (CreateHardLinkW fails with
+        // ERROR_FILE_NOT_FOUND there) -- confirmed via a throwaway probe
+        // on this machine, not assumed. Neither ENOENT nor
+        // ERROR_FILE_NOT_FOUND is ErrorKind::CrossesDevices, so this
+        // exercises the same hardened fallback branch without needing a
+        // directory-specific quirk, giving the hardening real coverage
+        // on CI platforms the two Unix-only tests above don't reach.
+        let dir = tempdir();
+        let asset = Asset {
+            disk: dir.path().join("does-not-exist.txt"),
+            ..Asset::default()
+        };
+        let mode = resolve_link_mode(&asset, dir.path(), LinkMode::Auto).unwrap();
+        assert_eq!(mode, "copy");
         let err = resolve_link_mode(&asset, dir.path(), LinkMode::Hardlink).unwrap_err();
         assert!(err.starts_with("cannot hardlink "), "{err}");
         assert!(!err.contains("os error"), "{err}");
@@ -1006,72 +1043,6 @@ mod tests {
         let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
         assert_eq!(err, "missing required payload: Textures/HP_Menu.utx");
     }
-
-    #[test]
-    fn validate_plan_retail_only_paths_category_check_is_unreachable_given_the_required_path_lists()
-    {
-        // The "configured retail-only Paths category has no payload"
-        // check (one per root: System/Maps/Textures/Sounds/Music) runs
-        // *after* every AddRequired call for CRITICAL_RETAIL_PATHS,
-        // RETAIL_FINAL_LOCALIZATION, and RETAIL_ONLY_REQUIRED_PATHS, and
-        // after the unconditional retail-Ogg-count-141 check earlier in
-        // the function. Every one of those five roots already has at
-        // least one required retail-source path baked into those lists
-        // (System/Core.u, Maps/Entry.unr, Textures/HP2_Master.utx,
-        // Sounds/AllDialog.USA_uax, and the 141 required Music oggs) --
-        // so by the time this check runs, it can never actually fail:
-        // removing the one retail Sounds asset the baseline has doesn't
-        // reach this check at all, it fails the earlier AddRequired
-        // check for that same path instead, confirmed by actually
-        // running this exact fixture (the original version of this test
-        // asserted the "no payload" message and failed, with the real
-        // output being "missing required payload: Sounds/AllDialog.USA_uax"
-        // -- this is that finding, not a guess). This mirrors the real
-        // C++ source exactly: the same redundancy exists there too (read
-        // directly, not inferred), so this isn't a porting bug to fix,
-        // just a dead branch this port faithfully carries over.
-        let mut plan = valid_retail_only_plan();
-        plan.retain(|a| a.path != "Sounds/AllDialog.USA_uax");
-        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
-        assert_eq!(err, "missing required payload: Sounds/AllDialog.USA_uax");
-    }
-
-    #[test]
-    fn validate_plan_retail_only_final_count_check_is_unreachable_given_the_ogg_count_check() {
-        // Similarly, "retail-only requires at least one map and one
-        // music file" (checked last, after everything else) can only
-        // fire when retail_maps==0 or retail_oggs==0 -- but
-        // retail_oggs is already required to be exactly 141
-        // unconditionally, before the profile match even runs, and
-        // retail_maps==42 is enforced by this same function's own
-        // earlier "retail-only map contract mismatch" check. So by the
-        // time this final check would run, both counts are already
-        // pinned to nonzero values; it cannot fail. Confirmed the same
-        // way as the sibling test above: the original version of this
-        // test asserted the "requires at least one" message and failed,
-        // with the real output being the retail Ogg count check firing
-        // first (retail_oggs==0 here, checked before any profile-
-        // specific logic at all). Faithful to the real C++ source, which
-        // has the identical redundancy.
-        let mut plan = Vec::new();
-        plan.extend(many(
-            214,
-            "retail",
-            "System/Cutscenes",
-            "int",
-            "retail_asset",
-        ));
-        for path in CRITICAL_RETAIL_PATHS {
-            plan.push(asset("retail", path, "retail_asset"));
-        }
-        for path in RETAIL_FINAL_LOCALIZATION {
-            plan.push(asset("retail", path, "retail_asset"));
-        }
-        plan.extend(many(42, "retail", "Maps", "unr", "retail_asset"));
-        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
-        assert_eq!(err, "retail Ogg contract mismatch: expected 141, found 0");
-    }
-
     #[test]
     fn validate_plan_safe_map_contract_mismatch_is_reported_with_both_counts() {
         let plan = many(141, "retail", "Music", "ogg", "");
