@@ -22,14 +22,39 @@
 /// TEXF_RGB16=0x02, TEXF_DXT1=0x03, TEXF_RGB8=0x04, TEXF_RGBA8=0x05`
 /// (`TEXF_MAX=0xff` is a bound sentinel the real source never uses as
 /// an actual per-texture format value, so it has no variant here).
+/// `#[repr(u8)]` with explicit discriminants, not left implicit: the
+/// real value arrives from C++ as `Info.Format`, a raw byte, so this
+/// needs the same real-discriminant-plus-`from_raw` shape as
+/// `BackendChoice::from_ffi_discriminant` already established for
+/// the `Backend` ini key, not a Rust-side-only enum whose variant
+/// order happens to coincide with the real one today.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextureFormat {
-    P8,
-    Rgba7,
-    Rgb16,
-    Dxt1,
-    Rgb8,
-    Rgba8,
+    P8 = 0x00,
+    Rgba7 = 0x01,
+    Rgb16 = 0x02,
+    Dxt1 = 0x03,
+    Rgb8 = 0x04,
+    Rgba8 = 0x05,
+}
+
+impl TextureFormat {
+    /// Converts a raw `Info.Format` byte to the matching variant,
+    /// `None` for anything outside `0x00..=0x05` (including the real
+    /// `TEXF_MAX=0xff` sentinel itself, which is never a real
+    /// per-texture format value -- see this enum's own doc).
+    pub fn from_raw(value: u8) -> Option<Self> {
+        match value {
+            0x00 => Some(Self::P8),
+            0x01 => Some(Self::Rgba7),
+            0x02 => Some(Self::Rgb16),
+            0x03 => Some(Self::Dxt1),
+            0x04 => Some(Self::Rgb8),
+            0x05 => Some(Self::Rgba8),
+            _ => None,
+        }
+    }
 }
 
 /// `SetTexture.cpp`'s own `IsHP2CompressedTexture`: the only
@@ -190,6 +215,25 @@ pub fn p8_to_rgba8(indices: &[u8], palette: &[FColor; 256], mask_mode: P8MaskMod
 mod tests {
     use super::*;
 
+    #[test]
+    fn from_raw_matches_the_real_un_tex_h_discriminants() {
+        // Pins every real ETextureFormat value (UnTex.h:225-230):
+        // TEXF_P8=0x00, TEXF_RGBA7=0x01, TEXF_RGB16=0x02,
+        // TEXF_DXT1=0x03, TEXF_RGB8=0x04, TEXF_RGBA8=0x05.
+        assert_eq!(TextureFormat::from_raw(0x00), Some(TextureFormat::P8));
+        assert_eq!(TextureFormat::from_raw(0x01), Some(TextureFormat::Rgba7));
+        assert_eq!(TextureFormat::from_raw(0x02), Some(TextureFormat::Rgb16));
+        assert_eq!(TextureFormat::from_raw(0x03), Some(TextureFormat::Dxt1));
+        assert_eq!(TextureFormat::from_raw(0x04), Some(TextureFormat::Rgb8));
+        assert_eq!(TextureFormat::from_raw(0x05), Some(TextureFormat::Rgba8));
+        // The real TEXF_MAX sentinel (0xff) is never a real
+        // per-texture value -- must return None, not panic or wrap.
+        assert_eq!(TextureFormat::from_raw(0xff), None);
+        // Every other out-of-range byte must also return None, not
+        // silently alias to a valid variant.
+        assert_eq!(TextureFormat::from_raw(0x06), None);
+        assert_eq!(TextureFormat::from_raw(0x80), None);
+    }
     #[test]
     fn texture_format_name_matches_the_real_source_strings_exactly() {
         assert_eq!(texture_format_name(TextureFormat::P8), "P8");
