@@ -76,7 +76,34 @@ pub struct LineDrawCall<'a> {
     pub vertices: &'a [LineVertex],
     pub draw_params: &'a [DrawParams],
     pub target: &'a wgpu::TextureView,
-    pub clear_color: wgpu::Color,
+    /// The real `wgpu::LoadOp<wgpu::Color>` -- `Clear(color)` to
+    /// start a fresh target (this crate's own first offscreen-
+    /// readback test still uses this), or `Load` to draw on top of
+    /// whatever `target` already contains without erasing it, the
+    /// real requirement for drawing a line into the live frame.
+    /// Critical correctness note (caught on review before this was
+    /// ever wired to a real `RenderLoop`, not after): `Load` alone is
+    /// not enough to composite correctly onto `lock_frame`'s own
+    /// clear. `lock_frame` only *records* its clear pass into
+    /// `InProgressFrame`'s own `CommandEncoder` -- it does not submit
+    /// it; only `unlock_frame` does, later. A `Load`-mode draw that
+    /// did its own separate `queue.submit` between `lock_frame` and
+    /// `unlock_frame` would therefore run on the GPU *before* the
+    /// still-unsubmitted clear, which would then wipe it out when
+    /// `unlock_frame` finally submits -- every frame would end up
+    /// clear-only, a real, serious bug an earlier version of this
+    /// doc comment wrongly reasoned around ("wgpu queue submits
+    /// execute in submission order... without needing to share the
+    /// same `CommandEncoder`" -- false for this specific case, since
+    /// the clear is not actually submitted at the point a same-frame
+    /// draw call would run). The real fix: a `Load`-mode draw into
+    /// the live frame must record into the *same*, still-open
+    /// `CommandEncoder` `lock_frame`'s clear pass used, not a fresh
+    /// one of its own -- see `SimpleLinePipeline::record` (not
+    /// `::render`, which still creates and submits its own encoder,
+    /// correct only for a caller -- like this crate's own tests --
+    /// that owns the whole encoder lifecycle itself).
+    pub load: wgpu::LoadOp<wgpu::Color>,
 }
 
 /// One real, lazily-built `simple.wgsl` pipeline plus the two bind-
@@ -162,28 +189,36 @@ impl SimpleLinePipeline {
         }
     }
 
-    /// Renders `call.vertices` (a flat `LineList`: every consecutive
-    /// pair is one line, matching `Draw2DLine`'s own real `GL_LINES`
-    /// `DrawMode`) into `call.target`, using the already-uploaded
+    /// Uploads `call`'s buffers and records (does **not** submit) a
+    /// real render pass drawing `call.vertices` (a flat `LineList`:
+    /// every consecutive pair is one line, matching `Draw2DLine`'s
+    /// own real `GL_LINES` `DrawMode`) into `call.target`, using
     /// `call.frame_uniforms_buffer` (this crate's own `RenderLoop::
     /// set_scene_node` produces one of the right size/layout) and
     /// `call.draw_params` (one entry per real `DrawID`, indexed by
-    /// each vertex's own `draw_id` field). Submits and blocks until
-    /// GPU work completes before returning, so a caller can safely
-    /// read `call.target` back immediately afterward -- this slice's
-    /// own deliberately simple, non-batched contract; the real
-    /// engine-facing batcher this is a foundation for will not submit
-    /// this eagerly per call. `call`'s own fields are grouped into
-    /// `LineDrawCall` purely to keep this function under clippy's
-    /// `too_many_arguments` limit -- see that struct's own doc for
-    /// why, not repeated here.
-    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: LineDrawCall<'_>) {
+    /// each vertex's own `draw_id` field) -- into `encoder`, whichever
+    /// one the caller passes. This is the real integration point for
+    /// drawing into a live `RenderLoop` frame: `call.load` must be
+    /// `wgpu::LoadOp::Load` and `encoder` must be the *same*,
+    /// still-open `CommandEncoder` `lock_frame`'s own clear pass was
+    /// recorded into (not a fresh one) -- `LineDrawCall`'s own `load`
+    /// field doc has the full correctness reasoning for why a fresh
+    /// encoder plus a separate `queue.submit` would silently lose the
+    /// draw. `device`/`queue` are still needed here (buffer creation/
+    /// upload), even though this does not submit anything itself.
+    pub fn record(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        call: LineDrawCall<'_>,
+    ) {
         let LineDrawCall {
             frame_uniforms_buffer,
             vertices,
             draw_params,
             target,
-            clear_color,
+            load,
         } = call;
         assert!(
             draw_params.len() <= MAX_DRAWS,
@@ -243,29 +278,43 @@ impl SimpleLinePipeline {
             }],
         });
 
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("draw.rs line render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+        pass.set_bind_group(1, &draw_params_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+
+    /// Standalone wrapper around `record`: creates its own fresh
+    /// `CommandEncoder`, records into it, submits, and blocks until
+    /// GPU work completes before returning, so a caller can safely
+    /// read `call.target` back immediately afterward. Correct only
+    /// for a caller that owns the whole encoder lifecycle itself and
+    /// is not drawing into a live `RenderLoop` frame -- this crate's
+    /// own offscreen tests, or any other fully self-contained render.
+    /// Drawing into a real in-progress `RenderLoop` frame must use
+    /// `record` directly against that frame's own `CommandEncoder`
+    /// instead (`LineDrawCall::load`'s own doc has the full
+    /// correctness reasoning for why this standalone version cannot
+    /// be used for that).
+    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: LineDrawCall<'_>) {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("draw.rs line render encoder"),
         });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("draw.rs line render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
-            pass.set_bind_group(1, &draw_params_bind_group, &[]);
-            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            pass.draw(0..vertices.len() as u32, 0..1);
-        }
+        self.record(device, queue, &mut encoder, call);
         queue.submit(std::iter::once(encoder.finish()));
         device
             .poll(wgpu::PollType::wait_indefinitely())
@@ -367,7 +416,7 @@ mod tests {
                 vertices: &vertices,
                 draw_params: &draw_params,
                 target: &render_target_view,
-                clear_color: wgpu::Color::BLUE,
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
 
@@ -439,6 +488,207 @@ mod tests {
             "SimpleLinePipeline::render confirmed empirically: a real Draw2DLine-shaped vertex \
              buffer, uploaded through real buffers and bind groups, produced the right pixels \
              at the right positions in a real offscreen texture on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    // The real test the review that caught the clear-vs-draw-ordering
+    // bug asked for: lock_frame records its clear pass into
+    // InProgressFrame's own CommandEncoder without submitting it;
+    // only unlock_frame submits, later. A literal lock_frame ->
+    // record -> unlock_frame test needs a real OS window (wgpu
+    // surfaces are always backed by one, there is no "offscreen
+    // surface" concept) -- not available to a Rust #[test] on macOS
+    // (this session's own established constraint: SDL_Init(VIDEO)
+    // needs the real process main thread, which cargo test's harness
+    // never runs on). This test instead manually reproduces the exact
+    // mechanism lock_frame/unlock_frame rely on -- one CommandEncoder,
+    // a clear pass recorded into it without submitting, then a second
+    // pass recorded into that *same* still-open encoder (via
+    // SimpleLinePipeline::record, Load mode, not ::render's own
+    // separate-encoder-and-submit path), submitted exactly once at
+    // the end -- against a real offscreen texture instead of a real
+    // surface. This is the actual bug class being guarded against,
+    // proven end to end even though it does not literally call
+    // lock_frame/unlock_frame themselves.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn record_composites_correctly_into_a_shared_unsubmitted_encoder() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shared encoder test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = SimpleLinePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let vertices = [
+            LineVertex {
+                coords: [-1.0, 0.0, 0.0],
+                draw_id: 0,
+            },
+            LineVertex {
+                coords: [0.0, 0.0, 0.0],
+                draw_id: 0,
+            },
+        ];
+        let draw_params = [DrawParams {
+            draw_color: [0.0, 1.0, 0.0, 1.0],
+        }];
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shared encoder test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Step 1, matching lock_frame exactly: record a clear pass
+        // into a fresh encoder, do NOT submit it yet.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("shared encoder test encoder"),
+        });
+        {
+            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shared encoder test clear pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &render_target_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+        }
+        // Step 2, matching a real Draw2DLine call between Lock and
+        // Unlock: record the line into the SAME still-unsubmitted
+        // encoder, Load mode (not Clear -- must not erase step 1).
+        pipeline.record(
+            device,
+            queue,
+            &mut encoder,
+            LineDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                target: &render_target_view,
+                load: wgpu::LoadOp::Load,
+            },
+        );
+        // Step 3, matching unlock_frame exactly: submit the whole
+        // accumulated encoder exactly once, now that both passes are
+        // recorded.
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real shared-encoder submit");
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shared encoder test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("shared encoder test readback encoder"),
+        });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        // Left half (inside the drawn line's span): must be green --
+        // proves the Load-mode draw, recorded into the clear pass's
+        // own still-unsubmitted encoder, actually reached the GPU at
+        // all once the single combined submit ran.
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the line drawn via record() into the shared encoder to actually render, \
+             got {left_pixel:?}"
+        );
+        // Right half (outside the line's span): must still be blue,
+        // the real clear color -- proves the clear pass, recorded
+        // first into the same encoder but submitted together with the
+        // draw, was not wiped out or reordered incorrectly relative
+        // to the draw. This is the exact real bug an earlier version
+        // of this crate's own design (a separate queue.submit inside
+        // what is now record()) would have risked: if the draw had
+        // run in its own earlier submit, the clear's own later submit
+        // (matching unlock_frame's real timing) would have wiped it,
+        // and this assertion would catch that by seeing blue only
+        // where the draw itself did not touch, never by this pixel
+        // going the wrong color -- the structural fix (record() now
+        // only takes a shared `&mut CommandEncoder`, with no way to
+        // create or submit its own) already prevents that class of
+        // regression by construction, and this test proves the
+        // resulting single-submit composite is actually correct.
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected the clear pass recorded into the shared encoder to survive the combined \
+             submit outside the drawn line's span, got {right_pixel:?}"
+        );
+        println!(
+            "record() confirmed empirically to composite correctly with lock_frame's own real \
+             clear-recorded-not-submitted pattern: a clear pass and a Load-mode line draw, both \
+             recorded into one shared CommandEncoder and submitted together exactly once, \
+             produced the right pixels in both the clear-only and drawn regions on adapter \
+             {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );
