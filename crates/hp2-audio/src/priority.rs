@@ -34,16 +34,15 @@ fn ue_clamp(x: f32, min: f32, max: f32) -> f32 {
 ///
 /// Called on every tick for every active source
 /// (`ALAudioSubsystem.cpp:1703`, inside `Update`), for every gathered
-/// ambient sound (`:1404`, `:1424`), from `PlaySound` (`:808`), and
-/// from `FindLeastImportantSound` (`:2134`) -- five call sites, not
-/// one. `FindLeastImportantSound` itself stays unported (reads
-/// `this->Sources` directly, deeply object-graph-coupled); the other
-/// four callers already call through `SoundPriority`'s C++ body,
-/// which now forwards here unconditionally. No ctest exercises
-/// `Update`/`PlaySound`'s runtime call paths -- `audio_lifecycle`
-/// only calls this function directly via
-/// `TestSoundPriorityFfiBoundary`, so the on-tick behavior is
-/// unexercised by any automated check.
+/// ambient sound (`:1404`, `:1424`), and from `PlaySound` (`:808`) --
+/// four C++ call sites. `FindLeastImportantSound` (`:2105-2156`) also
+/// computes a priority per candidate, but calls this Rust function
+/// directly (see `find_least_important_sound` below), not through
+/// `SoundPriority`'s C++ body, since its own body was replaced
+/// entirely by a Rust forward. No ctest exercises `Update`/
+/// `PlaySound`'s runtime call paths -- `audio_lifecycle` only calls
+/// this function directly via `TestSoundPriorityFfiBoundary`, so the
+/// on-tick behavior is unexercised by any automated check.
 pub fn sound_priority(
     dist_squared: f32,
     radius: f32,

@@ -45,19 +45,22 @@
 //! `FDistSquared` itself (live `AActor`/`FVector` state), then passes
 //! the single resulting float across. FFI-wired via
 //! `hp2_rs_audio_sound_priority`; `SoundPriority`'s body now computes
-//! only `DistSquared` before forwarding. `SoundPriority` has five
-//! call sites (`:808` in `PlaySound`, `:1404`/`:1424` gathering
-//! ambient sounds, `:1703` in `Update` for every active source on
-//! every tick, `:2134` in `FindLeastImportantSound`) -- this Rust
-//! path now runs on every tick for every active sound. No existing
-//! C++ oracle for any of the five call sites; `audio_lifecycle` only
-//! exercises this function directly via `TestSoundPriorityFfiBoundary`,
-//! covered by `priority.rs`'s own Rust unit tests otherwise.
-//! `Update`/`PlaySound`'s runtime call paths are not exercised by any
-//! automated check.
+//! only `DistSquared` before forwarding. `SoundPriority` had five
+//! call sites when this slice landed; `FindLeastImportantSound`'s
+//! own call (`:2134`) is gone now that its C++ body was replaced
+//! entirely by a Rust forward (see "Third" below) -- it calls
+//! `sound_priority` directly, not through `SoundPriority`'s C++ body.
+//! Four C++ call sites remain: `:808` in `PlaySound`, `:1404`/`:1424`
+//! gathering ambient sounds, `:1703` in `Update` for every active
+//! source on every tick -- this Rust path still runs on every tick
+//! for every active sound. No existing C++ oracle for any of them;
+//! `audio_lifecycle` only exercises this function directly via
+//! `TestSoundPriorityFfiBoundary`, covered by `priority.rs`'s own
+//! Rust unit tests otherwise. `Update`/`PlaySound`'s runtime call
+//! paths are not exercised by any automated check.
 //!
 //! **Third: `FindLeastImportantSound`** (`ALAudioSubsystem.cpp:
-//! 2105-2156`), called from `RegisterSound` (`:758`, `:842`) when a
+//! 2105-2156`), called from `PlaySound` (`:758`, `:842`) when a
 //! new sound needs a source and every slot is full. Unlike the first
 //! two, this one *does* read `this->Sources`/the live `USound*`
 //! pointers directly in the real C++ -- the first function in this
