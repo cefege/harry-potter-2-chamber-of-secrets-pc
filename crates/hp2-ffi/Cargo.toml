@@ -13,6 +13,7 @@ crate-type = ["staticlib"]
 hp2-ffi-support.workspace = true
 hp2-ini.workspace = true
 hp2-codecs.workspace = true
+hp2-import.workspace = true
 log.workspace = true
 
 [build-dependencies]

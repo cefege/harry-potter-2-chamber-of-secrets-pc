@@ -223,6 +223,19 @@ pub enum LinkMode {
     Hardlink = 2,
 }
 
+impl LinkMode {
+    /// Replaces `static_cast<LinkMode>(ordinal)`/`Profile::from_u32`'s
+    /// own FFI convention: `None` for any ordinal outside `0..=2`.
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(LinkMode::Auto),
+            1 => Some(LinkMode::Copy),
+            2 => Some(LinkMode::Hardlink),
+            _ => None,
+        }
+    }
+}
+
 const CRITICAL_RETAIL_PATHS: [&str; 14] = [
     "System/Core.u",
     "System/Editor.u",

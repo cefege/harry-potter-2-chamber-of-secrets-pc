@@ -628,3 +628,120 @@ pub unsafe extern "C" fn hp2_rs_vorbis_time_total(handle: *const Hp2RsVorbisDeco
         (*handle).0.time_total()
     })
 }
+
+/// Replaces `HP2Import::RunImport`. Paths are UTF-8, not NUL-
+/// terminated. `profile` is `HP2Import::Profile`'s C++ ordinal
+/// (Safe=0, Full=1, RetailOnly=2); `link_mode` is
+/// `HP2Import::LinkMode`'s (Auto=0, Copy=1, Hardlink=2). Calls `sink`
+/// exactly once with the success log or the failure message; the
+/// return value says which (matching the real C++'s `bool` return
+/// plus `Log`/`Error` out-parameters, funneled through the one
+/// callback instead).
+///
+/// `progress` is nullable; passed as `*mut c_void` rather than a typed
+/// pointer so cbindgen does not need to resolve
+/// `hp2_import::output::Progress`'s layout across the crate boundary
+/// into the generated header -- the real C++ caller already owns its
+/// own `HP2Import::Progress` definition (`HP2Import.h`), laid out to
+/// match `hp2_import::output::Progress` exactly (see that type's own
+/// doc comment for the field-by-field justification), and casts its
+/// `HP2Import::Progress*` to this parameter directly.
+///
+/// # Safety
+/// Every `(ptr, len)` pair must be valid for reads of that length (or
+/// null with length 0). `progress`, non-null, must point at a live
+/// `HP2Import::Progress`-layout-compatible value, safe to access from
+/// multiple threads for the duration of this call (the real C++ caller
+/// already does this: `HP2Launcher.cpp` polls it from another thread
+/// while this runs). `sink` must be safe to call with `ctx` and a
+/// `(ptr, len)` UTF-8 byte span valid only for the call's duration.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_import_run(
+    retail_root: *const u8,
+    retail_root_len: usize,
+    archive: *const u8,
+    archive_len: usize,
+    prototype_root: *const u8,
+    prototype_root_len: usize,
+    output: *const u8,
+    output_len: usize,
+    profile: u32,
+    link_mode: u32,
+    check_only: bool,
+    progress: *mut c_void,
+    sink: IniResultSink,
+    ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_import_run", false, move || unsafe {
+        let retail_root = match str_from_raw(retail_root, retail_root_len) {
+            Some(s) => s,
+            None => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err("retail root path is not valid UTF-8".to_string()),
+                );
+            }
+        };
+        let archive = match str_from_raw(archive, archive_len) {
+            Some(s) => s,
+            None => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err("archive path is not valid UTF-8".to_string()),
+                );
+            }
+        };
+        let prototype_root = match str_from_raw(prototype_root, prototype_root_len) {
+            Some(s) => s,
+            None => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err("prototype root path is not valid UTF-8".to_string()),
+                );
+            }
+        };
+        let output = match str_from_raw(output, output_len) {
+            Some(s) => s,
+            None => return deliver(sink, ctx, Err("output path is not valid UTF-8".to_string())),
+        };
+        let profile = match Profile::from_u32(profile) {
+            Some(p) => p,
+            None => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err(format!("unknown import profile ordinal {profile}")),
+                );
+            }
+        };
+        let link_mode = match hp2_import::plan::LinkMode::from_u32(link_mode) {
+            Some(m) => m,
+            None => {
+                return deliver(
+                    sink,
+                    ctx,
+                    Err(format!("unknown link mode ordinal {link_mode}")),
+                );
+            }
+        };
+        let options = hp2_import::output::Options {
+            retail_root: retail_root.to_string(),
+            archive: archive.to_string(),
+            prototype_root: prototype_root.to_string(),
+            output: output.to_string(),
+            profile,
+            link_mode,
+            check_only,
+        };
+        let progress_ptr = progress.cast::<hp2_import::output::Progress>();
+        let progress_ref = progress_ptr.as_ref();
+        deliver(
+            sink,
+            ctx,
+            hp2_import::output::run_import(&options, progress_ref),
+        )
+    })
+}

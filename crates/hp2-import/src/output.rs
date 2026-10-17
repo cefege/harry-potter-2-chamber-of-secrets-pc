@@ -361,11 +361,25 @@ pub fn validate_output(output: &Path, assets: &[Asset], manifest: &str) -> Resul
 
 /// Replaces `Progress`: shared, atomically-updated file-count and
 /// cancellation state a caller can poll/set from another thread while
-/// [`materialize`] runs. `files_total` is set by `RunImport` before
-/// calling `Materialize` in the real C++, not by `Materialize` itself
-/// -- this crate has no `RunImport` yet (see the module doc), so
-/// nothing sets `files_total` here either; a future caller does that,
-/// matching the C++ division of responsibility exactly.
+/// [`materialize`]/[`run_import`] run. `run_import` sets `files_total`/
+/// `files_done` once, right after `plan` returns, matching the real
+/// C++'s own division of responsibility (`RunImport` sets them,
+/// `Materialize` only increments `filesDone`).
+///
+/// `#[repr(C)]`: this struct is shared directly across the FFI
+/// boundary with C++'s own `HP2Import::Progress`
+/// (`std::atomic<std::int64_t> filesDone, filesTotal; std::atomic<bool>
+/// cancelRequested;`) via `hp2-ffi`'s `hp2_rs_import_run` (a `void*`
+/// the real C++ caller casts from its own `HP2Import::Progress*`, so
+/// no cross-crate struct needs to appear in the generated header).
+/// Confirmed layout-compatible by direct measurement, not just by the
+/// general claim that `AtomicI64`/`AtomicBool` have the same size,
+/// alignment, and bit validity as their underlying integer types and a
+/// lock-free `std::atomic<T>` is just `T` under the hood: a throwaway
+/// probe on each side found `sizeof`/`size_of` = 24,
+/// `alignof`/`align_of` = 8, and identical field offsets (0, 8, 16) on
+/// both the real `HP2Import::Progress` and this struct.
+#[repr(C)]
 #[derive(Default)]
 pub struct Progress {
     pub files_done: std::sync::atomic::AtomicI64,
