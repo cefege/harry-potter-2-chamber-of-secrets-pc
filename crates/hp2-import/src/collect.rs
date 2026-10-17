@@ -620,4 +620,56 @@ mod tests {
         );
         assert!(assets.values().all(|a| a.source == "prototype"));
     }
+
+    #[test]
+    fn collect_retail_cutscenes_matches_uppercase_extension_and_mixed_case_directory() {
+        // Ground truth from the real compiled CollectRetailCutscenes on
+        // this exact fixture: an on-disk "Cutscenes" directory (not
+        // "cutscenes") still matches Child's case-insensitive lookup,
+        // and an uppercase "INTRO.INT" file still matches the ".int"
+        // extension check -- both without altering the file's own
+        // on-disk casing in the output path.
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("System/Cutscenes")).unwrap();
+        write(dir.path(), "System/Cutscenes/INTRO.INT", b"c1");
+        let mut assets = BTreeMap::new();
+        collect_retail_cutscenes(dir.path(), &mut assets).unwrap();
+        let asset = assets.values().next().unwrap();
+        assert_eq!(asset.path, "System/Cutscenes/INTRO.INT");
+        assert_eq!(asset.source, "retail");
+    }
+
+    #[test]
+    fn a_cutscene_payload_and_a_cutscene_reference_can_collide_at_the_same_destination() {
+        // Ground truth from real compiled probes of
+        // CollectPrototypeRuntimeCutscenes and
+        // CollectPrototypeCutsceneReferences on this exact fixture: both
+        // produce an asset at "System/Cutscenes/intro.int" (one from
+        // System/cutscenes/intro.int directly, one from
+        // CutScenes/intro.txt via extension replacement). Neither
+        // function sees the other's output on its own (each returns a
+        // fresh map); the collision only becomes observable once a
+        // caller -- HP2ImportPlan.cpp's orchestration, not yet ported --
+        // merges both into one map via insert(), which is exactly what
+        // this test does instead, since insert() is the real, already-
+        // verified collision gate.
+        let dir = tempdir();
+        stdfs::create_dir_all(dir.path().join("System/cutscenes")).unwrap();
+        stdfs::create_dir_all(dir.path().join("CutScenes")).unwrap();
+        write(dir.path(), "System/cutscenes/intro.int", b"payload");
+        write(dir.path(), "CutScenes/intro.txt", b"reference");
+
+        let mut assets = collect_prototype_runtime_cutscenes(dir.path()).unwrap();
+        assert_eq!(assets.len(), 1);
+        let refs = collect_prototype_cutscene_references(dir.path()).unwrap();
+        assert_eq!(refs.len(), 1);
+
+        let (_, reference_asset) = refs.into_iter().next().unwrap();
+        assert_eq!(reference_asset.path, "System/Cutscenes/intro.int");
+        let err = insert(&mut assets, reference_asset).unwrap_err();
+        assert!(
+            err.starts_with("case-insensitive output collision for System/Cutscenes/intro.int: "),
+            "{err}"
+        );
+    }
 }
