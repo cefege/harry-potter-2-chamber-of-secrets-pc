@@ -368,11 +368,13 @@ pub fn validate_plan(plan: &[Asset], profile: Profile) -> Result<(), String> {
             add_required(&exact, "System/DefUser.ini", "generated")?;
             // Unreachable: CRITICAL_RETAIL_PATHS/RETAIL_FINAL_LOCALIZATION/
             // RETAIL_ONLY_REQUIRED_PATHS already force a retail-sourced
-            // asset under every one of these five roots (via the
-            // add_required calls above), so this loop can never actually
-            // find a root with none. Dead code inherited from the real
-            // C++ source (confirmed by reading it directly, not inferred);
-            // not a porting bug to fix.
+            // asset under System, Maps, Textures, and Sounds (via the
+            // add_required calls above); none of those three lists has a
+            // Music/ path, but Music is separately guaranteed by the
+            // unconditional retail_oggs != 141 check earlier in this
+            // function. Dead code inherited from the real C++ source
+            // (confirmed by reading it directly, not inferred); not a
+            // porting bug to fix.
             for root in ["System", "Maps", "Textures", "Sounds", "Music"] {
                 let found = plan
                     .iter()
