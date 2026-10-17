@@ -3,9 +3,10 @@
 //! `HarryPotter2/Unreal` overlay). Ported incrementally, one piece at a
 //! time; see the plan for the full scope.
 //!
-//! Two pieces of this crate deviate from the plan's literal text. The
-//! plan document itself is a session-local artifact, not part of this
-//! repo, so the decisions are recorded here instead of just pointed at:
+//! Three pieces of this crate deviate from the plan's literal text or
+//! from a byte-for-byte C++ transcription. The plan document itself is
+//! a session-local artifact, not part of this repo, so the decisions
+//! are recorded here instead of just pointed at:
 //!
 //! - **Archive extraction's crate choice** (not yet implemented;
 //!   `HP2ImportArchive.cpp` isn't ported). Plan text: the
@@ -30,8 +31,8 @@
 //!   actual `UTF8PROC_CASEFOLD` output for every Unicode scalar value
 //!   found 146 real divergences (Unicode additions newer than
 //!   `unicode-normalization`'s bundled tables, e.g. the Garay script).
-//!   **This one is the implementer's engineering decision, not yet put
-//!   to the user**: switched the table's source to that same exhaustive
+//!   Presented to the user in plain language; **user-approved
+//!   2026-10-17**: switched the table's source to that same exhaustive
 //!   dump against the pinned utf8proc instead, committed as
 //!   `fold_table.rs`. Still pure Rust, still no utf8proc linked into
 //!   the Rust side, still drops utf8proc from `HP2Dependencies.cmake`
@@ -39,6 +40,20 @@
 //!   table's data, found necessary because `unicode-normalization`'s
 //!   turned out to be stale relative to the pinned C library it must
 //!   match.
+//! - **`resolve_link_mode`'s non-`EXDEV` probe-failure fallback**
+//!   (implemented; see [`plan`]). The real C++ `ResolveLinkMode`
+//!   returns `"hardlink"` optimistically after *any* hard-link probe
+//!   failure other than crossing filesystems, so on a filesystem that
+//!   rejects hard links for some other reason (confirmed reachable on
+//!   this machine: hard-linking a directory fails with `EPERM`, not
+//!   `EXDEV`), planning would wrongly record "hardlink" and the real
+//!   link would then fail at commit time -- a likely latent C++ bug.
+//!   Flagged to the user; presented in plain language; **user-approved
+//!   2026-10-17**: hardened instead of transcribed literally -- *any*
+//!   probe failure, not just a cross-device one, now falls back to
+//!   `"copy"` (or fails outright with the real OS error text if the
+//!   caller explicitly required `Hardlink`). This is a deliberate
+//!   behavior change, not a byte-for-byte port, at this one function.
 
 pub mod classify;
 pub mod collect;

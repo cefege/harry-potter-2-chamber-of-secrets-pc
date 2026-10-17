@@ -111,19 +111,24 @@ fn random_probe_name() -> String {
     format!(".hp2-link-probe-{a:016x}{b:016x}")
 }
 
-/// Replaces `ResolveLinkMode`. Probes whether `asset.disk` can be
-/// hard-linked into `output_parent` by actually creating (and removing)
-/// a throwaway hard link there, rather than comparing device IDs --
-/// matching the C++ function's own approach exactly, including its
-/// specific error handling: a cross-device probe failure falls back to
-/// `"copy"` (or fails outright if the caller explicitly required
-/// `Hardlink`), but *any other* probe failure still returns `"hardlink"`
-/// optimistically -- the real C++ source does this too, inferred by
-/// reading its control flow (there's no comment there explaining why;
-/// this is the behavior the code actually has, not a documented
-/// contract): the probe failing for some unrelated reason, e.g. a
-/// permissions quirk on the probe name specifically, doesn't mean the
-/// real asset path will fail the same way later.
+/// Replaces `ResolveLinkMode`, **with one deliberate, user-approved
+/// behavior change** (not a literal transcription at this one point):
+/// the real C++ source's fall-through, after any probe failure other
+/// than a cross-device link, still returns `"hardlink"` optimistically
+/// -- so on a filesystem that rejects hard links for some other reason
+/// (e.g. this port's own cross-check below: hard-linking a directory
+/// fails with `EPERM`, not `EXDEV`), the plan would record "hardlink"
+/// and the real link at commit time would then fail. Flagged to the
+/// user as a likely latent bug during this port; user chose to harden
+/// it here rather than preserve it: *any* probe failure, not just a
+/// cross-device one, now falls back to `"copy"` (or fails outright, with
+/// the real OS error text, if the caller explicitly required
+/// `Hardlink`) -- the same policy the cross-device case already used,
+/// just applied uniformly instead of only to that one error kind.
+///
+/// Everything else matches the C++ function's own approach: probing by
+/// actually creating (and removing) a throwaway hard link rather than
+/// comparing device IDs.
 ///
 /// The same-device success path (the common case) is verified directly:
 /// this machine's `/tmp` and the repo are on the same filesystem, so a
@@ -133,6 +138,10 @@ fn random_probe_name() -> String {
 /// `std::errc::cross_device_link`'s semantics) is implemented per its
 /// documented contract but not empirically exercised -- this single-
 /// filesystem dev machine has no second device to force that error on.
+/// The *other*-failure branch (the hardened one) is verified directly
+/// instead, using a real non-cross-device hard-link failure found on
+/// this machine: `fs::hard_link` on a directory fails with `EPERM`
+/// (`ErrorKind::PermissionDenied`), confirmed via a throwaway probe.
 pub fn resolve_link_mode(
     asset: &Asset,
     output_parent: &Path,
@@ -166,7 +175,17 @@ pub fn resolve_link_mode(
             }
             Ok("copy".to_string())
         }
-        Err(_) => Ok("hardlink".to_string()),
+        Err(e) => {
+            if requested == LinkMode::Hardlink {
+                return Err(fail(format!(
+                    "cannot hardlink {} -> {}: {}",
+                    utf8(&asset.disk).unwrap_or_else(|_| asset.disk.display().to_string()),
+                    utf8(output_parent).unwrap_or_else(|_| output_parent.display().to_string()),
+                    strerror_of(&e)
+                )));
+            }
+            Ok("copy".to_string())
+        }
     }
 }
 
@@ -561,6 +580,41 @@ mod tests {
         assert_eq!(mode, "hardlink");
         let mode = resolve_link_mode(&asset, dir.path(), LinkMode::Hardlink).unwrap();
         assert_eq!(mode, "hardlink");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_link_mode_falls_back_to_copy_on_a_non_cross_device_hard_link_failure() {
+        // fs::hard_link on a directory fails with EPERM
+        // (ErrorKind::PermissionDenied), confirmed via a throwaway probe
+        // against this machine's real filesystem -- a real, reachable
+        // non-cross-device failure, not a synthetic/mocked one. This is
+        // the hardened path: before the user-approved fix, any failure
+        // here other than ErrorKind::CrossesDevices fell through to
+        // "hardlink" optimistically; now it falls back to "copy" the
+        // same way the cross-device case already did.
+        let dir = tempdir();
+        std::fs::create_dir(dir.path().join("a_directory")).unwrap();
+        let asset = Asset {
+            disk: dir.path().join("a_directory"),
+            ..Asset::default()
+        };
+        let mode = resolve_link_mode(&asset, dir.path(), LinkMode::Auto).unwrap();
+        assert_eq!(mode, "copy");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_link_mode_fails_outright_on_a_non_cross_device_failure_when_hardlink_is_required() {
+        let dir = tempdir();
+        std::fs::create_dir(dir.path().join("a_directory")).unwrap();
+        let asset = Asset {
+            disk: dir.path().join("a_directory"),
+            ..Asset::default()
+        };
+        let err = resolve_link_mode(&asset, dir.path(), LinkMode::Hardlink).unwrap_err();
+        assert!(err.starts_with("cannot hardlink "), "{err}");
+        assert!(!err.contains("os error"), "{err}");
     }
 
     #[test]
