@@ -83,6 +83,27 @@ class UWgpuRenderDevice : public URenderDevice
 	// Backend key at all still resolves to Auto correctly.
 	BYTE Backend;
 
+	// `[WgpuDrv.WgpuRenderDevice] OneXBlending`/`ActorXBlending` --
+	// plain config bools, matching XOpenGL.cpp's own StaticConstructor
+	// registration and real defaults (both default true). Read
+	// directly by SetSceneNode to build FrameUniforms::
+	// light_map_intensity/light_color_intensity, mirroring
+	// XOpenGL.cpp's own SetFrameStateUniforms exactly (`OneXBlending ?
+	// 2.f : 4.f`, `ActorXBlending ? 1.f : 1.5f`).
+	UBOOL OneXBlending;
+	UBOOL ActorXBlending;
+
+	// Gamma, deliberately NOT yet a config property or synced from
+	// the real viewport brightness slider the way XOpenGL.cpp's own
+	// SetGamma/GetViewportGamma are (GammaMultiplier/GammaMultiplierUED
+	// config, a real gamma-ramp subsystem this port has not read yet
+	// at all) -- out of scope for SetSceneNode's own FrameUniforms
+	// wiring, tracked separately under this plan's "Settings
+	// carry-over" item (UseVSync/RenderScale/.../UseSRGBTextures).
+	// Fixed at 1.0f (no correction) until that lands; stated honestly
+	// here rather than silently wrong or left undocumented.
+	FLOAT Gamma;
+
 	void StaticConstructor();
 
 	// URenderDevice pure virtuals -- every one of URenderDevice's
@@ -95,6 +116,7 @@ class UWgpuRenderDevice : public URenderDevice
 	void Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize );
 	void Unlock( UBOOL Blit );
 	void DrawComplexSurface( FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet, DWORD PolyFlags, BYTE cAlpha );
+	void SetSceneNode( FSceneNode* Frame );
 	INT MaxVertices();
 	void DrawTriangles( FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, _WORD* Indices, INT NumIndices, DWORD PolyFlags, FSpanBuffer* Span );
 	void DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, class FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags );

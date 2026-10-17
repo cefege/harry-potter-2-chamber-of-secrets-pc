@@ -53,6 +53,11 @@ void UWgpuRenderDevice::StaticConstructor()
 	new(Backends->Names)FName(TEXT("Dx12"));
 	new(Backends->Names)FName(TEXT("Gl"));
 	new(GetClass(), TEXT("Backend"), RF_Public)UByteProperty(CPP_PROPERTY(Backend), TEXT("Options"), CPF_Config, Backends);
+
+	// Matches XOpenGL.cpp's own StaticConstructor registration for the
+	// same two properties -- plain UBoolProperty, CPF_Config, no enum.
+	new(GetClass(), TEXT("OneXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(OneXBlending), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("ActorXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(ActorXBlending), TEXT("Options"), CPF_Config);
 	unguard;
 }
 
@@ -61,6 +66,17 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	guard(UWgpuRenderDevice::Init);
 	Viewport = InViewport;
 
+	// Matches XOpenGL.cpp's own Init (OneXBlending = 1; ActorXBlending
+	// = 1;): real, already-shipped default-seeding behavior, not a new
+	// design choice -- these are CPF_Config properties, so a real ini
+	// value loaded before this runs is overwritten here on every Init
+	// call (including the fullscreen-toggle re-Init noted above),
+	// same as the reference implementation. SetSceneNode's own
+	// FrameUniforms wiring reads these directly.
+	OneXBlending = ActorXBlending = 1;
+	// Gamma: see this class's own header comment on why this stays a
+	// fixed 1.0f for now (no gamma-ramp subsystem ported yet).
+	Gamma = 1.0f;
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
 	// existing device/view first so repeated toggles don't leak one
@@ -306,6 +322,45 @@ void UWgpuRenderDevice::Unlock( UBOOL Blit )
 	// is to return false, not panic or corrupt state, when there is no
 	// frame in progress.
 	hp2_rs_wgpu_unlock( RustDevice, Blit != 0 );
+	unguard;
+}
+
+void UWgpuRenderDevice::SetSceneNode( FSceneNode* Frame )
+{
+	guard(UWgpuRenderDevice::SetSceneNode);
+	if( !RustDevice )
+		return;
+
+	// Matches XOpenGL.cpp's own SetSceneNode/SetOrthoProjection/
+	// SetProjection/UpdateCoords field reads exactly (hp2_wgpu::
+	// compute_frame_uniforms's own doc has the real matrix math this
+	// feeds). Unlike the real source, this does not skip the call
+	// when nothing relevant changed (StoredOrthoFX != ... etc.) --
+	// correct but not maximally efficient, the same known, explicit,
+	// non-urgent follow-up noted on hp2_wgpu::RenderLoop::
+	// set_scene_node's own doc.
+	SceneFrame Scene;
+	Scene.coords_origin[0] = Frame->Coords.Origin.X; Scene.coords_origin[1] = Frame->Coords.Origin.Y; Scene.coords_origin[2] = Frame->Coords.Origin.Z;
+	Scene.coords_x_axis[0] = Frame->Coords.XAxis.X;  Scene.coords_x_axis[1]  = Frame->Coords.XAxis.Y;  Scene.coords_x_axis[2]  = Frame->Coords.XAxis.Z;
+	Scene.coords_y_axis[0] = Frame->Coords.YAxis.X;  Scene.coords_y_axis[1]  = Frame->Coords.YAxis.Y;  Scene.coords_y_axis[2]  = Frame->Coords.YAxis.Z;
+	Scene.coords_z_axis[0] = Frame->Coords.ZAxis.X;  Scene.coords_z_axis[1]  = Frame->Coords.ZAxis.Y;  Scene.coords_z_axis[2]  = Frame->Coords.ZAxis.Z;
+	Scene.uncoords_origin[0] = Frame->Uncoords.Origin.X; Scene.uncoords_origin[1] = Frame->Uncoords.Origin.Y; Scene.uncoords_origin[2] = Frame->Uncoords.Origin.Z;
+	Scene.uncoords_x_axis[0] = Frame->Uncoords.XAxis.X;  Scene.uncoords_x_axis[1]  = Frame->Uncoords.XAxis.Y;  Scene.uncoords_x_axis[2]  = Frame->Uncoords.XAxis.Z;
+	Scene.uncoords_y_axis[0] = Frame->Uncoords.YAxis.X;  Scene.uncoords_y_axis[1]  = Frame->Uncoords.YAxis.Y;  Scene.uncoords_y_axis[2]  = Frame->Uncoords.YAxis.Z;
+	Scene.uncoords_z_axis[0] = Frame->Uncoords.ZAxis.X;  Scene.uncoords_z_axis[1]  = Frame->Uncoords.ZAxis.Y;  Scene.uncoords_z_axis[2]  = Frame->Uncoords.ZAxis.Z;
+	Scene.fx = Frame->FX;
+	Scene.fy = Frame->FY;
+	Scene.effective_fov_angle = Frame->EffectiveFovAngle;
+	Scene.viewport_fov_angle = Frame->Viewport->Actor->FovAngle;
+	Scene.is_ortho = Frame->Viewport->IsOrtho() != 0;
+	Scene.is_wireframe_zfar = ( GIsEditor && Frame->Viewport->Actor->RendMap == REN_Wire );
+	// GetViewportGamma's own real logic (XOpenGL.cpp): 1.f when
+	// ortho, the real Gamma field otherwise.
+	Scene.gamma = Scene.is_ortho ? 1.0f : Gamma;
+	Scene.light_color_intensity = ActorXBlending ? 1.0f : 1.5f;
+	Scene.light_map_intensity = OneXBlending ? 2.0f : 4.0f;
+
+	hp2_rs_wgpu_set_scene_node( RustDevice, &Scene );
 	unguard;
 }
 

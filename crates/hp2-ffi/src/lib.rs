@@ -2951,3 +2951,34 @@ pub unsafe extern "C" fn hp2_rs_wgpu_frame_counts(handle: *mut c_void) -> hp2_wg
         },
     )
 }
+
+/// Replaces the matrix-math half of `UXOpenGLRenderDevice::
+/// SetSceneNode` (not yet called from any `WgpuDrv.cpp` override --
+/// `URenderDevice::SetSceneNode` has an empty default body, so
+/// `UWgpuRenderDevice` not overriding it yet is a real no-op, not
+/// broken). `scene` is read once by value before this function
+/// returns (`SceneFrame` is `Copy`-shaped, all plain FFI-safe
+/// fields), so the caller's own storage for it does not need to
+/// outlive the call. No-op (not a crash) on a null `handle` or `scene`.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null. `scene` must point to a valid, fully
+/// initialized `hp2_wgpu::SceneFrame`, or be null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_set_scene_node(
+    handle: *mut c_void,
+    scene: *const hp2_wgpu::SceneFrame,
+) {
+    guard("hp2_rs_wgpu_set_scene_node", (), move || {
+        if handle.is_null() || scene.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        let scene = unsafe { &*scene };
+        handle
+            .render_loop
+            .set_scene_node(&handle.created.device, &handle.created.queue, scene);
+    })
+}
