@@ -384,36 +384,68 @@
 //! way to bind an already-created wgpu texture/sampler instead of
 //! going through the texture cache.
 //!
-//! One real, not-yet-decided architectural gap surfaced by all three
-//! orchestration files: GLSL's `#if`-gated shader specialization
-//! (`ShaderCompilationOptions`, lazily compiled and cached per unique
-//! combination of texture layers and blend mode via
+//! One real architectural gap all three orchestration files surface,
+//! now actually designed (not left open): GLSL's `#if`-gated shader
+//! specialization (`ShaderCompilationOptions`, lazily compiled and
+//! cached per unique combination of texture layers and blend mode via
 //! `SelectSpecialization`) has no direct WGSL/wgpu equivalent -- wgpu
-//! has no API-level preprocessor. The likely shape, not yet
-//! implemented or further scoped: a Rust-side
-//! `HashMap<ShaderCompilationOptions, wgpu::RenderPipeline>` cache. An
-//! earlier version of this doc suggested WGSL pipeline-overridable
-//! constants as the preferred mechanism for this -- wrong, caught on
-//! review: an override constant can disable a branch's *logic*, but
-//! WGSL still counts a `@group`/`@binding` as statically used if any
-//! code references it at all, even code a constant switches off, so a
-//! single WGSL source with every optional texture layer behind
-//! override-disabled branches would still require every one of those
-//! bindings to be populated (dummy textures for absent lightmap/
-//! fog/detail/etc. layers) in every specialization, which the GLSL
-//! `#if`-compiled-out approach never needs. Generating N actual WGSL
-//! source variants (string substitution, or naga's own preprocessing
-//! if it offers one) avoids that and is the better fit, not pipeline
-//! constants. Confirmed in passing: `DrawGouraud.cpp`'s real
-//! `MaxVertices()` also returns a hardcoded `256`, matching
-//! `WgpuDrv.cpp`'s current stub value -- not a shortcut, already
-//! correct. Still unexamined: the ring-buffer/`ShaderProgram::Flush`
-//! machinery itself (`ShaderProgram.cpp`, read only for its
-//! bindless/SSBO-fallback logic so far, not its buffering internals),
-//! the shader class constructors/`CreateInputLayout` bodies named
-//! above, and how any of this would connect to `WgpuDrv.cpp`'s current
-//! no-op `DrawComplexSurface`/`DrawTriangles`/`DrawTile`/`Draw2DLine`/
-//! `Draw2DPoint` stubs.
+//! has no API-level preprocessor. An earlier version of this doc
+//! concluded the port needs to replicate that whole mechanism, either
+//! as a `HashMap<ShaderCompilationOptions, wgpu::RenderPipeline>` keyed
+//! by the full options bitmask, or (after rejecting pipeline-
+//! overridable constants as unable to avoid populating every optional
+//! binding anyway) by generating N actual WGSL source-text variants.
+//! Both wrong, caught on review after actually reading why GLSL needs
+//! this at all, not just that it exists: `DrawComplex.cpp` calls
+//! `SetBlend(NextPolyFlags)` as a plain, separate GL state change
+//! *before* `SelectSpecialization` runs, not something the shader
+//! specialization encodes -- confirming the one genuinely pipeline-
+//! level axis (opaque/alpha-blended/masked blend state, which wgpu
+//! bakes into `ColorTargetState::blend` with no runtime-settable
+//! equivalent) is already structurally separate from everything else
+//! `ShaderCompilationOptions` varies. Of what remains -- optional
+//! texture layers (lightmap/fogmap/detail/macro/bump/environment/
+//! height) and simple per-draw boolean flags (masked/alpha-blended/
+//! modulated/translucent/unlit/render-fog) -- none require a different
+//! bind-group or vertex-buffer layout: `DrawComplex_GLSL.cpp`'s bump-
+//! mapping tangent basis (`vTBNMat`) is computed in the vertex shader
+//! from the surface's own known `XAxis`/`YAxis`/`ZAxis`, not read from
+//! a dedicated bound vertex attribute, so no shader needs a per-option
+//! vertex layout; and this crate's own `complex.wgsl` already proves,
+//! tested on real hardware, that an optional texture layer (lightmap,
+//! fogmap) can instead always be bound (a 1x1 dummy when the real
+//! layer is absent for a given draw) and conditionally sampled at
+//! runtime with `select()`, keyed off the same per-DrawID `DrawFlags`
+//! bits GLSL's per-draw-call signature computation already reads. The
+//! real design, then: one WGSL "uber-shader" module per draw-call type
+//! (already this crate's shape for `complex.wgsl`/`gouraud.wgsl`/
+//! `tile.wgsl`), extending that same proven dummy-texture-plus-
+//! `select()` pattern to the remaining optional texture layers instead
+//! of introducing permutation-cache machinery to avoid building at
+//! all; plus a small, separate `HashMap<BlendMode, wgpu::
+//! RenderPipeline>` per draw-call-type shader for the actual pipeline-
+//! level blend-state axis, `BlendMode` being a 3-4-value enum
+//! (Opaque/AlphaBlended/Masked, mirroring `SetBlend`'s own real
+//! `PolyFlags`-driven GL state, not the full `ShaderCompilationOptions`
+//! cross-product). This also means the earlier open question about a
+//! "per-specialization" WGSL inter-stage-location budget (`DrawComplex`
+//! paragraph above) is moot under this design: there is only one real
+//! varying layout per shader module, not one per specialization, so
+//! every optional varying just needs to fit WGSL's 16-location limit
+//! once, globally, for that shader. Not yet implemented: this crate
+//! currently has no `BlendMode` enum, no per-draw-call-type pipeline
+//! cache, and `complex.wgsl`/`gouraud.wgsl` do not yet carry
+//! detail/macro/bump/environment/height textures at all (both still
+//! base-path only, as their own headers already say). Confirmed in
+//! passing: `DrawGouraud.cpp`'s real `MaxVertices()` also returns a
+//! hardcoded `256`, matching `WgpuDrv.cpp`'s current stub value -- not
+//! a shortcut, already correct. Still unexamined: the ring-buffer/
+//! `ShaderProgram::Flush` machinery itself (`ShaderProgram.cpp`, read
+//! only for its bindless/SSBO-fallback logic so far, not its buffering
+//! internals), the shader class constructors/`CreateInputLayout`
+//! bodies named above, and how any of this would connect to
+//! `WgpuDrv.cpp`'s current no-op `DrawComplexSurface`/`DrawTriangles`/
+//! `DrawTile`/`Draw2DLine`/`Draw2DPoint` stubs.
 //!
 //! Depth-range convention (GLSL/OpenGL clip-space Z is -1..1; WebGPU's
 //! is 0..1): not yet resolved in code, since no Rust code builds a
