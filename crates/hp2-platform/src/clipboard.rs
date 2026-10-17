@@ -4,27 +4,20 @@
 //!
 //! **Design: hand-written `extern "C"` declarations against the pinned
 //! SDL2 headers, no `sdl2`/`sdl2-sys` crate dependency at all, behind
-//! the `sdl` Cargo feature -- the exact same pattern already approved
-//! and in use for `hp2-import`'s libarchive binding
-//! (`crates/hp2-import/src/archive.rs`'s `archive` feature; see that
-//! module's doc comment and this crate's own "Approved deviations"
-//! entry in `local://rust-inplace-port-plan.md` for the full
-//! reasoning).** This supersedes an earlier version of this module and
-//! its accompanying plan-deviation entry, both of which chose the
-//! `sdl2` crate instead -- caught on review before being wired into
-//! the CMake build: with `sdl2-sys`'s `static-link` feature, building
-//! `hp2-ffi` as a `crate-type = ["staticlib"]` bundles the *entire*
-//! referenced `SDL2`/`SDL2main` static archives' object code directly
-//! into `libhp2_ffi.a` (rustc's default behavior for `-l static=X`
+//! the `sdl` Cargo feature -- the same pattern already in use for
+//! `hp2-import`'s libarchive binding
+//! (`crates/hp2-import/src/archive.rs`'s `archive` feature; see this
+//! crate's "Approved deviations" entry in
+//! `local://rust-inplace-port-plan.md` for the full history).** A
+//! crate dependency on `sdl2`/`sdl2-sys` with the `static-link`
+//! feature does not work here: building `hp2-ffi` as a
+//! `crate-type = ["staticlib"]` bundles the *entire* referenced
+//! `SDL2`/`SDL2main` static archives' object code directly into
+//! `libhp2_ffi.a` (rustc's default behavior for `-l static=X`
 //! references in a staticlib output), and `hp2_game` already links
 //! `SDL2::SDL2-static` on its own account (`SDLDrv`, `SDLLaunch`,
-//! `HP2LauncherPlatform.cpp`) -- producing exactly the duplicate-
-//! symbol/two-SDL-instance risk the earlier deviation entry claimed
-//! was eliminated "by construction", which it was not: that reasoning
-//! only covered the *linking* half (same pinned version, no second
-//! vendored copy to divergently build), not the *staticlib-bundling*
-//! half (a second copy of the same already-built archive's object
-//! code still ending up embedded twice).
+//! `HP2LauncherPlatform.cpp`) -- a second, separately-embedded copy of
+//! the same archive's object code in the same binary.
 //!
 //! Hand-written externs with no `#[link(...)]` attribute and no
 //! build-script-emitted `cargo:rustc-link-lib` sidestep this
@@ -37,24 +30,21 @@
 //! archive every other SDL2 consumer in this build already links,
 //! linked exactly once into `hp2_game`'s final binary. Verified:
 //! `nm out/<preset>/libhp2_ffi.a | grep ' T _SDL_Init$'` is empty
-//! (no embedded definition) once this feature is wired in.
+//! (no embedded definition).
 //!
-//! **No SDL init in this module, deliberately** (unrelated to the
-//! point above, but important on its own): by the time any caller
-//! could reach these functions, C++ has already called
+//! **No SDL init in this module, deliberately:** by the time any
+//! caller could reach these functions, C++ has already called
 //! `SDL_Init(SDL_INIT_VIDEO)` on the process main thread
 //! (`USDLClient::Init`), so these are thin, stateless calls on
 //! already-initialized SDL state, not reinitializing anything.
-//! (An even earlier version of this module called the `sdl2` crate's
-//! own `sdl2::init()`/`.video()` to construct a `ClipboardUtil`. That
-//! additionally crashed under `cargo test` with "Rust cannot catch
-//! foreign exceptions, aborting": `SDL_InitSubSystem(VIDEO)` touches
-//! Cocoa/AppKit APIs that macOS requires to run on the process's
-//! actual main thread, and the Rust test harness runs each test on a
-//! worker thread, never thread 0 -- confirmed by running the
-//! identical sequence in a throwaway `fn main()` binary, genuinely on
-//! the main thread, which round-tripped cleanly. Moot now: this
-//! module performs no init at all.)
+//! `SDL_InitSubSystem(VIDEO)` touches Cocoa/AppKit APIs that macOS
+//! requires to run on the process's actual main thread -- the Rust
+//! test harness runs each test on a worker thread, never thread 0, so
+//! this module's functions cannot be exercised by a normal in-crate
+//! `#[test]` (confirmed: calling `sdl2::init()`/`.video()` from a
+//! `#[test]` aborts with "Rust cannot catch foreign exceptions";
+//! calling the same sequence from a real `fn main()` on the actual
+//! main thread works cleanly).
 //!
 //! Verified by running the compiled `hp2_rs_platform_get_clipboard_text`/
 //! `set_clipboard_text` functions directly from C++

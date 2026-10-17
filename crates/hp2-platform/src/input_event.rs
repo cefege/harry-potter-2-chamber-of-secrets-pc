@@ -1,32 +1,24 @@
 //! Normalized input-event adapter, ported from
 //! `HarryPotter2/Unreal/SDLDrv/Inc/HP2InputEvents.h`.
 //!
-//! **Correction (caught on review): the real header's own "PREP ONLY
-//! -- not yet wired into the viewport pump" comment is stale relative
-//! to the actual C++, and an earlier version of this module doc
-//! repeated that stale claim without cross-checking it against code
-//! already read in this same session.** `USDLViewport`'s real,
-//! live `UpdateInput` (`SDLViewport.cpp:318-480`) already calls these
-//! exact functions at real call sites: the constructor fills
-//! `KeysymMap` from `HP2MapKeysym` (`:84-85`), and the event loop
-//! calls `HP2MakeKeyEvent` (`:345`), `HP2MakeTextEvent` (`:352`),
-//! `HP2MakeMouseButtonEvent` (`:370`) and `HP2MakeWheelEvents`
-//! (`:378`) directly, each immediately followed by `CauseInputEvent`/
-//! `Engine->Key`. So the real cutover is *not* "design a new batch
-//! SDL-poll FFI protocol" (an earlier version of this doc described
-//! exactly that, also wrong) -- it is switching those five call sites
-//! from the local inline C++ functions to `hp2_rs_*` equivalents,
-//! one call at a time, keeping the exact same per-event, inline-in-
-//! the-poll-loop shape the pump already has today. `CauseInputEvent`
-//! itself (`:535-542`) calls `GetOuterUSDLClient()->Engine->
-//! InputEvent(...)` -- a live `UEngine*` virtual dispatch -- so that
-//! part stays C++ until Phase 5; only the pure mapping step ahead of
-//! it moves. This makes the `#[repr(C)]` layout of `HP2InputEvent`
-//! exactly matching `FHP2InputEvent` a live, present-tense
-//! requirement, not a future-design nicety -- see that struct's own
-//! doc comment below for the fix this review caught (an earlier
-//! version omitted `#[repr(C)]` and used a `[u8;7]+len` shape that
-//! did not match the real `ANSICHAR Text[8]` layout at all).
+//! The real header's own "PREP ONLY -- not yet wired into the
+//! viewport pump" comment is stale: `USDLViewport::UpdateInput`
+//! (`SDLViewport.cpp:318-480`) already calls these exact functions at
+//! live call sites. The constructor fills `KeysymMap` from
+//! `HP2MapKeysym` (`:84-85`); the event loop calls `HP2MakeKeyEvent`
+//! (`:345`), `HP2MakeTextEvent` (`:352`), `HP2MakeMouseButtonEvent`
+//! (`:370`) and `HP2MakeWheelEvents` (`:378`), each immediately
+//! followed by `CauseInputEvent`/`Engine->Key`. The cutover for this
+//! module is switching those five call sites to `hp2_rs_*`
+//! equivalents one at a time, keeping the exact same per-event,
+//! inline-in-the-poll-loop shape the pump has today -- not a new
+//! batch SDL-poll protocol. `CauseInputEvent` itself (`:535-542`)
+//! calls `GetOuterUSDLClient()->Engine->InputEvent(...)`, a live
+//! `UEngine*` virtual dispatch, so that part stays C++ until Phase 5;
+//! only the pure mapping step ahead of it moves. This makes
+//! `HP2InputEvent`'s `#[repr(C)]` layout exactly matching the real
+//! `FHP2InputEvent` (`ANSICHAR Text[8]`, NUL in-band, no separate
+//! length field) a live requirement, not a future-design detail.
 //!
 //! `EInputKey`/`EInputAction` (`Engine/Inc/EngineClasses.h:129-401`) are
 //! both plain, dense, zero-based C++ enums (`IK_None=0 .. IK_MAX=255`,
@@ -173,13 +165,12 @@ pub mod ist {
 /// Key` and `EInputAction Action` are both plain C++ `enum`s (`int`-sized
 /// by default, no explicit underlying type declared), `FLOAT Delta` is
 /// `f32`, and `ANSICHAR Text[8]` is an 8-byte NUL-terminated buffer with
-/// the terminator stored *in* the array -- not a separate length field,
-/// which an earlier version of this struct had (`[u8;7]+text_len: u8`,
-/// never `#[repr(C)]` at all): same total size by coincidence (8 bytes
-/// either way) but a different byte-for-byte shape, caught on review
-/// before this crossed FFI anywhere. `text`'s contents are only
-/// meaningful for `SDL_TEXTINPUT`-sourced events; every other event
-/// constructor leaves it zeroed, matching `HP2MakeNoneEvent`.
+/// the terminator stored *in* the array, not a separate length field.
+/// `size_of`/`offset_of` below are checked against the real compiled
+/// struct (`sizeof(FHP2InputEvent)==20`, offsets 0/4/8/12). `text`'s
+/// contents are only meaningful for `SDL_TEXTINPUT`-sourced events;
+/// every other event constructor leaves it zeroed, matching
+/// `HP2MakeNoneEvent`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HP2InputEvent {
@@ -529,13 +520,11 @@ pub fn make_wheel_events(wheel_y: i32, out: &mut [HP2InputEvent; 3]) -> i32 {
 /// evaluating outside `0x80..0xC0` to fail the check; callers in this
 /// crate always pass a longer-than-the-claimed-length NUL-terminated byte
 /// slice so that read is always in-bounds, matching the C++'s own
-/// reliance on a NUL-terminated `const char*`). `utf8` is `None` only for
-/// the real C++'s `Utf8 == NULL` case (-1); a `Some(&[])` empty-but-
-/// present string is *not* the same thing -- the real C++ would read
-/// `Utf8[0]`, the string's own NUL terminator (value 0), and return `0`,
-/// not `-1` (caught on review: an earlier version of this function
-/// treated an empty slice the same as `None`, both returning `-1`, which
-/// is wrong for the empty-string case specifically).
+/// reliance on a NUL-terminated `const char*`). `utf8` is `None` only
+/// for the real C++'s `Utf8 == NULL` case (-1); a `Some(&[])`
+/// empty-but-present string is not the same thing -- the real C++
+/// reads `Utf8[0]`, the string's own NUL terminator (value 0), and
+/// returns `0`, not `-1`.
 pub fn utf8_codepoint(utf8: Option<&[u8]>) -> i32 {
     let Some(utf8) = utf8 else {
         return -1;
@@ -723,18 +712,30 @@ mod tests {
         let truncated = make_text_event(Some(&[0xC3]));
         assert_eq!(truncated.key, ik::NONE);
 
-        // Regression for a bug caught on review: an empty-but-present
-        // string (`Some(&[])`, matching the real C++'s `Utf8Text == ""`)
-        // must decode to codepoint 0 (reading the string's own NUL
-        // terminator byte), not -1/IK_None -- -1 is reserved for `None`
-        // (the real C++'s `Utf8Text == NULL`).
-        let empty_but_present = make_text_event(Some(&[]));
+        // `utf8_codepoint` must distinguish the real C++'s
+        // `Utf8Text == NULL` (-1) from `Utf8Text == ""` (reads the
+        // string's own NUL terminator byte, 0). Asserted directly
+        // against `utf8_codepoint`, not via `make_text_event`:
+        // `ik::NONE == 0`, so a buggy -1-for-both-cases
+        // implementation would also produce `key == 0` through the
+        // `codepoint >= 0` check below, making a `make_text_event`-
+        // level assertion unable to tell the two apart.
         assert_eq!(
-            empty_but_present.key, 0,
-            "empty string must decode to codepoint 0, not IK_None"
+            utf8_codepoint(Some(&[])),
+            0,
+            "empty string must decode to codepoint 0, not -1"
         );
-        let null = make_text_event(None);
-        assert_eq!(null.key, ik::NONE, "NULL must decode to IK_None (via -1)");
+        assert_eq!(utf8_codepoint(None), -1, "NULL must decode to -1");
+        // At the HP2InputEvent level the two cases are indistinguishable,
+        // matching the real C++ exactly (IK_None is also 0).
+        assert_eq!(make_text_event(Some(&[])).key, 0);
+        assert_eq!(make_text_event(None).key, ik::NONE);
+
+        // A payload longer than the 7-byte copy limit must still leave
+        // an in-band NUL terminator at index 7, matching the real C++'s
+        // `for (; Index < 7 && ...; ++Index) ...; Text[Index] = 0;`.
+        let truncated_payload = make_text_event(Some(b"ABCDEFGHI"));
+        assert_eq!(truncated_payload.text, *b"ABCDEFG\0");
     }
 
     #[test]
@@ -742,6 +743,7 @@ mod tests {
         let e = make_none_event();
         assert_eq!(e.key, ik::NONE);
         assert_eq!(e.action, ist::NONE);
+        assert_eq!(e.delta, 0.0);
         assert_eq!(e.text, [0; 8]);
     }
 }

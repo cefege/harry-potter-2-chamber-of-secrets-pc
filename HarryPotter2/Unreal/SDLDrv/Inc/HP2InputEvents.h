@@ -42,6 +42,17 @@ struct FHP2InputEvent
 	ANSICHAR     Text[8]; // SDL_TEXTINPUT payload copy (NUL-terminated); empty otherwise
 };
 
+// Pins the exact layout the Rust port's #[repr(C)] mirror
+// (crates/hp2-platform/src/input_event.rs's HP2InputEvent) asserts via
+// its own size_of/offset_of consts. A change on either side that
+// breaks this contract fails that side's own build, not just at
+// runtime on one machine.
+static_assert( sizeof(FHP2InputEvent) == 20, "FHP2InputEvent layout must match crates/hp2-platform/src/input_event.rs's HP2InputEvent" );
+static_assert( offsetof(FHP2InputEvent, Key) == 0, "FHP2InputEvent.Key offset must match HP2InputEvent.key" );
+static_assert( offsetof(FHP2InputEvent, Action) == 4, "FHP2InputEvent.Action offset must match HP2InputEvent.action" );
+static_assert( offsetof(FHP2InputEvent, Delta) == 8, "FHP2InputEvent.Delta offset must match HP2InputEvent.delta" );
+static_assert( offsetof(FHP2InputEvent, Text) == 12, "FHP2InputEvent.Text offset must match HP2InputEvent.text" );
+
 inline FHP2InputEvent HP2MakeNoneEvent()
 {
 	FHP2InputEvent E;
