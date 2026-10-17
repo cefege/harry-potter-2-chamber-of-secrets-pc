@@ -2150,9 +2150,25 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
              texture's top row at NDC y=+1) -- if this reads blue instead, the UV flip fix \
              regressed back to the literal GLSL formula; got {top_row_red_pixel:?}"
         );
+        // Row 1 starts at the padded offset 256 (padded_bytes_per_row
+        // above), not immediately after the 4-byte top-left pixel --
+        // checking only the top row would let a degenerate result pass
+        // (e.g. a UV that is constant 0 everywhere would sample red for
+        // every pixel, top and bottom, and still pass the assertion
+        // above); checking that the bottom row is genuinely blue is
+        // what actually proves the orientation, not just "some pixel
+        // somewhere is red".
+        let bottom_row_blue_pixel = &mapped[256..260];
+        assert_eq!(
+            bottom_row_blue_pixel,
+            &[0u8, 0, 255, 255],
+            "expected the render target's bottom row to read back blue (sampling the source \
+             texture's bottom row at NDC y=-1) -- got {bottom_row_blue_pixel:?}"
+        );
         println!(
             "postprocess.wgsl's UV flip confirmed empirically: top row of the render target \
-             sampled red (top row of the source texture), not blue, on adapter {:?} backend {}",
+             sampled red, bottom row sampled blue, matching the source texture's real \
+             orientation, not a degenerate constant UV, on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );
