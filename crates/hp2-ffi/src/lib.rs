@@ -2046,3 +2046,117 @@ pub unsafe extern "C" fn hp2_rs_platform_set_clipboard_text(
         },
     )
 }
+
+/// Mirrors `hp2_platform::input_event::HP2InputEvent`, which itself
+/// mirrors `FHP2InputEvent` (`HP2InputEvents.h:37-43`, size/offset
+/// asserted there and in `input_event.rs`). Declared separately here,
+/// not re-exported, so cbindgen (which only parses this crate plus
+/// `hp2-ffi-support`, per `cbindgen.toml`) emits it into `hp2_rs.h`,
+/// matching every other FFI struct in this file.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiInputEvent {
+    pub key: i32,
+    pub action: i32,
+    pub delta: f32,
+    pub text: [u8; 8],
+}
+
+impl From<hp2_platform::input_event::HP2InputEvent> for FfiInputEvent {
+    fn from(e: hp2_platform::input_event::HP2InputEvent) -> Self {
+        FfiInputEvent {
+            key: e.key,
+            action: e.action,
+            delta: e.delta,
+            text: e.text,
+        }
+    }
+}
+
+/// Replaces `HP2MapKeysym` (`HP2InputEvents.h:53-185`). Used only by
+/// `USDLViewport`'s constructor to fill its own `KeysymMap[512]` --
+/// a field that is itself never read anywhere in this codebase, kept
+/// here for line-by-line fill-behavior parity with the pre-cutover
+/// C++, not because anything consults the array.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_input_map_keysym(sym: i32) -> i32 {
+    guard(
+        "hp2_rs_input_map_keysym",
+        hp2_platform::input_event::ik::NONE,
+        || hp2_platform::input_event::map_keysym(sym),
+    )
+}
+
+/// Replaces `HP2MakeKeyEvent` (`HP2InputEvents.h:189-195`), called at
+/// `SDLViewport.cpp:345` for `SDL_KEYDOWN`/`SDL_KEYUP`.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_input_make_key_event(sym: i32, pressed: bool) -> FfiInputEvent {
+    guard(
+        "hp2_rs_input_make_key_event",
+        hp2_platform::input_event::make_none_event().into(),
+        || hp2_platform::input_event::make_key_event(sym, pressed).into(),
+    )
+}
+
+/// Replaces `HP2MakeMouseButtonEvent` (`HP2InputEvents.h:200-212`),
+/// called at `SDLViewport.cpp:370` for `SDL_MOUSEBUTTONDOWN`/`UP`.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_input_make_mouse_button_event(button: u8, pressed: bool) -> FfiInputEvent {
+    guard(
+        "hp2_rs_input_make_mouse_button_event",
+        hp2_platform::input_event::make_none_event().into(),
+        || hp2_platform::input_event::make_mouse_button_event(button, pressed).into(),
+    )
+}
+
+/// Replaces `HP2MakeWheelEvents` (`HP2InputEvents.h:219-239`), called
+/// at `SDLViewport.cpp:378` for `SDL_MOUSEWHEEL`. `out` must point to
+/// space for at least 3 `FfiInputEvent`s. Returns the count written
+/// (0..=3), matching the real C++'s `INT` return.
+///
+/// # Safety
+/// `out` must be a valid, aligned pointer to at least 3
+/// `FfiInputEvent` slots, writable for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_input_make_wheel_events(
+    wheel_y: i32,
+    out: *mut FfiInputEvent,
+) -> i32 {
+    guard("hp2_rs_input_make_wheel_events", 0, move || unsafe {
+        let mut events = [hp2_platform::input_event::make_none_event(); 3];
+        let count = hp2_platform::input_event::make_wheel_events(wheel_y, &mut events);
+        for (i, event) in events.iter().take(count as usize).enumerate() {
+            *out.add(i) = (*event).into();
+        }
+        count
+    })
+}
+
+/// Replaces `HP2MakeTextEvent` (`HP2InputEvents.h:276-289`), called at
+/// `SDLViewport.cpp:352` for `SDL_TEXTINPUT`. `text` is UTF-8, not
+/// NUL-terminated; `text == NULL` mirrors the real C++'s
+/// `Utf8Text == NULL` case, matching the real call site's own
+/// `Event.text.text` (always a valid, non-null pointer into the SDL
+/// event struct's embedded buffer, even for an empty string).
+///
+/// # Safety
+/// `(text, text_len)` must be valid for reads of that length, or null
+/// with any length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_input_make_text_event(
+    text: *const u8,
+    text_len: usize,
+) -> FfiInputEvent {
+    guard(
+        "hp2_rs_input_make_text_event",
+        hp2_platform::input_event::make_none_event().into(),
+        move || unsafe {
+            let bytes = if text.is_null() {
+                None
+            } else {
+                Some(std::slice::from_raw_parts(text, text_len))
+            };
+            hp2_platform::input_event::make_text_event(bytes).into()
+        },
+    )
+}
