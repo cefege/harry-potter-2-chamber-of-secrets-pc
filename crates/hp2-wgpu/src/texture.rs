@@ -259,6 +259,38 @@ pub fn texture_uv_mult(u_scale: f32, v_scale: f32, u_size: u32, v_size: u32) -> 
     )
 }
 
+/// Real `UXOpenGLRenderDevice::SetTexture`'s own `UPan`/`VPan`
+/// computation (`SetTexture.cpp:488-489`: `Tex.UPan = Info.Pan.X +
+/// PanBias * Info.UScale`, `Tex.VPan` symmetrically from `Info.Pan.Y`/
+/// `Info.VScale`) -- confirmed at the same real "Set panning" comment
+/// immediately before the real `UMult`/`VMult` computation
+/// `texture_uv_mult`'s own doc already has the full citation for, run
+/// fresh on every real bind, not cached, same real reasoning. A
+/// separate function, not folded into `texture_uv_mult`: real
+/// `DrawComplexSurface` callers (`SetTextureHelper`, `DrawComplex.cpp:
+/// 21-42`) need both `UMult`/`VMult` *and* `UPan`/`VPan` together per
+/// real texture layer (`DrawCallParams->DiffuseUV`/`LightMapUV`/
+/// `FogMapUV`, each a real `vec4(UMult, VMult, UPan, VPan)`), but
+/// `DrawTile`'s own real callers only ever need `UMult`/`VMult` --
+/// keeping them separate avoids a real caller that only needs one
+/// pair having to compute (or fake) the other. `pan_bias` is the real
+/// `PanBias` parameter `SetTexture`'s own real callers pass as a
+/// caller-chosen constant, not a per-texture field -- `0.0` for
+/// diffuse/detail/macro/bump-map layers, `-0.5` for lightmap/fogmap
+/// layers (confirmed from `DrawComplex.cpp`'s own five real
+/// `SetTextureHelper` call sites, `:168,175,178,181,184`), a real
+/// per-*layer*, not per-texture, constant this function's own callers
+/// must supply, not derive.
+pub fn texture_uv_pan(
+    pan_x: f32,
+    pan_y: f32,
+    pan_bias: f32,
+    u_scale: f32,
+    v_scale: f32,
+) -> (f32, f32) {
+    (pan_x + pan_bias * u_scale, pan_y + pan_bias * v_scale)
+}
+
 /// Real `BindMap`'s own role (`SetTexture.cpp`'s `TMap<QWORD,
 /// FCachedTexture> *BindMap`) -- GPU texture objects keyed by the
 /// real `CacheID` (`fix_cache_id`'s own output), looked up before
@@ -345,71 +377,94 @@ impl TextureCache {
         rgba8_bytes: &[u8],
         srgb: bool,
     ) -> &CachedTexture {
-        assert_eq!(
-            rgba8_bytes.len(),
-            width as usize * height as usize * 4,
-            "rgba8_bytes length must be exactly width * height * 4 bytes"
-        );
-        let format = if srgb {
-            wgpu::TextureFormat::Rgba8UnormSrgb
-        } else {
-            wgpu::TextureFormat::Rgba8Unorm
-        };
-        let texture = created.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hp2-wgpu cached texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            // COPY_SRC: lets this crate's own
-            // upload_rgba8_round_trips_real_bytes_through_a_real_gpu_
-            // texture test (and any future debug-readback tooling)
-            // copy an uploaded texture's real contents out for
-            // verification -- negligible cost, same reasoning as
-            // RenderLoop::set_scene_node's own frame_uniforms_buffer
-            // already established for the equivalent buffer case.
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        created.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            rgba8_bytes,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.entries.insert(
             cache_id,
-            CachedTexture {
-                texture,
-                view,
-                width,
-                height,
-            },
+            create_gpu_texture(created, width, height, rgba8_bytes, srgb),
         );
         self.entries
             .get(&cache_id)
             .expect("just inserted this cache_id above")
+    }
+}
+
+/// The real GPU-texture-object-creation core of `TextureCache::
+/// upload_rgba8` (that method's own doc has the full real contract
+/// and panics), factored out as a standalone function so a caller
+/// that needs a real, valid, but *not real-engine-sourced* GPU
+/// texture -- `RenderLoop::dummy_texture`'s own doc has the full real
+/// reasoning for why one is needed -- can build one without going
+/// through `TextureCache`'s own `CacheID`-keyed `HashMap` at all (an
+/// earlier version of that call site used a throwaway `cache_id: 0`
+/// insert-then-remove through `TextureCache::upload_rgba8` itself
+/// instead -- caught on review before landing: a real, if unlikely,
+/// collision risk against a genuine real `CacheID` of exactly `0`,
+/// and pointless indirection through a `HashMap` entry that would
+/// have been removed again immediately anyway).
+pub fn create_gpu_texture(
+    created: &crate::CreatedDevice,
+    width: u32,
+    height: u32,
+    rgba8_bytes: &[u8],
+    srgb: bool,
+) -> CachedTexture {
+    assert_eq!(
+        rgba8_bytes.len(),
+        width as usize * height as usize * 4,
+        "rgba8_bytes length must be exactly width * height * 4 bytes"
+    );
+    let format = if srgb {
+        wgpu::TextureFormat::Rgba8UnormSrgb
+    } else {
+        wgpu::TextureFormat::Rgba8Unorm
+    };
+    let texture = created.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("hp2-wgpu cached texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        // COPY_SRC: lets this crate's own
+        // upload_rgba8_round_trips_real_bytes_through_a_real_gpu_
+        // texture test (and any future debug-readback tooling)
+        // copy an uploaded texture's real contents out for
+        // verification -- negligible cost, same reasoning as
+        // RenderLoop::set_scene_node's own frame_uniforms_buffer
+        // already established for the equivalent buffer case.
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    created.queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba8_bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    CachedTexture {
+        texture,
+        view,
+        width,
+        height,
     }
 }
 
@@ -552,6 +607,27 @@ mod tests {
         let (u_mult, v_mult) = texture_uv_mult(1.0, 1.0, 4, 8);
         assert_eq!(u_mult, 0.25);
         assert_eq!(v_mult, 0.125);
+    }
+
+    #[test]
+    fn texture_uv_pan_matches_the_real_set_texture_formula() {
+        // pan_x=10.0, pan_y=20.0, pan_bias=-0.5 (the real lightmap/
+        // fogmap layer constant), u_scale=2.0, v_scale=4.0. Hand-
+        // verified: u_pan = 10.0 + (-0.5)*2.0 = 9.0, v_pan = 20.0 +
+        // (-0.5)*4.0 = 18.0.
+        let (u_pan, v_pan) = texture_uv_pan(10.0, 20.0, -0.5, 2.0, 4.0);
+        assert_eq!(u_pan, 9.0);
+        assert_eq!(v_pan, 18.0);
+    }
+
+    #[test]
+    fn texture_uv_pan_with_zero_bias_is_plain_pan() {
+        // pan_bias=0.0 (the real diffuse/detail/macro/bump-map layer
+        // constant) -- the bias term vanishes regardless of scale,
+        // leaving the raw pan values unchanged.
+        let (u_pan, v_pan) = texture_uv_pan(10.0, 20.0, 0.0, 2.0, 4.0);
+        assert_eq!(u_pan, 10.0);
+        assert_eq!(v_pan, 20.0);
     }
 
     #[test]

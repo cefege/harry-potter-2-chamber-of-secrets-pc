@@ -705,6 +705,48 @@ pub fn compute_tile_draw_color(
     color
 }
 
+/// Real `DrawComplexSurface`/`SetTextureHelper`'s own `DiffuseInfo`
+/// computation (`DrawComplex.cpp:39,168-172`, both read together: the
+/// helper's own `TextureInfo` write only happens when the caller
+/// passes a non-null pointer, which `DrawComplexSurface` itself only
+/// does when `Surface.Texture->Texture` is non-null, confirmed by
+/// direct re-read of the real ternary at the call site, not assumed
+/// from the helper's own body in isolation). Real shape, confirmed
+/// genuinely different from `compute_tile_draw_color`'s/`PrepareGouraudCall`'s
+/// own `TextureAlpha` formula in two ways, not assumed parallel:
+/// `.x`(diffuse)/`.z`(alpha) each use a real `> 0.f` *value* check
+/// (`resolve_texture_alpha`'s own formula, reused twice here) even
+/// when the real texture object is non-null, and the real null-
+/// texture fallback is `(1.0, 0.0, 0.0, cAlpha/255.0)` -- diffuse
+/// defaults to `1.0` but alpha(`.z`) defaults to `0.0`, not a uniform
+/// `1.0` fallback the way `compute_tile_draw_color`'s own `Option`
+/// shape might suggest by surface analogy alone. `.y` (Specular) is
+/// always `Info.Texture->Specular` directly, no `>0.f` check at all
+/// (confirmed: the real source has no ternary for it) -- `0.0` only
+/// in the real null-texture fallback. `.w` is always `cAlpha as f32 /
+/// 255.0` regardless of which branch -- the real source's own
+/// `DrawComplex.cpp:172`'s unconditional post-helper overwrite
+/// (replacing whatever `TEXTURE_SCALE_NAME` the helper itself might
+/// have written for the macro-texture-only case, not read anywhere in
+/// this crate's own ported `complex.wgsl` fragment shader scope
+/// either way). `texture` is `Some((Diffuse, Specular, Alpha))` when
+/// `Surface.Texture->Texture` is real and non-null, `None` otherwise
+/// -- one combined real null check drives all three real fields'
+/// fallback together, not three independent `Option`s the way
+/// `TileDrawRequest`'s own unrelated fields are.
+pub fn compute_complex_diffuse_info(texture: Option<(f32, f32, f32)>, c_alpha: u8) -> [f32; 4] {
+    let alpha_field = c_alpha as f32 / 255.0;
+    match texture {
+        Some((diffuse, specular, alpha)) => [
+            resolve_texture_alpha(Some(diffuse)),
+            specular,
+            resolve_texture_alpha(Some(alpha)),
+            alpha_field,
+        ],
+        None => [1.0, 0.0, 0.0, alpha_field],
+    }
+}
+
 /// Groups `tile_quad_corners`' real inputs (clippy's
 /// `too_many_arguments` -- fifteen real `f32` values, same reasoning
 /// as `LineDrawCall`/`TileDrawCall` above). `rfx2`/`rfy2`/`fx2`/`fy2`
@@ -1397,6 +1439,323 @@ impl GouraudPipeline {
     }
 }
 
+/// `complex.wgsl`'s real WGSL source, embedded the same way `simple.
+/// wgsl`/`tile.wgsl`/`gouraud.wgsl` are.
+const COMPLEX_WGSL_SOURCE: &str = concat!(
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/complex.wgsl")
+);
+
+/// Byte-for-byte mirror of `complex.wgsl`'s own real `VertexInput`
+/// (`@location(0) coords: vec3<f32>, @location(1) draw_id: u32`),
+/// matching the already-proven layout from this crate's own `complex_
+/// wgsl_builds_a_render_pipeline_on_a_real_adapter` test (`array_
+/// stride: 16`). No `tex_coords`/`light_color`/`fog_color` the way
+/// `GouraudVertex` has: real BSP surfaces have no per-vertex UVs at
+/// all -- every texture layer's UV is computed in the vertex shader
+/// from the surface's own shared planar `XAxis`/`YAxis` mapping axes
+/// (`complex.wgsl`'s own module doc has the full real citation), so
+/// per-vertex data here really is just `Coords`/`DrawID`, matching
+/// the real source's own comment on why `Normal` is kept in the real
+/// struct but never read (32-byte alignment padding, not a real input
+/// this base path uses -- already excluded here, same reasoning
+/// `GouraudVertex`'s own doc already has for its own unused `Normal`).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ComplexVertex {
+    pub coords: [f32; 3],
+    pub draw_id: u32,
+}
+
+/// `ComplexVertex` minus `draw_id` -- the real per-vertex shape a
+/// caller (a future `RenderLoop::queue_complex_surface`/`hp2_rs_wgpu_
+/// queue_complex_surface` FFI array parameter) provides, same real
+/// reasoning as `GouraudVertexInput`'s own doc (no `draw_id` until a
+/// real `unlock_frame` flush assigns a chunk-local one). Real BSP
+/// surfaces have no other real per-vertex fields at all in this base
+/// path (`ComplexVertex`'s own doc has the full real citation for
+/// why) -- just the triangulated `Coords` a future `WgpuDrv.cpp`
+/// override builds from the real `FSavedPoly`/`FTransform` linked
+/// list (`DrawComplex.cpp:206-248`'s own real fan-triangulation,
+/// mirroring `queue_triangles`' own already-established non-indexed
+/// fan-expansion shape).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ComplexVertexInput {
+    pub coords: [f32; 3],
+}
+
+/// Byte-for-byte mirror of `complex.wgsl`'s own real `DrawParameters`
+/// (`diffuse_uv`/`light_map_uv`/`fog_map_uv`: vec4<f32>, `diffuse_
+/// info`: vec4<f32>, `x_axis`/`y_axis`: vec4<f32>, `draw_flags`: u32)
+/// -- six real `vec4<f32>` fields (already 16-byte aligned) plus one
+/// trailing `u32`, same `_padding`-to-the-next-16-byte-boundary
+/// reasoning as `TileDrawParams`/`GouraudDrawParams`. Each `*_uv`
+/// field is `(UMult, VMult, UPan, VPan)` for that real texture layer
+/// (`texture_uv_mult`/`texture_uv_pan`'s own real per-bind formulas,
+/// confirmed against `SetTextureHelper`'s own real `vec4(UMult, VMult,
+/// UPan, VPan)` construction, `DrawComplex.cpp:37`) -- `.xy`=mult,
+/// `.zw`=pan, matching `complex.wgsl`'s own vertex shader reads
+/// exactly (`(map_dot - params.diffuse_uv.zw) * params.diffuse_uv.xy`).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ComplexDrawParams {
+    pub diffuse_uv: [f32; 4],
+    pub light_map_uv: [f32; 4],
+    pub fog_map_uv: [f32; 4],
+    pub diffuse_info: [f32; 4],
+    pub x_axis: [f32; 4],
+    pub y_axis: [f32; 4],
+    pub draw_flags: u32,
+    pub _padding: [u32; 3],
+}
+
+/// Groups `ComplexPipeline::record`/`::render`'s "what to draw"
+/// arguments, same reasoning as `TileDrawCall`/`GouraudDrawCall` --
+/// now with *three* real texture/sampler pairs (diffuse/light map/fog
+/// map, `complex.wgsl`'s own `@group(2)` bindings 0-5) instead of one,
+/// matching the real source's own multi-layer `DrawComplexSurface`.
+/// Real surfaces without a lightmap/fogmap still need *some* valid
+/// bound texture here (WGSL cannot conditionally declare a binding
+/// the way the real GLSL's own `#if OPT_HasLightMap` can) --
+/// `complex.wgsl`'s own module doc already has the full real
+/// reasoning for why the sampled value is simply discarded via
+/// `select()` in that case, not read from this struct's own fields at
+/// all; this crate's own future `queue_complex_surface` wiring is
+/// responsible for choosing *which* real or dummy texture view to
+/// pass here, not this struct.
+pub struct ComplexDrawCall<'a> {
+    pub frame_uniforms_buffer: &'a wgpu::Buffer,
+    pub vertices: &'a [ComplexVertex],
+    pub draw_params: &'a [ComplexDrawParams],
+    pub diffuse_texture_view: &'a wgpu::TextureView,
+    pub diffuse_sampler: &'a wgpu::Sampler,
+    pub light_map_texture_view: &'a wgpu::TextureView,
+    pub light_map_sampler: &'a wgpu::Sampler,
+    pub fog_map_texture_view: &'a wgpu::TextureView,
+    pub fog_map_sampler: &'a wgpu::Sampler,
+    pub target: &'a wgpu::TextureView,
+    pub load: wgpu::LoadOp<wgpu::Color>,
+}
+
+/// One real, lazily-built `complex.wgsl` pipeline plus its three
+/// bind-group layouts (`@group(0)` frame uniforms, `@group(1)` draw
+/// params, `@group(2)` the six real texture/sampler bindings), same
+/// `blend: None` first-proof reasoning as `TilePipeline`/
+/// `GouraudPipeline`'s own doc already states in full.
+pub struct ComplexPipeline {
+    pipeline: wgpu::RenderPipeline,
+    frame_uniforms_layout: wgpu::BindGroupLayout,
+    draw_params_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+}
+
+impl ComplexPipeline {
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("complex.wgsl (draw.rs production)"),
+            source: wgpu::ShaderSource::Wgsl(COMPLEX_WGSL_SOURCE.into()),
+        });
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: 12,
+                shader_location: 1,
+            },
+        ];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("complex.wgsl pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ComplexVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let frame_uniforms_layout = pipeline.get_bind_group_layout(0);
+        let draw_params_layout = pipeline.get_bind_group_layout(1);
+        let texture_layout = pipeline.get_bind_group_layout(2);
+        Self {
+            pipeline,
+            frame_uniforms_layout,
+            draw_params_layout,
+            texture_layout,
+        }
+    }
+
+    /// Same real contract as `TilePipeline::record`/`GouraudPipeline::
+    /// record` (`TilePipeline::record`'s own doc has the full
+    /// correctness reasoning for `encoder`/`call.load`) --
+    /// `TriangleList` topology, matching real `DrawComplexSurface`'s
+    /// own flat fan-triangulated vertex list (`DrawComplex.cpp:
+    /// 234-244`).
+    pub fn record(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        call: ComplexDrawCall<'_>,
+    ) {
+        let ComplexDrawCall {
+            frame_uniforms_buffer,
+            vertices,
+            draw_params,
+            diffuse_texture_view,
+            diffuse_sampler,
+            light_map_texture_view,
+            light_map_sampler,
+            fog_map_texture_view,
+            fog_map_sampler,
+            target,
+            load,
+        } = call;
+        assert!(
+            draw_params.len() <= MAX_DRAWS,
+            "draw_params.len() ({}) exceeds complex.wgsl's real MAX_DRAWS ({MAX_DRAWS})",
+            draw_params.len()
+        );
+        assert!(
+            vertices.len().is_multiple_of(3),
+            "TriangleList topology needs a vertex count that is a multiple of 3, got {}",
+            vertices.len()
+        );
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs complex vertex buffer"),
+            size: (std::mem::size_of_val(vertices)) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
+
+        let mut padded_params = vec![
+            ComplexDrawParams {
+                diffuse_uv: [0.0; 4],
+                light_map_uv: [0.0; 4],
+                fog_map_uv: [0.0; 4],
+                diffuse_info: [0.0; 4],
+                x_axis: [0.0; 4],
+                y_axis: [0.0; 4],
+                draw_flags: 0,
+                _padding: [0; 3],
+            };
+            MAX_DRAWS
+        ];
+        padded_params[..draw_params.len()].copy_from_slice(draw_params);
+        let draw_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs complex draw-params buffer"),
+            size: (MAX_DRAWS * std::mem::size_of::<ComplexDrawParams>()) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&draw_params_buffer, 0, bytemuck::cast_slice(&padded_params));
+
+        let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs complex frame uniforms bind group"),
+            layout: &self.frame_uniforms_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniforms_buffer.as_entire_binding(),
+            }],
+        });
+        let draw_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs complex draw params bind group"),
+            layout: &self.draw_params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: draw_params_buffer.as_entire_binding(),
+            }],
+        });
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs complex texture bind group"),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(diffuse_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(light_map_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(light_map_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(fog_map_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(fog_map_sampler),
+                },
+            ],
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("draw.rs complex render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+        pass.set_bind_group(1, &draw_params_bind_group, &[]);
+        pass.set_bind_group(2, &texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+
+    /// Same real contract as `TilePipeline::render`.
+    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: ComplexDrawCall<'_>) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("draw.rs complex render encoder"),
+        });
+        self.record(device, queue, &mut encoder, call);
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after a real complex render");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1869,6 +2228,51 @@ mod tests {
             [1.0, 1.0, 1.0, 0.7],
             "PF_Modulated forces RGB (and alpha, provisionally) to 1.0, but the texture's own \
              positive Alpha must still override alpha again afterward, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn compute_complex_diffuse_info_uses_real_values_when_texture_present_and_positive() {
+        let out = compute_complex_diffuse_info(Some((0.5, 0.3, 0.7)), 255);
+        let close = |a: [f32; 4], b: [f32; 4]| (0..4).all(|i| (a[i] - b[i]).abs() < 1e-4);
+        assert!(
+            close(out, [0.5, 0.3, 0.7, 1.0]),
+            "expected [diffuse, specular, alpha, c_alpha/255] unchanged when all real values \
+             are positive, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn compute_complex_diffuse_info_defaults_diffuse_and_alpha_to_one_when_non_positive() {
+        // Specular has no real >0.f check at all (unlike diffuse/
+        // alpha) -- 0.3 must pass through unchanged even though
+        // diffuse/alpha (0.0/-1.0, both non-positive) get defaulted.
+        let out = compute_complex_diffuse_info(Some((0.0, 0.3, -1.0)), 128);
+        let close = |a: [f32; 4], b: [f32; 4]| (0..4).all(|i| (a[i] - b[i]).abs() < 1e-4);
+        assert!(
+            close(out, [1.0, 0.3, 1.0, 128.0 / 255.0]),
+            "expected diffuse/alpha each defaulted to 1.0 independently (non-positive value \
+             check, same real formula as resolve_texture_alpha), specular passed through \
+             unchanged (no real >0.f check on it at all), got {out:?}"
+        );
+    }
+
+    #[test]
+    fn compute_complex_diffuse_info_null_texture_fallback_is_asymmetric() {
+        // The real null-texture fallback (DrawComplex.cpp:170) is
+        // (1.0, 0.0, 0.0, cAlpha/255.0) -- diffuse defaults to 1.0 but
+        // alpha(.z) defaults to 0.0, not a uniform 1.0 the way
+        // compute_tile_draw_color's own Option<f32> shape might
+        // suggest by surface analogy alone. This is the real case
+        // most likely to be gotten wrong by assuming symmetry with
+        // Gouraud's own different null-fallback shape instead of
+        // reading DrawComplex.cpp's own real line directly.
+        let out = compute_complex_diffuse_info(None, 64);
+        let close = |a: [f32; 4], b: [f32; 4]| (0..4).all(|i| (a[i] - b[i]).abs() < 1e-4);
+        assert!(
+            close(out, [1.0, 0.0, 0.0, 64.0 / 255.0]),
+            "expected the real asymmetric null fallback (1.0, 0.0, 0.0, c_alpha/255.0), got \
+             {out:?} -- a uniform (1,1,1,_) or (0,0,0,_) fallback here would be wrong"
         );
     }
 
@@ -2360,6 +2764,207 @@ mod tests {
              textured mesh, uploaded through a real TextureCache entry and real buffers/bind \
              groups, produced the right pixels at the right positions in a real offscreen \
              texture on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn complex_pipeline_renders_a_real_textured_surface_into_an_offscreen_texture() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        // Same real identity-modelviewproj_mat/light_color_intensity=1.0
+        // technique as the gouraud pipeline test above.
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        frame_bytes[520..524].copy_from_slice(&1.0f32.to_le_bytes());
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("complex render test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = ComplexPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+
+        // Same real solid-red 1x1 texture technique as the tile/
+        // gouraud pipeline tests -- bound for all three real layers
+        // (diffuse/light map/fog map): draw_flags=0 below means
+        // neither DF_LightMap nor DF_FogMap is set, so complex.wgsl's
+        // own real select() calls discard whatever is sampled from
+        // the light-map/fog-map slots entirely (that shader's own
+        // module doc: "any valid texture works, its color is never
+        // read") -- reusing the diffuse texture there is simplest,
+        // not a claim this is what a real two-layer surface would do.
+        let mut texture_cache = crate::texture::TextureCache::new();
+        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        // x_axis=(1,0,0,0), y_axis=(0,1,0,0): the real per-vertex UV
+        // mapping (`map_dot = (dot(x_axis.xyz,coords)-x_axis.w, dot(
+        // y_axis.xyz,coords)-y_axis.w)`) collapses to `(coords.x,
+        // coords.y)` directly -- a deliberately trivial real mapping,
+        // not a claim this is what any actual real BSP surface uses.
+        // With a 1x1 texture the exact UV value sampled never matters
+        // (there is only one texel regardless of address mode or
+        // exact coordinate, including negative ones) -- this test
+        // exists to prove the pipeline/bind-group/compositing
+        // machinery works, not to exercise a specific real UV-mapping
+        // scenario (texture_uv_mult/texture_uv_pan's own tests already
+        // cover the real formula in isolation).
+        let diffuse_uv = [1.0, 1.0, 0.0, 0.0];
+        let x_axis = [1.0, 0.0, 0.0, 0.0];
+        let y_axis = [0.0, 1.0, 0.0, 0.0];
+        // Same real six-vertex, two-triangle quad shape as the tile/
+        // gouraud pipeline tests (left half of the 64px-wide target).
+        let vertices = [
+            ComplexVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+            },
+            ComplexVertex {
+                coords: [0.0, -1.0, 0.0],
+                draw_id: 0,
+            },
+            ComplexVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+            },
+            ComplexVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+            },
+            ComplexVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+            },
+            ComplexVertex {
+                coords: [-1.0, 1.0, 0.0],
+                draw_id: 0,
+            },
+        ];
+        // diffuse_info=[1,0,1,1] (compute_complex_diffuse_info(Some((
+        // 1.0,0.0,1.0)), 255), hand-computed: diffuse/alpha both
+        // already positive so pass through, c_alpha=255 -> w=1.0),
+        // draw_flags=0 (no masking/alpha-blend/modulated/lightmap/
+        // fogmap -- compute_tile_draw_flags's own tests cover the
+        // real PolyFlags->DrawFlags translation separately).
+        let draw_params = [ComplexDrawParams {
+            diffuse_uv,
+            light_map_uv: [0.0; 4],
+            fog_map_uv: [0.0; 4],
+            diffuse_info: [1.0, 0.0, 1.0, 1.0],
+            x_axis,
+            y_axis,
+            draw_flags: 0,
+            _padding: [0; 3],
+        }];
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("complex render test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        pipeline.render(
+            device,
+            queue,
+            ComplexDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                diffuse_texture_view: &cached.view,
+                diffuse_sampler: &sampler,
+                light_map_texture_view: &cached.view,
+                light_map_sampler: &sampler,
+                fog_map_texture_view: &cached.view,
+                fog_map_sampler: &sampler,
+                target: &render_target_view,
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+            },
+        );
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("complex render test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("complex render test readback encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected a pixel inside the drawn surface's span to read back red (the real \
+             sampled diffuse texel times the real neutral diffuse_info, with no lightmap/fogmap \
+             flags set), got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected a pixel outside the drawn surface's span to still read back the real \
+             clear color, blue -- got {right_pixel:?}"
+        );
+        println!(
+            "ComplexPipeline::render confirmed empirically: a real DrawComplexSurface-shaped \
+             textured surface, uploaded through a real TextureCache entry and real buffers/bind \
+             groups (three texture/sampler pairs in one bind group), produced the right pixels \
+             at the right positions in a real offscreen texture on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );

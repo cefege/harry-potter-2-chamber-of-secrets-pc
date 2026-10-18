@@ -951,6 +951,29 @@ struct QueuedTriangleMesh {
     draw_flags: u32,
 }
 
+/// One real queued `DrawComplexSurface` call's own real surface: its
+/// own flat fan-triangulated vertex coords (real `FSavedPoly`
+/// linked-list polygons, already triangulated -- `RenderLoop::queue_
+/// complex_surface`'s own doc has the full real reasoning for why
+/// this crate's own CPU-buffer-then-upload-once architecture needs
+/// no equivalent of the real source's own mid-call vertex-buffer-
+/// capacity flush-restart, DrawComplex.cpp:213-229) plus the real
+/// per-draw `DiffuseUV`/`LightMapUV`/`FogMapUV`/`DiffuseInfo`/`XAxis`/
+/// `YAxis`/`DrawFlags` (`DrawComplexSurface`/`SetTextureHelper`'s own
+/// scoped-down real output this crate's own `queue_complex_surface`
+/// computes). Carries no segment or texture `cache_id`s of its own,
+/// same reasoning as `QueuedTile`.
+struct QueuedComplexSurface {
+    vertices: Vec<draw::ComplexVertexInput>,
+    diffuse_uv: [f32; 4],
+    light_map_uv: [f32; 4],
+    fog_map_uv: [f32; 4],
+    diffuse_info: [f32; 4],
+    x_axis: [f32; 4],
+    y_axis: [f32; 4],
+    draw_flags: u32,
+}
+
 /// One ordered entry in `RenderLoop::batches`. Either queued lines or
 /// queued tiles for one real segment (`Batch::segment`, an index into
 /// `RenderLoop::frame_uniforms_segments` -- same real meaning as
@@ -1002,10 +1025,11 @@ struct QueuedTriangleMesh {
 /// whichever draw lands on a given pixel *last* wins outright) must
 /// follow real call order, not a per-primitive-kind fixed order.
 /// `batches` is one single ordered `Vec`; `queue_line`/`queue_tile`/
-/// `queue_point`/`queue_triangles` each either extend the last batch
-/// (same segment, same kind, same `cache_id` for tiles/triangles) or
-/// push a brand new one -- `unlock_frame` then replays `batches` in
-/// push order, which is real call order.
+/// `queue_point`/`queue_triangles`/`queue_complex_surface` each
+/// either extend the last batch (same segment, same kind, same
+/// `cache_id`(s) for tiles/triangles/complex surfaces) or push a
+/// brand new one -- `unlock_frame` then replays `batches` in push
+/// order, which is real call order.
 enum BatchPayload {
     Lines(Vec<QueuedLine>),
     Tiles {
@@ -1016,6 +1040,20 @@ enum BatchPayload {
     Triangles {
         cache_id: u64,
         meshes: Vec<QueuedTriangleMesh>,
+    },
+    Complex {
+        diffuse_cache_id: u64,
+        /// `None` when the real `Surface.LightMap`/`FogMap` was null
+        /// for every surface in this batch (the real dummy-texture
+        /// case, `RenderLoop::dummy_texture`'s own doc has the full
+        /// real reasoning) -- a batch boundary on this field changing
+        /// matches the real per-layer `SetTexture` TMU-staleness
+        /// check the same way `Tiles`'/`Triangles`' own `cache_id`
+        /// already does, not a simplification specific to this
+        /// variant.
+        light_map_cache_id: Option<u64>,
+        fog_map_cache_id: Option<u64>,
+        surfaces: Vec<QueuedComplexSurface>,
     },
 }
 
@@ -1110,6 +1148,10 @@ pub struct RenderLoop {
     /// pipeline`/`point_pipeline`, for `queue_triangles`' own real
     /// draws.
     gouraud_pipeline: Option<(wgpu::TextureFormat, draw::GouraudPipeline)>,
+    /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
+    /// pipeline`/`point_pipeline`/`gouraud_pipeline`, for `queue_
+    /// complex_surface`'s own real draws.
+    complex_pipeline: Option<(wgpu::TextureFormat, draw::ComplexPipeline)>,
     /// Real `BindMap`'s own role (`texture.rs`'s own `TextureCache`
     /// doc has the full real citation) -- persists across frames
     /// (unlike `batches`/`frame_uniforms_segments`, never cleared by
@@ -1132,6 +1174,23 @@ pub struct RenderLoop {
     /// right scope for the first real textured-quad draw to land,
     /// not a blocker on wiring real per-texture sampler state first.
     sampler: Option<wgpu::Sampler>,
+    /// Lazily created once this `RenderLoop`'s whole lifetime (unlike
+    /// `texture_cache`'s own real per-`CacheID` entries, never
+    /// invalidated/replaced): a real 1x1 opaque white GPU texture,
+    /// bound as the real light-map/fog-map texture slot whenever a
+    /// real `DrawComplexSurface` call's own `Surface.LightMap`/
+    /// `FogMap` is null -- `complex.wgsl`'s own module doc has the
+    /// full real reasoning for why WGSL needs *some* valid texture
+    /// bound there regardless (it cannot conditionally declare a
+    /// binding the way the real GLSL's own `#if OPT_HasLightMap`/
+    /// `#if OPT_HasFogMap` can), and why its own color is never
+    /// actually read in that case (`select()` discards the sampled
+    /// value entirely whenever the corresponding `DrawFlags` bit is
+    /// clear) -- deliberately *not* stored inside `texture_cache`
+    /// itself (no risk of ever colliding with a real `CacheID`, and
+    /// keeps "this is a real uploaded texture" and "this is an inert
+    /// always-bound placeholder" two clearly separate kinds of state).
+    dummy_texture: Option<texture::CachedTexture>,
     /// Set by every `set_scene_node` call -- the real `RFX2`/`RFY2`/
     /// `Frame->FX2`/`FY2` screen-to-clip transform `Draw2DLine`'s own
     /// real source applies (`DrawSimple.cpp:80,82`) is derived
@@ -1226,6 +1285,56 @@ pub struct TrianglesDrawRequest {
     pub diffuse: Option<f32>,
 }
 
+/// One real texture layer's own per-bind inputs for `ComplexSurface
+/// DrawRequest` (the real `SetTexture`'s own per-call fields:
+/// `CacheID`/`UScale`/`VScale`/`Pan.X`/`Pan.Y`) -- `cache_id` must
+/// already be `fix_cache_id`'s own output, same contract as every
+/// other `*DrawRequest`'s own `cache_id` field. `u_scale`/`v_scale`
+/// feed `texture_uv_mult`; `pan_x`/`pan_y` feed `texture_uv_pan`
+/// (that function's own doc has the real `PanBias` reasoning --
+/// `queue_complex_surface` itself supplies the real per-layer
+/// constant, `0.0` for diffuse/`-0.5` for light-map/fog-map, not this
+/// struct, since it is a property of *which* layer is being bound,
+/// not something a real caller chooses per call).
+pub struct ComplexTextureLayer {
+    pub cache_id: u64,
+    pub u_scale: f32,
+    pub v_scale: f32,
+    pub pan_x: f32,
+    pub pan_y: f32,
+}
+
+/// Groups `RenderLoop::queue_complex_surface`'s real scalar inputs
+/// (clippy's `too_many_arguments`, same reasoning as `TileDrawRequest`/
+/// `TrianglesDrawRequest` -- the real per-vertex coords are a separate
+/// slice parameter). `diffuse` is always present (the real source's
+/// own `check(Surface.Texture)` assertion, `DrawComplex.cpp:60` --
+/// every real `DrawComplexSurface` call has a real diffuse `Surface.
+/// Texture`, confirmed, not assumed). `light_map`/`fog_map` are
+/// `None` for the real `!Surface.LightMap`/`!Surface.FogMap` case
+/// (real, common -- most real surfaces have neither or only one).
+/// `texture_fields` is `Some((Diffuse, Specular, Alpha))` when the
+/// real `Surface.Texture->Texture` is non-null, same real combined-
+/// null-check shape `compute_complex_diffuse_info`'s own doc already
+/// has the full citation for (not three independent `Option`s).
+/// `c_alpha` is the real `BYTE cAlpha` `DrawComplexSurface` itself
+/// receives. `x_axis`/`y_axis` are the real `Facet.MapCoords.XAxis`/
+/// `YAxis`, already packed as `(axis.X, axis.Y, axis.Z, axis |
+/// MapCoords.Origin)` (the real dot-product bias baked into `.w`,
+/// `DrawComplex.cpp:193-194`) -- a future `WgpuDrv.cpp` override's own
+/// responsibility to compute from the real `FCoords`, not this
+/// function's.
+pub struct ComplexSurfaceDrawRequest {
+    pub diffuse: ComplexTextureLayer,
+    pub light_map: Option<ComplexTextureLayer>,
+    pub fog_map: Option<ComplexTextureLayer>,
+    pub poly_flags: u32,
+    pub texture_fields: Option<(f32, f32, f32)>,
+    pub c_alpha: u8,
+    pub x_axis: [f32; 4],
+    pub y_axis: [f32; 4],
+}
+
 impl RenderLoop {
     pub fn new() -> Self {
         Self {
@@ -1239,8 +1348,10 @@ impl RenderLoop {
             tile_pipeline: None,
             point_pipeline: None,
             gouraud_pipeline: None,
+            complex_pipeline: None,
             texture_cache: texture::TextureCache::new(),
             sampler: None,
+            dummy_texture: None,
             last_scene: None,
         }
     }
@@ -1648,6 +1759,193 @@ impl RenderLoop {
                     payload: BatchPayload::Triangles {
                         cache_id: request.cache_id,
                         meshes: vec![mesh],
+                    },
+                });
+            }
+        }
+    }
+
+    /// Real per-tick entry point a future `UWgpuRenderDevice::
+    /// DrawComplexSurface` override will call through a future
+    /// `hp2_rs_wgpu_queue_complex_surface` FFI function -- not wired
+    /// yet (same staged-rollout pattern every other `queue_*`
+    /// function's own doc already established). Mirrors
+    /// `DrawComplexSurface`/`SetTextureHelper`'s own real pipeline
+    /// (`DrawComplex.cpp:21-259`, read in full) for the real base
+    /// path only (diffuse + light map + fog map -- `complex.wgsl`'s
+    /// own module doc already scopes detail/macro/bump/environment/
+    /// parallax/distance-fog/editor/multi-pass as real, separately
+    /// tracked, not-yet-ported branches, not an invented cut made
+    /// here), *after* the real per-polygon fan-triangulation -- that
+    /// part is this function's own caller's responsibility, same real
+    /// reasoning `queue_triangles`' own doc already establishes for
+    /// its own fan/indexed expansion (real `FSavedPoly`/`FTransform*`
+    /// pointer-dereferencing work this crate has no access to).
+    ///
+    /// Computes each present real texture layer's own `UMult`/`VMult`/
+    /// `UPan`/`VPan` fresh (`texture_uv_mult`/`texture_uv_pan`, never
+    /// cached, same real per-bind-freshness reasoning established for
+    /// every other `queue_*` function) with the real per-layer
+    /// `PanBias` constant baked in here (`0.0` diffuse, `-0.5` light-
+    /// map/fog-map, confirmed against the real five `SetTextureHelper`
+    /// call sites, `DrawComplex.cpp:168,175,178`). A real `light_map`/
+    /// `fog_map` layer whose own `cache_id` is not yet actually
+    /// uploaded (a real, reachable transient condition, same category
+    /// `queue_tile`'s own doc already covers for the single-layer
+    /// case) degrades to the same real dummy-texture/absent-flag
+    /// treatment as a real null `Surface.LightMap`/`FogMap` -- a
+    /// deliberate choice, not silently pretended away: the real
+    /// source has no equivalent transient-upload-ordering condition
+    /// to begin with (a real `FCachedTexture` either exists or the
+    /// real engine is already uploading it synchronously), so there
+    /// is no single real behavior to match exactly here; failing the
+    /// *whole* surface (like a missing diffuse texture does) would
+    /// lose strictly more than necessary for what is, in this port,
+    /// only a one-frame-transient condition -- rendering the surface
+    /// without that one optional layer for this one frame is the
+    /// safer, more conservative choice.
+    ///
+    /// Drops the whole call cleanly (not a panic), same established
+    /// conditions as every other `queue_*` function: no frame in
+    /// progress, no `set_scene_node` call yet this frame, the real
+    /// diffuse texture not yet uploaded (unlike light-map/fog-map,
+    /// *not* degradable -- every real `DrawComplexSurface` call has a
+    /// real diffuse `Surface.Texture`, confirmed by the real source's
+    /// own `check(Surface.Texture)` assertion, so a missing diffuse
+    /// cache entry here means the real engine's own `SetTexture`
+    /// upload has not reached this `cache_id` yet, the same real
+    /// condition `queue_tile`'s own doc already covers), or an empty
+    /// `vertices` slice.
+    ///
+    /// Extends `self.batches`' own last entry when it is already a
+    /// `Complex` batch for this same segment *and* all three real
+    /// `cache_id`s match (diffuse, and light-map/fog-map including
+    /// their own `None`-for-dummy state), otherwise pushes a new one
+    /// -- `BatchPayload::Complex`'s own doc has the full real
+    /// citation for why all three, not just diffuse, are real batch
+    /// boundaries here.
+    pub fn queue_complex_surface(
+        &mut self,
+        request: ComplexSurfaceDrawRequest,
+        vertices: &[draw::ComplexVertexInput],
+    ) {
+        if self.in_progress.is_none() {
+            return;
+        }
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
+            return;
+        };
+        let Some(diffuse_cached) = self.texture_cache.get(request.diffuse.cache_id) else {
+            return;
+        };
+        if vertices.is_empty() {
+            return;
+        }
+        let (diffuse_u_mult, diffuse_v_mult) = texture::texture_uv_mult(
+            request.diffuse.u_scale,
+            request.diffuse.v_scale,
+            diffuse_cached.width,
+            diffuse_cached.height,
+        );
+        let (diffuse_u_pan, diffuse_v_pan) = texture::texture_uv_pan(
+            request.diffuse.pan_x,
+            request.diffuse.pan_y,
+            0.0,
+            request.diffuse.u_scale,
+            request.diffuse.v_scale,
+        );
+        let diffuse_uv = [diffuse_u_mult, diffuse_v_mult, diffuse_u_pan, diffuse_v_pan];
+
+        const LIGHT_FOG_PAN_BIAS: f32 = -0.5;
+        const DF_LIGHT_MAP: u32 = 0x0002;
+        const DF_FOG_MAP: u32 = 0x0004;
+        let mut draw_flags = draw::compute_tile_draw_flags(request.poly_flags);
+
+        let (light_map_uv, light_map_cache_id) = match request.light_map.as_ref() {
+            Some(layer) => match self.texture_cache.get(layer.cache_id) {
+                Some(cached) => {
+                    let (u_mult, v_mult) = texture::texture_uv_mult(
+                        layer.u_scale,
+                        layer.v_scale,
+                        cached.width,
+                        cached.height,
+                    );
+                    let (u_pan, v_pan) = texture::texture_uv_pan(
+                        layer.pan_x,
+                        layer.pan_y,
+                        LIGHT_FOG_PAN_BIAS,
+                        layer.u_scale,
+                        layer.v_scale,
+                    );
+                    draw_flags |= DF_LIGHT_MAP;
+                    ([u_mult, v_mult, u_pan, v_pan], Some(layer.cache_id))
+                }
+                None => ([0.0; 4], None),
+            },
+            None => ([0.0; 4], None),
+        };
+        let (fog_map_uv, fog_map_cache_id) = match request.fog_map.as_ref() {
+            Some(layer) => match self.texture_cache.get(layer.cache_id) {
+                Some(cached) => {
+                    let (u_mult, v_mult) = texture::texture_uv_mult(
+                        layer.u_scale,
+                        layer.v_scale,
+                        cached.width,
+                        cached.height,
+                    );
+                    let (u_pan, v_pan) = texture::texture_uv_pan(
+                        layer.pan_x,
+                        layer.pan_y,
+                        LIGHT_FOG_PAN_BIAS,
+                        layer.u_scale,
+                        layer.v_scale,
+                    );
+                    draw_flags |= DF_FOG_MAP;
+                    ([u_mult, v_mult, u_pan, v_pan], Some(layer.cache_id))
+                }
+                None => ([0.0; 4], None),
+            },
+            None => ([0.0; 4], None),
+        };
+
+        let surface = QueuedComplexSurface {
+            vertices: vertices.to_vec(),
+            diffuse_uv,
+            light_map_uv,
+            fog_map_uv,
+            diffuse_info: draw::compute_complex_diffuse_info(
+                request.texture_fields,
+                request.c_alpha,
+            ),
+            x_axis: request.x_axis,
+            y_axis: request.y_axis,
+            draw_flags,
+        };
+        match self.batches.last_mut() {
+            Some(Batch {
+                segment: last_segment,
+                payload:
+                    BatchPayload::Complex {
+                        diffuse_cache_id,
+                        light_map_cache_id: last_light_map_cache_id,
+                        fog_map_cache_id: last_fog_map_cache_id,
+                        surfaces,
+                    },
+            }) if *last_segment == segment
+                && *diffuse_cache_id == request.diffuse.cache_id
+                && *last_light_map_cache_id == light_map_cache_id
+                && *last_fog_map_cache_id == fog_map_cache_id =>
+            {
+                surfaces.push(surface);
+            }
+            _ => {
+                self.batches.push(Batch {
+                    segment,
+                    payload: BatchPayload::Complex {
+                        diffuse_cache_id: request.diffuse.cache_id,
+                        light_map_cache_id,
+                        fog_map_cache_id,
+                        surfaces: vec![surface],
                     },
                 });
             }
@@ -2386,7 +2684,9 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
         && batches.iter().any(|b| {
             matches!(
                 b.payload,
-                BatchPayload::Tiles { .. } | BatchPayload::Triangles { .. }
+                BatchPayload::Tiles { .. }
+                    | BatchPayload::Triangles { .. }
+                    | BatchPayload::Complex { .. }
             )
         })
     {
@@ -2395,6 +2695,34 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
                 .device
                 .create_sampler(&wgpu::SamplerDescriptor::default()),
         );
+    }
+    // Real 1x1 opaque white dummy texture (RenderLoop::dummy_texture's
+    // own doc has the full real reasoning) -- only actually needed
+    // when some real Complex batch is missing a real light-map or
+    // fog-map binding (light_map_cache_id/fog_map_cache_id is None
+    // for whichever of the two is absent -- a batch can have either,
+    // both, or neither None).
+    if loop_state.dummy_texture.is_none()
+        && batches.iter().any(|b| {
+            matches!(
+                &b.payload,
+                BatchPayload::Complex {
+                    light_map_cache_id: None,
+                    ..
+                } | BatchPayload::Complex {
+                    fog_map_cache_id: None,
+                    ..
+                }
+            )
+        })
+    {
+        loop_state.dummy_texture = Some(texture::create_gpu_texture(
+            created,
+            1,
+            1,
+            &[255, 255, 255, 255],
+            false,
+        ));
     }
     let needs_point_pipeline = batches
         .iter()
@@ -2420,6 +2748,19 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
         loop_state.gouraud_pipeline = Some((
             frame.color_format,
             draw::GouraudPipeline::new(&created.device, frame.color_format),
+        ));
+    }
+    let needs_complex_pipeline = batches
+        .iter()
+        .any(|b| matches!(b.payload, BatchPayload::Complex { .. }))
+        && !matches!(
+            &loop_state.complex_pipeline,
+            Some((format, _)) if *format == frame.color_format
+        );
+    if needs_complex_pipeline {
+        loop_state.complex_pipeline = Some((
+            frame.color_format,
+            draw::ComplexPipeline::new(&created.device, frame.color_format),
         ));
     }
 
@@ -2731,6 +3072,132 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
                             draw_params: &draw_params,
                             texture_view: &cached.view,
                             sampler,
+                            target: &frame.view,
+                            load: wgpu::LoadOp::Load,
+                        },
+                    );
+                }
+            }
+            BatchPayload::Complex {
+                diffuse_cache_id,
+                light_map_cache_id,
+                fog_map_cache_id,
+                surfaces,
+            } => {
+                // Same real reachable-transient-condition reasoning
+                // as the Tiles/Triangles arms above -- the real
+                // diffuse texture specifically, not degradable the
+                // way light-map/fog-map are (queue_complex_surface's
+                // own doc has the full real reasoning for both).
+                let Some(diffuse_cached) = loop_state.texture_cache.get(*diffuse_cache_id) else {
+                    continue;
+                };
+                let (_, pipeline) = loop_state
+                    .complex_pipeline
+                    .as_ref()
+                    .expect("complex_pipeline was just ensured above");
+                let sampler = loop_state
+                    .sampler
+                    .as_ref()
+                    .expect("sampler was just ensured above");
+                // A real light-map/fog-map cache_id here is always
+                // already resident (queue_complex_surface only ever
+                // records Some(cache_id) after a successful real
+                // texture_cache.get) -- the dummy texture (RenderLoop::
+                // dummy_texture's own doc) covers the real None case,
+                // just ensured above whenever any batch needs it.
+                let light_map_view = match light_map_cache_id {
+                    Some(id) => {
+                        &loop_state
+                            .texture_cache
+                            .get(*id)
+                            .expect("queue_complex_surface only records an already-cached id")
+                            .view
+                    }
+                    None => {
+                        &loop_state
+                            .dummy_texture
+                            .as_ref()
+                            .expect("dummy_texture was just ensured above")
+                            .view
+                    }
+                };
+                let fog_map_view = match fog_map_cache_id {
+                    Some(id) => {
+                        &loop_state
+                            .texture_cache
+                            .get(*id)
+                            .expect("queue_complex_surface only records an already-cached id")
+                            .view
+                    }
+                    None => {
+                        &loop_state
+                            .dummy_texture
+                            .as_ref()
+                            .expect("dummy_texture was just ensured above")
+                            .view
+                    }
+                };
+                let mut vertices: Vec<draw::ComplexVertex> = Vec::new();
+                let mut draw_params: Vec<draw::ComplexDrawParams> = Vec::new();
+                for surface in surfaces {
+                    // Same real chunk-not-drop reasoning as the
+                    // Tiles/Triangles arms above -- one real surface
+                    // is one draw_id/one draw_params entry, regardless
+                    // of its own variable vertex count.
+                    if draw_params.len() >= draw::MAX_DRAWS {
+                        pipeline.record(
+                            &created.device,
+                            &created.queue,
+                            &mut frame.encoder,
+                            draw::ComplexDrawCall {
+                                frame_uniforms_buffer: buffer,
+                                vertices: &vertices,
+                                draw_params: &draw_params,
+                                diffuse_texture_view: &diffuse_cached.view,
+                                diffuse_sampler: sampler,
+                                light_map_texture_view: light_map_view,
+                                light_map_sampler: sampler,
+                                fog_map_texture_view: fog_map_view,
+                                fog_map_sampler: sampler,
+                                target: &frame.view,
+                                load: wgpu::LoadOp::Load,
+                            },
+                        );
+                        vertices.clear();
+                        draw_params.clear();
+                    }
+                    let draw_id = draw_params.len() as u32;
+                    vertices.extend(surface.vertices.iter().map(|v| draw::ComplexVertex {
+                        coords: v.coords,
+                        draw_id,
+                    }));
+                    draw_params.push(draw::ComplexDrawParams {
+                        diffuse_uv: surface.diffuse_uv,
+                        light_map_uv: surface.light_map_uv,
+                        fog_map_uv: surface.fog_map_uv,
+                        diffuse_info: surface.diffuse_info,
+                        x_axis: surface.x_axis,
+                        y_axis: surface.y_axis,
+                        draw_flags: surface.draw_flags,
+                        _padding: [0; 3],
+                    });
+                }
+                if !draw_params.is_empty() {
+                    pipeline.record(
+                        &created.device,
+                        &created.queue,
+                        &mut frame.encoder,
+                        draw::ComplexDrawCall {
+                            frame_uniforms_buffer: buffer,
+                            vertices: &vertices,
+                            draw_params: &draw_params,
+                            diffuse_texture_view: &diffuse_cached.view,
+                            diffuse_sampler: sampler,
+                            light_map_texture_view: light_map_view,
+                            light_map_sampler: sampler,
+                            fog_map_texture_view: fog_map_view,
+                            fog_map_sampler: sampler,
                             target: &frame.view,
                             load: wgpu::LoadOp::Load,
                         },
@@ -3996,6 +4463,179 @@ mod tests {
             "RenderLoop's real upload_texture/queue_triangles/unlock_frame path confirmed \
              empirically to composite a queued triangle mesh draw correctly on top of its own \
              clear, on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_queue_complex_surface_renders_a_real_surface_through_the_real_lock_unlock_path()
+    {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop complex offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            520,
+            &1.0f32.to_le_bytes(),
+        );
+        loop_state.upload_texture(&created, 99, 1, 1, &[255, 0, 0, 255], false);
+
+        // No real light-map/fog-map (request.light_map/fog_map both
+        // None below) -- deliberately exercises RenderLoop::dummy_
+        // texture's own real lazy-creation path, not just the
+        // already-proven-elsewhere real-texture path. Same trivial
+        // identity x_axis/y_axis UV mapping as the draw.rs-level
+        // ComplexPipeline test above (a 1x1 texture makes the exact
+        // UV value irrelevant to the sampled color).
+        let vertices = [
+            draw::ComplexVertexInput {
+                coords: [-1.0, -1.0, 0.0],
+            },
+            draw::ComplexVertexInput {
+                coords: [0.0, -1.0, 0.0],
+            },
+            draw::ComplexVertexInput {
+                coords: [0.0, 1.0, 0.0],
+            },
+            draw::ComplexVertexInput {
+                coords: [-1.0, -1.0, 0.0],
+            },
+            draw::ComplexVertexInput {
+                coords: [0.0, 1.0, 0.0],
+            },
+            draw::ComplexVertexInput {
+                coords: [-1.0, 1.0, 0.0],
+            },
+        ];
+        loop_state.queue_complex_surface(
+            ComplexSurfaceDrawRequest {
+                diffuse: ComplexTextureLayer {
+                    cache_id: 99,
+                    u_scale: 1.0,
+                    v_scale: 1.0,
+                    pan_x: 0.0,
+                    pan_y: 0.0,
+                },
+                light_map: None,
+                fog_map: None,
+                poly_flags: 0,
+                texture_fields: Some((1.0, 0.0, 1.0)),
+                c_alpha: 255,
+                x_axis: [1.0, 0.0, 0.0, 0.0],
+                y_axis: [0.0, 1.0, 0.0, 0.0],
+            },
+            &vertices,
+        );
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop complex offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop complex offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected the surface queued via RenderLoop::queue_complex_surface and flushed by \
+             the real unlock_frame to actually render (including the real dummy-texture path \
+             for the absent light-map/fog-map), got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected begin_offscreen_frame's own clear pass to survive outside the drawn \
+             surface's span, got {right_pixel:?}"
+        );
+        println!(
+            "RenderLoop's real upload_texture/queue_complex_surface/unlock_frame path (no real \
+             light-map/fog-map -- exercising the real dummy-texture path) confirmed \
+             empirically to composite a queued complex surface draw correctly on top of its \
+             own clear, on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );
