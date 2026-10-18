@@ -434,6 +434,7 @@ name = "hp2-ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "hp2-abi",
  "hp2-audio",
  "hp2-codecs",
  "hp2-ffi-support",
@@ -442,6 +443,7 @@ dependencies = [
  "hp2-ini",
  "hp2-launcher",
  "hp2-platform",
+ "hp2-render",
  "hp2-wgpu",
  "log",
  "wgpu",
@@ -488,6 +490,13 @@ dependencies = [
 [[package]]
 name = "hp2-platform"
 version = "0.1.0"
+
+[[package]]
+name = "hp2-render"
+version = "0.1.0"
+dependencies = [
+ "hp2-abi",
+]
 
 [[package]]
 name = "hp2-wgpu"

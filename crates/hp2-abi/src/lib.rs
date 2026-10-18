@@ -20,7 +20,7 @@
 //! only) is what every probe number below reflects.
 //!
 //! Deliberately NOT in this crate yet: `FSceneNode`, `FSurfaceInfo`,
-//! `FSurfaceFacet`, `FTextureInfo`, `FTransTexture`, `FTransSample`.
+//! `FSurfaceFacet`, `FTextureInfo`, `FTransSample`.
 //! Every one of them holds a raw pointer to a live engine object
 //! (`ULevel*`, `FTextureInfo*`, `FSpanBuffer*`, `UViewport*`, ...) or
 //! embeds a type that does. Mirroring their layout today, before Phase
@@ -195,6 +195,11 @@ pub mod poly_flags {
     pub const LUMOS_AFFECTED: u32 = HIGH_SHADOW_DETAIL | MODULATED;
     pub const LUMOS_DISAPPEAR: u32 = LUMOS_AFFECTED;
 }
+
+pub mod render_particle;
+pub mod render_scene;
+pub mod render_span;
+pub mod render_sprite_filter;
 
 #[cfg(test)]
 mod tests {

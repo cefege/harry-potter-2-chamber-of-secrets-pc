@@ -13,6 +13,17 @@ mod fire_ice;
 mod fire_sparks;
 mod fire_water;
 mod fire_wet_wave;
+mod render;
+mod render_light;
+mod render_mesh;
+mod render_particle;
+mod render_particle_clip;
+mod render_particle_shard;
+mod render_particle_tube;
+mod render_softln;
+mod render_span;
+mod render_sprite;
+mod render_sprite_filter;
 mod viewport;
 
 /// Route Rust log records to the engine log. Called from `main` before

@@ -211,6 +211,8 @@ public:
 	// Inlines.
 	FLOAT RandomBase( UPTRINT i ) {return RandomBases[i & RAND_MASK]; }
 	FLOAT Random(     int i ) {return Randoms    [i & RAND_MASK]; }
+	static const FLOAT* RandomBaseData() {return RandomBases; }
+	static const FLOAT* RandomData()     {return Randoms; }
 
 protected:
 	// Constants.
@@ -223,6 +225,10 @@ protected:
 	static FLOAT Randoms		[N_RANDS]; // Per-tick continuous random numbers.
 };
 extern FGlobalRandomsBase *GRandoms;
+
+// Engine services for the Rust Render port; the table lives in Render.cpp.
+struct Hp2RenderServices;
+extern const Hp2RenderServices* GRenderServices;
 
 /*------------------------------------------------------------------------------------
 	Fast approximate math code.

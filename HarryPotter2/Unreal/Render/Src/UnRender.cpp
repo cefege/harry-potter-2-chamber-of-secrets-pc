@@ -8,6 +8,10 @@
 
 #include "Render.h"
 #include "UnNet.h"
+#include "hp2_rs.h"
+
+#include <string>
+#include <vector>
 
 /*-----------------------------------------------------------------------------
 	Object implementations.
@@ -59,6 +63,251 @@ FBspNode*   GNodes;
 FBspSurf*   GSurfs;
 FVert*      GVerts;
 TArray<FVector>* GPoints;
+
+/*-----------------------------------------------------------------------------
+	Services for the Rust URender port (crates/hp2-render/src/services_uren.rs).
+	Rust reaches this state only through GUrenServices and the UrenGlobals
+	address table. Nothing here calls into Rust.
+-----------------------------------------------------------------------------*/
+
+// Layout pins for the Rust mirrors in crates/hp2-abi/src/render_scene.rs.
+// These types are owned by Render.h, which this port does not edit, so the pins live here.
+static_assert(sizeof(FVolActorLink) == 40, "FVolActorLink must match hp2-abi render_scene::FVolActorLink");
+static_assert(offsetof(FVolActorLink,Location) == 0, "FVolActorLink::Location must match hp2-abi render_scene::FVolActorLink");
+static_assert(offsetof(FVolActorLink,Actor) == 16, "FVolActorLink::Actor must match hp2-abi render_scene::FVolActorLink");
+static_assert(offsetof(FVolActorLink,Next) == 24, "FVolActorLink::Next must match hp2-abi render_scene::FVolActorLink");
+static_assert(offsetof(FVolActorLink,Volumetric) == 32, "FVolActorLink::Volumetric must match hp2-abi render_scene::FVolActorLink");
+// FDynamicItem and FDynamicSprite have virtual functions, so they are not standard-layout
+// and offsetof is not portable for them. Only sizeof is pinned here.
+static_assert(sizeof(FDynamicItem) == 24, "FDynamicItem must match hp2-abi render_scene::FDynamicItem");
+static_assert(sizeof(FDynamicSprite) == 224, "FDynamicSprite must match hp2-abi render_scene::FDynamicSprite");
+static_assert(sizeof(FBspDrawList) == 128, "FBspDrawList must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,iNode) == 0, "FBspDrawList::iNode must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,iSurf) == 4, "FBspDrawList::iSurf must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,iZone) == 8, "FBspDrawList::iZone must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,Key) == 12, "FBspDrawList::Key must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,PolyFlags) == 16, "FBspDrawList::PolyFlags must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,Span) == 24, "FBspDrawList::Span must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,Zone) == 80, "FBspDrawList::Zone must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,Next) == 88, "FBspDrawList::Next must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,SurfNext) == 96, "FBspDrawList::SurfNext must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,Volumetrics) == 104, "FBspDrawList::Volumetrics must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,Polys) == 112, "FBspDrawList::Polys must match hp2-abi render_scene::FBspDrawList");
+static_assert(offsetof(FBspDrawList,SurfLights) == 120, "FBspDrawList::SurfLights must match hp2-abi render_scene::FBspDrawList");
+static_assert(sizeof(URender::FStampedPoint) == 16, "URender::FStampedPoint must match hp2-abi render_scene::FStampedPoint");
+static_assert(offsetof(URender::FStampedPoint,Point) == 0, "URender::FStampedPoint::Point must match hp2-abi render_scene::FStampedPoint");
+static_assert(offsetof(URender::FStampedPoint,Stamp) == 8, "URender::FStampedPoint::Stamp must match hp2-abi render_scene::FStampedPoint");
+static_assert(sizeof(URender::FDynamicsCache) == 16, "URender::FDynamicsCache must match hp2-abi render_scene::FDynamicsCache");
+
+// FBspNode, FBspSurf and FSceneNode are non-standard-layout, so their member offsets are
+// pinned here under -Winvalid-offsetof suppression. Their sizeof pins live in the headers.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+static_assert(offsetof(FBspNode,Plane) == 0, "FBspNode::Plane must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,ZoneMask) == 16, "FBspNode::ZoneMask must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iVertPool) == 24, "FBspNode::iVertPool must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iSurf) == 28, "FBspNode::iSurf must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iBack) == 32, "FBspNode::iBack must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iFront) == 36, "FBspNode::iFront must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iPlane) == 40, "FBspNode::iPlane must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iCollisionBound) == 44, "FBspNode::iCollisionBound must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iRenderBound) == 48, "FBspNode::iRenderBound must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iZone) == 52, "FBspNode::iZone must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,NumVertices) == 54, "FBspNode::NumVertices must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,NodeFlags) == 55, "FBspNode::NodeFlags must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspNode,iLeaf) == 56, "FBspNode::iLeaf must match hp2-abi render_scene::FBspNode");
+static_assert(offsetof(FBspSurf,Texture) == 0, "FBspSurf::Texture must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,PolyFlags) == 8, "FBspSurf::PolyFlags must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,pBase) == 12, "FBspSurf::pBase must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,vNormal) == 16, "FBspSurf::vNormal must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,vTextureU) == 20, "FBspSurf::vTextureU must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,vTextureV) == 24, "FBspSurf::vTextureV must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,iLightMap) == 28, "FBspSurf::iLightMap must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,iBrushPoly) == 32, "FBspSurf::iBrushPoly must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,PanU) == 36, "FBspSurf::PanU must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,PanV) == 38, "FBspSurf::PanV must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,Actor) == 40, "FBspSurf::Actor must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,Decals) == 48, "FBspSurf::Decals must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FBspSurf,Nodes) == 64, "FBspSurf::Nodes must match hp2-abi render_scene::FBspSurf");
+static_assert(offsetof(FSceneNode,Viewport) == 0, "FSceneNode::Viewport must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Level) == 8, "FSceneNode::Level must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Parent) == 16, "FSceneNode::Parent must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Sibling) == 24, "FSceneNode::Sibling must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Child) == 32, "FSceneNode::Child must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,iSurf) == 40, "FSceneNode::iSurf must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,ZoneNumber) == 44, "FSceneNode::ZoneNumber must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Recursion) == 48, "FSceneNode::Recursion must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Mirror) == 52, "FSceneNode::Mirror must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,NearClip) == 56, "FSceneNode::NearClip must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Coords) == 72, "FSceneNode::Coords must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Uncoords) == 120, "FSceneNode::Uncoords must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Span) == 168, "FSceneNode::Span must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Draw) == 176, "FSceneNode::Draw must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Sprite) == 200, "FSceneNode::Sprite must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,X) == 208, "FSceneNode::X must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Y) == 212, "FSceneNode::Y must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,XB) == 216, "FSceneNode::XB must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,YB) == 220, "FSceneNode::YB must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,FX) == 224, "FSceneNode::FX must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,FY) == 228, "FSceneNode::FY must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,FX15) == 232, "FSceneNode::FX15 must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,FY15) == 236, "FSceneNode::FY15 must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,FX2) == 240, "FSceneNode::FX2 must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,FY2) == 244, "FSceneNode::FY2 must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Zoom) == 248, "FSceneNode::Zoom must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,EffectiveFovAngle) == 252, "FSceneNode::EffectiveFovAngle must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,Proj) == 256, "FSceneNode::Proj must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,RProj) == 268, "FSceneNode::RProj must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,PrjXM) == 280, "FSceneNode::PrjXM must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,PrjYM) == 284, "FSceneNode::PrjYM must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,PrjXP) == 288, "FSceneNode::PrjXP must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,PrjYP) == 292, "FSceneNode::PrjYP must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,ViewSides) == 296, "FSceneNode::ViewSides must match hp2-abi render_scene::FSceneNode");
+static_assert(offsetof(FSceneNode,ViewPlanes) == 344, "FSceneNode::ViewPlanes must match hp2-abi render_scene::FSceneNode");
+#if defined(__clang__) || defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
+static FLOAT UrenAppSeconds()
+{
+	return appSeconds().GetFloat();
+}
+
+static FLOAT UrenAppProcessSeconds()
+{
+	return appProcessSeconds().GetFloat();
+}
+
+static void UrenLogText( EName Severity, const uint8_t* Text, size_t Length )
+{
+	const std::string Utf8( reinterpret_cast<const char*>(Text), Length );
+	std::vector<TCHAR> Converted( Length + 1 );
+	if( appFromUtf8InPlace( Converted.data(), Utf8.c_str(), static_cast<INT>(Converted.size()) ) )
+		debugf( Severity, TEXT("%s"), Converted.data() );
+	else
+		debugf( Severity, TEXT("HP2Rust: <log record failed UTF-8 conversion>") );
+}
+
+static void UrenLogDebugf( const uint8_t* Text, size_t Length )
+{
+	UrenLogText( NAME_Log, Text, Length );
+}
+
+static void UrenRandomsTick( FLOAT TimeSeconds )
+{
+	GRandoms->Tick( TimeSeconds );
+}
+
+static void UrenLightManagerInit()
+{
+	GLightManager->Init();
+}
+
+static void UrenLightManagerExit()
+{
+	GLightManager->Exit();
+}
+
+static BYTE* UrenCacheGet( QWORD Id, void** Item, INT Alignment )
+{
+	return GCache.Get( Id, *reinterpret_cast<FCacheItem**>(Item), Alignment );
+}
+
+// Flush() with no arguments is UrenCacheFlush(0, ~0, 0).
+static void UrenCacheFlush( QWORD Id, DWORD Mask, INT IgnoreLocked )
+{
+	GCache.Flush( Id, Mask, IgnoreLocked );
+}
+
+static BYTE* UrenCacheCreate( QWORD Id, void** Item, INT CreateSize, INT Alignment, INT SafetyPad )
+{
+	return GCache.Create( Id, *reinterpret_cast<FCacheItem**>(Item), CreateSize, Alignment, SafetyPad );
+}
+
+static void UrenCacheItemUnlock( void* Item )
+{
+	static_cast<FCacheItem*>(Item)->Unlock();
+}
+
+static QWORD UrenCacheIdFrame( DWORD Base, const void* Frame )
+{
+	return MakeCacheID( static_cast<ECacheIDBase>(Base), static_cast<const UObject*>(Frame) );
+}
+
+static QWORD UrenCacheIdObj( DWORD Base, const void* Obj, const void* Frame )
+{
+	return MakeCacheID( static_cast<ECacheIDBase>(Base), static_cast<const UObject*>(Obj), static_cast<const UObject*>(Frame) );
+}
+
+static QWORD UrenCacheIdWord( DWORD Base, DWORD Word, DWORD Byte, const void* Frame )
+{
+	return MakeCacheID( static_cast<ECacheIDBase>(Base), Word, Byte, static_cast<const UObject*>(Frame) );
+}
+
+static void UrenDynFilter( void* Item, void* Viewport, void* Frame, INT INode, INT Outside )
+{
+	static_cast<FDynamicItem*>(Item)->Filter( static_cast<UViewport*>(Viewport), static_cast<FSceneNode*>(Frame), INode, Outside );
+}
+
+static void UrenDynPreRender( void* Item, void* Viewport, void* Frame, void* SpanBuffer, INT INode, void* Volumetrics )
+{
+	static_cast<FDynamicItem*>(Item)->PreRender( static_cast<UViewport*>(Viewport), static_cast<FSceneNode*>(Frame), static_cast<FSpanBuffer*>(SpanBuffer), INode, static_cast<FVolActorLink*>(Volumetrics) );
+}
+
+// Addresses of C++ statics, read by Rust through the address (see Hp2UrenGlobals).
+static const Hp2UrenGlobals UrenGlobals =
+{
+	(void*)&GFrame,
+	(void*)&GNodes,
+	(void*)&GSurfs,
+	(void*)&GVerts,
+	(void*)&GPoints,
+	(void*)&GStat,
+	(void*)&GSecondsPerCycle,
+	(void*)&GDynMem,
+	(void*)&GSceneMem,
+	(void*)&GMem,
+	(void*)&URender::VectorMem,
+	(void*)&URender::DynamicsCache,
+	(void*)&URender::NumDynLightSurfs,
+	(void*)&URender::NumDynLightLeaves,
+	(void*)&URender::MaxSurfLights,
+	(void*)&URender::MaxLeafLights,
+	(void*)URender::DynLightSurfs,
+	(void*)URender::DynLightLeaves,
+	(void*)&URender::SurfLights,
+	(void*)&URender::LeafLights,
+};
+static_assert( sizeof(Hp2UrenGlobals) == 20*sizeof(void*), "Hp2UrenGlobals field count must match UrenGlobals" );
+
+// GRenderServices is constant-initialized in Render.cpp, so reading it here is well defined.
+static const Hp2UrenServices UrenServicesTable =
+{
+	&UrenGlobals,
+	GRenderServices,
+	UrenAppSeconds,
+	UrenAppProcessSeconds,
+	UrenLogDebugf,
+	UrenRandomsTick,
+	UrenLightManagerInit,
+	UrenLightManagerExit,
+	UrenCacheGet,
+	UrenCacheFlush,
+	UrenCacheCreate,
+	UrenCacheItemUnlock,
+	UrenCacheIdFrame,
+	UrenCacheIdObj,
+	UrenCacheIdWord,
+	UrenDynFilter,
+	UrenDynPreRender,
+};
+static_assert( sizeof(Hp2UrenServices) == 17*sizeof(void*), "Hp2UrenServices field count must match UrenServicesTable" );
+
+extern const Hp2UrenServices* GUrenServices;
+const Hp2UrenServices* GUrenServices = &UrenServicesTable;
+
 #if defined(LEGEND) // added by Legend 1/31/1999
 INT			GLODActorLights;
 #endif

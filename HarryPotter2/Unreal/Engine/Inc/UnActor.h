@@ -166,6 +166,11 @@ inline FRotator AActor::GetViewRotation()
 	unguardSlow;
 }
 
+// Layout pins for the Rust mirror in crates/hp2-abi/src/render_scene.rs.
+static_assert(sizeof(FActorLink) == 16, "FActorLink must match hp2-abi render_scene::FActorLink");
+static_assert(offsetof(FActorLink,Actor) == 0, "FActorLink::Actor must match hp2-abi render_scene::FActorLink");
+static_assert(offsetof(FActorLink,Next) == 8, "FActorLink::Next must match hp2-abi render_scene::FActorLink");
+
 /*-----------------------------------------------------------------------------
 	The End.
 -----------------------------------------------------------------------------*/

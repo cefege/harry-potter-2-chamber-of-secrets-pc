@@ -491,6 +491,24 @@ public:
 	}
 };
 
+// Layout pins for the Rust mirrors in crates/hp2-abi/src/render_scene.rs.
+// FBspNode and FBspSurf member offsets are pinned in UnRender.cpp (non-standard-layout).
+static_assert(sizeof(FVert) == 8, "FVert must match hp2-abi render_scene::FVert");
+static_assert(offsetof(FVert,pVertex) == 0, "FVert::pVertex must match hp2-abi render_scene::FVert");
+static_assert(offsetof(FVert,iSide) == 4, "FVert::iSide must match hp2-abi render_scene::FVert");
+static_assert(sizeof(FBspNode) == 64, "FBspNode must match hp2-abi render_scene::FBspNode");
+static_assert(sizeof(FBspSurf) == 80, "FBspSurf must match hp2-abi render_scene::FBspSurf");
+static_assert(sizeof(FLeaf) == 24, "FLeaf must match hp2-abi render_scene::FLeaf");
+static_assert(offsetof(FLeaf,iZone) == 0, "FLeaf::iZone must match hp2-abi render_scene::FLeaf");
+static_assert(offsetof(FLeaf,iPermeating) == 4, "FLeaf::iPermeating must match hp2-abi render_scene::FLeaf");
+static_assert(offsetof(FLeaf,iVolumetric) == 8, "FLeaf::iVolumetric must match hp2-abi render_scene::FLeaf");
+static_assert(offsetof(FLeaf,VisibleZones) == 16, "FLeaf::VisibleZones must match hp2-abi render_scene::FLeaf");
+static_assert(sizeof(FZoneProperties) == 32, "FZoneProperties must match hp2-abi render_scene::FZoneProperties");
+static_assert(offsetof(FZoneProperties,ZoneActor) == 0, "FZoneProperties::ZoneActor must match hp2-abi render_scene::FZoneProperties");
+static_assert(offsetof(FZoneProperties,LastRenderTime) == 8, "FZoneProperties::LastRenderTime must match hp2-abi render_scene::FZoneProperties");
+static_assert(offsetof(FZoneProperties,Connectivity) == 16, "FZoneProperties::Connectivity must match hp2-abi render_scene::FZoneProperties");
+static_assert(offsetof(FZoneProperties,Visibility) == 24, "FZoneProperties::Visibility must match hp2-abi render_scene::FZoneProperties");
+
 /*----------------------------------------------------------------------------
 	The End.
 ----------------------------------------------------------------------------*/

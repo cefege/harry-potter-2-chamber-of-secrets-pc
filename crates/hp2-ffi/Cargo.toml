@@ -18,6 +18,8 @@ hp2-launcher.workspace = true
 hp2-audio.workspace = true
 hp2-fire.workspace = true
 hp2-platform.workspace = true
+hp2-render.workspace = true
+hp2-abi.workspace = true
 hp2-wgpu = { workspace = true, optional = true }
 wgpu = { workspace = true, optional = true }
 log.workspace = true

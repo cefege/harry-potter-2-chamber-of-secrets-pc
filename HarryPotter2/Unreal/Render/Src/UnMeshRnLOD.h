@@ -63,33 +63,22 @@ void URender::DrawLodMesh
 	FLOAT TargetSubset = Mesh->ModelVerts;
 	INT   VertexSubset = Mesh->ModelVerts;
 
-	UBOOL DoLOD =( ( *(DWORD*)&Mesh->LODStrength != 0 ) && (Mesh->CollapsePointThus.Num() != 0) );
-
-	if( DoLOD )
-	{
-		FLOAT Bias = Owner->LODBias  / (Mesh->LODStrength * GlobalShapeLOD * GlobalShapeLODAdjust);
-		FLOAT Pix = (Sprite->Y2+1 - Sprite->Y1) * (Sprite->X2+1 - Sprite->X1);
-
-		// Geometric mean of vertex-based and fraction-based LOD.
-		const FLOAT VERTS_PER_PIX2 = 0.04f;		// 1 vert/25 pixels.
-		const FLOAT LOD_PER_FRAC = 4.f;			// Full LOD at 1/4 screen width.
-		FLOAT LODPix = Pix*VERTS_PER_PIX2/Mesh->ModelVerts,
-			  LODFrac = appSqrt(Pix)/Frame->FX*LOD_PER_FRAC;
-		FLOAT LOD = Bias * Max( LODPix, LODFrac );
-		TargetSubset = Mesh->LODMinVerts + (Mesh->ModelVerts - Mesh->LODMinVerts) * LOD;
-
-		// Command line debugging variables.
-		if ( ShapeLODMode == 0 )
-		{
-			if( ShapeLODFix != 0.f)
-				TargetSubset = ShapeLODFix * Mesh->ModelVerts;
-			else
-				TargetSubset = Mesh->ModelVerts;
-		}
-		VertexSubset    = Min( appRound(TargetSubset), Mesh->ModelVerts );
-		if( VertexSubset >= Mesh->ModelVerts ) 
-			DoLOD = false; 
-	}
+	Hp2RsLodInputs LodIn;
+	LodIn.lod_strength            = Mesh->LODStrength;
+	LodIn.collapse_count          = Mesh->CollapsePointThus.Num();
+	LodIn.model_verts             = Mesh->ModelVerts;
+	LodIn.lod_min_verts           = Mesh->LODMinVerts;
+	LodIn.lod_bias                = Owner->LODBias;
+	LodIn.global_shape_lod        = GlobalShapeLOD;
+	LodIn.global_shape_lod_adjust = GlobalShapeLODAdjust;
+	LodIn.x1                      = Sprite->X1;
+	LodIn.y1                      = Sprite->Y1;
+	LodIn.x2                      = Sprite->X2;
+	LodIn.y2                      = Sprite->Y2;
+	LodIn.fx                      = Frame->FX;
+	LodIn.shape_lod_mode          = ShapeLODMode;
+	LodIn.shape_lod_fix           = ShapeLODFix;
+	UBOOL DoLOD = hp2_rs_render_mesh_lod_subset(&LodIn, &TargetSubset, &VertexSubset) != 0;
 
 	// Get transformed verts.
 	STAT(GStat.MeshVertCount += Mesh->ModelVerts);
@@ -121,7 +110,7 @@ void URender::DrawLodMesh
 	INT NonMorphSubset = 0;
 	if ( DoMorph ) 
 	{
-		NonMorphSubset = appRound( TargetSubset * (1.f - Mesh->LODMorph) ); 
+		NonMorphSubset = hp2_rs_render_mesh_non_morph_subset(TargetSubset, Mesh->LODMorph);
 
 		if( NonMorphSubset >= VertexSubset )
 		{
@@ -129,18 +118,18 @@ void URender::DrawLodMesh
 		}
 		else
 		{
-			FLOAT InvLODMorph = 1.f/( Mesh->LODMorph * TargetSubset );
+			FLOAT InvLODMorph = hp2_rs_render_mesh_morph_inv(Mesh->LODMorph, TargetSubset);
 			// prepare an upper subset for morphing.
 			for ( INT i=VertexSubset-1; i>NonMorphSubset; i-- ) 
 			{
 				// Vertices morph according to their closeness to collapse.
-				FLOAT Alpha = Min( 1.f, (FLOAT)(i-NonMorphSubset) * InvLODMorph );
+				FLOAT Alpha = hp2_rs_render_mesh_morph_alpha(i, NonMorphSubset, InvLODMorph);
 				// Only go down once. 
 				INT Morph2 = Mesh->CollapsePointThus(i);
 				if ( Morph2 > 0 )
 				{
 					// because we count DOWN, morphed samples don't hinder each other.
-					Samples[i].Point += ( Samples[Morph2].Point - Samples[i].Point ) * Alpha;			
+					hp2_rs_render_mesh_morph_point(&Samples[i].Point.X, &Samples[Morph2].Point.X, Alpha);
 				}
 				else
 				{
@@ -363,7 +352,7 @@ void URender::DrawLodMesh
 	}
 
 	// Coloring.
-	FLOAT Unlit = Clamp( Owner->ScaleGlow*0.5f + Owner->AmbientGlow/256.f, 0.f, 1.f );
+	FLOAT Unlit = hp2_rs_render_mesh_unlit(Owner->ScaleGlow, Owner->AmbientGlow);
 	GUnlitColor = FVector( Unlit, Unlit, Unlit );
 	if( GIsEditor && (ExtraFlags & PF_Selected) )
 		GUnlitColor = GUnlitColor*0.4f + FVector(0.0f,0.6f,0.0f);
@@ -513,8 +502,8 @@ void URender::DrawLodMesh
 						{
 							FacePool(FaceTop).Key
 							=	NotWeaponHeuristic
-							?	appRound( 1000*( V[0]->Point.Z + V[1]->Point.Z + V[2]->Point.Z + SortBias ) )
-							:	appRound( FDistSquared(V[0]->Point,Hack)*FDistSquared(V[1]->Point,Hack)*FDistSquared(V[2]->Point,Hack) );
+							?	hp2_rs_render_mesh_depth_key_height(V[0]->Point.Z, V[1]->Point.Z, V[2]->Point.Z, SortBias)
+							:	hp2_rs_render_mesh_depth_key_distance(&V[0]->Point.X, &V[1]->Point.X, &V[2]->Point.X, &Hack.X);
 						}
 					}
 				}
@@ -536,7 +525,7 @@ void URender::DrawLodMesh
 		guardSlow(RenderTexx);
 		// Fatness.
 		UBOOL Fatten   = Owner->Fatness!=128;
-		FLOAT Fatness  = (Owner->Fatness/16.0f)-8.0f;
+		FLOAT Fatness  = hp2_rs_render_mesh_fatness_offset(Owner->Fatness);
 		//FLOAT Detail   = GlobalMeshLOD * Owner->DrawScale / (0.5f * Frame->RProj.Z * Max(1.f,Owner->Location.TransformPointBy(Coords).Z));
 
 		// Sort by depth.

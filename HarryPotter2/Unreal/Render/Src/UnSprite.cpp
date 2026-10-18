@@ -8,6 +8,7 @@
 
 #include "Render.h"
 #include "UnMesh.h"
+#include "hp2_rs.h"
 
 // SDLLaunch owns this opt-in side artifact. The renderer supplies the exact
 // per-pass admission facts immediately before the existing Update(NULL) seam.
@@ -307,9 +308,16 @@ UBOOL FDynamicSprite::Setup( FSceneNode* Frame )
 {
 	guardSlow(FDynamicSprite::Setup);
 
-	// Handle the actor based on its type.
-	if( Actor->DrawType==DT_Sprite || Actor->DrawType==DT_SpriteAnimOnce || (Frame->Viewport->Actor->ShowFlags & SHOW_ActorIcons)
-	|| (Actor->DrawType==DT_Particles && (Frame->Viewport->IsOrtho() || !Frame->Viewport->IsRealtime())) )
+	// Handle the actor based on its type. Branch selection in Rust:
+	// hp2_render::sprite::setup_path (0 reject, 1 sprite, 2 box).
+	INT Path = hp2_rs_render_sprite_setup_path(
+		Actor->DrawType==DT_Sprite || Actor->DrawType==DT_SpriteAnimOnce,
+		Actor->DrawType==DT_Mesh,
+		Actor->DrawType==DT_Particles,
+		(Frame->Viewport->Actor->ShowFlags & SHOW_ActorIcons) != 0,
+		Frame->Viewport->IsOrtho(),
+		Frame->Viewport->IsRealtime() );
+	if( Path==1 )
 	{
 		// Make sure we have something to draw.
 		FLOAT     DrawScale = Actor->DrawScale;
@@ -324,63 +332,28 @@ UBOOL FDynamicSprite::Setup( FSceneNode* Frame )
 		if( !Texture )
 			return 0;
 
-		// Setup projection plane.
-		MinZ = MaxZ = ((Actor->Location - Frame->Coords.Origin) | Frame->Coords.ZAxis) - Actor->SpriteProjForward;
-		if( MinZ<-2*Actor->SpriteProjForward && !Frame->Viewport->IsOrtho() )
+		// Setup projection plane (Rust: hp2_render::sprite::projection_plane).
+		ProjectionPlane Plane = { 0.f, 0 };
+		hp2_rs_render_sprite_projection_plane( &Actor->Location, &Frame->Coords.Origin, &Frame->Coords.ZAxis,
+			Actor->SpriteProjForward, Frame->Viewport->IsOrtho(), &Plane );
+		MinZ = MaxZ = Plane.min_z;
+		if( Plane.reject )
 			return 0;
 
 		// See if this is occluded.
 		if( !GRender->Project( Frame, Actor->Location, ScreenX, ScreenY, &Persp ) )
 			return 0;
 
-		// X extent.
-		FLOAT XSize = Persp * DrawScale * Texture->USize;//!!expensive
-		X1          = appRound(appCeil(ScreenX-XSize/2));
-		X2          = appRound(appCeil(ScreenX+XSize/2));
-		if( X1 > X2 )
-		{
-			Exchange( X1, X2 );
-		}
-		if( X1 < 0 )
-		{
-			X1 = 0;
-			if( X2 < 0 )
-				X2 = 0;
-		}
-		if( X2 > Frame->X )
-		{
-			X2 = Frame->X;
-			if( X1 > Frame->X )
-				X1 = Frame->X;
-		}
-		if( X2<=0 || X1>=Frame->X-1 )
+		// X extent (Rust: hp2_render::sprite::extent_x).
+		if( !hp2_rs_render_sprite_extent_x( ScreenX, Persp, DrawScale, Texture->USize, Frame->X, &X1, &X2 ) )
 			return 0;
 
-		// Y extent.
-		FLOAT YSize = Persp * DrawScale * Texture->VSize;
-		Y1          = appRound(appCeil(ScreenY-YSize/2));
-		Y2          = appRound(appCeil(ScreenY+YSize/2));
-		if( Y1 > Y2 )
-		{
-			Exchange( Y1, Y2 );
-		}
-		if( Y1 < 0 )
-		{
-			Y1 = 0;
-			if( Y2 < 0 )
-				Y2 = 0;
-		}
-		if( Y2 > Frame->Y )
-		{
-			Y2 = Frame->Y;
-			if( Y1 > Frame->Y )
-				Y1 = Frame->Y;
-		}
-		if( Y2<=0 || Y1>=Frame->Y || Y1>=Y2 )
+		// Y extent (Rust: hp2_render::sprite::extent_y).
+		if( !hp2_rs_render_sprite_extent_y( ScreenY, Persp, DrawScale, Texture->VSize, Frame->Y, &Y1, &Y2 ) )
 			return 0;
 		return 1;
 	}
-	else if( Actor->DrawType==DT_Mesh || Actor->DrawType==DT_Particles )
+	else if( Path==2 )
 	{
 		AParticleFX* ParticleFX = Cast<AParticleFX>(Actor);
 		if( ParticleFX && ParticleFX->bShellOnly ) 
@@ -394,27 +367,29 @@ UBOOL FDynamicSprite::Setup( FSceneNode* Frame )
 
 		// Get bounding box.
 		FCoords BoxCoords = Actor->GetRenderBoundingBox( 1 );
-		if( BoxCoords.XAxis.SizeSquared() == 0.f )
+		if( hp2_rs_render_sprite_box_axis_is_empty( &BoxCoords.XAxis ) )
 			return 0;
 
 		FScreenBounds ScreenBounds;
 		if( !GRender->BoundVisible( Frame, BoxCoords, NULL, ScreenBounds ) )
 			return 0;
 
-		X1 = appRound(ScreenBounds.MinX);
-		X2 = appRound(ScreenBounds.MaxX);
-		Y1 = appRound(ScreenBounds.MinY);
-		Y2 = appRound(ScreenBounds.MaxY);
-
-		MinZ = ScreenBounds.MinZ;
-		MaxZ = ScreenBounds.MaxZ;
-		if( Y1>=Y2 )
+		// Screen bounds to extents, and Y1>=Y2 reject (Rust: hp2_render::sprite::box_extent).
+		BoxExtent Box = { 0, 0, 0, 0, 0.f, 0.f, 0 };
+		hp2_rs_render_sprite_box_extent( ScreenBounds.MinX, ScreenBounds.MaxX, ScreenBounds.MinY, ScreenBounds.MaxY,
+			ScreenBounds.MinZ, ScreenBounds.MaxZ, &Box );
+		X1 = Box.x1;
+		X2 = Box.x2;
+		Y1 = Box.y1;
+		Y2 = Box.y2;
+		MinZ = Box.min_z;
+		MaxZ = Box.max_z;
+		if( Box.reject )
 			return 0;
 
 		STAT(GStat.SpanPix += (X2+1-X1)*(Y2+1-Y1));
 		return 1;
 	}
-	
 	else return 0;
 	unguardSlow;
 }
@@ -438,192 +413,44 @@ FDynamicChunk::FDynamicChunk( INT iNode, FDynamicSprite* InSprite, FRasterPoly* 
 	unguardSlow;
 }
 
+// FRasterPoly header and span layouts mirrored by hp2-abi::render_sprite_filter and hp2-abi::render_span.
+static_assert(sizeof(FRasterPoly) == 8, "FRasterPoly header must be 8 bytes (StartY, EndY)");
+static_assert(sizeof(FRasterSpan) == 8, "FRasterSpan must be two INTs");
+
 void FDynamicChunk::Filter( UViewport* Viewport, FSceneNode* Frame, INT iNode, INT Outside )
 {
 	guardSlow(FDynamicChunk::Filter);
 	FBspNode& Node = Frame->Level->Model->Nodes(iNode);
 
-	// Setup.
-	FRasterPoly *FrontRaster, *BackRaster;
-
-	// Find point-to-plane distances for all four vertices (side-of-plane classifications).
-	INT Front=0, Back=0;
-	FLOAT Dist[4];
-	INT i;
-	for( i=0; i<4; i++ )
+	// Split and filter-down decisions are made in Rust (hp2_rs_render_sprite_filter_*).
+	// The split path allocates its two rasters here, in the original order: after the
+	// split test, before the Y0/Y1 test.
+	SIZE_T Size = 0;
+	FRasterPoly* FrontBuf = NULL;
+	FRasterPoly* BackBuf  = NULL;
+	if( hp2_rs_render_sprite_filter_alloc_bytes( Sprite->ProxyVerts, &Node.Plane, Raster, &Size ) )
 	{
-		Dist[i] = Node.Plane.PlaneDot( Sprite->ProxyVerts[i].Point );
-		Front  += Dist[i] > +0.01;
-		Back   += Dist[i] < -0.01;
-	}
-	if( Front && Back )
-	{	
-		// Find intersection points.
-		FTransform	Intersect[4];
-		FTransform* I  = &Intersect	         [0];
-		FTransform* V1 = &Sprite->ProxyVerts [3]; 
-		FTransform* V2 = &Sprite->ProxyVerts [0];
-		FLOAT*      D1 = &Dist			     [3];
-		FLOAT*      D2 = &Dist			     [0];
-		INT			NumInt = 0;
-
-		for( i=0; i<4; i++ )
-		{
-			if( (*D1)*(*D2) < 0.0 )
-			{	
-				// At intersection point.
-				FLOAT Alpha = *D1 / (*D1 - *D2);
-				I->ScreenX  = V1->ScreenX + Alpha * (V2->ScreenX - V1->ScreenX);
-				I->ScreenY  = V1->ScreenY + Alpha * (V2->ScreenY - V1->ScreenY);
-
-				I++;
-				NumInt++;
-			}
-			V1 = V2++;
-			D1 = D2++;
-		}
-		if( NumInt < 2 )
-			goto NoSplit;
-
-		// Allocate front and back rasters.
-		const SIZE_T Size = sizeof(FRasterPoly) + static_cast<SIZE_T>(Raster->EndY - Raster->StartY) * sizeof(FRasterSpan);
-		FrontRaster	= (FRasterPoly *)New<BYTE>(GDynMem,appCheckedIntSize(Size));
-		BackRaster	= (FRasterPoly *)New<BYTE>(GDynMem,appCheckedIntSize(Size));
-
-		// Make sure that first intersection point is on top.
-		if( Intersect[0].ScreenY > Intersect[1].ScreenY )
-			Exchange( Intersect[0], Intersect[1] );
-		INT Y0 = Max( appFloor(Intersect[0].ScreenY), Raster->StartY );
-		INT Y1 = Min( appFloor(Intersect[1].ScreenY), Raster->EndY   );
-		if( Y0>Y1 )
-			goto NoSplit;
-
-		// Find TopRaster.
-		FRasterPoly* TopRaster = NULL;
-		if( Y0 > Raster->StartY )
-		{
-			if( Dist[0] >= 0 ) TopRaster = FrontRaster;
-			else               TopRaster = BackRaster;
-		}
-
-		// Find BottomRaster.
-		FRasterPoly* BottomRaster = NULL;
-		if( Y1 < Raster->EndY )
-		{
-			if( Dist[2] >= 0 ) BottomRaster = FrontRaster;
-			else               BottomRaster = BackRaster;
-		}
-
-		// Find LeftRaster and RightRaster.
-		FRasterPoly *LeftRaster, *RightRaster;
-		if( Intersect[1].ScreenX >= Intersect[0].ScreenX )
-		{
-			if (Dist[1] >= 0.0) {LeftRaster = BackRaster;  RightRaster = FrontRaster;}
-			else	   			{LeftRaster = FrontRaster; RightRaster = BackRaster; };
-		}
-		else // Intersect[1].ScreenX < Intersect[0].ScreenX
-		{
-			if (Dist[0] >= 0.0) {LeftRaster = FrontRaster; RightRaster = BackRaster; }
-			else                {LeftRaster = BackRaster;  RightRaster = FrontRaster;};
-		}
-
-		// Set left and right raster defaults (may be overwritten by TopRaster or BottomRaster).
-		checkSlow(Y0>=0);
-		checkSlow(Y1<=Frame->Y);
-		LeftRaster->StartY = Y0; RightRaster->StartY = Y0;
-		LeftRaster->EndY   = Y1; RightRaster->EndY   = Y1;
-
-		// Copy TopRaster section.
-		if( TopRaster )
-		{
-			TopRaster->StartY = Raster->StartY;
-
-			FRasterSpan* SourceLine	= &Raster->Lines    [0];
-			FRasterSpan* Line		= &TopRaster->Lines [0];
-
-			for( i=TopRaster->StartY; i<Y0; i++ )
-				*Line++ = *SourceLine++;
-		}
-
-		// Copy BottomRaster section.
-		if( BottomRaster )
-		{
-			BottomRaster->EndY = Raster->EndY;
-
-			FRasterSpan* SourceLine	= &Raster->Lines       [Y1 - Raster->StartY];
-			FRasterSpan* Line       = &BottomRaster->Lines [Y1 - BottomRaster->StartY];
-
-			for( i=Y1; i<BottomRaster->EndY; i++ )
-				*Line++ = *SourceLine++;
-		}
-
-		// Split middle raster section.
-		if( Y1 != Y0 )
-		{
-			FLOAT	FloatYAdjust	= (FLOAT)Y0 + 1.0f - Intersect[0].ScreenY;
-			FLOAT	FloatFixDX 		= 65536.0f * (Intersect[1].ScreenX - Intersect[0].ScreenX) / (Intersect[1].ScreenY - Intersect[0].ScreenY);
-			INT		FixDX			= appRound(FloatFixDX);
-			INT		FixX			= appRound(65536.0f * Intersect[0].ScreenX + FloatFixDX * FloatYAdjust);
-
-			if( Raster->StartY > Y0 ) 
-			{
-				FixX   += (Raster->StartY-Y0) * FixDX;
-				Y0		= Raster->StartY;
-			}
-			if( Raster->EndY < Y1 )
-			{
-				Y1      = Raster->EndY;
-			}
-			
-			FRasterSpan	*SourceLine = &Raster->Lines      [Y0 - Raster->StartY];
-			FRasterSpan	*LeftLine   = &LeftRaster->Lines  [Y0 - LeftRaster->StartY];
-			FRasterSpan	*RightLine  = &RightRaster->Lines [Y0 - RightRaster->StartY];
-
-			while( Y0++ < Y1 )
-			{
-				*LeftLine  = *SourceLine;
-				*RightLine = *SourceLine;
-
-				INT X = Unfix(FixX);
-				if (X < LeftLine->X[1])    LeftLine->X[1] = X;
-				if (X > RightLine->X[0]) RightLine->X[0] = X;
-
-				FixX       += FixDX;
-				SourceLine ++;
-				LeftLine   ++;
-				RightLine  ++;
-			}
-		}
-
-		// Discard any rasters that are completely empty.
-		if( BackRaster->EndY <= BackRaster->StartY )
-			BackRaster = NULL;
-		if( FrontRaster->EndY <= FrontRaster->StartY )
-			FrontRaster = NULL;
-	}
-	else
-	{
-		// Don't have to split the rasterization.
-		NoSplit:
-		FrontRaster = BackRaster = Raster;
+		FrontBuf = (FRasterPoly *)New<BYTE>(GDynMem,appCheckedIntSize(Size));
+		BackBuf  = (FRasterPoly *)New<BYTE>(GDynMem,appCheckedIntSize(Size));
 	}
 
-	// Filter it down.
-	INT CSG = Node.IsCsg();
-	if( Front && FrontRaster )
-	{
-		if( Node.iFront != INDEX_NONE )
-			new(GDynMem)FDynamicChunk( Node.iFront, Sprite, FrontRaster );
-		else if( Outside || CSG )
-			new(GDynMem)FDynamicFinalChunk( iNode, Sprite, FrontRaster, 0 );
-	}
-	if( Back && BackRaster )
-	{
-		if( Node.iBack != INDEX_NONE  )
-			new(GDynMem)FDynamicChunk( Node.iBack, Sprite, BackRaster );
-		else if( Outside && !CSG )
-			new(GDynMem)FDynamicFinalChunk( iNode, Sprite, BackRaster, 1 );
-	}
+	void* FrontRasterPtr = NULL;
+	void* BackRasterPtr  = NULL;
+	BYTE  FrontAction    = 0;
+	BYTE  BackAction     = 0;
+	hp2_rs_render_sprite_filter_chunk( Sprite->ProxyVerts, &Node.Plane, Raster, FrontBuf, BackBuf, Node.iFront, Node.iBack, Outside != 0, Node.IsCsg() != 0, &FrontRasterPtr, &BackRasterPtr, &FrontAction, &BackAction );
+	FRasterPoly* FrontRaster = (FRasterPoly*)FrontRasterPtr;
+	FRasterPoly* BackRaster  = (FRasterPoly*)BackRasterPtr;
+
+	// Filter it down. Action codes: 1 FDynamicChunk, 2 FDynamicFinalChunk.
+	if( FrontAction == 1 )
+		new(GDynMem)FDynamicChunk( Node.iFront, Sprite, FrontRaster );
+	else if( FrontAction == 2 )
+		new(GDynMem)FDynamicFinalChunk( iNode, Sprite, FrontRaster, 0 );
+	if( BackAction == 1 )
+		new(GDynMem)FDynamicChunk( Node.iBack, Sprite, BackRaster );
+	else if( BackAction == 2 )
+		new(GDynMem)FDynamicFinalChunk( iNode, Sprite, BackRaster, 1 );
 	unguardSlow;
 }
 
@@ -743,9 +570,10 @@ void FDynamicLight::Filter( UViewport* Viewport, FSceneNode* Frame, INT iNode, I
 
 	// Filter down.
 	FBspNode& Node = Viewport->Actor->GetLevel()->Model->Nodes(iNode);
-	FLOAT Dist   = Node.Plane.PlaneDot( Actor->Location );
-	FLOAT Radius = Actor->WorldLightRadius();
-	if( Dist > -Radius )
+	// Dist against -Radius, -VolRadius, Radius and VolRadius, decided in Rust (hp2_rs_render_sprite_light_flags).
+	enum { ENTER_FRONT=1, VOLUMETRIC_FRONT=2, ENTER_BACK=4, VOLUMETRIC_BACK=8 };
+	BYTE Flags = hp2_rs_render_sprite_light_flags( &Node.Plane, &Actor->Location, Actor->WorldLightRadius(), Actor->WorldVolumetricRadius(), IsVol != 0 );
+	if( Flags & ENTER_FRONT )
 	{
 		// Filter down front.
 		UBOOL ThisHitLeaf=HitLeaf;
@@ -756,15 +584,15 @@ void FDynamicLight::Filter( UViewport* Viewport, FSceneNode* Frame, INT iNode, I
 			{
 				if( !GRender->LeafLights[iLeaf] )
 					GRender->DynLightLeaves[GRender->NumDynLightLeaves++] = iLeaf;
-				GRender->LeafLights[iLeaf] = new( GMem )FVolActorLink( Frame->Coords, Actor, GRender->LeafLights[iLeaf], IsVol && Dist>-Actor->WorldVolumetricRadius() );
+				GRender->LeafLights[iLeaf] = new( GMem )FVolActorLink( Frame->Coords, Actor, GRender->LeafLights[iLeaf], (Flags & VOLUMETRIC_FRONT) != 0 );
 				ThisHitLeaf=1;
 			}
 		}
 		if( Node.iFront!=INDEX_NONE )
-			new(GDynMem)FDynamicLight( Node.iFront, Actor, IsVol && Dist>-Actor->WorldVolumetricRadius(), ThisHitLeaf );
+			new(GDynMem)FDynamicLight( Node.iFront, Actor, (Flags & VOLUMETRIC_FRONT) != 0, ThisHitLeaf );
 
 		// Handle planars.
-		if( Dist < Radius )
+		if( Flags & ENTER_BACK )
 		{
 			for( INT iPlane=iNode; iPlane!=INDEX_NONE; iPlane = Viewport->Actor->GetLevel()->Model->Nodes(iPlane).iPlane )
 			{
@@ -792,7 +620,7 @@ void FDynamicLight::Filter( UViewport* Viewport, FSceneNode* Frame, INT iNode, I
 			}
 		}
 	}
-	if( Dist < Radius )
+	if( Flags & ENTER_BACK )
 	{
 		UBOOL ThisHitLeaf=HitLeaf;
 		if( !HitLeaf )
@@ -802,12 +630,12 @@ void FDynamicLight::Filter( UViewport* Viewport, FSceneNode* Frame, INT iNode, I
 			{
 				if( !GRender->LeafLights[iLeaf] )
 					GRender->DynLightLeaves[GRender->NumDynLightLeaves++] = iLeaf;
-				GRender->LeafLights[iLeaf] = new( GMem )FVolActorLink( Frame->Coords, Actor, GRender->LeafLights[iLeaf], IsVol && Dist<Actor->WorldVolumetricRadius() );
+				GRender->LeafLights[iLeaf] = new( GMem )FVolActorLink( Frame->Coords, Actor, GRender->LeafLights[iLeaf], (Flags & VOLUMETRIC_BACK) != 0 );
 				ThisHitLeaf=1;
 			}
 		}
 		if( Node.iBack!=INDEX_NONE )
-			new(GDynMem)FDynamicLight( Node.iBack, Actor, IsVol && Dist<Actor->WorldVolumetricRadius(), ThisHitLeaf );
+			new(GDynMem)FDynamicLight( Node.iBack, Actor, (Flags & VOLUMETRIC_BACK) != 0, ThisHitLeaf );
 	}
 	unguardSlow;
 }
@@ -824,8 +652,12 @@ UBOOL FDynamicSysParent::Setup( FSceneNode* Frame )
 {
 	guardSlow(FDynamicSysParent::Setup);
 
-	MinZ = MaxZ = ((Actor->Location - Frame->Coords.Origin) | Frame->Coords.ZAxis) - Actor->SpriteProjForward;
-	if( MinZ<-2*Actor->SpriteProjForward && !Frame->Viewport->IsOrtho() )
+	// Projection plane (Rust: hp2_render::sprite::projection_plane).
+	ProjectionPlane Plane = { 0.f, 0 };
+	hp2_rs_render_sprite_projection_plane( &Actor->Location, &Frame->Coords.Origin, &Frame->Coords.ZAxis,
+		Actor->SpriteProjForward, Frame->Viewport->IsOrtho(), &Plane );
+	MinZ = MaxZ = Plane.min_z;
+	if( Plane.reject )
 		return 0;
 
 	FScreenBounds ScreenBounds;
@@ -833,11 +665,16 @@ UBOOL FDynamicSysParent::Setup( FSceneNode* Frame )
 	if( !GRender->BoundVisible( Frame, Bounds.GetCoords(), NULL, ScreenBounds ) )
 		return 0;
 
-	X1 = appRound(ScreenBounds.MinX);
-	X2 = appRound(ScreenBounds.MaxX);
-	Y1 = appRound(ScreenBounds.MinY);
-	Y2 = appRound(ScreenBounds.MaxY);
-	if( Y1>=Y2 )
+	// Screen bounds to extents, and Y1>=Y2 reject (Rust: hp2_render::sprite::box_extent).
+	// MinZ/MaxZ pass through unchanged; only x1..y2 and reject are taken.
+	BoxExtent Box = { 0, 0, 0, 0, 0.f, 0.f, 0 };
+	hp2_rs_render_sprite_box_extent( ScreenBounds.MinX, ScreenBounds.MaxX, ScreenBounds.MinY, ScreenBounds.MaxY,
+		MinZ, MaxZ, &Box );
+	X1 = Box.x1;
+	X2 = Box.x2;
+	Y1 = Box.y1;
+	Y2 = Box.y2;
+	if( Box.reject )
 		return 0;
 
 	return 1;

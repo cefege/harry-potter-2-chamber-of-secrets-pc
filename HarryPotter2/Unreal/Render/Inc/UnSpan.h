@@ -110,6 +110,18 @@ public:
 	void AssertGoodEnough( TCHAR* Name );
 };
 
+// Layout must match hp2_abi::render_span (Rust); crates/hp2-abi/src/render_span.rs.
+static_assert( sizeof(FSpan) == 16, "FSpan layout" );
+static_assert( sizeof(FRasterSpan) == 8, "FRasterSpan layout" );
+static_assert( sizeof(FSpanBuffer) == 56, "FSpanBuffer layout" );
+static_assert( offsetof(FSpanBuffer, StartY) == 0, "FSpanBuffer.StartY offset" );
+static_assert( offsetof(FSpanBuffer, EndY) == 4, "FSpanBuffer.EndY offset" );
+static_assert( offsetof(FSpanBuffer, ValidLines) == 8, "FSpanBuffer.ValidLines offset" );
+static_assert( offsetof(FSpanBuffer, Index) == 16, "FSpanBuffer.Index offset" );
+static_assert( offsetof(FSpanBuffer, Mem) == 24, "FSpanBuffer.Mem offset" );
+static_assert( offsetof(FSpanBuffer, Mark) == 32, "FSpanBuffer.Mark offset" );
+static_assert( sizeof(FMemMark) == 24, "FMemMark layout" );
+
 /*------------------------------------------------------------------------------------
 	The End.
 ------------------------------------------------------------------------------------*/

@@ -504,6 +504,36 @@ struct ENGINE_API HCoords : public HHitProxy
 	}
 };
 
+// Layout pins for the Rust mirrors in crates/hp2-abi/src/render_scene.rs.
+// FSceneNode member offsets are pinned in UnRender.cpp (non-standard-layout).
+static_assert(sizeof(FSceneNode) == 408, "FSceneNode must match hp2-abi render_scene::FSceneNode");
+static_assert(sizeof(FSurfaceInfo) == 56, "FSurfaceInfo must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,PolyFlags) == 0, "FSurfaceInfo::PolyFlags must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,FlatColor) == 4, "FSurfaceInfo::FlatColor must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,Level) == 8, "FSurfaceInfo::Level must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,Texture) == 16, "FSurfaceInfo::Texture must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,LightMap) == 24, "FSurfaceInfo::LightMap must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,MacroTexture) == 32, "FSurfaceInfo::MacroTexture must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,DetailTexture) == 40, "FSurfaceInfo::DetailTexture must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(offsetof(FSurfaceInfo,FogMap) == 48, "FSurfaceInfo::FogMap must match hp2-abi render_scene::FSurfaceInfo");
+static_assert(sizeof(FSavedPoly) == 32, "FSavedPoly must match hp2-abi render_scene::FSavedPoly");
+static_assert(offsetof(FSavedPoly,Next) == 0, "FSavedPoly::Next must match hp2-abi render_scene::FSavedPoly");
+static_assert(offsetof(FSavedPoly,iNode) == 8, "FSavedPoly::iNode must match hp2-abi render_scene::FSavedPoly");
+static_assert(offsetof(FSavedPoly,User) == 16, "FSavedPoly::User must match hp2-abi render_scene::FSavedPoly");
+static_assert(offsetof(FSavedPoly,NumPts) == 24, "FSavedPoly::NumPts must match hp2-abi render_scene::FSavedPoly");
+static_assert(offsetof(FSavedPoly,Pts) == 32, "FSavedPoly::Pts must match hp2-abi render_scene::FSavedPoly");
+static_assert(sizeof(FSurfaceFacet) == 112, "FSurfaceFacet must match hp2-abi render_scene::FSurfaceFacet");
+static_assert(offsetof(FSurfaceFacet,MapCoords) == 0, "FSurfaceFacet::MapCoords must match hp2-abi render_scene::FSurfaceFacet");
+static_assert(offsetof(FSurfaceFacet,MapUncoords) == 48, "FSurfaceFacet::MapUncoords must match hp2-abi render_scene::FSurfaceFacet");
+static_assert(offsetof(FSurfaceFacet,Span) == 96, "FSurfaceFacet::Span must match hp2-abi render_scene::FSurfaceFacet");
+static_assert(offsetof(FSurfaceFacet,Polys) == 104, "FSurfaceFacet::Polys must match hp2-abi render_scene::FSurfaceFacet");
+static_assert(sizeof(FScreenBounds) == 24, "FScreenBounds must match hp2-abi render_scene::FScreenBounds");
+static_assert(offsetof(FScreenBounds,MinX) == 0, "FScreenBounds::MinX must match hp2-abi render_scene::FScreenBounds");
+static_assert(offsetof(FScreenBounds,MinY) == 4, "FScreenBounds::MinY must match hp2-abi render_scene::FScreenBounds");
+static_assert(offsetof(FScreenBounds,MaxX) == 8, "FScreenBounds::MaxX must match hp2-abi render_scene::FScreenBounds");
+static_assert(offsetof(FScreenBounds,MaxY) == 12, "FScreenBounds::MaxY must match hp2-abi render_scene::FScreenBounds");
+static_assert(offsetof(FScreenBounds,MinZ) == 16, "FScreenBounds::MinZ must match hp2-abi render_scene::FScreenBounds");
+static_assert(offsetof(FScreenBounds,MaxZ) == 20, "FScreenBounds::MaxZ must match hp2-abi render_scene::FScreenBounds");
 #endif
 
 /*------------------------------------------------------------------------------------

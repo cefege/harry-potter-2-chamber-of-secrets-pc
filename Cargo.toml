@@ -20,6 +20,7 @@ hp2-launcher = { path = "crates/hp2-launcher" }
 hp2-audio = { path = "crates/hp2-audio" }
 hp2-platform = { path = "crates/hp2-platform" }
 hp2-abi = { path = "crates/hp2-abi" }
+hp2-render = { path = "crates/hp2-render" }
 hp2-wgpu = { path = "crates/hp2-wgpu" }
 hp2-fire = { path = "crates/hp2-fire" }
 wgpu = "=30.0.1"

@@ -7,6 +7,7 @@
 =============================================================================*/
 
 #include "Render.h"
+#include "hp2_rs.h"
 #include "UnMesh.h"
 
 /*------------------------------------------------------------------------------
@@ -553,7 +554,7 @@ void URender::DrawMesh
 	}
 
 	// Coloring.
-	FLOAT Unlit  = Clamp( Owner->ScaleGlow*0.5f + Owner->AmbientGlow/256.f, 0.f, 1.f );
+	FLOAT Unlit  = hp2_rs_render_mesh_unlit(Owner->ScaleGlow, Owner->AmbientGlow);
 	GUnlitColor  = FVector( Unlit, Unlit, Unlit );
 	if( GIsEditor && (ExtraFlags & PF_Selected) )
 		GUnlitColor = GUnlitColor*0.4f + FVector(0.0f,0.6f,0.0f);
@@ -582,8 +583,7 @@ void URender::DrawMesh
 			DWORD PolyFlags = ExtraFlags | Tri->PolyFlags;
 
 			// Compute triangle normal.
-			TriNormals[i] = (V1.Point-V2.Point) ^ (V3.Point-V1.Point);
-			TriNormals[i] *= DivSqrtApprox(TriNormals[i].SizeSquared()+0.001f);
+			hp2_rs_render_mesh_tri_normal(&V1.Point.X, &V2.Point.X, &V3.Point.X, &TriNormals[i].X);
 
 			// See if potentially visible.
 			if( !(V1.Flags & V2.Flags & V3.Flags) )
@@ -599,7 +599,7 @@ void URender::DrawMesh
 					TriTop->Key
 					=	NotWeaponHeuristic
 					?	appRound( V1.Point.Z + V2.Point.Z + V3.Point.Z )
-					:	appRound( FDistSquared(V1.Point,Hack)*FDistSquared(V2.Point,Hack)*FDistSquared(V3.Point,Hack) );
+					:	hp2_rs_render_mesh_depth_key_distance(&V1.Point.X, &V2.Point.X, &V3.Point.X, &Hack.X);
 
 					// Add to list.
 					VisibleTriangles++;
@@ -618,7 +618,7 @@ void URender::DrawMesh
 
 		// Fatness.
 		UBOOL Fatten   = Owner->Fatness!=128;
-		FLOAT Fatness  = (Owner->Fatness/16.0f)-8.0f;
+		FLOAT Fatness  = hp2_rs_render_mesh_fatness_offset(Owner->Fatness);
 		//FLOAT Detail   = Owner->DrawScale * GlobalMeshLOD / (0.5f * Frame->RProj.Z * Max(1.0f,Owner->Location.TransformPointBy(Coords).Z));
 
 		// Sort by depth.
