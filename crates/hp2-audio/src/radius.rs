@@ -43,9 +43,9 @@ pub fn transition(used_radius: f32, radius: f32, elapsed: f32) -> RadiusStep {
 mod tests {
     use super::*;
 
-    // Oracle: `math_oracle.cpp` in `/tmp/hp2-m2/audio/`, which includes
-    // `orig_radius.inc` (ALAudioSubsystem.cpp:1690-1702 @06bfdd3) verbatim.
-    // Bit patterns from `math_oracle.out`.
+    // Oracle: `orig_radius` (ALAudioSubsystem.cpp:1690-1702 @06bfdd3) built with the TU's
+    // real flags (`-O3`, default `-ffp-contract=on`). All pinned cases are exactly
+    // representable, so fused and unfused `Lerp` produce the same bits.
 
     #[test]
     fn transition_lerps_inside_one_second() {

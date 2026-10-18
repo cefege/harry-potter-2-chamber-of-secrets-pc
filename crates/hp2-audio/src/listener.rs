@@ -106,8 +106,8 @@ pub fn delta_time(current_seconds: f32, last_seconds: f32) -> f32 {
 mod tests {
     use super::*;
 
-    // Inputs match the oracle in `/tmp/hp2-m2/audio/orient_oracle.cpp`
-    // (`n.Coords.XAxis/YAxis/ZAxis`); the expected bits come from its output.
+    // Inputs are the `SceneNode->Coords` axes of the fixed-case oracle; expected bits
+    // come from a build with the TU's real flags (`-O3`, default `-ffp-contract=on`).
     const X: Vec3 = [0.6, 0.8, 0.0];
     const Y: Vec3 = [-0.2, 0.5, 0.84];
     const Z: Vec3 = [0.1, -0.7, 0.7];
@@ -116,46 +116,44 @@ mod tests {
         [v[0].to_bits(), v[1].to_bits(), v[2].to_bits()]
     }
 
-    /// Oracle: `orient_oracle` modes 0 and 2 (`EAX=0`, `REV=0`), built with
-    /// `-ffp-contract=off`. Release `-O3` clang fuses multiply-adds here on
-    /// arm64 and lands 1 ULP away in `right` (`up` and `front` match), so these
-    /// bits are the source-expression values, not the fused Release bits.
+    /// Oracle: `fixed_orient 0` (`EAX=0`, `MMSYS=0`, `REV=0`), built with the TU's
+    /// real flags (`-O3`, default `-ffp-contract=on`).
     #[test]
     fn orientation_matches_original_non_ds3d() {
         let o = orientation(X, Y, Z, false, false);
         assert_eq!(bits(o.up), [0x3e4d4087, 0xbf004854, 0x3f5783c0]);
-        assert_eq!(bits(o.right), [0x3f19999a, 0xbf4ccccd, 0x00000000]);
+        assert_eq!(bits(o.right), [0x3f199999, 0xbf4ccccc, 0x00000000]);
         assert_eq!(bits(o.front), [0xbf4a0373, 0xbf178297, 0x3e285835]);
     }
 
-    /// Oracle: `orient_oracle` mode 1 (`EAX=1`, `MMSYS=0`, `REV=0`).
+    /// Oracle: `fixed_orient 1` (`EAX=1`, `MMSYS=0`, `REV=0`).
     #[test]
     fn orientation_matches_original_ds3d() {
         let o = orientation(X, Y, Z, true, false);
         assert_eq!(bits(o.up), [0x3dcdd4ed, 0xbf341a4f, 0x3f341a4f]);
-        assert_eq!(bits(o.right), [0x3f19999a, 0x3f4ccccd, 0x80000000]);
+        assert_eq!(bits(o.right), [0x3f199999, 0x3f4ccccc, 0x80000000]);
         assert_eq!(bits(o.front), [0x3f26a712, 0xbef9fa9c, 0xbf14cc07]);
     }
 
-    /// Oracle: `orient_oracle` mode 4 (`EAX=0`, `MMSYS=0`, `REV=1`).
+    /// Oracle: `fixed_orient 4` (`EAX=0`, `MMSYS=0`, `REV=1`).
     #[test]
     fn orientation_matches_original_reverse_stereo() {
         let o = orientation(X, Y, Z, false, true);
         assert_eq!(bits(o.up), [0x3e4d4087, 0xbf004854, 0x3f5783c0]);
-        assert_eq!(bits(o.right), [0xbf19999a, 0x3f4ccccd, 0x80000000]);
+        assert_eq!(bits(o.right), [0xbf199999, 0x3f4ccccc, 0x80000000]);
         assert_eq!(bits(o.front), [0x3f4a0373, 0x3f178297, 0xbe285835]);
     }
 
-    /// Oracle: `orient_oracle` mode 5 (`EAX=1`, `MMSYS=0`, `REV=1`).
+    /// Oracle: `fixed_orient 5` (`EAX=1`, `MMSYS=0`, `REV=1`).
     #[test]
     fn orientation_matches_original_ds3d_reverse_stereo() {
         let o = orientation(X, Y, Z, true, true);
         assert_eq!(bits(o.up), [0x3dcdd4ed, 0xbf341a4f, 0x3f341a4f]);
-        assert_eq!(bits(o.right), [0xbf19999a, 0xbf4ccccd, 0x00000000]);
+        assert_eq!(bits(o.right), [0xbf199999, 0xbf4ccccc, 0x00000000]);
         assert_eq!(bits(o.front), [0xbf26a712, 0x3ef9fa9c, 0x3f14cc07]);
     }
 
-    /// Oracle: `math_oracle` `lisvel_small`: View (1,2,3), Last 0, DeltaTime 0.5.
+    /// Oracle: `fixed_lisvel` row 0: View (1,2,3), Last 0, DeltaTime 0.5.
     #[test]
     fn listener_velocity_matches_original_small() {
         let v = listener_velocity([1.0, 2.0, 3.0], [0.0; 3], 0.5);
@@ -163,7 +161,7 @@ mod tests {
         assert!(listener_velocity_ok(v));
     }
 
-    /// Oracle: `math_oracle` `lisvel_big`: View (100,200,300), Last 0, DeltaTime 0.1.
+    /// Oracle: `fixed_lisvel` row 1: View (100,200,300), Last 0, DeltaTime 0.1.
     #[test]
     fn listener_velocity_matches_original_big() {
         let v = listener_velocity([100.0, 200.0, 300.0], [0.0; 3], 0.1);
@@ -171,7 +169,7 @@ mod tests {
         assert!(listener_velocity_ok(v));
     }
 
-    /// Oracle: `math_oracle` `srcvel` rows: `Velocity *= DISTANCE_FACTOR`, then `Size() < 300`.
+    /// Oracle: `fixed_srcvel` rows: `Velocity *= DISTANCE_FACTOR`, then `Size() < 300`.
     #[test]
     fn source_velocity_matches_original() {
         let cases: [(Vec3, [u32; 3], bool); 4] = [

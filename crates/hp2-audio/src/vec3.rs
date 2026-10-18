@@ -48,20 +48,28 @@ pub fn div(v: Vec3, s: f32) -> Vec3 {
     [v[0] * r, v[1] * r, v[2] * r]
 }
 
-/// `A ^ B` (`FVector::operator^`, `UnMath.h:677-683`).
+/// `A ^ B` (`FVector::operator^`, `UnMath.h:677-683`). Each `Y*Z - Z*Y` term is
+/// fused by the shipped object: the subtracted product rounds first, the leading one stays fused.
 #[inline]
 pub fn cross(a: Vec3, b: Vec3) -> Vec3 {
     [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
+        a[1].mul_add(b[2], -(a[2] * b[1])),
+        a[2].mul_add(b[0], -(a[0] * b[2])),
+        a[0].mul_add(b[1], -(a[1] * b[0])),
     ]
+}
+
+/// `X*X+Y*Y+Z*Z` as clang `-O3` arm64 contracts it in `UnMath.h:768` and `:802`:
+/// `Y*Y` rounds first, then `X*X` and `Z*Z` are fused in turn (oracle-verified).
+#[inline]
+fn square_sum(v: Vec3) -> f32 {
+    v[2].mul_add(v[2], v[0].mul_add(v[0], v[1] * v[1]))
 }
 
 /// `FVector::Size()` (`UnMath.h:766-769`).
 #[inline]
 pub fn size(v: Vec3) -> f32 {
-    sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+    sqrt(square_sum(v))
 }
 
 /// `FVector::Normalize()` (`UnMath.h:800-812`). Returns `false` and leaves
@@ -71,9 +79,9 @@ pub fn size(v: Vec3) -> f32 {
 /// the result is rounded to `FLOAT` before the component multiplies.
 #[inline]
 pub fn normalize(v: &mut Vec3) -> bool {
-    let square_sum = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-    if square_sum >= SMALL_NUMBER {
-        let scale = (1.0f32 as f64 / (square_sum as f64).sqrt()) as f32;
+    let sum = square_sum(*v);
+    if sum >= SMALL_NUMBER {
+        let scale = (1.0f32 as f64 / (sum as f64).sqrt()) as f32;
         v[0] *= scale;
         v[1] *= scale;
         v[2] *= scale;
@@ -104,10 +112,11 @@ pub fn clamp(x: f32, min: f32, max: f32) -> f32 {
     }
 }
 
-/// UE1 `Lerp` (`UnTemplate.h:143-146`): `A + Alpha * (B-A)`.
+/// UE1 `Lerp` (`UnTemplate.h:143-146`): `A + Alpha * (B-A)`, fused as one `fmadd`
+/// with `B-A` rounded first (oracle-verified).
 #[inline]
 pub fn lerp(a: f32, b: f32, alpha: f32) -> f32 {
-    a + alpha * (b - a)
+    alpha.mul_add(b - a, a)
 }
 
 #[cfg(test)]
@@ -136,10 +145,9 @@ mod tests {
         assert_eq!(v[0].to_bits(), (3.0f32 * (1.0f32 / 3.0f32)).to_bits());
     }
 
-    // Oracle: `/tmp/hp2-m2/audio/vec3/vec3_oracle.cpp` (original `FVector`
-    // operator/, Size, Normalize, operator^, `FDistSquared`, `Clamp`, `Lerp`
-    // included verbatim from 06bfdd3), output `vec3_oracle.out`, built with
-    // `clang++ -std=c++17 -w -O0 -ffp-contract=off`.
+    // Oracle: original `FVector` operator/, Size, Normalize, operator^, `FDistSquared`,
+    // `Clamp`, `Lerp` from 06bfdd3, built with the TU's real flags (`-O3`, default
+    // `-ffp-contract=on`). Every value below was checked against that build.
     const INPUTS: [Vec3; 7] = [
         [3.0, 4.0, 0.0],
         [1.0, 2.0, 2.0],
@@ -248,5 +256,29 @@ mod tests {
         assert_eq!(clamp(f32::NAN, 0.0, 1.0).to_bits(), 0x3f800000);
         assert_eq!(lerp(0.0, 10.0, 0.3).to_bits(), 0x40400000);
         assert_eq!(lerp(1.5, -2.25, 0.7).to_bits(), 0xbf900000);
+    }
+
+    // Inputs where the fused form differs in the last bit from the plain expression,
+    // so these pins fail if the `mul_add` pairing regresses (oracle-verified).
+    #[test]
+    fn fused_forms_match_cpp_bits_where_plain_differs() {
+        assert_eq!(
+            size([40.252743, -12.33354, -81.13359]).to_bits(),
+            0x42b6cfe0
+        );
+        let mut n = [40.252743f32, -12.33354, -81.13359];
+        assert!(normalize(&mut n));
+        assert_eq!(bits(n), [0x3ee17893, 0xbe0a2b74, 0xbf633aea]);
+        let a = [-6.236629e1f32, 9.799902e1, 9.661142e1];
+        let b = [-6.767143e1f32, 6.522202e1, -4.40946];
+        assert_eq!(bits(cross(a, b)), [0xc5d26a85, 0xc5d4e6ae, 0x45204142]);
+        assert_eq!(
+            lerp(5.8773685e1, -2.1701225e1, 6.303587e-1).to_bits(),
+            0x4100badf
+        );
+        assert_eq!(
+            lerp(3.1169804e1, 2.7109997, 7.0859337e-1).to_bits(),
+            0x413010bb
+        );
     }
 }
