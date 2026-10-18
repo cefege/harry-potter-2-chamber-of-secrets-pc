@@ -1653,7 +1653,8 @@ impl RenderLoop {
     /// the engine keeps calling `SetSceneNode`/`Draw*` after a
     /// failed/`Occluded` `Lock` (confirmed by reading this project's
     /// own real `wgpu-smoke.log`, `WgpuDrv: Lock did not begin a
-    /// frame` immediately followed by a real `SetSceneNode` call on
+    /// frame` (the wording before the outcome-code rewrite)
+    /// immediately followed by a real `SetSceneNode` call on
     /// the very next line), so silently dropping here is the correct,
     /// already-established behavior, not a gap. Also drops cleanly
     /// when no `set_scene_node` call has happened yet this frame

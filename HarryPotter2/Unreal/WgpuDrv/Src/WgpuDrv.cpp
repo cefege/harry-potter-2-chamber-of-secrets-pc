@@ -574,7 +574,7 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 		// exists and fits here (UnNames.h's REGISTER_NAME list has no
 		// graphics-specific one; a fabricated NAME_DevGraphics was
 		// caught here before this ever compiled).
-		debugf( NAME_Dev, TEXT("WgpuDrv: Lock did not begin a frame (outcome code %i)"), Outcome );
+		debugf( NAME_Dev, TEXT("WgpuDrv: Lock outcome code %i: no window frame presented this tick"), Outcome );
 	unguard;
 }
 
