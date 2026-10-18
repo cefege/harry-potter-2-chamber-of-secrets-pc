@@ -3216,6 +3216,46 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
             );
             return false;
         };
+        // Reject every format this port does not yet actually upload
+        // BEFORE constructing a Rust slice over data/data_len below --
+        // caught on review, not self-discovered: data_len is always
+        // caller-computed from width*height using an assumed bytes-
+        // per-pixel that this function has no way to verify, and is
+        // only actually correct for the two formats the match below
+        // still handles (P8: 1 byte/pixel, Rgba8: 4). For every other
+        // real format this engine supports -- RGB8 (3 bytes/pixel),
+        // RGB16 (2), DXT1 (block-compressed, smaller still -- the
+        // real engine's own per-format byte size, SetTexture.cpp's
+        // own HP2TextureBytes, read directly before concluding this)
+        // -- is smaller than width*height*4, so a caller computing
+        // data_len that way (every real WgpuDrv.cpp override does)
+        // would hand this function a data_len larger than the
+        // texture's real allocation. Constructing a slice of that
+        // length via bytes_from_raw's own from_raw_parts is undefined
+        // behavior the instant it happens, regardless of whether the
+        // rejected format's own data is ever actually read afterward.
+        // Checking the format first instead avoids ever constructing
+        // that slice for an unsupported format at all -- fixed once
+        // here for every current and future caller, rather than
+        // requiring every call site to somehow get its own data_len
+        // computation exactly right for formats this function cannot
+        // even use yet. (RGBA7 -- the one non-P8/Rgba8 format this
+        // session's own wgpu-smoke.log already shows hundreds of real
+        // "upload not yet ported" rejections for -- happens to share
+        // HP2TextureBytes' own default-4-bytes/pixel case with Rgba8,
+        // so those specific past runs were not actually reading out
+        // of bounds; RGB8/RGB16/DXT1 would have been, the moment any
+        // real asset using one of them was loaded.)
+        if !matches!(
+            format,
+            hp2_wgpu::texture::TextureFormat::P8 | hp2_wgpu::texture::TextureFormat::Rgba8
+        ) {
+            log::warn!(
+                "hp2_rs_wgpu_upload_texture: {} upload not yet ported, skipping",
+                hp2_wgpu::texture::texture_format_name(format)
+            );
+            return false;
+        }
         let Some(data) = (unsafe { bytes_from_raw(data, data_len) }) else {
             log::warn!("hp2_rs_wgpu_upload_texture: null data pointer with data_len != 0");
             return false;
@@ -3254,13 +3294,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
                 }
                 std::borrow::Cow::Borrowed(data)
             }
-            other => {
-                log::warn!(
-                    "hp2_rs_wgpu_upload_texture: {} upload not yet ported, skipping",
-                    hp2_wgpu::texture::texture_format_name(other)
-                );
-                return false;
-            }
+            _ => unreachable!("rejected above: format is P8 or Rgba8 by this point"),
         };
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
         handle
@@ -3639,4 +3673,150 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_complex_surface(
             vertices,
         );
     })
+}
+
+#[cfg(all(test, feature = "renderer-wgpu"))]
+mod tests {
+    use super::*;
+
+    /// Regression test for a real soundness bug (caught on review, not
+    /// self-discovered): `hp2_rs_wgpu_upload_texture` used to construct
+    /// a Rust slice over the caller-supplied `data`/`data_len` *before*
+    /// checking whether `format` was one of the two formats this
+    /// function actually knows how to upload (P8, RGBA8). Every real
+    /// `WgpuDrv.cpp` caller computes `data_len` as `width*height*4` for
+    /// every non-P8 format, which only happens to be correct for RGBA8
+    /// (and, by coincidence of this specific engine's own real
+    /// `HP2TextureBytes` table, RGBA7) -- for RGB8 (3 bytes/pixel),
+    /// RGB16 (2), and DXT1 (block-compressed, smaller still), that
+    /// claimed length is larger than the texture's real allocation, so
+    /// constructing a slice of that length via `bytes_from_raw`'s own
+    /// `from_raw_parts` was undefined behavior the instant it happened
+    /// -- even though the rejection arm never actually read from the
+    /// resulting slice afterward.
+    ///
+    /// This test cannot directly observe construction-time UB itself
+    /// (that would need Miri, which cannot interpret this function's
+    /// own real wgpu/Metal driver calls -- a hard blocker independent
+    /// of this test, not a shortcut taken for convenience), so what it
+    /// actually proves is the observable contract the fix's reordering
+    /// depends on: every unsupported format is rejected (`false`)
+    /// using only a tiny, genuinely-valid backing buffer whose real
+    /// length is far smaller than the `data_len` passed alongside it.
+    /// If the format check ever regresses back to running after slice
+    /// construction, this specific assertion would most likely still
+    /// pass (the rejection arm never reads the slice either way) -- the
+    /// real guarantee is the source-order invariant itself, inspectable
+    /// directly in `hp2_rs_wgpu_upload_texture`'s own body: the format-
+    /// support check must run before the `bytes_from_raw` call, full
+    /// stop. This test pins the observable contract that check
+    /// produces, not a substitute for verifying the ordering by reading
+    /// the code.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-ffi --features renderer-wgpu -- --ignored`"]
+    fn upload_texture_rejects_every_unsupported_format_without_touching_an_undersized_buffer() {
+        let result = unsafe { hp2_rs_wgpu_create(std::ptr::null_mut(), 0) };
+        assert!(
+            !result.handle.is_null(),
+            "expected a real headless device to be created"
+        );
+
+        // Deliberately tiny: 4 real bytes, far smaller than any of the
+        // data_len values below -- if the rejection below ever ran
+        // after a slice were constructed over this buffer at that
+        // claimed length, that construction would already be unsound
+        // regardless of this assertion's own result.
+        let tiny_buffer: [u8; 4] = [0, 0, 0, 0];
+
+        // One real non-P8/RGBA8 format byte each (TextureFormat::
+        // from_raw's own 0x01..=0x04 range for Rgba7/Rgb16/Dxt1/Rgb8),
+        // paired with a data_len a real WgpuDrv.cpp caller would
+        // actually compute for a 1024x1024 texture of that format
+        // using this crate's own established (width*height*4)-for-
+        // non-P8 formula -- the exact oversized value that motivated
+        // this fix, not an arbitrary large number chosen for this test.
+        for format_byte in [0x01u8, 0x02, 0x03, 0x04] {
+            let data_len = 1024usize * 1024 * 4;
+            let accepted = unsafe {
+                hp2_rs_wgpu_upload_texture(
+                    result.handle,
+                    1,
+                    format_byte,
+                    1024,
+                    1024,
+                    tiny_buffer.as_ptr(),
+                    data_len,
+                    std::ptr::null(),
+                    false,
+                    false,
+                )
+            };
+            assert!(
+                !accepted,
+                "format byte {format_byte:#x} is not P8 or RGBA8 and must be rejected"
+            );
+        }
+
+        // Complements the rejection proof above: confirms the fix's
+        // reordering did not also, even accidentally, reject the two
+        // formats this function actually does support.
+        let p8_pixel: [u8; 1] = [7];
+        // A real [FColor; 256] array, not a raw [u8; 1024] -- FColor
+        // is #[repr(C, align(4))] (hp2-abi's own layout-probe-verified
+        // attribute, not a plain #[repr(C)]'s implied align(1)), and
+        // palette_from_raw casts its *const u8 input straight to
+        // &[FColor; 256] with no alignment handling of its own
+        // (correctly: a real FTextureInfo::Palette pointer is always
+        // already FColor-aligned). A [u8; 1024] buffer has no such
+        // guarantee -- caught on review before this test's first run:
+        // sufficient byte size alone does not make a pointer valid to
+        // reinterpret as a more-aligned type, regardless of whether a
+        // particular stack layout happens not to fault on it.
+        let palette = [hp2_wgpu::texture::FColor {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }; 256];
+        let p8_accepted = unsafe {
+            hp2_rs_wgpu_upload_texture(
+                result.handle,
+                2,
+                0x00,
+                1,
+                1,
+                p8_pixel.as_ptr(),
+                1,
+                palette.as_ptr().cast::<u8>(),
+                false,
+                false,
+            )
+        };
+        assert!(
+            p8_accepted,
+            "a real 1x1 P8 texture with a real palette must still be accepted"
+        );
+
+        let rgba8_pixel: [u8; 4] = [255, 0, 0, 255];
+        let rgba8_accepted = unsafe {
+            hp2_rs_wgpu_upload_texture(
+                result.handle,
+                3,
+                0x05,
+                1,
+                1,
+                rgba8_pixel.as_ptr(),
+                4,
+                std::ptr::null(),
+                false,
+                false,
+            )
+        };
+        assert!(
+            rgba8_accepted,
+            "a real 1x1 RGBA8 texture must still be accepted"
+        );
+
+        unsafe { hp2_rs_wgpu_destroy(result.handle) };
+    }
 }
