@@ -1947,6 +1947,134 @@ impl ComplexPipeline {
     }
 }
 
+/// Real `PostProcessProgram` counterpart (`DrawPostProcess.cpp`): the
+/// final present blit. Copies `source` over all of `target` with gamma
+/// correction, with no depth test and no blending. Draws a fullscreen
+/// triangle strip from the vertex index, so it binds no vertex buffer.
+const POST_PROCESS_WGSL_SOURCE: &str = concat!(
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/postprocess.wgsl")
+);
+
+pub struct PostProcessPipeline {
+    pipeline: wgpu::RenderPipeline,
+    frame_uniforms_layout: wgpu::BindGroupLayout,
+    source_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+}
+
+impl PostProcessPipeline {
+    /// Builds the pipeline for `color_format`, the real target this
+    /// pipeline renders into. Source and target always match in size, so
+    /// one nearest-filtered, clamped sampler lands exactly on texel
+    /// centers.
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("postprocess.wgsl (draw.rs production)"),
+            source: wgpu::ShaderSource::Wgsl(POST_PROCESS_WGSL_SOURCE.into()),
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("postprocess.wgsl present pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..wgpu::PrimitiveState::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let frame_uniforms_layout = pipeline.get_bind_group_layout(0);
+        let source_layout = pipeline.get_bind_group_layout(1);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("postprocess.wgsl source sampler"),
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            ..wgpu::SamplerDescriptor::default()
+        });
+        Self {
+            pipeline,
+            frame_uniforms_layout,
+            source_layout,
+            sampler,
+        }
+    }
+
+    /// Records (does **not** submit) one pass that clears `target` to
+    /// black and draws `source` over all of it. `frame_uniforms_buffer`
+    /// supplies `gamma` and `y_scale`.
+    pub fn record(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_uniforms_buffer: &wgpu::Buffer,
+        source: &wgpu::TextureView,
+        target: &wgpu::TextureView,
+    ) {
+        let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("postprocess.wgsl frame uniforms bind group"),
+            layout: &self.frame_uniforms_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniforms_buffer.as_entire_binding(),
+            }],
+        });
+        let source_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("postprocess.wgsl source bind group"),
+            layout: &self.source_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("postprocess.wgsl present pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+        pass.set_bind_group(1, &source_bind_group, &[]);
+        pass.draw(0..4, 0..1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3710,6 +3838,113 @@ mod tests {
              {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn post_process_applies_gamma_and_keeps_orientation() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        // 1x2 source: top row (64,64,64), bottom row (255,0,0).
+        let source = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("post_process test source"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &source,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[64, 64, 64, 255, 255, 0, 0, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(2),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+        );
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("post_process test target"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let source_view = source.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut uniforms: crate::FrameUniforms = bytemuck::Zeroable::zeroed();
+        uniforms.gamma = 2.0;
+        uniforms.y_scale = 1.0;
+        let frame_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("post_process test frame uniforms"),
+            size: std::mem::size_of::<crate::FrameUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_uniforms_buffer, 0, bytemuck::bytes_of(&uniforms));
+
+        let pipeline = PostProcessPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("post_process test encoder"),
+        });
+        pipeline.record(
+            device,
+            &mut encoder,
+            &frame_uniforms_buffer,
+            &source_view,
+            &target_view,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let pixels = crate::capture::read_texture_rgba8(&created, &target)
+            .expect("Rgba8Unorm with COPY_SRC should read back");
+        let top = &pixels[0..4];
+        let bottom = &pixels[4..8];
+        println!(
+            "post_process top pixel {top:?}, bottom pixel {bottom:?} on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+        // Top: gamma_correct(64/255, 2.0) = sqrt(0.251) = 0.501 -> 128.
+        for (channel, (got, want)) in top.iter().zip([128u8, 128, 128, 255]).enumerate() {
+            assert!(
+                got.abs_diff(want) <= 1,
+                "channel {channel}: expected {want} +-1, got {got}; top row must be gamma-corrected"
+            );
+        }
+        // Bottom stays (255,0,0): gamma does not move 0 or 1, and the top/bottom orientation holds.
+        assert_eq!(
+            bottom,
+            &[255u8, 0, 0, 255],
+            "expected the bottom row to stay red (orientation preserved), got {bottom:?}"
         );
     }
 }

@@ -873,8 +873,14 @@ enum FramePresentable {
 /// matching wgpu's own documented behavior).
 struct InProgressFrame {
     presentable: FramePresentable,
-    #[allow(dead_code)] // kept alive for presentable's sake; never read directly
+    /// Where this frame's draws go: `RenderLoop::scene_target` for
+    /// surface and capture-only frames, or the caller's own texture for
+    /// `begin_offscreen_frame`.
     view: wgpu::TextureView,
+    /// Post-process destination (`unlock_frame` with `present`): the
+    /// acquired surface texture or the capture-only target. `None` for
+    /// `begin_offscreen_frame`, which draws straight into its target.
+    output: Option<wgpu::TextureView>,
     encoder: wgpu::CommandEncoder,
     /// The real color target format, needed to lazily build/reuse a
     /// `draw::SimpleLinePipeline` matching it when flushing queued
@@ -1230,6 +1236,17 @@ pub struct RenderLoop {
     /// Offscreen render target for `FramePresentable::CaptureOnly`
     /// frames, reused while its size and format still match.
     capture_target: Option<wgpu::Texture>,
+    /// XOpenGL's `RenderColorTexture` (the FBO every frame renders
+    /// into before `Unlock` blits it through `PostProcess_Prog`,
+    /// XOpenGL.cpp:2771-2825): the draw target of surface and
+    /// capture-only frames, recreated on size/format change.
+    scene_target: Option<(wgpu::Texture, wgpu::TextureView)>,
+    postprocess_pipeline: Option<(wgpu::TextureFormat, draw::PostProcessPipeline)>,
+    /// `FrameUniforms` the post-process pass reads (`gamma`, `y_scale`),
+    /// rewritten every blit from the last `set_scene_node` scene --
+    /// XOpenGL's persistent `FrameState` holds the last
+    /// `SetSceneNode`'s `GetViewportGamma` the same way.
+    postprocess_uniforms: Option<wgpu::Buffer>,
     /// Set by every `set_scene_node` call -- the real `RFX2`/`RFY2`/
     /// `Frame->FX2`/`FY2` screen-to-clip transform `Draw2DLine`'s own
     /// real source applies (`DrawSimple.cpp:80,82`) is derived
@@ -1399,6 +1416,9 @@ impl RenderLoop {
             capture_initialized: false,
             backing_scale: 1.0,
             capture_target: None,
+            scene_target: None,
+            postprocess_pipeline: None,
+            postprocess_uniforms: None,
         }
     }
 
@@ -1477,6 +1497,99 @@ impl RenderLoop {
             self.depth_target = Some(draw::create_depth_target(device, width, height));
         }
         &self.depth_target.as_ref().expect("just ensured above").1
+    }
+
+    /// `scene_target`'s texture (a cheap handle clone), (re)created
+    /// when the frame size or color format changed. Same format as the
+    /// output so the post-process pass is a straight gamma blit.
+    fn ensure_scene_target(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::Texture {
+        let stale = self.scene_target.as_ref().is_none_or(|(texture, _)| {
+            texture.width() != width || texture.height() != height || texture.format() != format
+        });
+        if stale {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("hp2-wgpu scene color target"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.scene_target = Some((texture, view));
+        }
+        self.scene_target
+            .as_ref()
+            .expect("just ensured above")
+            .0
+            .clone()
+    }
+
+    /// Real `PostProcess_Prog` blit (XOpenGL.cpp:2802-2825): draws
+    /// `frame.view` (the scene target) gamma-corrected into `output`.
+    /// Gamma and `y_scale` come from the last `set_scene_node` scene,
+    /// or 1.0 (no correction) before the first one.
+    fn record_post_process(
+        &mut self,
+        created: &CreatedDevice,
+        frame: &mut InProgressFrame,
+        output: &wgpu::TextureView,
+    ) {
+        let uniforms = match self.last_scene.as_ref() {
+            Some(scene) => compute_frame_uniforms(scene),
+            None => FrameUniforms {
+                gamma: 1.0,
+                y_scale: 1.0,
+                ..bytemuck::Zeroable::zeroed()
+            },
+        };
+        if self.postprocess_uniforms.is_none() {
+            self.postprocess_uniforms =
+                Some(created.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("hp2-wgpu post-process frame uniforms"),
+                    size: std::mem::size_of::<FrameUniforms>() as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+        }
+        let format = frame.color_format;
+        if !matches!(&self.postprocess_pipeline, Some((f, _)) if *f == format) {
+            self.postprocess_pipeline = Some((
+                format,
+                draw::PostProcessPipeline::new(&created.device, format),
+            ));
+        }
+        let buffer = self
+            .postprocess_uniforms
+            .as_ref()
+            .expect("just ensured above");
+        created
+            .queue
+            .write_buffer(buffer, 0, bytemuck::bytes_of(&uniforms));
+        let (_, pipeline) = self
+            .postprocess_pipeline
+            .as_ref()
+            .expect("just ensured above");
+        pipeline.record(
+            &created.device,
+            &mut frame.encoder,
+            buffer,
+            &frame.view,
+            output,
+        );
     }
 
     /// Real `UXOpenGLRenderDevice::ClearZ` (XOpenGL.cpp:3030-3042):
@@ -2776,46 +2889,24 @@ pub fn lock_frame(
             return FrameOutcome::Validation;
         }
     };
-    let color_format = texture.texture.format();
-    let view = texture
+    // XOpenGL renders every frame into its FBO and only blits it to the
+    // window in Unlock (XOpenGL.cpp:2771-2825); the surface texture is
+    // the post-process output, not the draw target.
+    let output_view = texture
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
-    let mut encoder = created
-        .device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("hp2-wgpu frame encoder"),
-        });
-    // Depth cleared with the color every Lock (XOpenGL.cpp:2528-2546).
-    let depth_view = loop_state
-        .ensure_depth_target(
-            &created.device,
-            texture.texture.width(),
-            texture.texture.height(),
-        )
-        .clone();
-    {
-        let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("hp2-wgpu clear pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(depth_clear_attachment(&depth_view)),
-            ..Default::default()
-        });
+    let scene = loop_state.ensure_scene_target(
+        &created.device,
+        texture.texture.width(),
+        texture.texture.height(),
+        texture.texture.format(),
+    );
+    begin_offscreen_frame(created, loop_state, &scene, clear_color);
+    if let Some(frame) = loop_state.in_progress.as_mut() {
+        frame.presentable = FramePresentable::Surface(texture);
+        frame.output = Some(output_view);
+        frame.suboptimal = is_suboptimal;
     }
-    loop_state.in_progress = Some(InProgressFrame {
-        presentable: FramePresentable::Surface(texture),
-        view,
-        encoder,
-        color_format,
-        suboptimal: is_suboptimal,
-    });
     // Not counted as `presented` here: a successful lock_frame only
     // means a frame was *acquired*, not that it will actually reach
     // the screen -- unlock_frame(present: false) (Blit=0, e.g. a
@@ -2939,6 +3030,7 @@ pub fn begin_offscreen_frame(
     loop_state.in_progress = Some(InProgressFrame {
         presentable: FramePresentable::Offscreen,
         view,
+        output: None,
         encoder,
         color_format: target.format(),
         suboptimal: false,
@@ -2992,9 +3084,11 @@ fn begin_capture_only_frame(
             view_formats: &[],
         }),
     };
-    begin_offscreen_frame(created, loop_state, &target, clear_color);
+    let scene = loop_state.ensure_scene_target(&created.device, width, height, format);
+    begin_offscreen_frame(created, loop_state, &scene, clear_color);
     if let Some(frame) = loop_state.in_progress.as_mut() {
         frame.presentable = FramePresentable::CaptureOnly(target.clone());
+        frame.output = Some(target.create_view(&wgpu::TextureViewDescriptor::default()));
     }
     loop_state.capture_target = Some(target);
 }
@@ -3605,6 +3699,11 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
     // the explicit clear() a lone-queue design would still need.
     let batches = std::mem::take(&mut loop_state.batches);
     dispatch_batches(created, loop_state, &mut frame, batches);
+    // Blit only, like XOpenGL's `if (Blit)` around PostProcess_Prog
+    // (XOpenGL.cpp:2802-2825): a Blit=0 frame never reaches the output.
+    if present && let Some(output) = frame.output.take() {
+        loop_state.record_post_process(created, &mut frame, &output);
+    }
     created
         .queue
         .submit(std::iter::once(frame.encoder.finish()));
@@ -7814,5 +7913,62 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             &[0u8, 0, 255, 255],
             "expected blue to overwrite red at column 32 after clear_z, full row {row:?}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn blit_frames_are_gamma_corrected_by_the_last_scene_gamma() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let dir = std::env::temp_dir().join(format!(
+            "hp2_blit_gamma_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("expected a writable temp directory");
+        let mut loop_state = RenderLoop::new();
+        loop_state.capture = Some(capture::FrameCapture::new(dir.clone(), String::new(), None));
+
+        // Scene cleared to 64/255 gray; the last SetSceneNode's gamma is
+        // 2.0, so the blit must output (64/255)^(1/2) = 0.501 -> 128.
+        let gray = 64.0 / 255.0;
+        begin_capture_only_frame(
+            &created,
+            &mut loop_state,
+            2,
+            1,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::Color {
+                r: gray,
+                g: gray,
+                b: gray,
+                a: 1.0,
+            },
+        );
+        let mut scene = reference_perspective_scene();
+        scene.gamma = 2.0;
+        loop_state.set_scene_node(&created.device, &created.queue, &scene);
+        assert!(unlock_frame(&created, &mut loop_state, true));
+
+        let mut reader = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(dir.join("frame_000000.png"))
+                .expect("expected frame_000000.png to be written"),
+        ))
+        .read_info()
+        .expect("expected a valid PNG header");
+        let mut buffer = vec![0; reader.output_buffer_size().expect("expected a frame size")];
+        reader
+            .next_frame(&mut buffer)
+            .expect("expected the PNG pixel data to decode");
+        for (index, channel) in buffer.iter().enumerate() {
+            assert!(
+                channel.abs_diff(128) <= 1,
+                "byte {index}: expected gamma-corrected 128, got {channel} (full {buffer:?})"
+            );
+        }
+        std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
     }
 }

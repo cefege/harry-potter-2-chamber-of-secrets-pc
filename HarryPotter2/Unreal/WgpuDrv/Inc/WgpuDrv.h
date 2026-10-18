@@ -158,14 +158,16 @@ class UWgpuRenderDevice : public URenderDevice
 	UBOOL OneXBlending;
 	UBOOL ActorXBlending;
 
-	// Gamma, deliberately NOT yet a config property or synced from
-	// the real viewport brightness slider the way XOpenGL.cpp's own
-	// SetGamma/GetViewportGamma are (GammaMultiplier/GammaMultiplierUED
-	// config, a real gamma-ramp subsystem this port has not read yet
-	// at all) -- out of scope for SetSceneNode's own FrameUniforms
-	// wiring. Fixed at 1.0f (no correction) until that lands; stated
-	// honestly here rather than silently wrong or left undocumented.
+	// Real SetGamma (XOpenGL.cpp:2961-2969), run from Flush:
+	// Gamma = (Client->Brightness + 0.1) * (GIsEditor ?
+	// GammaMultiplierUED : GammaMultiplier). SetSceneNode passes it
+	// (1.0 for ortho viewports, GetViewportGamma) to the Rust post-
+	// process blit, which applies pow(color, 1/Gamma) exactly like
+	// XOpenGL's PostProcess_Prog. Both multipliers are config
+	// properties with XOpenGL's defaults (1.75).
 	FLOAT Gamma;
+	FLOAT GammaMultiplier;
+	FLOAT GammaMultiplierUED;
 
 	// `[WgpuDrv.WgpuRenderDevice] UseVSync=Off|On|Adaptive` -- real
 	// config property, UEnum-backed (StaticConstructor registers

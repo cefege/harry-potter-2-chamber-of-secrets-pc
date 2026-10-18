@@ -217,6 +217,9 @@ void UWgpuRenderDevice::StaticConstructor()
 	// same two properties -- plain UBoolProperty, CPF_Config, no enum.
 	new(GetClass(), TEXT("OneXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(OneXBlending), TEXT("Options"), CPF_Config);
 	new(GetClass(), TEXT("ActorXBlending"), RF_Public)UBoolProperty(CPP_PROPERTY(ActorXBlending), TEXT("Options"), CPF_Config);
+	// XOpenGL.cpp:151-152 registers the same two keys.
+	new(GetClass(), TEXT("GammaMultiplier"), RF_Public)UFloatProperty(CPP_PROPERTY(GammaMultiplier), TEXT("Options"), CPF_Config);
+	new(GetClass(), TEXT("GammaMultiplierUED"), RF_Public)UFloatProperty(CPP_PROPERTY(GammaMultiplierUED), TEXT("Options"), CPF_Config);
 
 	// Settings carry-over (this class's own header has the real,
 	// per-property wiring status). UEnum member order matches
@@ -248,11 +251,13 @@ void UWgpuRenderDevice::StaticConstructor()
 	// stomp a real ini-configured value back to the hardcoded default
 	// on every single toggle, not just the first run.
 	OneXBlending = ActorXBlending = 1;
-	// Gamma: see this class's own header comment on why this stays a
-	// fixed 1.0f for now (no gamma-ramp subsystem ported yet). Seeded
-	// here, not in Init, for the same real reason as the two
-	// properties above.
+	// Gamma is recomputed by Flush (SetGamma); 1.0 (no correction)
+	// until the engine's first Flush. Multiplier defaults are
+	// XOpenGL.cpp:235-236. Seeded here, not in Init, for the same
+	// real reason as the two properties above.
 	Gamma = 1.0f;
+	GammaMultiplier = 1.75f;
+	GammaMultiplierUED = 1.75f;
 	// Settings carry-over: real XOpenGL.cpp defaults
 	// (StaticConstructor lines 216-273), seeded here for the same
 	// real reason as every default above -- Init() reruns on every
@@ -394,6 +399,9 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	// absence alone misleading evidence (caught on review).
 	if( NsView )
 		debugf( NAME_Init, TEXT("WgpuDrv: surface created on SDL_MetalView") );
+	// Real XOpenGL Init tail (XOpenGL.cpp:581): SetRes, whose own
+	// Flush(1) is what first runs SetGamma.
+	SetRes( NewX, NewY, NewColorBytes, Fullscreen );
 	return 1;
 	unguard;
 }
@@ -401,6 +409,11 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 UBOOL UWgpuRenderDevice::SetRes( INT NewX, INT NewY, INT NewColorBytes, UBOOL Fullscreen )
 {
 	guard(UWgpuRenderDevice::SetRes);
+	// The surface itself follows the window's drawable size on the
+	// next Lock (hp2_rs_wgpu_lock reconfigures on change). Real XOpenGL
+	// SetRes ends with Flush(1) (XOpenGL.cpp:1374-1375), which re-runs
+	// SetGamma; kept here for the same reason.
+	Flush( 1 );
 	return 1;
 	unguard;
 }
@@ -445,6 +458,11 @@ void UWgpuRenderDevice::Exit()
 void UWgpuRenderDevice::Flush( UBOOL AllowPrecache )
 {
 	guard(UWgpuRenderDevice::Flush);
+	// Real XOpenGL Flush's SetGamma call (XOpenGL.cpp:1578-1579) and
+	// SetGamma itself (XOpenGL.cpp:2961-2969): shift the 0.0-0.9
+	// brightness slider range to 0.1-1.0, then scale.
+	if( Viewport && Viewport->GetOuterUClient() )
+		Gamma = ( Viewport->GetOuterUClient()->Brightness + 0.1f ) * ( GIsEditor ? GammaMultiplierUED : GammaMultiplier );
 	unguard;
 }
 
