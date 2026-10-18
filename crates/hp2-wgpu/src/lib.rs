@@ -1966,12 +1966,74 @@ impl RenderLoop {
         }
     }
 
+    /// Real `SetTexture.cpp:508-515`'s own forced flush, read
+    /// directly before writing this (`Shaders[ActiveProgram]->
+    /// Flush(false);`, issued whenever a real `SetTexture` call is
+    /// about to rebind or re-upload a texture, specifically *because*
+    /// "any draw calls we've already batched up but not yet issued
+    /// were built expecting the OLD binding/contents" -- that
+    /// function's own comment, quoted exactly). This crate's own
+    /// `BatchPayload` stores a `cache_id`, resolved against `self.
+    /// texture_cache` only later, at actual dispatch time inside
+    /// `dispatch_batches` (`unlock_frame`'s own doc has the full real
+    /// reasoning for why that deferred-resolution design exists at
+    /// all: real call-order compositing across primitive kinds).
+    /// Without this function, a real texture re-upload mid-frame
+    /// (`Info.bRealtimeChanged`, `upload_texture`/`upload_compressed_
+    /// texture`'s own call sites below) would silently let an
+    /// EARLIER-queued batch retroactively pick up the LATER re-
+    /// upload's new content merely because both share a `cache_id` --
+    /// caught on review before `Info.bRealtimeChanged`-triggered re-
+    /// upload was ever wired through any real caller, not discovered
+    /// after it shipped. Dispatches (and submits) every currently-
+    /// queued batch using whatever `self.texture_cache` holds *right
+    /// now*, using the SAME real call-order-preserving `dispatch_
+    /// batches` every other real flush point uses, then replaces
+    /// `self.in_progress`'s own `CommandEncoder` with a fresh one so
+    /// the frame stays open for more draws after -- unlike `unlock_
+    /// frame`, never finishes/presents the frame itself, and never
+    /// touches `self.in_progress` at all beyond that swap (still
+    /// `Some` afterward, exactly as it was before this call, matching
+    /// the real engine's own `Flush` not ending the real frame
+    /// either). A no-op when no frame is currently in progress
+    /// (nothing could have been queued without one -- every real
+    /// `queue_*` method already bails on `self.in_progress.is_none()`)
+    /// or nothing is actually queued (`self.batches.is_empty()`).
+    fn flush_pending_batches(&mut self, created: &CreatedDevice) {
+        if self.batches.is_empty() {
+            return;
+        }
+        let Some(mut frame) = self.in_progress.take() else {
+            return;
+        };
+        let batches = std::mem::take(&mut self.batches);
+        dispatch_batches(created, self, &mut frame, batches);
+        let fresh_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("hp2-wgpu mid-frame flush encoder"),
+                });
+        let finished_encoder = std::mem::replace(&mut frame.encoder, fresh_encoder);
+        created
+            .queue
+            .submit(std::iter::once(finished_encoder.finish()));
+        self.in_progress = Some(frame);
+    }
+
     /// Uploads `rgba8_bytes` into `self.texture_cache` under
     /// `cache_id` -- thin passthrough to `texture::TextureCache::
     /// upload_rgba8` (that method's own doc has the full real
     /// contract and panics). A real future `SetTexture`-equivalent
     /// FFI wrapper calls this before any `queue_tile` call that
-    /// references the same `cache_id` can find it.
+    /// references the same `cache_id` can find it. Flushes `self.
+    /// batches` first (`flush_pending_batches`'s own doc has the full
+    /// real reasoning) whenever `cache_id` is already resident -- a
+    /// real re-upload (`Info.bRealtimeChanged`), not a first-ever
+    /// upload, the one real case that actually needs it: a brand-new
+    /// `cache_id` cannot retroactively affect any earlier-queued
+    /// batch, since no earlier batch could possibly already reference
+    /// a `cache_id` that did not exist in `self.texture_cache` yet.
     pub fn upload_texture(
         &mut self,
         created: &CreatedDevice,
@@ -1981,6 +2043,9 @@ impl RenderLoop {
         rgba8_bytes: &[u8],
         srgb: bool,
     ) {
+        if self.texture_cache.get(cache_id).is_some() {
+            self.flush_pending_batches(created);
+        }
         self.texture_cache
             .upload_rgba8(created, cache_id, width, height, rgba8_bytes, srgb);
     }
@@ -1994,15 +2059,17 @@ impl RenderLoop {
     /// this before any `queue_tile`/`queue_complex_surface` call that
     /// references the same `cache_id` can find it, same real ordering
     /// requirement `upload_texture`'s own doc already establishes.
-    /// Returns whether the upload actually happened -- unlike `upload_
-    /// texture`, this one has a real failure mode (`upload_compressed`
-    /// can return `None`), so unlike that method this one does not
-    /// discard its own callee's result (caught on review before
-    /// landing: an earlier version of this method returned `()` the
-    /// same way `upload_texture` does, which would have silently told
-    /// a real FFI caller "uploaded" even when the real device lacks
-    /// `Features::TEXTURE_COMPRESSION_BC` and nothing was actually
-    /// cached).
+    /// Flushes `self.batches` first under the same real condition
+    /// `upload_texture`'s own doc already establishes (`cache_id`
+    /// already resident). Returns whether the upload actually
+    /// happened -- unlike `upload_texture`, this one has a real
+    /// failure mode (`upload_compressed` can return `None`), so unlike
+    /// that method this one does not discard its own callee's result
+    /// (caught on review before landing: an earlier version of this
+    /// method returned `()` the same way `upload_texture` does, which
+    /// would have silently told a real FFI caller "uploaded" even when
+    /// the real device lacks `Features::TEXTURE_COMPRESSION_BC` and
+    /// nothing was actually cached).
     pub fn upload_compressed_texture(
         &mut self,
         created: &CreatedDevice,
@@ -2012,6 +2079,9 @@ impl RenderLoop {
         mips: &[texture::CompressedMipLevel<'_>],
         srgb: bool,
     ) -> bool {
+        if self.texture_cache.get(cache_id).is_some() {
+            self.flush_pending_batches(created);
+        }
         self.texture_cache
             .upload_compressed(created, cache_id, width, height, mips, srgb)
             .is_some()
@@ -2634,72 +2704,30 @@ pub fn begin_offscreen_frame(
     });
 }
 
-/// Replaces the per-frame-end half of `UWgpuRenderDevice::Unlock`.
-/// `present`, matching the real `Unlock(UBOOL Blit)`'s own parameter
-/// (`ThirdParty/XOpenGLDrv/Src/XOpenGL.cpp`'s own `Unlock` only blits
-/// when `Blit` is set -- used for render passes that should not
-/// actually reach the screen, e.g. hit-testing passes): `true` submits
-/// and presents the frame `lock_frame` began; `false` submits (so the
-/// GPU work still completes, matching XOpenGL's own real behavior of
-/// still finishing the frame) but never calls `queue.present`, letting
-/// `SurfaceTexture::drop` discard it instead (wgpu's own documented,
-/// safe behavior for an un-presented texture). Never calls
-/// `queue.present` at all for a `FramePresentable::Offscreen` frame
-/// (`begin_offscreen_frame`'s own doc), regardless of `present` --
-/// there is no real surface to present to.
-///
-/// Before submitting, flushes `loop_state.batches` (`RenderLoop::
-/// queue_line`/`queue_tile`) into the frame's own `CommandEncoder`,
-/// *after* the clear pass already recorded into it, in real push
+/// Dispatches `batches` into `frame.encoder`, lazily building
+/// whatever pipelines/sampler/`dummy_texture` they need, in real push
 /// order (`Batch`'s own doc has the full real citation for why real
-/// call order, not a per-primitive-kind fixed order, is required):
-/// one combined `Load`-mode `record()` call per batch (or per
-/// `draw::MAX_DRAWS`-sized chunk of a batch, for any batch larger
-/// than that -- matching the real GLSL batcher's own `Flush(true)`-
-/// when-full behavior, `DrawSimple.cpp:68-69`/`DrawTile.cpp:188-197`,
-/// no line or tile is ever lost), each bound to its own batch's real
-/// segment (`RenderLoop::frame_uniforms_segments`'s own doc has the
-/// full real bug this fixes) rather than one pass for the whole frame
-/// sharing a single `FrameUniforms` buffer, and not one GPU operation
-/// per engine draw call either (matching this crate's own real GLSL-
-/// batching precedent: one real GPU draw call batches many logical
-/// ones via `DrawID`). Each chunk's own real `DrawID`s are re-indexed
-/// to start at `0`. A `Tiles` batch referencing a `cache_id` that was
-/// never (or not yet) uploaded into `loop_state.texture_cache` is
-/// skipped cleanly (not a panic) -- a real, reachable transient
-/// condition, matching `queue_tile`'s own doc. Skipped entirely
-/// (queue cleared either way) if nothing was queued.
-///
-/// `loop_state.counts.presented` is incremented here, not in
-/// `lock_frame`, and only when `present` is `true` -- a successful
-/// `lock_frame` only acquired a frame; `unlock_frame(present: false)`
-/// never actually presents it, and counting it as `presented` would
-/// have over-counted relative to what callers like
-/// `Build/run_wgpu_smoke.py`'s `presented > 0` check mean by the name
-/// (caught on review, not self-caught). A `Suboptimal` frame
-/// (`lock_frame`'s own `InProgressFrame::suboptimal`) clears
-/// `loop_state.configured_size` regardless of `present` -- it is a
-/// property of the surface itself (`Surface::get_current_texture`'s
-/// own doc: "usable now, but reconfigure soon"), not of what this one
-/// call chose to do with the frame it got, so the next `lock_frame`
-/// reconfigures either way.
-///
-/// Returns `false` if `loop_state.in_progress` is `None` -- `unlock_
-/// frame` called without a matching successful `lock_frame` first is a
-/// caller bug, not a real runtime condition to report via
-/// `FrameOutcome`.
-pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, present: bool) -> bool {
-    let Some(mut frame) = loop_state.in_progress.take() else {
-        return false;
-    };
-    // Owned locally (not borrowed from loop_state) specifically so
-    // the loop below can freely take immutable borrows of loop_
-    // state's other fields (frame_uniforms_segments, texture_cache,
-    // line_pipeline, tile_pipeline, sampler) without fighting the
-    // borrow checker over two different fields of the same struct --
-    // already empty in loop_state.batches after this, equivalent to
-    // the explicit clear() a lone-queue design would still need.
-    let batches = std::mem::take(&mut loop_state.batches);
+/// call order, not a per-primitive-kind fixed order, is required).
+/// Does not submit `frame.encoder` or touch `loop_state.in_progress`
+/// at all -- shared by two real callers with two different real
+/// submit/frame-lifetime needs of their own: `unlock_frame` (frame-
+/// end, submits once itself afterward) and `RenderLoop::
+/// flush_pending_batches` (mid-frame, submits and replaces `frame.
+/// encoder` with a fresh one itself afterward, keeping the frame
+/// open for more draws). A `Tiles`/`Triangles`/`Complex` batch
+/// referencing a `cache_id` that was never (or not yet) uploaded into
+/// `loop_state.texture_cache` is skipped cleanly (not a panic) -- a
+/// real, reachable transient condition, matching `queue_tile`'s own
+/// doc. Each chunk's own real `DrawID`s are re-indexed to start at
+/// `0`, chunked at `draw::MAX_DRAWS` (matching the real GLSL
+/// batcher's own `Flush(true)`-when-full behavior, `DrawSimple.cpp:
+/// 68-69`/`DrawTile.cpp:188-197`, no line or tile is ever lost).
+fn dispatch_batches(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    frame: &mut InProgressFrame,
+    batches: Vec<Batch>,
+) {
     let needs_line_pipeline = batches
         .iter()
         .any(|b| matches!(b.payload, BatchPayload::Lines(_)))
@@ -3252,6 +3280,75 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
             }
         }
     }
+}
+
+/// Replaces the per-frame-end half of `UWgpuRenderDevice::Unlock`.
+/// `present`, matching the real `Unlock(UBOOL Blit)`'s own parameter
+/// (`ThirdParty/XOpenGLDrv/Src/XOpenGL.cpp`'s own `Unlock` only blits
+/// when `Blit` is set -- used for render passes that should not
+/// actually reach the screen, e.g. hit-testing passes): `true` submits
+/// and presents the frame `lock_frame` began; `false` submits (so the
+/// GPU work still completes, matching XOpenGL's own real behavior of
+/// still finishing the frame) but never calls `queue.present`, letting
+/// `SurfaceTexture::drop` discard it instead (wgpu's own documented,
+/// safe behavior for an un-presented texture). Never calls
+/// `queue.present` at all for a `FramePresentable::Offscreen` frame
+/// (`begin_offscreen_frame`'s own doc), regardless of `present` --
+/// there is no real surface to present to.
+///
+/// Before submitting, flushes `loop_state.batches` (`RenderLoop::
+/// queue_line`/`queue_tile`) into the frame's own `CommandEncoder`,
+/// *after* the clear pass already recorded into it, in real push
+/// order (`Batch`'s own doc has the full real citation for why real
+/// call order, not a per-primitive-kind fixed order, is required):
+/// one combined `Load`-mode `record()` call per batch (or per
+/// `draw::MAX_DRAWS`-sized chunk of a batch, for any batch larger
+/// than that -- matching the real GLSL batcher's own `Flush(true)`-
+/// when-full behavior, `DrawSimple.cpp:68-69`/`DrawTile.cpp:188-197`,
+/// no line or tile is ever lost), each bound to its own batch's real
+/// segment (`RenderLoop::frame_uniforms_segments`'s own doc has the
+/// full real bug this fixes) rather than one pass for the whole frame
+/// sharing a single `FrameUniforms` buffer, and not one GPU operation
+/// per engine draw call either (matching this crate's own real GLSL-
+/// batching precedent: one real GPU draw call batches many logical
+/// ones via `DrawID`). Each chunk's own real `DrawID`s are re-indexed
+/// to start at `0`. A `Tiles` batch referencing a `cache_id` that was
+/// never (or not yet) uploaded into `loop_state.texture_cache` is
+/// skipped cleanly (not a panic) -- a real, reachable transient
+/// condition, matching `queue_tile`'s own doc. Skipped entirely
+/// (queue cleared either way) if nothing was queued.
+///
+/// `loop_state.counts.presented` is incremented here, not in
+/// `lock_frame`, and only when `present` is `true` -- a successful
+/// `lock_frame` only acquired a frame; `unlock_frame(present: false)`
+/// never actually presents it, and counting it as `presented` would
+/// have over-counted relative to what callers like
+/// `Build/run_wgpu_smoke.py`'s `presented > 0` check mean by the name
+/// (caught on review, not self-caught). A `Suboptimal` frame
+/// (`lock_frame`'s own `InProgressFrame::suboptimal`) clears
+/// `loop_state.configured_size` regardless of `present` -- it is a
+/// property of the surface itself (`Surface::get_current_texture`'s
+/// own doc: "usable now, but reconfigure soon"), not of what this one
+/// call chose to do with the frame it got, so the next `lock_frame`
+/// reconfigures either way.
+///
+/// Returns `false` if `loop_state.in_progress` is `None` -- `unlock_
+/// frame` called without a matching successful `lock_frame` first is a
+/// caller bug, not a real runtime condition to report via
+/// `FrameOutcome`.
+pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, present: bool) -> bool {
+    let Some(mut frame) = loop_state.in_progress.take() else {
+        return false;
+    };
+    // Owned locally (not borrowed from loop_state) specifically so
+    // the loop below can freely take immutable borrows of loop_
+    // state's other fields (frame_uniforms_segments, texture_cache,
+    // line_pipeline, tile_pipeline, sampler) without fighting the
+    // borrow checker over two different fields of the same struct --
+    // already empty in loop_state.batches after this, equivalent to
+    // the explicit clear() a lone-queue design would still need.
+    let batches = std::mem::take(&mut loop_state.batches);
+    dispatch_batches(created, loop_state, &mut frame, batches);
     created
         .queue
         .submit(std::iter::once(frame.encoder.finish()));
@@ -4187,6 +4284,208 @@ mod tests {
             "RenderLoop's real upload_texture/queue_tile/unlock_frame path confirmed \
              empirically to composite a queued tile draw correctly on top of its own clear, on \
              adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_mid_frame_texture_reupload_does_not_retroactively_change_earlier_queued_draws() {
+        // The real regression test flush_pending_batches exists for
+        // (this crate's own todo list: "re-upload/bRealtimeChanged
+        // in-place update path"). Caught on review before Info.
+        // bRealtimeChanged-triggered re-upload was ever wired through
+        // any real caller, not discovered after it shipped: this
+        // crate's own BatchPayload stores a cache_id, resolved against
+        // self.texture_cache only later, at actual dispatch time
+        // (dispatch_batches's own doc). Without a real flush-before-
+        // replace safeguard (SetTexture.cpp:508-515's own real
+        // "Shaders[ActiveProgram]->Flush(false);", quoted in flush_
+        // pending_batches's own doc), re-uploading a texture under the
+        // SAME cache_id mid-frame would let an EARLIER-queued draw
+        // retroactively pick up the LATER re-upload's new content.
+        // This test queues a real tile against cache_id 99 while it is
+        // still red, re-uploads cache_id 99 as blue, then queues a
+        // SECOND real tile against the same cache_id 99 -- the
+        // earlier tile must still read back red, the later one blue.
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop mid-frame reupload offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        begin_offscreen_frame(
+            &created,
+            &mut loop_state,
+            &render_target,
+            wgpu::Color::GREEN,
+        );
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+
+        // Same real white draw_color convention as the plain tile test
+        // above -- isolates this test from needing to also reason
+        // about texture-color multiplication, white * texel == texel.
+        loop_state.upload_texture(&created, 99, 1, 1, &[255, 0, 0, 255], false);
+        // Same real X=0,XL=50 -> NDC x in [-1.0, 0.0] (left half)
+        // geometry as render_loop_queue_tile_renders_a_real_tile_
+        // through_the_real_lock_unlock_path's own hand-verified
+        // derivation above.
+        loop_state.queue_tile(TileDrawRequest {
+            cache_id: 99,
+            x: 0.0,
+            y: 49.5,
+            xl: 50.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+
+        // Real mid-frame re-upload under the SAME cache_id -- the one
+        // call this whole test exists to prove is safe. Must trigger
+        // RenderLoop::flush_pending_batches internally (cache_id 99 is
+        // already resident), dispatching the tile queued above using
+        // the still-red texture before this call's own blue bytes ever
+        // reach self.texture_cache.
+        loop_state.upload_texture(&created, 99, 1, 1, &[0, 0, 255, 255], false);
+
+        // Same real symmetric formula as the left half, X=50,XL=50 ->
+        // NDC x in [0.0, 1.0] (right half): rfx2*(px-fx2) with
+        // rfx2=0.02, fx2=50.0 gives 0.02*(50-50)=0 at the left edge
+        // and 0.02*(100-50)=1.0 at the right edge.
+        loop_state.queue_tile(TileDrawRequest {
+            cache_id: 99,
+            x: 50.0,
+            y: 49.5,
+            xl: 50.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop mid-frame reupload offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop mid-frame reupload offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected the EARLIER-queued tile (left half) to still read back red -- the texture \
+             it referenced at queue time, not the blue it was later re-uploaded as mid-frame, \
+             got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected the LATER-queued tile (right half), queued after the mid-frame re-upload, \
+             to read back blue, got {right_pixel:?}"
+        );
+        println!(
+            "RenderLoop::flush_pending_batches confirmed empirically: a real mid-frame texture \
+             re-upload under the same cache_id does not retroactively change an earlier-queued \
+             draw's own already-resolved texture content -- earlier geometry stayed red, later \
+             geometry became blue, on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );

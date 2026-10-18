@@ -233,6 +233,91 @@ pub fn p8_to_rgba8(indices: &[u8], palette: &[FColor; 256], mask_mode: P8MaskMod
         .collect()
 }
 
+/// Replaces `SetTexture.cpp`'s real `TEXF_RGB8` upload path
+/// (`InternalFormat = UnpackSRGB ? GL_SRGB8 : GL_RGB8; SourceFormat =
+/// GL_RGB;`, `ImgSrc = Mip->DataPtr` passed straight through --
+/// confirmed by direct re-read that the real engine performs no CPU-
+/// side conversion at all here, relying on OpenGL's own native
+/// 3-byte-per-texel `GL_RGB`/`GL_RGB8` support). wgpu has no 3-byte-
+/// per-texel texture format at all (no GPU API commonly exposes one,
+/// for alignment reasons), so unlike the real source, this port must
+/// expand to 4 bytes per texel before upload -- alpha forced to 255
+/// (opaque), the real source's own implicit behavior too: `GL_RGB`
+/// source data has no alpha channel for the driver to read in the
+/// first place, and a real `GL_RGB8`-internal-format texture has no
+/// alpha channel to sample either, so every real consumer of a
+/// TEXF_RGB8 texture already only ever sees fully opaque texels.
+/// `rgb_bytes` must be exactly `width * height * 3` bytes, tightly
+/// packed (R,G,B each one byte, matching `HP2TextureBytes`'s own
+/// real 3-bytes-per-pixel formula for this format).
+///
+/// # Panics
+/// If `rgb_bytes.len()` is not a whole multiple of 3 -- a caller bug,
+/// same `FTextureInfo`-fields-are-never-inconsistent reasoning
+/// `TextureCache::upload_rgba8`'s own doc already establishes.
+pub fn rgb8_to_rgba8(rgb_bytes: &[u8]) -> Vec<u8> {
+    assert_eq!(
+        rgb_bytes.len() % 3,
+        0,
+        "rgb_bytes length must be a whole multiple of 3"
+    );
+    rgb_bytes
+        .chunks_exact(3)
+        .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
+        .collect()
+}
+
+/// Replaces `SetTexture.cpp`'s real `TEXF_RGB16` upload path
+/// (`SourceType = GL_UNSIGNED_SHORT_5_6_5_REV`, `ImgSrc = Mip->
+/// DataPtr` passed straight through to the driver, which performs the
+/// packed-to-float unpacking in hardware). wgpu has no equivalent
+/// packed-565 texture format, so unlike the real source this port
+/// must unpack on the CPU before upload. Real bit layout confirmed
+/// from the OpenGL specification's own packed-pixel-type table before
+/// writing this, not assumed from the `_REV` suffix's name alone (an
+/// easy direction to get backwards -- the non-REV `GL_UNSIGNED_SHORT_
+/// 5_6_5` layout is the *opposite* of this one): for `GL_RGB` +
+/// `_5_6_5_REV`, a little-endian 16-bit value holds B in bits 15..11
+/// (5 bits), G in bits 10..5 (6 bits), R in bits 4..0 (5 bits) --
+/// functionally identical to `GL_BGR` + plain `_5_6_5`, per the
+/// OpenGL wiki's own Pixel Transfer page. Each N-bit channel is
+/// expanded to a full byte via bit replication (`(v << (8-n)) | (v >>
+/// (2n-8))`), the standard, widely-used technique that maps 0 to 0
+/// and the real N-bit maximum to 255 exactly, not a plain linear
+/// rescale (which also maps the endpoints correctly but distributes
+/// the real OpenGL-driver-produced intermediate values differently --
+/// bit replication is what real GPU texture samplers and drivers
+/// generally use for this exact kind of fixed-point channel expansion).
+/// Alpha is always 255 (opaque) -- `GL_RGB`, like `TEXF_RGB8`, has no
+/// real alpha channel at all. `packed_bytes` must be exactly `width *
+/// height * 2` bytes (one little-endian `u16` per texel, matching
+/// `HP2TextureBytes`'s own real 2-bytes-per-pixel formula for this
+/// format).
+///
+/// # Panics
+/// If `packed_bytes.len()` is not a whole multiple of 2 -- a caller
+/// bug, same reasoning as `rgb8_to_rgba8`'s own doc.
+pub fn rgb16_to_rgba8(packed_bytes: &[u8]) -> Vec<u8> {
+    assert_eq!(
+        packed_bytes.len() % 2,
+        0,
+        "packed_bytes length must be a whole multiple of 2"
+    );
+    packed_bytes
+        .chunks_exact(2)
+        .flat_map(|pair| {
+            let value = u16::from_le_bytes([pair[0], pair[1]]);
+            let r5 = (value & 0x1F) as u8;
+            let g6 = ((value >> 5) & 0x3F) as u8;
+            let b5 = ((value >> 11) & 0x1F) as u8;
+            let r8 = (r5 << 3) | (r5 >> 2);
+            let g8 = (g6 << 2) | (g6 >> 4);
+            let b8 = (b5 << 3) | (b5 >> 2);
+            [r8, g8, b8, 255]
+        })
+        .collect()
+}
+
 /// One real uploaded GPU texture, keyed by the real `CacheID` in a
 /// `TextureCache`. `width`/`height` are the real mip-0 `USize`/
 /// `VSize` -- kept alongside the `wgpu::Texture` itself since wgpu
