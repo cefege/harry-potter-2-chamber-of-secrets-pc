@@ -4,6 +4,7 @@
 
 #include "WgpuDrv.h"
 #include "hp2_rs.h"
+#include "NativeText.h"
 
 #if MACOSX
 #include <SDL_metal.h>
@@ -298,6 +299,10 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
+	// Re-init drops the native text provider with the device it served
+	// (XOpenGL.cpp:375-381 does the same on its own Init).
+	delete NativeTextBackend;
+	NativeTextBackend = NULL;
 #if MACOSX
 	if( MetalView )
 	{
@@ -399,6 +404,18 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	// absence alone misleading evidence (caught on review).
 	if( NsView )
 		debugf( NAME_Init, TEXT("WgpuDrv: surface created on SDL_MetalView") );
+	// Native text provider, created after the device so a failed device
+	// never leaves one behind (XOpenGL.cpp:587-597 creates it at the same
+	// point in its Init tail).
+#if HP2_HAS_NATIVE_TEXT_BACKEND
+	FNativeTextBackendStatus NativeTextStatus = { false, NULL };
+	NativeTextBackend = CreateNativeTextPlatformBackend( NativeTextStatus );
+	debugf( NAME_Init, TEXT("WgpuDrv: native text backend %s (%s)"),
+		NativeTextStatus.Available ? TEXT("ready") : TEXT("unavailable"),
+		NativeTextStatus.ReasonCode ? appFromAnsi( NativeTextStatus.ReasonCode ) : TEXT("unknown") );
+#else
+	debugf( NAME_Init, TEXT("WgpuDrv: native text backend unavailable (capability.compile_time_disabled)") );
+#endif
 	// Real XOpenGL Init tail (XOpenGL.cpp:581): SetRes, whose own
 	// Flush(1) is what first runs SetGamma.
 	SetRes( NewX, NewY, NewColorBytes, Fullscreen );
@@ -445,6 +462,10 @@ void UWgpuRenderDevice::Exit()
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
+	// Native text provider has no GPU state, so it is torn down without
+	// the device (XOpenGL.cpp:3127-3128).
+	delete NativeTextBackend;
+	NativeTextBackend = NULL;
 #if MACOSX
 	if( MetalView )
 	{
@@ -955,6 +976,146 @@ void UWgpuRenderDevice::ClearZ( FSceneNode* Frame )
 	// is a workaround the macOS build skips too.
 	if( RustDevice )
 		hp2_rs_wgpu_clear_z( RustDevice );
+	unguard;
+}
+
+namespace
+{
+// Per-call context for RasterizeNativeTextGlyph: the drawable glyphs of
+// one DrawCanvasText call, in the same order as the FFI glyph array.
+struct FNativeTextRasterContext
+{
+	const std::vector<const Hp2NativeText::FGlyphPlacement*>* Drawable;
+};
+
+// FfiNativeTextRasterize (hp2_rs.h). Coverage is RasterizeGlyph's own
+// alpha, the same bytes XOpenGL's atlas uploads. Rust sizes OutLen from
+// CalculateRasterRectangle, which must equal RasterizeGlyph's Width*Height;
+// a mismatch is refused, never truncated.
+bool RasterizeNativeTextGlyph( void* Ctx, size_t Index, uint8_t* OutCoverage, size_t OutLen )
+{
+	const FNativeTextRasterContext* Context = static_cast<const FNativeTextRasterContext*>( Ctx );
+	if( !Context || Index >= Context->Drawable->size() || !OutCoverage )
+		return false;
+	Hp2NativeText::FRasterizedGlyph Raster;
+	if( !Hp2NativeText::RasterizeGlyph( *(*Context->Drawable)[Index], Hp2NativeText::PageSize, Raster ) )
+		return false;
+	if( Raster.Alpha.size() != OutLen )
+		return false;
+	appMemcpy( OutCoverage, Raster.Alpha.data(), (INT)OutLen );
+	return true;
+}
+}
+
+UBOOL UWgpuRenderDevice::CreateCanvasTextLayout( const FCanvasTextRequest& Request, FCanvasTextLayout*& OutLayout )
+{
+	guard(UWgpuRenderDevice::CreateCanvasTextLayout);
+	OutLayout = NULL;
+	// No staged-font retry (XOpenGL NativeText.cpp:798-811): IsAwaitingStagedFont()
+	// is false on every native build (NativeTextShared.cpp:735-740), so that
+	// browser-only path is unreachable here.
+	if( !NativeTextBackend )
+		return 0;
+	// Origin validation and layout-only projection as in XOpenGL
+	// (NativeText.cpp:818-827). The origin is applied only after a
+	// successful create, so a failed create leaves nothing behind.
+	if( !Hp2NativeText::SafeFloat( Request.OriginX ) || !Hp2NativeText::SafeFloat( Request.OriginY ) )
+		return 0;
+	FCanvasTextLayoutRequest LayoutRequest;
+	if( !ProjectCanvasTextLayoutRequest( Request, LayoutRequest ) )
+		return 0;
+	if( !NativeTextBackend->CreateLayout( LayoutRequest, OutLayout ) || !OutLayout )
+		return 0;
+	OutLayout->OriginX = Request.OriginX;
+	OutLayout->OriginY = Request.OriginY;
+	return 1;
+	unguard;
+}
+
+void UWgpuRenderDevice::DestroyCanvasTextLayout( FCanvasTextLayout* Layout )
+{
+	guard(UWgpuRenderDevice::DestroyCanvasTextLayout);
+	if( NativeTextBackend )
+		NativeTextBackend->DestroyLayout( Layout );
+	unguard;
+}
+
+UBOOL UWgpuRenderDevice::MeasureCanvasText( FCanvasTextLayout* Layout, INT& OutWidth, INT& OutHeight )
+{
+	guard(UWgpuRenderDevice::MeasureCanvasText);
+	OutWidth = 0;
+	OutHeight = 0;
+	return NativeTextBackend ? NativeTextBackend->MeasureLayout( Layout, OutWidth, OutHeight ) : 0;
+	unguard;
+}
+
+UBOOL UWgpuRenderDevice::DrawCanvasText( FSceneNode* Frame, FCanvasTextLayout* Layout )
+{
+	guard(UWgpuRenderDevice::DrawCanvasText);
+	// Entry checks as in XOpenGL's DrawLayout (NativeText.cpp:398-399).
+	if( !RustDevice || !NativeTextBackend || !Frame || !Hp2NativeText::IsLayout( Layout ) )
+		return 0;
+
+	// Drawable glyphs only, as DrawLayout skips the rest (NativeText.cpp:404-411).
+	// Every drawable glyph is measured before anything reaches the atlas, so a
+	// failure returns 0 with nothing queued.
+	std::vector<const Hp2NativeText::FGlyphPlacement*> Drawable;
+	std::vector<FfiNativeTextGlyph> Glyphs;
+	for( const Hp2NativeText::FGlyphPlacement& Placement : Layout->Glyphs )
+	{
+		if( !Placement.bDrawable )
+			continue;
+		Hp2NativeText::FRasterRectangle Rectangle;
+		if( !Hp2NativeText::CalculateRasterRectangle( Placement, Hp2NativeText::PageSize, Rectangle ) )
+			return 0;
+		double DrawLeft = 0.0, DrawTop = 0.0;
+		Hp2NativeText::GlyphDrawOffset( Placement, DrawLeft, DrawTop );
+		FfiNativeTextGlyph Glyph;
+		Glyph.font_identity = reinterpret_cast<const uint8_t*>( Placement.Key.FontIdentity.data() );
+		Glyph.font_identity_len = Placement.Key.FontIdentity.size();
+		Glyph.glyph = static_cast<uint32_t>( Placement.Key.Glyph );
+		Glyph.raster_point_size_64 = Placement.Key.RasterPointSize64;
+		Glyph.antialias = Placement.Key.Antialias != 0;
+		Glyph.subpixel = Placement.Key.Subpixel != 0;
+		Glyph.draw_left = DrawLeft;
+		Glyph.draw_top = DrawTop;
+		Glyph.raster_width = static_cast<uint32_t>( Rectangle.Width );
+		Glyph.raster_height = static_cast<uint32_t>( Rectangle.Height );
+		Drawable.push_back( &Placement );
+		Glyphs.push_back( Glyph );
+	}
+
+	std::vector<FfiNativeTextUnderline> Underlines;
+	for( const Hp2NativeText::FUnderline& Underline : Layout->Underlines )
+	{
+		FfiNativeTextUnderline Raw;
+		Raw.start = Underline.Start;
+		Raw.end = Underline.End;
+		Raw.baseline = Underline.Baseline;
+		Raw.position = Underline.Position;
+		Raw.thickness = Underline.Thickness;
+		Underlines.push_back( Raw );
+	}
+
+	FfiNativeTextLayout NativeLayout;
+	NativeLayout.start_x = Layout->StartX;
+	NativeLayout.start_y = Layout->StartY;
+	NativeLayout.origin_x = Layout->OriginX;
+	NativeLayout.origin_y = Layout->OriginY;
+	NativeLayout.clip_x = Layout->ClipX;
+	NativeLayout.clip_y = Layout->ClipY;
+	NativeLayout.clip = Layout->bClip != 0;
+	NativeLayout.poly_flags = Layout->PolyFlags;
+	NativeLayout.color[0] = Layout->Color.X;
+	NativeLayout.color[1] = Layout->Color.Y;
+	NativeLayout.color[2] = Layout->Color.Z;
+	NativeLayout.color[3] = Layout->Color.W;
+
+	FNativeTextRasterContext Context;
+	Context.Drawable = &Drawable;
+	return hp2_rs_wgpu_draw_native_text( RustDevice, &NativeLayout,
+		Glyphs.data(), Glyphs.size(), Underlines.data(), Underlines.size(),
+		Frame->FX2, Frame->FY2, RasterizeNativeTextGlyph, &Context ) ? 1 : 0;
 	unguard;
 }
 

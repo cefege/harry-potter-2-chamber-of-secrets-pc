@@ -3156,6 +3156,165 @@ pub unsafe extern "C" fn hp2_rs_wgpu_clear_z(handle: *mut c_void) {
     })
 }
 
+/// `FCanvasTextLayout` draw fields for `hp2_rs_wgpu_draw_native_text`
+/// (`hp2_wgpu::native_text::NativeTextLayout`).
+#[cfg(feature = "renderer-wgpu")]
+#[repr(C)]
+pub struct FfiNativeTextLayout {
+    pub start_x: i32,
+    pub start_y: i32,
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub clip_x: f32,
+    pub clip_y: f32,
+    pub clip: bool,
+    pub poly_flags: u32,
+    pub color: [f32; 4],
+}
+
+/// One drawable `FGlyphPlacement` (`hp2_wgpu::native_text::NativeTextGlyph`).
+/// `font_identity`/`font_identity_len` is `Key.FontIdentity` as UTF-8;
+/// `draw_left`/`draw_top` are `GlyphDrawOffset`'s outputs and
+/// `raster_width`/`raster_height` `CalculateRasterRectangle`'s.
+#[cfg(feature = "renderer-wgpu")]
+#[repr(C)]
+pub struct FfiNativeTextGlyph {
+    pub font_identity: *const u8,
+    pub font_identity_len: usize,
+    pub glyph: u32,
+    pub raster_point_size_64: u32,
+    pub antialias: bool,
+    pub subpixel: bool,
+    pub draw_left: f64,
+    pub draw_top: f64,
+    pub raster_width: u32,
+    pub raster_height: u32,
+}
+
+/// One `FUnderline` (`hp2_wgpu::native_text::NativeTextUnderline`).
+#[cfg(feature = "renderer-wgpu")]
+#[repr(C)]
+pub struct FfiNativeTextUnderline {
+    pub start: f64,
+    pub end: f64,
+    pub baseline: f64,
+    pub position: f64,
+    pub thickness: f64,
+}
+
+/// Rasterizes glyph `index` of the current draw into `out_coverage`
+/// (`out_len` = raster_width * raster_height bytes, top row first).
+/// Returns false when the provider cannot rasterize it.
+#[cfg(feature = "renderer-wgpu")]
+pub type FfiNativeTextRasterize = unsafe extern "C" fn(
+    ctx: *mut c_void,
+    index: usize,
+    out_coverage: *mut u8,
+    out_len: usize,
+) -> bool;
+
+/// Replaces XOpenGL's native-text `DrawLayout` (`NativeText.cpp:396-491`,
+/// `hp2_wgpu::RenderLoop::draw_native_text`). Returns false, with nothing
+/// queued, wherever the C++ returns 0 (the canvas then falls back to bitmap
+/// text). `rasterize` is called only for glyphs missing from the atlas.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not yet
+/// destroyed), or null. `layout` must point to a valid
+/// `FfiNativeTextLayout`. `glyphs`/`underlines` must be valid for their
+/// counts (or null with a zero count), each glyph's font identity valid
+/// for its length. `rasterize` must honor its own contract for `ctx`.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn hp2_rs_wgpu_draw_native_text(
+    handle: *mut c_void,
+    layout: *const FfiNativeTextLayout,
+    glyphs: *const FfiNativeTextGlyph,
+    glyph_count: usize,
+    underlines: *const FfiNativeTextUnderline,
+    underline_count: usize,
+    fx2: f32,
+    fy2: f32,
+    rasterize: FfiNativeTextRasterize,
+    ctx: *mut c_void,
+) -> bool {
+    guard("hp2_rs_wgpu_draw_native_text", false, move || {
+        if handle.is_null() || layout.is_null() {
+            return false;
+        }
+        let layout = unsafe { &*layout };
+        let (Some(raw_glyphs), Some(raw_underlines)) = (unsafe {
+            (
+                typed_slice_from_raw(glyphs, glyph_count),
+                typed_slice_from_raw(underlines, underline_count),
+            )
+        }) else {
+            log::warn!("hp2_rs_wgpu_draw_native_text: null array with a nonzero count");
+            return false;
+        };
+        let mut glyphs = Vec::with_capacity(raw_glyphs.len());
+        for raw in raw_glyphs {
+            let Some(font_identity) =
+                (unsafe { str_from_raw(raw.font_identity, raw.font_identity_len) })
+            else {
+                log::warn!("hp2_rs_wgpu_draw_native_text: invalid font identity");
+                return false;
+            };
+            glyphs.push(hp2_wgpu::native_text::NativeTextGlyph {
+                key: hp2_wgpu::text_atlas::GlyphKey {
+                    font_identity: font_identity.to_owned(),
+                    glyph: raw.glyph,
+                    raster_point_size_64: raw.raster_point_size_64,
+                    antialias: raw.antialias,
+                    subpixel: raw.subpixel,
+                },
+                draw_left: raw.draw_left,
+                draw_top: raw.draw_top,
+                raster_width: raw.raster_width,
+                raster_height: raw.raster_height,
+            });
+        }
+        let underlines: Vec<_> = raw_underlines
+            .iter()
+            .map(|raw| hp2_wgpu::native_text::NativeTextUnderline {
+                start: raw.start,
+                end: raw.end,
+                baseline: raw.baseline,
+                position: raw.position,
+                thickness: raw.thickness,
+            })
+            .collect();
+        let layout = hp2_wgpu::native_text::NativeTextLayout {
+            start_x: layout.start_x,
+            start_y: layout.start_y,
+            origin_x: layout.origin_x,
+            origin_y: layout.origin_y,
+            clip_x: layout.clip_x,
+            clip_y: layout.clip_y,
+            clip: layout.clip,
+            poly_flags: layout.poly_flags,
+            color: layout.color,
+        };
+        let mut rasterize_glyph = |index: usize| -> Option<Vec<u8>> {
+            let glyph = glyphs.get(index)?;
+            let len = glyph.raster_width as usize * glyph.raster_height as usize;
+            let mut coverage = vec![0u8; len];
+            unsafe { rasterize(ctx, index, coverage.as_mut_ptr(), len) }.then_some(coverage)
+        };
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.draw_native_text(
+            &handle.created,
+            &layout,
+            &glyphs,
+            &underlines,
+            fx2,
+            fy2,
+            &mut rasterize_glyph,
+        )
+    })
+}
+
 /// Real `FixCacheID` (`SetTexture.cpp`'s own call site, immediately
 /// before `BindMap->Find`) -- `hp2_wgpu::texture::fix_cache_id`'s own
 /// doc has the full real reasoning. Pure (no `WgpuHandle` needed):

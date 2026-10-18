@@ -101,6 +101,12 @@ class UWgpuRenderDevice : public URenderDevice
 	// why: the Surface borrows the view's CAMetalLayer).
 	void* MetalView;
 
+	// Shared native text provider (XOpenGL NativeText.cpp's factory; CoreText
+	// on Apple). Owns shaping and glyph rasterization only, with no GPU
+	// state, so it is never Reset here. NULL until Init creates it and after
+	// Exit. Zero-initialized like RustDevice.
+	class FNativeTextPlatformBackend* NativeTextBackend;
+
 	// Total UWgpuRenderDevice::SetSceneNode calls since the last Init
 	// (not since process start -- Init resets it, matching its own
 	// device-recreate-on-every-toggle behavior). Logged in Exit next
@@ -223,6 +229,14 @@ class UWgpuRenderDevice : public URenderDevice
 	void PopHit( INT Count, UBOOL bForce );
 	void GetStats( TCHAR* Result );
 	void ReadPixels( FColor* Pixels );
+
+	// Native Canvas text. Layout create/measure/destroy go through the shared
+	// provider (NativeText.h); DrawCanvasText hands the shaped layout to the
+	// Rust atlas (hp2_rs_wgpu_draw_native_text).
+	UBOOL CreateCanvasTextLayout( const FCanvasTextRequest& Request, FCanvasTextLayout*& OutLayout );
+	void DestroyCanvasTextLayout( FCanvasTextLayout* Layout );
+	UBOOL MeasureCanvasText( FCanvasTextLayout* Layout, INT& OutWidth, INT& OutHeight );
+	UBOOL DrawCanvasText( FSceneNode* Frame, FCanvasTextLayout* Layout );
 };
 
 #endif
