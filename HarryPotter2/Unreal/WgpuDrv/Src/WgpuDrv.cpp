@@ -286,6 +286,10 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	Draw2DPointCallCount = 0;
 	DrawTrianglesCallCount = 0;
 	DrawComplexSurfaceCallCount = 0;
+	EndFlashDrawCount = 0;
+	// Neutral: (0.5,0.5,0.5,0) / 0 draws no overlay (see EndFlash).
+	CurrentFlashScale = FPlane(0.5f,0.5f,0.5f,0.f);
+	CurrentFlashFog = FPlane(0.f,0.f,0.f,0.f);
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -493,11 +497,13 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 	// ScreenClear, not FlashScale/FlashFog: XOpenGL.cpp's own Lock
 	// uses exactly ScreenClear.X/Y/Z/W as the real glClearColor value
 	// (confirmed by reading it, not assumed) -- FlashScale/FlashFog
-	// are a separate post-process tint that XOpenGL stores for later,
-	// not the buffer clear. No draw-call forwarding exists yet (this
-	// class's own header doc), so FlashScale/FlashFog/HitData/HitSize/
+	// are a separate post-process tint, not the buffer clear. They are
+	// stored here for EndFlash, which the engine calls after DrawWorld
+	// within this same frame (UnGame.cpp:1761). HitData/HitSize/
 	// RenderLockFlags go unused here for now, same as every other
 	// still-stub virtual in this class.
+	CurrentFlashScale = FlashScale;
+	CurrentFlashFog = FlashFog;
 	//
 	// Real physical pixel dimensions, not Viewport->SizeX/SizeY
 	// (logical/point units): XOpenGL's own present path makes exactly
@@ -965,6 +971,35 @@ void UWgpuRenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD Line
 		Frame->FX2, Frame->FY2,
 		Color.X, Color.Y, Color.Z,
 		LineFlags );
+	unguard;
+}
+
+void UWgpuRenderDevice::EndFlash()
+{
+	guard(UWgpuRenderDevice::EndFlash);
+	if( !RustDevice )
+		return;
+
+	// Real UXOpenGLRenderDevice::EndFlash (DrawSimple.cpp:207-256): draws
+	// the flash overlay only when FlashScale is not the neutral (0.5,0.5,
+	// 0.5,0) or FlashFog is not zero. Alpha is 1 - min(2 * FlashScale.X,
+	// 1), so the overlay goes from transparent to opaque as FlashScale.X
+	// falls. The real NoDrawSimple gate is not mirrored: this class has
+	// no such field, same as Draw2DLine's own override.
+	if( CurrentFlashScale == FPlane(0.5f,0.5f,0.5f,0.f) && CurrentFlashFog == FPlane(0.f,0.f,0.f,0.f) )
+		return;
+	const FLOAT Alpha = 1.f - Min( CurrentFlashScale.X * 2.f, 1.f );
+
+	// Logs only the first draw, same first-call reasoning as Draw2DLine.
+	if( EndFlashDrawCount == 0 )
+	{
+		debugf( NAME_Init, TEXT("WgpuDrv: EndFlash first draw: Fog=(%f,%f,%f) Alpha=%f"),
+			CurrentFlashFog.X, CurrentFlashFog.Y, CurrentFlashFog.Z, Alpha );
+	}
+	EndFlashDrawCount++;
+
+	hp2_rs_wgpu_end_flash( RustDevice,
+		CurrentFlashFog.X, CurrentFlashFog.Y, CurrentFlashFog.Z, Alpha );
 	unguard;
 }
 

@@ -145,6 +145,10 @@ const PF_LUMOS_AFFECTED: u32 = 0x0080_0040;
 const PF_HIGHLIGHTED: u32 = 0x1000_0000;
 const PF_OCCLUDE: u32 = 0x8000_0000;
 const LINE_DEPTH_CUED: u32 = 0x0000_0002;
+/// `LINE_Transparent` (`UnRender.h`'s `ELineFlags`, value 1). Only
+/// `EndFlash`'s own quad passes it; `for_line_flags` ignores it because
+/// the blend is the fixed `PF_Highlighted` either way.
+pub(crate) const LINE_TRANSPARENT: u32 = 0x0000_0001;
 
 /// Per-draw blend, color-mask and depth state (XOpenGL `SetBlend` and
 /// `SetDepth`). Each distinct value needs its own pipeline.
@@ -519,10 +523,11 @@ impl SimpleLinePipeline {
 /// them -- `simple.wgsl`/`LineVertex`/`DrawParams`/`LineDrawCall` are
 /// all directly reused unchanged, only `new`'s own `primitive.topology`
 /// and `record`'s own vertex-count assert differ from
-/// `SimpleLinePipeline`'s. `Draw2DPoint` is this struct's own real
-/// production caller (`DrawSimple.cpp:154-205`, `EndFlash`'s own
-/// flash-overlay quad, `DrawSimple.cpp:207-256`, is not ported --
-/// no real caller/FFI wiring exists for it yet, tracked separately).
+/// `SimpleLinePipeline`'s. Its real production callers are `Draw2DPoint`
+/// (`DrawSimple.cpp:154-205`) and `EndFlash`'s own flash-overlay quad
+/// (`DrawSimple.cpp:207-256`, via `queue_end_flash`), both through the
+/// `Points` batch payload. The color target takes `state.blend`, so the
+/// `PF_Highlighted` blend `EndFlash` needs is honored.
 pub struct SimpleTrianglePipeline {
     pipeline: wgpu::RenderPipeline,
     frame_uniforms_layout: wgpu::BindGroupLayout,
@@ -764,6 +769,26 @@ pub fn point_quad_corners(request: PointQuadRequest) -> PointQuadCorners {
         top_right: coord(x2 + 0.5, y1 - 0.5),
         bottom_right: coord(x2 + 0.5, y2 + 0.5),
         bottom_left: coord(x1 - 0.5, y2 + 0.5),
+    }
+}
+
+/// Full-viewport quad for `UXOpenGLRenderDevice::EndFlash`
+/// (`ThirdParty/XOpenGLDrv/Src/DrawSimple.cpp:207-256`). Corners are
+/// `(rfx2 * (±size_x / 2), rfy2 * (±size_y / 2), 1)`, which is `±RProjZ`
+/// in the same units `point_quad_corners` uses for its screen edges, so
+/// the quad covers the viewport exactly. `z` is the literal `1.0` that
+/// XOpenGL passes, not `resolve_point_z`'s adjusted value. Corner order
+/// matches `PointQuadCorners` (`top_left` `(-,-)`, `top_right` `(+,-)`,
+/// `bottom_right` `(+,+)`, `bottom_left` `(-,+)`).
+pub fn flash_quad_corners(rfx2: f32, rfy2: f32, size_x: f32, size_y: f32) -> PointQuadCorners {
+    let half_x = size_x / 2.0;
+    let half_y = size_y / 2.0;
+    let coord = |sx: f32, sy: f32| [rfx2 * sx * half_x, rfy2 * sy * half_y, 1.0];
+    PointQuadCorners {
+        top_left: coord(-1.0, -1.0),
+        top_right: coord(1.0, -1.0),
+        bottom_right: coord(1.0, 1.0),
+        bottom_left: coord(-1.0, 1.0),
     }
 }
 

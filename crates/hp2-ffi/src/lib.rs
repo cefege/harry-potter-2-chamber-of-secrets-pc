@@ -3869,6 +3869,34 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_point(
     })
 }
 
+/// Real `UXOpenGLRenderDevice::EndFlash`'s own flash overlay
+/// (`DrawSimple.cpp:207-256`) for `UWgpuRenderDevice::EndFlash`. `(r, g, b, a)`
+/// is the caller-computed `DrawColor` (`FlashFog.XYZ`, `1 - min(2 * FlashScale.X,
+/// 1)`). Queued as one full-viewport quad with the fixed `PF_Highlighted`
+/// blend and no depth test; a null `handle` or a frame with no `SetSceneNode`
+/// yet is a no-op.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not yet
+/// destroyed), or null (a no-op).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_end_flash(
+    handle: *mut c_void,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) {
+    guard("hp2_rs_wgpu_end_flash", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.queue_end_flash([r, g, b, a]);
+    })
+}
+
 /// Borrows a raw `(ptr, count)` FFI array as `&[T]` -- the generic
 /// counterpart to this file's own `bytes_from_raw` (byte-specific)
 /// and `palette_from_raw` (fixed-256-element-specific) for a real

@@ -1868,13 +1868,13 @@ impl RenderLoop {
     /// `6de550c` already fixed once for `Draw2DLine` specifically;
     /// fixed here before landing, not shipped and fixed later.
     ///
-    /// Known, explicitly scoped gaps, not silently pretended away,
-    /// same category `hp2_rs_wgpu_draw_2d_line`'s own doc already
-    /// names for lines: the real `HitTesting() ? HitColor : Color`
-    /// substitution and the real fixed `BlendMode = PF_Highlighted`
-    /// (`DrawSimple.cpp:166-168`) are not applied -- `SimpleTriangle
-    /// Pipeline`'s own fixed `blend: None` is the same known first-
-    /// proof limitation `SimpleLinePipeline`'s own doc already states.
+    /// Known, explicitly scoped gap, not silently pretended away, same
+    /// category `hp2_rs_wgpu_draw_2d_line`'s own doc already names for
+    /// lines: the real `HitTesting() ? HitColor : Color` substitution
+    /// (`DrawSimple.cpp:166-168`) is not applied. The fixed
+    /// `BlendMode = PF_Highlighted` is applied: `for_line_flags` selects
+    /// `(One, OneMinusSrcAlpha)` and `SimpleTrianglePipeline` takes that
+    /// blend through its color target.
     ///
     /// Extends `self.batches`' own last entry when it is already a
     /// `Points` batch for this same segment, otherwise pushes a new
@@ -1922,6 +1922,39 @@ impl RenderLoop {
             color: [color[0], color[1], color[2], 1.0],
         };
         let state = draw::RenderState::for_line_flags(line_flags);
+        self.push_point(segment, state, point);
+    }
+
+    /// Real `UXOpenGLRenderDevice::EndFlash`'s own flash overlay
+    /// (`DrawSimple.cpp:207-256`), queued as one `Points` quad over the
+    /// whole viewport. `color` is `(FlashFog.XYZ, 1 - min(2 * FlashScale.X,
+    /// 1))`, computed by the C++ caller, so the alpha is per-quad here,
+    /// not forced to 1 like `queue_point`'s. The state is the fixed
+    /// `PF_Highlighted` blend with no depth test, the same as XOpenGL's
+    /// `BlendMode = PF_Highlighted` / `LineFlags = LINE_Transparent`
+    /// (`draw::LINE_TRANSPARENT`; `for_line_flags` reads only depth-cued).
+    /// Needs a scene from `SetSceneNode` the same way `queue_point` does;
+    /// returns without queueing otherwise.
+    pub fn queue_end_flash(&mut self, color: [f32; 4]) {
+        if self.in_progress.is_none() {
+            return;
+        }
+        let Some(scene) = self.last_scene.as_ref() else {
+            return;
+        };
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
+            return;
+        };
+        let (rfx2, rfy2) = scene_rfx2_rfy2(scene);
+        let corners = draw::flash_quad_corners(rfx2, rfy2, scene.fx, scene.fy);
+        let state = draw::RenderState::for_line_flags(draw::LINE_TRANSPARENT);
+        self.push_point(segment, state, QueuedPoint { corners, color });
+    }
+
+    /// Appends `point` to the trailing `Points` batch when its segment and
+    /// state match, otherwise starts a new batch. Shared by `queue_point`
+    /// and `queue_end_flash`.
+    fn push_point(&mut self, segment: usize, state: draw::RenderState, point: QueuedPoint) {
         match self.batches.last_mut() {
             Some(Batch {
                 segment: last_segment,

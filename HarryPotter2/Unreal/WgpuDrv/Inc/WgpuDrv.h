@@ -143,6 +143,19 @@ class UWgpuRenderDevice : public URenderDevice
 	// Init, same reset/logging convention as Draw2DLineCallCount above.
 	INT DrawComplexSurfaceCallCount;
 
+	// Lock's FlashScale/FlashFog, stored for EndFlash. Named differently
+	// from Lock's parameters so they do not shadow. Init resets them to
+	// neutral values (0.5,0.5,0.5,0) / 0: FPlane's default constructor
+	// leaves W uninitialized, and a zero FlashScale with zero fog would
+	// draw an opaque black overlay.
+	FPlane CurrentFlashScale;
+	FPlane CurrentFlashFog;
+
+	// Total UWgpuRenderDevice::EndFlash overlay draws (calls that pass the
+	// neutral-value skip) since the last Init, same reset/logging
+	// convention as Draw2DLineCallCount above.
+	INT EndFlashDrawCount;
+
 	// `[WgpuDrv.WgpuRenderDevice] Backend=Auto|Metal|Vulkan|Dx12|Gl` --
 	// config property, UEnum-backed (StaticConstructor registers the
 	// enum). Plain member index: 0=Auto, 1=Metal, 2=Vulkan, 3=Dx12,
@@ -217,6 +230,7 @@ class UWgpuRenderDevice : public URenderDevice
 	void Flush( UBOOL AllowPrecache );
 	void Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize );
 	void Unlock( UBOOL Blit );
+	void EndFlash();
 	void DrawComplexSurface( FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet, DWORD PolyFlags, BYTE cAlpha );
 	void SetSceneNode( FSceneNode* Frame );
 	INT MaxVertices();
