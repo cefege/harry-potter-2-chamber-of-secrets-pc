@@ -348,7 +348,7 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 	{
 		TryRenderDevice( TEXT("ini:Engine.Engine.GameRenderDevice"), SizeX, SizeY, ColorBytes, IsFullscreen() );
 		if( !RenDev )
-			appErrorf( TEXT("No render device could be initialized (see the XOpenGL messages above for the failing reason)") );
+			appErrorf( TEXT("No render device could be initialized (see the WgpuDrv messages above for the failing reason)") );
 	}
 	unguard;
 }

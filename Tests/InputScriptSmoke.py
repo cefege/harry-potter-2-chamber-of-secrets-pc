@@ -272,7 +272,7 @@ def build_launch_command(executable: Path, data_root: Path, ticks: int) -> list[
         str(executable),
         f"-datadir={data_root}",
         f"-REPLAY={REPLAY_STEM}",
-        "-xopengl",
+        "-wgpu",
         "-NOFRONTEND",
         "-window",
         "-nosound",

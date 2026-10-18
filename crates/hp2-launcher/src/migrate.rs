@@ -136,12 +136,12 @@ const OWNED_BOOLEANS: &[OwnedBoolean] = &[
         fallback: true,
     },
     OwnedBoolean {
-        section: "XOpenGLDrv.XOpenGLRenderDevice",
+        section: "WgpuDrv.WgpuRenderDevice",
         key: "UseVSync",
         fallback: false,
     },
     OwnedBoolean {
-        section: "XOpenGLDrv.XOpenGLRenderDevice",
+        section: "WgpuDrv.WgpuRenderDevice",
         key: "UseAA",
         fallback: false,
     },
@@ -290,6 +290,55 @@ fn migrate_enum(
     migration_rewrite(values, section, key, spellings[selected], reason, changes);
 }
 
+/// Renderer migration: `WgpuDrv.WgpuRenderDevice` is the only render
+/// device. Any other device class in `[Engine.Engine]` is rewritten to it.
+/// Legacy `XOpenGLDrv.XOpenGLRenderDevice` values carry into the WgpuDrv
+/// section unless it already has a value, and the legacy section is dropped.
+fn migrate_renderer_wgpu(
+    values: &mut Vec<LegacySettingValue>,
+    changes: &mut Vec<SettingsMigrationChange>,
+) {
+    const WGPU: &str = "WgpuDrv.WgpuRenderDevice";
+    const LEGACY: &str = "XOpenGLDrv.XOpenGLRenderDevice";
+    for key in ["GameRenderDevice", "WindowedRenderDevice", "RenderDevice"] {
+        let Some(device) = migration_final_value(values, "Engine.Engine", key) else {
+            continue;
+        };
+        if !same(trim(&device), WGPU) {
+            migration_rewrite(
+                values,
+                "Engine.Engine",
+                key,
+                WGPU,
+                "settings.renderer_wgpu",
+                changes,
+            );
+        }
+    }
+    for key in [
+        "UseVSync",
+        "RenderScale",
+        "UseAA",
+        "NumAASamples",
+        "MaxAnisotropy",
+    ] {
+        let Some(legacy_value) = migration_final_value(values, LEGACY, key) else {
+            continue;
+        };
+        if migration_final_value(values, WGPU, key).is_none() {
+            migration_rewrite(
+                values,
+                WGPU,
+                key,
+                &legacy_value,
+                "settings.renderer_wgpu",
+                changes,
+            );
+        }
+    }
+    values.retain(|entry| !same(&entry.section, LEGACY));
+}
+
 /// Replaces `MigrateLegacySettings`. Returns the canonicalized rows
 /// and the journal of every normalization performed.
 pub fn migrate_legacy_settings(
@@ -297,6 +346,8 @@ pub fn migrate_legacy_settings(
 ) -> (Vec<LegacySettingValue>, Vec<SettingsMigrationChange>) {
     let mut changes = Vec::new();
     let mut values: Vec<LegacySettingValue> = legacy_values.to_vec();
+
+    migrate_renderer_wgpu(&mut values, &mut changes);
 
     // Owned booleans canonicalize to True/False; invalid spellings
     // fall back to the model default the loader would have used.
@@ -436,7 +487,7 @@ pub fn migrate_legacy_settings(
     migrate_discrete_scale(
         &mut values,
         &mut changes,
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "RenderScale",
         &RENDER_SCALE_VALUES,
         1.0,
@@ -490,9 +541,9 @@ pub fn migrate_legacy_settings(
     // Anti-aliasing: a disabled or unrecognized UseAA clears any stale
     // sample count, mirroring `load_anti_aliasing`.
     {
-        let aa_raw = migration_final_value(&values, "XOpenGLDrv.XOpenGLRenderDevice", "UseAA");
+        let aa_raw = migration_final_value(&values, "WgpuDrv.WgpuRenderDevice", "UseAA");
         let samples_raw =
-            migration_final_value(&values, "XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples");
+            migration_final_value(&values, "WgpuDrv.WgpuRenderDevice", "NumAASamples");
         let has_use_aa = aa_raw.is_some();
         let has_samples = samples_raw.is_some();
         if has_use_aa || has_samples {
@@ -509,7 +560,7 @@ pub fn migrate_legacy_settings(
             if has_use_aa {
                 migration_rewrite(
                     &mut values,
-                    "XOpenGLDrv.XOpenGLRenderDevice",
+                    "WgpuDrv.WgpuRenderDevice",
                     "UseAA",
                     bool_text(enabled),
                     "settings.antialiasing_normalized",
@@ -519,7 +570,7 @@ pub fn migrate_legacy_settings(
             if has_samples {
                 migration_rewrite(
                     &mut values,
-                    "XOpenGLDrv.XOpenGLRenderDevice",
+                    "WgpuDrv.WgpuRenderDevice",
                     "NumAASamples",
                     &samples.to_string(),
                     "settings.antialiasing_normalized",
@@ -529,8 +580,7 @@ pub fn migrate_legacy_settings(
         }
     }
 
-    if let Some(text) =
-        migration_final_value(&values, "XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy")
+    if let Some(text) = migration_final_value(&values, "WgpuDrv.WgpuRenderDevice", "MaxAnisotropy")
     {
         let mut canonical = 4i32;
         let mut reason = "settings.anisotropy_invalid_defaulted";
@@ -547,7 +597,7 @@ pub fn migrate_legacy_settings(
         }
         migration_rewrite(
             &mut values,
-            "XOpenGLDrv.XOpenGLRenderDevice",
+            "WgpuDrv.WgpuRenderDevice",
             "MaxAnisotropy",
             &canonical.to_string(),
             reason,
@@ -629,7 +679,8 @@ mod tests {
     // out-of-range ranged numbers, anti-aliasing with samples
     // preserved, anisotropy, valid and invalid enum spellings
     // (including surrounding whitespace), and an unrelated
-    // passthrough key.
+    // passthrough key. Renderer rows (legacy XOpenGL) are re-derived by
+    // `settings.renderer_wgpu` below; that step is hand-computed, not probed.
     #[test]
     fn migrate_legacy_settings_matches_cpp_ground_truth_on_a_full_fixture() {
         let input = vec![
@@ -669,7 +720,6 @@ mod tests {
                 value("SDLDrv.SDLClient", "BorderlessWindow", "False"),
                 value("SDLDrv.SDLClient", "ShowFPS", "True"),
                 value("SDLDrv.SDLClient", "MaintainVerticalFOV", "True"),
-                value("XOpenGLDrv.XOpenGLRenderDevice", "UseVSync", "False"),
                 value("Engine.GameEngine", "UseSound", "False"),
                 value("Engine.PlayerPawn", "bInvertMouse", "True"),
                 value("HGame.Harry", "bAutoCenterCamera", "False"),
@@ -678,25 +728,61 @@ mod tests {
                 value("SDLDrv.SDLClient", "WindowedViewportX", "640"),
                 value("SDLDrv.SDLClient", "WindowedViewportY", "480"),
                 value("Engine.GameEngine", "FrameRateLimit", "60"),
-                value("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.67"),
                 value("SDLDrv.SDLClient", "UIScale", "1"),
                 value("SDLDrv.SDLClient", "Brightness", "0.4"),
                 value("ALAudio.ALAudioSubsystem", "SoundVolume", "0.9"),
                 value("ALAudio.ALAudioSubsystem", "MusicVolume", "0.3"),
                 value("Engine.PlayerPawn", "MouseSensitivity", "3"),
-                value("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "True"),
-                value("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "4"),
-                value("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "8"),
                 value("SDLDrv.SDLClient", "TextureDetail", "High"),
                 value("Engine.PlayerPawn", "ObjectDetail", "ObjectDetailMedium"),
                 value("Engine.PlayerPawn", "Difficulty", "DifficultyHard"),
                 value("SomeOther.Section", "UnrelatedKey", "passthrough"),
                 value("SDLDrv.SDLClient", "StartupFullscreen", "False"),
+                value("WgpuDrv.WgpuRenderDevice", "UseVSync", "False"),
+                value("WgpuDrv.WgpuRenderDevice", "RenderScale", "0.67"),
+                value("WgpuDrv.WgpuRenderDevice", "UseAA", "True"),
+                value("WgpuDrv.WgpuRenderDevice", "NumAASamples", "4"),
+                value("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "8"),
             ]
         );
         assert_eq!(
             changes,
             vec![
+                change(
+                    "WgpuDrv.WgpuRenderDevice",
+                    "UseVSync",
+                    "",
+                    "0",
+                    "settings.renderer_wgpu"
+                ),
+                change(
+                    "WgpuDrv.WgpuRenderDevice",
+                    "RenderScale",
+                    "",
+                    "0.67",
+                    "settings.renderer_wgpu"
+                ),
+                change(
+                    "WgpuDrv.WgpuRenderDevice",
+                    "UseAA",
+                    "",
+                    "true",
+                    "settings.renderer_wgpu"
+                ),
+                change(
+                    "WgpuDrv.WgpuRenderDevice",
+                    "NumAASamples",
+                    "",
+                    "4",
+                    "settings.renderer_wgpu"
+                ),
+                change(
+                    "WgpuDrv.WgpuRenderDevice",
+                    "MaxAnisotropy",
+                    "",
+                    "8",
+                    "settings.renderer_wgpu"
+                ),
                 change(
                     "SDLDrv.SDLClient",
                     "StartupFullscreen",
@@ -726,14 +812,14 @@ mod tests {
                     "settings.boolean_invalid_defaulted"
                 ),
                 change(
-                    "XOpenGLDrv.XOpenGLRenderDevice",
+                    "WgpuDrv.WgpuRenderDevice",
                     "UseVSync",
                     "0",
                     "False",
                     "settings.boolean_spelling"
                 ),
                 change(
-                    "XOpenGLDrv.XOpenGLRenderDevice",
+                    "WgpuDrv.WgpuRenderDevice",
                     "UseAA",
                     "true",
                     "True",
@@ -873,8 +959,61 @@ mod tests {
         assert_eq!(
             values,
             vec![
-                value("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "False"),
-                value("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "0"),
+                value("WgpuDrv.WgpuRenderDevice", "UseAA", "False"),
+                value("WgpuDrv.WgpuRenderDevice", "NumAASamples", "0"),
+            ]
+        );
+    }
+
+    // Renderer migration: non-WgpuDrv device classes are rewritten, legacy
+    // XOpenGL values carry over only where WgpuDrv has no value, and the
+    // legacy section is dropped.
+    #[test]
+    fn renderer_migration_rewrites_devices_and_drops_legacy_section() {
+        let legacy = "XOpenGLDrv.XOpenGLRenderDevice";
+        let wgpu = "WgpuDrv.WgpuRenderDevice";
+        let input = vec![
+            value("Engine.Engine", "GameRenderDevice", legacy),
+            value(
+                "Engine.Engine",
+                "WindowedRenderDevice",
+                "VulkanDrv.VulkanRenderDevice",
+            ),
+            value("Engine.Engine", "RenderDevice", wgpu),
+            value(legacy, "UseVSync", "True"),
+            value(legacy, "MaxAnisotropy", "8"),
+            value(legacy, "DriverNote", "PreserveRendererSetting"),
+            value(wgpu, "UseVSync", "False"),
+        ];
+        let (values, changes) = migrate_legacy_settings(&input);
+        assert_eq!(
+            values,
+            vec![
+                value("Engine.Engine", "GameRenderDevice", wgpu),
+                value("Engine.Engine", "WindowedRenderDevice", wgpu),
+                value("Engine.Engine", "RenderDevice", wgpu),
+                value(wgpu, "UseVSync", "False"),
+                value(wgpu, "MaxAnisotropy", "8"),
+            ]
+        );
+        assert_eq!(
+            changes,
+            vec![
+                change(
+                    "Engine.Engine",
+                    "GameRenderDevice",
+                    legacy,
+                    wgpu,
+                    "settings.renderer_wgpu"
+                ),
+                change(
+                    "Engine.Engine",
+                    "WindowedRenderDevice",
+                    "VulkanDrv.VulkanRenderDevice",
+                    wgpu,
+                    "settings.renderer_wgpu"
+                ),
+                change(wgpu, "MaxAnisotropy", "", "8", "settings.renderer_wgpu"),
             ]
         );
     }

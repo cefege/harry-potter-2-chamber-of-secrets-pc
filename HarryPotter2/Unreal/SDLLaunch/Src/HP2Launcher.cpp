@@ -333,19 +333,6 @@ struct FLauncherSession::Impl
 	void DrawGraphics()
 	{
 		LauncherSettings& s = result.settings;
-		if (caps.rendererChoice)
-		{
-#ifdef HP2_ENABLE_VULKAN_DRIVER
-			const char* backends[] = {"XOpenGL", "Vulkan"};
-			int backend = static_cast<int>(s.renderBackend);
-#endif
-#ifdef HP2_ENABLE_VULKAN_DRIVER
-			ImGui::SetNextItemWidth(-1); if (ImGui::Combo("Renderer", &backend, backends, 2)) s.renderBackend = static_cast<RenderBackend>(backend);
-#else
-			ImGui::TextUnformatted("Renderer: XOpenGL");
-			s.renderBackend = RenderBackend::XOpenGL;
-#endif
-		}
 		if (caps.screenModes)
 		{
 			const char* modes[] = {"Windowed", "Fullscreen", "Borderless desktop"};

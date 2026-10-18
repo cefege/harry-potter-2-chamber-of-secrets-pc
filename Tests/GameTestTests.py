@@ -28,7 +28,10 @@ class GameTestContracts(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.data_root = self.root / "Unreal"
         (self.data_root / "System").mkdir(parents=True)
-        (self.data_root / "System" / "Default.ini").write_text("[Core.System]\n")
+        (self.data_root / "System" / "Default.ini").write_text(
+            "[Core.System]\n[Engine.Engine]\nGameRenderDevice=D3D11Drv.D3D11RenderDevice\n"
+            "WindowedRenderDevice=D3D11Drv.D3D11RenderDevice\nRenderDevice=D3D11Drv.D3D11RenderDevice\n"
+        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -105,29 +108,36 @@ class GameTestContracts(unittest.TestCase):
         with self.assertRaisesRegex(game_test.GameTestError, "System/Default.ini"):
             game_test.list_maps(self.root)
         self._map("Maps/Entryhall_hub.unr")
-        with self.assertRaisesRegex(game_test.GameTestError, "unsupported renderer"):
-            game_test.build_launch_command(Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "metal", 1)
+        for retired in ("metal", "xopengl", "vulkan"):
+            with self.assertRaisesRegex(game_test.GameTestError, "unsupported renderer"):
+                game_test.build_launch_command(Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", retired, 1)
         with self.assertRaisesRegex(game_test.GameTestError, "positive integer"):
-            game_test.build_launch_command(Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "xopengl", 0)
+            game_test.build_launch_command(
+                Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "wgpu", 0,
+                ini_file=Path("/artifacts/wgpu-engine.ini"),
+            )
         with self.assertRaisesRegex(game_test.GameTestError, "positive finite"):
             game_test.run_command([sys.executable, "-c", "raise SystemExit(0)"], repo_root=self.root, timeout_seconds=float("inf"), log_path=self.root / "never.log")
 
     def test_launch_command_preserves_sound_by_default(self) -> None:
+        ini_file = Path("/artifacts/wgpu-engine.ini")
         command = game_test.build_launch_command(
-            Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "xopengl", 42
+            Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "wgpu", 42,
+            ini_file=ini_file,
         )
         self.assertEqual(
             command,
             [
                 "/application", f"-datadir={self.data_root}", "..\\Maps\\Entryhall_hub.unr",
-                "-xopengl", "-NOFRONTEND", "-window", "-testticks=42", "-log",
+                "-wgpu", "-NOFRONTEND", "-window", "-testticks=42", "-log", f"-INI={ini_file}",
             ],
         )
         self.assertNotIn("-nosound", command)
         self.assertIn(
             "-nosound",
             game_test.build_launch_command(
-                Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "xopengl", 1, no_sound=True
+                Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "wgpu", 1,
+                no_sound=True, ini_file=ini_file,
             ),
         )
 
@@ -145,10 +155,26 @@ class GameTestContracts(unittest.TestCase):
         with self.assertRaisesRegex(game_test.GameTestError, "unsupported renderer"):
             game_test.build_launch_command(Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "metal", 1)
 
+    def test_render_device_engine_ini_selects_wgpu_and_rejects_ambiguous_keys(self) -> None:
+        destination = self.root / "wgpu-engine.ini"
+        game_test.render_device_engine_ini(self.data_root, destination, "wgpu")
+        text = destination.read_text(encoding="utf-8")
+        for key in ("GameRenderDevice", "WindowedRenderDevice", "RenderDevice"):
+            self.assertIn(f"{key}=WgpuDrv.WgpuRenderDevice", text)
+        with self.assertRaisesRegex(game_test.GameTestError, "unsupported renderer"):
+            game_test.render_device_engine_ini(self.data_root, self.root / "x.ini", "xopengl")
+        default_path = self.data_root / "System" / "Default.ini"
+        default_path.write_text(
+            "[Engine.Engine]\nGameRenderDevice=A\nWindowedRenderDevice=A\nRenderDevice=A\nRenderDevice=B\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(game_test.GameTestError, "expected exactly one RenderDevice"):
+            game_test.render_device_engine_ini(self.data_root, self.root / "y.ini", "wgpu")
+
     def test_replay_launch_command_replaces_map_with_replay_source(self) -> None:
         command = game_test.build_launch_command(
-            Path("/application"), self.data_root, None, "xopengl", 42,
-            replay_stem="privet_rng",
+            Path("/application"), self.data_root, None, "wgpu", 42,
+            replay_stem="privet_rng", ini_file=Path("/artifacts/wgpu-engine.ini"),
         )
         self.assertEqual(command[2], "-REPLAY=privet_rng")
         self.assertNotIn("..\\Maps\\PrivetDr.unr", command)
@@ -260,7 +286,7 @@ class GameTestContracts(unittest.TestCase):
                     data_root=self.data_root,
                     selected_map="Maps/Test.unr",
                     map_token="..\\Maps\\Test.unr",
-                    renderer="xopengl",
+                    renderer="wgpu",
                     ticks=1,
                     fixed_dt=0.02,
                     input_script=None,
@@ -854,7 +880,7 @@ class GameTestContracts(unittest.TestCase):
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
                 map_token="..\\Maps\\Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 input_script=None,
@@ -873,7 +899,7 @@ class GameTestContracts(unittest.TestCase):
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
                 map_token="..\\Maps\\Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 input_script=None,
@@ -940,7 +966,7 @@ class GameTestContracts(unittest.TestCase):
                 engine_bin=engine_bin,
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 timeout_seconds=1.0,
@@ -968,7 +994,7 @@ class GameTestContracts(unittest.TestCase):
             "--engine-bin", "engine",
             "--data-root", "data",
             "--map", "Maps/Test.unr",
-            "--renderer", "xopengl",
+            "--renderer", "wgpu",
             "--ticks", "1",
             "--fixed-dt", "0.02",
             "--checkpoints", "authored",
@@ -985,7 +1011,7 @@ class GameTestContracts(unittest.TestCase):
     def test_paired_rng_trace_limit_cli_is_strict_and_requires_trace_directory(self) -> None:
         base = [
             "game_test.py", "paired", "--app", "app", "--engine-bin", "engine",
-            "--data-root", "data", "--map", "Maps/Test.unr", "--renderer", "xopengl",
+            "--data-root", "data", "--map", "Maps/Test.unr", "--renderer", "wgpu",
             "--ticks", "1", "--fixed-dt", "0.02", "--checkpoints", "authored",
             "--output", "paired.json", "--rng-trace-dir", "rng-traces",
         ]
@@ -1008,7 +1034,7 @@ class GameTestContracts(unittest.TestCase):
         ):
             game_test.run_paired_game(
                 app=app, engine_bin=engine_bin, data_root=self.data_root,
-                selected_map="Maps/Test.unr", renderer="xopengl", ticks=1,
+                selected_map="Maps/Test.unr", renderer="wgpu", ticks=1,
                 fixed_dt=0.02, timeout_seconds=1.0, output=self.root / "paired.json",
                 rng_trace_limit=65_536,
             )
@@ -1034,7 +1060,7 @@ class GameTestContracts(unittest.TestCase):
                 game_test._run_fidelity_side(
                     name=side, executable=self.root / side, data_root=self.data_root,
                     selected_map="Maps/Test.unr", map_token="..\\Maps\\Test.unr",
-                    renderer="xopengl", ticks=1, fixed_dt=0.02, input_script=None,
+                    renderer="wgpu", ticks=1, fixed_dt=0.02, input_script=None,
                     replay=None, timeout_seconds=1.0, artifact_root=self.root / "artifacts",
                     checkpoint_manifest=checkpoint_manifest, start_gate=threading.Barrier(1),
                     rng_trace_path=trace_paths[side], shadow_update_trace_path=None,
@@ -1043,7 +1069,7 @@ class GameTestContracts(unittest.TestCase):
             game_test._run_fidelity_side(
                 name="cpp", executable=self.root / "cpp", data_root=self.data_root,
                 selected_map="Maps/Test.unr", map_token="..\\Maps\\Test.unr",
-                renderer="xopengl", ticks=1, fixed_dt=0.02, input_script=None,
+                renderer="wgpu", ticks=1, fixed_dt=0.02, input_script=None,
                 replay=None, timeout_seconds=1.0, artifact_root=self.root / "artifacts",
                 checkpoint_manifest=checkpoint_manifest, start_gate=threading.Barrier(1),
                 rng_trace_path=trace_paths["cpp"], shadow_update_trace_path=None,
@@ -1086,7 +1112,7 @@ class GameTestContracts(unittest.TestCase):
         ):
             result = game_test.run_paired_game(
                 app=app, engine_bin=engine_bin, data_root=self.data_root,
-                selected_map="Maps/Test.unr", renderer="xopengl", ticks=1,
+                selected_map="Maps/Test.unr", renderer="wgpu", ticks=1,
                 fixed_dt=0.02, timeout_seconds=1.0, output=self.root / "paired.json",
                 rng_trace_dir=trace_dir, rng_trace_limit=65_536,
             )
@@ -1100,7 +1126,7 @@ class GameTestContracts(unittest.TestCase):
     def test_paired_seed_cli_is_strict_decimal(self) -> None:
         base = [
             "game_test.py", "paired", "--app", "app", "--engine-bin", "engine",
-            "--data-root", "data", "--map", "Maps/Test.unr", "--renderer", "xopengl",
+            "--data-root", "data", "--map", "Maps/Test.unr", "--renderer", "wgpu",
             "--ticks", "1", "--fixed-dt", "0.02", "--checkpoints", "authored",
             "--output", "paired.json",
         ]
@@ -1129,7 +1155,7 @@ class GameTestContracts(unittest.TestCase):
             cpp_run, _, _ = game_test._run_fidelity_side(
                 name="cpp", executable=self.root / "cpp", data_root=self.data_root,
                 selected_map="Maps/Test.unr", map_token="..\\Maps\\Test.unr",
-                renderer="xopengl", ticks=1, fixed_dt=0.02, input_script=None,
+                renderer="wgpu", ticks=1, fixed_dt=0.02, input_script=None,
                 replay=None, timeout_seconds=1.0, artifact_root=self.root / "artifacts",
                 checkpoint_manifest=checkpoint_manifest, start_gate=threading.Barrier(1),
                 rng_trace_path=None, shadow_update_trace_path=None, rng_seed=42,
@@ -1137,7 +1163,7 @@ class GameTestContracts(unittest.TestCase):
             rust_run, _, _ = game_test._run_fidelity_side(
                 name="rust", executable=self.root / "rust", data_root=self.data_root,
                 selected_map="Maps/Test.unr", map_token="..\\Maps\\Test.unr",
-                renderer="xopengl", ticks=1, fixed_dt=0.02, input_script=None,
+                renderer="wgpu", ticks=1, fixed_dt=0.02, input_script=None,
                 replay=None, timeout_seconds=1.0, artifact_root=self.root / "artifacts",
                 checkpoint_manifest=checkpoint_manifest, start_gate=threading.Barrier(1),
                 rng_trace_path=None, shadow_update_trace_path=None, rng_seed=42,
@@ -1165,7 +1191,7 @@ class GameTestContracts(unittest.TestCase):
         with self.assertRaisesRegex(game_test.GameTestError, "only for map paired runs"):
             game_test.run_paired_game(
                 app=app, engine_bin=engine_bin, data_root=self.data_root,
-                selected_map="Maps/Test.unr", renderer="xopengl", ticks=1,
+                selected_map="Maps/Test.unr", renderer="wgpu", ticks=1,
                 fixed_dt=0.02, timeout_seconds=1.0, output=self.root / "paired.json",
                 replay_fixture=replay, replay_url="..\\Maps\\Test.unr", rng_seed=42,
             )
@@ -1261,7 +1287,7 @@ class GameTestContracts(unittest.TestCase):
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
                 map_token="..\\Maps\\Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 input_script=None,
@@ -1280,7 +1306,7 @@ class GameTestContracts(unittest.TestCase):
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
                 map_token="..\\Maps\\Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 input_script=None,
@@ -1342,7 +1368,7 @@ class GameTestContracts(unittest.TestCase):
                 engine_bin=engine_bin,
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 timeout_seconds=1.0,
@@ -1472,7 +1498,7 @@ class GameTestContracts(unittest.TestCase):
                 engine_bin=engine_bin,
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 timeout_seconds=1.0,
@@ -1622,7 +1648,7 @@ class GameTestContracts(unittest.TestCase):
                 engine_bin=engine_bin,
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 timeout_seconds=1.0,
@@ -1653,7 +1679,7 @@ class GameTestContracts(unittest.TestCase):
             "--engine-bin", "engine",
             "--data-root", "data",
             "--map", "Maps/Test.unr",
-            "--renderer", "xopengl",
+            "--renderer", "wgpu",
             "--ticks", "1",
             "--fixed-dt", "0.02",
             "--checkpoints", "authored",
@@ -1699,7 +1725,7 @@ class GameTestContracts(unittest.TestCase):
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
                 map_token="..\\Maps\\Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 input_script=None,
@@ -1718,7 +1744,7 @@ class GameTestContracts(unittest.TestCase):
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
                 map_token="..\\Maps\\Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 input_script=None,

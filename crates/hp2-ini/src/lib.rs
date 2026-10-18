@@ -70,10 +70,10 @@ pub fn build_default_ini(
         remove_section(&mut lines, "Editor.EditorEngine");
     }
     let engine: [(&str, &str); 6] = [
-        ("GameRenderDevice", "XOpenGLDrv.XOpenGLRenderDevice"),
+        ("GameRenderDevice", "WgpuDrv.WgpuRenderDevice"),
         ("AudioDevice", "ALAudio.ALAudioSubsystem"),
-        ("WindowedRenderDevice", "XOpenGLDrv.XOpenGLRenderDevice"),
-        ("RenderDevice", "XOpenGLDrv.XOpenGLRenderDevice"),
+        ("WindowedRenderDevice", "WgpuDrv.WgpuRenderDevice"),
+        ("RenderDevice", "WgpuDrv.WgpuRenderDevice"),
         ("ViewportManager", "SDLDrv.SDLClient"),
         (
             "Language",
@@ -142,24 +142,18 @@ pub fn build_default_ini(
     for (key, value) in sdl {
         set(&mut lines, "SDLDrv.SDLClient", key, value)?;
     }
-    let gl: [(&str, &str); 14] = [
-        ("OpenGLVersion", "Core"),
-        ("UseBindlessTextures", "False"),
-        ("UsePersistentBuffers", "False"),
-        ("UseShaderDrawParameters", "False"),
-        ("UseBufferInvalidation", "False"),
-        ("UseShaderCache", "False"),
+    // WgpuDrv reads UseVSync/UseAA/NumAASamples/MaxAnisotropy from its own
+    // section; DetailTextures is URenderDevice's base config bit
+    // (UnRenDev.h), read by the engine. The XOpenGL-only keys are gone.
+    let wgpu: [(&str, &str); 5] = [
         ("DetailTextures", "True"),
-        ("MacroTextures", "True"),
-        ("UseTrilinear", "True"),
-        ("UsePrecache", "True"),
         ("UseVSync", "Off"),
         ("UseAA", "True"),
         ("NumAASamples", "4"),
         ("MaxAnisotropy", "16.000000"),
     ];
-    for (key, value) in gl {
-        set(&mut lines, "XOpenGLDrv.XOpenGLRenderDevice", key, value)?;
+    for (key, value) in wgpu {
+        set(&mut lines, "WgpuDrv.WgpuRenderDevice", key, value)?;
     }
     if profile != Profile::Safe {
         let music_volume = retail_value(&retail, "ALAudio.ALAudioSubsystem", "MusicVolume")?;
@@ -538,18 +532,14 @@ fn validate_default(lines: &Lines, profile: Profile) -> Result<(), String> {
         (
             "Engine.Engine",
             "GameRenderDevice",
-            "XOpenGLDrv.XOpenGLRenderDevice",
+            "WgpuDrv.WgpuRenderDevice",
         ),
         (
             "Engine.Engine",
             "WindowedRenderDevice",
-            "XOpenGLDrv.XOpenGLRenderDevice",
+            "WgpuDrv.WgpuRenderDevice",
         ),
-        (
-            "Engine.Engine",
-            "RenderDevice",
-            "XOpenGLDrv.XOpenGLRenderDevice",
-        ),
+        ("Engine.Engine", "RenderDevice", "WgpuDrv.WgpuRenderDevice"),
         ("Engine.Engine", "ViewportManager", "SDLDrv.SDLClient"),
         ("Engine.Engine", "AudioDevice", "ALAudio.ALAudioSubsystem"),
         (

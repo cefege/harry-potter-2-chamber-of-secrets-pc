@@ -6,11 +6,11 @@
     ],
     "System/Default.ini": [
       "base: prototype System/Default.ini",
-      "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, prototype Language=int",
+      "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, prototype Language=int",
       "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
       "Core.System: forward-slash portable relative data paths",
       "SDLDrv.SDLClient: native portable client defaults",
-      "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set"
+      "WgpuDrv.WgpuRenderDevice: wgpu feature set"
     ]
   },
   "entries": [

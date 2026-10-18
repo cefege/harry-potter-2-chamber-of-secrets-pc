@@ -39,7 +39,6 @@ FfiLauncherSettings ToFfi(const LauncherSettings& settings)
 	ffi.screen_mode = static_cast<int32_t>(settings.screenMode);
 	ffi.resolution_width = settings.resolution.width;
 	ffi.resolution_height = settings.resolution.height;
-	ffi.render_backend = static_cast<int32_t>(settings.renderBackend);
 	ffi.vertical_sync = settings.verticalSync;
 	ffi.render_scale = settings.renderScale;
 	ffi.ui_scale = settings.uiScale;
@@ -75,7 +74,6 @@ LauncherSettings FromFfi(const FfiLauncherSettings& ffi)
 	settings.resolution.height = ffi.resolution_height;
 	settings.resolution.label =
 		std::to_string(ffi.resolution_width) + " x " + std::to_string(ffi.resolution_height);
-	settings.renderBackend = static_cast<RenderBackend>(ffi.render_backend);
 	settings.verticalSync = ffi.vertical_sync;
 	settings.renderScale = ffi.render_scale;
 	settings.uiScale = ffi.ui_scale;

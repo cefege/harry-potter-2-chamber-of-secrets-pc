@@ -121,7 +121,7 @@ out/<preset>/Testing/HP2/<test>/Artifacts/    # structured reports, logs, captur
 ```
 
 The renderer smoke scripts additionally write their JSON report next to those
-directories: `out/<preset>/Testing/HP2/renderer_smoke_xopengl/smoke-maps.json`
+directories: `out/<preset>/Testing/HP2/renderer_smoke_wgpu/smoke-maps.json`
 plus per-map engine logs under the sibling `smoke-maps-logs/` directory.
 
 CTest failure output is captured by the presets (`outputOnFailure`); a preset
@@ -165,7 +165,7 @@ Two renderer smoke tiers exist, both requiring the packaged app bundle at
 tests are **not silently skipped — they simply do not exist**, which surfaces as
 a configuration gap rather than a green run.
 
-1. **Commit gate** — `renderer_smoke_xopengl`: launches the XOpenGL renderer on
+1. **Commit gate** — `renderer_smoke_wgpu`: launches the wgpu renderer on
    a fixed three-map subset (`PrivetDr`, `Entry`, `Ch2Skurge`) for 120 ticks
    each with a 90-second per-map timeout, writing `smoke-maps.json`
    (`format_version` 2). Registered whenever the app bundle and prototype data
@@ -192,8 +192,7 @@ cmake --preset macos-arm64 -DFETCHCONTENT_FULLY_DISCONNECTED=ON
 ```
 
 The first configure of a fresh preset needs network access to populate `_deps`;
-the vendored trees under `ThirdParty/` (UT469eSDK, XOpenGLDrv, UT99VulkanDrv,
-vgmstream) are already in-tree and need no download.
+the vendored trees under `ThirdParty/` (UT469eSDK, vgmstream) are already in-tree and need no download.
 
 ## Distribution
 

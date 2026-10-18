@@ -264,8 +264,6 @@ add_custom_target(hp2_windows_dist
     COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_utf8proc_SOURCE_DIR}/LICENSE.md" "${HP2_WINDOWS_DIST_DIR}/licenses/utf8proc-LICENSE.md"
     COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_freetype_SOURCE_DIR}/LICENSE.TXT" "${HP2_WINDOWS_DIST_DIR}/licenses/FreeType-LICENSE.TXT"
     COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_harfbuzz_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/HarfBuzz-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${PROJECT_SOURCE_DIR}/ThirdParty/XOpenGLDrv/LICENSE.md" "${HP2_WINDOWS_DIST_DIR}/licenses/XOpenGLDrv-LICENSE.md"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${PROJECT_SOURCE_DIR}/ThirdParty/XOpenGLDrv/glm/copying.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/GLM-copying.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy "${PROJECT_SOURCE_DIR}/ThirdParty/fonts/LICENSE-Liberation.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/Liberation-LICENSE.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy "${PROJECT_SOURCE_DIR}/ThirdParty/fonts/LICENSE-NotoSansCJK.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/NotoSansCJK-LICENSE.txt"
     COMMAND "${CMAKE_COMMAND}"

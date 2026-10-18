@@ -52,13 +52,6 @@ pub enum ControlMode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum RenderBackend {
-    #[default]
-    XOpenGL,
-    Vulkan,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum DataSource {
     #[default]
     Retail,
@@ -148,7 +141,6 @@ impl Default for SaveRecord {
 pub struct LauncherSettings {
     pub screen_mode: ScreenMode,
     pub resolution: DisplayResolution,
-    pub render_backend: RenderBackend,
     pub vertical_sync: bool,
     pub render_scale: f64,
     pub ui_scale: f64,
@@ -180,7 +172,6 @@ impl Default for LauncherSettings {
         LauncherSettings {
             screen_mode: ScreenMode::default(),
             resolution: DisplayResolution::default(),
-            render_backend: RenderBackend::default(),
             vertical_sync: false,
             render_scale: 1.0,
             ui_scale: 1.0,

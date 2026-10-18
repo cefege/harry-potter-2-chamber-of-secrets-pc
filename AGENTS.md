@@ -17,7 +17,8 @@ one change, and the C++ it replaces is deleted in that same change.
 |Core|`HarryPotter2/Unreal/Core/`|Object model, serialization (`FName`/`FString`, package79 archives), memory, names, portable SHA-256|
 |Engine|`HarryPotter2/Unreal/Engine/`|Game loop, `UEngine::InputEvent` dispatch, level flow|
 |Render|`HarryPotter2/Unreal/Render/`|Scene rendering shared by driver backends|
-|XOpenGLDrv|`ThirdParty/XOpenGLDrv/`|GL driver + text seam (`FCanvasTextRequest`, native text backends: CoreText on macOS, FreeType on Linux). Pinned upstream; see ThirdParty rules below|
+|WgpuDrv|`HarryPotter2/Unreal/WgpuDrv/`|Sole render device: C++ driver shell over the Rust `hp2-wgpu` crate (FFI via `hp2-ffi`, feature `renderer-wgpu`)|
+|NativeText|`HarryPotter2/Unreal/NativeText/`|Provider-neutral native text seam (`FCanvasTextRequest`, `NativeText.h`): CoreText on macOS, FreeType on Linux. Bitmap fonts stay reachable via `[Display] NativeText=False`|
 |SDLDrv|`HarryPotter2/Unreal/SDLDrv/`|SDL2 window/input (`USDLViewport` → `CauseInputEvent`)|
 |SDLLaunch|`HarryPotter2/Unreal/SDLLaunch/`|Launch policy/store, desktop shell integration (`HP2ShellLauncher`), `HP2MacLauncher.mm`|
 |Launcher|`HarryPotter2/Unreal/Launch/`|Bootstrap paths, static packages, editor runtime entry, platform path resolution (`HP2Paths.cpp`)|
@@ -52,18 +53,13 @@ Left over from the earlier Rust rewrite that was removed before this port.
 Found by grep at this commit; not yet fixed. Do not treat as live, do not
 extend, and flag before editing:
 
-- `Build/parity_gate.py` and `Build/cutover.sh` call `Build/check_bundle_rs.py`,
-  which this port deleted. `parity_gate.py` also hardcodes crate names
-  `hp-engine`/`hp-app` (`COMPARATOR_PATHS`, `cargo test -p hp-engine`/`-p
-  hp-app`) from the removed rewrite; those crates do not exist in this port's
-  `crates/` workspace, so those calls fail too.
 - `Build/retail_flow_smoke.py` (`DEFAULT_APP`) and `Build/verify_playable.py`
   (`DEFAULT_BUNDLE`) default to `dist/macos-arm64-rs/HarryPotter2.app`, a path
   this repo's build never produces. Pass `--app dist/macos-arm64/HarryPotter2.app`
   explicitly until someone fixes the default.
 - `hp2rs`, `hp-app`, `hp-engine`, `target/release/`, and `dist/macos-arm64-rs/`
   references in `Build/game_test.py` (`RUST_REPLAY_MARKER`, `paired`),
-  `Build/cutover.sh`, `Build/*_trace.py`, `Tests/GameTestTests.py`,
+  `Build/*_trace.py`, `Tests/GameTestTests.py`,
   `Tests/StaticMovementGateTests.py`, `Tests/WorldCollisionGateTests.py`,
   `Docs/BEHAVIOR_MATRIX.md`, `Docs/REASON_CODES.md`,
   `Docs/RNG_TICK_DIVERGENCE.md`, and `Tests/Fixtures/render-baseline/rust_vs_cpp.md`.
@@ -118,10 +114,10 @@ sections are current; ignore the "Cargo era" section per above). Quick map:
 |Configure + build (macOS)|`cmake --preset macos-arm64 && cmake --build --preset macos-arm64 --target hp2_verification_binaries`|
 |Configure + build (Linux)|`cmake --preset linux-arm64 && cmake --build --preset linux-arm64 --target hp2_verification_binaries`|
 |Run verification suite|`ctest --preset macos-arm64` / `ctest --preset linux-arm64` (sanitizer variants: `*-asan-ubsan`, `*-tsan`)|
-|Single test|`ctest --preset <preset> -R '^<name>$'` — e.g. `abi_widths`, `package79_manifest`, `game_test_contract`, `renderer_smoke_xopengl` (see `Docs/BEHAVIOR_MATRIX.md` for the full list)|
+|Single test|`ctest --preset <preset> -R '^<name>$'` — e.g. `abi_widths`, `package79_manifest`, `game_test_contract`, `renderer_smoke_wgpu` (see `Docs/BEHAVIOR_MATRIX.md` for the full list)|
 |List maps|`python3 Build/game_test.py maps --data-root HarryPotter2/Unreal`|
 |Launch one map|`python3 Build/game_test.py run <map> ...` (see `Docs/OPERATIONS.md`)|
-|Renderer smoke|`python3 Build/smoke_maps.py --renderer=xopengl --output=<report.json> [--maps=...]`|
+|Renderer smoke|`python3 Build/smoke_maps.py --renderer=wgpu --output=<report.json> [--maps=...]`|
 |Bundle integrity|`python3 Build/check_bundle.py` (macOS `.app`; exit 0 pass / 1 fail / 2 blocked). Linux install is verified by the `linux-arm64*` ctest presets, not a separate script|
 |Retail data overlay|`python3 Build/prepare_retail_data.py` → writes `overlay-manifest.json`|
 |Retail-flow smoke|`python3 Build/retail_flow_smoke.py` (windowed retail launch + continue-flag step; manual steps printed at end)|

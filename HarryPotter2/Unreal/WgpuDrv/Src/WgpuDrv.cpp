@@ -320,9 +320,8 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	// SDL_WINDOW_OPENGL regardless of which render device is
 	// selected, and SDL_Metal_CreateView flips it to Metal on the
 	// fly, clearing SDL_WINDOW_OPENGL and unloading the GL library.
-	// A later fallback to XOpenGL on this same window would have no
-	// GL library loaded -- not a concern today (HP2_ENABLE_WGPU_DRIVER
-	// is an opt-in alternate GameRenderDevice, not a fallback chain).
+	// WgpuDrv is the only render device, so no GL fallback can run on this
+	// window after the conversion.
 	void* NsView = NULL;
 	SDL_Window* Window = (SDL_Window*)Viewport->GetWindow();
 	if( Window )

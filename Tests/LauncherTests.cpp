@@ -121,7 +121,7 @@ void WriteDefaultTemplates(const TemporaryRoots& roots)
 		"; immutable game default\n"
 		"[Engine.Engine]\n"
 		"ViewportManager=WinDrv.WindowsClient\n"
-		"GameRenderDevice=D3DDrv.D3DRenderDevice\n"
+		"GameRenderDevice=WgpuDrv.WgpuRenderDevice\n"
 		"[Engine.GameEngine]\n"
 		"UseSound=True\n"
 		"FrameRateLimit=60.000000\n"
@@ -130,7 +130,7 @@ void WriteDefaultTemplates(const TemporaryRoots& roots)
 		"FullscreenViewportX=800\nFullscreenViewportY=600\n"
 		"StartupFullscreen=False\nBrightness=0.4\nUseJoystick=True\n"
 		"ShowFPS=False\nMaintainVerticalFOV=True\nNativeText=True\nScreenFlashes=True\n"
-		"[XOpenGLDrv.XOpenGLRenderDevice]\n"
+		"[WgpuDrv.WgpuRenderDevice]\n"
 		"UseAA=False\nNumAASamples=0\nMaxAnisotropy=4\n"
 		"[ALAudio.ALAudioSubsystem]\nMusicVolume=0.53\nSoundVolume=0.9\n");
 	WriteBytes(roots.system / "DefUser.ini",
@@ -406,7 +406,7 @@ void TestConfigRoundTripAndBackups()
 		"malformed line without equals\r\n"
 		"[SDLDrv.SDLClient]\r\nBrightness=0.4\r\nUIScale=1.0\r\nUIScale = 1.25 ; final UI scale\r\n"
 		"ShowFPS=False\r\nMaintainVerticalFOV=True\r\nNativeText=True\r\nScreenFlashes=True\r\n"
-		"[XOpenGLDrv.XOpenGLRenderDevice]\r\nDriverNote=PreserveRendererSetting\r\n"
+		"[WgpuDrv.WgpuRenderDevice]\r\nDriverNote=PreserveRendererSetting\r\n"
 		"UseAA=Off\r\nNumAASamples=0\r\nMaxAnisotropy=4.000000\r\n"
 		"RenderScale=0.67\r\nRenderScale = 0.75 ; final render scale\r\n"
 		"[Unrelated.Section]\r\nMiXeDKey=MiXeDValue\r\n";
@@ -454,7 +454,7 @@ void TestConfigRoundTripAndBackups()
 	Expect(game.find("UseAA=True") != std::string::npos &&
 		game.find("NumAASamples=4") != std::string::npos &&
 		game.find("MaxAnisotropy=16") != std::string::npos,
-		"MSAA and anisotropy persist under XOpenGLDrv");
+		"MSAA and anisotropy persist under WgpuDrv");
 	Expect(user.find("ShowFPS") == std::string::npos &&
 		user.find("MaintainVerticalFOV") == std::string::npos &&
 		user.find("ScreenFlashes") == std::string::npos &&
@@ -565,7 +565,7 @@ void TestModernOptionRoundTrips()
 
 	WriteBytes(roots.user / "Game.ini",
 		"[SDLDrv.SDLClient]\nShowFPS=True\nMaintainVerticalFOV=True\nNativeText=True\nScreenFlashes=True\n"
-		"[XOpenGLDrv.XOpenGLRenderDevice]\n"
+		"[WgpuDrv.WgpuRenderDevice]\n"
 		"UseAA=False\nNumAASamples=4\nMaxAnisotropy=8.000000\n");
 	LauncherState loaded;
 	Expect(LoadLauncherState(roots.paths(), loaded, error), "runtime-formatted modern options load");
@@ -625,7 +625,7 @@ void TestMalformedRecovery()
 		"not=a truncation marker\n[Engine.GameEngine]\nFrameRateLimit=invalid\n"
 		"[SDLDrv.SDLClient]\nBrightness=nan\nUIScale=1.1\nWindowedViewportX=12\nWindowedViewportY=999999\n"
 		"ShowFPS=perhaps\nMaintainVerticalFOV=maybe\nNativeText=not-a-boolean\nScreenFlashes=sometimes\n"
-		"[XOpenGLDrv.XOpenGLRenderDevice]\nRenderScale=0.8\nUseAA=True\nNumAASamples=8\nMaxAnisotropy=2\n";
+		"[WgpuDrv.WgpuRenderDevice]\nRenderScale=0.8\nUseAA=True\nNumAASamples=8\nMaxAnisotropy=2\n";
 	const std::string malformedUser =
 		"[Engine.PlayerPawn\nDifficulty=DifficultyHard\n"
 		"[Engine.PlayerPawn]\nDifficulty=Unknown\nMouseSensitivity=not-a-number\nbModernThirdPersonControls=maybe\n"
@@ -1295,11 +1295,7 @@ void TestLegacySettingsMigration()
 			V("SDLDrv.SDLClient", "FullscreenViewportX", "640"),
 			V("SDLDrv.SDLClient", "FullscreenViewportY", "480"),
 			V("Engine.GameEngine", "FrameRateLimit", "30"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.85"),
 			V("SDLDrv.SDLClient", "UIScale", "1.25"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "True"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "4"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16"),
 			V("SDLDrv.SDLClient", "Brightness", "0.4"),
 			V("ALAudio.ALAudioSubsystem", "SoundVolume", "0.9"),
 			V("ALAudio.ALAudioSubsystem", "MusicVolume", "0.53"),
@@ -1309,20 +1305,28 @@ void TestLegacySettingsMigration()
 			V("SDLDrv.SDLClient", "TextureDetail", "Low"),
 			V("HGame.Harry", "bAutoQuaff", "False"),
 			V("Unrelated.Section", "KeepMe", "Untouched"),
+			V("WgpuDrv.WgpuRenderDevice", "RenderScale", "0.85"),
+			V("WgpuDrv.WgpuRenderDevice", "UseAA", "True"),
+			V("WgpuDrv.WgpuRenderDevice", "NumAASamples", "4"),
+			V("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "16"),
 		};
 		full.journal = {
+			C("WgpuDrv.WgpuRenderDevice", "RenderScale", "", "0.850000", "settings.renderer_wgpu"),
+			C("WgpuDrv.WgpuRenderDevice", "UseAA", "", "1", "settings.renderer_wgpu"),
+			C("WgpuDrv.WgpuRenderDevice", "NumAASamples", "", "4", "settings.renderer_wgpu"),
+			C("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "", "16.000000", "settings.renderer_wgpu"),
 			C("SDLDrv.SDLClient", "StartupFullscreen", "On", "True", "settings.boolean_spelling"),
 			C("SDLDrv.SDLClient", "BorderlessWindow", "yes", "True", "settings.boolean_spelling"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "1", "True", "settings.boolean_spelling"),
+			C("WgpuDrv.WgpuRenderDevice", "UseAA", "1", "True", "settings.boolean_spelling"),
 			C("HGame.Harry", "bAutoQuaff", "No", "False", "settings.boolean_spelling"),
 			C("SDLDrv.SDLClient", "StartupFullscreen", "True", "False", "settings.screen_mode_consolidated"),
 			C("SDLDrv.SDLClient", "WindowedViewportX", "1024", "640", "settings.viewport_consolidated"),
 			C("SDLDrv.SDLClient", "WindowedViewportY", "768", "480", "settings.viewport_consolidated"),
 			C("Engine.GameEngine", "FrameRateLimit", "30.000000", "30", "settings.frame_rate_limit_normalized"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.850000", "0.85", "settings.scale_normalized"),
+			C("WgpuDrv.WgpuRenderDevice", "RenderScale", "0.850000", "0.85", "settings.scale_normalized"),
 			C("SDLDrv.SDLClient", "Brightness", "0.400000", "0.4", "settings.range_normalized"),
 			C("ALAudio.ALAudioSubsystem", "SoundVolume", "0.900000", "0.9", "settings.range_normalized"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "16.000000", "16", "settings.anisotropy_normalized"),
+			C("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "16.000000", "16", "settings.anisotropy_normalized"),
 			C("SDLDrv.SDLClient", "TextureDetail", "LOW", "Low", "settings.enum_normalized"),
 			C("Engine.PlayerPawn", "ObjectDetail", "objectdetailhigh", "ObjectDetailHigh", "settings.enum_normalized"),
 			C("Engine.PlayerPawn", "Difficulty", "difficultyhard", "DifficultyHard", "settings.enum_normalized"),
@@ -1357,29 +1361,33 @@ void TestLegacySettingsMigration()
 			V("SDLDrv.SDLClient", "WindowedViewportX", "800"),
 			V("SDLDrv.SDLClient", "WindowedViewportY", "600"),
 			V("Engine.GameEngine", "FrameRateLimit", "60"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "1"),
 			V("SDLDrv.SDLClient", "UIScale", "1"),
 			V("SDLDrv.SDLClient", "Brightness", "0.4"),
 			V("Engine.PlayerPawn", "MouseSensitivity", "3"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "False"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "0"),
-			V("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "4"),
 			V("Engine.PlayerPawn", "Difficulty", "DifficultyEasy"),
 			V("SDLDrv.SDLClient", "NativeText", "True"),
+			V("WgpuDrv.WgpuRenderDevice", "RenderScale", "1"),
+			V("WgpuDrv.WgpuRenderDevice", "UseAA", "False"),
+			V("WgpuDrv.WgpuRenderDevice", "NumAASamples", "0"),
+			V("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "4"),
 		};
 		invalid.journal = {
+			C("WgpuDrv.WgpuRenderDevice", "RenderScale", "", "0.9", "settings.renderer_wgpu"),
+			C("WgpuDrv.WgpuRenderDevice", "UseAA", "", "maybe", "settings.renderer_wgpu"),
+			C("WgpuDrv.WgpuRenderDevice", "NumAASamples", "", "8", "settings.renderer_wgpu"),
+			C("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "", "32", "settings.renderer_wgpu"),
 			C("SDLDrv.SDLClient", "NativeText", "garbage", "True", "settings.boolean_invalid_defaulted"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "maybe", "False", "settings.boolean_invalid_defaulted"),
+			C("WgpuDrv.WgpuRenderDevice", "UseAA", "maybe", "False", "settings.boolean_invalid_defaulted"),
 			C("SDLDrv.SDLClient", "StartupFullscreen", "True", "False", "settings.screen_mode_consolidated"),
 			C("SDLDrv.SDLClient", "WindowedViewportX", "12", "800", "settings.viewport_consolidated"),
 			C("SDLDrv.SDLClient", "WindowedViewportY", "768", "600", "settings.viewport_consolidated"),
 			C("Engine.GameEngine", "FrameRateLimit", "59", "60", "settings.frame_rate_limit_invalid_defaulted"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.9", "1", "settings.scale_invalid_defaulted"),
+			C("WgpuDrv.WgpuRenderDevice", "RenderScale", "0.9", "1", "settings.scale_invalid_defaulted"),
 			C("SDLDrv.SDLClient", "UIScale", "abc", "1", "settings.scale_invalid_defaulted"),
 			C("SDLDrv.SDLClient", "Brightness", "nan", "0.4", "settings.range_invalid_defaulted"),
 			C("Engine.PlayerPawn", "MouseSensitivity", "not-a-number", "3", "settings.range_invalid_defaulted"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "8", "0", "settings.antialiasing_normalized"),
-			C("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "32", "4", "settings.anisotropy_invalid_defaulted"),
+			C("WgpuDrv.WgpuRenderDevice", "NumAASamples", "8", "0", "settings.antialiasing_normalized"),
+			C("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "32", "4", "settings.anisotropy_invalid_defaulted"),
 			C("Engine.PlayerPawn", "Difficulty", "Ultra", "DifficultyEasy", "settings.enum_invalid_defaulted"),
 		};
 		cases.push_back(invalid);
@@ -1417,7 +1425,7 @@ void TestLegacySettingsMigration()
 		MigrationCase passthrough;
 		passthrough.description = "canonical and unrelated rows leave no journal entries";
 		passthrough.input = {
-			V("Engine.Engine", "GameRenderDevice", "D3DDrv.D3DRenderDevice"),
+			V("Engine.Engine", "GameRenderDevice", "WgpuDrv.WgpuRenderDevice"),
 			V("SDLDrv.SDLClient", "ShowFPS", "True"),
 			V("Unrelated.Section", "MiXeDKey", "MiXeDValue"),
 		};

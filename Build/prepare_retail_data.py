@@ -85,11 +85,11 @@ RETAIL_FINAL_LOCALIZATION = {
 FULL_DEFAULT_MERGES = (
     "base: prototype System/Default.ini",
     "FrontEnd: retail EASplashWaitTime, WBSplashWaitTime, LaunchCode, UseSaveSlot",
-    "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
+    "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, Language=usa",
     "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
     "Core.System: forward-slash portable relative data paths",
     "SDLDrv.SDLClient: native portable client defaults",
-    "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+    "WgpuDrv.WgpuRenderDevice: wgpu feature set",
     "ALAudio.ALAudioSubsystem: retail final MusicVolume=0.53",
     "HGame console: retail final debug mode disabled",
 )
@@ -102,11 +102,11 @@ FULL_DEFUSER_MERGES = (
 RETAIL_ONLY_DEFAULT_MERGES = (
     "base: retail System/default.ini; no prototype bytes",
     "FrontEnd: retail final splash, launch, and save-slot values",
-    "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
+    "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, Language=usa",
     "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
     "Core.System: forward-slash portable relative data paths",
     "SDLDrv.SDLClient: native portable client defaults",
-    "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+    "WgpuDrv.WgpuRenderDevice: wgpu feature set",
     "ALAudio.ALAudioSubsystem: retail final MusicVolume=0.53",
     "HGame console: retail final debug mode disabled",
 )
@@ -118,11 +118,11 @@ RETAIL_ONLY_DEFUSER_MERGES = (
 )
 SAFE_DEFAULT_MERGES = (
     "base: prototype System/Default.ini",
-    "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, prototype Language=int",
+    "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, prototype Language=int",
     "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
     "Core.System: forward-slash portable relative data paths",
     "SDLDrv.SDLClient: native portable client defaults",
-    "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+    "WgpuDrv.WgpuRenderDevice: wgpu feature set",
 )
 SAFE_DEFUSER_MERGES = (
     "base: prototype System/DefUser.ini with Modern controls disabled; prototype bindings retained",
@@ -644,10 +644,10 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
         remove_ini_section(lines, "Editor.EditorEngine")
 
     native_engine = {
-        "GameRenderDevice": "XOpenGLDrv.XOpenGLRenderDevice",
+        "GameRenderDevice": "WgpuDrv.WgpuRenderDevice",
         "AudioDevice": "ALAudio.ALAudioSubsystem",
-        "WindowedRenderDevice": "XOpenGLDrv.XOpenGLRenderDevice",
-        "RenderDevice": "XOpenGLDrv.XOpenGLRenderDevice",
+        "WindowedRenderDevice": "WgpuDrv.WgpuRenderDevice",
+        "RenderDevice": "WgpuDrv.WgpuRenderDevice",
         "ViewportManager": "SDLDrv.SDLClient",
         "Language": "usa" if profile in {"full", "retail-only"} else "int",
     }
@@ -713,24 +713,15 @@ def build_default_ini(template_path: Path, retail_path: Path, profile: str) -> b
     for key, value in sdl_values.items():
         set_ini_value(lines, "SDLDrv.SDLClient", key, value)
 
-    xopengl_values = {
-        "OpenGLVersion": "Core",
-        "UseBindlessTextures": "False",
-        "UsePersistentBuffers": "False",
-        "UseShaderDrawParameters": "False",
-        "UseBufferInvalidation": "False",
-        "UseShaderCache": "False",
+    wgpu_values = {
         "DetailTextures": "True",
-        "MacroTextures": "True",
-        "UseTrilinear": "True",
-        "UsePrecache": "True",
         "UseVSync": "Off",
         "UseAA": "True",
         "NumAASamples": "4",
         "MaxAnisotropy": "16.000000",
     }
-    for key, value in xopengl_values.items():
-        set_ini_value(lines, "XOpenGLDrv.XOpenGLRenderDevice", key, value)
+    for key, value in wgpu_values.items():
+        set_ini_value(lines, "WgpuDrv.WgpuRenderDevice", key, value)
 
     if profile in {"full", "retail-only"}:
         set_ini_value(
@@ -788,9 +779,9 @@ def build_defuser_ini(template_path: Path, retail_path: Path, profile: str) -> b
 
 def validate_default_ini(lines: list[str], profile: str) -> None:
     expected = {
-        ("Engine.Engine", "GameRenderDevice"): "XOpenGLDrv.XOpenGLRenderDevice",
-        ("Engine.Engine", "WindowedRenderDevice"): "XOpenGLDrv.XOpenGLRenderDevice",
-        ("Engine.Engine", "RenderDevice"): "XOpenGLDrv.XOpenGLRenderDevice",
+        ("Engine.Engine", "GameRenderDevice"): "WgpuDrv.WgpuRenderDevice",
+        ("Engine.Engine", "WindowedRenderDevice"): "WgpuDrv.WgpuRenderDevice",
+        ("Engine.Engine", "RenderDevice"): "WgpuDrv.WgpuRenderDevice",
         ("Engine.Engine", "ViewportManager"): "SDLDrv.SDLClient",
         ("Engine.Engine", "AudioDevice"): "ALAudio.ALAudioSubsystem",
         ("Engine.Engine", "Language"): "usa" if profile in {"full", "retail-only"} else "int",

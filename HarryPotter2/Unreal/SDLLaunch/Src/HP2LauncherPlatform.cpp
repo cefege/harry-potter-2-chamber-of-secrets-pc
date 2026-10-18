@@ -42,7 +42,6 @@ HP2Launcher::LauncherCapabilities CurrentCapabilities()
 #if defined(__EMSCRIPTEN__)
 	result.screenModes = false;
 	result.resolutions = false;
-	result.rendererChoice = false;
 	result.revealPaths = false;
 	result.nativeFolderPicker = false;
 #endif

@@ -38,9 +38,7 @@ enum EViewportBlitFlags
 	BLIT_Direct3D       = 0x0010, // Create Direct3D along with DirectDraw.
 	BLIT_NoWindowChange = 0x0020, // Don't resize existing window frame.
 	BLIT_NoWindowFrame  = 0x0040, // Turn off the window frame.
-	BLIT_OpenGL			= 0x0080, // OpenGL rendering.
 	BLIT_HardwarePaint  = 0x0100, // Window should be repainted in hardware when drawn.
-	BLIT_Vulkan        = 0x0200, // Vulkan rendering.
 
 	// Special.
 	BLIT_ParameterFlags	= BLIT_NoWindowChange, // Only parameters to ResizeViewport, not permanent flags.

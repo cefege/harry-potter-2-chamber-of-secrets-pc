@@ -6,11 +6,8 @@ Wraps a gate-on (HP2_ENABLE_WGPU_DRIVER=ON) hp2_game build with:
     (ApplyPortableConfig preserves valid custom selections),
   - fixed ticks/timeout, isolated HOME, structured schema-v1 report.
 
-No ICD/loader environment needed unlike run_vulkan_smoke.py: wgpu's
-Metal backend talks to the system Metal framework directly, nothing
-to point at. Mirrors run_vulkan_smoke.py's structure closely since
-the two scripts solve the same problem for two different experimental
-render devices.
+No ICD/loader environment is needed: wgpu's Metal backend talks to the
+system Metal framework directly, so there is nothing to point at.
 
 Exit codes: 0 pass, 1 fail, 2 blocked(reason).
 """

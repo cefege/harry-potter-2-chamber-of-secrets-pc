@@ -361,20 +361,20 @@ if(PkgConfig_FOUND)
 endif()
 
 hp2_declare_text_provider(CoreText
-    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextShared.cpp"
+    SOURCES "${HP2_UNREAL_ROOT}/NativeText/Src/NativeTextShared.cpp"
     LINK_LIBS "${HP2_CORETEXT_FRAMEWORK}" "${HP2_COREGRAPHICS_FRAMEWORK}"
     CONDITION "APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK"
 )
 hp2_declare_text_provider(FreeType
-    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFreeType.cpp"
+    SOURCES "${HP2_UNREAL_ROOT}/NativeText/Src/NativeTextFreeType.cpp"
     LINK_LIBS PkgConfig::HP2_FREETYPE PkgConfig::HP2_HARFBUZZ PkgConfig::HP2_FONTCONFIG
     CONDITION "NOT APPLE AND NOT WIN32 AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND HP2_FONTCONFIG_FOUND"
 )
 if(WIN32)
     hp2_declare_text_provider(FreeTypeBundled
         SOURCES
-            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFreeType.cpp"
-            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFontsBundled.cpp"
+            "${HP2_UNREAL_ROOT}/NativeText/Src/NativeTextFreeType.cpp"
+            "${HP2_UNREAL_ROOT}/NativeText/Src/NativeTextFontsBundled.cpp"
         LINK_LIBS freetype harfbuzz
         CONDITION "WIN32"
     )
@@ -397,8 +397,8 @@ if(EMSCRIPTEN)
         "-sUSE_FREETYPE=1" "-sUSE_HARFBUZZ=1")
     hp2_declare_text_provider(FreeTypeEmscripten
         SOURCES
-            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFreeType.cpp"
-            "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextFontSeamEmscripten.cpp"
+            "${HP2_UNREAL_ROOT}/NativeText/Src/NativeTextFreeType.cpp"
+            "${HP2_UNREAL_ROOT}/NativeText/Src/NativeTextFontSeamEmscripten.cpp"
         LINK_LIBS ""
         CONDITION "TRUE"
     )

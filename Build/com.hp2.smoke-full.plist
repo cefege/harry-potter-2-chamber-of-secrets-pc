@@ -11,7 +11,7 @@
   Latest report:         out/macos-arm64-full-smoke/Testing/HP2/renderer_smoke_full/smoke-maps.json
   Logs + last-run state: StandardOutPath/StandardErrorPath below.
 
-  The job invokes Build/run_vulkan_smoke-style discipline through ctest:
+  The job runs the renderer smoke discipline through ctest:
   configure+build+ctest on the macos-arm64-full-smoke preset via
   Build/verify_all.sh, so a red run always leaves the per-stage logs.
 -->

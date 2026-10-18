@@ -88,12 +88,6 @@ DROP_LINE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 DROP_SHADER_DIAGNOSTIC_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(pattern)
     for pattern in (
-        r"^XOpenGL: No compiler messages for ",
-        r"^XOpenGL: compiler messages for ",
-        r"^XOpenGL: No linker messages for ",
-        r"^XOpenGL: linker messages for ",
-        r"^XOpenGL: Log linking ",
-        r"^XOpenGL: invalid or unused shader var ",
         r"^WARNING: Output of \w+ shader ",
     )
 )
@@ -172,7 +166,7 @@ def _launch(
         app=executable,
         data_root=data_root,
         selected_map=selected_map,
-        renderer="xopengl",
+        renderer="wgpu",
         ticks=ticks,
         timeout_seconds=timeout_seconds,
         log_path=run_directory / "engine.log",
@@ -209,7 +203,7 @@ def run_contract(
     command = {
         "app": game_test._display_path(executable, REPOSITORY_ROOT),
         "map": selected_map,
-        "renderer": "xopengl",
+        "renderer": "wgpu",
         "ticks": ticks,
         "timeout_seconds": timeout_seconds,
         "launches": ["run_1", "run_2"],

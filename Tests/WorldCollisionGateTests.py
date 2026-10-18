@@ -359,7 +359,9 @@ class WorldCollisionGateContracts(unittest.TestCase):
             trace_path.write_text(json.dumps(self._trace()), encoding="utf-8")
             return {"passed": True}
 
-        with patch.object(world_collision_gate.game_test, "build_launch_command", return_value=["engine"]) as build_command, patch.object(
+        with patch.object(
+            world_collision_gate.game_test, "render_device_engine_ini", return_value=Path("engine.ini")
+        ), patch.object(world_collision_gate.game_test, "build_launch_command", return_value=["engine"]) as build_command, patch.object(
             world_collision_gate.game_test, "run_command", side_effect=fake_run_command
         ):
             result = world_collision_gate._run_side(
@@ -368,7 +370,7 @@ class WorldCollisionGateContracts(unittest.TestCase):
                 data_root=self.root / "data",
                 scenario_path=scenario_path,
                 artifact_dir=artifact_dir,
-                renderer="xopengl",
+                renderer="wgpu",
                 timeout_seconds=1.0,
                 start_gate=threading.Barrier(1),
             )
@@ -398,7 +400,9 @@ class WorldCollisionGateContracts(unittest.TestCase):
             )
             return {"passed": True}
 
-        with patch.object(world_collision_gate.game_test, "build_launch_command", return_value=["engine"]), patch.object(
+        with patch.object(
+            world_collision_gate.game_test, "render_device_engine_ini", return_value=Path("engine.ini")
+        ), patch.object(world_collision_gate.game_test, "build_launch_command", return_value=["engine"]), patch.object(
             world_collision_gate.game_test, "run_command", side_effect=fake_run_command
         ):
             result = world_collision_gate._run_side(
@@ -407,7 +411,7 @@ class WorldCollisionGateContracts(unittest.TestCase):
                 data_root=self.root / "data",
                 scenario_path=scenario_path,
                 artifact_dir=artifact_dir,
-                renderer="xopengl",
+                renderer="wgpu",
                 timeout_seconds=1.0,
                 start_gate=threading.Barrier(1),
                 protocol=world_collision_gate.BUMP_PROTOCOL,
@@ -427,7 +431,7 @@ class WorldCollisionGateContracts(unittest.TestCase):
             "--data-root", "data",
             "--output", "report.json",
         ])
-        self.assertEqual(arguments.renderer, "xopengl")
+        self.assertEqual(arguments.renderer, "wgpu")
         self.assertFalse(hasattr(arguments, "fixture_root"))
         self.assertFalse(hasattr(arguments, "ucc"))
         self.assertFalse(arguments.bump_only)
@@ -447,7 +451,7 @@ class WorldCollisionGateContracts(unittest.TestCase):
             engine_bin=Path("hp2rs"),
             data_root=Path("data"),
             output=Path("report.json"),
-            renderer="xopengl",
+            renderer="wgpu",
             timeout_seconds=world_collision_gate.DEFAULT_TIMEOUT_SECONDS,
         )
 

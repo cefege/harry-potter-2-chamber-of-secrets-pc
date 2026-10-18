@@ -7,7 +7,7 @@ play. This page is for building, testing, and hacking on the engine.
 
 This is a faithful recreation of the classic 2002 game engine for **macOS 15+ on Apple silicon (arm64)** and **Linux (arm64)**. It uses:
 
-- **XOpenGL** (`ThirdParty/XOpenGLDrv`) — OpenGL renderer adapted from UE1
+- **wgpu** (`HarryPotter2/Unreal/WgpuDrv/` + Rust `crates/hp2-wgpu`) — the sole render device on every platform
 - **SDL2** — window management and input handling  
 - **Native text rendering** — the default text backend (CoreText on macOS,
   FreeType on Linux); the 2002 bitmap fonts remain available via
@@ -200,7 +200,7 @@ ctest --preset macos-arm64 -R <test_name>
 
 Commonly useful tests:
 - `game_test_contract` — baseline game behavior
-- `renderer_smoke_xopengl` — renderer correctness
+- `renderer_smoke_wgpu` — renderer correctness
 - `package79_manifest` — data serialization
 
 **For complete test documentation, see [BEHAVIOR_MATRIX.md](BEHAVIOR_MATRIX.md).**

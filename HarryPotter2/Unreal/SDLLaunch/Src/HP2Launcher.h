@@ -15,7 +15,6 @@ struct LauncherCapabilities
 {
 	bool screenModes = true;
 	bool resolutions = true;
-	bool rendererChoice = true;
 	bool revealPaths = true;
 	bool nativeFolderPicker = true;
 };

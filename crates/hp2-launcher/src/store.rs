@@ -36,8 +36,8 @@ use hp2_ini::launcher::Document;
 
 use crate::model::{
     ANISOTROPY_VALUES, ANTI_ALIASING_SAMPLE_VALUES, ControlMode, DataSource, Difficulty,
-    FRAME_RATE_LIMIT_VALUES, LauncherSettings, ObjectDetail, RENDER_SCALE_VALUES, RenderBackend,
-    ScreenMode, TextureDetail, UI_SCALE_VALUES,
+    FRAME_RATE_LIMIT_VALUES, LauncherSettings, ObjectDetail, RENDER_SCALE_VALUES, ScreenMode,
+    TextureDetail, UI_SCALE_VALUES,
 };
 
 /// Replaces `Lower`.
@@ -284,7 +284,7 @@ fn load_discrete_integer(
 }
 
 fn load_anti_aliasing(doc: &Document, target: &mut i32) {
-    let Some(text) = doc.get("XOpenGLDrv.XOpenGLRenderDevice", "UseAA") else {
+    let Some(text) = doc.get("WgpuDrv.WgpuRenderDevice", "UseAA") else {
         return;
     };
     let Some(enabled) = boolean(&text) else {
@@ -294,7 +294,7 @@ fn load_anti_aliasing(doc: &Document, target: &mut i32) {
         *target = 0;
         return;
     }
-    if let Some(text) = doc.get("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples")
+    if let Some(text) = doc.get("WgpuDrv.WgpuRenderDevice", "NumAASamples")
         && let Some(samples) = integer(&text)
         && (samples == 2 || samples == 4)
     {
@@ -363,22 +363,15 @@ pub fn load_settings(game: &Document, user: &Document) -> LauncherSettings {
         "{} x {}",
         settings.resolution.width, settings.resolution.height
     );
-    if let Some(render_device) = game.get("Engine.Engine", "GameRenderDevice") {
-        settings.render_backend = if same(trim(&render_device), "VulkanDrv.VulkanRenderDevice") {
-            RenderBackend::Vulkan
-        } else {
-            RenderBackend::XOpenGL
-        };
-    }
     load_bool(
         game,
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "UseVSync",
         &mut settings.vertical_sync,
     );
     load_discrete_number(
         game,
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "RenderScale",
         &RENDER_SCALE_VALUES,
         &mut settings.render_scale,
@@ -420,7 +413,7 @@ pub fn load_settings(game: &Document, user: &Document) -> LauncherSettings {
     load_anti_aliasing(game, &mut settings.anti_aliasing_samples);
     load_discrete_integer(
         game,
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "MaxAnisotropy",
         &ANISOTROPY_VALUES,
         &mut settings.anisotropy,
@@ -564,17 +557,10 @@ fn difficulty_text(value: Difficulty) -> &'static str {
     }
 }
 
-fn render_device_class(value: RenderBackend) -> &'static str {
-    match value {
-        RenderBackend::XOpenGL => "XOpenGLDrv.XOpenGLRenderDevice",
-        RenderBackend::Vulkan => "VulkanDrv.VulkanRenderDevice",
-    }
-}
-
 /// Replaces `ApplyGame`.
 pub fn apply_game(game: &mut Document, settings: &LauncherSettings) {
     game.set("Engine.Engine", "ViewportManager", "SDLDrv.SDLClient");
-    let render_device = render_device_class(settings.render_backend);
+    let render_device = "WgpuDrv.WgpuRenderDevice";
     game.set("Engine.Engine", "GameRenderDevice", render_device);
     game.set("Engine.Engine", "WindowedRenderDevice", render_device);
     game.set("Engine.Engine", "RenderDevice", render_device);
@@ -628,12 +614,12 @@ pub fn apply_game(game: &mut Document, settings: &LauncherSettings) {
         bool_text(settings.joystick_enabled),
     );
     game.set(
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "UseVSync",
         if settings.vertical_sync { "On" } else { "Off" },
     );
     game.set(
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "RenderScale",
         &double_text(settings.render_scale),
     );
@@ -659,17 +645,17 @@ pub fn apply_game(game: &mut Document, settings: &LauncherSettings) {
         bool_text(settings.screen_flashes),
     );
     game.set(
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "UseAA",
         bool_text(settings.anti_aliasing_samples != 0),
     );
     game.set(
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "NumAASamples",
         &settings.anti_aliasing_samples.to_string(),
     );
     game.set(
-        "XOpenGLDrv.XOpenGLRenderDevice",
+        "WgpuDrv.WgpuRenderDevice",
         "MaxAnisotropy",
         &settings.anisotropy.to_string(),
     );
@@ -1035,13 +1021,13 @@ mod tests {
         game.set(
             "Engine.Engine",
             "GameRenderDevice",
-            "XOpenGLDrv.XOpenGLRenderDevice",
+            "WgpuDrv.WgpuRenderDevice",
         );
-        game.set("XOpenGLDrv.XOpenGLRenderDevice", "UseVSync", "True");
-        game.set("XOpenGLDrv.XOpenGLRenderDevice", "RenderScale", "0.75");
-        game.set("XOpenGLDrv.XOpenGLRenderDevice", "UseAA", "True");
-        game.set("XOpenGLDrv.XOpenGLRenderDevice", "NumAASamples", "2");
-        game.set("XOpenGLDrv.XOpenGLRenderDevice", "MaxAnisotropy", "8");
+        game.set("WgpuDrv.WgpuRenderDevice", "UseVSync", "True");
+        game.set("WgpuDrv.WgpuRenderDevice", "RenderScale", "0.75");
+        game.set("WgpuDrv.WgpuRenderDevice", "UseAA", "True");
+        game.set("WgpuDrv.WgpuRenderDevice", "NumAASamples", "2");
+        game.set("WgpuDrv.WgpuRenderDevice", "MaxAnisotropy", "8");
         game.set("Engine.GameEngine", "UseSound", "True");
         game.set("Engine.GameEngine", "FrameRateLimit", "60");
         game.set("ALAudio.ALAudioSubsystem", "SoundVolume", "0.75");
@@ -1068,7 +1054,6 @@ mod tests {
         assert_eq!(settings.screen_mode, ScreenMode::Windowed);
         assert_eq!(settings.resolution.width, 1024);
         assert_eq!(settings.resolution.height, 768);
-        assert_eq!(settings.render_backend, RenderBackend::XOpenGL);
         assert!(settings.vertical_sync);
         assert_eq!(settings.render_scale, 0.75);
         assert_eq!(settings.ui_scale, 1.0);
@@ -1114,7 +1099,7 @@ mod tests {
         apply_user(&mut user_out, &settings);
         assert_eq!(
             game_out.get("Engine.Engine", "GameRenderDevice").as_deref(),
-            Some("XOpenGLDrv.XOpenGLRenderDevice")
+            Some("WgpuDrv.WgpuRenderDevice")
         );
         assert_eq!(
             game_out
@@ -1124,7 +1109,7 @@ mod tests {
         );
         assert_eq!(
             game_out
-                .get("XOpenGLDrv.XOpenGLRenderDevice", "UseVSync")
+                .get("WgpuDrv.WgpuRenderDevice", "UseVSync")
                 .as_deref(),
             Some("On")
         );

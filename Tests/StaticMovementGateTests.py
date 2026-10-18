@@ -222,7 +222,9 @@ class StaticMovementGateContracts(unittest.TestCase):
             trace_path.write_text(json.dumps(self._trace()), encoding="utf-8")
             return {"passed": True}
 
-        with patch.object(static_movement_gate.game_test, "build_launch_command", return_value=["engine"]) as build_command, patch.object(
+        with patch.object(
+            static_movement_gate.game_test, "render_device_engine_ini", return_value=Path("engine.ini")
+        ), patch.object(static_movement_gate.game_test, "build_launch_command", return_value=["engine"]) as build_command, patch.object(
             static_movement_gate.game_test, "run_command", side_effect=fake_run_command
         ):
             cpp_result = static_movement_gate._run_side(
@@ -231,7 +233,7 @@ class StaticMovementGateContracts(unittest.TestCase):
                 data_root=self.root / "cpp-data",
                 scenario_path=scenario_path,
                 artifact_dir=artifact_dir,
-                renderer="xopengl",
+                renderer="wgpu",
                 timeout_seconds=1.0,
                 start_gate=threading.Barrier(1),
                 trace_environment=static_movement_gate.CPP_TRACE_ENVIRONMENT,
@@ -242,7 +244,7 @@ class StaticMovementGateContracts(unittest.TestCase):
                 data_root=self.root / "rust-data",
                 scenario_path=scenario_path,
                 artifact_dir=artifact_dir,
-                renderer="xopengl",
+                renderer="wgpu",
                 timeout_seconds=1.0,
                 start_gate=threading.Barrier(1),
                 trace_environment=static_movement_gate.RUST_TRACE_ENVIRONMENT,
@@ -263,7 +265,7 @@ class StaticMovementGateContracts(unittest.TestCase):
             "--data-root", "data",
             "--output", "report.json",
         ])
-        self.assertEqual(arguments.renderer, "xopengl")
+        self.assertEqual(arguments.renderer, "wgpu")
         self.assertEqual(arguments.timeout, static_movement_gate.DEFAULT_TIMEOUT_SECONDS)
         self.assertFalse(hasattr(arguments, "fixture_root"))
         self.assertFalse(hasattr(arguments, "ucc"))

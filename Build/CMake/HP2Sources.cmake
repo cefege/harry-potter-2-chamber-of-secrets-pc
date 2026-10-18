@@ -133,28 +133,6 @@ set(HP2_SDLDRV_SOURCES
     "${HP2_UNREAL_ROOT}/SDLDrv/Src/SDLViewport.cpp"
 )
 
-# This allowlist is the complete pinned XOpenGL runtime subset. The vendored
-# GLM implementation translation unit and unrelated donor trees are excluded.
-set(HP2_XOPENGLDRV_SOURCES
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/XOpenGLDrv.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/XOpenGL.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/glad.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/CheckExtensions.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DebugLog.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawComplex.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawComplex_GLSL.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawGouraud.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawGouraud_GLSL.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawPostProcess.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawSimple.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawSimple_GLSL.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawTile.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/DrawTile_GLSL.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/EditorHit.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/SetTexture.cpp"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/ShaderProgram.cpp"
-)
-
 set(HP2_LAUNCHER_CORE_SOURCES
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2LauncherAdapter.cpp"
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src/HP2DataImport.cpp"

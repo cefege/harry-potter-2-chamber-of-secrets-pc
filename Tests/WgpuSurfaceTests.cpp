@@ -1,31 +1,19 @@
 /*=============================================================================
 	WgpuSurfaceTests.cpp: real-window check for hp2_rs_wgpu_create's
-	window-surface path and hp2_rs_wgpu_lock/hp2_rs_wgpu_unlock
-	(crates/hp2-wgpu/src/lib.rs's macos module and lock_frame/
-	unlock_frame), macOS only, gated the same as WgpuDrv itself
-	(HP2_ENABLE_WGPU_DRIVER). Exercises the exact same create/lock/
-	unlock/destroy calls UWgpuRenderDevice::Init/Lock/Unlock/Exit make
-	-- not a parallel test-only function (two earlier versions of this
-	test called now-deleted test-only functions,
-	hp2_rs_wgpu_create_surface_from_ns_view_for_testing and
-	hp2_rs_wgpu_present_once_for_testing; both were merged into real
-	production entry points once one existed to merge into, caught on
-	review as worth consolidating rather than keeping near-identical
-	parallel code paths).
+	window-surface path and hp2_rs_wgpu_lock/hp2_rs_wgpu_unlock (macOS only;
+	crates/hp2-wgpu/src/lib.rs, macos module). Exercises the same
+	create/lock/unlock/destroy calls UWgpuRenderDevice::Init/Lock/Unlock/Exit
+	make, not a parallel test-only function. Two earlier versions called
+	test-only FFI functions; both were merged into the production entry points.
 
-	Unlike every other SDL-touching ctest in this project, this one
-	cannot use the "dummy" video driver: SDL_Metal_CreateView needs a
-	genuine windowing backend to attach a CAMetalLayer-backed NSView
-	to, which the dummy driver (headless, no real window system) does
-	not provide. Uses the real default video driver instead, relying
-	on this being run on a machine with an actual display (true for
-	the macOS runners/dev machines this experimental driver targets;
-	HP2_ENABLE_WGPU_DRIVER defaults OFF everywhere else).
+	This test cannot use the "dummy" video driver: SDL_Metal_CreateView needs a
+	real windowing backend to attach a CAMetalLayer-backed NSView to. It uses the
+	default video driver and must run on a machine with a display. The test is
+	not built on other platforms.
 
-	No existing C++ oracle: this logic (SDL_Metal_CreateView ->
-	SDL_Metal_GetLayer's NSView pointer -> wgpu::Surface, and the
-	configure/acquire/clear/present sequence) has no XOpenGL/Vulkan
-	equivalent to port from; it is new.
+	No C++ oracle: the SDL_Metal_CreateView -> SDL_Metal_GetLayer NSView pointer
+	-> wgpu::Surface path and the configure/acquire/clear/present sequence are
+	new, with nothing to port from.
 =============================================================================*/
 
 #include "SDLDrv.h"

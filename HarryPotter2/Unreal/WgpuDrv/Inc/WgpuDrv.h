@@ -1,80 +1,11 @@
 /*=============================================================================
-	WgpuDrv.h: wgpu-backed render device, forwarding to crates/hp2-wgpu.
-	Phase 3.2 of local://rust-inplace-port-plan.md.
+	WgpuDrv.h: UWgpuRenderDevice, the only render device. Forwards the
+	URenderDevice interface to crates/hp2-wgpu through the hp2_rs_wgpu_*
+	exports (hp2-ffi feature `renderer-wgpu`).
 
-	Scope today: Init creates a real wgpu adapter+device, and on macOS
-	(MACOSX) also a real window surface via SDL_Metal_CreateView on the
-	real game window (Viewport->GetWindow()), logging the plan's
-	"WgpuDrv: adapter "<name>" backend <X>" line. Non-macOS builds stay
-	headless (no Metal API to create a view from) until a Vulkan/DX12
-	surface path exists. Lock/Unlock call into the real per-frame
-	configure/acquire/clear/present path (hp2_rs_wgpu_lock/unlock,
-	crates/hp2-wgpu's lock_frame/unlock_frame). SetSceneNode, Draw2DLine,
-	DrawTile, Draw2DPoint, DrawTriangles, and DrawComplexSurface are all
-	real, wired overrides now (hp2_rs_wgpu_set_scene_node/draw_2d_line/
-	queue_tile/queue_point/queue_triangles/queue_complex_surface,
-	crates/hp2-wgpu's real simple.wgsl/tile.wgsl/gouraud.wgsl/
-	complex.wgsl pipelines exist and are GPU-verified by that crate's
-	own tests) -- stale as of an earlier version of this paragraph,
-	which said "nothing is drawn into the frame yet, and there is no
-	WGSL shader pipeline", then later "DrawComplexSurface/DrawTriangles/
-	DrawTile/Draw2DPoint remain safe no-op stubs". Detail textures,
-	macro textures, bump maps, the real shader-specialization system,
-	and a few other DrawComplexSurface branches remain real, separately
-	scoped gaps -- hp2_wgpu::RenderLoop::queue_complex_surface's own
-	doc has the full citation for each.
-
-	Observed, not yet explained: a real Build/run_wgpu_smoke.py
-	-testticks=60 run on this project's own development machine (a
-	real MacBook, its own built-in display active -- confirmed via
-	system_profiler/pmset/CGSessionCopyCurrentDictionary before
-	concluding anything about the machine itself) got outcome code 4
-	(Occluded, see hp2_wgpu::FrameOutcome's own doc) on all 60 of 60
-	ticks; zero frames were actually presented in that run. By
-	contrast, Tests/WgpuSurfaceTests.cpp passes reliably on the same
-	machine. The most likely difference between the two, not yet
-	isolated by turning each off one at a time, is that that test
-	applies several precautions Lock does not -- SDL_HINT_MAC_
-	BACKGROUND_APP, SDL_RaiseWindow, SDL_WINDOW_ALWAYS_ON_TOP, and
-	polling the present call itself for up to ~2 seconds -- while a
-	real `hp2_game -window` launch does none of those and Lock makes
-	only one attempt per tick. Lock deliberately does not poll the way
-	that test does: blocking the real game loop for up to ~2 seconds
-	on every single frame to work around this would be a bad trade even
-	if it turned out to help, since a frame failing to acquire is
-	already an expected, transient condition in real usage (minimized
-	window, display asleep) that the next tick's own Lock call
-	naturally retries for free. The engine itself handled the all-
-	Occluded run correctly regardless: Unlock is safe to call even when
-	Lock observed a non-zero outcome (hp2_wgpu::unlock_frame's own
-	contract), and the real run above completed all 60 ticks and shut
-	down cleanly with no crash. (Separately, UWgpuRenderDevice::Exit
-	itself was not being reached at all during that same -testticks
-	run -- a real, pre-existing gap in USDLViewport::Destroy shared by
-	every render device, not specific to this one -- since fixed at
-	the source; see SDLViewport.cpp's own Destroy/ShutdownAfterError.
-	That fix is unrelated to why frames are not presented above: it
-	only means Exit's own frame-count summary line is now reliably
-	logged, not that any frame reaches the screen.)
-
-	2026-10-17 addendum: a later ctest run in this same long session
-	hit a NEW, different confound -- not a retroactive correction of
-	the paragraph above, which checked session-lock state at the time
-	and found it genuinely unlocked. A compiled probe calling the real
-	`CGSessionCopyCurrentDictionary()` (the exact function named above)
-	at 19:56 that day found `CGSSessionScreenIsLocked = 1`, locked
-	since 19:47 -- directly explaining why that one later run's
-	`wgpu_surface_round_trip` ctest (which normally passes for real,
-	per the paragraph above) hit its own `SKIP_RETURN_CODE=77`
-	environment-gap path instead: macOS reports every window occluded
-	to the WindowServer/Metal compositor while the session is locked,
-	independent of any application code. Any `renderer_smoke_wgpu`/
-	`wgpu_surface_round_trip` result captured during a locked session
-	is uninterpretable noise, not evidence toward or against the
-	original all-Occluded finding above -- that finding still needs
-	its own genuinely-unlocked re-run (with a fresh `CGSessionCopy
-	CurrentDictionary` check immediately beforehand, not assumed from
-	an earlier check) before its root cause can be narrowed further.
+	Config section: [WgpuDrv.WgpuRenderDevice]. Keys are registered in
+	UWgpuRenderDevice::StaticConstructor (WgpuDrv.cpp). macOS is the only
+	verified platform; Init creates a Metal window surface there.
 =============================================================================*/
 
 #ifndef _INCL_WGPUDRV_H_

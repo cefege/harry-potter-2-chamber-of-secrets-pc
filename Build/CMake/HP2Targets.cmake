@@ -87,7 +87,6 @@ set(HP2_EMPTY_MODULE_API_DEFINITIONS
     EDITOR_API=
     ALAUDIO_API=
     SDLDRV_API=
-    XOPENGLDRV_API=
     WGPUDRV_API=
 )
 
@@ -125,18 +124,15 @@ set(HP2_SDLDRV_INCLUDE_DIRS
     ${HP2_ENGINE_INCLUDE_DIRS}
     "${HP2_UNREAL_ROOT}/SDLDrv/Inc"
 )
-set(HP2_XOPENGLDRV_INCLUDE_DIRS
-    ${HP2_RENDER_INCLUDE_DIRS}
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src"
-    "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/glm"
+set(HP2_NATIVETEXT_INCLUDE_DIRS
+    "${HP2_UNREAL_ROOT}/NativeText/Inc"
 )
 set(HP2_LAUNCH_INCLUDE_DIRS
     ${HP2_RENDER_INCLUDE_DIRS}
     ${HP2_FIRE_INCLUDE_DIRS}
     ${HP2_ALAUDIO_INCLUDE_DIRS}
     ${HP2_SDLDRV_INCLUDE_DIRS}
-    ${HP2_XOPENGLDRV_INCLUDE_DIRS}
+    ${HP2_NATIVETEXT_INCLUDE_DIRS}
     "${HP2_UNREAL_ROOT}/Launch/Src"
     "${HP2_UNREAL_ROOT}/UCC/Src"
     "${HP2_UNREAL_ROOT}/SDLLaunch/Src"
@@ -192,14 +188,8 @@ endfunction()
 # this import only; the game's own targets keep CMAKE_OSX_DEPLOYMENT_TARGET.
 # Emscripten has no Rust target, so the browser build links no Rust.
 #
-# Declared here (not next to the rest of its own WgpuDrv block further
-# down, unlike HP2_ENABLE_VULKAN_DRIVER) because corrosion_set_features
-# below is a property of the whole hp2-ffi crate and runs once, at
-# import time -- it must already know whether to enable hp2-ffi's
-# renderer-wgpu Cargo feature before the WgpuDrv C++ package (which
-# needs that feature's hp2_rs_wgpu_* exports) is even declared.
-option(HP2_ENABLE_WGPU_DRIVER
-    "Build the experimental wgpu render device port (HarryPotter2/Unreal/WgpuDrv)" OFF)
+# WgpuDrv is the only render device, built on every non-web platform. The web
+# build links no Rust, so it has no render device there.
 if(NOT EMSCRIPTEN)
     set(_hp2_saved_osx_deployment_target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
     set(CMAKE_OSX_DEPLOYMENT_TARGET "")
@@ -211,14 +201,10 @@ if(NOT EMSCRIPTEN)
     # the real product build where it's actually needed. See
     # crates/hp2-import/Cargo.toml's `[features]` doc comment.
     set(HP2_FFI_FEATURES hp2-import/archive platform-sdl)
-    if(HP2_ENABLE_WGPU_DRIVER)
-        # Same reasoning as archive/platform-sdl: off by default so bare
-        # cargo build/test never needs wgpu's platform backends
-        # (objc2-metal and friends), on only for the experimental build
-        # that actually wants WgpuDrv.WgpuRenderDevice. See crates/
-        # hp2-ffi/Cargo.toml's `[features]` doc comment.
-        list(APPEND HP2_FFI_FEATURES renderer-wgpu)
-    endif()
+    # renderer-wgpu: the WgpuDrv.WgpuRenderDevice backend. Off by default in
+    # crates/hp2-ffi so bare cargo build/test never needs wgpu's platform backends
+    # (objc2-metal and friends); always on for the real product build.
+    list(APPEND HP2_FFI_FEATURES renderer-wgpu)
     corrosion_set_features(hp2_ffi FEATURES ${HP2_FFI_FEATURES})
     # libhp2_ffi.a's compiled code (not just the Import-specific part)
     # has real, unresolved archive_read_*/archive_entry_*/archive_error_*
@@ -242,7 +228,7 @@ if(NOT EMSCRIPTEN)
     # more consumer of the one archive, resolved once at hp2_game's
     # final link.
     target_link_libraries(hp2_ffi INTERFACE archive_static SDL2::SDL2-static)
-    if(HP2_ENABLE_WGPU_DRIVER AND APPLE)
+    if(APPLE)
         # Not guessed: `cargo rustc -p hp2-ffi --lib --crate-type=staticlib
         # --features=hp2-import/archive,platform-sdl,renderer-wgpu --
         # --print native-static-libs` printed the authoritative list
@@ -253,7 +239,7 @@ if(NOT EMSCRIPTEN)
         # succeeded even before this list was added -- AppKit, already
         # linked unconditionally into hp2_game, pulls some of these in
         # transitively -- but relying on that would be fragile; this is
-        # the real, verified list, not a guess. Linux's Vulkan/GL
+        # the real, verified list, not a guess. Linux's wgpu
         # backends are not covered here -- wgpu's non-Apple hals load
         # their native libraries dynamically rather than needing
         # link-time framework linking, unverified in this project's own
@@ -287,7 +273,7 @@ endif()
 
 hp2_add_engine_object(hp2_engine Engine ${HP2_ENGINE_SOURCES})
 target_include_directories(hp2_engine PUBLIC ${HP2_ENGINE_INCLUDE_DIRS})
-target_include_directories(hp2_engine PRIVATE "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc")
+target_include_directories(hp2_engine PRIVATE ${HP2_NATIVETEXT_INCLUDE_DIRS})
 target_link_libraries(hp2_engine PUBLIC Squish::Squish)
 if(NOT EMSCRIPTEN)
     target_link_libraries(hp2_engine PRIVATE hp2_ffi)
@@ -336,28 +322,16 @@ target_include_directories(hp2_imgui PUBLIC "${HP2_IMGUI_ROOT}" "${HP2_IMGUI_ROO
 target_compile_features(hp2_imgui PUBLIC cxx_std_17)
 target_link_libraries(hp2_imgui PUBLIC SDL2::SDL2-static PRIVATE hp2_compile_policy)
 
-hp2_add_engine_object(hp2_xopengldrv XOpenGLDrv ${HP2_XOPENGLDRV_SOURCES})
-target_include_directories(hp2_xopengldrv PUBLIC ${HP2_XOPENGLDRV_INCLUDE_DIRS})
-target_compile_definitions(hp2_xopengldrv PRIVATE
-    XOPENGL_HP2=1
-    XOPENGL_USE_SDL=1
-    SDL2BUILD=1
-)
-target_link_libraries(hp2_xopengldrv PUBLIC
-    SDL2::SDL2-static
-    OpenGL::GL
-    Squish::Squish
-)
-
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     # Selected shaping/rasterization core (NativeTextShared.cpp for CoreText,
     # NativeTextFreeType.cpp for FreeType) compiled once and consumed as
     # objects by every render driver with a native text leg, so the provider
     # link libraries reach both consumers.
-    hp2_add_engine_object(hp2_nativetextcore XOpenGLDrv
+    hp2_add_engine_object(hp2_nativetextcore NativeText
         ${HP2_TEXT_PROVIDER_SOURCES}
+        "${HP2_UNREAL_ROOT}/NativeText/Src/NativeText.cpp"
     )
-    target_include_directories(hp2_nativetextcore PUBLIC ${HP2_XOPENGLDRV_INCLUDE_DIRS})
+    target_include_directories(hp2_nativetextcore PUBLIC ${HP2_NATIVETEXT_INCLUDE_DIRS} ${HP2_ENGINE_INCLUDE_DIRS})
     if(WIN32 OR EMSCRIPTEN)
         target_compile_definitions(hp2_nativetextcore PRIVATE HP2_NATIVE_TEXT_FONT_SEAM=1)
     endif()
@@ -377,18 +351,6 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
     # to hp2_game further down, where that target exists.
     get_property(HP2_WEB_FONTLINK_FLAGS GLOBAL PROPERTY HP2_WEB_FONTLINK_FLAGS)
 
-    # NativeText.cpp is the provider-neutral glyph atlas and XOpenGL text
-    # draw path; it belongs to hp2_xopengldrv itself, not the shaping core.
-    target_sources(hp2_xopengldrv PRIVATE
-        "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeText.cpp"
-    )
-
-    # Link libraries exported by the selected native text provider
-    # (HP2Dependencies.cmake), not provider-specific framework paths.
-    target_link_libraries(hp2_xopengldrv PUBLIC
-        ${HP2_TEXT_PROVIDER_LINK_LIBS}
-        hp2_nativetextcore
-    )
 endif()
 
 set(HP2_IMPORT_ROOT "${HP2_UNREAL_ROOT}/Import")
@@ -502,7 +464,6 @@ target_link_libraries(hp2_game PRIVATE
     hp2_editor_runtime
     hp2_alaudio
     hp2_sdldrv
-    hp2_xopengldrv
     hp2_import_core
     hp2_imgui
 )
@@ -518,8 +479,7 @@ endif()
 
 if(HP2_HAS_NATIVE_TEXT_BACKEND)
     # Object libraries do not propagate their objects through other object
-    # libraries: consume the shared native-text core directly wherever
-    # hp2_xopengldrv is linked (mirrors the hp2_zvulkan idiom).
+    # libraries: consume the shared native-text core directly here.
     target_sources(hp2_game PRIVATE $<TARGET_OBJECTS:hp2_nativetextcore>)
 endif()
 
@@ -763,7 +723,7 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
         ${HP2_PATH_SOURCE}
     )
     # hp2_nativetextcore is an OBJECT library: its objects do not survive
-    # transitively through hp2_xopengldrv, so consume them directly here.
+    # transitively through another target, so consume them directly here.
     target_sources(hp2_native_typography_tests PRIVATE
         $<TARGET_OBJECTS:hp2_nativetextcore>
     )
@@ -771,7 +731,6 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
         hp2_core
         hp2_engine
         hp2_render
-        hp2_xopengldrv
         ${HP2_TEXT_PROVIDER_LINK_LIBS}
     )
 endif()
@@ -789,7 +748,6 @@ if(HP2_HAS_NATIVE_TEXT_BACKEND)
         hp2_core
         hp2_engine
         hp2_render
-        hp2_xopengldrv
         ${HP2_TEXT_PROVIDER_LINK_LIBS}
     )
 endif()
@@ -1184,14 +1142,6 @@ hp2_add_behavior_test(framing_baseline_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/FramingBaselineTests.py"
 )
 set_tests_properties(framing_baseline_contract PROPERTIES LABELS "fast;data-none")
-hp2_add_behavior_test(matrix_compare_contract "${Python3_EXECUTABLE}"
-    "${PROJECT_SOURCE_DIR}/Tests/MatrixCompareTests.py"
-)
-set_tests_properties(matrix_compare_contract PROPERTIES LABELS "fast;data-none")
-hp2_add_behavior_test(wgpu_vs_xopengl_contract "${Python3_EXECUTABLE}"
-    "${PROJECT_SOURCE_DIR}/Tests/WgpuVsXopenglTests.py"
-)
-set_tests_properties(wgpu_vs_xopengl_contract PROPERTIES LABELS "fast;data-none")
 
 if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
@@ -1237,26 +1187,27 @@ endif()
 # which the verification docs call out as a configuration gap.
 if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
-    hp2_add_behavior_test(renderer_smoke_xopengl "${Python3_EXECUTABLE}"
+    hp2_add_behavior_test(renderer_smoke_maps "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
-        "--renderer=xopengl"
+        "--renderer=wgpu"
         "--app=${CMAKE_BINARY_DIR}/hp2_game"
         "--maps=PrivetDr,Entry,Ch2Skurge"
         "--ticks=120"
         "--timeout=90"
-        "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_xopengl/smoke-maps.json"
+        "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_maps/smoke-maps.json"
         "--data-root=${HP2_TEST_DATA_ROOT}"
     )
     if(HP2_ENABLE_FULL_MAP_SMOKE)
         hp2_add_behavior_test(renderer_smoke_full "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
+            "--renderer=wgpu"
             "--app=${CMAKE_BINARY_DIR}/hp2_game"
             "--ticks=300"
             "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_full/smoke-maps.json"
             "--data-root=${HP2_TEST_DATA_ROOT}"
         )
         set_tests_properties(renderer_smoke_full PROPERTIES
-            LABELS "smoke;renderer;xopengl;smoke-full"
+            LABELS "smoke;renderer;wgpu;smoke-full"
             RESOURCE_LOCK hp2_gpu
             TIMEOUT 14400
         )
@@ -1310,171 +1261,12 @@ if(HP2_TEST_DATA_PRESENT)
 endif()
 endif()
 # ---------------------------------------------------------------------------
-# Experimental Vulkan render device: HP2 port of ThirdParty/UT99VulkanDrv
-# (ZVulkan-lineage community UE1 driver). Opt-in only; stays OFF by default
-# until first successful launch evidence, exactly like the -vulkan feature
-# state. Everything below this comment is owned by the Vulkan port block.
-#
-# Layout mirrors hp2_xopengldrv: object libraries linked into hp2_game so the
-# engine's static class registry finds VulkanDrv.VulkanRenderDevice at boot.
-# ---------------------------------------------------------------------------
-option(HP2_ENABLE_VULKAN_DRIVER
-    "Build the experimental Vulkan render device port (ThirdParty/UT99VulkanDrv)" OFF)
-
-if(WIN32 AND HP2_ENABLE_VULKAN_DRIVER)
-    message(FATAL_ERROR "The experimental Vulkan driver is not supported on Windows builds.")
-endif()
-
-if(HP2_ENABLE_VULKAN_DRIVER)
-    set(HP2_VULKANDRV_ROOT "${HP2_THIRD_PARTY_ROOT}/UT99VulkanDrv")
-
-    # ZVulkan core + vendored volk / vk_mem_alloc / glslang (runtime GLSL ->
-    # SPIR-V for ShaderManager). Third-party code is exempt from the repo
-    # warning policy; only hp2_vulkandrv itself compiles under it.
-    set(HP2_ZVULKAN_SOURCES
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkanbuilders.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkandevice.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkaninstance.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkansurface.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vulkanswapchain.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/vk_mem_alloc/vk_mem_alloc.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/volk/volk.c"
-        # vendored glslang (Unix OSDependent layer)
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/GenericCodeGen/CodeGen.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/GenericCodeGen/Link.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Constant.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/InfoSink.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Initialize.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/IntermTraverse.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Intermediate.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/ParseContextBase.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/ParseHelper.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/PoolAlloc.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/RemoveTree.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Scan.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/ShaderLang.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/SpirvIntrinsics.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/SymbolTable.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/Versions.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/attribute.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/glslang_tab.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/intermOut.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/iomapper.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/limits.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/linkValidate.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/parseConst.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/propagateNoContraction.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/reflection.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/Pp.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpAtom.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpContext.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpScanner.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/MachineIndependent/preprocessor/PpTokens.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/OSDependent/Unix/ossource.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/glslang/ResourceLimits/ResourceLimits.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/GlslangToSpv.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/InReadableOrder.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/Logger.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/SpvBuilder.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/SpvPostProcess.cpp"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src/glslang/spirv/SpvTools.cpp"
-    )
-
-    add_library(hp2_zvulkan OBJECT ${HP2_ZVULKAN_SOURCES})
-    target_compile_features(hp2_zvulkan PUBLIC cxx_std_17)
-    target_include_directories(hp2_zvulkan PUBLIC
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/include"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/include/zvulkan"
-        "${HP2_VULKANDRV_ROOT}/ZVulkan/src"
-    )
-    # The donor's ZVulkan CMake defines UNIX/_UNIX on non-Win32 for its
-    # glslang OSDependent selection and volk platform branches.
-    target_compile_definitions(hp2_zvulkan PRIVATE UNIX=1 _UNIX=1)
-
-    set(HP2_VULKANDRV_SOURCES
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/UVulkanRenderDevice.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/VulkanDrv.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/BufferManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/CommandBufferManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/DescriptorSetManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/FileResource.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/FramebufferManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/Hp2FrameCapture.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/halffloat.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/mat.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/RenderPassManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/SamplerManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/SceneTextures.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/ShaderManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/TextureManager.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/TextureUploader.cpp"
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv/UploadManager.cpp"
-    )
-
-    add_library(hp2_vulkandrv OBJECT ${HP2_VULKANDRV_SOURCES})
-    target_link_libraries(hp2_vulkandrv PRIVATE hp2_compile_policy)
-    target_link_libraries(hp2_vulkandrv PUBLIC hp2_zvulkan)
-    target_include_directories(hp2_vulkandrv PUBLIC
-        ${HP2_RENDER_INCLUDE_DIRS}
-        "${HP2_VULKANDRV_ROOT}/VulkanDrv"
-    )
-    target_compile_definitions(hp2_vulkandrv PRIVATE
-        __STATIC_LINK=1
-        SDL2BUILD=1
-    )
-    target_link_libraries(hp2_vulkandrv PUBLIC SDL2::SDL2-static)
-
-    if(HP2_HAS_NATIVE_TEXT_BACKEND)
-        # The experimental Vulkan driver shares the driver-neutral CoreText
-        # core with XOpenGL: inject its objects, the shared header include
-        # path, and the Vulkan-side native text translation unit authored
-        # against Inc/NativeTextShared.h.
-        target_sources(hp2_vulkandrv PRIVATE
-            "${HP2_VULKANDRV_ROOT}/VulkanDrv/VulkanNativeText.cpp"
-        )
-        target_include_directories(hp2_vulkandrv PUBLIC "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Inc")
-        target_link_libraries(hp2_vulkandrv PUBLIC hp2_nativetextcore)
-        # Objects do not flow through the object-library chain: register the
-        # shared native-text core next to hp2_vulkandrv, mirroring hp2_zvulkan.
-        target_link_libraries(hp2_game PRIVATE hp2_nativetextcore)
-    endif()
-
-    # Static registration: adding the objects to hp2_game puts
-    # VulkanDrv.VulkanRenderDevice into the engine class registry next to
-    # XOpenGLDrv.XOpenGLRenderDevice; config/-flag selection stays lead-owned.
-    # The define gates RegisterHP2ClientClasses' registrant call.
-    target_link_libraries(hp2_game PRIVATE
-        hp2_vulkandrv
-        hp2_zvulkan
-    )
-    target_compile_definitions(hp2_game PRIVATE HP2_ENABLE_VULKAN_DRIVER=1)
-
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_test(NAME renderer_smoke_vulkan
-        COMMAND "${Python3_EXECUTABLE}"
-            "${PROJECT_SOURCE_DIR}/Build/run_vulkan_smoke.py"
-            "--build-dir=${CMAKE_BINARY_DIR}"
-            "--data-root=${HP2_TEST_DATA_ROOT}"
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-    )
-    set_tests_properties(renderer_smoke_vulkan PROPERTIES
-        LABELS "smoke;renderer;vulkan"
-        RESOURCE_LOCK hp2_gpu
-        TIMEOUT 600
-    )
-
-endif()
-
-# ---------------------------------------------------------------------------
 # WgpuDrv: experimental wgpu-backed render device.
-# HP2_ENABLE_WGPU_DRIVER itself is declared earlier (next to the
-# corrosion_import_crate block above), because that block needs it
-# before this point to decide whether hp2-ffi's renderer-wgpu Cargo
-# feature is on. Layout mirrors the Vulkan block above: one OBJECT
-# library, linked into hp2_game so the engine's static class registry
-# finds WgpuDrv.WgpuRenderDevice at boot.
+# hp2-ffi's renderer-wgpu feature is enabled by the corrosion_import_crate block
+# above, before this point. One OBJECT library, linked into hp2_game so the engine's
+# static class registry finds WgpuDrv.WgpuRenderDevice at boot.
 # ---------------------------------------------------------------------------
-if(HP2_ENABLE_WGPU_DRIVER)
+if(NOT EMSCRIPTEN)
     set(HP2_WGPUDRV_SOURCES
         "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Src/WgpuDrv.cpp"
     )
@@ -1511,23 +1303,19 @@ if(HP2_ENABLE_WGPU_DRIVER)
     target_include_directories(hp2_wgpudrv PUBLIC
         ${HP2_RENDER_INCLUDE_DIRS}
         "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Inc"
-        "${HP2_XOPENGLDRV_INCLUDE_DIRS}"
+        "${HP2_NATIVETEXT_INCLUDE_DIRS}"
     )
 
-    # Static registration: adding the object to hp2_game puts
-    # WgpuDrv.WgpuRenderDevice into the engine class registry next to
-    # XOpenGLDrv.XOpenGLRenderDevice/VulkanDrv.VulkanRenderDevice;
-    # config/-flag selection stays lead-owned. The define gates
-    # RegisterHP2ClientClasses' registrant call
-    # (HP2StaticPackages.cpp).
-    target_link_libraries(hp2_game PRIVATE hp2_wgpudrv)
-    target_compile_definitions(hp2_game PRIVATE HP2_ENABLE_WGPU_DRIVER=1)
+# Static registration: adding the object to hp2_game puts
+# WgpuDrv.WgpuRenderDevice into the engine class registry; it is the only
+# render device. HP2StaticPackages.cpp's RegisterHP2ClientClasses calls its registrant.
+target_link_libraries(hp2_game PRIVATE hp2_wgpudrv)
 
     if(APPLE)
         # hp2_rs_wgpu_lock/hp2_rs_wgpu_create's window-surface path are
         # only meaningful on macOS (crates/hp2-wgpu/src/lib.rs's
         # `macos` module) -- gate this test target the same way so a
-        # hypothetical non-Apple HP2_ENABLE_WGPU_DRIVER build never
+        # hypothetical non-Apple build never
         # tries to compile against a window-surface path that does not
         # exist there.
         set(HP2_WGPU_SURFACE_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/WgpuSurfaceTests.cpp")
@@ -1544,9 +1332,8 @@ if(HP2_ENABLE_WGPU_DRIVER)
         )
         # HP2_EXECUTABLE_TARGETS (the hp2_verification_binaries
         # dependency list) is finalized at line ~769-805, long before
-        # this HP2_ENABLE_WGPU_DRIVER block runs -- adding this target
-        # there would need touching that always-on list for an
-        # experimental, default-OFF feature. Explicit add_dependencies
+        # this WgpuDrv block runs -- adding this target
+        # there would need touching that always-on list. Explicit add_dependencies
         # instead: without it, the documented `cmake --build ... --
         # target hp2_verification_binaries && ctest` sequence never
         # builds this executable in a fresh build directory, and
@@ -1585,16 +1372,12 @@ if(HP2_ENABLE_WGPU_DRIVER)
         )
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    # hp2_add_behavior_test (not a bare add_test, unlike
-    # renderer_smoke_vulkan above): bare add_test sets no
+    # hp2_add_behavior_test (not a bare add_test): bare add_test sets no
     # HP2_ARTIFACT_DIR, so run_wgpu_smoke.py's own HP2_ARTIFACT_DIR
     # fallback (a fresh tempfile.mkdtemp()) would kick in instead,
     # and its log/report would never reach the per-test artifact
     # directory -- AGENTS.md Non-Negotiable #2 requires exactly that
-    # path (caught on review; renderer_smoke_vulkan's own bare
-    # add_test has the identical gap, not touched here, out of scope
-    # for this change, same as run_wgpu_smoke.py's own already-noted
-    # parallel to run_vulkan_smoke.py).
+    # path (caught on review).
     hp2_add_behavior_test(renderer_smoke_wgpu "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/run_wgpu_smoke.py"
         "--build-dir=${CMAKE_BINARY_DIR}"

@@ -237,13 +237,15 @@ class LifecycleGateContracts(unittest.TestCase):
             trace.write_text(json.dumps(self._trace()), encoding="utf-8")
             return {"passed": True}
 
-        with patch.object(lifecycle_gate.game_test, "run_command", side_effect=fake_run_command):
+        with patch.object(
+            lifecycle_gate.game_test, "render_device_engine_ini", return_value=Path("engine.ini")
+        ), patch.object(lifecycle_gate.game_test, "run_command", side_effect=fake_run_command):
             result = lifecycle_gate._run_side(
                 name="cpp",
                 executable=self.root / "cpp-engine",
                 data_root=self.root / "cpp-data",
                 artifact_dir=self.root / "artifacts",
-                renderer="xopengl",
+                renderer="wgpu",
                 timeout_seconds=5.0,
                 start_gate=threading.Barrier(1),
             )

@@ -23,7 +23,10 @@ class FireTextureHarnessContracts(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.data_root = self.root / "Unreal"
         (self.data_root / "System").mkdir(parents=True)
-        (self.data_root / "System" / "Default.ini").write_text("[Core.System]\n")
+        (self.data_root / "System" / "Default.ini").write_text(
+            "[Core.System]\n[Engine.Engine]\nGameRenderDevice=D3D11Drv.D3D11RenderDevice\n"
+            "WindowedRenderDevice=D3D11Drv.D3D11RenderDevice\nRenderDevice=D3D11Drv.D3D11RenderDevice\n"
+        )
         map_path = self.data_root / "Maps" / "Test.unr"
         map_path.parent.mkdir()
         map_path.write_bytes(b"map")
@@ -49,7 +52,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
             "data_root": self.data_root,
             "selected_map": "Maps/Test.unr",
             "map_token": "Maps/Test.unr",
-            "renderer": "xopengl",
+            "renderer": "wgpu",
             "ticks": 1,
             "fixed_dt": 0.02,
             "input_script": None,
@@ -125,7 +128,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
                 engine_bin=engine_bin,
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 timeout_seconds=1.0,
@@ -178,7 +181,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
                 engine_bin=engine_bin,
                 data_root=self.data_root,
                 selected_map="Maps/Test.unr",
-                renderer="xopengl",
+                renderer="wgpu",
                 ticks=1,
                 fixed_dt=0.02,
                 timeout_seconds=1.0,
@@ -192,7 +195,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
     def test_cli_accepts_fire_texture_trace_directory(self) -> None:
         with patch.object(sys, "argv", [
             "game_test.py", "paired", "--app", "app", "--engine-bin", "engine",
-            "--data-root", "data", "--map", "Maps/Test.unr", "--renderer", "xopengl",
+            "--data-root", "data", "--map", "Maps/Test.unr", "--renderer", "wgpu",
             "--ticks", "1", "--fixed-dt", "0.02", "--checkpoints", "authored",
             "--output", "paired.json", "--fire-texture-trace-dir", "fire-traces",
         ]):
@@ -213,7 +216,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
         with patch.object(game_test, "run_command", side_effect=fake_run_command):
             run, _, _ = game_test._run_fidelity_side(
                 name="cpp", executable=self.root / "cpp", data_root=self.data_root,
-                selected_map="Maps/Test.unr", map_token="Maps/Test.unr", renderer="xopengl",
+                selected_map="Maps/Test.unr", map_token="Maps/Test.unr", renderer="wgpu",
                 ticks=1, fixed_dt=0.02, input_script=None, replay=None, timeout_seconds=1.0,
                 artifact_root=self.root / "artifacts", checkpoint_manifest=checkpoint_manifest,
                 start_gate=threading.Barrier(1), rng_trace_path=None,

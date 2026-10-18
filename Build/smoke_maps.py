@@ -27,7 +27,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import struct
 import platform
@@ -56,10 +55,6 @@ DEFAULT_TICKS = 300
 DEFAULT_TIMEOUT_SECONDS = 120.0
 REPORT_FORMAT_VERSION = 2
 SUPPORTED_MAP_VERSIONS = frozenset((76, 79))
-# Loader environment mirrors Build/run_vulkan_smoke.py (MoltenVK via Homebrew).
-DEFAULT_VULKAN_ICD = Path("/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json")
-VULKAN_DYLD_LIBRARY_PATH = "/opt/homebrew/lib"
-VULKAN_DYLD_FALLBACK_LIBRARY_PATH = "/opt/homebrew/opt/molten-vk/lib"
 MAP_CLASSIFICATIONS = (
     "playable_level",
     "editor_template_geometry_study",
@@ -558,15 +553,6 @@ def _replace_directory(directory: Path) -> None:
         raise SmokeError(f"cannot replace directory {directory}: {error}") from error
 
 
-def _vulkan_environment(icd: Path) -> dict[str, str]:
-    """MoltenVK loader environment for a -vulkan launch."""
-    return {
-        "VK_DRIVER_FILES": str(icd),
-        "DYLD_LIBRARY_PATH": VULKAN_DYLD_LIBRARY_PATH,
-        "DYLD_FALLBACK_LIBRARY_PATH": VULKAN_DYLD_FALLBACK_LIBRARY_PATH,
-    }
-
-
 def _frames_directory(output: Path) -> Path:
     name = output.name
     stem = name[:-5] if name.lower().endswith(".json") else name
@@ -643,15 +629,12 @@ def _run_map(
     log_path: Path,
     inspection: dict[str, object],
     capture_frames_dir: Path | None = None,
-    extra_environment: dict[str, str] | None = None,
     ini_file: Path | None = None,
     engine_bin: Path | None = None,
 ) -> dict[str, object]:
     # Per-tick timing markers are opt-in inside the engine; every smoke
     # launch turns them on so frame budgets measure real ticks.
     extra_env = {"HP2_FRAME_TIMING": "1"}
-    if extra_environment:
-        extra_env.update(extra_environment)
     if capture_frames_dir is not None:
         _replace_directory(capture_frames_dir)
         extra_env.update(
@@ -1012,8 +995,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument(
         "--renderer",
         choices=game_test.RENDERERS,
-        required=True,
-        help="renderer to smoke (-xopengl, -vulkan or -wgpu is passed explicitly)",
+        default="wgpu",
+        help="renderer to smoke (-wgpu is passed explicitly)",
     )
     parser.add_argument(
         "--ticks",
@@ -1082,16 +1065,6 @@ def _arguments() -> argparse.Namespace:
             "with --capture-frames, delete every map's captured frames except "
             "its last one right after that map finishes (frame_meta.json is "
             "kept), bounding disk use for full-sweep renderer comparisons"
-        ),
-    )
-    parser.add_argument(
-        "--vulkan-icd",
-        type=Path,
-        default=DEFAULT_VULKAN_ICD,
-        help=(
-            "Vulkan ICD manifest passed to the engine through VK_DRIVER_FILES "
-            "when --renderer=vulkan (MoltenVK loader dylib paths are exported "
-            "alongside it, mirroring Build/run_vulkan_smoke.py)"
         ),
     )
     return parser.parse_args()
@@ -1177,24 +1150,11 @@ def main() -> int:
         output = game_test._resolve_path(arguments.output, repo_root, strict=False)
         if not output.name:
             raise SmokeError(f"output path must name a JSON file: {arguments.output}")
-        vulkan_environment: dict[str, str] | None = None
-        renderer_ini: Path | None = None
         ini_stem = output.name[:-5] if output.name.lower().endswith(".json") else output.name
-        if arguments.renderer == "vulkan":
-            if not arguments.vulkan_icd.is_file():
-                raise SmokeError(
-                    f"vulkan ICD manifest not found: {arguments.vulkan_icd}"
-                )
-            vulkan_environment = _vulkan_environment(arguments.vulkan_icd)
-            renderer_ini = game_test.write_device_engine_ini(
-                data_root, output.with_name(f"{ini_stem}-vulkan-engine.ini"),
-                game_test.RENDERER_DEVICE_CLASSES["vulkan"],
-            )
-        elif arguments.renderer == "wgpu":
-            renderer_ini = game_test.write_device_engine_ini(
-                data_root, output.with_name(f"{ini_stem}-wgpu-engine.ini"),
-                game_test.RENDERER_DEVICE_CLASSES["wgpu"],
-            )
+        renderer_ini = game_test.render_device_engine_ini(
+            data_root, output.with_name(f"{ini_stem}-{arguments.renderer}-engine.ini"),
+            arguments.renderer,
+        )
         logs = _log_directory(output)
         _replace_directory(logs)
         if arguments.capture_keep_last and not arguments.capture_frames:
@@ -1227,7 +1187,6 @@ def main() -> int:
                     max_frame_ms=arguments.max_frame_ms,
                     max_map_seconds=arguments.max_map_seconds,
                     capture_frames_dir=capture_frames_dir,
-                    extra_environment=vulkan_environment,
                     ini_file=renderer_ini,
                     engine_bin=arguments.engine_bin,
                 )
@@ -1276,16 +1235,7 @@ def main() -> int:
             "renderer": arguments.renderer,
             "ticks": arguments.ticks,
             "capture_frames": arguments.capture_frames,
-            "vulkan_icd": (
-                game_test._display_path(arguments.vulkan_icd, repo_root)
-                if arguments.renderer == "vulkan"
-                else None
-            ),
-            "vulkan_engine_ini": (
-                game_test._display_path(renderer_ini, repo_root)
-                if arguments.renderer == "vulkan" and renderer_ini is not None
-                else None
-            ),
+            "renderer_engine_ini": game_test._display_path(renderer_ini, repo_root),
             "timeout_seconds": arguments.timeout,
             "max_frame_ms": arguments.max_frame_ms,
             "max_map_seconds": arguments.max_map_seconds,

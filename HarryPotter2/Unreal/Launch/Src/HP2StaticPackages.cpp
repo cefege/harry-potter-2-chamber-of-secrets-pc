@@ -14,7 +14,6 @@
 #include "UnFractal.h"
 #if defined(HP2_WITH_CLIENT_PACKAGES) && HP2_WITH_CLIENT_PACKAGES
 #include "SDLDrv.h"
-#include "XOpenGLDrv.h"
 #include "ALAudio.h"
 #endif
 #include "HP2StaticPackages.h"
@@ -70,22 +69,13 @@ void RegisterHP2RuntimeClasses()
 }
 
 #if defined(HP2_WITH_CLIENT_PACKAGES) && HP2_WITH_CLIENT_PACKAGES
-#if defined(HP2_ENABLE_VULKAN_DRIVER) && HP2_ENABLE_VULKAN_DRIVER
-extern "C" void autoInitializeRegistrantsVulkanDrv(void);
-#endif
-#if defined(HP2_ENABLE_WGPU_DRIVER) && HP2_ENABLE_WGPU_DRIVER
 extern "C" void autoInitializeRegistrantsWgpuDrv(void);
-#endif
 
 	void RegisterHP2ClientClasses()
 	{
 		AUTO_INITIALIZE_REGISTRANTS_SDLDRV;
-		AUTO_INITIALIZE_REGISTRANTS_XOPENGLDRV;
 		AUTO_INITIALIZE_REGISTRANTS_ALAUDIO;
-#if defined(HP2_ENABLE_VULKAN_DRIVER) && HP2_ENABLE_VULKAN_DRIVER
-		autoInitializeRegistrantsVulkanDrv();
-#endif
-#if defined(HP2_ENABLE_WGPU_DRIVER) && HP2_ENABLE_WGPU_DRIVER
+#if !defined(__EMSCRIPTEN__)
 		autoInitializeRegistrantsWgpuDrv();
 #endif
 	}

@@ -1,0 +1,67 @@
+/*=============================================================================
+	NativeText.h: Platform-neutral native Canvas text backend contract.
+=============================================================================*/
+
+#include "NativeTextShared.h"
+
+struct FCanvasTextLayout;
+struct FCanvasTextRequest;
+struct FCanvasTextLayoutRequest;
+
+
+// Platform implementations own shaped-layout and rasterizer objects entirely.
+// This boundary intentionally carries no CoreText, DirectWrite, or Pango types.
+class FNativeTextPlatformBackend
+{
+public:
+	virtual ~FNativeTextPlatformBackend() {}
+	virtual UBOOL CreateLayout( const FCanvasTextLayoutRequest& Request, FCanvasTextLayout*& OutLayout ) = 0;
+	virtual void DestroyLayout( FCanvasTextLayout* Layout ) = 0;
+	virtual UBOOL MeasureLayout( FCanvasTextLayout* Layout, INT& OutWidth, INT& OutHeight ) = 0;
+};
+
+// Runtime availability report for the platform text stack.  Available=false
+// means the renderer must keep using the per-draw Boolean Canvas fallback;
+// ReasonCode is a stable dotted-lowercase diagnostic string backed by static
+// storage and safe to log or persist.
+struct FNativeTextBackendStatus
+{
+	bool Available;
+	const char* ReasonCode;
+};
+
+// Status-reporting factory.  Returns NULL on an unusable platform text stack,
+// filling OutStatus with a stable reason code; never crashes when unavailable.
+FNativeTextPlatformBackend* CreateNativeTextPlatformBackend( FNativeTextBackendStatus& OutStatus );
+
+// Source-compatibility wrapper around the status factory.  A NULL return means
+// unavailable; callers wanting the reason code use the overload above.
+FNativeTextPlatformBackend* CreateNativeTextPlatformBackend();
+
+// These diagnostics expose facts from an opaque shaped layout so the native
+// typography contract can be exercised without creating a GL window.
+struct FNativeTextLayoutTestInfo
+{
+	INT Width;
+	INT Height;
+	INT UTF16Length;
+	INT VisibleSourceEnd;
+	INT ClusterCount;
+	INT GlyphKeyCount;
+	INT ResolvedFontCount;
+	INT UnderlineCount;
+	QWORD GlyphKeyFingerprint;
+};
+
+UBOOL NativeTextCopyUTF16ForTests( const TCHAR* Text, INT TextLength, UNICHAR* OutText, INT OutCapacity, INT& OutLength );
+UBOOL NativeTextInspectLayoutForTests( const FCanvasTextLayout* Layout, FNativeTextLayoutTestInfo& OutInfo, INT* OutClusterSourceEnds, INT OutCapacity );
+
+// The game executable drives this state while -TESTNATIVETEXT is active.  It
+// is deliberately renderer-owned: a successful result means a real GL Canvas
+// draw completed, rather than only a CoreText layout unit test.
+
+void BeginNativeTextRuntimeSmoke();
+ENativeTextRuntimeSmokeState GetNativeTextRuntimeSmokeState();
+ENativeTextRuntimeSmokeStage GetNativeTextRuntimeSmokeStage();
+void SetNativeTextRuntimeSmokeStage( ENativeTextRuntimeSmokeStage Stage );
+void CompleteNativeTextRuntimeSmoke( UBOOL Success );

@@ -777,7 +777,6 @@ pub struct FfiLauncherSettings {
     pub screen_mode: i32,
     pub resolution_width: i32,
     pub resolution_height: i32,
-    pub render_backend: i32,
     pub vertical_sync: bool,
     pub render_scale: f64,
     pub ui_scale: f64,
@@ -835,11 +834,6 @@ fn settings_from_ffi(
         2 => ScreenMode::BorderlessDesktop,
         _ => return Err(INVALID_SELECTION.to_string()),
     };
-    let render_backend = match ffi.render_backend {
-        0 => RenderBackend::XOpenGL,
-        1 => RenderBackend::Vulkan,
-        _ => return Err(INVALID_SELECTION.to_string()),
-    };
     let texture_detail = match ffi.texture_detail {
         0 => TextureDetail::Low,
         1 => TextureDetail::Medium,
@@ -872,7 +866,6 @@ fn settings_from_ffi(
             height: ffi.resolution_height,
             label: String::new(),
         },
-        render_backend,
         vertical_sync: ffi.vertical_sync,
         render_scale: ffi.render_scale,
         ui_scale: ffi.ui_scale,
@@ -905,7 +898,6 @@ fn settings_to_ffi(settings: &hp2_launcher::model::LauncherSettings) -> FfiLaunc
         screen_mode: settings.screen_mode as i32,
         resolution_width: settings.resolution.width,
         resolution_height: settings.resolution.height,
-        render_backend: settings.render_backend as i32,
         vertical_sync: settings.vertical_sync,
         render_scale: settings.render_scale,
         ui_scale: settings.ui_scale,

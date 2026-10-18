@@ -14,10 +14,7 @@ the MIT license above.
 
 | Component | License | Upstream | Notes |
 | --- | --- | --- | --- |
-| `ThirdParty/XOpenGLDrv` | BSD-3-Clause | OldUnreal/XOpenGLDrv | Bundles glad (MIT, generated OpenGL loader) and GLM (MIT, `glm/copying.txt`); renders through SDL2 GL |
-| `ThirdParty/UT99VulkanDrv` | zlib | dpjudas/UT99VulkanDrv | Carries bundled ZVulkan, Vulkan-Headers, VMA, volk, and glslang license notices |
 | `ThirdParty/vgmstream` | ISC | vgmstream/vgmstream | Includes EA-XA decoder coefficient data; see its attribution notice |
-| `ThirdParty/stb` | Public domain / MIT | nothings/stb | `stb_image_write.h` used for end-of-frame PNG capture |
 
 ## Fetched at configure time (FetchContent, hash-pinned)
 
@@ -28,7 +25,6 @@ the MIT license above.
 | libogg | Xiph BSD-3-Clause-style | xiph/ogg | |
 | libvorbis | Xiph BSD-3-Clause-style | xiph/vorbis | |
 | libSquish | MIT | svn2github/libsquish | DXT compression |
-| MoltenVK | Apache-2.0 | KhronosGroup/MoltenVK | Vulkan-over-Metal runtime for the macOS Vulkan driver |
 
 ## Reference-only projects
 

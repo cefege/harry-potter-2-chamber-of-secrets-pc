@@ -55,11 +55,6 @@ enum class ControlMode
 	Modern
 };
 
-enum class RenderBackend
-{
-	XOpenGL,
-	Vulkan
-};
 enum class DataSource
 {
 	Retail,
@@ -110,7 +105,6 @@ struct LauncherSettings
 {
 	ScreenMode screenMode = ScreenMode::Windowed;
 	DisplayResolution resolution;
-	RenderBackend renderBackend = RenderBackend::XOpenGL;
 	bool verticalSync = false;
 	double renderScale = 1.0;
 	double uiScale = 1.0;

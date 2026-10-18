@@ -579,12 +579,16 @@ def _run_side(
     side_dir = artifact_dir / name
     side_dir.mkdir(parents=True, exist_ok=True)
     trace_path = side_dir / TRACE_FILENAME
+    ini_file = game_test.render_device_engine_ini(
+        data_root, side_dir / f"{renderer}-engine.ini", renderer,
+    )
     command = game_test.build_launch_command(
         executable,
         data_root,
         _map_token(),
         renderer,
         REQUESTED_TICKS,
+        ini_file=ini_file,
         fixed_dt=FIXED_DT,
     )
     process = game_test.run_command(
@@ -627,11 +631,11 @@ def run_static_movement_gate(
     engine_bin: Path,
     data_root: Path,
     output: Path,
-    renderer: str = "xopengl",
+    renderer: str = "wgpu",
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
     """Stage TriggerTest2 and compare C++ and Rust static-BSP movement traces."""
-    if renderer not in ("xopengl", "vulkan"):
+    if renderer not in game_test.RENDERERS:
         raise StaticMovementGateError(f"unsupported renderer: {renderer}")
     timeout = _timeout(timeout_seconds)
     cpp_executable = _executable(app, "C++ application")
@@ -720,7 +724,7 @@ def _arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--engine-bin", required=True, type=Path, help="Rust engine executable")
     parser.add_argument("--data-root", required=True, type=Path, help="unmodified HP2 data root")
     parser.add_argument("--output", required=True, type=Path, help="atomic static-movement gate report")
-    parser.add_argument("--renderer", choices=("xopengl", "vulkan"), default="xopengl")
+    parser.add_argument("--renderer", choices=game_test.RENDERERS, default="wgpu")
     parser.add_argument("--timeout", type=_positive_timeout, default=DEFAULT_TIMEOUT_SECONDS)
     return parser.parse_args(argv)
 

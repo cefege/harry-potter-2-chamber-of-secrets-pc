@@ -181,11 +181,11 @@ fn strings(values: &[&str]) -> Vec<String> {
 pub fn manifest(assets: &[Asset], profile: &str) -> String {
     let safe_defaults = strings(&[
         "base: prototype System/Default.ini",
-        "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, prototype Language=int",
+        "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, prototype Language=int",
         "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
         "Core.System: forward-slash portable relative data paths",
         "SDLDrv.SDLClient: native portable client defaults",
-        "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+        "WgpuDrv.WgpuRenderDevice: wgpu feature set",
     ]);
     let safe_defuser = strings(&[
         "base: prototype System/DefUser.ini with Modern controls disabled; prototype bindings retained",
@@ -194,11 +194,11 @@ pub fn manifest(assets: &[Asset], profile: &str) -> String {
     let full_defaults = strings(&[
         "base: prototype System/Default.ini",
         "FrontEnd: retail EASplashWaitTime, WBSplashWaitTime, LaunchCode, UseSaveSlot",
-        "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
+        "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, Language=usa",
         "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
         "Core.System: forward-slash portable relative data paths",
         "SDLDrv.SDLClient: native portable client defaults",
-        "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+        "WgpuDrv.WgpuRenderDevice: wgpu feature set",
         "ALAudio.ALAudioSubsystem: retail final MusicVolume=0.53",
         "HGame console: retail final debug mode disabled",
     ]);
@@ -211,11 +211,11 @@ pub fn manifest(assets: &[Asset], profile: &str) -> String {
     let retail_defaults = strings(&[
         "base: retail System/default.ini; no prototype bytes",
         "FrontEnd: retail final splash, launch, and save-slot values",
-        "Engine.Engine: XOpenGLDrv, SDLDrv, OpenAL, Language=usa",
+        "Engine.Engine: WgpuDrv, SDLDrv, OpenAL, Language=usa",
         "Engine.GameEngine: FrameRateLimit=144, UseAA/NumAASamples/MaxAnisotropy maxed, and no unavailable ServerActors",
         "Core.System: forward-slash portable relative data paths",
         "SDLDrv.SDLClient: native portable client defaults",
-        "XOpenGLDrv.XOpenGLRenderDevice: OpenGL 4.1-safe feature set",
+        "WgpuDrv.WgpuRenderDevice: wgpu feature set",
         "ALAudio.ALAudioSubsystem: retail final MusicVolume=0.53",
         "HGame console: retail final debug mode disabled",
     ]);

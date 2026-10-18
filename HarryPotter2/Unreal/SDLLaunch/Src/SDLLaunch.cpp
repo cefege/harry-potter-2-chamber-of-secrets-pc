@@ -510,6 +510,8 @@ void ApplyPortableConfig()
 			TEXT("GlideDrv."),
 			TEXT("SoftDrv."),
 			TEXT("OpenGLDrv."),
+			TEXT("XOpenGLDrv."),
+			TEXT("VulkanDrv."),
 			TEXT("WinDrv.")
 		};
 		for( const TCHAR* Prefix : LegacyPrefixes )
@@ -537,8 +539,8 @@ void ApplyPortableConfig()
 		if( GConfig->GetString( TEXT("Engine.Engine"), Key, Current, ARRAY_COUNT(Current), TEXT("System") )
 			&& IsLegacyRenderDevice( Current ) )
 		{
-			GConfig->SetString( TEXT("Engine.Engine"), Key, TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("System") );
-			debugf( NAME_Init, TEXT("Migrated [Engine.Engine] %s=%s to XOpenGLDrv.XOpenGLRenderDevice"), Key, Current );
+			GConfig->SetString( TEXT("Engine.Engine"), Key, TEXT("WgpuDrv.WgpuRenderDevice"), TEXT("System") );
+			debugf( NAME_Init, TEXT("Migrated [Engine.Engine] %s=%s to WgpuDrv.WgpuRenderDevice"), Key, Current );
 		}
 	}
 
@@ -6062,10 +6064,10 @@ static int HP2BootAfterLauncher(
 			// its eglSwapInterval call had no loop to reprogram and the ini is
 			// the only source of the choice here. Absent the key this reads as
 			// display-paced, which is what the renderer's own VS_Adaptive
-			// default resolves to (XOpenGL.cpp:268); the web panel always
+			// default resolves to (WgpuDrv.cpp's UseVSync default); the web panel always
 			// writes it.
 			FString VSyncSetting;
-			Session->VSync = !( GConfig->GetString( TEXT("XOpenGLDrv.XOpenGLRenderDevice"), TEXT("UseVSync"), VSyncSetting )
+			Session->VSync = !( GConfig->GetString( TEXT("WgpuDrv.WgpuRenderDevice"), TEXT("UseVSync"), VSyncSetting )
 				&& appStricmp( *VSyncSetting, TEXT("Off") ) == 0 );
 			// An explicit frame rate is required: with fps = 0 Emscripten never
 			// starts the loop in this configuration. This only times the first

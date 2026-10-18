@@ -22,11 +22,14 @@ and exports its inputs as variables. No caller hardcodes provider paths.
      `hp2_xopengldrv` and gates test targets/registrations on
      `HP2_HAS_NATIVE_TEXT_BACKEND`.
 
-Today there is exactly one provider:
+Declared providers, in declaration order (`Build/CMake/HP2Dependencies.cmake`); the first whose `CONDITION` holds is selected:
 
 | Name | Condition | Sources | Link libs |
 |---|---|---|---|
-| `CoreText` | `APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK` | `ThirdParty/XOpenGLDrv/Src/NativeText.cpp` | CoreText, CoreGraphics |
+| `CoreText` | `APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK` | `HarryPotter2/Unreal/NativeText/Src/NativeTextShared.cpp` | CoreText, CoreGraphics |
+| `FreeType` | `NOT APPLE AND NOT WIN32 AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND HP2_FONTCONFIG_FOUND` | `HarryPotter2/Unreal/NativeText/Src/NativeTextFreeType.cpp` | FreeType, HarfBuzz, Fontconfig (pkg-config) |
+| `FreeTypeBundled` | `WIN32` | `HarryPotter2/Unreal/NativeText/Src/NativeTextFreeType.cpp`, `HarryPotter2/Unreal/NativeText/Src/NativeTextFontsBundled.cpp` | freetype, harfbuzz |
+| `FreeTypeEmscripten` | `TRUE` (declared only under `EMSCRIPTEN`) | `HarryPotter2/Unreal/NativeText/Src/NativeTextFreeType.cpp`, `HarryPotter2/Unreal/NativeText/Src/NativeTextFontSeamEmscripten.cpp` | none (link flags via `HP2_WEB_FONTLINK_FLAGS`) |
 
 The framework probes run unconditionally before the declarations so every
 condition is a pure variable test; on hosts without the frameworks
@@ -47,7 +50,7 @@ Order matters: earlier declarations win, so put the preferred backend first.
 # Windows: DirectWrite
 find_library(HP2_DWRITE_FRAMEWORK DirectWrite)          # or find_package / pkg-config for Pango
 hp2_declare_text_provider(DirectWrite
-    SOURCES "${HP2_THIRD_PARTY_ROOT}/XOpenGLDrv/Src/NativeTextDirectWrite.cpp"
+    SOURCES "${CMAKE_SOURCE_DIR}/HarryPotter2/Unreal/NativeText/Src/NativeTextDirectWrite.cpp"
     LINK_LIBS "${HP2_DWRITE_FRAMEWORK}"
     CONDITION "WIN32 AND HP2_DWRITE_FRAMEWORK"
 )
@@ -56,7 +59,7 @@ hp2_declare_text_provider(DirectWrite
 For Pango on Linux, probe with `pkg_check_modules` (or `find_package(Pango)`)
 and use a condition like `PANGO_FOUND AND CAIRO_FOUND`. The new provider's
 sources must expose the same `FNativeTextPlatformBackend` seam that
-`ThirdParty/XOpenGLDrv/Src/NativeText.cpp` implements; the driver and tests
+`HarryPotter2/Unreal/NativeText/Src/NativeText.cpp` implements; the driver and tests
 compile against the interface, not the backend.
 
 ## Gate interaction: capability and default are separate decisions
