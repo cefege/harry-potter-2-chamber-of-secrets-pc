@@ -393,6 +393,20 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             },
         )
 
+    def test_prune_to_last_frame_keeps_highest_frame_and_meta(self) -> None:
+        frames = self.root / "000001-Entry"
+        frames.mkdir()
+        for index in (0, 1, 10, 9):
+            (frames / f"frame_{index:06d}.png").write_bytes(b"png")
+        (frames / "frame_meta.json").write_text('{"captures":[]}\n', encoding="utf-8")
+        (frames / "notes.txt").write_text("keep", encoding="utf-8")
+        smoke_maps._prune_to_last_frame(frames)
+        self.assertEqual(
+            sorted(path.name for path in frames.iterdir()),
+            ["frame_000010.png", "frame_meta.json", "notes.txt"],
+        )
+        smoke_maps._prune_to_last_frame(self.root / "missing")
+
 
 class LaunchLegContracts(unittest.TestCase):
     def test_blocked_smoke_leg_raises_and_retains_runner_log(self) -> None:

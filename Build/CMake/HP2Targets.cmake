@@ -1197,6 +1197,10 @@ hp2_add_behavior_test(matrix_compare_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/MatrixCompareTests.py"
 )
 set_tests_properties(matrix_compare_contract PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(wgpu_vs_xopengl_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/WgpuVsXopenglTests.py"
+)
+set_tests_properties(wgpu_vs_xopengl_contract PROPERTIES LABELS "fast;data-none")
 
 if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")

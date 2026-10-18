@@ -596,6 +596,20 @@ def _frames_directory(output: Path) -> Path:
     stem = name[:-5] if name.lower().endswith(".json") else name
     return output.with_name(f"{stem}-frames")
 
+def _prune_to_last_frame(frames_dir: Path) -> None:
+    """Delete every frame_<6d>.png in ``frames_dir`` except the highest-numbered.
+
+    frame_meta.json is kept untouched, so the record's capture count still
+    reports every captured frame. A missing directory is a no-op.
+    """
+    frames = sorted(frames_dir.glob("frame_[0-9][0-9][0-9][0-9][0-9][0-9].png"))
+    for frame in frames[:-1]:
+        try:
+            frame.unlink()
+        except OSError as error:
+            raise SmokeError(f"cannot prune captured frame {frame}: {error}") from error
+
+
 
 def _capture_record(
     frames_dir: Path | None, repo_root: Path
@@ -1085,6 +1099,16 @@ def _arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--capture-keep-last",
+        action="store_true",
+        default=False,
+        help=(
+            "with --capture-frames, delete every map's captured frames except "
+            "its last one right after that map finishes (frame_meta.json is "
+            "kept), bounding disk use for full-sweep renderer comparisons"
+        ),
+    )
+    parser.add_argument(
         "--vulkan-icd",
         type=Path,
         default=DEFAULT_VULKAN_ICD,
@@ -1197,6 +1221,8 @@ def main() -> int:
             )
         logs = _log_directory(output)
         _replace_directory(logs)
+        if arguments.capture_keep_last and not arguments.capture_frames:
+            raise SmokeError("--capture-keep-last requires --capture-frames")
         frames_root = (
             _frames_directory(output) if arguments.capture_frames else None
         )
@@ -1240,6 +1266,8 @@ def main() -> int:
                     max_frame_ms=arguments.max_frame_ms,
                     max_map_seconds=arguments.max_map_seconds,
                 )
+            if arguments.capture_keep_last and capture_frames_dir is not None:
+                _prune_to_last_frame(capture_frames_dir)
             records.append(record)
 
         passed_count = sum(1 for record in records if record["passed"])
