@@ -3369,3 +3369,51 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_tile(
         });
     })
 }
+
+/// Replaces `UXOpenGLRenderDevice::Draw2DPoint` (`DrawSimple.cpp:
+/// 154-205`, read in full). `x1`/`y1`/`x2`/`y2`/`z` are `Draw2DPoint`'s
+/// own real `FLOAT` parameters, unchanged -- `hp2_wgpu::RenderLoop::
+/// queue_point`'s own doc has the full real citation for the `Z`
+/// adjustment and `+-0.5` quad inset/expansion applied internally.
+/// `fx2`/`fy2` are the real `Frame->FX2`/`FY2` the actual `Draw2DPoint`
+/// call received, same real per-call-not-cached reasoning `hp2_rs_
+/// wgpu_draw_2d_line`'s own `fx2`/`fy2` already establish. `r`/`g`/`b`
+/// are the real `FPlane Color`'s first three components -- alpha is
+/// not a parameter here either, same real reason `hp2_rs_wgpu_draw_
+/// 2d_line`'s own doc already states for lines (`DrawSimple.cpp:166`:
+/// `Color.W = 1.f; //Unfortunately this is usually set to 0.`).
+///
+/// Known, explicitly scoped gaps, not silently pretended away, same
+/// category `hp2_rs_wgpu_draw_2d_line`'s own doc already names for
+/// lines: `LineFlags`, the real `HitTesting() ? HitColor : Color`
+/// substitution, and the real fixed `BlendMode = PF_Highlighted`
+/// (`DrawSimple.cpp:166-168`) are not applied yet.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_queue_point(
+    handle: *mut c_void,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    z: f32,
+    fx2: f32,
+    fy2: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+) {
+    guard("hp2_rs_wgpu_queue_point", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle
+            .render_loop
+            .queue_point(x1, y1, x2, y2, z, fx2, fy2, [r, g, b]);
+    })
+}

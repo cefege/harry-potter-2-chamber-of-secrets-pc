@@ -118,6 +118,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	SetSceneNodeCallCount = 0;
 	Draw2DLineCallCount = 0;
 	DrawTileCallCount = 0;
+	Draw2DPointCallCount = 0;
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -261,7 +262,7 @@ void UWgpuRenderDevice::Exit()
 		// (hp2_wgpu::RenderLoop::set_scene_node's own doc): how many
 		// SetSceneNode calls one run actually made, not inferred or
 		// assumed from the engine's own architecture docs.
-		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount );
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i Draw2DPoint calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount, Draw2DPointCallCount );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -580,6 +581,30 @@ void UWgpuRenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineF
 void UWgpuRenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD LineFlags, FLOAT X1, FLOAT Y1, FLOAT X2, FLOAT Y2, FLOAT Z )
 {
 	guard(UWgpuRenderDevice::Draw2DPoint);
+	if( !RustDevice )
+		return;
+
+	// hp2_rs_wgpu_queue_point's own doc has the full real-formula
+	// detail and the known, explicitly scoped gaps (LineFlags,
+	// HitTesting, PF_Highlighted blend mode -- none applied yet, same
+	// category of gap Draw2DLine's own override already has). Color.W
+	// is not passed at all, same real reason Draw2DLine's own override
+	// already has (DrawSimple.cpp:166: "Unfortunately this is usually
+	// set to 0"). Frame->FX2/FY2 are read straight off this call's own
+	// real Frame, not derived from whatever scene SetSceneNode last
+	// cached -- the real source's own Draw2DPoint does the same
+	// (DrawSimple.cpp:187), matching Draw2DLine's own override exactly.
+	if( Draw2DPointCallCount == 0 )
+	{
+		debugf( NAME_Init, TEXT("WgpuDrv: Draw2DPoint first call: X1=%f Y1=%f X2=%f Y2=%f Z=%f"),
+			X1, Y1, X2, Y2, Z );
+	}
+	Draw2DPointCallCount++;
+
+	hp2_rs_wgpu_queue_point( RustDevice,
+		X1, Y1, X2, Y2, Z,
+		Frame->FX2, Frame->FY2,
+		Color.X, Color.Y, Color.Z );
 	unguard;
 }
 
