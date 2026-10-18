@@ -3074,3 +3074,298 @@ pub unsafe extern "C" fn hp2_rs_wgpu_draw_2d_line(
         );
     })
 }
+
+/// Real `FixCacheID` (`SetTexture.cpp`'s own call site, immediately
+/// before `BindMap->Find`) -- `hp2_wgpu::texture::fix_cache_id`'s own
+/// doc has the full real reasoning. Pure (no `WgpuHandle` needed):
+/// callers compute the real tagged cache key once and reuse the
+/// result for every other `hp2_rs_wgpu_*texture*`/`hp2_rs_wgpu_
+/// queue_tile` call referencing the same real texture, matching the
+/// real source's own `FixCacheID(Info, PolyFlags)` call site exactly
+/// (once per real `SetTexture`/`DrawTile` call, reused by everything
+/// downstream of it in that same call). `format` is the real raw
+/// `Info.Format` byte -- an out-of-range value (`hp2_wgpu::texture::
+/// TextureFormat::from_raw`'s own `None` case) logs a warning and
+/// returns `cache_id` unchanged (untagged): the real source's own
+/// masked-vs-unmasked distinction only matters for `TEXF_P8`, so an
+/// unrecognized format cannot be P8 either way, and returning the
+/// input unchanged is the safe, inert fallback (never a crash, never
+/// a made-up tag).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_wgpu_fix_cache_id(cache_id: u64, format: u8, poly_flags: u32) -> u64 {
+    guard("hp2_rs_wgpu_fix_cache_id", cache_id, move || {
+        let Some(format) = hp2_wgpu::texture::TextureFormat::from_raw(format) else {
+            log::warn!(
+                "hp2_rs_wgpu_fix_cache_id: invalid Info.Format value {format} (expected \
+                 0x00..=0x05), returning cache_id unchanged"
+            );
+            return cache_id;
+        };
+        hp2_wgpu::texture::fix_cache_id(cache_id, format, poly_flags)
+    })
+}
+
+/// `hp2_wgpu::RenderLoop::is_texture_cached`'s own real contract
+/// (that method's own doc has the full reasoning) -- `cache_id` must
+/// already be `hp2_rs_wgpu_fix_cache_id`'s own output. `false` on a
+/// null `handle` (not a crash).
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_is_texture_cached(handle: *mut c_void, cache_id: u64) -> bool {
+    guard("hp2_rs_wgpu_is_texture_cached", false, move || {
+        if handle.is_null() {
+            return false;
+        }
+        let handle = unsafe { &*(handle as *mut WgpuHandle) };
+        handle.render_loop.is_texture_cached(cache_id)
+    })
+}
+
+/// Borrows a raw `(ptr, 1024-byte)` FFI span as `&[hp2_wgpu::texture::
+/// FColor; 256]` (the real `FTextureInfo::Palette`'s own shape; `hp2_
+/// wgpu::texture::FColor` is itself a re-export of `hp2_abi::FColor`
+/// -- `hp2-abi` is not a direct dependency of this crate, `hp2-wgpu`'s
+/// own re-export is the real accessible path) -- same raw-pointer-
+/// reinterpretation idiom as this file's own `bytes_from_raw`/
+/// `str_from_raw` (not `bytemuck`: this crate has no existing
+/// dependency on it, unlike `hp2-wgpu`, and introducing one for this
+/// one conversion is not worth a new dependency when this file's own
+/// established raw-pointer-cast idiom already covers it). Null `ptr`
+/// is `None`. `hp2_abi::FColor` is `#[repr(C, align(4))]`, matching
+/// the real `union { DWORD Int4; struct {...}; }` layout the real
+/// `Palette` array itself has (that struct's own doc has the full
+/// real citation) -- a 1024-byte span really is 256 contiguous,
+/// correctly aligned `FColor`s, not an assumption.
+#[cfg(feature = "renderer-wgpu")]
+unsafe fn palette_from_raw<'a>(ptr: *const u8) -> Option<&'a [hp2_wgpu::texture::FColor; 256]> {
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { &*(ptr as *const [hp2_wgpu::texture::FColor; 256]) })
+}
+
+/// Replaces `UXOpenGLRenderDevice::SetTexture`'s own real upload path
+/// (`SetTexture.cpp`, `UploadTexture`'s `TEXF_P8`/`TEXF_RGBA8` cases
+/// specifically -- read in full before writing this function, not
+/// guessed). `cache_id` must already be `hp2_rs_wgpu_fix_cache_id`'s
+/// own output. `format` is the real raw `Info.Format` byte
+/// (`hp2_wgpu::texture::TextureFormat`'s own real discriminants).
+///
+/// Dispatches on `format`:
+/// - `TEXF_P8` (`0x00`): `data` is the real raw `Mip->DataPtr` (one
+///   byte per texel, `width * height` bytes), `palette` must be a
+///   valid, non-null pointer to the real 256-entry `FTextureInfo::
+///   Palette` -- expanded via `hp2_wgpu::texture::p8_to_rgba8` (that
+///   function's own doc has the full real citation), `masked`
+///   selecting `P8MaskMode::Masked`/`Unmasked` (the real `PF_Masked`-
+///   driven choice `FixCacheID`'s own doc already covers -- the
+///   caller's responsibility to have already made this same choice
+///   consistently with whatever `cache_id` it passed in, matching the
+///   real source's own paired `FixCacheID`/`UploadTexture` call
+///   sequence).
+/// - `TEXF_RGBA8` (`0x05`): `data` is already real RGBA8 bytes
+///   (`width * height * 4`), uploaded directly, `palette`/`masked`
+///   ignored.
+/// - Every other real format (`TEXF_RGBA7`/`TEXF_RGB16`/`TEXF_DXT1`/
+///   `TEXF_RGB8`): not yet ported (this crate's own todo list tracks
+///   DXT1/BC and RGB8/RGB16/RGBA7 conversion as separate, not-yet-done
+///   items) -- logs a warning and returns `false`, uploading nothing.
+///   A real, known, explicitly scoped gap: textures in these formats
+///   do not render via this path yet, not a silent wrong result.
+///
+/// Returns `false` (not a panic) on a null `handle`, an out-of-range
+/// `format` byte, a null `data`/`palette` pointer where required, or a
+/// `data` length that does not match `width * height` (P8) / `width *
+/// height * 4` (RGBA8) -- all real, reachable caller-input conditions,
+/// not asserted/panicked on (unlike `TextureCache::upload_rgba8`'s own
+/// internal `assert_eq!`, which this function's own explicit length
+/// check exists specifically to never reach with mismatched input).
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null. `data` must be valid for `data_len` bytes.
+/// `palette`, when not null, must be valid for 1024 bytes (256 real
+/// `FColor` entries).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
+    handle: *mut c_void,
+    cache_id: u64,
+    format: u8,
+    width: u32,
+    height: u32,
+    data: *const u8,
+    data_len: usize,
+    palette: *const u8,
+    masked: bool,
+    srgb: bool,
+) -> bool {
+    guard("hp2_rs_wgpu_upload_texture", false, move || {
+        if handle.is_null() {
+            return false;
+        }
+        let Some(format) = hp2_wgpu::texture::TextureFormat::from_raw(format) else {
+            log::warn!(
+                "hp2_rs_wgpu_upload_texture: invalid Info.Format value {format} (expected \
+                 0x00..=0x05), skipping upload"
+            );
+            return false;
+        };
+        let Some(data) = (unsafe { bytes_from_raw(data, data_len) }) else {
+            log::warn!("hp2_rs_wgpu_upload_texture: null data pointer with data_len != 0");
+            return false;
+        };
+        let rgba8: std::borrow::Cow<'_, [u8]> = match format {
+            hp2_wgpu::texture::TextureFormat::P8 => {
+                if data.len() != width as usize * height as usize {
+                    log::warn!(
+                        "hp2_rs_wgpu_upload_texture: TEXF_P8 data_len {} != width*height {}",
+                        data.len(),
+                        width as usize * height as usize
+                    );
+                    return false;
+                }
+                let Some(palette) = (unsafe { palette_from_raw(palette) }) else {
+                    log::warn!("hp2_rs_wgpu_upload_texture: TEXF_P8 requires a non-null palette");
+                    return false;
+                };
+                let mask_mode = if masked {
+                    hp2_wgpu::texture::P8MaskMode::Masked
+                } else {
+                    hp2_wgpu::texture::P8MaskMode::Unmasked
+                };
+                let expanded = hp2_wgpu::texture::p8_to_rgba8(data, palette, mask_mode);
+                let bytes: Vec<u8> = expanded.iter().flat_map(|c| [c.r, c.g, c.b, c.a]).collect();
+                std::borrow::Cow::Owned(bytes)
+            }
+            hp2_wgpu::texture::TextureFormat::Rgba8 => {
+                if data.len() != width as usize * height as usize * 4 {
+                    log::warn!(
+                        "hp2_rs_wgpu_upload_texture: TEXF_RGBA8 data_len {} != width*height*4 {}",
+                        data.len(),
+                        width as usize * height as usize * 4
+                    );
+                    return false;
+                }
+                std::borrow::Cow::Borrowed(data)
+            }
+            other => {
+                log::warn!(
+                    "hp2_rs_wgpu_upload_texture: {} upload not yet ported, skipping",
+                    hp2_wgpu::texture::texture_format_name(other)
+                );
+                return false;
+            }
+        };
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle
+            .render_loop
+            .upload_texture(&handle.created, cache_id, width, height, &rgba8, srgb);
+        true
+    })
+}
+
+/// Replaces `UXOpenGLRenderDevice::DrawTile`/`SubmitTileBatch`
+/// (`DrawTile.cpp:24-56`/`117-265`, both read in full). `cache_id`
+/// must already be `hp2_rs_wgpu_fix_cache_id`'s own output, and the
+/// matching real texture must already have been uploaded via
+/// `hp2_rs_wgpu_upload_texture` (or already be cached from an earlier
+/// call, checked first via `hp2_rs_wgpu_is_texture_cached`) -- a
+/// `cache_id` with no real cached texture is dropped cleanly
+/// (`hp2_wgpu::RenderLoop::queue_tile`'s own doc), not a crash.
+/// `x`/`y`/`xl`/`yl`/`u`/`v`/`ul`/`vl`/`z` are `DrawTile`'s own real
+/// `FLOAT` parameters, unchanged. `r`/`g`/`b` are the real `FPlane
+/// Color`'s first three components -- unlike `hp2_rs_wgpu_draw_2d_
+/// line`, alpha genuinely is still not a meaningful input here
+/// either, for a different real reason: `DrawTile.cpp:40-43`'s own
+/// `Color.W` adjustment unconditionally overwrites whatever the
+/// caller's `Color.W` was (to `1.0` or to the real texture's own
+/// `Alpha`, see `has_texture_alpha`/`texture_alpha` below) -- no real
+/// code path preserves it, confirmed by `hp2_wgpu::draw::compute_
+/// tile_draw_color`'s own tests. `u_scale`/`v_scale` are the real
+/// `FTextureInfo::UScale`/`VScale` fields (`hp2_wgpu::texture::
+/// texture_uv_mult`'s own doc has the full real per-bind-freshness
+/// reasoning -- read fresh from this specific `DrawTile` call's own
+/// `Info`, never cached). `has_texture_alpha`/`texture_alpha` encode
+/// the real `Info.Texture && Info.Texture->Alpha` pair as an FFI-safe
+/// bool-plus-value (no native `Option<f32>` across this boundary) --
+/// `false` for a real null `Info.Texture`, matching `compute_tile_
+/// draw_color`'s own `None` case. `fx2`/`fy2` are the real `Frame->
+/// FX2`/`FY2` the actual `DrawTile` call received, same real per-call-
+/// not-cached reasoning `hp2_rs_wgpu_draw_2d_line`'s own `fx2`/`fy2`
+/// already establish.
+///
+/// Known, explicitly scoped gaps, not silently pretended away (both
+/// confirmed by reading `SubmitTileBatch` in full, not assumed from
+/// `DrawTile`'s own simpler entry point alone): the real `GIsEditor &&
+/// PF_Selected -> DF_Selected` flag (`DrawTile.cpp:143-144`) and the
+/// real `HitTesting() ? HitColor : Color` substitution (`DrawTile.cpp:
+/// 146`) are not applied -- `poly_flags` is translated by `hp2_wgpu::
+/// draw::compute_tile_draw_flags` alone, which does not know about
+/// `GIsEditor`/selection state, and no hit-testing readback exists on
+/// this render device yet (tracked separately, same gap `hp2_rs_wgpu_
+/// draw_2d_line`'s own doc already names for lines). The real editor-
+/// only `Z = 1.0f` override (`DrawTile.cpp:206-211`) is also not
+/// applied, matching `RenderLoop::queue_tile`'s own doc.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_queue_tile(
+    handle: *mut c_void,
+    cache_id: u64,
+    x: f32,
+    y: f32,
+    xl: f32,
+    yl: f32,
+    u: f32,
+    v: f32,
+    ul: f32,
+    vl: f32,
+    z: f32,
+    r: f32,
+    g: f32,
+    b: f32,
+    poly_flags: u32,
+    u_scale: f32,
+    v_scale: f32,
+    has_texture_alpha: bool,
+    texture_alpha: f32,
+    fx2: f32,
+    fy2: f32,
+) {
+    guard("hp2_rs_wgpu_queue_tile", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.queue_tile(hp2_wgpu::TileDrawRequest {
+            cache_id,
+            x,
+            y,
+            xl,
+            yl,
+            u,
+            v,
+            ul,
+            vl,
+            z,
+            // Color.W is always overwritten by compute_tile_draw_color
+            // -- see this function's own doc.
+            color: [r, g, b, 1.0],
+            poly_flags,
+            u_scale,
+            v_scale,
+            texture_alpha: has_texture_alpha.then_some(texture_alpha),
+            fx2,
+            fy2,
+        });
+    })
+}

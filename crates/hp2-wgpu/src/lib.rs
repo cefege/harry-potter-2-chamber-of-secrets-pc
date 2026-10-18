@@ -1384,6 +1384,22 @@ impl RenderLoop {
             .upload_rgba8(created, cache_id, width, height, rgba8_bytes, srgb);
     }
 
+    /// Real `SetTexture.cpp:502`'s own fast-path bailout check, the
+    /// caller-facing half: lets a future FFI wrapper skip the real
+    /// (potentially expensive -- P8-palette expansion, format
+    /// conversion) texture-data extraction work entirely when
+    /// `cache_id` is already resident, the same real condition that
+    /// lets `SetTexture` itself return immediately without reaching
+    /// its own `UploadTexture` call. Does not detect staleness
+    /// (`IsTextureDataStale`'s own real counterpart) -- a resident
+    /// `cache_id` is always treated as still fresh; re-upload of an
+    /// already-cached, realtime-changing texture is `TextureCache`'s
+    /// own separately tracked, not-yet-done item (that struct's own
+    /// doc has the full reasoning).
+    pub fn is_texture_cached(&self, cache_id: u64) -> bool {
+        self.texture_cache.get(cache_id).is_some()
+    }
+
     /// Real per-tick entry point `UWgpuRenderDevice::SetSceneNode`
     /// calls through `hp2_rs_wgpu_set_scene_node` (wired, not a
     /// future plan -- an earlier version of this doc said "not wired

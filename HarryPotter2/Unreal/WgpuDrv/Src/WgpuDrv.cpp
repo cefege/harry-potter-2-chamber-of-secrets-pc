@@ -117,6 +117,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	Viewport = InViewport;
 	SetSceneNodeCallCount = 0;
 	Draw2DLineCallCount = 0;
+	DrawTileCallCount = 0;
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -260,7 +261,7 @@ void UWgpuRenderDevice::Exit()
 		// (hp2_wgpu::RenderLoop::set_scene_node's own doc): how many
 		// SetSceneNode calls one run actually made, not inferred or
 		// assumed from the engine's own architecture docs.
-		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount );
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -457,6 +458,83 @@ void UWgpuRenderDevice::DrawTriangles( FSceneNode* Frame, FTextureInfo& Info, FT
 void UWgpuRenderDevice::DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, FSpanBuffer* Span, FLOAT Z, FPlane Color, FPlane Fog, DWORD PolyFlags )
 {
 	guard(UWgpuRenderDevice::DrawTile);
+	if( !RustDevice )
+		return;
+
+	// hp2_rs_wgpu_queue_tile's own doc has the full real-formula
+	// detail and the known, explicitly scoped gaps (GIsEditor &&
+	// PF_Selected -> DF_Selected, HitTesting, the editor-only Z=1.0f
+	// override -- none applied yet, same category of gap Draw2DLine's
+	// own override already has for LineFlags/HitTesting/blend mode).
+	//
+	// Real FixCacheID call site (SetTexture.cpp's own, immediately
+	// before BindMap->Find) -- computed once per real DrawTile call,
+	// reused for the upload-or-skip check below and the final
+	// queue_tile call, matching the real source's own single call
+	// site exactly.
+	QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, PolyFlags );
+
+	// Real SetTexture.cpp:502's own fast-path bailout, the caller-
+	// facing half (hp2_rs_wgpu_is_texture_cached's own doc): skips
+	// the real (potentially expensive -- P8 palette expansion) data
+	// extraction entirely when this exact real texture is already
+	// resident. Does not detect staleness (bRealtimeChanged) --
+	// hp2_wgpu::wgpu::texture::TextureCache's own doc already tracks
+	// real re-upload as a separate, not-yet-done item.
+	if( !hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
+	{
+		// Real UploadTexture (SetTexture.cpp, read in full), scoped
+		// to mip 0 only (TextureCache's own doc has the full real
+		// reasoning/limitation -- the real source's own per-mip loop,
+		// Bind->BaseMip through Info.NumMips, is not replicated here)
+		// and to the two real formats hp2_rs_wgpu_upload_texture
+		// itself already supports (TEXF_P8/TEXF_RGBA8 -- that
+		// function's own doc has the real, explicitly scoped gap for
+		// TEXF_RGBA7/RGB16/RGB8/DXT1: it logs and returns false,
+		// uploading nothing, rather than this override needing to
+		// know which formats are supported itself).
+		if( Info.Format == TEXF_P8 && !Info.Palette )
+		{
+			// Real SetTexture.cpp:213-214's own appErrorf condition
+			// ("Encountered bogus P8 texture") -- this override logs
+			// and skips the one texture instead of aborting the whole
+			// process over it.
+			debugf( NAME_Warning, TEXT("WgpuDrv: DrawTile: TEXF_P8 texture %ls has a null Palette, skipping upload"),
+				Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
+		}
+		else if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
+		{
+			FMipmapBase* Mip = Info.Mips[0];
+			size_t DataLen = ( Info.Format == TEXF_P8 )
+				? (size_t)Mip->USize * (size_t)Mip->VSize
+				: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
+			hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
+				(DWORD)Mip->USize, (DWORD)Mip->VSize,
+				Mip->DataPtr, DataLen,
+				(const BYTE*)Info.Palette,
+				( PolyFlags & PF_Masked ) != 0,
+				UseSRGBTextures != 0 );
+		}
+	}
+
+	UBOOL HasTextureAlpha = Info.Texture != NULL;
+
+	if( DrawTileCallCount == 0 )
+	{
+		debugf( NAME_Init, TEXT("WgpuDrv: DrawTile first call: X=%f Y=%f XL=%f YL=%f CacheID=%llu Format=%i"),
+			X, Y, XL, YL, FixedCacheID, (INT)Info.Format );
+	}
+	DrawTileCallCount++;
+
+	hp2_rs_wgpu_queue_tile( RustDevice, FixedCacheID,
+		X, Y, XL, YL,
+		U, V, UL, VL,
+		Z,
+		Color.X, Color.Y, Color.Z,
+		PolyFlags,
+		Info.UScale, Info.VScale,
+		HasTextureAlpha, HasTextureAlpha ? Info.Texture->Alpha : 0.0f,
+		Frame->FX2, Frame->FY2 );
 	unguard;
 }
 

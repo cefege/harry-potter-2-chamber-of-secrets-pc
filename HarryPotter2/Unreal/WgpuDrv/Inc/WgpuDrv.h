@@ -115,6 +115,10 @@ class UWgpuRenderDevice : public URenderDevice
 	// already has).
 	INT Draw2DLineCallCount;
 
+	// Total UWgpuRenderDevice::DrawTile calls since the last Init,
+	// same reset/logging convention as Draw2DLineCallCount above.
+	INT DrawTileCallCount;
+
 	// `[WgpuDrv.WgpuRenderDevice] Backend=Auto|Metal|Vulkan|Dx12|Gl` --
 	// config property, UEnum-backed (StaticConstructor registers the
 	// enum). Plain member index: 0=Auto, 1=Metal, 2=Vulkan, 3=Dx12,
