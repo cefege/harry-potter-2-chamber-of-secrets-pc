@@ -3894,7 +3894,11 @@ pub unsafe extern "C" fn hp2_rs_wgpu_end_flash(
             return false;
         }
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
-        handle.render_loop.queue_end_flash([r, g, b, a])
+        handle.render_loop.queue_end_flash(
+            &handle.created.device,
+            &handle.created.queue,
+            [r, g, b, a],
+        )
     })
 }
 
