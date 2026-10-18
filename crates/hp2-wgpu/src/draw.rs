@@ -587,8 +587,21 @@ pub fn point_quad_corners(request: PointQuadRequest) -> PointQuadCorners {
 /// unbuilt axis -- see `TilePipeline`'s own doc). Also skips `DF_
 /// DiffuseTexture`, which `SubmitTileBatch` ORs in itself right after
 /// calling the real function this ports, not something `GetPolyFlags
-/// AndDrawFlags` sets -- a future `queue_tile` wiring's own
-/// responsibility, not this pure function's.
+/// AndDrawFlags` sets -- a `queue_tile`/`queue_triangles` wiring-time
+/// responsibility, not this pure function's. The real function's own
+/// `RemoveOccludeIfSolid` third parameter (`SetTexture.cpp:578`) only
+/// ever affects the *returned* `PolyFlags`' own `PF_Occlude` bit (fed
+/// to `SetBlend`'s own real blend-state selection, the same separate,
+/// still-unbuilt axis above) -- it has no effect on `DrawFlags`
+/// itself (confirmed: `PF_Occlude` is not part of `RelevantPolyFlags`,
+/// the mask `DrawFlags`' own if-chain is built from), so this one
+/// function is the real, byte-identical translation for *both* real
+/// call sites regardless of their own different third-argument value
+/// -- `SubmitTileBatch`'s `GetPolyFlagsAndDrawFlags(PolyFlags,
+/// DrawFlags, 1)` and `PrepareGouraudCall`'s `GetPolyFlagsAndDrawFlags
+/// (PolyFlags, DrawFlags, 0)` (`DrawGouraud.cpp:74`) alike -- not a
+/// coincidence, confirmed by direct re-read of the real function
+/// before reusing it for a second caller, not assumed from the name.
 ///
 /// The one real behavior difference from a naive flag-for-flag
 /// mapping: `PF_RenderFog` is first cleared from a local copy of
@@ -645,6 +658,21 @@ pub fn compute_tile_draw_flags(poly_flags: u32) -> u32 {
     draw_flags
 }
 
+/// The real `Info.Texture && Info.Texture->Alpha > 0.f ? Info.Texture
+/// ->Alpha : 1.0f` resolution, factored out so `compute_tile_draw_
+/// color`'s own `PF_Modulated`-then-unconditional-override sequence
+/// and `queue_triangles`' own real `PrepareGouraudCall:166` (`const
+/// FLOAT TextureAlpha = (Info.Texture && Info.Texture->Alpha > 0.f) ?
+/// Info.Texture->Alpha : 1.f;` -- the identical real formula, a
+/// second real call site, not a coincidence) both call the one real
+/// formula instead of each re-deriving it.
+pub fn resolve_texture_alpha(texture_alpha: Option<f32>) -> f32 {
+    match texture_alpha {
+        Some(alpha) if alpha > 0.0 => alpha,
+        _ => 1.0,
+    }
+}
+
 /// `DrawTile`'s own real pre-`SubmitTileBatch` color adjustment
 /// (`DrawTile.cpp:33-43`, read in full, not just the `PF_Modulated`
 /// branch alone): `PF_Modulated` forces the whole color -- including
@@ -652,16 +680,17 @@ pub fn compute_tile_draw_flags(poly_flags: u32) -> u32 {
 /// `if`/`else` immediately after, not an `else if` chained onto the
 /// `PF_Modulated` check above it), `Info.Texture->Alpha` overwrites
 /// alpha again when the real texture object exists and that alpha is
-/// strictly `> 0.f`, falling back to `1.0` otherwise. The two checks
-/// are independent, not mutually exclusive: a `PF_Modulated` tile
-/// whose texture has a real positive `Alpha` ends up with RGB forced
-/// to `1.0` but alpha taken from the texture, not `1.0` -- confirmed
-/// by reading both branches in sequence, this function's own tests
-/// exercise exactly that combination, not just each flag alone.
-/// `texture_alpha` is `None` for the real `!Info.Texture` case (a
-/// real `FTextureInfo` can genuinely have a null `Texture` pointer --
-/// the real source's own `&&` short-circuit), `Some(Info.Texture->
-/// Alpha)` otherwise.
+/// strictly `> 0.f`, falling back to `1.0` otherwise (`resolve_
+/// texture_alpha`'s own doc has the real shared-formula citation).
+/// The two checks are independent, not mutually exclusive: a
+/// `PF_Modulated` tile whose texture has a real positive `Alpha` ends
+/// up with RGB forced to `1.0` but alpha taken from the texture, not
+/// `1.0` -- confirmed by reading both branches in sequence, this
+/// function's own tests exercise exactly that combination, not just
+/// each flag alone. `texture_alpha` is `None` for the real `!Info.
+/// Texture` case (a real `FTextureInfo` can genuinely have a null
+/// `Texture` pointer -- the real source's own `&&` short-circuit),
+/// `Some(Info.Texture->Alpha)` otherwise.
 pub fn compute_tile_draw_color(
     color: [f32; 4],
     poly_flags: u32,
@@ -672,10 +701,7 @@ pub fn compute_tile_draw_color(
     if poly_flags & PF_MODULATED != 0 {
         color = [1.0, 1.0, 1.0, 1.0];
     }
-    color[3] = match texture_alpha {
-        Some(alpha) if alpha > 0.0 => alpha,
-        _ => 1.0,
-    };
+    color[3] = resolve_texture_alpha(texture_alpha);
     color
 }
 
@@ -1057,6 +1083,317 @@ impl TilePipeline {
         device
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("device poll should succeed after a real tile render");
+    }
+}
+
+/// `gouraud.wgsl`'s real WGSL source, embedded the same way `simple.
+/// wgsl`/`tile.wgsl` are (`SIMPLE_WGSL_SOURCE`'s own doc has the full
+/// reasoning).
+const GOURAUD_WGSL_SOURCE: &str = concat!(
+    include_str!("shaders/common.wgsl"),
+    include_str!("shaders/gouraud.wgsl")
+);
+
+/// Byte-for-byte mirror of `gouraud.wgsl`'s own real `VertexInput`
+/// (`@location(0) coords: vec3<f32>, @location(1) draw_id: u32,
+/// @location(2) tex_coords: vec2<f32>, @location(3) light_color:
+/// vec4<f32>, @location(4) fog_color: vec4<f32>`), matching the
+/// already-proven vertex layout from this crate's own `gouraud_wgsl_
+/// builds_a_render_pipeline_on_a_real_adapter` test (`array_stride:
+/// 56`, offsets `0/12/16/24/40`) -- no `#[repr(C)]` padding needed:
+/// each field's own natural `f32`/`u32` alignment (4 bytes) already
+/// divides every one of those offsets evenly. `coords` are *not*
+/// screen-to-clip-transformed the way `LineVertex`/`TileVertex`'s own
+/// coords are -- real `BufferVert` (`DrawGouraud.cpp:35-43`) copies
+/// `FTransTexture::Point` straight through (`glm::vec3(P->Point.X,
+/// P->Point.Y, P->Point.Z)`), and `gouraud.wgsl`'s own `vs_main`
+/// feeds that directly into `modelviewproj_mat` with no other
+/// transform -- confirmed by direct re-read of both, not assumed
+/// from `TileVertex`'s superficially similar shape. No `normals`
+/// field: `gouraud.wgsl`'s own `VertexInput` already deliberately
+/// omits it (bump-mapping only, not read anywhere in this crate's
+/// own ported fragment shader scope, that shader's own module doc
+/// has the full citation).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GouraudVertex {
+    pub coords: [f32; 3],
+    pub draw_id: u32,
+    pub tex_coords: [f32; 2],
+    pub light_color: [f32; 4],
+    pub fog_color: [f32; 4],
+}
+
+/// `GouraudVertex` minus `draw_id` -- the real per-vertex shape a
+/// caller (a future `RenderLoop::queue_triangles`/`hp2_rs_wgpu_
+/// queue_triangles` FFI array parameter) provides, matching real
+/// `BufferVert`'s own four real `FTransTexture` fields exactly
+/// (`Point`/`TexCoords`/`Light`/`Fog` -- `Normal` excluded, same
+/// reasoning `GouraudVertex`'s own doc already has). `draw_id` is
+/// not known until a real `unlock_frame` flush actually assigns a
+/// chunk-local one (same established pattern `QueuedLine`/
+/// `QueuedTile`'s own corner structs already use -- geometry carries
+/// no `draw_id` of its own until flush time), so this is a distinct,
+/// smaller type rather than `GouraudVertex` itself with a throwaway
+/// placeholder value a caller would have to remember never matters.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GouraudVertexInput {
+    pub coords: [f32; 3],
+    pub tex_coords: [f32; 2],
+    pub light_color: [f32; 4],
+    pub fog_color: [f32; 4],
+}
+
+/// Byte-for-byte mirror of `gouraud.wgsl`'s own real `DrawParameters`
+/// (`diffuse_info: vec4<f32>, draw_color: vec4<f32>, draw_flags:
+/// u32`) -- same `_padding`-to-32-bytes reasoning as `TileDrawParams`
+/// (two `vec4<f32>` fields, already 16-byte aligned with nothing
+/// trailing them, plus one `u32` that needs rounding the whole
+/// struct's own stride up to the next 16-byte boundary). `draw_color`
+/// is written here (`[0.0, 0.0, 0.0, texture_alpha]`, matching the
+/// real non-hit-testing branch of `PrepareGouraudCall:168`) even
+/// though `gouraud.wgsl`'s own `fs_main` never actually reads it in
+/// this crate's current ported scope (`TextureAlpha` already reaches
+/// the shader via `diffuse_info.w` too, confirmed real and not a
+/// double-write bug: outside hit-testing, the real `DrawColor.w` is
+/// genuinely redundant with `DiffuseInfo.w`) -- keeping the real GPU
+/// buffer layout honest/forward-compatible with a future real hit-
+/// testing wiring that *would* need `DrawColor`, not silently
+/// dropping a real struct field this port happens not to read yet.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GouraudDrawParams {
+    pub diffuse_info: [f32; 4],
+    pub draw_color: [f32; 4],
+    pub draw_flags: u32,
+    pub _padding: [u32; 3],
+}
+
+/// Groups `GouraudPipeline::record`/`::render`'s "what to draw"
+/// arguments, same reasoning as `TileDrawCall`.
+pub struct GouraudDrawCall<'a> {
+    pub frame_uniforms_buffer: &'a wgpu::Buffer,
+    pub vertices: &'a [GouraudVertex],
+    pub draw_params: &'a [GouraudDrawParams],
+    pub texture_view: &'a wgpu::TextureView,
+    pub sampler: &'a wgpu::Sampler,
+    pub target: &'a wgpu::TextureView,
+    pub load: wgpu::LoadOp<wgpu::Color>,
+}
+
+/// One real, lazily-built `gouraud.wgsl` pipeline plus its three
+/// bind-group layouts (`@group(0)` frame uniforms, `@group(1)` draw
+/// params, `@group(2)` diffuse texture/sampler), same reasoning and
+/// same known `blend: None` first-proof limitation as `TilePipeline`'s
+/// own doc already states in full (not duplicated here) -- `DrawColor`
+/// outside hit-testing never carries a real RGB tint for Gouraud
+/// meshes either way (`GouraudDrawParams`'s own doc has the real
+/// citation), so the same opaque-replace tradeoff applies with even
+/// less real-world downside than `TilePipeline`'s own case.
+pub struct GouraudPipeline {
+    pipeline: wgpu::RenderPipeline,
+    frame_uniforms_layout: wgpu::BindGroupLayout,
+    draw_params_layout: wgpu::BindGroupLayout,
+    texture_layout: wgpu::BindGroupLayout,
+}
+
+impl GouraudPipeline {
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("gouraud.wgsl (draw.rs production)"),
+            source: wgpu::ShaderSource::Wgsl(GOURAUD_WGSL_SOURCE.into()),
+        });
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: 12,
+                shader_location: 1,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x2,
+                offset: 16,
+                shader_location: 2,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 24,
+                shader_location: 3,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 40,
+                shader_location: 4,
+            },
+        ];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("gouraud.wgsl pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<GouraudVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let frame_uniforms_layout = pipeline.get_bind_group_layout(0);
+        let draw_params_layout = pipeline.get_bind_group_layout(1);
+        let texture_layout = pipeline.get_bind_group_layout(2);
+        Self {
+            pipeline,
+            frame_uniforms_layout,
+            draw_params_layout,
+            texture_layout,
+        }
+    }
+
+    /// Same real contract as `TilePipeline::record` (that method's
+    /// own doc has the full correctness reasoning for `encoder`/
+    /// `call.load`) -- `TriangleList` topology, matching real
+    /// `DrawTriangles`' own flat (indexed-or-fan-expanded) triangle
+    /// list (`DrawGouraud.cpp:337-350`, both the indexed and fan
+    /// branches already expand to a flat triangle-list shape before
+    /// this point, this crate's own `queue_triangles` orchestration
+    /// does the same).
+    pub fn record(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        call: GouraudDrawCall<'_>,
+    ) {
+        let GouraudDrawCall {
+            frame_uniforms_buffer,
+            vertices,
+            draw_params,
+            texture_view,
+            sampler,
+            target,
+            load,
+        } = call;
+        assert!(
+            draw_params.len() <= MAX_DRAWS,
+            "draw_params.len() ({}) exceeds gouraud.wgsl's real MAX_DRAWS ({MAX_DRAWS})",
+            draw_params.len()
+        );
+        assert!(
+            vertices.len().is_multiple_of(3),
+            "TriangleList topology needs a vertex count that is a multiple of 3, got {}",
+            vertices.len()
+        );
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs gouraud vertex buffer"),
+            size: (std::mem::size_of_val(vertices)) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
+
+        let mut padded_params = vec![
+            GouraudDrawParams {
+                diffuse_info: [0.0; 4],
+                draw_color: [0.0; 4],
+                draw_flags: 0,
+                _padding: [0; 3],
+            };
+            MAX_DRAWS
+        ];
+        padded_params[..draw_params.len()].copy_from_slice(draw_params);
+        let draw_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs gouraud draw-params buffer"),
+            size: (MAX_DRAWS * std::mem::size_of::<GouraudDrawParams>()) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&draw_params_buffer, 0, bytemuck::cast_slice(&padded_params));
+
+        let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs gouraud frame uniforms bind group"),
+            layout: &self.frame_uniforms_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniforms_buffer.as_entire_binding(),
+            }],
+        });
+        let draw_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs gouraud draw params bind group"),
+            layout: &self.draw_params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: draw_params_buffer.as_entire_binding(),
+            }],
+        });
+        let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs gouraud texture bind group"),
+            layout: &self.texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("draw.rs gouraud render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+        pass.set_bind_group(1, &draw_params_bind_group, &[]);
+        pass.set_bind_group(2, &texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+
+    /// Same real contract as `TilePipeline::render`.
+    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: GouraudDrawCall<'_>) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("draw.rs gouraud render encoder"),
+        });
+        self.record(device, queue, &mut encoder, call);
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after a real gouraud render");
     }
 }
 
@@ -1817,6 +2154,212 @@ mod tests {
              uploaded through a real TextureCache entry and real buffers/bind groups, produced \
              the right pixels at the right positions in a real offscreen texture on adapter \
              {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn gouraud_pipeline_renders_a_real_textured_triangle_mesh_into_an_offscreen_texture() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        // Identity modelviewproj_mat (bytes [256..320)), same real
+        // technique as the other pipeline tests above. light_color_
+        // intensity at byte 520 (FrameUniforms' own real field order,
+        // re-read directly from its own struct definition rather than
+        // assumed from a truncated earlier view of it, which would
+        // have given the wrong offset -- light_space_mat/frame_coords/
+        // frame_uncoords are three more real Mat4 fields between
+        // modelviewproj_mat and the trailing scalars, not adjacent to
+        // them) set to 1.0 (neutral): gouraud.wgsl's own vs_main
+        // computes `out.light_color = in.light_color *
+        // light_color_intensity`, so a non-1.0 value here would scale
+        // this test's own light_color input unexpectedly.
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        frame_bytes[520..524].copy_from_slice(&1.0f32.to_le_bytes());
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gouraud render test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = GouraudPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+
+        // Same real solid-red 1x1 texture technique as the tile
+        // pipeline test above.
+        let mut texture_cache = crate::texture::TextureCache::new();
+        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        // Same real six-vertex, two-triangle quad shape as the tile
+        // pipeline test above (left half of the 64px-wide target) --
+        // light_color=[1,1,1,1] (neutral: the real non-modulated,
+        // non-fog fragment branch computes `color * vec4(light_color.
+        // rgb, 1.0)`, so white keeps the sampled red texel unchanged),
+        // fog_color=[0,0,0,0] (draw_flags=0 means DF_RenderFog is
+        // unset, so this is never read in that branch -- zeroed for
+        // cleanliness only, not because its value matters here).
+        let light_color = [1.0, 1.0, 1.0, 1.0];
+        let fog_color = [0.0, 0.0, 0.0, 0.0];
+        let vertices = [
+            GouraudVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+                light_color,
+                fog_color,
+            },
+            GouraudVertex {
+                coords: [0.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 1.0],
+                light_color,
+                fog_color,
+            },
+            GouraudVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+                light_color,
+                fog_color,
+            },
+            GouraudVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+                light_color,
+                fog_color,
+            },
+            GouraudVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+                light_color,
+                fog_color,
+            },
+            GouraudVertex {
+                coords: [-1.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 0.0],
+                light_color,
+                fog_color,
+            },
+        ];
+        // diffuse_info=[u_mult=1,v_mult=1,diffuse=1,texture_alpha=1]
+        // (all neutral -- this test is not exercising texture_uv_mult
+        // or the real diffuse/alpha scaling, which have their own
+        // separate, dedicated unit tests), draw_flags=0 (no masking/
+        // alpha-blend/fog/modulated -- compute_tile_draw_flags's own
+        // tests cover that translation separately).
+        let draw_params = [GouraudDrawParams {
+            diffuse_info: [1.0, 1.0, 1.0, 1.0],
+            draw_color: [0.0, 0.0, 0.0, 1.0],
+            draw_flags: 0,
+            _padding: [0; 3],
+        }];
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("gouraud render test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        pipeline.render(
+            device,
+            queue,
+            GouraudDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                texture_view: &cached.view,
+                sampler: &sampler,
+                target: &render_target_view,
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+            },
+        );
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gouraud render test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("gouraud render test readback encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected a pixel inside the drawn mesh's span to read back red (the real sampled \
+             texel times the real neutral light_color/diffuse), got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected a pixel outside the drawn mesh's span to still read back the real clear \
+             color, blue -- got {right_pixel:?}"
+        );
+        println!(
+            "GouraudPipeline::render confirmed empirically: a real DrawTriangles-shaped \
+             textured mesh, uploaded through a real TextureCache entry and real buffers/bind \
+             groups, produced the right pixels at the right positions in a real offscreen \
+             texture on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );

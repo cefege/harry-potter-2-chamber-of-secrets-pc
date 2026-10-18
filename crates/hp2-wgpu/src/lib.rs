@@ -933,6 +933,24 @@ struct QueuedPoint {
     color: [f32; 4],
 }
 
+/// One real queued `DrawTriangles` call's own real mesh: its own
+/// already-index/fan-resolved flat triangle-list vertices (`draw::
+/// GouraudVertexInput`, the real `BufferVert`-extracted per-vertex
+/// data, C++'s own responsibility to resolve from the real `Pts`/
+/// `Indices` arrays before calling in -- `RenderLoop::queue_triangles`'
+/// own doc has the full real reasoning for why that resolution lives
+/// on the caller side, not here) plus the real per-draw `DiffuseInfo`/
+/// `DrawColor`/`DrawFlags` (`PrepareGouraudCall`'s own scoped-down
+/// output this crate's own `queue_triangles` computes). Carries no
+/// segment or texture `cache_id` of its own, same reasoning as
+/// `QueuedTile`.
+struct QueuedTriangleMesh {
+    vertices: Vec<draw::GouraudVertexInput>,
+    diffuse_info: [f32; 4],
+    draw_color: [f32; 4],
+    draw_flags: u32,
+}
+
 /// One ordered entry in `RenderLoop::batches`. Either queued lines or
 /// queued tiles for one real segment (`Batch::segment`, an index into
 /// `RenderLoop::frame_uniforms_segments` -- same real meaning as
@@ -984,10 +1002,10 @@ struct QueuedPoint {
 /// whichever draw lands on a given pixel *last* wins outright) must
 /// follow real call order, not a per-primitive-kind fixed order.
 /// `batches` is one single ordered `Vec`; `queue_line`/`queue_tile`/
-/// `queue_point` each either extend the last batch (same segment,
-/// same kind, same `cache_id` for tiles) or push a brand new one --
-/// `unlock_frame` then replays `batches` in push order, which is real
-/// call order.
+/// `queue_point`/`queue_triangles` each either extend the last batch
+/// (same segment, same kind, same `cache_id` for tiles/triangles) or
+/// push a brand new one -- `unlock_frame` then replays `batches` in
+/// push order, which is real call order.
 enum BatchPayload {
     Lines(Vec<QueuedLine>),
     Tiles {
@@ -995,6 +1013,10 @@ enum BatchPayload {
         entries: Vec<QueuedTile>,
     },
     Points(Vec<QueuedPoint>),
+    Triangles {
+        cache_id: u64,
+        meshes: Vec<QueuedTriangleMesh>,
+    },
 }
 
 struct Batch {
@@ -1084,6 +1106,10 @@ pub struct RenderLoop {
     /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
     /// pipeline`, for `queue_point`'s own real draws.
     point_pipeline: Option<(wgpu::TextureFormat, draw::SimpleTrianglePipeline)>,
+    /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
+    /// pipeline`/`point_pipeline`, for `queue_triangles`' own real
+    /// draws.
+    gouraud_pipeline: Option<(wgpu::TextureFormat, draw::GouraudPipeline)>,
     /// Real `BindMap`'s own role (`texture.rs`'s own `TextureCache`
     /// doc has the full real citation) -- persists across frames
     /// (unlike `batches`/`frame_uniforms_segments`, never cleared by
@@ -1170,6 +1196,36 @@ pub struct TileDrawRequest {
     pub fy2: f32,
 }
 
+/// Groups `RenderLoop::queue_triangles`' real scalar inputs (clippy's
+/// `too_many_arguments`, same reasoning as `TileDrawRequest` -- the
+/// real per-vertex data is a separate slice parameter, not part of
+/// this struct, since it has its own lifetime and variable length).
+/// `cache_id` must already be `fix_cache_id`'s own output, matching
+/// `TileDrawRequest`'s own contract. `u_scale`/`v_scale` are the real
+/// `FTextureInfo::UScale`/`VScale` fields, read fresh from whichever
+/// real `FTextureInfo` this specific `DrawTriangles` call received --
+/// same real per-bind-freshness reasoning as `TileDrawRequest`'s own.
+/// `texture_alpha` is the real `Info.Texture->Alpha` (`None` for a
+/// real null `Info.Texture`), same real `Option<f32>` shape as
+/// `TileDrawRequest`'s own. `diffuse` is the real `Info.Texture ?
+/// Info.Texture->Diffuse : 1.f` (`PrepareGouraudCall:166,171`) --
+/// `UTexture::Diffuse`, a real field `TileDrawRequest` has no
+/// equivalent of at all (`DrawTile`'s own real color path never reads
+/// it). `Option<f32>` for the same real reason `texture_alpha` is:
+/// `None` for a real null `Info.Texture`, resolved to `1.0` by
+/// `queue_triangles` itself (`.unwrap_or(1.0)`, the real formula's
+/// own simpler shape -- no `> 0.f` comparison the way `TextureAlpha`'s
+/// own resolution needs, so no separate named pure function the way
+/// `resolve_texture_alpha` was worth factoring out for that one).
+pub struct TrianglesDrawRequest {
+    pub cache_id: u64,
+    pub poly_flags: u32,
+    pub u_scale: f32,
+    pub v_scale: f32,
+    pub texture_alpha: Option<f32>,
+    pub diffuse: Option<f32>,
+}
+
 impl RenderLoop {
     pub fn new() -> Self {
         Self {
@@ -1182,6 +1238,7 @@ impl RenderLoop {
             line_pipeline: None,
             tile_pipeline: None,
             point_pipeline: None,
+            gouraud_pipeline: None,
             texture_cache: texture::TextureCache::new(),
             sampler: None,
             last_scene: None,
@@ -1474,6 +1531,124 @@ impl RenderLoop {
                 self.batches.push(Batch {
                     segment,
                     payload: BatchPayload::Points(vec![point]),
+                });
+            }
+        }
+    }
+
+    /// Real per-tick entry point a future `UWgpuRenderDevice::
+    /// DrawTriangles` override will call through a future `hp2_rs_
+    /// wgpu_queue_triangles` FFI function -- not wired yet (same
+    /// staged-rollout pattern `queue_tile`/`queue_point`'s own docs
+    /// already established). Mirrors `DrawTriangles`/`PrepareGouraud
+    /// Call`'s own real pipeline (`DrawGouraud.cpp:68-205`/`285-359`,
+    /// both read in full), *after* the real `Indices`/fan validation
+    /// and expansion into a flat triangle list -- that part is this
+    /// function's own caller's responsibility, not this function's:
+    /// the real `Pts: FTransTexture**`/`Indices: _WORD*` indirection
+    /// (nullable individual `Pts[i]` pointers, an optional index
+    /// buffer selecting between an indexed list and a triangle fan
+    /// over `Pts[0..NumPts)`, real out-of-range/null-pointer
+    /// validation that silently drops the *whole* call, not just the
+    /// bad vertex) is real `FTransTexture*` pointer-dereferencing
+    /// work this crate has no access to -- a future `WgpuDrv.cpp`
+    /// override does that real resolution itself (mirroring `DrawGouraud.
+    /// cpp:303-350`'s own real logic exactly) and calls in with an
+    /// already-flat `vertices` slice, the real `BufferVert`-extracted
+    /// per-vertex data (`draw::GouraudVertexInput`'s own doc has the
+    /// full real field-by-field citation).
+    ///
+    /// Computes the real, scoped-down `DiffuseInfo`/`DrawColor`/
+    /// `DrawFlags` (`PrepareGouraudCall:166-173`): `texture_uv_mult`
+    /// for `UMult`/`VMult` (never cached, same real per-bind-
+    /// freshness reasoning `queue_tile`'s own doc already
+    /// establishes), `resolve_texture_alpha` for the real shared
+    /// `TextureAlpha` formula, `compute_tile_draw_flags` for
+    /// `DrawFlags` (the same real `GetPolyFlagsAndDrawFlags` function
+    /// `SubmitTileBatch` itself calls -- confirmed by direct re-read
+    /// that function's own doc already has the full citation for, not
+    /// a coincidentally-similar second function).
+    ///
+    /// Known, explicitly scoped gaps, not silently pretended away,
+    /// all confirmed by reading `PrepareGouraudCall` in full, not
+    /// assumed from `DrawTriangles`' own simpler entry point alone:
+    /// detail textures, macro textures, bump maps, the real `OPT_
+    /// HWLighting`/shader-specialization system, `GIsEditor &&
+    /// PF_Selected -> DF_Selected`, `NoNearZ`/`SetProjection`
+    /// re-invocation, and the real `HitTesting() ? HitColor : (0,0,0,
+    /// TextureAlpha)` substitution are not applied -- `gouraud.wgsl`'s
+    /// own module doc already names every one of these as a real,
+    /// separately scoped, not-yet-ported `#if`-gated GLSL branch, not
+    /// an invented scope cut made here.
+    ///
+    /// Drops cleanly (not a panic), same established conditions as
+    /// `queue_tile`: no frame in progress, no `set_scene_node` call
+    /// yet this frame, or `request.cache_id` not yet uploaded. Also
+    /// drops cleanly on an empty `vertices` slice -- a real
+    /// `DrawTriangles` call already guarantees `OutVertexCount >= 3`
+    /// before ever reaching this point (`DrawGouraud.cpp:305-306`),
+    /// so an empty slice here would mean a caller bug upstream of
+    /// this function, not a condition to panic on.
+    ///
+    /// Extends `self.batches`' own last entry when it is already a
+    /// `Triangles` batch for this same segment *and* the same
+    /// `cache_id`, otherwise pushes a new one -- same real flush-
+    /// boundary reasoning `Batch`'s own doc already has (primitive-
+    /// kind change confirmed via `DrawTriangles`' own real
+    /// `SetProgram(Gouraud_Prog)` call site, `DrawGouraud.cpp:326`;
+    /// texture change confirmed via the same real `SetTexture.cpp:
+    /// 502/515` citation already established for tiles -- `Prepare
+    /// GouraudCall:170`'s own `SetTexture(DiffuseTextureIndex, ...)`
+    /// call is the identical real function, not a different one).
+    pub fn queue_triangles(
+        &mut self,
+        request: TrianglesDrawRequest,
+        vertices: &[draw::GouraudVertexInput],
+    ) {
+        if self.in_progress.is_none() {
+            return;
+        }
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
+            return;
+        };
+        let Some(cached) = self.texture_cache.get(request.cache_id) else {
+            return;
+        };
+        if vertices.is_empty() {
+            return;
+        }
+        let (u_mult, v_mult) = texture::texture_uv_mult(
+            request.u_scale,
+            request.v_scale,
+            cached.width,
+            cached.height,
+        );
+        let texture_alpha = draw::resolve_texture_alpha(request.texture_alpha);
+        let mesh = QueuedTriangleMesh {
+            vertices: vertices.to_vec(),
+            diffuse_info: [
+                u_mult,
+                v_mult,
+                request.diffuse.unwrap_or(1.0),
+                texture_alpha,
+            ],
+            draw_color: [0.0, 0.0, 0.0, texture_alpha],
+            draw_flags: draw::compute_tile_draw_flags(request.poly_flags),
+        };
+        match self.batches.last_mut() {
+            Some(Batch {
+                segment: last_segment,
+                payload: BatchPayload::Triangles { cache_id, meshes },
+            }) if *last_segment == segment && *cache_id == request.cache_id => {
+                meshes.push(mesh);
+            }
+            _ => {
+                self.batches.push(Batch {
+                    segment,
+                    payload: BatchPayload::Triangles {
+                        cache_id: request.cache_id,
+                        meshes: vec![mesh],
+                    },
                 });
             }
         }
@@ -2208,9 +2383,12 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
         ));
     }
     if loop_state.sampler.is_none()
-        && batches
-            .iter()
-            .any(|b| matches!(b.payload, BatchPayload::Tiles { .. }))
+        && batches.iter().any(|b| {
+            matches!(
+                b.payload,
+                BatchPayload::Tiles { .. } | BatchPayload::Triangles { .. }
+            )
+        })
     {
         loop_state.sampler = Some(
             created
@@ -2229,6 +2407,19 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
         loop_state.point_pipeline = Some((
             frame.color_format,
             draw::SimpleTrianglePipeline::new(&created.device, frame.color_format),
+        ));
+    }
+    let needs_gouraud_pipeline = batches
+        .iter()
+        .any(|b| matches!(b.payload, BatchPayload::Triangles { .. }))
+        && !matches!(
+            &loop_state.gouraud_pipeline,
+            Some((format, _)) if *format == frame.color_format
+        );
+    if needs_gouraud_pipeline {
+        loop_state.gouraud_pipeline = Some((
+            frame.color_format,
+            draw::GouraudPipeline::new(&created.device, frame.color_format),
         ));
     }
 
@@ -2467,6 +2658,79 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
                             frame_uniforms_buffer: buffer,
                             vertices: &vertices,
                             draw_params: &draw_params,
+                            target: &frame.view,
+                            load: wgpu::LoadOp::Load,
+                        },
+                    );
+                }
+            }
+            BatchPayload::Triangles { cache_id, meshes } => {
+                // Same real reachable-transient-condition reasoning
+                // as the Tiles arm above.
+                let Some(cached) = loop_state.texture_cache.get(*cache_id) else {
+                    continue;
+                };
+                let (_, pipeline) = loop_state
+                    .gouraud_pipeline
+                    .as_ref()
+                    .expect("gouraud_pipeline was just ensured above");
+                let sampler = loop_state
+                    .sampler
+                    .as_ref()
+                    .expect("sampler was just ensured above");
+                let mut vertices: Vec<draw::GouraudVertex> = Vec::new();
+                let mut draw_params: Vec<draw::GouraudDrawParams> = Vec::new();
+                for mesh in meshes {
+                    // Same real chunk-not-drop reasoning as the
+                    // Lines/Tiles/Points arms above -- one real mesh
+                    // is one draw_id/one draw_params entry here (like
+                    // one tile is one draw_id), regardless of how
+                    // many actual GPU vertices that one mesh itself
+                    // contributes (variable, unlike Tile's fixed 6).
+                    if draw_params.len() >= draw::MAX_DRAWS {
+                        pipeline.record(
+                            &created.device,
+                            &created.queue,
+                            &mut frame.encoder,
+                            draw::GouraudDrawCall {
+                                frame_uniforms_buffer: buffer,
+                                vertices: &vertices,
+                                draw_params: &draw_params,
+                                texture_view: &cached.view,
+                                sampler,
+                                target: &frame.view,
+                                load: wgpu::LoadOp::Load,
+                            },
+                        );
+                        vertices.clear();
+                        draw_params.clear();
+                    }
+                    let draw_id = draw_params.len() as u32;
+                    vertices.extend(mesh.vertices.iter().map(|v| draw::GouraudVertex {
+                        coords: v.coords,
+                        draw_id,
+                        tex_coords: v.tex_coords,
+                        light_color: v.light_color,
+                        fog_color: v.fog_color,
+                    }));
+                    draw_params.push(draw::GouraudDrawParams {
+                        diffuse_info: mesh.diffuse_info,
+                        draw_color: mesh.draw_color,
+                        draw_flags: mesh.draw_flags,
+                        _padding: [0; 3],
+                    });
+                }
+                if !draw_params.is_empty() {
+                    pipeline.record(
+                        &created.device,
+                        &created.queue,
+                        &mut frame.encoder,
+                        draw::GouraudDrawCall {
+                            frame_uniforms_buffer: buffer,
+                            vertices: &vertices,
+                            draw_params: &draw_params,
+                            texture_view: &cached.view,
+                            sampler,
                             target: &frame.view,
                             load: wgpu::LoadOp::Load,
                         },
@@ -3544,6 +3808,194 @@ mod tests {
             "RenderLoop's real queue_point/unlock_frame path confirmed empirically to \
              composite a queued point draw correctly on top of its own clear, on adapter {:?} \
              backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_queue_triangles_renders_a_real_mesh_through_the_real_lock_unlock_path() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop triangles offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Same real call order and identity-modelviewproj substitution
+        // as the tile/point tests above -- light_color_intensity at
+        // byte 520 set to 1.0 (neutral), same real reasoning as
+        // gouraud_pipeline_renders_a_real_textured_triangle_mesh_
+        // into_an_offscreen_texture's own doc (draw.rs).
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            520,
+            &1.0f32.to_le_bytes(),
+        );
+        loop_state.upload_texture(&created, 99, 1, 1, &[255, 0, 0, 255], false);
+
+        // Real GouraudVertex coords pass straight through to
+        // modelviewproj_mat with no RFX2/FX2 screen-to-clip transform
+        // at all (unlike Tile/Point/Line) -- queue_triangles' own doc
+        // and GouraudVertex's own doc both have the full real
+        // citation for why. Direct NDC quad (two triangles, matching
+        // the real BufferVert's own per-vertex extraction shape):
+        // left half of the 64px target, same established visual
+        // convention as every other RenderLoop end-to-end test here.
+        let light_color = [1.0, 1.0, 1.0, 1.0];
+        let fog_color = [0.0, 0.0, 0.0, 0.0];
+        let vertices = [
+            draw::GouraudVertexInput {
+                coords: [-1.0, -1.0, 0.0],
+                tex_coords: [0.0, 1.0],
+                light_color,
+                fog_color,
+            },
+            draw::GouraudVertexInput {
+                coords: [0.0, -1.0, 0.0],
+                tex_coords: [1.0, 1.0],
+                light_color,
+                fog_color,
+            },
+            draw::GouraudVertexInput {
+                coords: [0.0, 1.0, 0.0],
+                tex_coords: [1.0, 0.0],
+                light_color,
+                fog_color,
+            },
+            draw::GouraudVertexInput {
+                coords: [-1.0, -1.0, 0.0],
+                tex_coords: [0.0, 1.0],
+                light_color,
+                fog_color,
+            },
+            draw::GouraudVertexInput {
+                coords: [0.0, 1.0, 0.0],
+                tex_coords: [1.0, 0.0],
+                light_color,
+                fog_color,
+            },
+            draw::GouraudVertexInput {
+                coords: [-1.0, 1.0, 0.0],
+                tex_coords: [0.0, 0.0],
+                light_color,
+                fog_color,
+            },
+        ];
+        loop_state.queue_triangles(
+            TrianglesDrawRequest {
+                cache_id: 99,
+                poly_flags: 0,
+                u_scale: 1.0,
+                v_scale: 1.0,
+                texture_alpha: None,
+                diffuse: None,
+            },
+            &vertices,
+        );
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop triangles offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop triangles offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected the mesh queued via RenderLoop::queue_triangles and flushed by the real \
+             unlock_frame to actually render, got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected begin_offscreen_frame's own clear pass to survive outside the drawn \
+             mesh's span, got {right_pixel:?}"
+        );
+        println!(
+            "RenderLoop's real upload_texture/queue_triangles/unlock_frame path confirmed \
+             empirically to composite a queued triangle mesh draw correctly on top of its own \
+             clear, on adapter {:?} backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );
