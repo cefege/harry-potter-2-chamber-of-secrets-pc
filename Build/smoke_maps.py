@@ -56,9 +56,6 @@ DEFAULT_TICKS = 300
 DEFAULT_TIMEOUT_SECONDS = 120.0
 REPORT_FORMAT_VERSION = 2
 SUPPORTED_MAP_VERSIONS = frozenset((76, 79))
-VULKAN_RENDER_DEVICE_CLASS = "VulkanDrv.VulkanRenderDevice"
-WGPU_RENDER_DEVICE_CLASS = "WgpuDrv.WgpuRenderDevice"
-VIDEO_DEVICE_KEYS = ("GameRenderDevice", "WindowedRenderDevice", "RenderDevice")
 # Loader environment mirrors Build/run_vulkan_smoke.py (MoltenVK via Homebrew).
 DEFAULT_VULKAN_ICD = Path("/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json")
 VULKAN_DYLD_LIBRARY_PATH = "/opt/homebrew/lib"
@@ -559,27 +556,6 @@ def _replace_directory(directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=False)
     except OSError as error:
         raise SmokeError(f"cannot replace directory {directory}: {error}") from error
-
-
-def _render_device_engine_ini(data_root: Path, destination: Path, device_class: str) -> Path:
-    """Generate an Engine.ini selecting ``device_class`` for every video device key.
-
-    Serves the Vulkan and wgpu legs. The stock Default.ini carries legacy video
-    devices that ApplyPortableConfig would migrate to XOpenGLDrv at boot, so a
-    non-XOpenGL leg must hand the engine an explicit selection (same discipline
-    as Build/run_vulkan_smoke.py).
-    """
-    default_path = data_root / "System" / "Default.ini"
-    text = default_path.read_text(encoding="utf-8", errors="replace")
-    for key in VIDEO_DEVICE_KEYS:
-        text, count = re.subn(
-            rf"^{key}=.*$", f"{key}={device_class}", text,
-            count=1, flags=re.MULTILINE,
-        )
-        if count != 1:
-            raise SmokeError(f"{default_path}: expected exactly one {key} entry")
-    game_test._write_atomic(destination, text.encode("utf-8"))
-    return destination
 
 
 def _vulkan_environment(icd: Path) -> dict[str, str]:
@@ -1210,14 +1186,14 @@ def main() -> int:
                     f"vulkan ICD manifest not found: {arguments.vulkan_icd}"
                 )
             vulkan_environment = _vulkan_environment(arguments.vulkan_icd)
-            renderer_ini = _render_device_engine_ini(
+            renderer_ini = game_test.write_device_engine_ini(
                 data_root, output.with_name(f"{ini_stem}-vulkan-engine.ini"),
-                VULKAN_RENDER_DEVICE_CLASS,
+                game_test.RENDERER_DEVICE_CLASSES["vulkan"],
             )
         elif arguments.renderer == "wgpu":
-            renderer_ini = _render_device_engine_ini(
+            renderer_ini = game_test.write_device_engine_ini(
                 data_root, output.with_name(f"{ini_stem}-wgpu-engine.ini"),
-                WGPU_RENDER_DEVICE_CLASS,
+                game_test.RENDERER_DEVICE_CLASSES["wgpu"],
             )
         logs = _log_directory(output)
         _replace_directory(logs)

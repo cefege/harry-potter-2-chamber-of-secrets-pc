@@ -45,6 +45,13 @@ ARM64_CPU_TYPE = 0x0100000C
 TERMINATION_GRACE_SECONDS = 5.0
 KILL_GRACE_SECONDS = 5.0
 RENDERERS = ("xopengl", "vulkan", "wgpu")
+VIDEO_DEVICE_KEYS = ("GameRenderDevice", "WindowedRenderDevice", "RenderDevice")
+# Engine.ini device class per non-XOpenGL renderer. XOpenGL keeps the stock
+# Default.ini selection (migrated to XOpenGLDrv at boot).
+RENDERER_DEVICE_CLASSES = {
+    "vulkan": "VulkanDrv.VulkanRenderDevice",
+    "wgpu": "WgpuDrv.WgpuRenderDevice",
+}
 
 FIDELITY_FORMAT_VERSION = 1
 FIDELITY_FIELDS = (
@@ -453,6 +460,27 @@ def _effective_rng_seed(value: int) -> int:
     return value if 0 < value < RNG_SEED_MAX else 1
 
 
+def write_device_engine_ini(data_root: Path, destination: Path, device_class: str) -> Path:
+    """Write an Engine.ini selecting ``device_class`` for every video device key.
+
+    The engine does not parse -xopengl/-vulkan/-wgpu; the device comes only from
+    VIDEO_DEVICE_KEYS. The stock Default.ini carries legacy video devices that
+    ApplyPortableConfig would migrate to XOpenGLDrv at boot, so a non-XOpenGL
+    launch must hand the engine an explicit selection.
+    """
+    default_path = data_root / "System" / "Default.ini"
+    text = default_path.read_text(encoding="utf-8", errors="replace")
+    for key in VIDEO_DEVICE_KEYS:
+        text, count = re.subn(
+            rf"^{key}=.*$", f"{key}={device_class}", text,
+            count=1, flags=re.MULTILINE,
+        )
+        if count != 1:
+            raise GameTestError(f"{default_path}: expected exactly one {key} entry")
+    _write_atomic(destination, text.encode("utf-8"))
+    return destination
+
+
 def build_launch_command(
     executable: Path, data_root: Path, map_token: str | None, renderer: str,
     ticks: int, *, no_sound: bool = False, ini_file: Path | None = None,
@@ -461,6 +489,11 @@ def build_launch_command(
 ) -> list[str]:
     if renderer not in RENDERERS:
         raise GameTestError(f"unsupported renderer: {renderer}")
+    if renderer != "xopengl" and ini_file is None:
+        raise GameTestError(
+            f"renderer {renderer} needs an Engine.ini selecting its device: "
+            f"the engine does not parse -{renderer}"
+        )
     _positive_int(ticks)
     if fixed_dt is not None:
         _positive_float(fixed_dt)
@@ -775,6 +808,11 @@ def run_game(
         executable = _resolve_path(engine_bin, repo_root, strict=True)
     _validate_native_arm64(executable)
     map_path, map_token = _resolve_map(data_root, selected_map)
+    if ini_file is None and renderer != "xopengl":
+        ini_file = write_device_engine_ini(
+            data_root, log_path.with_name(f"{log_path.stem}-{renderer}-engine.ini"),
+            RENDERER_DEVICE_CLASSES[renderer],
+        )
     command = build_launch_command(
         executable, data_root, map_token, renderer, ticks,
         no_sound=no_sound, ini_file=ini_file,
@@ -1687,8 +1725,12 @@ def _run_fidelity_side(
     side_root.mkdir(parents=True, exist_ok=True)
     report_path = side_root / "fidelity-state.json"
     log_path = side_root / "stdout-stderr.log"
+    ini_file = None if renderer == "xopengl" else write_device_engine_ini(
+        data_root, side_root / f"{renderer}-engine.ini", RENDERER_DEVICE_CLASSES[renderer],
+    )
     command = build_launch_command(
         executable, data_root, None if replay else map_token, renderer, ticks,
+        ini_file=ini_file,
         fixed_dt=None if replay else fixed_dt,
         input_script=None if replay else input_script,
         replay_stem=replay.stem if replay else None,

@@ -342,12 +342,12 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             "RenderDevice=GlideDrv.GlideRenderDevice\n",
             encoding="utf-8",
         )
-        destination = smoke_maps._render_device_engine_ini(
+        destination = game_test.write_device_engine_ini(
             data_root, self.root / "matrix-vulkan-engine.ini",
-            smoke_maps.VULKAN_RENDER_DEVICE_CLASS,
+            game_test.RENDERER_DEVICE_CLASSES["vulkan"],
         )
         text = destination.read_text(encoding="utf-8")
-        for key in smoke_maps.VIDEO_DEVICE_KEYS:
+        for key in game_test.VIDEO_DEVICE_KEYS:
             self.assertIn(f"{key}=VulkanDrv.VulkanRenderDevice", text)
         self.assertNotIn("D3DDrv", text)
 
@@ -360,12 +360,12 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             "RenderDevice=GlideDrv.GlideRenderDevice\n",
             encoding="utf-8",
         )
-        destination = smoke_maps._render_device_engine_ini(
+        destination = game_test.write_device_engine_ini(
             data_root, self.root / "matrix-wgpu-engine.ini",
-            smoke_maps.WGPU_RENDER_DEVICE_CLASS,
+            game_test.RENDERER_DEVICE_CLASSES["wgpu"],
         )
         text = destination.read_text(encoding="utf-8")
-        for key in smoke_maps.VIDEO_DEVICE_KEYS:
+        for key in game_test.VIDEO_DEVICE_KEYS:
             self.assertIn(f"{key}=WgpuDrv.WgpuRenderDevice", text)
         self.assertNotIn("D3DDrv", text)
 
@@ -376,9 +376,9 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             "[Engine.Engine]\nGameRenderDevice=D3DDrv.D3DRenderDevice\n",
             encoding="utf-8",
         )
-        with self.assertRaisesRegex(smoke_maps.SmokeError, "WindowedRenderDevice"):
-            smoke_maps._render_device_engine_ini(
-                data_root, self.root / "broken.ini", smoke_maps.VULKAN_RENDER_DEVICE_CLASS
+        with self.assertRaisesRegex(game_test.GameTestError, "WindowedRenderDevice"):
+            game_test.write_device_engine_ini(
+                data_root, self.root / "broken.ini", game_test.RENDERER_DEVICE_CLASSES["vulkan"]
             )
 
     def test_vulkan_environment_exports_loader_variables(self) -> None:
@@ -434,7 +434,7 @@ class LaunchCommandIniContract(unittest.TestCase):
     def test_ini_file_is_forwarded_to_the_launch_command(self) -> None:
         data_root = Path("HarryPotter2/Unreal")
         plain = game_test.build_launch_command(
-            Path("app"), data_root, "..\\Maps\\Entry.unr", "vulkan", 60,
+            Path("app"), data_root, "..\\Maps\\Entry.unr", "xopengl", 60,
         )
         self.assertFalse(any(argument.startswith("-INI=") for argument in plain))
         selected = game_test.build_launch_command(

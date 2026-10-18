@@ -127,20 +127,21 @@ class GameTestContracts(unittest.TestCase):
         self.assertIn(
             "-nosound",
             game_test.build_launch_command(
-                Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "vulkan", 1, no_sound=True
+                Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "xopengl", 1, no_sound=True
             ),
         )
 
-    def test_build_launch_command_wgpu_passes_wgpu_flag(self) -> None:
-        self.assertEqual(
+    def test_build_launch_command_wgpu_requires_device_ini(self) -> None:
+        with self.assertRaisesRegex(game_test.GameTestError, "needs an Engine.ini"):
             game_test.build_launch_command(
                 Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "wgpu", 42
-            ),
-            [
-                "/application", f"-datadir={self.data_root}", "..\\Maps\\Entryhall_hub.unr",
-                "-wgpu", "-NOFRONTEND", "-window", "-testticks=42", "-log",
-            ],
+            )
+        ini_file = Path("/artifacts/wgpu-engine.ini")
+        command = game_test.build_launch_command(
+            Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "wgpu", 42,
+            ini_file=ini_file,
         )
+        self.assertIn(f"-INI={ini_file}", command)
         with self.assertRaisesRegex(game_test.GameTestError, "unsupported renderer"):
             game_test.build_launch_command(Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "metal", 1)
 
