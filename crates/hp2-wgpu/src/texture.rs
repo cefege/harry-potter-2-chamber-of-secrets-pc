@@ -4,19 +4,41 @@
 //! (`SetTexture.cpp`'s own `case TEXF_P8:` conversion loop,
 //! `ConvertP8_RGBA8888`, read in full), the real `ETextureFormat`
 //! enum and its small pure helpers (`HP2TextureBytes`/
-//! `HP2TextureFormatName`/`IsHP2CompressedTexture`), and `FixCacheID`'s
-//! real masked-vs-unmasked bind-map-key tagging (the tagging logic
-//! itself, not yet wired to any actual cache/`BindMap` structure --
-//! no cache exists in this crate yet, see below). Not yet ported:
-//! an actual texture cache structure (the real `BindMap`/
-//! `FCachedTexture`, keyed by `CacheID`), `TEXF_DXT1`/BC upload and
-//! the still-undecided mip strategy noted in this crate's own module
-//! doc, actual GPU upload for any format, and the lightmap `GL_BGRA`
-//! swizzle note (`DrawComplex_GLSL.cpp:439-444`'s `OPT_GLES .bgr`
-//! branch) -- upload lightmaps as `Bgra8Unorm` (or CPU-swizzle before
-//! upload) to keep `complex.wgsl`'s plain `.rgb` sampling correct
-//! once lightmap upload is actually implemented; recorded here so the
-//! decision is not lost before that lands.
+//! `HP2TextureFormatName`/`IsHP2CompressedTexture`), `FixCacheID`'s
+//! real masked-vs-unmasked bind-map-key tagging, a real `TextureCache`
+//! (the real `BindMap`/`FCachedTexture`, keyed by `CacheID`) with
+//! real GPU-backed `upload_rgba8`/`create_gpu_texture`, and real
+//! `TEXF_P8`/`TEXF_RGBA8` GPU upload end to end (`hp2-ffi`'s own
+//! `hp2_rs_wgpu_upload_texture`, wired from every real `WgpuDrv.cpp`
+//! draw override that needs a texture -- diffuse and lightmap/fogmap
+//! alike, `DrawComplexSurface`'s own override uploads all three
+//! through this same path). Not yet ported: `TEXF_DXT1`/BC upload and
+//! the still-undecided mip strategy (both this crate's own open todo
+//! item; `texture_bytes` already has the real per-format byte-size
+//! formula ready for whichever strategy lands), and `TEXF_RGB8`/
+//! `TEXF_RGB16`/`TEXF_RGBA7` conversion (currently rejected cleanly by
+//! `hp2_rs_wgpu_upload_texture`, not silently mis-uploaded -- see that
+//! function's own doc, including the real soundness bug an earlier
+//! version of its rejection path had and the fix that closed it).
+//!
+//! Investigated and resolved, not left open: lightmap upload needed
+//! no `GL_BGRA`/`.bgr` swizzle after all, unlike an earlier, more
+//! cautious version of this paragraph assumed before actually reading
+//! the real condition that gates it (`DrawComplex_GLSL.cpp:439-444`'s
+//! `OPT_GLES` branch). That branch only ever compiles in when
+//! `UXOpenGLRenderDevice::OpenGLVersion == GL_ES` (`ShaderProgram.cpp:
+//! 1048-1051`), and this port's own two real target platforms never
+//! produce that value: macOS hardcodes `OpenGLVersion = GL_Core`
+//! unconditionally (`XOpenGL.cpp:391-392`, "HP2's macOS renderer is
+//! deliberately limited to Apple's OpenGL 4.1 core surface"), and
+//! Linux defaults to `GL_Core` too, only ever falling back to `GL_ES`
+//! if the real GPU driver cannot provide OpenGL 3.3 core at all
+//! (`XOpenGL.cpp:824-829`) -- not a configuration this project's own
+//! supported Linux arm64 target normally hits. The real `#else`
+//! branch (`OPT_GLCore`) is plain `LightColor.rgb`, no swizzle at all
+//! -- exactly what `complex.wgsl`'s own already-shipped lightmap
+//! sampling already does (`light_map_sample.rgb * (frame.light_map_
+//! intensity * 255.0 / 127.0)`). No code change was needed.
 
 /// Real `ETextureFormat` (`UnTex.h`): `TEXF_P8=0x00, TEXF_RGBA7=0x01,
 /// TEXF_RGB16=0x02, TEXF_DXT1=0x03, TEXF_RGB8=0x04, TEXF_RGBA8=0x05`
