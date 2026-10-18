@@ -4470,7 +4470,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -4637,7 +4639,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -4823,7 +4827,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -5020,7 +5026,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -5412,12 +5420,16 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             520,
             &1.0f32.to_le_bytes(),
         );
@@ -5602,13 +5614,14 @@ mod tests {
         for i in 0..4 {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
+        let newest_segment = loop_state.frame_uniforms_segment_count() - 1;
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state.frame_uniforms_segment(newest_segment).unwrap(),
             256,
             &identity_diagonal,
         );
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state.frame_uniforms_segment(newest_segment).unwrap(),
             520,
             &1.0f32.to_le_bytes(),
         );
@@ -5796,7 +5809,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -5967,7 +5982,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -5999,7 +6016,9 @@ mod tests {
         let mut x_flip_diagonal = identity_diagonal;
         x_flip_diagonal[0..4].copy_from_slice(&(-1.0f32).to_le_bytes());
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(1).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &x_flip_diagonal,
         );
@@ -6141,7 +6160,9 @@ mod tests {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -7610,7 +7631,9 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
@@ -7854,7 +7877,9 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state
+                .frame_uniforms_segment(loop_state.frame_uniforms_segment_count() - 1)
+                .unwrap(),
             256,
             &identity_diagonal,
         );
