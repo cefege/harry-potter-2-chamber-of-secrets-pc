@@ -3417,3 +3417,93 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_point(
             .queue_point(x1, y1, x2, y2, z, fx2, fy2, [r, g, b]);
     })
 }
+
+/// Borrows a raw `(ptr, count)` FFI array as `&[T]` -- the generic
+/// counterpart to this file's own `bytes_from_raw` (byte-specific)
+/// and `palette_from_raw` (fixed-256-element-specific) for a real
+/// variable-length typed array FFI parameter (`hp2_rs_wgpu_queue_
+/// triangles`' own real `vertices` parameter). `count == 0` returns
+/// `&[]` without reading `ptr`. A null `ptr` with `count != 0` is
+/// `None`.
+#[cfg(feature = "renderer-wgpu")]
+unsafe fn typed_slice_from_raw<'a, T>(ptr: *const T, count: usize) -> Option<&'a [T]> {
+    if count == 0 {
+        return Some(&[]);
+    }
+    if ptr.is_null() {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(ptr, count) })
+}
+
+/// Replaces `UXOpenGLRenderDevice::DrawTriangles`/`PrepareGouraudCall`
+/// (`DrawGouraud.cpp:68-205`/`285-359`, both read in full). `cache_id`
+/// must already be `hp2_rs_wgpu_fix_cache_id`'s own output, and the
+/// matching real texture must already be cached (`hp2_rs_wgpu_
+/// upload_texture`/`hp2_rs_wgpu_is_texture_cached`), same real
+/// contract as `hp2_rs_wgpu_queue_tile`. `vertices`/`vertex_count`
+/// are the real, already-flattened triangle-list data -- the real
+/// `Pts`/`Indices` indexed-or-fan indirection and validation
+/// (`DrawGouraud.cpp:300-323`) is this function's own caller's
+/// responsibility, not this function's (`hp2_wgpu::RenderLoop::
+/// queue_triangles`'s own doc has the full real reasoning: real
+/// `FTransTexture*` pointer dereferences this crate has no access
+/// to). `u_scale`/`v_scale` are the real `FTextureInfo::UScale`/
+/// `VScale` fields, same real per-bind-freshness reasoning as
+/// `hp2_rs_wgpu_queue_tile`'s own. `has_texture_alpha`/`texture_alpha`
+/// and `has_diffuse`/`diffuse` each encode a real `Option<f32>` as an
+/// FFI-safe bool-plus-value pair, same convention `hp2_rs_wgpu_
+/// queue_tile`'s own `has_texture_alpha`/`texture_alpha` already
+/// establish -- `false` for a real null `Info.Texture` in both cases.
+///
+/// Known, explicitly scoped gaps, not silently pretended away, same
+/// category `hp2_rs_wgpu_queue_tile`'s own doc already names: detail
+/// textures, macro textures, bump maps, the real shader-specialization
+/// system, `GIsEditor && PF_Selected -> DF_Selected`, `NoNearZ`
+/// handling, and the real `HitTesting()` substitution are not applied
+/// -- `hp2_wgpu::RenderLoop::queue_triangles`'s own doc has the full
+/// citation for every one of these as a real, separately scoped,
+/// not-yet-ported `PrepareGouraudCall` branch.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null. `vertices` must be valid for `vertex_count`
+/// contiguous real `hp2_wgpu::draw::GouraudVertexInput` values, or be
+/// null with `vertex_count == 0`.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_queue_triangles(
+    handle: *mut c_void,
+    cache_id: u64,
+    poly_flags: u32,
+    u_scale: f32,
+    v_scale: f32,
+    has_texture_alpha: bool,
+    texture_alpha: f32,
+    has_diffuse: bool,
+    diffuse: f32,
+    vertices: *const hp2_wgpu::draw::GouraudVertexInput,
+    vertex_count: usize,
+) {
+    guard("hp2_rs_wgpu_queue_triangles", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let Some(vertices) = (unsafe { typed_slice_from_raw(vertices, vertex_count) }) else {
+            log::warn!("hp2_rs_wgpu_queue_triangles: null vertices pointer with vertex_count != 0");
+            return;
+        };
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.queue_triangles(
+            hp2_wgpu::TrianglesDrawRequest {
+                cache_id,
+                poly_flags,
+                u_scale,
+                v_scale,
+                texture_alpha: has_texture_alpha.then_some(texture_alpha),
+                diffuse: has_diffuse.then_some(diffuse),
+            },
+            vertices,
+        );
+    })
+}

@@ -119,6 +119,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	Draw2DLineCallCount = 0;
 	DrawTileCallCount = 0;
 	Draw2DPointCallCount = 0;
+	DrawTrianglesCallCount = 0;
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -262,7 +263,7 @@ void UWgpuRenderDevice::Exit()
 		// (hp2_wgpu::RenderLoop::set_scene_node's own doc): how many
 		// SetSceneNode calls one run actually made, not inferred or
 		// assumed from the engine's own architecture docs.
-		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i Draw2DPoint calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount, Draw2DPointCallCount );
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i Draw2DPoint calls=%i DrawTriangles calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount, Draw2DPointCallCount, DrawTrianglesCallCount );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -453,6 +454,109 @@ INT UWgpuRenderDevice::MaxVertices()
 void UWgpuRenderDevice::DrawTriangles( FSceneNode* Frame, FTextureInfo& Info, FTransTexture** Pts, INT NumPts, _WORD* Indices, INT NumIndices, DWORD PolyFlags, FSpanBuffer* Span )
 {
 	guard(UWgpuRenderDevice::DrawTriangles);
+	if( !RustDevice )
+		return;
+
+	// Real DrawTriangles' own validation/expansion logic (DrawGouraud.
+	// cpp:296-359, read in full, transcribed here exactly -- not just
+	// approximated from its general shape): an indexed flat triangle
+	// list when Indices is non-null (truncated to a multiple of 3), a
+	// triangle fan over Pts[0..NumPts) otherwise. Real per-index
+	// validation (range, non-null Pts[PointIndex]) drops the *whole*
+	// call silently (a warning, not a partial draw) on any bad index --
+	// the real source's own behavior, not a new policy invented here.
+	if( !Pts || NumPts < 3 )
+		return;
+
+	const UBOOL Indexed = Indices != NULL;
+	const INT OutVertexCount = Indexed ? NumIndices - (NumIndices % 3) : (NumPts - 2) * 3;
+	if( OutVertexCount < 3 )
+		return;
+
+	for( INT i = 0; i < (Indexed ? OutVertexCount : NumPts); ++i )
+	{
+		const INT PointIndex = Indexed ? Indices[i] : i;
+		if( PointIndex < 0 || PointIndex >= NumPts || !Pts[PointIndex] )
+		{
+			debugf( NAME_Warning, TEXT("WgpuDrv: DrawTriangles received an invalid vertex index.") );
+			return;
+		}
+	}
+
+	// Real BufferVert's own four real FTransTexture fields (DrawGouraud.
+	// cpp:35-43: Point/U/V/Light/Fog -- Normal skipped, GouraudVertexInput's
+	// own doc has the full real reasoning). TArray(InNum, Tag) (not
+	// TRefArray's own same-looking (InNum) constructor, confirmed by
+	// reading both real constructor bodies first) really allocates via
+	// Realloc -- every element is written below before being read, so
+	// the real lack of zero-initialization here does not matter.
+	TArray<GouraudVertexInput> Vertices( OutVertexCount );
+	auto FillVertex = [&]( GouraudVertexInput& Vert, FTransTexture* P )
+	{
+		Vert.coords[0] = P->Point.X; Vert.coords[1] = P->Point.Y; Vert.coords[2] = P->Point.Z;
+		Vert.tex_coords[0] = P->U; Vert.tex_coords[1] = P->V;
+		Vert.light_color[0] = P->Light.X; Vert.light_color[1] = P->Light.Y; Vert.light_color[2] = P->Light.Z; Vert.light_color[3] = P->Light.W;
+		Vert.fog_color[0] = P->Fog.X; Vert.fog_color[1] = P->Fog.Y; Vert.fog_color[2] = P->Fog.Z; Vert.fog_color[3] = P->Fog.W;
+	};
+	if( Indexed )
+	{
+		for( INT i = 0; i < OutVertexCount; ++i )
+			FillVertex( Vertices(i), Pts[Indices[i]] );
+	}
+	else
+	{
+		INT Out = 0;
+		for( INT i = 0; i < NumPts - 2; ++i )
+		{
+			FillVertex( Vertices(Out++), Pts[0] );
+			FillVertex( Vertices(Out++), Pts[i + 1] );
+			FillVertex( Vertices(Out++), Pts[i + 2] );
+		}
+	}
+
+	// Same real FixCacheID/is_texture_cached/upload_texture sequence
+	// as DrawTile's own override -- hp2_rs_wgpu_queue_triangles's own
+	// doc has the full real-formula detail and the known, explicitly
+	// scoped gaps (detail/macro textures, bump maps, shader
+	// specialization, GIsEditor && PF_Selected, NoNearZ, HitTesting --
+	// none applied yet).
+	QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, PolyFlags );
+	if( !hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
+	{
+		if( Info.Format == TEXF_P8 && !Info.Palette )
+		{
+			debugf( NAME_Warning, TEXT("WgpuDrv: DrawTriangles: TEXF_P8 texture %ls has a null Palette, skipping upload"),
+				Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
+		}
+		else if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
+		{
+			FMipmapBase* Mip = Info.Mips[0];
+			size_t DataLen = ( Info.Format == TEXF_P8 )
+				? (size_t)Mip->USize * (size_t)Mip->VSize
+				: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
+			hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
+				(DWORD)Mip->USize, (DWORD)Mip->VSize,
+				Mip->DataPtr, DataLen,
+				(const BYTE*)Info.Palette,
+				( PolyFlags & PF_Masked ) != 0,
+				UseSRGBTextures != 0 );
+		}
+	}
+
+	UBOOL HasTexture = Info.Texture != NULL;
+
+	if( DrawTrianglesCallCount == 0 )
+	{
+		debugf( NAME_Init, TEXT("WgpuDrv: DrawTriangles first call: OutVertexCount=%i CacheID=%llu Format=%i"),
+			OutVertexCount, FixedCacheID, (INT)Info.Format );
+	}
+	DrawTrianglesCallCount++;
+
+	hp2_rs_wgpu_queue_triangles( RustDevice, FixedCacheID, PolyFlags,
+		Info.UScale, Info.VScale,
+		HasTexture, HasTexture ? Info.Texture->Alpha : 0.0f,
+		HasTexture, HasTexture ? Info.Texture->Diffuse : 0.0f,
+		&Vertices(0), (size_t)OutVertexCount );
 	unguard;
 }
 
