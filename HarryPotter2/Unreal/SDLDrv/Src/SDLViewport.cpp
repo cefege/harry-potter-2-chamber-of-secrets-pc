@@ -3,9 +3,8 @@
 =============================================================================*/
 
 #include "SDLDrv.h"
-#include "HP2InputEvents.h"
-#include "HP2MouseCapturePolicy.h"
 #include "UnRenDev.h"
+#include "hp2_rs.h"
 #include "FConfigCacheIni.h"
 #include <stddef.h>
 #include <errno.h>
@@ -25,12 +24,6 @@ IMPLEMENT_CLASS(USDLViewport);
 	Locals.
 -----------------------------------------------------------------------------*/
 
-// Joystick axes in the exact order the engine's input contracts expect.
-static const EInputKey GJoyAxisKeys[USDLClient::MaxJoystickAxes] =
-{
-	IK_JoyX, IK_JoyY, IK_JoyZ, IK_JoyR, IK_JoyU, IK_JoyV, IK_UnknownEA, IK_UnknownEB
-};
-
 // Layout mirror of hp2-ffi's FfiViewportSize (crates/hp2-ffi/src/viewport.rs).
 static_assert(sizeof(FfiViewportSize) == 16, "FfiViewportSize drifted from hp2-ffi");
 static_assert(offsetof(FfiViewportSize, blit_flags) == 0, "FfiViewportSize drifted from hp2-ffi");
@@ -38,6 +31,65 @@ static_assert(offsetof(FfiViewportSize, size_x) == 4, "FfiViewportSize drifted f
 static_assert(offsetof(FfiViewportSize, size_y) == 8, "FfiViewportSize drifted from hp2-ffi");
 static_assert(offsetof(FfiViewportSize, color_bytes) == 12, "FfiViewportSize drifted from hp2-ffi");
 static_assert(USDLViewport::NumSystemCursors == 7, "hp2_rs_viewport_mode_cursor_index assumes 7 system cursors");
+// Mirrors of the input pump's C layouts (crates/hp2-ffi/src/input.rs) and of
+// the SDL constants crates/hp2-platform/src/input_pump.rs reads. Rust asserts
+// the same sizes and offsets.
+static_assert(SDL_KEYDOWN == 0x300 && SDL_KEYUP == 0x301 && SDL_TEXTINPUT == 0x303, "SDL key/text event types drifted from input_pump.rs");
+static_assert(SDL_MOUSEMOTION == 0x400 && SDL_MOUSEBUTTONDOWN == 0x401 && SDL_MOUSEBUTTONUP == 0x402 && SDL_MOUSEWHEEL == 0x403, "SDL mouse event types drifted from input_pump.rs");
+static_assert(SDL_JOYAXISMOTION == 0x600 && SDL_JOYHATMOTION == 0x602 && SDL_JOYBUTTONDOWN == 0x603 && SDL_JOYBUTTONUP == 0x604, "SDL joystick event types drifted from input_pump.rs");
+static_assert(SDL_WINDOWEVENT == 0x200, "SDL_WINDOWEVENT drifted from input_pump.rs");
+static_assert(SDL_WINDOWEVENT_SHOWN == 1 && SDL_WINDOWEVENT_HIDDEN == 2 && SDL_WINDOWEVENT_RESIZED == 5 && SDL_WINDOWEVENT_MINIMIZED == 7 && SDL_WINDOWEVENT_RESTORED == 9 && SDL_WINDOWEVENT_FOCUS_GAINED == 12 && SDL_WINDOWEVENT_FOCUS_LOST == 13, "SDL window event ids drifted from input_pump.rs");
+static_assert(SDL_WINDOW_HIDDEN == 0x8 && SDL_WINDOW_MINIMIZED == 0x40 && SDL_WINDOW_INPUT_FOCUS == 0x200, "SDL window flags drifted from input_pump.rs");
+static_assert(SDL_TEXTINPUTEVENT_TEXT_SIZE == 32, "SDL_TEXTINPUTEVENT_TEXT_SIZE drifted from input.rs");
+static_assert(sizeof(FfiSdlEvent) == 84, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, kind) == 0, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, key_sym) == 4, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, text) == 8, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, motion_x) == 40, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, motion_y) == 44, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, motion_state) == 48, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, button) == 52, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, wheel_y) == 56, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, joy_axis) == 60, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, joy_axis_value) == 64, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, joy_button) == 68, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, joy_hat) == 69, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, window_event) == 70, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, window_data1) == 72, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, window_data2) == 76, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(offsetof(FfiSdlEvent, window_flags) == 80, "FfiSdlEvent drifted from hp2-ffi");
+static_assert(sizeof(FfiInputContext) == 40, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, mouse_is_grabbed) == 0, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, lost_grab) == 1, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, capture_mouse) == 2, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, has_window) == 3, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, has_engine) == 4, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, has_actor) == 5, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, joy_hat_folds_to_buttons) == 6, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, mouse_scale_x) == 8, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, mouse_scale_y) == 12, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, size_x) == 16, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, size_y) == 20, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, joystick_dead_zone) == 24, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, scale_jbx) == 28, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, scale_jby) == 32, "FfiInputContext drifted from hp2-ffi");
+static_assert(offsetof(FfiInputContext, last_joy_hat) == 36, "FfiInputContext drifted from hp2-ffi");
+static_assert(sizeof(FfiInputAction) == 40, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, kind) == 0, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, key) == 4, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, action) == 8, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, delta) == 12, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, buttons) == 16, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, x) == 20, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, y) == 24, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, width) == 28, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, height) == 32, "FfiInputAction drifted from hp2-ffi");
+static_assert(offsetof(FfiInputAction, flag) == 36, "FfiInputAction drifted from hp2-ffi");
+static_assert(InputActionCause == 0 && InputActionEngineKey == 1 && InputActionEngineMousePosition == 2 && InputActionUpdateMouseGrab == 3 && InputActionSetLostGrab == 4 && InputActionSetLastJoyHat == 5 && InputActionReleaseAll == 6 && InputActionResizeViewport == 7 && InputActionQueryKeyDown == 8, "FfiInputActionKind drifted from hp2-ffi");
+static_assert(sizeof(FfiReleaseAllCursor) == 12, "FfiReleaseAllCursor drifted from hp2-ffi");
+static_assert(offsetof(FfiReleaseAllCursor, phase) == 0, "FfiReleaseAllCursor drifted from hp2-ffi");
+static_assert(offsetof(FfiReleaseAllCursor, index) == 4, "FfiReleaseAllCursor drifted from hp2-ffi");
+static_assert(offsetof(FfiReleaseAllCursor, awaiting_key) == 8, "FfiReleaseAllCursor drifted from hp2-ffi");
 
 // Window pixels per viewport pixel; identity until both sizes are known.
 static void UpdateMouseScale( USDLViewport& Viewport )
@@ -73,12 +125,6 @@ USDLViewport::USDLViewport()
 ,	SpeechPid( -1 )
 {
 	guard(USDLViewport::USDLViewport);
-
-	// Freeze the keysym translation table used by the event pump; the
-	// quirks (Ctrl collapse, GUI-as-F24, tilde aliases) live in
-	// HP2MapKeysym and are contract-tested there.
-	for( INT Index = 0; Index < KeysymMapSize; ++Index )
-		KeysymMap[Index] = HP2MapKeysym( (SDL_Keycode)Index );
 
 	// System cursors.
 	SystemCursors[0] = SDL_CreateSystemCursor( SDL_SYSTEM_CURSOR_ARROW );
@@ -348,6 +394,126 @@ void USDLViewport::CloseWindow()
 	// SDL windows need no explicit close choreography.
 }
 
+// Room for every action one polled event can produce; must match
+// input_pump::MAX_ACTIONS (crates/hp2-platform/src/input_pump.rs).
+enum { InputPumpMaxActions = 4 };
+
+// Per-event snapshot the Rust pump translates against. Built fresh for each
+// event so it sees the state the previous event's actions left behind.
+static FfiInputContext MakeInputContext( const USDLViewport& Viewport, const USDLClient* C )
+{
+	FfiInputContext Ctx;
+	memset( &Ctx, 0, sizeof(Ctx) );
+	Ctx.mouse_is_grabbed = Viewport.MouseIsGrabbed != 0;
+	Ctx.lost_grab = Viewport.LostGrab != 0;
+	Ctx.capture_mouse = C->CaptureMouse != 0;
+	Ctx.has_window = Viewport.SdlWindow != NULL;
+	Ctx.has_engine = C->Engine != NULL;
+	Ctx.has_actor = Viewport.Actor != NULL;
+	Ctx.joy_hat_folds_to_buttons = C->JoyHatFoldsToButtons != 0;
+	Ctx.mouse_scale_x = Viewport.MouseScaleX;
+	Ctx.mouse_scale_y = Viewport.MouseScaleY;
+	Ctx.size_x = Viewport.SizeX;
+	Ctx.size_y = Viewport.SizeY;
+	Ctx.joystick_dead_zone = C->JoystickDeadZone;
+	Ctx.scale_jbx = C->ScaleJBX;
+	Ctx.scale_jby = C->ScaleJBY;
+	Ctx.last_joy_hat = Viewport.LastJoyHat;
+	return Ctx;
+}
+
+// Flattens one SDL_Event into the plain FfiSdlEvent layout. Only the fields
+// the pump reads for that event kind are copied.
+static FfiSdlEvent FlattenSdlEvent( const USDLViewport& Viewport, const SDL_Event& Event )
+{
+	FfiSdlEvent Flat;
+	memset( &Flat, 0, sizeof(Flat) );
+	Flat.kind = Event.type;
+	switch( Event.type )
+	{
+		case SDL_KEYDOWN:
+		case SDL_KEYUP:
+			Flat.key_sym = Event.key.keysym.sym;
+			break;
+		case SDL_TEXTINPUT:
+			memcpy( Flat.text, Event.text.text, sizeof(Flat.text) );
+			break;
+		case SDL_MOUSEMOTION:
+			Flat.motion_x = Event.motion.x;
+			Flat.motion_y = Event.motion.y;
+			Flat.motion_state = Event.motion.state;
+			break;
+		case SDL_MOUSEBUTTONDOWN:
+		case SDL_MOUSEBUTTONUP:
+			Flat.button = Event.button.button;
+			break;
+		case SDL_MOUSEWHEEL:
+			Flat.wheel_y = Event.wheel.y;
+			break;
+		case SDL_JOYAXISMOTION:
+			Flat.joy_axis = Event.jaxis.axis;
+			Flat.joy_axis_value = Event.jaxis.value;
+			break;
+		case SDL_JOYBUTTONDOWN:
+		case SDL_JOYBUTTONUP:
+			Flat.joy_button = Event.jbutton.button;
+			break;
+		case SDL_JOYHATMOTION:
+			Flat.joy_hat = Event.jhat.value;
+			break;
+		case SDL_WINDOWEVENT:
+			Flat.window_event = Event.window.event;
+			Flat.window_data1 = Event.window.data1;
+			Flat.window_data2 = Event.window.data2;
+			if( Viewport.SdlWindow )
+				Flat.window_flags = SDL_GetWindowFlags( Viewport.SdlWindow );
+			break;
+		default:
+			break;
+	}
+	return Flat;
+}
+
+// Runs the actions the pump returned, in order. Cause still goes through
+// CauseInputEvent, which re-checks Engine and Actor at call time.
+static void ExecuteInputActions( USDLViewport& Viewport, USDLClient* C, const FfiInputAction* Actions, INT Count )
+{
+	for( INT Index = 0; Index < Count; ++Index )
+	{
+		const FfiInputAction& Step = Actions[Index];
+		switch( Step.kind )
+		{
+			case InputActionCause:
+				Viewport.CauseInputEvent( Step.key, (EInputAction)Step.action, Step.delta );
+				break;
+			case InputActionEngineKey:
+				C->Engine->Key( &Viewport, (EInputKey)Step.key );
+				break;
+			case InputActionEngineMousePosition:
+				C->Engine->MousePosition( &Viewport, Step.buttons, Step.x, Step.y );
+				break;
+			case InputActionUpdateMouseGrab:
+				Viewport.UpdateMouseGrabState( Step.flag ? 1 : 0 );
+				break;
+			case InputActionSetLostGrab:
+				Viewport.LostGrab = Step.flag ? 1 : 0;
+				break;
+			case InputActionSetLastJoyHat:
+				Viewport.LastJoyHat = (EInputKey)Step.key;
+				break;
+			case InputActionReleaseAll:
+				Viewport.ReleaseAllInput();
+				break;
+			case InputActionResizeViewport:
+				Viewport.ResizeViewport( BLIT_NoWindowChange, Step.width, Step.height, INDEX_NONE );
+				break;
+			default:
+				// InputActionQueryKeyDown is produced only by the release stepper.
+				break;
+		}
+	}
+}
+
 void USDLViewport::UpdateInput( UBOOL Reset )
 {
 	guard(USDLViewport::UpdateInput);
@@ -356,142 +522,28 @@ void USDLViewport::UpdateInput( UBOOL Reset )
 	if( Reset )
 		ReleaseAllInput();
 
-	// Relative mouse deltas are sampled once per pump while grabbed.
+	// Relative mouse deltas are sampled once per pump while grabbed. Rust maps
+	// them to IK_MouseX/IK_MouseY with the original sign and scale.
 	if( MouseIsGrabbed && SdlWindow )
 	{
 		INT DeltaX = 0, DeltaY = 0;
 		SDL_GetRelativeMouseState( &DeltaX, &DeltaY );
-		if( DeltaX )
-			CauseInputEvent( IK_MouseX, IST_Axis, (FLOAT)DeltaX * MouseScaleX );
-		if( DeltaY )
-			CauseInputEvent( IK_MouseY, IST_Axis, -(FLOAT)DeltaY * MouseScaleY );
+		const FfiInputContext Ctx = MakeInputContext( *this, C );
+		FfiInputAction Actions[InputPumpMaxActions];
+		const INT Count = hp2_rs_input_relative_mouse( &Ctx, DeltaX, DeltaY, Actions );
+		ExecuteInputActions( *this, C, Actions, Count );
 	}
 
+	// Each polled event is flattened, translated against the state it arrives
+	// in, and its actions run before the next event is read.
 	SDL_Event Event;
 	while( SDL_PollEvent(&Event) )
 	{
-		switch( Event.type )
-		{
-			case SDL_KEYDOWN:
-			case SDL_KEYUP:
-			{
-				const FHP2InputEvent Normalized = HP2MakeKeyEvent( Event.key.keysym.sym, Event.type == SDL_KEYDOWN );
-				if( Normalized.Key != IK_None )
-					CauseInputEvent( Normalized.Key, Normalized.Action, 0.f );
-				break;
-			}
-			case SDL_TEXTINPUT:
-			{
-				const FHP2InputEvent Normalized = HP2MakeTextEvent( Event.text.text );
-				UEngine* ClientEngine = C->Engine;
-				if( Normalized.Key != IK_None && ClientEngine && Actor )
-					ClientEngine->Key( this, Normalized.Key );
-				break;
-			}
-			case SDL_MOUSEMOTION:
-			{
-				if( !MouseIsGrabbed && C->Engine )
-					C->Engine->MousePosition( this,
-						hp2_rs_platform_buttons_from_sdl_state( Event.motion.state ),
-						(FLOAT)Event.motion.x * MouseScaleX,
-						(FLOAT)Event.motion.y * MouseScaleY );
-				break;
-			}
-			case SDL_MOUSEBUTTONDOWN:
-			case SDL_MOUSEBUTTONUP:
-			{
-				const FHP2InputEvent Normalized = HP2MakeMouseButtonEvent( Event.button.button, Event.type == SDL_MOUSEBUTTONDOWN );
-				if( Normalized.Key != IK_None )
-					CauseInputEvent( Normalized.Key, Normalized.Action, 0.f );
-				break;
-			}
-			case SDL_MOUSEWHEEL:
-			{
-				FHP2InputEvent Wheel[3];
-				const INT Count = HP2MakeWheelEvents( Event.wheel.y, Wheel );
-				for( INT Index = 0; Index < Count; ++Index )
-					CauseInputEvent( Wheel[Index].Key, Wheel[Index].Action, Wheel[Index].Delta );
-				break;
-			}
-			case SDL_JOYAXISMOTION:
-			{
-				INT Key = 0; FLOAT Value = 0.f;
-				if( hp2_rs_input_map_joystick_axis( Event.jaxis.axis, Event.jaxis.value, C->JoystickDeadZone, C->ScaleJBX, C->ScaleJBY, &Key, &Value ) )
-					CauseInputEvent( (EInputKey)Key, IST_Axis, Value );
-				break;
-			}
-			case SDL_JOYBUTTONDOWN:
-			case SDL_JOYBUTTONUP:
-			{
-				INT Key = 0, Action = 0;
-				if( hp2_rs_input_map_joystick_button( Event.jbutton.button, Event.type == SDL_JOYBUTTONDOWN, &Key, &Action ) )
-					CauseInputEvent( (EInputKey)Key, (EInputAction)Action, 0.f );
-				break;
-			}
-			case SDL_JOYHATMOTION:
-			{
-				if( !C->JoyHatFoldsToButtons )
-					break;
-				FfiKeyAction Events[2];
-				INT NewLastJoyHat = LastJoyHat; // preserved if a caught panic skips the write
-				const INT Count = hp2_rs_input_fold_joystick_hat( Event.jhat.value, LastJoyHat, Events, &NewLastJoyHat );
-				for( INT Index = 0; Index < Count; ++Index )
-					CauseInputEvent( (EInputKey)Events[Index].key, (EInputAction)Events[Index].action, 0.f );
-				LastJoyHat = (EInputKey)NewLastJoyHat;
-				break;
-			}
-			case SDL_WINDOWEVENT:
-			{
-				const Uint8 Kind = Event.window.event;
-				const UBOOL bLoss    = Kind == SDL_WINDOWEVENT_FOCUS_LOST || Kind == SDL_WINDOWEVENT_MINIMIZED || Kind == SDL_WINDOWEVENT_HIDDEN;
-				const UBOOL bRestore = Kind == SDL_WINDOWEVENT_FOCUS_GAINED || Kind == SDL_WINDOWEVENT_RESTORED || Kind == SDL_WINDOWEVENT_SHOWN;
-				const HP2Capture::FState State = { MouseIsGrabbed != 0, LostGrab != 0, C->CaptureMouse != 0 };
-				if( bLoss )
-				{
-					const HP2Capture::FDecision Decision = HP2Capture::OnLoss( State );
-					if( Decision.Action == HP2Capture::Action_Release )
-					{
-						UpdateMouseGrabState( 0 );
-						LostGrab = 1;
-					}
-					// Held input dies on every loss event, grabbed or not.
-					ReleaseAllInput();
-				}
-				else if( bRestore && SdlWindow )
-				{
-					const Uint32 WindowFlags = SDL_GetWindowFlags( SdlWindow );
-					const HP2Capture::FWindowFlags Flags =
-					{
-						(WindowFlags & SDL_WINDOW_INPUT_FOCUS) != 0,
-						(WindowFlags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0
-					};
-					const HP2Capture::FDecision Decision = HP2Capture::OnRestore( State, Flags );
-					if( Decision.Action == HP2Capture::Action_Restore )
-					{
-						UpdateMouseGrabState( C->CaptureMouse );
-						LostGrab = 0;
-					}
-				}
-				else if( Kind == SDL_WINDOWEVENT_RESIZED )
-				{
-					// Wayland compositors can resize the xdg-toplevel out from
-					// under us (tiling layout, compositor-driven fullscreen)
-					// without ever routing through ToggleFullscreen/EndFullscreen.
-					// Left unhandled, SizeX/SizeY, MouseScaleX/Y, and the render
-					// device's resolution go stale while SDL's own window size
-					// (and therefore SDL_MOUSEMOTION coordinates) track the new
-					// size, so the menu cursor drifts away from the pointer by
-					// the gap between the old and new size.
-					const INT NewWidth = Event.window.data1;
-					const INT NewHeight = Event.window.data2;
-					if( NewWidth > 0 && NewHeight > 0 && (NewWidth != SizeX || NewHeight != SizeY) )
-						ResizeViewport( BLIT_NoWindowChange, NewWidth, NewHeight, INDEX_NONE );
-				}
-				break;
-			}
-			default:
-				break;
-		}
+		const FfiSdlEvent Flat = FlattenSdlEvent( *this, Event );
+		const FfiInputContext Ctx = MakeInputContext( *this, C );
+		FfiInputAction Actions[InputPumpMaxActions];
+		const INT Count = hp2_rs_input_translate_event( &Ctx, &Flat, Actions );
+		ExecuteInputActions( *this, C, Actions, Count );
 	}
 	unguard;
 }
@@ -517,8 +569,8 @@ void USDLViewport::SetMouseCapture( UBOOL Capture, UBOOL Clip, UBOOL FocusOnly )
 		// gameplay starts, before the compositor finishes focusing the
 		// freshly created window. Defer instead of dropping the request:
 		// mark it pending exactly like a grab lost to a real focus loss, so
-		// the existing SDL_WINDOWEVENT_FOCUS_GAINED handler's tested
-		// HP2Capture::OnRestore completes it once focus genuinely arrives.
+		// the window-event pump's FOCUS_GAINED restore (input_pump.rs, through
+		// mouse_capture::on_restore) completes it once focus genuinely arrives.
 		Capture = 0;
 		LostGrab = 1;
 	}
@@ -590,35 +642,35 @@ void USDLViewport::UpdateMouseGrabState( UBOOL Capture )
 	unguard;
 }
 
-void USDLViewport::ReleaseJoystickInput()
-{
-	guard(USDLViewport::ReleaseJoystickInput);
-	for( INT Index = 0; Index < USDLClient::MaxJoystickAxes; ++Index )
-		CauseInputEvent( GJoyAxisKeys[Index], IST_Axis, 0.f );
-	LastJoyHat = IK_None;
-	unguard;
-}
-
 void USDLViewport::ReleaseAllInput()
 {
 	guard(USDLViewport::ReleaseAllInput);
 
-	// Held keys release first, ascending IK order so bindings observe a
-	// deterministic sequence.
-	if( Input )
+	// Order lives in Rust (input_pump::release_all_next): held keys release
+	// first in ascending IK order, then the joystick axes neutralize and
+	// LastJoyHat resets, then the mouse axes. The shell only answers key-held
+	// queries and executes the steps in order.
+	FfiReleaseAllCursor Cursor = hp2_rs_input_release_all_begin( Input != NULL );
+	bool bHeld = false;
+	FfiInputAction Step;
+	while( hp2_rs_input_release_all_next( &Cursor, bHeld, &Step ) )
 	{
-		for( INT Key = 0; Key < IK_MAX; ++Key )
-			if( Input->KeyDown(Key) )
-				CauseInputEvent( Key, IST_Release, 0.f );
+		bHeld = false;
+		switch( Step.kind )
+		{
+			case InputActionQueryKeyDown:
+				bHeld = Input->KeyDown( Step.key ) != 0;
+				break;
+			case InputActionCause:
+				CauseInputEvent( Step.key, (EInputAction)Step.action, Step.delta );
+				break;
+			case InputActionSetLastJoyHat:
+				LastJoyHat = (EInputKey)Step.key;
+				break;
+			default:
+				break;
+		}
 	}
-
-	// Joystick axes neutralize next...
-	ReleaseJoystickInput();
-
-	// ...then the mouse axes.
-	CauseInputEvent( IK_MouseX, IST_Axis, 0.f );
-	CauseInputEvent( IK_MouseY, IST_Axis, 0.f );
-	CauseInputEvent( IK_MouseW, IST_Axis, 0.f );
 
 	unguard;
 }

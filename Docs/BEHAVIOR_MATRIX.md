@@ -77,13 +77,11 @@ partition the suite.
 | `game_test_contract` | data-none | fast | `Tests/GameTestTests.py` |
 | `input_axis_order` | data-prototype | integration | `Tests/InputContractTests.cpp` |
 | `input_edge_contracts` | data-prototype | integration | `Tests/InputContractTests.cpp` |
-| `input_event_mapping` | data-prototype | integration | `Tests/InputContractTests.cpp` |
 | `input_release_all` | data-prototype | integration | `Tests/InputContractTests.cpp` |
 | `input_script_contract` | data-none | fast | `Tests/InputScriptSmoke.py` |
 | `input_script_smoke` | data-prototype | integration | `Tests/InputScriptSmoke.py` |
 | `localization_contract` | data-prototype | integration | `Tests/LocalizationTests.py` |
 | `matrix_compare_contract` | data-none | fast | `Tests/MatrixCompareTests.py` |
-| `mouse_capture_policy` | data-prototype | integration | `Tests/InputContractTests.cpp` |
 | `native_launcher_contract` | data-none | fast | `Tests/LauncherTests.cpp` |
 | `native_registration` | data-prototype | integration | `Tests/AbiTests.cpp` |
 | `native_typography_contracts` | data-prototype | fast | `Tests/NativeTypographyTests.cpp`, `Tests/CanvasCompatibilityTests.cpp` |

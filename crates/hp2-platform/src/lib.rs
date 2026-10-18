@@ -13,60 +13,35 @@
 //! same kind of live-engine-object FFI boundary `hp2-audio` is
 //! blocked on -- see that crate's own module doc.
 //!
-//! - `mouse_capture`: `HP2MouseCapturePolicy.h`'s pure decision table
-//!   (`OnLoss`/`OnRestore`). FFI-wired: both are thin forwards to
-//!   `hp2_rs_mouse_capture_on_loss`/`on_restore`; the C++ decision
-//!   logic that used to implement them is deleted. Called from
-//!   `USDLViewport::UpdateInput`'s `SDL_WINDOWEVENT` handler
-//!   (`SDLViewport.cpp:434/451`, unchanged) and
-//!   `Tests/InputContractTests.cpp`'s `TestMouseCapturePolicy`
-//!   (`mouse_capture_policy` ctest, unchanged) -- both now run
-//!   through Rust.
-//! - `input_event`: `HP2InputEvents.h`'s raw-SDL -> normalized-event
-//!   mapping functions. FFI-wired: `HP2InputEvents.h`'s five functions
-//!   (`HP2MapKeysym`, `HP2MakeKeyEvent`, `HP2MakeMouseButtonEvent`,
-//!   `HP2MakeWheelEvents`, `HP2MakeTextEvent`) are thin forwards to
-//!   `hp2_rs_input_*`; the C++ switch statement and UTF-8 decoder that
-//!   used to implement them are deleted. `USDLViewport::UpdateInput`
-//!   (`SDLViewport.cpp:318-480`, five call sites:
-//!   `:84-85/345/352/370/378`) and `Tests/InputContractTests.cpp`'s
-//!   `TestInputEventMapping` (`input_event_mapping` ctest) are both
-//!   unchanged -- they call the same names, which now resolve to Rust.
-//! - `joystick_input`: the `SDL_JOYAXISMOTION`/`SDL_JOYBUTTONDOWN`/
-//!   `SDL_JOYBUTTONUP`/`SDL_JOYHATMOTION` cases inline in
-//!   `UpdateInput` (`SDLViewport.cpp:373-415`). Unlike every other
-//!   bullet in this list, there was no existing named C++ function
-//!   to forward from -- this logic lived directly in the switch
-//!   statement, not behind a header -- so this is new structure
-//!   extracted from inline code, not a header-forward of an existing
-//!   abstraction. FFI-wired: the three cases now call
-//!   `hp2_rs_input_map_joystick_axis`/`map_joystick_button`/
-//!   `fold_joystick_hat`, each immediately followed by
-//!   `CauseInputEvent` as before. `GJoyAxisKeys` stays in C++ (still
-//!   used by `ReleaseJoystickInput`, not converted);
-//!   `GHatButtonBase` became dead once this landed and was deleted.
-//!   No existing oracle (this logic never had one); covered by
-//!   `joystick_input.rs`'s own Rust unit tests plus FFI-boundary
-//!   checks added to `Tests/PlatformJoystickTests.cpp`
-//!   (`joystick_round_trip` ctest, shared with the `joystick` module
-//!   above).
+//! - `input_pump`: `USDLViewport::UpdateInput`'s event-to-action
+//!   translation (`SDLViewport.cpp:351-497`), `ReleaseAllInput`'s
+//!   iteration order (`:602-624`), and the repaint-victim predicate that
+//!   `USDLClient::Tick` folds over (`SDLClient.cpp:185-211`). The C++ shell
+//!   flattens each polled `SDL_Event` into an `SdlEvent`, snapshots its UObject
+//!   fields into a `Context`, calls `translate_event`, and runs the returned
+//!   `Action`s in order (`CauseInputEvent`, `Engine->Key`, `Engine->MousePosition`,
+//!   `UpdateMouseGrabState`, `ResizeViewport`, `ReleaseAllInput`, and the
+//!   `LastJoyHat`/`LostGrab` writes). Rust never holds state across an engine
+//!   call. Pure modules used only by
+//!   `input_pump`: `input_event` (the raw-SDL key/button/wheel/text
+//!   mapping, previously `HP2InputEvents.h`), `joystick_input` (axis,
+//!   button, and hat mapping), and `mouse_capture` (the loss/restore
+//!   decision table, previously `HP2MouseCapturePolicy.h`). Ctests:
+//!   `input_edge_contracts`, `input_axis_order`, `input_release_all`
+//!   (`Tests/InputContractTests.cpp`); the pure mapping and capture
+//!   decisions are unit-tested in Rust (`input_pump`, `input_event`,
+//!   `mouse_capture`).
 //! - `clipboard`: `USDLClient::GetClipboardText`/`SetClipboardText`.
 //!   FFI-wired; the real C++ caller already calls through it. Ctest:
 //!   `clipboard_round_trip` (`Tests/PlatformClipboardTests.cpp`).
 //! - `mouse_state`: `USDLViewport::GetViewportButtonFlags`/
 //!   `GetMouseState`/`UpdateMouseGrabState` (`SDLViewport.cpp:544-579`).
-//!   FFI-wired: all three bodies now call `hp2_rs_platform_*`,
-//!   passing `SdlWindow` through as an opaque pointer (the real C++
-//!   still owns it; this module never creates/destroys/stores it).
-//!   The C++ bodies (the SDL calls and the grab-transition guard)
-//!   are deleted; the caller only stores the returned
-//!   `MouseIsGrabbed`/`bWindowsMouseAvailable` back into its own
-//!   UObject fields, which Rust cannot touch directly. No existing
-//!   C++ oracle exercised these (UObject member functions, not
-//!   constructible by `Tests/InputContractTests.cpp`'s headless
-//!   harness), so `Tests/PlatformMouseStateTests.cpp`
-//!   (`mouse_state_round_trip` ctest) is new coverage, not a ported
-//!   test.
+//!   FFI-wired: all three bodies call `hp2_rs_platform_*`, passing
+//!   `SdlWindow` through as an opaque pointer (the real C++ still owns
+//!   it; this module never creates/destroys/stores it). The caller only
+//!   stores the returned `MouseIsGrabbed`/`bWindowsMouseAvailable` back
+//!   into its own UObject fields. `buttons_from_sdl_state` is also used
+//!   by `input_pump`. Ctest: `mouse_state_round_trip`.
 //! - `window_chrome`: `USDLViewport::UpdateWindowFrame`/`SetTitleBar`
 //!   (`SDLViewport.cpp:233-239/748-755`). FFI-wired: both bodies now
 //!   call `hp2_rs_platform_*`, `SdlWindow` passed through as an
@@ -94,9 +69,9 @@
 //!   2.0.14+) creates a software joystick with no real hardware,
 //!   confirmed empirically to work under the dummy video driver.
 //!   `Tests/PlatformJoystickTests.cpp` (`joystick_round_trip` ctest)
-//!   covers the real branches: button clamp to 16, axis clamp to
-//!   `MaxJoystickAxes` (8), the >12-buttons-and-a-hat fold threshold
-//!   (including the exact boundary, 12 vs 14 buttons), `IgnoreHat`
+//!   covers the real branches: button clamp to 16, axis clamp to 8,
+//!   the >12-buttons-and-a-hat fold threshold (including the exact
+//!   boundary, 12 vs 14 buttons), `IgnoreHat`
 //!   suppression, and out-of-range device index failing cleanly.
 //! - `viewport`: pure decision logic from `USDLViewport`
 //!   (`SDLViewport.cpp`): `UpdateMouseScale`'s math, the constructor's
@@ -117,19 +92,19 @@
 //! or call through `RenDev` (`:160-212`). None of that can move to
 //! Rust before a render device exists on the Rust side to move it to.
 //!
-//! What remains in C++ and why: the `SDL_*` window/cursor calls and
-//! `OpenWindow`'s `SDL_CreateWindow`/GL-attribute half (they operate on
-//! the C++-owned `SdlWindow`), `SetModeCursor`'s `SDL_SetCursor` call
-//! (the index clamp is now `hp2_rs_viewport_mode_cursor_index`), and
-//! `UpdateInput`'s event pump, which calls `CauseInputEvent`,
-//! `Engine->Key`, `Engine->MousePosition`, and `Input->KeyDown`
-//! directly. Moving the pump needs a host callback table so Rust never
-//! holds a borrow across an engine call that can throw.
-//! `ReleaseJoystickInput` (still inline C++, now the only remaining
-//! consumer of `GJoyAxisKeys`, called in turn by `ReleaseAllInput`),
-//! and ungrabbed `SDL_MOUSEMOTION` (dispatches straight to
-//! `Engine->MousePosition` with no `HP2Make*Event` call, so it was
-//! never part of `input_event`'s scope).
+//! What remains in C++ and why: the `SDL_*` calls (`SDL_PollEvent`,
+//! `SDL_GetRelativeMouseState`, `SDL_GetWindowFlags`, window/cursor
+//! calls, joystick open/close) and the flattening of each `SDL_Event`
+//! into `SdlEvent`, because they operate on C++-owned SDL objects.
+//! `OpenWindow`'s `SDL_CreateWindow`/GL-attribute half and
+//! `SetModeCursor`'s `SDL_SetCursor` call also stay (the index clamp is
+//! `hp2_rs_viewport_mode_cursor_index`). Every engine call stays in C++
+//! -- `CauseInputEvent`'s `Engine->InputEvent`, `Engine->Key`,
+//! `Engine->MousePosition`, `Input->KeyDown`, `ResizeViewport`,
+//! `UpdateMouseGrabState` -- and the UObject field reads and writes:
+//! Rust must never hold a borrow across an engine call that can throw,
+//! so Rust returns an action list and C++ executes it in order.
+//! `SetMouseCapture` stays in C++ for the same SDL reason.
 //!
 //! `USDLViewport::TextToSpeech`/`UpdateSpeech` (`fork`/
 //! `execl("/usr/bin/say")`, `:752-795`) are **not** on this list:
@@ -145,6 +120,7 @@
 
 pub mod clipboard;
 pub mod input_event;
+pub mod input_pump;
 pub mod joystick;
 pub mod joystick_input;
 pub mod mouse_capture;

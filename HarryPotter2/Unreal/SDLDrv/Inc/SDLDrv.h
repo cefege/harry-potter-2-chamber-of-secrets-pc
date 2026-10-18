@@ -27,9 +27,6 @@ class USDLClient : public UClient, public FNotifyHook
 
 public:
 
-	// Joystick axis budget shared with the input contracts.
-	enum { MaxJoystickAxes = 8 };
-
 	// Configuration.
 	BITFIELD	UseJoystick;
 	BITFIELD	StartupFullscreen;
@@ -104,7 +101,6 @@ class USDLViewport : public UViewport
 
 public:
 	enum { NumSystemCursors = 7 };
-	enum { KeysymMapSize = 512 };
 
 	// Variables.
 	SDL_Window*		SdlWindow;
@@ -113,7 +109,6 @@ public:
 	BITFIELD		LostFullscreen:1;
 	BITFIELD		MouseIsGrabbed:1;
 	EInputKey		LastJoyHat;
-	EInputKey		KeysymMap[KeysymMapSize];
 	SDL_Cursor*		SystemCursors[NumSystemCursors];
 	FLOAT			MouseScaleX, MouseScaleY;
 	INT				SpeechPid;
@@ -151,7 +146,6 @@ public:
 	void GetMouseState( FLOAT& X, FLOAT& Y, DWORD& Buttons );
 	DWORD GetViewportButtonFlags();
 	UBOOL CauseInputEvent( INT iKey, EInputAction Action, FLOAT Delta=0.f );
-	void ReleaseJoystickInput();
 	void ReleaseAllInput();
 	void SetTopness();
 	void SetTitleBar( const TCHAR* Title );

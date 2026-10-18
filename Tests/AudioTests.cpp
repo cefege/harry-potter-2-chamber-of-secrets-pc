@@ -609,73 +609,6 @@ void TestRepeatedTeardownHasNoWorker(const std::filesystem::path& TempDir)
 	}
 }
 
-void TestTalkRegistrationEvictionPolicy()
-{
-	TArray<ALSource> Sources;
-	Sources.AddZeroed(3);
-	for( INT Index=0; Index<Sources.Num(); ++Index )
-		Sources(Index).Sound = reinterpret_cast<USound*>(
-			static_cast<UPTRINT>(Index + 1));
-	Sources(0).Id = SLOT_Talk * 2;
-	Sources(0).Priority = 100.f;
-	Sources(1).Id = SLOT_Ambient * 2;
-	Sources(1).Priority = 2.f;
-	Sources(2).Id = SLOT_Misc * 2;
-	Sources(2).Priority = 1.f;
-	Require(
-		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == 2,
-		"talk registration evicts the lowest-priority non-talk source");
-	Sources(2).Id = SLOT_Talk * 2;
-	Require(
-		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == 1,
-		"talk registration never evicts an existing talk source");
-	Sources(1).Id = SLOT_Talk * 2;
-	Require(
-		UALAudioSubsystem::FindLeastPriorityNonTalkSource(Sources) == INDEX_NONE,
-		"talk-only source sets are protected from registration eviction");
-}
-
-void TestSoundPriorityFfiBoundary()
-{
-	// hp2_rs_audio_sound_priority (crates/hp2-audio/src/priority.rs):
-	// the logic already has its own Rust unit tests; this exists to
-	// prove the FFI boundary itself -- argument marshaling, SF_* flag
-	// bit values -- not to re-litigate the logic. No UViewport is
-	// needed: the pure-math half of SoundPriority takes only
-	// plain floats/ints once DistSquared is computed by the caller.
-	Require(
-		hp2_rs_audio_sound_priority( 999999.f, 0.f, 100.f, 10.f, 0 ) == 10.f,
-		"zero radius should skip the distance factor entirely");
-	Require(
-		hp2_rs_audio_sound_priority( 0.f, 0.f, 100.f, 0.f, SF_HasLipSync|SF_Music|SF_No3D ) == 7.f,
-		"all three flag bonuses should stack to 4+2+1");
-}
-
-void TestFindLeastImportantSoundFfiBoundary()
-{
-	// hp2_rs_audio_find_least_important_sound (crates/hp2-audio/src/
-	// priority.rs::find_least_important_sound): the logic already has
-	// its own Rust unit tests; this exists to prove the FFI boundary
-	// itself -- FfiLeastImportantSlot's field order/layout, the
-	// usize/size_t sound-identity marshaling -- not to re-litigate
-	// the logic. No live USound/AActor/UViewport needed: every slot
-	// field is already a plain value once DistSquared is computed by
-	// the (real, live-object-coupled) caller.
-	FfiLeastImportantSlot Slots[4];
-	Slots[0] = { 0xAAAAu, SLOT_Misc * 2, 0.f, 10.f, 0.f, 0 };
-	Slots[1] = { 0xAAAAu, SLOT_Misc * 2, 0.f, 5.f,  0.f, 0 };
-	Slots[2] = { 0xAAAAu, SLOT_Talk * 2, 0.f, 1.f,  0.f, 0 }; // protected despite the lowest volume
-	Slots[3] = { 0xAAAAu, SLOT_Misc * 2, 0.f, 7.f,  0.f, 0 };
-	Require(
-		hp2_rs_audio_find_least_important_sound( Slots, 4, 0u, 100.f ) == 1,
-		"should pick the lowest-priority non-talk instance of the only sound past the min count");
-	Require(
-		hp2_rs_audio_find_least_important_sound( Slots, 4, 0xAAAAu, 100.f ) == -1,
-		"must not evict the sound that is itself about to play");
-	Require(
-		hp2_rs_audio_find_least_important_sound( NULL, 0, 0u, 100.f ) == -1,
-		"an empty slot list should never crash and never evict");
-}
 } // namespace
 
 int main()
@@ -695,9 +628,6 @@ int main()
 	TestOggEOFLoopAndErrors(TempDir);
 	TestQueuedDestinationIdentity(TempDir);
 	TestXAPartialsAndLoop();
-	TestTalkRegistrationEvictionPolicy();
-	TestSoundPriorityFfiBoundary();
-	TestFindLeastImportantSoundFfiBoundary();
 	TestRepeatedTeardownHasNoWorker(TempDir);
 
 	FFileStream::Destroy();

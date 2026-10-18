@@ -62,8 +62,9 @@ pub fn ambient_out_of_range(
 }
 
 /// Sorts ambient candidates highest priority first, exactly as the original
-/// `Sort` over `ALAmbient` does (`ALAudioSubsystem.cpp:1492`, `Compare` at
-/// `:1270`). Ties are not stable; the order is the original algorithm's.
+/// `Sort` over `ALAmbient` does (`23ac187:.../ALAudioSubsystem.cpp:1437`,
+/// `Compare` at `:1270`; `Sort` body is `06bfdd3` `UnTemplate.h:1727-1801`).
+/// Ties are not stable; the order is the original algorithm's.
 pub fn sort_by_priority<T>(items: &mut [T], priority: impl Fn(&T) -> f32) {
     ue_sort(items, |a, b| ambient_compare(priority(a), priority(b)));
 }
@@ -85,7 +86,7 @@ mod tests {
     }
 
     /// Deterministic LCG; same constants as the C++ oracle in
-    /// `/tmp/ambient_ref/ref.cpp` (`case D`).
+    /// `/tmp/hp2-m2/audio/ambient/ref.cpp` (`case D`).
     fn lcg_entries(n: usize) -> Vec<Entry> {
         let mut x: u32 = 12345;
         (0..n)
@@ -120,7 +121,7 @@ mod tests {
     }
 
     /// Permutations captured from the original C++ `Sort` + `Compare`
-    /// (`/tmp/ambient_ref/ref.cpp`, compiled with clang++ -ffp-contract=off).
+    /// (`/tmp/hp2-m2/audio/ambient/ref.cpp`, compiled with clang++ -ffp-contract=off; output `ref.out`).
     /// Equal priorities are deliberately present: the expected order is the
     /// original algorithm's, not a stable sort.
     #[test]
@@ -184,7 +185,7 @@ mod tests {
         assert_eq!(ambient_flags(false), 2 | 32);
     }
 
-    /// Cases from `ref.cpp` (`ADMIT`): (owned, dist, radius, rm, mult).
+    /// Cases from `ref.cpp` (`ADMIT`, output `ref.out`): (owned, dist, radius, rm, mult).
     #[test]
     fn admission_matches_cpp_including_boundaries() {
         let cases: [(bool, f32, f32, f32, f32); 8] = [
@@ -214,7 +215,7 @@ mod tests {
         assert!(ambient_admitted(true, f32::MAX, 0.0, 0.0, 0.0));
     }
 
-    /// Cases from `ref.cpp` (`OUT`): (dist, zone, mult). `dist > Square(zone*mult)`.
+    /// Cases from `ref.cpp` (`OUT`, output `ref.out`): (dist, zone, mult). `dist > Square(zone*mult)`.
     #[test]
     fn out_of_range_matches_cpp_including_boundaries() {
         assert!(!ambient_out_of_range(100., 10., 1.));

@@ -13,7 +13,7 @@
     <array>
         <string>/bin/zsh</string>
         <string>-lc</string>
-        <string>cd "$HOME/Code/Default/hp2" &amp;&amp; cmake --build --preset macos-arm64 --target hp2_verification_binaries &amp;&amp; ctest --preset macos-arm64 -R "determinism_double_run|input_edge_contracts|input_axis_order|input_release_all|mouse_capture_policy|input_event_mapping" --output-on-failure</string>
+        <string>cd "$HOME/Code/Default/hp2" &amp;&amp; cmake --build --preset macos-arm64 --target hp2_verification_binaries &amp;&amp; ctest --preset macos-arm64 -R "determinism_double_run|input_edge_contracts|input_axis_order|input_release_all|mouse_state_round_trip|joystick_round_trip" --output-on-failure &amp;&amp; "$HOME/.cargo/bin/cargo" test -p hp2-platform</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>

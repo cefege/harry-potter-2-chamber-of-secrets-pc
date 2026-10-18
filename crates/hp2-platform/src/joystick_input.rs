@@ -1,13 +1,10 @@
-//! Replaces the joystick event mapping inline in
-//! `USDLViewport::UpdateInput`'s `SDL_JOYAXISMOTION`/
-//! `SDL_JOYBUTTONDOWN`/`SDL_JOYBUTTONUP`/`SDL_JOYHATMOTION` cases
-//! (`SDLViewport.cpp:373-415`). Unlike `HP2MapKeysym` and friends,
-//! this logic has no existing named C++ function of its own -- it is
-//! written directly inline in the switch statement, not behind a
-//! header the way `HP2InputEvents.h`/`HP2MouseCapturePolicy.h` are.
-//! So there is no existing oracle test and no existing abstraction
-//! boundary to preserve; this module is new structure, not a forward
-//! for something that already had one.
+//! Joystick event mapping for `input_pump::translate_event`'s
+//! `SDL_JOYAXISMOTION`/`SDL_JOYBUTTONDOWN`/`SDL_JOYBUTTONUP`/
+//! `SDL_JOYHATMOTION` cases. Originally this logic sat inline in
+//! `USDLViewport::UpdateInput` (`SDLViewport.cpp:373-415`) with no named C++
+//! function, so there is no C++ oracle to preserve; the axis-key table and
+//! the hat-fold rules now live only here and are pinned by this crate's
+//! unit tests.
 
 use crate::input_event::{ik, ist};
 
@@ -15,10 +12,10 @@ use crate::input_event::{ik, ist};
 /// copy of the same constant (kept separate rather than shared,
 /// since the two modules are otherwise independent and this avoids a
 /// cross-module dependency for one `i32`).
-const MAX_JOYSTICK_AXES: i32 = 8;
+pub const MAX_JOYSTICK_AXES: i32 = 8;
 /// `GJoyAxisKeys` (`SDLViewport.cpp:28-31`): joystick axes in the
 /// exact order the engine's input contracts expect.
-const JOY_AXIS_KEYS: [i32; MAX_JOYSTICK_AXES as usize] = [
+pub const JOY_AXIS_KEYS: [i32; MAX_JOYSTICK_AXES as usize] = [
     ik::JOY_X,
     ik::JOY_Y,
     ik::JOY_Z,

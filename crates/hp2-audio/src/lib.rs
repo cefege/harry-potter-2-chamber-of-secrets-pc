@@ -1,101 +1,78 @@
-//! Rust port of `HarryPotter2/Unreal/ALAudio/Src/ALAudioSubsystem.cpp`
-//! (2261 lines) -- the OpenAL-Soft-backed implementation of
-//! `UAudioSubsystem`, registered as `ALAudio.ALAudioSubsystem`.
+//! Rust port of the ALAudio subsystem (`HarryPotter2/Unreal/ALAudio/Src/
+//! ALAudioSubsystem.cpp`), the OpenAL-backed implementation of
+//! `UAudioSubsystem` registered as `ALAudio.ALAudioSubsystem`.
 //!
-//! **Scope of this crate today:** the `priority` functions (three, below),
-//! `ambient` (the `HandleAmbience` admission, flags, source-id, and
-//! `UpdateAmbience` stop predicates, plus `sort`, a faithful port of the UE1
-//! `Sort` template that `HandleAmbience` uses), and `stream`, the
-//! streaming-buffer state machine (`UpdateStreamingSounds`,
-//! `ALAudioSubsystem.cpp:1495-1597`) with OpenAL and `GFileStream` calls
-//! passed in as closures. Device init, voice management, attenuation, and
-//! music are still C++. `UALAudioSubsystem`
-//! is a UE1 `UObject`-derived class (`DECLARE_CLASS(UALAudioSubsystem,
-//! UAudioSubsystem, CLASS_Config, ALAudio)`) whose state and virtual
-//! interface are deeply coupled to the live engine object graph --
-//! `USound::Audio = this`, `TObjectIterator<USound>`, per-tick
-//! `AActor*`/`USound*` access for positional audio, and UE1's property
-//! reflection system for config persistence (`StaticConstructor`'s
-//! `UBoolProperty`/`UFloatProperty` registrations). Porting the class
-//! itself (matching the plan's "C++ stub forwards every virtual to
-//! `hp2_rs_audio_*`" design) requires a kind of FFI boundary this
-//! crate has only just started establishing: Rust holding opaque
-//! identities for live `USound*` pointers (see
-//! `find_least_important_sound` below, its first real use), but not
-//! yet opaque identities for `AActor*`/`UViewport*`, and not yet
-//! holding any handle *across calls* (every function here is still
-//! stateless, called fresh each time with plain data). The full class
-//! port is still real, substantial, multi-session work, scoped but
-//! not started.
+//! **Rust owns the subsystem logic.** [`subsystem::Subsystem`] holds the
+//! `Sources`, `Buffers`, and `Streams` state, and the modules implement the
+//! behavior that used to live in the C++ class body:
 //!
-//! **First: `FindLeastPriorityNonTalkSource`**
-//! (`ALAudioSubsystem.cpp:2085-2101`). `ALSource` fields `Sound`/
-//! `Id`/`Priority` only depend on a `Sound` null-check, the slot bits
-//! of `Id`, and `Priority` -- genuinely pure data, no object graph
-//! traversal, a `static` C++ method already called with an explicit
-//! `TArray<ALSource>` parameter rather than reading `this->Sources`
-//! directly. FFI-wired via
-//! `hp2_rs_audio_find_least_priority_non_talk_source`
-//! (`crates/hp2-ffi`); `FindLeastPriorityNonTalkSource`'s body now
-//! forwards to it, builds the `FfiAudioSourceSlot` array from its own
-//! `TArray<ALSource>` immediately before the call. The real C++
-//! oracle, `TestTalkRegistrationEvictionPolicy`
-//! (`Tests/AudioTests.cpp:612-636`, part of the `audio_lifecycle`
-//! ctest), exercises this through the real caller path and passes
-//! against the Rust implementation.
+//! - `subsystem`: `Init`/`Destroy` (OpenAL device and context bring-up and
+//!   teardown, the `alError` checks and log order), `RegisterSound` /
+//!   `UnregisterSound` for ogg, XA, and WAV, `SetViewport`, and the stream
+//!   record bookkeeping.
+//! - `playback`: `PlaySound`, `StopSound` (both overloads), `StopSoundSource`,
+//!   `OldStopSound`, `ModifySound`, `NoteDestroy`, and the occlusion-scaled
+//!   reference distance used by PlaySound and ModifySound.
+//! - `update`: `Update`'s control flow (pause/unpause transitions, finished
+//!   source underrun and check(0) handling, `HandleAmbience`, `UpdateAmbience`,
+//!   the per-source `UpdateSounds` pass, fade and occlusion gating, and the
+//!   listener position, orientation, and velocity writes).
+//! - `music`: `PlayMusic`, `StopMusic`, `StopAllMusic`, `PauseSounds`, and
+//!   `UnpauseSounds`.
+//! - `exec`: the Exec command bodies (PAUSESOUNDS, UNPAUSESOUNDS, RESTARTSOUNDS,
+//!   PLAYINGSOUNDSTATS).
+//! - `stream`: the streaming buffer state machine (`UpdateStreamingSounds`),
+//!   with the OpenAL and `GFileStream` calls passed in as fallible callbacks.
+//! - `lipsync`: lip-sync timing gate and the mouth channel handle (the former
+//!   `FLipSyncAnimMgr`).
+//! - Pure helpers: `vec3` (UE1 `FVector`, bit-exact), `listener` (projection,
+//!   listener and source velocity gates, delta-time clamp), `fade`, `radius`,
+//!   `priority` (`SoundPriority`), `ambient` (`HandleAmbience` admission and
+//!   flags), `sort` (UE1 `Sort`), `al` (OpenAL and ALC enum values, plus
+//!   `alError`).
 //!
-//! **Second: `SoundPriority`'s pure math half**
-//! (`ALAudioSubsystem.cpp:1946-1961`) -- given `Volume`/`Radius`/
-//! `Flags` and the already-computed `FDistSquared(Location,
-//! ViewTarget->Location)`, compute the priority score. C++ still
-//! resolves `Viewport->Actor->ViewTarget`/`->Actor` and calls
-//! `FDistSquared` itself (live `AActor`/`FVector` state), then passes
-//! the single resulting float across. FFI-wired via
-//! `hp2_rs_audio_sound_priority`; `SoundPriority`'s body now computes
-//! only `DistSquared` before forwarding. `SoundPriority` had five
-//! call sites when this slice landed; `FindLeastImportantSound`'s
-//! own call (`:2134`) is gone now that its C++ body was replaced
-//! entirely by a Rust forward (see "Third" below) -- it calls
-//! `sound_priority` directly, not through `SoundPriority`'s C++ body.
-//! Four C++ call sites remain: `:808` in `PlaySound`, `:1404`/`:1424`
-//! gathering ambient sounds, `:1703` in `Update` for every active
-//! source on every tick -- this Rust path still runs on every tick
-//! for every active sound. No existing C++ oracle for any of them;
-//! `audio_lifecycle` only exercises this function directly via
-//! `TestSoundPriorityFfiBoundary`, covered by `priority.rs`'s own
-//! Rust unit tests otherwise. `Update`/`PlaySound`'s runtime call
-//! paths are not exercised by any automated check.
+//! **Still C++, and why.** The C++ shell is `UALAudioSubsystem`, a UE1
+//! `UObject` class (`DECLARE_CLASS(..., CLASS_Config, ALAudio)`). It keeps:
 //!
-//! **Third: `FindLeastImportantSound`** (`ALAudioSubsystem.cpp:
-//! 2105-2156`), called from `PlaySound` (`:758`, `:842`) when a
-//! new sound needs a source and every slot is full. Unlike the first
-//! two, this one *does* read `this->Sources`/the live `USound*`
-//! pointers directly in the real C++ -- the first function in this
-//! crate needing a live-object FFI pattern rather than pure data
-//! alone. Resolved as: `Sound` crosses as `sound: usize`, the pointer
-//! bits with no dereference ability on the Rust side, only equality
-//! comparison (matching exactly what the real C++'s `TMap<USound*,
-//! INT>`/`pMaxCountSound` pointer identity and truthiness checks
-//! need) -- `0` doubles as both "never assigned" and "a null `Sound`"
-//! the same way a null `USound*` does in C++. `WorkingFlags` is read
-//! once per source up front in C++ (`Source.Sound ? ->WorkingFlags :
-//! 0`) rather than only for the eventually-selected candidates like
-//! the original's lazier gating -- a deliberate simplification
-//! (same deterministic result, bounded extra `FDistSquared`/pointer
-//! read cost for a typically-small `Sources` array) to keep this to
-//! one FFI round trip instead of two. FFI-wired via
-//! `hp2_rs_audio_find_least_important_sound`; reuses `sound_priority`
-//! internally for the second-pass comparison. No existing C++ oracle;
-//! covered by `priority.rs`'s own Rust unit tests (including the
-//! null-identity and "first sound to strictly exceed the running
-//! max" tie-break edge cases) plus an FFI-boundary check added to
-//! `Tests/AudioTests.cpp` (`TestFindLeastImportantSoundFfiBoundary`,
-//! same `audio_lifecycle` ctest).
+//! - The UObject shell: class declaration, `StaticConstructor` property
+//!   registration, config properties (`UseEAX`, `CompatibilityMode`,
+//!   `ReverseStereo`, `MaxChannels`, and the others, so the `.ini` keys do not
+//!   change), `USound::Audio = this` ownership, and the owned `Box<Subsystem>`.
+//! - The OpenAL trampolines: each `alc*`/`al*` call is a thin `extern "C"`
+//!   thunk, reached from Rust through the host table below.
+//! - Engine-global services, which must stay in C++: `GFileStream` chunk
+//!   requests, `TObjectIterator` over `USound`, `AActor`/`ULevel`/`UViewport`
+//!   accessors, `IsAudibleAt`, `PointRegion`, `CalculateRadiusMultiplier`,
+//!   `debugf`, `appSeconds`, the `Ar` output device, and `FTime` (its tick
+//!   count is private, so the shell memcpys it into an `i64`).
+//! - Exception containment: engine calls can throw. Each trampoline that calls
+//!   an engine function that can throw (USound, AActor, ULevel, GFileStream,
+//!   the log and error sinks) wraps its body in `try`/`catch (...)`, stores
+//!   `std::current_exception()` in a per-call context, and returns failure.
+//!   Rust returns `Err(HostFailed)` and never holds a borrow across an engine
+//!   call. The C++ export shell rethrows the stored exception once the Rust
+//!   export has returned. The OpenAL/ALC thunks and `appSeconds` are direct
+//!   calls and do not throw.
+//! - Exec parsing: `ParseCommand` dispatch, `ASTAT`, `WEAPONRADIUS`
+//!   (`GAudioDefaultRadius` is an engine global), and `ROLLOFF` (sets the
+//!   `RollOff` UObject property, then calls the Rust StopSound overload 1).
+//!
+//! Host calls go through [`host::Host`]. The C++ shell implements it with one
+//! function table per call (`hp2_rs_audio_*` exports in `crates/hp2-ffi`).
 
+pub mod al;
 pub mod ambient;
-
+pub mod exec;
+pub mod fade;
+pub mod host;
+pub mod lipsync;
+pub mod listener;
+pub mod music;
+pub mod playback;
 pub mod priority;
-
-pub mod stream;
-
+pub mod radius;
 pub mod sort;
+pub mod stream;
+pub mod subsystem;
+pub mod update;
+pub mod vec3;

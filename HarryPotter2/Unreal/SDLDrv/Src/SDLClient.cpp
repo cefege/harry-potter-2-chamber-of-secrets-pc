@@ -7,6 +7,7 @@
 #include "hp2_rs.h"
 
 #include <string.h>
+#include <stddef.h>
 
 /*-----------------------------------------------------------------------------
 	Static registration.
@@ -182,6 +183,13 @@ UBOOL USDLClient::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 	unguard;
 }
 
+// Layout mirror of hp2-ffi's FfiRepaintCandidate (crates/hp2-ffi/src/input.rs).
+static_assert(sizeof(FfiRepaintCandidate) == 16, "FfiRepaintCandidate drifted from hp2-ffi");
+static_assert(offsetof(FfiRepaintCandidate, realtime) == 0, "FfiRepaintCandidate drifted from hp2-ffi");
+static_assert(offsetof(FfiRepaintCandidate, size_x) == 4, "FfiRepaintCandidate drifted from hp2-ffi");
+static_assert(offsetof(FfiRepaintCandidate, size_y) == 8, "FfiRepaintCandidate drifted from hp2-ffi");
+static_assert(offsetof(FfiRepaintCandidate, best_minus_candidate) == 12, "FfiRepaintCandidate drifted from hp2-ffi");
+
 void USDLClient::Tick()
 {
 	guard(USDLClient::Tick);
@@ -193,16 +201,28 @@ void USDLClient::Tick()
 	// UGameEngine::Tick delegates all drawing here, so a client that only
 	// pumps input never presents anything (blank window; render-device
 	// Unlock/present hooks never run).
+	// The victim rule lives in Rust (hp2_rs_input_repaint_replaces_best,
+	// crates/hp2-platform/src/input_pump.rs). FTime is 64-bit fixed-point, so
+	// the comparison crosses the boundary as FTime::operator-, whose float sign is
+	// exact: victim > candidate exactly when (victim - candidate) > 0. Fold one
+	// viewport at a time so Tick stays allocation-free.
 	UViewport* BestViewport = NULL;
 	for( INT Index = 0; Index < Viewports.Num(); ++Index )
 	{
 		UViewport* Viewport = Viewports(Index);
-		if
-		(	Viewport
-		&&	Viewport->IsRealtime()
-		&&	Viewport->SizeX
-		&&	Viewport->SizeY
-		&&	(!BestViewport || BestViewport->LastUpdateTime > Viewport->LastUpdateTime) )
+		if( !Viewport )
+			continue;
+		const FLOAT BestMinusCandidate = BestViewport
+			? BestViewport->LastUpdateTime - Viewport->LastUpdateTime
+			: 0.f;
+		const FfiRepaintCandidate Candidate =
+		{
+			Viewport->IsRealtime() != 0,
+			Viewport->SizeX,
+			Viewport->SizeY,
+			BestMinusCandidate
+		};
+		if( hp2_rs_input_repaint_replaces_best( BestViewport != NULL, Candidate ) )
 			BestViewport = Viewport;
 	}
 	if( BestViewport )

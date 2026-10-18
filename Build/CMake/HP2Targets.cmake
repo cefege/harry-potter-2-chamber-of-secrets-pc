@@ -1053,14 +1053,6 @@ if(HP2_TEST_DATA_PRESENT)
         --test=input_release_all
         "-datadir=${HP2_TEST_DATA_ROOT}"
     )
-    hp2_add_behavior_test(mouse_capture_policy hp2_input_contract_tests
-        --test=mouse_capture_policy
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
-    hp2_add_behavior_test(input_event_mapping hp2_input_contract_tests
-        --test=input_event_mapping
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
 endif()
 hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
 hp2_add_behavior_test(clipboard_round_trip hp2_platform_clipboard_tests)

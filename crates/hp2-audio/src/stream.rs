@@ -3,11 +3,14 @@
 //! `UpdateStreamingSounds`) and the `EALStreamBufferState` enum
 //! (`ALAudioSubsystem.h`).
 //!
-//! The OpenAL and `GFileStream` calls stay in C++: this module takes
-//! them as closures. Each closure is one C++ call site, invoked in the
-//! same order the C++ loop makes them, so the sequence of side effects
-//! is identical. A `check(...)` that fires in C++ becomes an
-//! `Err(StreamError)` here.
+//! The OpenAL and `GFileStream` calls are made by the caller through `Host`
+//! (`host.rs`) inside the closures passed to `tick`. Each closure is one C++
+//! call site, invoked in the same order the C++ loop makes them, so the
+//! sequence of side effects is identical. A `check(...)` that fires in C++
+//! becomes `TickError::Stream`; an engine call that throws becomes
+//! `TickError::Host`.
+
+use crate::host::{HostFailed, HostResult};
 
 /// Matches `EALStreamBufferState` (`ALAudioSubsystem.h`): the C++ enum's
 /// implicit 0..4 values, so the byte form is the C++ `(BYTE)` cast.
@@ -109,7 +112,28 @@ pub struct TickOutcome {
     pub played: bool,
 }
 
-/// One `UpdateStreamingSounds` pass (`ALAudioSubsystem.cpp:1495-1597`).
+/// Failure of one `tick` pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TickError {
+    /// A `check(...)` in the original loop fired.
+    Stream(StreamError),
+    /// An engine call made through `Host` threw.
+    Host(HostFailed),
+}
+
+impl From<StreamError> for TickError {
+    fn from(e: StreamError) -> Self {
+        TickError::Stream(e)
+    }
+}
+
+impl From<HostFailed> for TickError {
+    fn from(e: HostFailed) -> Self {
+        TickError::Host(e)
+    }
+}
+
+/// One `UpdateStreamingSounds` pass (`23ac187:HarryPotter2/Unreal/ALAudio/Src/ALAudioSubsystem.cpp:1497-1596`).
 ///
 /// - `processed`: the value of `alGetSourcei(AL_BUFFERS_PROCESSED)`.
 /// - `unqueue()`: `alSourceUnqueueBuffers(Source, 1, &b)`, returns `b`.
@@ -130,12 +154,12 @@ pub fn tick<U, P, Q, R>(
     mut pop_completed: P,
     mut queue: Q,
     mut request: R,
-) -> Result<TickOutcome, StreamError>
+) -> Result<TickOutcome, TickError>
 where
-    U: FnMut() -> u32,
-    P: FnMut() -> Option<(usize, bool)>,
-    Q: FnMut(usize),
-    R: FnMut(usize) -> bool,
+    U: FnMut() -> HostResult<u32>,
+    P: FnMut() -> HostResult<Option<(usize, bool)>>,
+    Q: FnMut(usize) -> HostResult<()>,
+    R: FnMut(usize) -> HostResult<bool>,
 {
     let n = stream.num_buffers;
     // `UBOOL TerminalObserved = !Stream.Alive;` (`:1503`)
@@ -143,7 +167,7 @@ where
 
     // Unqueue every processed buffer (`:1506-1529`).
     for _ in 0..processed.max(0) {
-        let name = unqueue();
+        let name = unqueue()?;
         let index = (0..n)
             .find(|&c| stream.buffers[c] == name)
             .ok_or(StreamError::UnqueuedBufferNotFound)?;
@@ -151,7 +175,7 @@ where
     }
 
     // Drain completed chunks (`:1533-1559`).
-    while let Some((dest, terminal)) = pop_completed() {
+    while let Some((dest, terminal)) = pop_completed()? {
         let mut matches = 0usize;
         let mut index = None;
         for c in 0..n {
@@ -161,7 +185,7 @@ where
             }
         }
         if matches != 1 {
-            return Err(StreamError::CompletionMatchCount(matches));
+            return Err(StreamError::CompletionMatchCount(matches).into());
         }
         let index = index.expect("matches == 1 implies an index");
         stream.state[index] = on_completed(stream.state[index])?;
@@ -177,11 +201,11 @@ where
             continue;
         }
         if stream.refill[index] == 0 {
-            return Err(StreamError::NullRefillData);
+            return Err(StreamError::NullRefillData.into());
         }
-        queue(index);
+        queue(index)?;
         let accepted = if !terminal_observed {
-            request(stream.refill[index])
+            request(stream.refill[index])?
         } else {
             false
         };
@@ -197,6 +221,12 @@ where
     Ok(outcome)
 }
 
+// Transition and call-sequence expectations below are pinned to the
+// original loop: `/tmp/hp2-m2/audio/stream/stream_oracle.cpp` includes the
+// verbatim text (`orig_stream.inc`) and is built with
+// `clang++ -std=c++17 -w -O0 -ffp-contract=off stream_oracle.cpp`; its output
+// is `stream_oracle.out`. `host_failure_during_tick_is_propagated` has no C++
+// counterpart (`alError` only logs) and is Rust-only.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,11 +335,14 @@ mod tests {
             &mut s,
             0,
             || unreachable!(),
-            || None,
-            |i| queued.push(i),
+            || Ok(None),
+            |i| {
+                queued.push(i);
+                Ok(())
+            },
             |d| {
                 requested.push(d);
-                true
+                Ok(true)
             },
         )
         .unwrap();
@@ -332,11 +365,14 @@ mod tests {
             &mut s,
             0,
             || unreachable!(),
-            || done.next(),
-            |i| queued.push(i),
+            || Ok(done.next()),
+            |i| {
+                queued.push(i);
+                Ok(())
+            },
             |_| {
                 requests += 1;
-                true
+                Ok(true)
             },
         )
         .unwrap();
@@ -359,11 +395,11 @@ mod tests {
             &mut s,
             0,
             || unreachable!(),
-            || None,
-            |_| {},
+            || Ok(None),
+            |_| Ok(()),
             |_| {
                 requests += 1;
-                true
+                Ok(true)
             },
         )
         .unwrap();
@@ -381,10 +417,26 @@ mod tests {
             BufferState::QueuedNoPrefetch,
         ]);
         s.reset = true;
-        let first = tick(&mut s, 0, || unreachable!(), || None, |_| {}, |_| true).unwrap();
+        let first = tick(
+            &mut s,
+            0,
+            || unreachable!(),
+            || Ok(None),
+            |_| Ok(()),
+            |_| Ok(true),
+        )
+        .unwrap();
         assert!(first.played);
         assert!(!s.reset);
-        let second = tick(&mut s, 0, || unreachable!(), || None, |_| {}, |_| true).unwrap();
+        let second = tick(
+            &mut s,
+            0,
+            || unreachable!(),
+            || Ok(None),
+            |_| Ok(()),
+            |_| Ok(true),
+        )
+        .unwrap();
         assert!(!second.played);
     }
 
@@ -395,8 +447,8 @@ mod tests {
             BufferState::QueuedPending,
             BufferState::QueuedPending,
         ]);
-        let err = tick(&mut s, 1, || 999, || None, |_| {}, |_| true).unwrap_err();
-        assert_eq!(err, StreamError::UnqueuedBufferNotFound);
+        let err = tick(&mut s, 1, || Ok(999), || Ok(None), |_| Ok(()), |_| Ok(true)).unwrap_err();
+        assert_eq!(err, TickError::Stream(StreamError::UnqueuedBufferNotFound));
     }
 
     #[test]
@@ -412,11 +464,30 @@ mod tests {
             &mut s,
             0,
             || unreachable!(),
-            || done.next(),
-            |_| {},
-            |_| true,
+            || Ok(done.next()),
+            |_| Ok(()),
+            |_| Ok(true),
         )
         .unwrap_err();
-        assert_eq!(err, StreamError::CompletionMatchCount(2));
+        assert_eq!(err, TickError::Stream(StreamError::CompletionMatchCount(2)));
+    }
+
+    #[test]
+    fn host_failure_during_tick_is_propagated() {
+        let mut s = stream([
+            BufferState::FreeReady,
+            BufferState::QueuedNoPrefetch,
+            BufferState::QueuedNoPrefetch,
+        ]);
+        let err = tick(
+            &mut s,
+            0,
+            || unreachable!(),
+            || Ok(None),
+            |_| Err(HostFailed),
+            |_| Ok(true),
+        )
+        .unwrap_err();
+        assert_eq!(err, TickError::Host(HostFailed));
     }
 }

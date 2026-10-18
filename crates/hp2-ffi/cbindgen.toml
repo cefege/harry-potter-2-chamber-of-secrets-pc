@@ -22,4 +22,8 @@ include = ["hp2-ffi-support", "hp2-wgpu", "hp2-fire", "hp2-render", "hp2-engine"
 # UnRender services and globals are passed to C++ by value of address through
 # GUrenServices (UnRender.cpp), not through an hp2-ffi export signature, so
 # cbindgen would never emit them without naming them here.
-include = ["Hp2UrenGlobals", "Hp2UrenServices"]
+# `hp2_rs_audio_exec` takes the command as a bare `uint32_t` (an out-of-range
+# enum value would be undefined behavior on the Rust side), so no exported
+# signature references `FfiExecCommand`. Listing it here makes cbindgen emit
+# the enumerators the C++ shell names in `RunExec` and its `static_assert`.
+include = ["Hp2UrenGlobals", "Hp2UrenServices", "FfiExecCommand"]

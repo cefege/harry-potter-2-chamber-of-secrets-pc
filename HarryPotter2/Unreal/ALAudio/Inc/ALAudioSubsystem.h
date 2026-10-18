@@ -10,145 +10,31 @@ Revision history:
 #define _INC_ALAUDIOSUBSYSTEM
 
 /*------------------------------------------------------------------------------------
-	Dependencies.
+	Ownership split.
+
+	All audio logic (channel and source bookkeeping, stream feeding, listener and
+	attenuation math, playback decisions, music, lip-sync timing, stats) lives in
+	the Rust crate hp2-audio and is reached through the hp2_rs_audio_* exports in
+	crates/hp2-ffi/src/audio.rs. The Rust subsystem is held in Handle.
+
+	What remains in C++ and why:
+	- This UObject shell: UObject lifetime, config properties (their ini keys are
+	  part of the engine's config surface), and the engine virtual overrides that
+	  the engine calls by name.
+	- Thin trampolines in ALAudioSubsystem.cpp that give Rust access to engine-global
+	  services (USound, AActor, ULevel, GFileStream, the OpenAL and ALC entry points).
+	  Engine globals cannot move to Rust, so Rust reaches them only through the
+	  FfiHost table that the shell fills.
+	- USound::Audio, the engine hook that routes USound calls to this subsystem.
 ------------------------------------------------------------------------------------*/
-
-#include <AL/al.h>
-#include <AL/alc.h>
-
-typedef ALenum (*EAXSet)(const void*, ALuint, ALuint, ALvoid*, ALuint);
-typedef ALenum (*EAXGet)(const void*, ALuint, ALuint, ALvoid*, ALuint);
 
 /*------------------------------------------------------------------------------------
 	Helpers
 ------------------------------------------------------------------------------------*/
 
-// Constants.
-
-// Maximum number of audio channels.
-#define MAX_AUDIOCHANNELS 32
-
-// Maximum number of audio streams.
-#define MAX_AUDIOSTREAMS 32
-
-// Maximum listener velocity in meters/ second.
-#define MAX_LISTENER_VELOCITY 50
-
-// Maximum source velocity in meters/ seconds.
-#define MAX_SOURCE_VELOCITY 300
-
-// Amount of OpenAL buffers per stream.
-//#define MAX_BUFFERS_PER_STREAM 4
-#define MAX_BUFFERS_PER_STREAM 3
-
-// Size in bytes per buffer in stream.
-#define OGGVORBIS_STREAM_CHUNKSIZE	65536
-#define XA_STREAM_CHUNKSIZE			32768
-
-// Occlusion factor.
-#define OCCLUSION_FACTOR 0.35f
-
-// Priority modifier for playing sounds.
-#define PLAYING_PRIORITY_MULTIPLIER 1.0f
-
-// Conversion factor for Unreal units -> meter
-#define DISTANCE_FACTOR ( 0.0254f / 2.f )
-
-//#define DISTANCE_FACTOR (( 2.f / 254.f ) / ( 0.0254f / 2.f ))
-
-// Utility Macros.
-
-/*------------------------------------------------------------------------------------
-	Lip-sync animation manager class.
-------------------------------------------------------------------------------------*/
-class FLipSyncAnimMgr
-{
-public:
-	FLipSyncAnimMgr( AActor *ParentActor, FLipSyncData *LipSyncData );
-	~FLipSyncAnimMgr( );
-
-	UBOOL	Start( FLOAT fTime );
-	void	Update( FLOAT fTime );
-	void	EatPauseTime( FLOAT fDeltaTime );
-
-protected:
-	AActor*			m_ParentActor;
-	FLipSyncData	*m_pLipSyncData;
-	FLOAT			m_StartTime;
-	FLOAT			m_LastElapsedTime;
-	BYTE			m_LastAmp;
-	AActor*			m_LipSyncAnimChan;
-
-	FLipSyncAnimMgr() {};	// don't allow default construction
-};
-
-/*------------------------------------------------------------------------------------
-	UGenericAudioSubsystem.
-------------------------------------------------------------------------------------*/
-
-struct ALSource
-{
-	USound			*Sound;
-	ALuint			Source;
-	AActor*			Actor;
-	FVector			Location;
-	FLOAT			Priority;
-	FLOAT			Radius;
-	FLOAT			ZoneRadius;
-	FLOAT			UsedRadius;
-	FLOAT			WantedRadius;
-	FTime			LastChange;
-	FLOAT			Volume;
-	FLOAT			FadeDuration;
-	FLOAT			FadeTime;
-	EFadeMode		FadeMode;
-	INT				Flags;
-	INT				Id;
-	UBOOL			Started;
-	UBOOL			Paused;
-	FLipSyncAnimMgr	*LipSyncAnimMgr;
-};
-
-struct ALBuffer
-{
-	ALuint		Buffer;
-	INT			Flags;
-	FString		Name;
-};
-
-enum EALStreamBufferState
-{
-	QueuedPending,
-	QueuedReady,
-	FreePending,
-	FreeReady,
-	QueuedNoPrefetch
-};
-
-struct ALStream
-{
-	ALuint			Buffer[MAX_BUFFERS_PER_STREAM];
-	BYTE*			RefillData[MAX_BUFFERS_PER_STREAM];
-	EALStreamBufferState BufferState[MAX_BUFFERS_PER_STREAM];
-	INT				Id;
-	INT				Flags;
-	INT				Processed;
-	INT				Rate;
-	UBOOL			Alive;
-	UBOOL			Reset;
-	ALuint			Format;
-	INT				StreamChunkSize;
-	INT				NumBuffers;
-	FString			Name;
-};
-
-struct ALAmbient
-{
-	AActor*		Actor;
-	FLOAT		Priority;
-	DWORD		Flags;
-	INT			Id;
-};
+// Opaque Rust subsystem (crates/hp2-ffi/src/audio.rs).
+struct FfiAudioSubsystem;
+struct FfiAudioConfig;
 
 // Immutable audio-source state exposed for fidelity telemetry. The subsystem
 // retains ownership of all source and sound objects.
@@ -159,37 +45,20 @@ struct FALAudioFidelitySource
 };
 
 //
-// The Generic implementation of UAudioSubsystem.
+// The OpenAL implementation of UAudioSubsystem. Logic is in Rust; see the header
+// comment above.
 //
 class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 {
 	DECLARE_CLASS(UALAudioSubsystem,UAudioSubsystem,CLASS_Config,ALAudio)
 
-	// Variables.
+	// Viewport mirror. Rust owns the viewport reference and reports it back.
 	UViewport*	Viewport;
-	UViewport*	DummyViewport;
-//	DOUBLE		LastTime;
-	FTime		LastTime;
-	FVector		LastPosition;
-	UBOOL		Initialized;
-	UBOOL		LastRealtime;
-	UBOOL		LastPaused;
-	UBOOL		RestartSounds;
-	UI3DL2Listener*		OldListener;
-	FPointRegion		RegionListener;
 
-	// Channels.
-	TArray<ALSource>	Sources;
-	TArray<ALBuffer>	Buffers;
-	TArray<ALStream>	Streams;
+	// Rust subsystem handle. Created in the constructor, freed in Destroy.
+	FfiAudioSubsystem*	Handle;
 
-	// AL specific
-	ALCdevice*	SoundDevice;
-	ALCcontext* SoundContext;
-	EAXGet		alEAXGet;
-	EAXSet		alEAXSet;
-
-	// Configuration.
+	// Configuration (ini keys unchanged).
 	FLOAT		DopplerFactor,
 				MusicVolume,
 				SoundVolume,
@@ -200,29 +69,10 @@ class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 				UseEAX,
 				UseMMSYSTEM;
 
-
-	// Stats.
-	class FALAudioStats
-	{
-	public:
-
-		INT		STATS_FirstEntry,
-				STATS_PlaySoundCycles,
-				STATS_UpdateCycles,
-				STATS_OcclusionCycles,
-				STATS_PlaySoundCalls,
-				STATS_OccludedSounds,
-				STATS_ActiveStreamingSounds,
-				STATS_ActiveRegularSounds,
-				STATS_StoppedSounds,
-				STATS_LastEntry;
-		FALAudioStats();
-		void Init();
-	} ALAudioStats;
-
 	// Constructor.
 	UALAudioSubsystem();
 	void StaticConstructor();
+	void MakeConfig( FfiAudioConfig& Cfg ) const;
 
 	// UObject interface.
 	void Destroy();
@@ -238,7 +88,7 @@ class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 	void UnregisterSound( USound* Sound, INT Id = -1 );
 	INT PlaySound( AActor* Actor, INT Id, USound* Sound, FVector Location, FLOAT Volume, FLOAT Radius, FLOAT Pitch, INT Flags, FLOAT FadeDuration, FLOAT Priority = 0.f );
 	UBOOL StopSound( AActor* Actor, USound* Sound );
-	
+
 	INT PlayMusic( FString Song, FLOAT FadeInTime );
 	UBOOL StopMusic( INT SongHandle, FLOAT FadeOutTime );
 	INT StopAllMusic( FLOAT FadeOutTime );
@@ -247,22 +97,6 @@ class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 	void NoteDestroy( AActor* Actor );
 	UViewport* GetViewport();
 	void GetFidelityActiveSources( TArray<FALAudioFidelitySource>& Out ) const;
-
-	// Internal functions.
-	void SetVolumes();
-	void StopSoundSource( INT Index );
-	void OldStopSound( INT Index );
-	FLOAT SoundPriority( UViewport* Viewport, FVector Location, FLOAT Volume, FLOAT Radius, INT Flags );
-	INT GetNewStreamStruct();
-	void SetI3DL2Listener( UI3DL2Listener* Listener );
-	UBOOL alError( TCHAR* Text, UBOOL Log = true );
-	// Callbacks for hp2_rs_audio_stream_tick (UpdateStreamingSounds). Ctx is an FStreamTickCalls from ALAudioSubsystem.cpp.
-	static ALuint StreamTickUnqueue( void* Ctx );
-	static BYTE StreamTickPopCompleted( void* Ctx, uintptr_t* Dest, BYTE* Terminal );
-	static void StreamTickQueue( void* Ctx, ALuint BufferIndex );
-	static BYTE StreamTickRequest( void* Ctx, uintptr_t Dest );
-	INT FindLeastImportantSound( USound *pIncomingSound );
-	static INT FindLeastPriorityNonTalkSource( const TArray<ALSource>& InSources );
 
 	//	Added by TG as part of initial test port
 	//

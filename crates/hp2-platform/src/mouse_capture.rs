@@ -1,10 +1,10 @@
-//! Replaces `HP2Capture::OnLoss`/`OnRestore`
-//! (`SDLDrv/Inc/HP2MouseCapturePolicy.h:81-102`), the pure
-//! mouse-grab-state decision seam `USDLViewport`'s
-//! `SDL_WINDOWEVENT` handler consults. Enum/struct field names and
-//! doc wording below mirror the real header's own comments closely
-//! -- it is the authoritative description of this behavior, not
-//! reworded.
+//! Loss/restore grab-state decision table. Replaces `HP2Capture::OnLoss`/
+//! `OnRestore` (formerly `SDLDrv/Inc/HP2MouseCapturePolicy.h:81-102`, now
+//! deleted). The Rust input pump (`input_pump::translate_event`) is the only
+//! caller; the C++ shell just executes the returned actions. Enum/struct
+//! field names and doc wording below mirror the deleted header's own
+//! comments closely -- it was the authoritative description of this
+//! behavior, not reworded.
 
 /// Replaces `HP2Capture::EAction`: what the caller must do to the
 /// grab state. `enum EAction { Action_None, Action_Release,
@@ -118,9 +118,9 @@ pub fn on_restore(state: &State, window: &WindowFlags) -> Decision {
 mod tests {
     use super::*;
 
-    // Matches `HP2MouseCapturePolicy.h:45-59`'s explicit C++
-    // discriminants exactly: `EAction` assigns none (so its real
-    // ordinals are the default 0/1/2), `ECursor` assigns
+    // Matches the explicit C++ discriminants of the deleted
+    // `HP2MouseCapturePolicy.h:45-59` (710119c): `EAction` assigns none (so
+    // its real ordinals are the default 0/1/2), `ECursor` assigns
     // `Hide=-1, Leave=0, Show=1`. This guards the `#[repr(i32)]`
     // values above against silent drift (e.g. a reordered variant)
     // at whatever point these cross an FFI boundary as a raw `i32`.
@@ -134,16 +134,10 @@ mod tests {
         assert_eq!(Cursor::Show as i32, 1);
     }
 
-    // Literal transcription of the real, unmodified C++ oracle test
-    // tables (`Tests/InputContractTests.cpp:501-568`,
-    // `TestMouseCapturePolicy`, registered as the `mouse_capture_policy`
-    // ctest -- one of Phase 2's named gates, part of the project's
-    // ctest baseline already). Header-only `inline` functions have no
-    // linkage distinction to check via `nm` the way a `.cpp`-defined
-    // function would; the real behavior is pinned by this already-
-    // passing, already-table-driven C++ test, which these cases
-    // reproduce row for row, same names, same inputs, same expected
-    // outputs.
+    // Transcribed row for row from the deleted C++ oracle
+    // `Tests/InputContractTests.cpp::TestMouseCapturePolicy` (710119c:488-576).
+    // Same names, same inputs, same expected outputs. Header-only C++ had no
+    // linkage to check, so the table is the pin.
 
     #[test]
     fn grabbed_first_loss_releases_and_shows_cursor() {

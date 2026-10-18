@@ -1,26 +1,21 @@
 //! Normalized input-event adapter, ported from
 //! `HarryPotter2/Unreal/SDLDrv/Inc/HP2InputEvents.h`.
 //!
-//! `USDLViewport::UpdateInput` (`SDLViewport.cpp:318-480`) calls
+//! `USDLViewport::UpdateInput` (`SDLViewport.cpp`) used to call
 //! `HP2MapKeysym`/`HP2MakeKeyEvent`/`HP2MakeMouseButtonEvent`/
-//! `HP2MakeWheelEvents`/`HP2MakeTextEvent` at five live call sites
-//! (`:84-85/345/352/370/378`), each immediately followed by
-//! `CauseInputEvent`/`Engine->Key`. Those five names in
-//! `HP2InputEvents.h` are now thin forwards to this module's
-//! functions through `hp2_rs_input_*` (`crates/hp2-ffi/src/lib.rs`);
-//! the C++ switch statement and UTF-8 decoder that used to implement
-//! them are deleted. `SDLViewport.cpp` is unchanged -- it keeps
-//! calling the same names, which now resolve to Rust. This is also
-//! why `HP2InputEvent`'s `#[repr(C)]` layout exactly matching the real
-//! `FHP2InputEvent` (`ANSICHAR Text[8]`, NUL in-band, no separate
-//! length field) is a hard requirement: `hp2_rs_input_*` returns it
-//! (via a separately-declared `FfiInputEvent` mirror in `hp2-ffi`,
-//! which cbindgen needs defined in that crate directly) across the
-//! real FFI boundary the game runs today, not a future design detail.
-//! `CauseInputEvent` itself (`SDLViewport.cpp:535-542`) calls
+//! `HP2MakeWheelEvents`/`HP2MakeTextEvent` (`HP2InputEvents.h`) at its SDL
+//! switch. Those mappings now run in Rust: `input_pump::translate_event`
+//! calls the functions in this module and returns the resulting actions to
+//! C++. `HP2InputEvents.h` and its C++ switch/UTF-8 decoder are deleted; the
+//! `HP2InputEvents.h:N` line references in this module point at that file as it
+//! was at commit 06bfdd3.
+//! Nothing in this module crosses the FFI boundary; the `HP2InputEvent`
+//! layout is internal to the Rust side.
+//!
+//! `CauseInputEvent` (`SDLViewport.cpp`) calls
 //! `GetOuterUSDLClient()->Engine->InputEvent(...)`, a live `UEngine*`
-//! virtual dispatch, so that part stays C++ until Phase 5; only the
-//! pure mapping step ahead of it is Rust.
+//! virtual dispatch, so that part stays C++. Only the pure mapping step
+//! ahead of it is Rust.
 //!
 //! `EInputKey`/`EInputAction` (`Engine/Inc/EngineClasses.h:129-401`) are
 //! both plain, dense, zero-based C++ enums (`IK_None=0 .. IK_MAX=255`,
@@ -150,6 +145,8 @@ pub mod ik {
     pub const JOY_Y: i32 = 225;
     pub const JOY_Z: i32 = 226;
     pub const JOY_R: i32 = 227;
+    pub const MOUSE_X: i32 = 228;
+    pub const MOUSE_Y: i32 = 229;
     pub const MOUSE_W: i32 = 231;
     pub const JOY_U: i32 = 232;
     pub const JOY_V: i32 = 233;
@@ -157,6 +154,8 @@ pub mod ik {
     pub const UNKNOWN_EB: i32 = 235;
     pub const MOUSE_WHEEL_UP: i32 = 236;
     pub const MOUSE_WHEEL_DOWN: i32 = 237;
+    /// `IK_MAX` (`EngineClasses.h:386`): exclusive upper bound of key indices.
+    pub const MAX: i32 = 255;
 }
 
 /// `EInputAction` values (`EngineClasses.h:394-401`), all of them -- there
@@ -584,10 +583,9 @@ pub fn make_text_event(utf8_text: Option<&[u8]>) -> HP2InputEvent {
 mod tests {
     use super::*;
 
-    /// Mirrors `Tests/InputContractTests.cpp::TestInputEventMapping`'s
-    /// `KeyRows` table (`InputContractTests.cpp:580-602`) row for row,
-    /// transcribed from the real C++ oracle test, registered as the
-    /// `input_event_mapping` ctest.
+    /// Transcribed row for row from the deleted C++ oracle
+    /// `Tests/InputContractTests.cpp::TestInputEventMapping`'s `KeyRows`
+    /// table (710119c:581-602).
     #[test]
     fn mirrors_the_real_cpp_keysym_mapping_table() {
         const SDLK_A: i32 = b'a' as i32;

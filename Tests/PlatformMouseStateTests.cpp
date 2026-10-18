@@ -73,10 +73,10 @@ int main()
 	Require( Buttons == 0, "GetMouseState buttons should match GetViewportButtonFlags (none held)" );
 	Require( X == 0.f && Y == 0.f, "expected the dummy driver's mouse position to scale to (0,0)" );
 
-	// UpdateMouseGrabState's transition contract, matching the real
-	// C++'s own early-return guard (HP2MouseCapturePolicy.h's "Current
-	// truth" note: capture state changes only on an actual
-	// grabbed/released transition, not every call). A real hidden
+	// UpdateMouseGrabState's transition contract: the early-return guard
+	// (hp2_rs_platform_update_mouse_grab_state; transition table in
+	// mouse_capture.rs) changes grab state only on an actual grabbed/released
+	// transition, not every call. A real hidden
 	// window exercises the SDL_SetWindowGrab call path genuinely
 	// (see the file header for why its effect isn't independently
 	// checkable under the dummy driver).
@@ -92,7 +92,7 @@ int main()
 	Require( SDL_ShowCursor( SDL_QUERY ) == SDL_DISABLE, "expected the cursor hidden after grabbing" );
 
 	// Already grabbed -> grab again: no transition (idempotent).
-	// "Cursor visibility must stay untouched" (HP2MouseCapturePolicy.h):
+	// "Cursor visibility must stay untouched" (mouse_capture.rs):
 	// show the cursor by hand first, then confirm the no-op call does
 	// NOT hide it again.
 	SDL_ShowCursor( SDL_ENABLE );

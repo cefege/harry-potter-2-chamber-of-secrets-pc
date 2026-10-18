@@ -1,6 +1,6 @@
 /*=============================================================================
-	InputContractTests.cpp: Headless contracts for the engine input path and
-	the SDL driver's extracted mouse-capture policy (wave 3).
+	InputContractTests.cpp: Headless contracts for the engine input path
+	(UEngine::InputEvent -> UInput) and the viewport's release-all sweep.
 
 	Scope
 	  - input_edge          : UEngine::InputEvent -> UInput::PreProcess/
@@ -10,11 +10,11 @@
 	                          including UInput::ReadInput's IST_Hold sweep.
 	  - input_release_all   : USDLViewport::ReleaseAllInput and
 	                          UInput::ResetInput clearing behavior.
-	  - mouse_capture_policy: table-driven freeze of the pure
-	                          HP2Capture::OnLoss/OnRestore decisions.
-	  - input_event_mapping : pure raw-SDL -> normalized-event helpers from
-	                          HP2InputEvents.h (PREP adapter; the viewport
-	                          pump is NOT rewired yet).
+
+	The SDL raw-event translation, the mouse-capture policy and the keysym /
+	mouse / wheel / text normalization now run in Rust (crates/hp2-platform:
+	input_pump.rs, mouse_capture.rs, input_event.rs) and are pinned by their
+	unit tests, so this suite no longer covers them.
 
 	Bootstrap mirrors Tests/AbiTests.cpp (FMallocAnsi + silent devices +
 	InstallHP2NativeLookups + RegisterHP2RuntimeClasses) and requires
@@ -25,8 +25,8 @@
 	comments rather than assertions):
 	  - The SDL event pump (USDLViewport::UpdateInput) cannot be driven in a
 	    headless ctest environment; keyboard/mouse/joystick translation and
-	    the LostGrab window-event dance stay uncovered until the normalized
-	    adapter (HP2InputEvents.h) is adopted behind pure mappings.
+	    the LostGrab window-event dance stay uncovered here (their pure
+	    decision logic is unit-tested in input_pump.rs).
 	  - UEngine::InputEvent's quit-menu yes/no key translation requires a
 	    scripted HUD main menu (Viewport->Actor->myHUD->MainMenu) and is not
 	    exercised; with Console==NULL the console KeyEvent/KeyType branches
@@ -35,7 +35,7 @@
 	    IK_MouseY; the engine layer under test passes deltas through
 	    verbatim, so the sign flip remains a viewport-side convention.
 	  - Menu state (USDLClient::InMenuLoop) never participates in the
-	    mouse-capture decision today; see HP2MouseCapturePolicy.h.
+	    mouse-capture decision today; see mouse_capture.rs.
 
 	Zero engine-source edits were required for this suite (the additive-hook
 	allowance in Engine/Src/UnIn.cpp went unused).
@@ -51,8 +51,6 @@
 #include "FFeedbackContextAnsi.h"
 #include "FConfigCacheIni.h"
 #include "SDLDrv.h"
-#include "HP2MouseCapturePolicy.h"
-#include "HP2InputEvents.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -125,10 +123,6 @@ const char* ReasonCodeForStage( const char* Stage )
 		return "input.axis_order_mismatch";
 	if( std::strcmp( Stage, "input.release_all" ) == 0 )
 		return "input.release_all_mismatch";
-	if( std::strcmp( Stage, "capture.policy" ) == 0 )
-		return "capture.policy_mismatch";
-	if( std::strncmp( Stage, "mapping.", 8 ) == 0 )
-		return "mapping.mismatch";
 	return "input.assertion_failed";
 }
 
@@ -235,10 +229,10 @@ bool BuildInputWorld( FInputWorld& World )
 		return false;
 
 	// Real viewport construction: resolves ini:Engine.Engine.Canvas and
-	// ini:Engine.Engine.Input through the prototype data root and builds the
-	// SDL keysym table. Safe headlessly: SDL video calls degrade to NULL/-1
-	// paths the constructor already tolerates, and SDL_PollEvent yields
-	// nothing without an initialized video subsystem.
+	// ini:Engine.Engine.Input through the prototype data root. Safe
+	// headlessly: SDL video calls degrade to NULL/-1 paths the constructor
+	// already tolerates, and SDL_PollEvent yields nothing without an
+	// initialized video subsystem.
 	World.Viewport = Cast<USDLViewport>( UObject::StaticConstructObject(
 		USDLViewport::StaticClass(), World.Client, NAME_None, RF_Transient ) );
 	if( !World.Viewport )
@@ -413,7 +407,8 @@ int TestReleaseAllInput( FInputWorld& World )
 	GFailureStage = "input.release_all";
 	ResetWorld( World );
 
-	static const EInputKey ExpectedAxes[USDLClient::MaxJoystickAxes] =
+	static const INT JoystickAxisCount = 8; // mirrors MAX_JOYSTICK_AXES (joystick_input.rs)
+	static const EInputKey ExpectedAxes[JoystickAxisCount] =
 		{ IK_JoyX, IK_JoyY, IK_JoyZ, IK_JoyR, IK_JoyU, IK_JoyV, IK_UnknownEA, IK_UnknownEB };
 
 	// Hold three keys out of ascending order.
@@ -425,12 +420,12 @@ int TestReleaseAllInput( FInputWorld& World )
 	World.Viewport->ReleaseAllInput();
 
 	// Expected Process-level stream: one IST_Release per held key in
-	// ascending IK order, then MaxJoystickAxes zeroed joystick axes, then
+	// ascending IK order, then JoystickAxisCount zeroed joystick axes, then
 	// MouseX/Y/W zeros - all through the engine dispatch (probe-recorded).
 	const std::vector<FRecordedCall> Stream = Deliveries( World.Input );
-	if( Stream.size() != 3 + USDLClient::MaxJoystickAxes + 3 )
+	if( Stream.size() != 3 + JoystickAxisCount + 3 )
 		Fail( "ReleaseAllInput delivered %u events, expected %u",
-			(unsigned)Stream.size(), (unsigned)(3 + USDLClient::MaxJoystickAxes + 3) );
+			(unsigned)Stream.size(), (unsigned)(3 + JoystickAxisCount + 3) );
 	else
 	{
 		size_t Cursor = 0;
@@ -443,7 +438,7 @@ int TestReleaseAllInput( FInputWorld& World )
 				Fail( "release sweep slot %d got key %d action %d delta %f (expected %d/IST_Release/0)",
 					Index, Call.Key, Call.Action, Call.Delta, ReleasedKeys[Index] );
 		}
-		for( int Index = 0; Index < USDLClient::MaxJoystickAxes; ++Index, ++Cursor )
+		for( int Index = 0; Index < JoystickAxisCount; ++Index, ++Cursor )
 		{
 			const FRecordedCall& Call = Stream[Cursor];
 			if( Call.Key != ExpectedAxes[Index] || Call.Action != IST_Axis || Call.Delta != 0.f )
@@ -477,205 +472,6 @@ int TestReleaseAllInput( FInputWorld& World )
 		Fail( "key survived ResetInput" );
 	if( World.Input->GetInputAction() != IST_None )
 		Fail( "input action not neutralized by ResetInput" );
-
-	return GFailures;
-}
-
-/*-----------------------------------------------------------------------------
-	mouse_capture_policy: truth-freezing table for HP2Capture decisions.
------------------------------------------------------------------------------*/
-
-int TestMouseCapturePolicy()
-{
-	GFailureStage = "capture.policy";
-
-	struct FLossRow
-	{
-		const char* Name;
-		bool bCurrentlyGrabbed;
-		bool bLossPending;
-		bool bCaptureMouseConfig;
-		HP2Capture::EAction ExpectedAction;
-		HP2Capture::ECursor ExpectedCursor;
-	};
-	const FLossRow LossRows[] =
-	{
-		// grabbed, first loss              -> release, cursor shown
-		{ "grabbed_first_loss",    true,  false, true,  HP2Capture::Action_Release, HP2Capture::Cursor_Show },
-		// grabbed, repeat loss             -> no-op (loss already pending)
-		{ "grabbed_repeat_loss",   true,  true,  true,  HP2Capture::Action_None,    HP2Capture::Cursor_Leave },
-		// not grabbed                      -> no-op
-		{ "ungrabbed_loss",        false, false, true,  HP2Capture::Action_None,    HP2Capture::Cursor_Leave },
-		// not grabbed, stale loss pending  -> no-op
-		{ "ungrabbed_stale_loss",  false, true,  false, HP2Capture::Action_None,    HP2Capture::Cursor_Leave },
-		// config ignored on the loss side
-		{ "config_off_first_loss", true,  false, false, HP2Capture::Action_Release, HP2Capture::Cursor_Show },
-	};
-	for( size_t Index = 0; Index < sizeof(LossRows)/sizeof(LossRows[0]); ++Index )
-	{
-		const FLossRow& Row = LossRows[Index];
-		const HP2Capture::FState State = { Row.bCurrentlyGrabbed, Row.bLossPending, Row.bCaptureMouseConfig };
-		const HP2Capture::FDecision Decision = HP2Capture::OnLoss( State );
-		if( Decision.Action != Row.ExpectedAction || Decision.Cursor != Row.ExpectedCursor )
-			Fail( "loss row '%s': action/cursor %d/%d, expected %d/%d",
-				Row.Name, Decision.Action, Decision.Cursor, Row.ExpectedAction, Row.ExpectedCursor );
-	}
-
-	struct FRestoreRow
-	{
-		const char* Name;
-		bool bLossPending;
-		bool bHasInputFocus;
-		bool bMinimizedOrHidden;
-		bool bCaptureMouseConfig;
-		HP2Capture::EAction ExpectedAction;
-		HP2Capture::ECursor ExpectedCursor;
-	};
-	const FRestoreRow RestoreRows[] =
-	{
-		// pending loss + focus + visible + capture on   -> grab, cursor hidden
-		{ "restore_capture_on",   true,  true,  false, true,  HP2Capture::Action_Restore, HP2Capture::Cursor_Hide },
-		// pending loss + focus + visible + capture off  -> grab stays off:
-		// UpdateMouseGrabState(FALSE) sees no transition, so the cursor keeps
-		// the visibility it gained during the release (frozen subtlety).
-		{ "restore_capture_off",  true,  true,  false, false, HP2Capture::Action_Restore, HP2Capture::Cursor_Leave },
-		// no input focus                                -> wait
-		{ "restore_no_focus",     true,  false, false, true,  HP2Capture::Action_None,    HP2Capture::Cursor_Leave },
-		// minimized                                     -> wait
-		{ "restore_minimized",    true,  true,  true,  true,  HP2Capture::Action_None,    HP2Capture::Cursor_Leave },
-		// no pending loss                               -> no-op
-		{ "restore_without_loss", false, true,  false, true,  HP2Capture::Action_None,    HP2Capture::Cursor_Leave },
-	};
-	for( size_t Index = 0; Index < sizeof(RestoreRows)/sizeof(RestoreRows[0]); ++Index )
-	{
-		const FRestoreRow& Row = RestoreRows[Index];
-		const HP2Capture::FState State = { true, Row.bLossPending, Row.bCaptureMouseConfig };
-		const HP2Capture::FWindowFlags Flags = { Row.bHasInputFocus, Row.bMinimizedOrHidden };
-		const HP2Capture::FDecision Decision = HP2Capture::OnRestore( State, Flags );
-		if( Decision.Action != Row.ExpectedAction || Decision.Cursor != Row.ExpectedCursor )
-			Fail( "restore row '%s': action/cursor %d/%d, expected %d/%d",
-				Row.Name, Decision.Action, Decision.Cursor, Row.ExpectedAction, Row.ExpectedCursor );
-	}
-
-	// Gap-documentation row: menu flags are NOT policy inputs today. If a
-	// future change consults USDLClient::InMenuLoop, extend FState and add
-	// rows here deliberately - this assertion pins today's ignorance.
-	{
-		const HP2Capture::FState State = { true, false, true }; // grabbed, menu open, capture on
-		const HP2Capture::FWindowFlags Flags = { true, false };
-		if( HP2Capture::OnRestore( State, Flags ).Action != HP2Capture::Action_None )
-			Fail( "menu-state row changed meaning: restore without pending loss fired" );
-	}
-
-	return GFailures;
-}
-
-/*-----------------------------------------------------------------------------
-	input_event_mapping: HP2InputEvents.h pure mappings.
------------------------------------------------------------------------------*/
-
-int TestInputEventMapping()
-{
-	GFailureStage = "mapping.keysym";
-	struct FKeyRow { SDL_Keycode Sym; EInputKey Expected; const char* Name; };
-	const FKeyRow KeyRows[] =
-	{
-		{ SDLK_a, IK_A, "a" },
-		{ SDLK_z, IK_Z, "z" },
-		{ SDLK_9, IK_9, "9" },
-		{ SDLK_SPACE, IK_Space, "space" },
-		{ SDLK_RETURN, IK_Enter, "return" },
-		{ SDLK_KP_ENTER, IK_Enter, "kp_enter" },
-		{ SDLK_LCTRL, IK_Ctrl, "lctrl-collapse" },
-		{ SDLK_RCTRL, IK_Ctrl, "rctrl-collapse" },
-		{ SDLK_LGUI, IK_F24, "lgui-as-f24" },
-		{ SDLK_RGUI, IK_F24, "rgui-as-f24" },
-		{ SDLK_LALT, IK_Alt, "alt" },
-		{ SDLK_BACKQUOTE, IK_Tilde, "backquote" },
-		{ 241, IK_Tilde, "spanish-enye" },
-		{ 167, IK_Tilde, "apple-section-sign" },
-		{ SDLK_F15, IK_F15, "f15" },
-		{ SDLK_KP_DIVIDE, IK_GreySlash, "kp_divide" },
-		{ SDLK_NUMLOCKCLEAR, IK_NumLock, "numlock" },
-		{ SDLK_APPLICATION, IK_None, "unmapped-application" },
-		{ SDLK_UNKNOWN, IK_None, "unknown" },
-	};
-	for( size_t Index = 0; Index < sizeof(KeyRows)/sizeof(KeyRows[0]); ++Index )
-	{
-		const FKeyRow& Row = KeyRows[Index];
-		const EInputKey Actual = HP2MapKeysym( Row.Sym );
-		if( Actual != Row.Expected )
-			Fail( "keysym '%s' mapped to %d, expected %d", Row.Name, Actual, Row.Expected );
-	}
-
-	GFailureStage = "mapping.key_events";
-	{
-		const FHP2InputEvent Press = HP2MakeKeyEvent( SDLK_SPACE, true );
-		if( Press.Key != IK_Space || Press.Action != IST_Press || Press.Delta != 0.f || Press.Text[0] != 0 )
-			Fail( "key press normalization drifted" );
-		const FHP2InputEvent Release = HP2MakeKeyEvent( SDLK_q, false );
-		if( Release.Key != IK_Q || Release.Action != IST_Release )
-			Fail( "key release normalization drifted" );
-		const FHP2InputEvent Suppressed = HP2MakeKeyEvent( SDLK_APPLICATION, true );
-		if( Suppressed.Key != IK_None || Suppressed.Action != IST_Press )
-			Fail( "unmapped keysym lost the suppression marker" );
-	}
-
-	GFailureStage = "mapping.mouse_buttons";
-	{
-		const FHP2InputEvent Left = HP2MakeMouseButtonEvent( 1, true );
-		if( Left.Key != IK_LeftMouse || Left.Action != IST_Press )
-			Fail( "left button normalization drifted" );
-		const FHP2InputEvent Middle = HP2MakeMouseButtonEvent( 2, false );
-		if( Middle.Key != IK_MiddleMouse || Middle.Action != IST_Release )
-			Fail( "middle button normalization drifted" );
-		const FHP2InputEvent Right = HP2MakeMouseButtonEvent( 3, true );
-		if( Right.Key != IK_RightMouse || Right.Action != IST_Press )
-			Fail( "right button normalization drifted" );
-		const FHP2InputEvent Side = HP2MakeMouseButtonEvent( 8, true );
-		if( Side.Key != IK_None || Side.Action != IST_None )
-			Fail( "button 8 must normalize to a suppressed event" );
-	}
-
-	GFailureStage = "mapping.wheel";
-	{
-		FHP2InputEvent Events[3];
-		if( HP2MakeWheelEvents( 0, Events ) != 0 )
-			Fail( "zero wheel delta must produce no events" );
-
-		if( HP2MakeWheelEvents( 3, Events ) != 3 )
-			Fail( "wheel up must produce 3 events" );
-		if( Events[0].Key != IK_MouseW || Events[0].Action != IST_Axis || Events[0].Delta != 3.f )
-			Fail( "wheel-up axis event drifted" );
-		if( Events[1].Key != IK_MouseWheelUp || Events[1].Action != IST_Press )
-			Fail( "wheel-up press pair drifted" );
-		if( Events[2].Key != IK_MouseWheelUp || Events[2].Action != IST_Release )
-			Fail( "wheel-up release pair drifted" );
-
-		if( HP2MakeWheelEvents( -2, Events ) != 3 )
-			Fail( "wheel down must produce 3 events" );
-		if( Events[0].Delta != -2.f || Events[1].Key != IK_MouseWheelDown || Events[2].Key != IK_MouseWheelDown )
-			Fail( "wheel-down sequence drifted" );
-	}
-
-	GFailureStage = "mapping.text";
-	{
-		const FHP2InputEvent Ascii = HP2MakeTextEvent( "A" );
-		if( Ascii.Key != 65 || Ascii.Action != IST_None || Ascii.Text[0] != 'A' || Ascii.Text[1] != 0 )
-			Fail( "ascii text normalization drifted" );
-		const FHP2InputEvent Accent = HP2MakeTextEvent( "\xC3\xA9" ); // U+00E9
-		if( Accent.Key != 233 )
-			Fail( "two-byte utf8 codepoint decoded to %d, expected 233", Accent.Key );
-		const FHP2InputEvent Astral = HP2MakeTextEvent( "\xF0\x9F\x98\x80" ); // astral plane
-		if( Astral.Key != IK_None )
-			Fail( "astral-plane payload must decode to IK_None like the UCS2 helper" );
-		const FHP2InputEvent Malformed = HP2MakeTextEvent( "\xFF" );
-		if( Malformed.Key != IK_None )
-			Fail( "malformed utf8 must decode to IK_None" );
-		const FHP2InputEvent Truncated = HP2MakeTextEvent( "\xC3" );
-		if( Truncated.Key != IK_None )
-			Fail( "truncated utf8 continuation must decode to IK_None" );
-	}
 
 	return GFailures;
 }
@@ -714,12 +510,15 @@ bool InitializeRuntime( int ArgC, char** ArgV )
 		appStrcat( CmdLine, Argument );
 	}
 	// Bind Engine.u's exported script classes onto the registered native
-	// classes (SpellRuntimeTests/AbiTests parity). Without these lookups the
-	// import creates shadow Actor/Console class objects and enum children
-	// like Actor.EInputKey never appear under the native AActor.
+	// classes (SpellRuntimeTests parity). Mirrors SDLLaunch.cpp: native
+	// lookups are installed before appInit.
 	InstallHP2NativeLookups();
 	GIsStarted = 1;
 	GIsGuarded = 1;
+	// Linker export filtering (RF_LoadForClient/Server) drops every Engine.u
+	// export when neither flag is set, which is why Actor.EInputKey was
+	// missing. Mirror the game's runtime flags (SDLLaunch.cpp), not the editor's.
+	GIsClient = GIsServer = GIsScriptable = 1;
 	try
 	{
 		appInit( TEXT("InputContractTests"), CmdLine, &RuntimeMalloc, &RuntimeLog, &RuntimeError,
@@ -730,13 +529,8 @@ bool InitializeRuntime( int ArgC, char** ArgV )
 		return false;
 	}
 	RegisterHP2RuntimeClasses();
-	// Enum lookups (Actor.EInputKey/EInputAction) resolve only after the
-	// Engine package is linked into the object space.
 	if( !UObject::LoadPackage( NULL, TEXT("Engine.u"), LOAD_NoFail ) )
 		return false;
-	// OPEN FINDING resolved: the missing piece vs AbiTests was
-	// InstallHP2NativeLookups() above -- without it Engine.u imports create
-	// shadow classes and Actor.EInputKey never lands under native AActor.
 	return true;
 }
 
@@ -766,21 +560,11 @@ FSuiteResult RunSuite( const char* Test )
 
 	try
 	{
-		if( std::strcmp( Test, "mouse_capture_policy" ) == 0 )
-		{
-			TestMouseCapturePolicy();
-		}
-		else if( std::strcmp( Test, "input_event_mapping" ) == 0 )
-		{
-			TestInputEventMapping();
-		}
-		else if( bNeedsWorld )
+		if( bNeedsWorld )
 		{
 			FInputWorld World;
-			// RESIDUAL GAP: native lookups are installed (InstallHP2NativeLookups
-			// before appInit) yet the checked enum lookup still escapes only under
-			// ctest isolation; direct invocation passes. Quarantined until that
-			// last delta is found.
+			// An engine error escaping the fixture build or the test body is a
+			// failure. It is reported with exit 1; it is never a pass.
 			bool EscapedEngineError = false;
 			try
 			{
@@ -801,14 +585,12 @@ FSuiteResult RunSuite( const char* Test )
 			catch( ... )
 			{
 				EscapedEngineError = true;
-				std::fprintf( stderr, "%s: KNOWN GAP in %s (engine error escaped: %s)\n",
+				std::fprintf( stderr, "%s: engine error escaped in %s: %s\n",
 					GTestName, Test, TCHAR_TO_ANSI(RuntimeError.Message) );
 			}
 			if( EscapedEngineError )
-			{
-				std::fflush( NULL );
-				_Exit( 0 );
-			}
+				return SuiteResult( "fail", "input.engine_error_escaped",
+					"engine error escaped the test body", 1 );
 		}
 		else
 		{
@@ -865,7 +647,7 @@ int main( int ArgC, char** ArgV )
 
 	if( Test == NULL || !*Test )
 	{
-		std::fprintf( stderr, "%s: required argument --test=<input_edge|input_axis_order|input_release_all|mouse_capture_policy|input_event_mapping>\n", GTestName );
+		std::fprintf( stderr, "%s: required argument --test=<input_edge|input_axis_order|input_release_all>\n", GTestName );
 		WriteReport( ArgC, ArgV, SuiteResult( "fail", "input.test_selector_missing", "required --test argument missing", 2 ) );
 		return 2;
 	}

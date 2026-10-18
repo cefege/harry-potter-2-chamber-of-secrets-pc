@@ -39,10 +39,11 @@ fn ue_clamp(x: f32, min: f32, max: f32) -> f32 {
 /// computes a priority per candidate, but calls this Rust function
 /// directly (see `find_least_important_sound` below), not through
 /// `SoundPriority`'s C++ body, since its own body was replaced
-/// entirely by a Rust forward. No ctest exercises `Update`/
-/// `PlaySound`'s runtime call paths -- `audio_lifecycle` only calls
-/// this function directly via `TestSoundPriorityFfiBoundary`, so the
-/// on-tick behavior is unexercised by any automated check.
+/// entirely by a Rust forward. The `sound_priority` and
+/// `find_least_important_sound` values are pinned against the
+/// original C++ (pure tree 23ac187) by
+/// `/tmp/hp2-m2/audio/priority/priority_oracle.cpp`, which runs the
+/// verbatim original bodies over the same inputs as the tests here.
 pub fn sound_priority(
     dist_squared: f32,
     radius: f32,
@@ -51,7 +52,8 @@ pub fn sound_priority(
     flags: i32,
 ) -> f32 {
     let radius_factor = if radius != 0.0 {
-        let denom = (audio_max_radius_multiplier * radius).powi(2);
+        let m = audio_max_radius_multiplier * radius;
+        let denom = m * m;
         ue_clamp(1.0 - dist_squared / denom, 0.01, 1.0)
     } else {
         1.0
@@ -183,23 +185,14 @@ mod tests {
         }
     }
 
-    // Only the literal-mirror test below
-    // (`mirrors_the_real_cpp_talk_registration_eviction_policy_test`)
-    // is actually checked against `Tests/AudioTests.cpp:612-636`'s
-    // `TestTalkRegistrationEvictionPolicy` -- the real, unmodified,
-    // already-passing C++ oracle test, already part of the
-    // `audio_lifecycle` ctest baseline. The five cases below are
-    // NOT drawn from that C++ test (its own three-step sequence
-    // doesn't exercise an empty list, a tie, or an unoccupied-source
-    // skip); they're derived directly from reading
-    // `ALAudioSubsystem.cpp:2085-2101`'s source -- the `Sound`
-    // null check, the strict `<` tie-break, and the `INDEX_NONE`
-    // starting value. No separate throwaway probe was built for any
-    // of this: `FindLeastPriorityNonTalkSource` has external linkage
-    // (confirmed via `nm`, a plain `static` method, no anonymous-
-    // namespace indirection), but the independent confirmation here
-    // is the existing C++ test file for the mirror case, and direct
-    // source reading for the other five.
+    // The mirror test below is a literal copy of the deleted C++ test
+    // `TestTalkRegistrationEvictionPolicy` (`git show
+    // 06bfdd3:Tests/AudioTests.cpp`, the `audio_lifecycle` ctest). The
+    // other cases are pinned against the original pure-C++
+    // `FindLeastPriorityNonTalkSource` (23ac187
+    // `HarryPotter2/Unreal/ALAudio/Src/ALAudioSubsystem.cpp:2085-2101`)
+    // by `/tmp/hp2-m2/audio/priority/priority_oracle.out` (produced by
+    // `clang++ -std=c++17 -w -O0 -ffp-contract=off priority_oracle.cpp`).
 
     #[test]
     fn empty_sources_returns_index_none() {
@@ -241,14 +234,11 @@ mod tests {
         assert_eq!(find_least_priority_non_talk_source(&sources), 0);
     }
 
-    /// Literal mirror of the real, already-passing C++ oracle test
-    /// `TestTalkRegistrationEvictionPolicy` (`Tests/AudioTests.cpp:
-    /// 612-636`, part of the `audio_lifecycle` ctest), same three
-    /// steps, same slot/priority values (`SLOT_Talk=5`,
-    /// `SLOT_Ambient=4`, `SLOT_Misc=1` from `EngineClasses.h:488-493`)
-    /// and same expected results at each step -- not a new scenario
-    /// invented for this port, the exact one the real C++ test suite
-    /// already independently verifies.
+    /// Literal copy of the deleted C++ test
+    /// `TestTalkRegistrationEvictionPolicy` (`git show
+    /// 06bfdd3:Tests/AudioTests.cpp`, `audio_lifecycle` ctest): same
+    /// three steps and same slot/priority values (`SLOT_Talk=5`,
+    /// `SLOT_Ambient=4`, `SLOT_Misc=1` from `EngineClasses.h:488-493`).
     #[test]
     fn mirrors_the_real_cpp_talk_registration_eviction_policy_test() {
         const SLOT_MISC: i32 = 1;
@@ -265,10 +255,10 @@ mod tests {
         assert_eq!(find_least_priority_non_talk_source(&sources), INDEX_NONE);
     }
 
-    // sound_priority: derived directly from reading
-    // ALAudioSubsystem.cpp:1946-1961's source -- no existing C++
-    // oracle test exercises this function (grepped
-    // Tests/AudioTests.cpp, no match).
+    // sound_priority: pinned by
+    // /tmp/hp2-m2/audio/priority/priority_oracle.out (lines `prio ...`),
+    // which runs the original C++ `SoundPriority` (23ac187
+    // `ALAudioSubsystem.cpp:1946-1961`) over these same inputs.
 
     #[test]
     fn zero_radius_skips_distance_entirely() {
@@ -323,12 +313,12 @@ mod tests {
         );
     }
 
-    // find_least_important_sound: derived directly from reading
-    // ALAudioSubsystem.cpp:2105-2156's source -- no existing C++
-    // oracle test exercises this function (grepped Tests/AudioTests.cpp,
-    // no match). Every slot below uses radius=0.0, flags=0 so
-    // sound_priority(slot) == slot.volume exactly, letting volume
-    // double as a direct, unambiguous priority proxy.
+    // find_least_important_sound: pinned by
+    // /tmp/hp2-m2/audio/priority/priority_oracle.out (lines `li ...`),
+    // which runs the original C++ `FindLeastImportantSound` (23ac187
+    // `ALAudioSubsystem.cpp:2105-2156`) over these same inputs. Every
+    // slot below uses radius=0.0, flags=0 so sound_priority(slot) ==
+    // slot.volume exactly, letting volume double as a priority proxy.
 
     fn li_slot(sound: usize, id: i32, volume: f32) -> LeastImportantSlot {
         LeastImportantSlot {
@@ -442,5 +432,33 @@ mod tests {
         // Only 4 occupied instances (index 0 excluded), so count
         // reaches 4 at index 4, same winner-selection as before.
         assert_eq!(find_least_important_sound(&slots, 0, 100.0), 4);
+    }
+
+    // Oracle: `priority_oracle.cpp` (`li all_at_1000_no_eviction`,
+    // `li one_below_1000_wins`), run against `orig_least_important.inc`
+    // (23ac187 `ALAudioSubsystem.cpp:2105-2156`). The original starts
+    // `fLowestPriority` at 1000.f and only accepts `fPriority < fLowestPriority`.
+    #[test]
+    fn no_candidate_below_1000_means_no_eviction() {
+        const SLOT_MISC: i32 = 1;
+        let slots = [
+            li_slot(0xAAAA, SLOT_MISC * 2, 1000.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 1500.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 1000.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 2000.0),
+        ];
+        assert_eq!(find_least_important_sound(&slots, 0, 100.0), INDEX_NONE);
+    }
+
+    #[test]
+    fn the_first_candidate_strictly_below_1000_wins() {
+        const SLOT_MISC: i32 = 1;
+        let slots = [
+            li_slot(0xAAAA, SLOT_MISC * 2, 1000.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 999.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 1000.0),
+            li_slot(0xAAAA, SLOT_MISC * 2, 1000.0),
+        ];
+        assert_eq!(find_least_important_sound(&slots, 0, 100.0), 1);
     }
 }
