@@ -176,11 +176,13 @@ endfunction()
 # byproduct, the header gets Ninja's restat after the cargo step and every
 # consumer whose depfile lists it is ordered after, and rebuilt by, the same
 # invocation. cbindgen only rewrites the file when its contents change, so
-# an unchanged API rebuilds nothing. UNVERIFIED: the single-invocation
-# signature-change case above has not been re-run against this declaration.
-# Keep the workaround until it has: after any hp2_rs_wgpu_* signature change,
-# run `cmake --build ... --target hp2_verification_binaries` twice before
-# trusting a binary or ctest result from it.
+# an unchanged API rebuilds nothing.
+# Verified (wgpu tree, header-only signature change, one consumer): with the
+# BYPRODUCTS below removed, the single invocation rewrote hp2_rs.h and exited 0
+# without recompiling WgpuDrv.cpp.o (stale). With it present, the same
+# invocation rewrote the header and recompiled WgpuDrv.cpp.o, which then failed
+# against the new declaration. One build is enough; the run-twice step is not
+# needed for this case. Only one consumer was tested, not all ~37.
 #
 # Corrosion copies CMAKE_OSX_DEPLOYMENT_TARGET into MACOSX_DEPLOYMENT_TARGET for
 # every cargo run, host proc-macros included. On macOS 27 with Xcode ld-27037,
