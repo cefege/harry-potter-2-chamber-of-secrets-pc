@@ -477,6 +477,7 @@
 //! `modelviewproj_mat` must build it directly in WebGPU's 0..1
 //! convention), not duplicated here.
 
+pub mod capture;
 pub mod draw;
 pub mod texture;
 
@@ -808,7 +809,9 @@ pub enum FrameOutcome {
     Timeout = 3,
     /// `get_current_texture` returned `Occluded` (window minimized or
     /// behind another window -- or, on macOS, possibly never actually
-    /// mapped to the screen).
+    /// mapped to the screen). Nothing is presented; with
+    /// `HP2_CAPTURE_FRAMES` on, the frame is still rendered offscreen
+    /// and captured (`FramePresentable::CaptureOnly`).
     Occluded = 4,
     /// `get_current_texture` returned `Outdated`.
     Outdated = 5,
@@ -847,6 +850,13 @@ pub enum FrameOutcome {
 enum FramePresentable {
     Surface(wgpu::SurfaceTexture),
     Offscreen,
+    /// `lock_frame` got `Occluded` while `HP2_CAPTURE_FRAMES` is on:
+    /// the frame is rendered into `RenderLoop::capture_target` instead
+    /// (never presented) so it can still be captured -- XOpenGL renders
+    /// and captures every frame regardless of window visibility, and
+    /// capture consumers (`Tests/DeterminismDoubleRunTests.py`,
+    /// `Build/smoke_maps.py`) depend on one capture per frame.
+    CaptureOnly(wgpu::Texture),
 }
 
 /// One in-flight frame between `lock_frame`/`begin_offscreen_frame`
@@ -1205,6 +1215,21 @@ pub struct RenderLoop {
     /// keeps "this is a real uploaded texture" and "this is an inert
     /// always-bound placeholder" two clearly separate kinds of state).
     dummy_texture: Option<texture::CachedTexture>,
+    /// `HP2_CAPTURE_FRAMES` end-of-frame capture (`capture::FrameCapture`),
+    /// read once from the environment on the first `lock_frame`, exactly
+    /// like XOpenGL.cpp's own lazily-initialized `GFrameCapture`
+    /// (`HPInitFrameCapture`, XOpenGL.cpp:2686-2705). `None` when capture
+    /// is off -- one `getenv` per process, nothing else.
+    capture: Option<capture::FrameCapture>,
+    capture_initialized: bool,
+    /// HiDPI backing scale (drawable pixels per logical window pixel),
+    /// set by the C++ side before each `lock_frame` (`set_backing_scale`)
+    /// and recorded per captured frame as `backing_scale_factor`, the
+    /// same value XOpenGL.cpp:2728-2731 computes from SDL.
+    backing_scale: f64,
+    /// Offscreen render target for `FramePresentable::CaptureOnly`
+    /// frames, reused while its size and format still match.
+    capture_target: Option<wgpu::Texture>,
     /// Set by every `set_scene_node` call -- the real `RFX2`/`RFY2`/
     /// `Frame->FX2`/`FY2` screen-to-clip transform `Draw2DLine`'s own
     /// real source applies (`DrawSimple.cpp:80,82`) is derived
@@ -1367,7 +1392,31 @@ impl RenderLoop {
             sampler: None,
             dummy_texture: None,
             last_scene: None,
+            capture: None,
+            capture_initialized: false,
+            backing_scale: 1.0,
+            capture_target: None,
         }
+    }
+
+    /// Lazily reads `HP2_CAPTURE_FRAMES`/`MAP`/`TICKS` once, matching
+    /// XOpenGL.cpp's own `if (!GFrameCapture.Initialized)
+    /// HPInitFrameCapture();`.
+    fn ensure_capture_initialized(&mut self) {
+        if self.capture_initialized {
+            return;
+        }
+        self.capture_initialized = true;
+        self.capture = capture::FrameCapture::from_env();
+        if self.capture.is_some() {
+            log::info!("WgpuDrv: frame capture enabled");
+        }
+    }
+
+    /// Records the real HiDPI backing scale for the next captured frame
+    /// (`backing_scale`'s own doc).
+    pub fn set_backing_scale(&mut self, scale: f64) {
+        self.backing_scale = scale;
     }
 
     pub fn counts(&self) -> FrameCounts {
@@ -2535,6 +2584,22 @@ pub fn lock_frame(
             return FrameOutcome::NoDefaultConfig;
         };
         config.present_mode = present_mode;
+        // Capture reads the presented surface texture back, which needs
+        // COPY_SRC on the swapchain textures -- requested only when
+        // capture is actually on and the surface really supports it
+        // (not every backend does), so the normal path is unchanged.
+        loop_state.ensure_capture_initialized();
+        if loop_state
+            .capture
+            .as_ref()
+            .is_some_and(capture::FrameCapture::is_enabled)
+            && surface
+                .get_capabilities(&created.adapter)
+                .usages
+                .contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
         surface.configure(&created.device, &config);
         loop_state.configured_size = Some((width, height));
         loop_state.configured_present_mode = Some(present_mode);
@@ -2548,6 +2613,16 @@ pub fn lock_frame(
         }
         wgpu::CurrentSurfaceTexture::Occluded => {
             loop_state.counts.occluded += 1;
+            // Same format `get_default_config` picks (`formats[0]`), so a
+            // captured occluded frame matches a captured visible one.
+            if loop_state
+                .capture
+                .as_ref()
+                .is_some_and(capture::FrameCapture::is_enabled)
+                && let Some(&format) = surface.get_capabilities(&created.adapter).formats.first()
+            {
+                begin_capture_only_frame(created, loop_state, width, height, format, clear_color);
+            }
             return FrameOutcome::Occluded;
         }
         wgpu::CurrentSurfaceTexture::Outdated => {
@@ -2702,6 +2777,47 @@ pub fn begin_offscreen_frame(
         color_format: target.format(),
         suboptimal: false,
     });
+}
+
+/// `FramePresentable::CaptureOnly`'s frame start: (re)uses
+/// `loop_state.capture_target` at `width`x`height`/`format`, then
+/// begins the frame into it exactly like `begin_offscreen_frame`.
+fn begin_capture_only_frame(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    clear_color: wgpu::Color,
+) {
+    let target = match loop_state.capture_target.take() {
+        Some(texture)
+            if texture.width() == width
+                && texture.height() == height
+                && texture.format() == format =>
+        {
+            texture
+        }
+        _ => created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hp2-wgpu occluded capture target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        }),
+    };
+    begin_offscreen_frame(created, loop_state, &target, clear_color);
+    if let Some(frame) = loop_state.in_progress.as_mut() {
+        frame.presentable = FramePresentable::CaptureOnly(target.clone());
+    }
+    loop_state.capture_target = Some(target);
 }
 
 /// Dispatches `batches` into `frame.encoder`, lazily building
@@ -3352,14 +3468,70 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
     created
         .queue
         .submit(std::iter::once(frame.encoder.finish()));
-    if present && let FramePresentable::Surface(texture) = frame.presentable {
-        created.queue.present(texture);
-        loop_state.counts.presented += 1;
+    match frame.presentable {
+        FramePresentable::Surface(texture) if present => {
+            // XOpenGL.cpp:2829-2831: capture runs after the frame is fully
+            // rendered and immediately before the swap -- here, after the
+            // submit above and before present.
+            capture_presented_frame(created, loop_state, &texture.texture);
+            created.queue.present(texture);
+            loop_state.counts.presented += 1;
+        }
+        // Same Blit-only capture point, minus the present (`CaptureOnly`'s
+        // own doc); not counted as presented.
+        FramePresentable::CaptureOnly(texture) if present => {
+            capture_presented_frame(created, loop_state, &texture);
+        }
+        _ => {}
     }
     if frame.suboptimal {
         loop_state.configured_size = None;
     }
     true
+}
+
+/// Real `HPCapturePresentedFrame` (XOpenGL.cpp:2707-2767) for a wgpu
+/// surface texture: no-op unless `HP2_CAPTURE_FRAMES` is on. Reads the
+/// finished frame back (`capture::read_texture_rgba8`, top row first --
+/// wgpu needs no bottom-up flip, unlike `glReadPixels`) and appends it via
+/// `capture::FrameCapture::write_frame`, recording the real adapter name
+/// as `renderer` (XOpenGL's `GL_RENDERER` equivalent). A swapchain that
+/// could not get `COPY_SRC` (`lock_frame`'s own capability check), or an
+/// unsupported surface format, disables capture with one warning instead
+/// of failing every frame -- same as XOpenGL's own write-failure path.
+fn capture_presented_frame(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    texture: &wgpu::Texture,
+) {
+    let Some(frame_capture) = loop_state.capture.as_mut() else {
+        return;
+    };
+    if !frame_capture.is_enabled() {
+        return;
+    }
+    if !texture.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+        log::warn!("WgpuDrv: surface does not support COPY_SRC; disabling frame capture");
+        loop_state.capture = None;
+        return;
+    }
+    let Some(rgba) = capture::read_texture_rgba8(created, texture) else {
+        log::warn!(
+            "WgpuDrv: surface format {:?} unsupported for frame capture; disabling it",
+            texture.format()
+        );
+        loop_state.capture = None;
+        return;
+    };
+    if let Err(error) = frame_capture.write_frame(
+        &rgba,
+        texture.width(),
+        texture.height(),
+        loop_state.backing_scale,
+        &created.adapter_name,
+    ) {
+        log::warn!("WgpuDrv: frame capture write failed ({error}); disabling capture");
+    }
 }
 
 /// `src/shaders/common.wgsl`'s source, concatenated in front of every
@@ -6769,5 +6941,258 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             created.adapter_name,
             backend_name(created.backend)
         );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn capture_presented_frame_writes_the_rendered_frame_and_meta() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let dir = std::env::temp_dir().join(format!(
+            "hp2_capture_presented_frame_writes_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("expected a writable temp directory");
+        let mut loop_state = RenderLoop::new();
+        loop_state.capture = Some(capture::FrameCapture::new(
+            dir.clone(),
+            "capture_test_map".into(),
+            Some(7),
+        ));
+        let texture = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("capture_presented_frame writes test texture"),
+            size: wgpu::Extent3d {
+                width: 3,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let mut rgba = Vec::with_capacity(24);
+        for i in 0u8..6 {
+            rgba.extend_from_slice(&[i * 10, i * 10 + 1, i * 10 + 2, 255]);
+        }
+        created.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(12),
+                rows_per_image: Some(2),
+            },
+            wgpu::Extent3d {
+                width: 3,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        capture_presented_frame(&created, &mut loop_state, &texture);
+
+        assert!(
+            loop_state
+                .capture
+                .as_ref()
+                .is_some_and(|capture| capture.is_enabled()),
+            "expected capture to stay enabled after a successful write"
+        );
+        let expected_rgb: Vec<u8> = rgba
+            .chunks_exact(4)
+            .flat_map(|pixel| [pixel[0], pixel[1], pixel[2]])
+            .collect();
+        let mut reader = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(dir.join("frame_000000.png"))
+                .expect("expected frame_000000.png to be written"),
+        ))
+        .read_info()
+        .expect("expected a valid PNG header");
+        assert_eq!(reader.info().color_type, png::ColorType::Rgb);
+        assert_eq!((reader.info().width, reader.info().height), (3, 2));
+        let mut buffer = vec![0; reader.output_buffer_size().expect("expected a frame size")];
+        reader
+            .next_frame(&mut buffer)
+            .expect("expected the PNG pixel data to decode");
+        assert_eq!(
+            buffer, expected_rgb,
+            "expected the PNG to hold the texture's own RGB pixels with alpha dropped"
+        );
+
+        let meta = std::fs::read_to_string(dir.join("frame_meta.json"))
+            .expect("expected frame_meta.json to be written");
+        assert_eq!(
+            meta,
+            format!(
+                "{{\"captures\":[{{\"width_px\":3,\"height_px\":2,\"backing_scale_factor\":1.000000,\"renderer\":\"{}\",\"ticks\":7,\"map\":\"capture_test_map\"}}]}}\n",
+                created.adapter_name
+            )
+        );
+        std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
+        println!(
+            "capture_presented_frame wrote a real 3x2 frame and meta on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn capture_presented_frame_disables_capture_when_texture_lacks_copy_src() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let dir = std::env::temp_dir().join(format!(
+            "hp2_capture_presented_frame_no_copy_src_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("expected a writable temp directory");
+        let mut loop_state = RenderLoop::new();
+        loop_state.capture = Some(capture::FrameCapture::new(
+            dir.clone(),
+            "capture_test_map".into(),
+            None,
+        ));
+        let texture = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("capture_presented_frame no COPY_SRC test texture"),
+            size: wgpu::Extent3d {
+                width: 3,
+                height: 2,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        capture_presented_frame(&created, &mut loop_state, &texture);
+
+        assert!(
+            loop_state.capture.is_none(),
+            "expected capture to be disabled when the presented texture lacks COPY_SRC"
+        );
+        assert!(
+            !dir.join("frame_000000.png").exists(),
+            "expected no frame to be written when capture is disabled"
+        );
+        assert!(
+            !dir.join("frame_meta.json").exists(),
+            "expected no meta to be written when capture is disabled"
+        );
+        std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
+        println!(
+            "capture_presented_frame disabled capture for a non-COPY_SRC texture on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn capture_only_frame_is_captured_but_never_presented() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let dir = std::env::temp_dir().join(format!(
+            "hp2_capture_only_frame_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("expected a writable temp directory");
+        let mut loop_state = RenderLoop::new();
+        loop_state.capture = Some(capture::FrameCapture::new(
+            dir.clone(),
+            "Entry".into(),
+            None,
+        ));
+        loop_state.set_backing_scale(2.0);
+
+        // Bgra8Unorm: the real macOS swapchain format family, so the
+        // capture's BGRA->RGBA swap is exercised too.
+        begin_capture_only_frame(
+            &created,
+            &mut loop_state,
+            4,
+            2,
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::Color::RED,
+        );
+        assert!(unlock_frame(&created, &mut loop_state, true));
+        let first_target = loop_state
+            .capture_target
+            .clone()
+            .expect("expected the capture target to be kept for reuse");
+        // Blit=0: no capture point, same as a surface frame.
+        begin_capture_only_frame(
+            &created,
+            &mut loop_state,
+            4,
+            2,
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::Color::RED,
+        );
+        assert!(unlock_frame(&created, &mut loop_state, false));
+        assert_eq!(
+            loop_state.capture_target.as_ref(),
+            Some(&first_target),
+            "expected a same-shape capture-only frame to reuse its target"
+        );
+
+        assert_eq!(
+            loop_state.counts.presented, 0,
+            "a capture-only frame is never presented"
+        );
+        assert!(
+            !dir.join("frame_000001.png").exists(),
+            "Blit=0 must not capture"
+        );
+        let mut reader = png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(dir.join("frame_000000.png"))
+                .expect("expected frame_000000.png to be written"),
+        ))
+        .read_info()
+        .expect("expected a valid PNG header");
+        assert_eq!((reader.info().width, reader.info().height), (4, 2));
+        let mut buffer = vec![0; reader.output_buffer_size().expect("expected a frame size")];
+        reader
+            .next_frame(&mut buffer)
+            .expect("expected the PNG pixel data to decode");
+        assert_eq!(
+            buffer,
+            [255, 0, 0].repeat(8),
+            "expected the red clear color, RGB order"
+        );
+        let meta = std::fs::read_to_string(dir.join("frame_meta.json"))
+            .expect("expected frame_meta.json to be written");
+        assert_eq!(
+            meta,
+            format!(
+                "{{\"captures\":[{{\"width_px\":4,\"height_px\":2,\"backing_scale_factor\":2.000000,\"renderer\":\"{}\",\"ticks\":null,\"map\":\"Entry\"}}]}}\n",
+                created.adapter_name
+            )
+        );
+        std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
     }
 }

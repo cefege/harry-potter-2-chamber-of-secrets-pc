@@ -467,8 +467,12 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 	// requested size actually changed.
 #if MACOSX
 	INT PixelWidth = 0, PixelHeight = 0;
+	INT LogicalWidth = 0, LogicalHeight = 0;
 	if( SDL_Window* Window = (SDL_Window*)Viewport->GetWindow() )
+	{
 		SDL_Metal_GetDrawableSize( Window, &PixelWidth, &PixelHeight );
+		SDL_GetWindowSize( Window, &LogicalWidth, &LogicalHeight );
+	}
 	if( PixelWidth <= 0 || PixelHeight <= 0 )
 	{
 		// No window, or SDL reported nothing useful -- not expected
@@ -480,9 +484,15 @@ void UWgpuRenderDevice::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenC
 		PixelWidth = Viewport->SizeX;
 		PixelHeight = Viewport->SizeY;
 	}
+	// HP2_CAPTURE_FRAMES's backing_scale_factor: drawable pixels per
+	// logical window pixel, computed exactly as XOpenGL.cpp:2728-2731
+	// does (DrawableHeight / LogicalHeight, 1.0 when unknown).
+	hp2_rs_wgpu_set_backing_scale( RustDevice,
+		LogicalHeight > 0 ? (DOUBLE)PixelHeight / (DOUBLE)LogicalHeight : 1.0 );
 #else
 	const INT PixelWidth = Viewport->SizeX;
 	const INT PixelHeight = Viewport->SizeY;
+	hp2_rs_wgpu_set_backing_scale( RustDevice, 1.0 );
 #endif
 	const DWORD Outcome = hp2_rs_wgpu_lock( RustDevice,
 		(DWORD)Max( 1, PixelWidth ), (DWORD)Max( 1, PixelHeight ),

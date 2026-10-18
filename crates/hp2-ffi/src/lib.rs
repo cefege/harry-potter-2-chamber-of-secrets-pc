@@ -2941,6 +2941,32 @@ pub unsafe extern "C" fn hp2_rs_wgpu_unlock(handle: *mut c_void, present: bool) 
     })
 }
 
+/// Records the real HiDPI backing scale (drawable pixels per logical
+/// window pixel) for `HP2_CAPTURE_FRAMES`'s `backing_scale_factor` field
+/// (`hp2_wgpu::RenderLoop::set_backing_scale`). Called by `WgpuDrv.cpp`'s
+/// `Lock` before `hp2_rs_wgpu_lock`, computed the same way XOpenGL.cpp:
+/// 2728-2731 does. Non-finite or non-positive values fall back to `1.0`.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not yet
+/// destroyed), or null (a no-op).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_set_backing_scale(handle: *mut c_void, scale: f64) {
+    guard("hp2_rs_wgpu_set_backing_scale", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
+        handle.render_loop.set_backing_scale(scale);
+    })
+}
+
 /// Replaces the frame-outcome-reporting half of
 /// `UWgpuRenderDevice::Exit`. Returns the live tally of every
 /// `hp2_rs_wgpu_lock` outcome since `handle` was created
