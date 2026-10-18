@@ -867,6 +867,86 @@ mod tests {
     }
 
     #[test]
+    fn rgb8_to_rgba8_expands_each_texel_and_forces_opaque_alpha() {
+        // Red, then green, tightly packed 3 bytes each -- no padding
+        // between texels (HP2TextureBytes' own real width*height*3
+        // formula, no slack to leave room for).
+        let rgb = [255u8, 0, 0, 0, 255, 0];
+        let rgba = rgb8_to_rgba8(&rgb);
+        assert_eq!(rgba, vec![255, 0, 0, 255, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn rgb8_to_rgba8_dropping_the_alpha_byte_is_caught() {
+        // Negative control: an earlier, wrong version of this
+        // function might plausibly have forgotten to append the
+        // alpha byte at all (just passed rgb_bytes through
+        // unchanged) -- confirms the real test above actually
+        // distinguishes "4 bytes with alpha=255 appended" from "3
+        // bytes, no alpha" rather than passing either way.
+        let rgb = [255u8, 0, 0];
+        let wrong = rgb.to_vec();
+        let right = rgb8_to_rgba8(&rgb);
+        assert_ne!(
+            wrong, right,
+            "a 3-byte passthrough must not equal the real 4-byte expansion"
+        );
+        assert_eq!(right, vec![255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rgb16_to_rgba8_decodes_the_real_gl_unsigned_short_5_6_5_rev_layout() {
+        // Pure red: R=0b11111 (5 bits, max) in bits 4..0, G=0, B=0.
+        // Little-endian u16 0x001F -> bytes [0x1F, 0x00].
+        let red = rgb16_to_rgba8(&[0x1F, 0x00]);
+        assert_eq!(red, vec![255, 0, 0, 255]);
+        // Pure green: G=0b111111 (6 bits, max) in bits 10..5 ->
+        // 0b0000_0111_1110_0000 = 0x07E0, little-endian [0xE0, 0x07].
+        let green = rgb16_to_rgba8(&[0xE0, 0x07]);
+        assert_eq!(green, vec![0, 255, 0, 255]);
+        // Pure blue: B=0b11111 (5 bits, max) in bits 15..11 ->
+        // 0b1111_1000_0000_0000 = 0xF800, little-endian [0x00, 0xF8].
+        let blue = rgb16_to_rgba8(&[0x00, 0xF8]);
+        assert_eq!(blue, vec![0, 0, 255, 255]);
+        // Black and white: all-zero and all-one bits respectively,
+        // same regardless of channel order -- a weaker check on its
+        // own (passes even with a channel-order bug), kept alongside
+        // the three single-channel cases above rather than instead of
+        // them.
+        assert_eq!(rgb16_to_rgba8(&[0x00, 0x00]), vec![0, 0, 0, 255]);
+        assert_eq!(rgb16_to_rgba8(&[0xFF, 0xFF]), vec![255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn rgb16_to_rgba8_using_the_non_rev_layout_is_caught() {
+        // Negative control: the non-REV GL_UNSIGNED_SHORT_5_6_5 bit
+        // layout (R in bits 15..11, G in 10..5, B in 4..0) is the
+        // *opposite* of the real _REV one this function implements --
+        // an easy direction to get backwards from the suffix's name
+        // alone (this function's own doc already covers why). Confirms
+        // a pure-red _REV-encoded pixel, decoded under the wrong
+        // (non-REV) layout, would produce the exact wrong color this
+        // function must NOT produce: pure blue, not red.
+        let red_rev_encoded = [0x1Fu8, 0x00];
+        let value = u16::from_le_bytes(red_rev_encoded);
+        let wrong_b5 = (value & 0x1F) as u8; // non-REV: B is the LOW 5 bits
+        let wrong_g6 = ((value >> 5) & 0x3F) as u8;
+        let wrong_r5 = ((value >> 11) & 0x1F) as u8; // non-REV: R is the HIGH 5 bits
+        let wrong_r8 = (wrong_r5 << 3) | (wrong_r5 >> 2);
+        let wrong_g8 = (wrong_g6 << 2) | (wrong_g6 >> 4);
+        let wrong_b8 = (wrong_b5 << 3) | (wrong_b5 >> 2);
+        let wrong_decode = [wrong_r8, wrong_g8, wrong_b8, 255];
+        let real_decode = rgb16_to_rgba8(&red_rev_encoded);
+        assert_ne!(
+            wrong_decode.to_vec(),
+            real_decode,
+            "the real _REV decode must not match the non-REV (opposite-order) decode"
+        );
+        assert_eq!(real_decode, vec![255, 0, 0, 255]);
+        assert_eq!(wrong_decode, [0, 0, 255, 255]);
+    }
+
+    #[test]
     fn fix_cache_id_tags_p8_masked_textures_only() {
         const PF_MASKED: u32 = 0x0000_0002;
         const PF_INVISIBLE: u32 = 0x0000_0001;

@@ -53,8 +53,28 @@ FString Utf8SpanToFString( const BYTE* Text, SIZE_T Len )
 QWORD UploadTextureIfNeeded( void* RustDevice, UBOOL UseSRGBTextures, FTextureInfo& Info, DWORD PolyFlags, const TCHAR* CallerName )
 {
 	QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, PolyFlags );
-	if( hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
+	// Real SetTexture.cpp:502's own `!IsTextureDataStale` condition --
+	// IsTextureDataStale is purely Info.bRealtimeChanged-driven
+	// (SetTexture.cpp:99-101, read directly before relying on this:
+	// `if (Info.bRealtimeChanged) { IsTextureDataStale = 1; ... }`,
+	// no other real condition sets it). Without this, a real realtime
+	// texture (most importantly every real lightmap/fogmap -- each
+	// one's own CacheID is stable across re-illumination, UnLight.cpp's
+	// own `MakeCacheID(CID_StaticMap, iLightMap, ZoneID, Model)` --
+	// would upload once and then never again for the rest of the
+	// program, however many times its own real lighting actually
+	// changed afterward.
+	if( hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) && !Info.bRealtimeChanged )
 		return FixedCacheID;
+	// Real SetTexture.cpp:200's own unconditional `Info.bRealtimeChanged
+	// = 0;`, at the very top of the real UploadTexture -- reset here at
+	// the same real point this function's own analog of "decide to call
+	// UploadTexture, then call it" enters that real function, covering
+	// every branch below alike (P8-null-palette skip, DXT1-invalid-mip
+	// skip, and the real uncompressed upload), matching the real
+	// source's own reset running regardless of what UploadTexture itself
+	// goes on to do.
+	Info.bRealtimeChanged = 0;
 
 	if( Info.Format == TEXF_P8 && !Info.Palette )
 	{
@@ -117,17 +137,36 @@ QWORD UploadTextureIfNeeded( void* RustDevice, UBOOL UseSRGBTextures, FTextureIn
 		// to mip 0 only (TextureCache's own doc has the full real
 		// reasoning/limitation -- the real source's own per-mip loop,
 		// Bind->BaseMip through Info.NumMips, is not replicated here
-		// for these uncompressed formats) and to the two real formats
-		// hp2_rs_wgpu_upload_texture itself already supports (TEXF_
-		// P8/TEXF_RGBA8 -- that function's own doc has the real,
-		// explicitly scoped gap for TEXF_RGBA7/RGB16/RGB8: it logs
-		// and returns false, uploading nothing, rather than this
-		// override needing to know which formats are supported
-		// itself).
+		// for these uncompressed formats). Covers all five real
+		// uncompressed formats hp2_rs_wgpu_upload_texture itself now
+		// supports (TEXF_P8/RGBA7/RGB16/RGB8/RGBA8).
+		//
+		// DataLen must be each real format's own real per-pixel byte
+		// size (SetTexture.cpp's own real HP2TextureBytes formula,
+		// replicated here for the same real reason DXT1's own branch
+		// above already does: a file-static function in a different
+		// real translation unit, not reachable from here) -- NOT a
+		// blanket "P8 is 1, everything else is 4" the way an earlier
+		// version of this function had, back when RGB8 (3 bytes/pixel)
+		// and RGB16 (2) were both still unconditionally rejected by
+		// hp2_rs_wgpu_upload_texture itself regardless of what DataLen
+		// claimed. Now that both are real, accepted formats, the same
+		// real soundness bug DXT1 had before its own fix (an
+		// oversized, caller-computed DataLen reaching bytes_from_raw's
+		// own from_raw_parts before any per-format length check could
+		// catch it) would reopen here if this were not fixed at the
+		// same time those two formats became real upload targets, not
+		// left for a later change to discover again independently.
 		FMipmapBase* Mip = Info.Mips[0];
-		size_t DataLen = ( Info.Format == TEXF_P8 )
-			? (size_t)Mip->USize * (size_t)Mip->VSize
-			: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
+		size_t BytesPerPixel;
+		switch( Info.Format )
+		{
+		case TEXF_P8:    BytesPerPixel = 1; break;
+		case TEXF_RGB16: BytesPerPixel = 2; break;
+		case TEXF_RGB8:  BytesPerPixel = 3; break;
+		default:         BytesPerPixel = 4; break; // TEXF_RGBA7, TEXF_RGBA8
+		}
+		size_t DataLen = (size_t)Mip->USize * (size_t)Mip->VSize * BytesPerPixel;
 		hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
 			(DWORD)Mip->USize, (DWORD)Mip->VSize,
 			Mip->DataPtr, DataLen,

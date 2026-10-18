@@ -3248,7 +3248,11 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
         // real asset using one of them was loaded.)
         if !matches!(
             format,
-            hp2_wgpu::texture::TextureFormat::P8 | hp2_wgpu::texture::TextureFormat::Rgba8
+            hp2_wgpu::texture::TextureFormat::P8
+                | hp2_wgpu::texture::TextureFormat::Rgba8
+                | hp2_wgpu::texture::TextureFormat::Rgb8
+                | hp2_wgpu::texture::TextureFormat::Rgb16
+                | hp2_wgpu::texture::TextureFormat::Rgba7
         ) {
             log::warn!(
                 "hp2_rs_wgpu_upload_texture: {} upload not yet ported, skipping",
@@ -3283,10 +3287,20 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
                 let bytes: Vec<u8> = expanded.iter().flat_map(|c| [c.r, c.g, c.b, c.a]).collect();
                 std::borrow::Cow::Owned(bytes)
             }
-            hp2_wgpu::texture::TextureFormat::Rgba8 => {
+            // TEXF_RGBA8 and TEXF_RGBA7 share the real byte layout
+            // exactly (hp2_wgpu::texture module doc's own two
+            // independent real-source citations for why: XOpenGLDrv's
+            // own case TEXF_RGBA7 passes Mip->DataPtr straight through
+            // with zero CPU-side work, and UnLight.cpp's own real
+            // lightmap/fogmap generation writes GET_COLOR_DWORD(FColor)
+            // -packed DWORDs into TEXF_RGBA7-tagged buffers) -- the
+            // "7" names a value-range convention, not a different
+            // physical layout, so both share this one real arm.
+            hp2_wgpu::texture::TextureFormat::Rgba8 | hp2_wgpu::texture::TextureFormat::Rgba7 => {
                 if data.len() != width as usize * height as usize * 4 {
                     log::warn!(
-                        "hp2_rs_wgpu_upload_texture: TEXF_RGBA8 data_len {} != width*height*4 {}",
+                        "hp2_rs_wgpu_upload_texture: {} data_len {} != width*height*4 {}",
+                        hp2_wgpu::texture::texture_format_name(format),
                         data.len(),
                         width as usize * height as usize * 4
                     );
@@ -3294,7 +3308,29 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
                 }
                 std::borrow::Cow::Borrowed(data)
             }
-            _ => unreachable!("rejected above: format is P8 or Rgba8 by this point"),
+            hp2_wgpu::texture::TextureFormat::Rgb8 => {
+                if data.len() != width as usize * height as usize * 3 {
+                    log::warn!(
+                        "hp2_rs_wgpu_upload_texture: TEXF_RGB8 data_len {} != width*height*3 {}",
+                        data.len(),
+                        width as usize * height as usize * 3
+                    );
+                    return false;
+                }
+                std::borrow::Cow::Owned(hp2_wgpu::texture::rgb8_to_rgba8(data))
+            }
+            hp2_wgpu::texture::TextureFormat::Rgb16 => {
+                if data.len() != width as usize * height as usize * 2 {
+                    log::warn!(
+                        "hp2_rs_wgpu_upload_texture: TEXF_RGB16 data_len {} != width*height*2 {}",
+                        data.len(),
+                        width as usize * height as usize * 2
+                    );
+                    return false;
+                }
+                std::borrow::Cow::Owned(hp2_wgpu::texture::rgb16_to_rgba8(data))
+            }
+            _ => unreachable!("rejected above: format is one of the five matched arms"),
         };
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
         handle
@@ -3785,18 +3821,38 @@ mod tests {
     /// Regression test for a real soundness bug (caught on review, not
     /// self-discovered): `hp2_rs_wgpu_upload_texture` used to construct
     /// a Rust slice over the caller-supplied `data`/`data_len` *before*
-    /// checking whether `format` was one of the two formats this
-    /// function actually knows how to upload (P8, RGBA8). Every real
-    /// `WgpuDrv.cpp` caller computes `data_len` as `width*height*4` for
-    /// every non-P8 format, which only happens to be correct for RGBA8
-    /// (and, by coincidence of this specific engine's own real
-    /// `HP2TextureBytes` table, RGBA7) -- for RGB8 (3 bytes/pixel),
-    /// RGB16 (2), and DXT1 (block-compressed, smaller still), that
+    /// checking whether `format` was one of the formats this function
+    /// actually knows how to upload. At the time this test was first
+    /// written, that was just P8/RGBA8; RGB8/RGB16/RGBA7 were added
+    /// later (a separate real change) and this test's own format list
+    /// updated to match -- every real `WgpuDrv.cpp` caller computes
+    /// `data_len` as `width*height*4` for every non-P8/non-RGB8/non-
+    /// RGB16 format, which is only actually correct for RGBA8 and
+    /// RGBA7 (confirmed identical real byte layouts, `hp2_wgpu::
+    /// texture` module doc's own two independent real-source
+    /// citations) -- for DXT1 (block-compressed, smaller still) that
     /// claimed length is larger than the texture's real allocation, so
     /// constructing a slice of that length via `bytes_from_raw`'s own
     /// `from_raw_parts` was undefined behavior the instant it happened
     /// -- even though the rejection arm never actually read from the
-    /// resulting slice afterward.
+    /// resulting slice afterward. RGB8/RGB16 have their own correct,
+    /// different-from-`*4` formulas (3 and 2 bytes/pixel respectively)
+    /// computed from real, correctly-sized buffers below instead, not
+    /// exercised through this same oversized-tiny-buffer path at all --
+    /// doing so for a format this function DOES now support, using a
+    /// data_len that does not match that format's own real formula,
+    /// would itself be unsound again, the exact bug class this test
+    /// exists to guard against (caught on review while extending this
+    /// test for the format-support change, not after it shipped
+    /// wrong: an earlier draft of this update kept 0x01/0x02/0x04 --
+    /// RGBA7/RGB16/RGB8, all newly-supported by that same change -- in
+    /// the oversized-tiny-buffer rejection loop below, which would
+    /// have made this test itself construct the exact unsound slice
+    /// it exists to prevent, for RGBA7 especially: its own real
+    /// `*4` formula happens to equal the old assumed-for-every-
+    /// nonP8-format length, so it would not even have been caught by
+    /// the per-format length check afterward, only have silently
+    /// "worked" by coincidence of a stack layout that did not fault).
     ///
     /// This test cannot directly observe construction-time UB itself
     /// (that would need Miri, which cannot interpret this function's
@@ -3831,14 +3887,17 @@ mod tests {
         // regardless of this assertion's own result.
         let tiny_buffer: [u8; 4] = [0, 0, 0, 0];
 
-        // One real non-P8/RGBA8 format byte each (TextureFormat::
-        // from_raw's own 0x01..=0x04 range for Rgba7/Rgb16/Dxt1/Rgb8),
-        // paired with a data_len a real WgpuDrv.cpp caller would
-        // actually compute for a 1024x1024 texture of that format
-        // using this crate's own established (width*height*4)-for-
-        // non-P8 formula -- the exact oversized value that motivated
-        // this fix, not an arbitrary large number chosen for this test.
-        for format_byte in [0x01u8, 0x02, 0x03, 0x04] {
+        // 0x03 (TEXF_DXT1, this function's own real doc already covers
+        // why: it has its own dedicated hp2_rs_wgpu_upload_compressed_
+        // texture entry point instead) and 0x06 (out of TextureFormat's
+        // own real 0x00..=0x05 range entirely -- exercises the earlier,
+        // separate from_raw rejection path, not the matches! one).
+        // Paired with a data_len a real WgpuDrv.cpp caller would
+        // actually compute for a 1024x1024 texture using this crate's
+        // own established (width*height*4)-for-RGBA-shaped-formats
+        // formula -- the exact oversized value that motivated this
+        // fix, not an arbitrary large number chosen for this test.
+        for format_byte in [0x03u8, 0x06] {
             let data_len = 1024usize * 1024 * 4;
             let accepted = unsafe {
                 hp2_rs_wgpu_upload_texture(
@@ -3856,13 +3915,20 @@ mod tests {
             };
             assert!(
                 !accepted,
-                "format byte {format_byte:#x} is not P8 or RGBA8 and must be rejected"
+                "format byte {format_byte:#x} is not one of the five real formats this \
+                 function supports and must be rejected"
             );
         }
 
         // Complements the rejection proof above: confirms the fix's
-        // reordering did not also, even accidentally, reject the two
-        // formats this function actually does support.
+        // reordering did not also, even accidentally, reject any of
+        // the five formats this function actually does support. Every
+        // one of these uses a real, correctly-sized buffer for its own
+        // real per-format byte layout -- never the oversized-tiny-
+        // buffer pattern above, which would itself be unsound for a
+        // supported format (this test's own doc has the full real
+        // reasoning for why, including a real mistake caught before
+        // landing).
         let p8_pixel: [u8; 1] = [7];
         // A real [FColor; 256] array, not a raw [u8; 1024] -- FColor
         // is #[repr(C, align(4))] (hp2-abi's own layout-probe-verified
@@ -3900,11 +3966,68 @@ mod tests {
             "a real 1x1 P8 texture with a real palette must still be accepted"
         );
 
+        let rgba7_pixel: [u8; 4] = [0, 255, 0, 255];
+        let rgba7_accepted = unsafe {
+            hp2_rs_wgpu_upload_texture(
+                result.handle,
+                3,
+                0x01,
+                1,
+                1,
+                rgba7_pixel.as_ptr(),
+                4,
+                std::ptr::null(),
+                false,
+                false,
+            )
+        };
+        assert!(
+            rgba7_accepted,
+            "a real 1x1 RGBA7 texture must be accepted -- identical real byte layout to RGBA8"
+        );
+
+        // Pure red in the real GL_UNSIGNED_SHORT_5_6_5_REV layout
+        // (rgb16_to_rgba8's own doc/tests have the full real bit-
+        // layout derivation): R in the low 5 bits.
+        let rgb16_pixel: [u8; 2] = [0x1F, 0x00];
+        let rgb16_accepted = unsafe {
+            hp2_rs_wgpu_upload_texture(
+                result.handle,
+                4,
+                0x02,
+                1,
+                1,
+                rgb16_pixel.as_ptr(),
+                2,
+                std::ptr::null(),
+                false,
+                false,
+            )
+        };
+        assert!(rgb16_accepted, "a real 1x1 RGB16 texture must be accepted");
+
+        let rgb8_pixel: [u8; 3] = [0, 0, 255];
+        let rgb8_accepted = unsafe {
+            hp2_rs_wgpu_upload_texture(
+                result.handle,
+                5,
+                0x04,
+                1,
+                1,
+                rgb8_pixel.as_ptr(),
+                3,
+                std::ptr::null(),
+                false,
+                false,
+            )
+        };
+        assert!(rgb8_accepted, "a real 1x1 RGB8 texture must be accepted");
+
         let rgba8_pixel: [u8; 4] = [255, 0, 0, 255];
         let rgba8_accepted = unsafe {
             hp2_rs_wgpu_upload_texture(
                 result.handle,
-                3,
+                6,
                 0x05,
                 1,
                 1,
