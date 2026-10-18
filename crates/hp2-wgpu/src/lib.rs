@@ -895,17 +895,98 @@ pub struct FrameCounts {
 /// One real queued `Draw2DLine` call (`RenderLoop::queue_line`'s own
 /// doc has the full contract): `p1`/`p2` already screen-to-clip-
 /// transformed (`draw_2d_line_screen_to_coords`'s own real output,
-/// not raw screen pixels), `color` the real `DrawColor`, and
-/// `segment` the real index into `RenderLoop::frame_uniforms_segments`
-/// this line was queued under -- the real `SetSceneNode` call whose
-/// matrices this specific line must be drawn with, not necessarily
-/// the frame's *last* `SetSceneNode` call (the real bug this whole
-/// per-segment design exists to fix).
+/// not raw screen pixels), `color` the real `DrawColor`. Carries no
+/// segment index of its own -- that now lives on the owning `Batch`
+/// (every line in one `BatchPayload::Lines` group shares one real
+/// `SetSceneNode` call's segment, by construction of `queue_line`
+/// itself), not duplicated per entry the way an earlier version of
+/// this struct did.
 struct QueuedLine {
     p1: [f32; 3],
     p2: [f32; 3],
     color: [f32; 4],
+}
+
+/// One real queued `DrawTile` call's own real quad geometry
+/// (`tile_quad_corners`'s own real output, already screen-to-clip-
+/// transformed the same way `QueuedLine::p1`/`p2` are -- both apply
+/// the identical real `RFX2 * Z * (coord - FX2)` formula, just to a
+/// quad's four corners instead of a line's two endpoints) plus the
+/// real per-draw `DrawColor`/`DrawFlags` (`compute_tile_draw_color`/
+/// `compute_tile_draw_flags`'s own real output). Carries no segment
+/// or texture `cache_id` of its own -- both live on the owning
+/// `Batch`/`BatchPayload::Tiles`, same reasoning as `QueuedLine`.
+struct QueuedTile {
+    corners: draw::TileQuadCorners,
+    draw_color: [f32; 4],
+    draw_flags: u32,
+}
+
+/// One ordered entry in `RenderLoop::batches`. Either queued lines or
+/// queued tiles for one real segment (`Batch::segment`, an index into
+/// `RenderLoop::frame_uniforms_segments` -- same real meaning as
+/// `QueuedLine`'s own former `segment` field) -- and, for tiles only,
+/// one bound texture (`cache_id`).
+///
+/// Matches the real source's own flush-on-state-change behavior,
+/// confirmed by direct re-read of three separate real call sites, not
+/// assumed from any one of them alone: `Draw2DLine`/`Draw2DPoint`/
+/// `DrawTile` each call `SetProgram` with their own distinct shader
+/// program at their own entry point (`DrawSimple.cpp:60,100,162,214`,
+/// `DrawTile.cpp:31`), and `SetProgram` flushes whatever the
+/// previously active program had buffered before switching
+/// (`XOpenGL.cpp:2978-2995`, `ShaderProgramImpl::DeactivateShader`'s
+/// own `Flush(false)` call, `XOpenGL.h:1574-1577`) -- a primitive-
+/// kind change is a real flush boundary. Separately, binding a
+/// *different* texture than whatever a shader's own TMU already has
+/// bound is *also* a real flush boundary, for tiles specifically:
+/// `SetTexture.cpp:502` bails out early (no flush) only when the
+/// requested texture is already bound and not stale; otherwise
+/// `SetTexture.cpp:515` flushes `Shaders[ActiveProgram]` before
+/// rebinding -- confirmed by direct re-read, not inferred from
+/// `SubmitTileBatch`'s own flush conditions alone (`DrawTile.cpp:
+/// 188-197`), which do *not* check the bound texture at all (the
+/// real per-draw `DrawCallParams` entry carries its own bindless
+/// texture handle, so multiple distinct textures actually can
+/// coexist within one already-*flushed*-and-newly-started real GL
+/// batch -- but only until the *next* `SetTexture` call changes the
+/// binding again, which is exactly the real flush this models). This
+/// Rust port's own `TilePipeline::record` binds one `texture_view`/
+/// `sampler` pair per call (no bindless equivalent), so here a
+/// texture change is unconditionally a new batch, matching the real
+/// `SetTexture.cpp:502/515` behavior exactly rather than diverging
+/// from it for portability reasons (an earlier version of this doc
+/// wrongly attributed the need to this port's own lack of bindless
+/// textures alone -- corrected on review after re-reading `SetTexture.
+/// cpp:499-515` directly: the real engine flushes on texture change
+/// too, just from a different call site than `SubmitTileBatch`'s own
+/// buffer-full/blend-state checks).
+///
+/// An earlier version of this crate's own design (before `queue_tile`
+/// existed) used a single flat `queued_lines: Vec<QueuedLine>`, with
+/// no equivalent for tiles even contemplated yet -- a hypothetical
+/// separate `queued_tiles: Vec<QueuedTile>`, flushed in its own fixed-
+/// order loop after all lines, would have been wrong for any real
+/// frame that interleaves `Draw2DLine` and `DrawTile` calls within one
+/// segment (editor grid-plus-icon overlays are a real, reachable
+/// example): final compositing (both pipelines use `blend: None`, so
+/// whichever draw lands on a given pixel *last* wins outright) must
+/// follow real call order, not a per-primitive-kind fixed order.
+/// `batches` is one single ordered `Vec`; `queue_line`/`queue_tile`
+/// each either extend the last batch (same segment, same kind, same
+/// `cache_id` for tiles) or push a brand new one -- `unlock_frame`
+/// then replays `batches` in push order, which is real call order.
+enum BatchPayload {
+    Lines(Vec<QueuedLine>),
+    Tiles {
+        cache_id: u64,
+        entries: Vec<QueuedTile>,
+    },
+}
+
+struct Batch {
     segment: usize,
+    payload: BatchPayload,
 }
 
 /// Per-`CreatedDevice` state that must persist across the
@@ -958,23 +1039,25 @@ pub struct RenderLoop {
     /// that call's own outcome -- a stale segment from a previous,
     /// already-flushed frame must never leak into the next one).
     frame_uniforms_segments: Vec<wgpu::Buffer>,
-    /// Appended by `queue_line`, drained and recorded into the real
-    /// in-progress frame's own `CommandEncoder` by `unlock_frame`,
-    /// *after* the clear pass that encoder already holds -- not
-    /// drawn immediately per call (this crate's own todo list already
-    /// tracked that as a real, serious bug: `lock_frame` only records
-    /// its clear pass without submitting it, so an immediate per-call
-    /// submit would run before the still-unsubmitted clear and get
-    /// wiped out by it; see `draw::LineDrawCall`'s own doc for the
-    /// full reasoning). Each entry already carries its own real
-    /// screen-to-clip-transformed `Coords` (`queue_line`'s own doc)
-    /// and the real segment index (`frame_uniforms_segments`' own
-    /// index) it was queued under -- `unlock_frame` groups by that
-    /// index and issues one real `record()` call per non-empty
-    /// segment, each with its own correctly re-indexed local
-    /// `draw_id`s, not one call for the whole frame sharing a single
-    /// (wrong, per the field above) `FrameUniforms` buffer.
-    queued_lines: Vec<QueuedLine>,
+    /// Appended by `queue_line`/`queue_tile`, drained and recorded
+    /// into the real in-progress frame's own `CommandEncoder` by
+    /// `unlock_frame`, *after* the clear pass that encoder already
+    /// holds -- not drawn immediately per call (this crate's own todo
+    /// list already tracked that as a real, serious bug: `lock_frame`
+    /// only records its clear pass without submitting it, so an
+    /// immediate per-call submit would run before the still-
+    /// unsubmitted clear and get wiped out by it; see `draw::
+    /// LineDrawCall`'s own doc for the full reasoning). One single
+    /// ordered `Vec<Batch>`, not a separate queue per primitive kind
+    /// -- `Batch`'s own doc has the full reasoning (real call-order
+    /// compositing) and the real flush-boundary citations (primitive-
+    /// kind change, segment change, texture change for tiles).
+    /// `unlock_frame` replays `batches` in push order, chunking each
+    /// batch's own contents into `draw::MAX_DRAWS`-sized `record()`
+    /// calls, re-indexing local `draw_id`s fresh per chunk -- not one
+    /// call for the whole frame sharing a single (wrong, per the
+    /// `frame_uniforms_segments` field above) `FrameUniforms` buffer.
+    batches: Vec<Batch>,
     /// Lazily built on first use against whichever `color_format` the
     /// first real in-progress frame actually has -- cached and
     /// *checked* against that format on every later use (a `RenderLoop`
@@ -982,6 +1065,31 @@ pub struct RenderLoop {
     /// whole real lifetime, so a mismatch here would mean a real
     /// caller bug, not a condition to silently handle).
     line_pipeline: Option<(wgpu::TextureFormat, draw::SimpleLinePipeline)>,
+    /// Same lazy-build-and-check contract as `line_pipeline`, for
+    /// `queue_tile`'s own real draws.
+    tile_pipeline: Option<(wgpu::TextureFormat, draw::TilePipeline)>,
+    /// Real `BindMap`'s own role (`texture.rs`'s own `TextureCache`
+    /// doc has the full real citation) -- persists across frames
+    /// (unlike `batches`/`frame_uniforms_segments`, never cleared by
+    /// `lock_frame`/`begin_offscreen_frame`/`unlock_frame`), matching
+    /// the real `BindMap`'s own lifetime: uploaded textures stay
+    /// resident until the real engine itself invalidates/replaces
+    /// them, not just for one frame.
+    texture_cache: texture::TextureCache,
+    /// Lazily created on first real tile draw (`unlock_frame`'s own
+    /// lazy-init, same point `tile_pipeline` itself is ensured) --
+    /// one shared `wgpu::Sampler` for every `queue_tile` draw this
+    /// `RenderLoop`'s whole lifetime, `wgpu::SamplerDescriptor::
+    /// default()` (bilinear-equivalent default filtering, no
+    /// anisotropy). A real, known, explicitly scoped gap, not
+    /// silently pretended away: the real source's own sampler state
+    /// varies per real `FTextureInfo` (wrap mode, `MaxAnisotropy`
+    /// ini key) -- this crate's own todo list already tracks real
+    /// per-texture sampler state and `MaxAnisotropy` wiring as a
+    /// separate, not-yet-done item; one fixed default sampler is the
+    /// right scope for the first real textured-quad draw to land,
+    /// not a blocker on wiring real per-texture sampler state first.
+    sampler: Option<wgpu::Sampler>,
     /// Set by every `set_scene_node` call -- the real `RFX2`/`RFY2`/
     /// `Frame->FX2`/`FY2` screen-to-clip transform `Draw2DLine`'s own
     /// real source applies (`DrawSimple.cpp:80,82`) is derived
@@ -1005,6 +1113,47 @@ impl Default for RenderLoop {
     }
 }
 
+/// Groups `RenderLoop::queue_tile`'s real inputs (clippy's
+/// `too_many_arguments`, same reasoning as `draw::TileQuadRequest`
+/// above -- this struct is one level higher: `DrawTile`'s own real
+/// `FTextureInfo`-sourced fields (`cache_id`, `u_scale`, `v_scale`,
+/// `texture_alpha`) plus its own direct real parameters, not yet
+/// `rfx2`/`rfy2` which `queue_tile` itself derives from `self.
+/// last_scene`). `cache_id` must already be `fix_cache_id`'s own
+/// output (`texture.rs`'s own doc), matching `self.texture_cache`'s
+/// own real lookup key. `u_scale`/`v_scale` are the real `FTextureInfo::
+/// UScale`/`VScale` fields `texture_uv_mult` needs, read fresh from
+/// whichever real `FTextureInfo` this specific `DrawTile` call
+/// received -- not cached, same real per-bind-freshness reasoning as
+/// `fx2`/`fy2` below. `texture_alpha` is `compute_tile_draw_color`'s
+/// own real `Option<f32>` input (`None` for a real null `Info.
+/// Texture`, confirmed real-reachable, `Some(Info.Texture->Alpha)`
+/// otherwise). `fx2`/`fy2` are the real `Frame->FX2`/`FY2` the actual
+/// `DrawTile` call site itself received, same real per-call-not-
+/// cached reasoning `queue_line`'s own `fx2`/`fy2` parameters already
+/// establish (`draw_2d_line_screen_to_coords`'s own doc has the full
+/// citation) -- `DrawTile.cpp:219` etc. read `Frame->FX2`/`FY2` the
+/// identical way `DrawSimple.cpp:80,82` does.
+pub struct TileDrawRequest {
+    pub cache_id: u64,
+    pub x: f32,
+    pub y: f32,
+    pub xl: f32,
+    pub yl: f32,
+    pub u: f32,
+    pub v: f32,
+    pub ul: f32,
+    pub vl: f32,
+    pub z: f32,
+    pub color: [f32; 4],
+    pub poly_flags: u32,
+    pub u_scale: f32,
+    pub v_scale: f32,
+    pub texture_alpha: Option<f32>,
+    pub fx2: f32,
+    pub fy2: f32,
+}
+
 impl RenderLoop {
     pub fn new() -> Self {
         Self {
@@ -1013,8 +1162,11 @@ impl RenderLoop {
             in_progress: None,
             counts: FrameCounts::default(),
             frame_uniforms_segments: Vec::new(),
-            queued_lines: Vec::new(),
+            batches: Vec::new(),
             line_pipeline: None,
+            tile_pipeline: None,
+            texture_cache: texture::TextureCache::new(),
+            sampler: None,
             last_scene: None,
         }
     }
@@ -1063,15 +1215,20 @@ impl RenderLoop {
     /// segments`'s own doc has the full real bug this fixes), not
     /// drawn with whichever segment happens to be bound when
     /// `unlock_frame` later flushes the queue. `unlock_frame`'s own
-    /// flush groups queued lines by segment and chunks each segment's
-    /// own group into one `record()` call per `simple.wgsl`'s real
-    /// `MAX_DRAWS` capacity worth of lines (matching the real GLSL
-    /// batcher's own `Flush(true)`-when-full behavior, `DrawSimple.
-    /// cpp:68-69` -- not checked here, since how many *other* lines
-    /// will end up sharing this call's own segment is not yet known
-    /// at queue time; no line is ever lost, unlike an earlier version
-    /// of this doc and the flush logic it described, caught on
-    /// review).
+    /// flush replays `batches` in real call order (`Batch`'s own doc
+    /// has the full reasoning), chunking each batch's own contents
+    /// into one `record()` call per `simple.wgsl`'s real `MAX_DRAWS`
+    /// capacity worth of lines (matching the real GLSL batcher's own
+    /// `Flush(true)`-when-full behavior, `DrawSimple.cpp:68-69` --
+    /// not checked here, since how many *other* lines will end up
+    /// sharing this call's own batch is not yet known at queue time;
+    /// no line is ever lost, unlike an earlier version of this doc
+    /// and the flush logic it described, caught on review). Extends
+    /// `self.batches`' own last entry when it is already a `Lines`
+    /// batch for this same segment, otherwise pushes a new one --
+    /// `Batch`'s own doc has the full reasoning for why a segment
+    /// change (not just a primitive-kind change) is also a real new-
+    /// batch boundary in this port's own design.
     pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], fx2: f32, fy2: f32, color: [f32; 4]) {
         if self.in_progress.is_none() {
             return;
@@ -1082,12 +1239,149 @@ impl RenderLoop {
         let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
             return;
         };
-        self.queued_lines.push(QueuedLine {
+        let line = QueuedLine {
             p1: draw_2d_line_screen_to_coords(scene, fx2, fy2, p1),
             p2: draw_2d_line_screen_to_coords(scene, fx2, fy2, p2),
             color,
-            segment,
+        };
+        match self.batches.last_mut() {
+            Some(Batch {
+                segment: last_segment,
+                payload: BatchPayload::Lines(lines),
+            }) if *last_segment == segment => {
+                lines.push(line);
+            }
+            _ => {
+                self.batches.push(Batch {
+                    segment,
+                    payload: BatchPayload::Lines(vec![line]),
+                });
+            }
+        }
+    }
+
+    /// Real per-tick entry point a future `UWgpuRenderDevice::
+    /// DrawTile` override will call through a future `hp2_rs_wgpu_
+    /// queue_tile` FFI function -- not wired yet (this crate's own
+    /// todo list tracks the remaining FFI/`WgpuDrv.cpp`/real
+    /// `FTextureInfo` CacheID-and-palette-extraction wiring as a
+    /// separate, following change; this function itself is real,
+    /// tested Rust, not a stub). Mirrors `DrawTile`'s own real
+    /// pipeline in order (`DrawTile.cpp:24-56`, `SubmitTileBatch`,
+    /// `DrawTile.cpp:117-265`, both read in full): looks up `request.
+    /// cache_id` in `self.texture_cache` (dropped cleanly, matching
+    /// `queue_line`'s own no-frame/no-scene drop convention, if the
+    /// real engine ever calls this before the matching real
+    /// `SetTexture`-equivalent upload landed -- a real, reachable
+    /// transient condition, not a caller bug), computes `UMult`/
+    /// `VMult` fresh via `texture::texture_uv_mult` from the cached
+    /// texture's own real `width`/`height` and `request`'s own
+    /// `u_scale`/`v_scale` (never cached -- `texture_uv_mult`'s own
+    /// doc has the full real per-bind-freshness citation), builds the
+    /// real quad geometry via `draw::tile_quad_corners`, and the real
+    /// `DrawColor`/`DrawFlags` via `draw::compute_tile_draw_color`/
+    /// `compute_tile_draw_flags`.
+    ///
+    /// Known, explicitly scoped gap, not silently pretended away:
+    /// does not apply `DrawTile.cpp:206-211`'s real editor-only `Z =
+    /// 1.0f` override (`GIsEditor && Frame->Viewport->Actor &&
+    /// (Frame->Viewport->IsOrtho() || Abs(Z) <= SMALL_NUMBER)`) --
+    /// none of `GIsEditor`/`Viewport->Actor`/`Viewport->IsOrtho()` are
+    /// real inputs this function (or any real caller up to this
+    /// point in the port) has yet; a future FFI wrapper that has
+    /// real access to them would need to apply this itself before
+    /// calling in, or this function would need a new explicit
+    /// request field for it -- not invented here without a real
+    /// caller to thread it from.
+    ///
+    /// Extends `self.batches`' own last entry when it is already a
+    /// `Tiles` batch for this same segment *and* the same `cache_id`,
+    /// otherwise pushes a new one -- `Batch`'s own doc has the full
+    /// real citation for why a texture change is also a real new-
+    /// batch boundary here, matching `SetTexture.cpp:502/515`
+    /// directly, not a port-specific simplification.
+    pub fn queue_tile(&mut self, request: TileDrawRequest) {
+        if self.in_progress.is_none() {
+            return;
+        }
+        let Some(scene) = self.last_scene.as_ref() else {
+            return;
+        };
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
+            return;
+        };
+        let Some(cached) = self.texture_cache.get(request.cache_id) else {
+            return;
+        };
+        let (rfx2, rfy2) = scene_rfx2_rfy2(scene);
+        let (u_mult, v_mult) = texture::texture_uv_mult(
+            request.u_scale,
+            request.v_scale,
+            cached.width,
+            cached.height,
+        );
+        let corners = draw::tile_quad_corners(draw::TileQuadRequest {
+            rfx2,
+            rfy2,
+            fx2: request.fx2,
+            fy2: request.fy2,
+            x: request.x,
+            y: request.y,
+            xl: request.xl,
+            yl: request.yl,
+            u: request.u,
+            v: request.v,
+            ul: request.ul,
+            vl: request.vl,
+            z: request.z,
+            u_mult,
+            v_mult,
         });
+        let tile = QueuedTile {
+            corners,
+            draw_color: draw::compute_tile_draw_color(
+                request.color,
+                request.poly_flags,
+                request.texture_alpha,
+            ),
+            draw_flags: draw::compute_tile_draw_flags(request.poly_flags),
+        };
+        match self.batches.last_mut() {
+            Some(Batch {
+                segment: last_segment,
+                payload: BatchPayload::Tiles { cache_id, entries },
+            }) if *last_segment == segment && *cache_id == request.cache_id => {
+                entries.push(tile);
+            }
+            _ => {
+                self.batches.push(Batch {
+                    segment,
+                    payload: BatchPayload::Tiles {
+                        cache_id: request.cache_id,
+                        entries: vec![tile],
+                    },
+                });
+            }
+        }
+    }
+
+    /// Uploads `rgba8_bytes` into `self.texture_cache` under
+    /// `cache_id` -- thin passthrough to `texture::TextureCache::
+    /// upload_rgba8` (that method's own doc has the full real
+    /// contract and panics). A real future `SetTexture`-equivalent
+    /// FFI wrapper calls this before any `queue_tile` call that
+    /// references the same `cache_id` can find it.
+    pub fn upload_texture(
+        &mut self,
+        created: &CreatedDevice,
+        cache_id: u64,
+        width: u32,
+        height: u32,
+        rgba8_bytes: &[u8],
+        srgb: bool,
+    ) {
+        self.texture_cache
+            .upload_rgba8(created, cache_id, width, height, rgba8_bytes, srgb);
     }
 
     /// Real per-tick entry point `UWgpuRenderDevice::SetSceneNode`
@@ -1377,6 +1671,29 @@ pub fn compute_frame_uniforms(scene: &SceneFrame) -> FrameUniforms {
     }
 }
 
+/// Shared real `RFX2`/`RFY2` derivation (`XOpenGL.cpp:1821-1823`
+/// ortho / `1868-1870` perspective -- both branches compute them the
+/// same way from their own `RProjZ`/`Aspect`, matching
+/// `compute_frame_uniforms`'s own `r_proj_z`/`aspect` derivation
+/// exactly), factored out of `draw_2d_line_screen_to_coords` so
+/// `queue_tile`'s own real quad-corner geometry can reuse the exact
+/// same real per-segment values rather than duplicating the formula
+/// -- both real call shapes (`Draw2DLine`'s two endpoints, `DrawTile`'s
+/// four corners) apply the identical `RFX2 * Z * (coord - FX2)`
+/// transform using the same cached-per-`SetSceneNode` `RFX2`/`RFY2`.
+fn scene_rfx2_rfy2(scene: &SceneFrame) -> (f32, f32) {
+    let aspect = scene.fy / scene.fx;
+    let r_proj_z = if scene.is_ortho {
+        (scene.viewport_fov_angle * std::f32::consts::PI / 360.0).tan()
+    } else {
+        (scene.effective_fov_angle * std::f32::consts::PI / 360.0).tan()
+    };
+    (
+        2.0 * r_proj_z / scene.fx,
+        2.0 * r_proj_z * aspect / scene.fy,
+    )
+}
+
 /// Real `Draw2DLine`/`Draw2DPoint`/`Draw2DClippedLine`'s own shared
 /// screen-to-clip transform (`DrawSimple.cpp:80,82` for `Draw2DLine`
 /// itself; `187-197` for `Draw2DClippedLine`, same formula with a
@@ -1389,10 +1706,11 @@ pub fn compute_frame_uniforms(scene: &SceneFrame) -> FrameUniforms {
 /// perspective -- both branches compute them the same way from their
 /// own `RProjZ`/`Aspect`, matching `compute_frame_uniforms`'s own
 /// `r_proj_z`/`aspect` derivation exactly, not duplicated with a
-/// different formula) are real `UXOpenGLRenderDevice` *member*
-/// fields, cached once per `SetSceneNode` and reused by every
-/// `Draw2DLine` call that frame -- `scene` (the caller's own cached
-/// `self.last_scene`) is the right source for those two specifically.
+/// different formula, now shared via `scene_rfx2_rfy2` above) are
+/// real `UXOpenGLRenderDevice` *member* fields, cached once per
+/// `SetSceneNode` and reused by every `Draw2DLine` call that frame --
+/// `scene` (the caller's own cached `self.last_scene`) is the right
+/// source for those two specifically.
 ///
 /// `fx2`/`fy2` are different: the real source reads them fresh off
 /// `Frame->FX2`/`FY2` (`UnCamera.cpp:351-352`: `FX2 = FX * 0.5f`, `FY2
@@ -1414,14 +1732,7 @@ pub fn draw_2d_line_screen_to_coords(
     fy2: f32,
     p: [f32; 3],
 ) -> [f32; 3] {
-    let aspect = scene.fy / scene.fx;
-    let r_proj_z = if scene.is_ortho {
-        (scene.viewport_fov_angle * std::f32::consts::PI / 360.0).tan()
-    } else {
-        (scene.effective_fov_angle * std::f32::consts::PI / 360.0).tan()
-    };
-    let rfx2 = 2.0 * r_proj_z / scene.fx;
-    let rfy2 = 2.0 * r_proj_z * aspect / scene.fy;
+    let (rfx2, rfy2) = scene_rfx2_rfy2(scene);
     [rfx2 * p[2] * (p[0] - fx2), rfy2 * p[2] * (p[1] - fy2), p[2]]
 }
 
@@ -1467,7 +1778,7 @@ pub fn lock_frame(
     // never reached (e.g. a skipped Unlock) must never leak into the
     // next one.
     loop_state.frame_uniforms_segments.clear();
-    loop_state.queued_lines.clear();
+    loop_state.batches.clear();
     let Some(surface) = created.surface.as_ref() else {
         loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
@@ -1624,7 +1935,7 @@ pub fn begin_offscreen_frame(
     // Same real per-frame reset lock_frame itself does -- see its own
     // comment at the equivalent point for the full reasoning.
     loop_state.frame_uniforms_segments.clear();
-    loop_state.queued_lines.clear();
+    loop_state.batches.clear();
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut encoder = created
         .device
@@ -1669,25 +1980,27 @@ pub fn begin_offscreen_frame(
 /// (`begin_offscreen_frame`'s own doc), regardless of `present` --
 /// there is no real surface to present to.
 ///
-/// Before submitting, flushes `loop_state`'s own queued line draws
-/// (`RenderLoop::queue_line`) into the frame's own `CommandEncoder`,
-/// *after* the clear pass already recorded into it, grouped by the
-/// real segment each line was queued under (`RenderLoop::
-/// frame_uniforms_segments`'s own doc has the full real bug this
-/// fixes): one combined `Load`-mode pass *per non-empty segment*, not
-/// one pass for the whole frame sharing a single `FrameUniforms`
-/// buffer (which would draw every line with only the *last*
-/// `SetSceneNode` call's matrices) and not N separate per-line passes
-/// either (matching this crate's own real GLSL-batching precedent:
-/// one real GPU draw call batches many logical ones via `DrawID`
-/// within a segment, not one GPU operation per engine draw call).
-/// Each segment's own real `DrawID`s are re-indexed to start at `0`
-/// for every chunk of `simple.wgsl`'s real `MAX_DRAWS` capacity
-/// worth of lines (one `record()` call per chunk, matching the real
-/// GLSL batcher's own `Flush(true)`-when-full behavior, `DrawSimple.
-/// cpp:68-69` -- no line is ever lost, unlike an earlier version of
-/// this doc and the flush logic it described, caught on review).
-/// Skipped (queue cleared either way) if no lines were queued.
+/// Before submitting, flushes `loop_state.batches` (`RenderLoop::
+/// queue_line`/`queue_tile`) into the frame's own `CommandEncoder`,
+/// *after* the clear pass already recorded into it, in real push
+/// order (`Batch`'s own doc has the full real citation for why real
+/// call order, not a per-primitive-kind fixed order, is required):
+/// one combined `Load`-mode `record()` call per batch (or per
+/// `draw::MAX_DRAWS`-sized chunk of a batch, for any batch larger
+/// than that -- matching the real GLSL batcher's own `Flush(true)`-
+/// when-full behavior, `DrawSimple.cpp:68-69`/`DrawTile.cpp:188-197`,
+/// no line or tile is ever lost), each bound to its own batch's real
+/// segment (`RenderLoop::frame_uniforms_segments`'s own doc has the
+/// full real bug this fixes) rather than one pass for the whole frame
+/// sharing a single `FrameUniforms` buffer, and not one GPU operation
+/// per engine draw call either (matching this crate's own real GLSL-
+/// batching precedent: one real GPU draw call batches many logical
+/// ones via `DrawID`). Each chunk's own real `DrawID`s are re-indexed
+/// to start at `0`. A `Tiles` batch referencing a `cache_id` that was
+/// never (or not yet) uploaded into `loop_state.texture_cache` is
+/// skipped cleanly (not a panic) -- a real, reachable transient
+/// condition, matching `queue_tile`'s own doc. Skipped entirely
+/// (queue cleared either way) if nothing was queued.
 ///
 /// `loop_state.counts.presented` is incremented here, not in
 /// `lock_frame`, and only when `present` is `true` -- a successful
@@ -1711,44 +2024,97 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
     let Some(mut frame) = loop_state.in_progress.take() else {
         return false;
     };
-    if !loop_state.queued_lines.is_empty() {
-        let needs_new_pipeline = !matches!(
+    // Owned locally (not borrowed from loop_state) specifically so
+    // the loop below can freely take immutable borrows of loop_
+    // state's other fields (frame_uniforms_segments, texture_cache,
+    // line_pipeline, tile_pipeline, sampler) without fighting the
+    // borrow checker over two different fields of the same struct --
+    // already empty in loop_state.batches after this, equivalent to
+    // the explicit clear() a lone-queue design would still need.
+    let batches = std::mem::take(&mut loop_state.batches);
+    let needs_line_pipeline = batches
+        .iter()
+        .any(|b| matches!(b.payload, BatchPayload::Lines(_)))
+        && !matches!(
             &loop_state.line_pipeline,
             Some((format, _)) if *format == frame.color_format
         );
-        if needs_new_pipeline {
-            loop_state.line_pipeline = Some((
-                frame.color_format,
-                draw::SimpleLinePipeline::new(&created.device, frame.color_format),
-            ));
-        }
-        let (_, pipeline) = loop_state
-            .line_pipeline
-            .as_ref()
-            .expect("line_pipeline was just set to Some above");
-        for (segment, buffer) in loop_state.frame_uniforms_segments.iter().enumerate() {
-            let mut vertices = Vec::new();
-            let mut draw_params: Vec<draw::DrawParams> = Vec::new();
-            for line in loop_state
-                .queued_lines
-                .iter()
-                .filter(|line| line.segment == segment)
-            {
-                // Real GLSL batcher's own Flush(true)-when-full
-                // behavior (`DrawSimple.cpp:68-69`: `if (Shader->
-                // DrawBuffer.IsFull()...) Shader->Flush(true);`),
-                // not dropping the excess -- an earlier version of
-                // this loop broke out of the inner loop once
-                // `draw_params.len() >= MAX_DRAWS`, silently losing
-                // every later line in the same segment (caught on
-                // review: real editor wireframe/grid views can queue
-                // more than 256 lines in one segment). Records the
-                // full chunk into the same shared, still-unsubmitted
-                // `frame.encoder` (Load mode throughout -- every
-                // chunk only adds to what is already there, never
-                // re-clears) and starts a fresh chunk, rather than
-                // losing anything.
-                if draw_params.len() >= draw::MAX_DRAWS {
+    if needs_line_pipeline {
+        loop_state.line_pipeline = Some((
+            frame.color_format,
+            draw::SimpleLinePipeline::new(&created.device, frame.color_format),
+        ));
+    }
+    let needs_tile_pipeline = batches
+        .iter()
+        .any(|b| matches!(b.payload, BatchPayload::Tiles { .. }))
+        && !matches!(
+            &loop_state.tile_pipeline,
+            Some((format, _)) if *format == frame.color_format
+        );
+    if needs_tile_pipeline {
+        loop_state.tile_pipeline = Some((
+            frame.color_format,
+            draw::TilePipeline::new(&created.device, frame.color_format),
+        ));
+    }
+    if loop_state.sampler.is_none()
+        && batches
+            .iter()
+            .any(|b| matches!(b.payload, BatchPayload::Tiles { .. }))
+    {
+        loop_state.sampler = Some(
+            created
+                .device
+                .create_sampler(&wgpu::SamplerDescriptor::default()),
+        );
+    }
+
+    for batch in &batches {
+        let buffer = &loop_state.frame_uniforms_segments[batch.segment];
+        match &batch.payload {
+            BatchPayload::Lines(lines) => {
+                let (_, pipeline) = loop_state
+                    .line_pipeline
+                    .as_ref()
+                    .expect("line_pipeline was just ensured above");
+                let mut vertices = Vec::new();
+                let mut draw_params: Vec<draw::DrawParams> = Vec::new();
+                for line in lines {
+                    // Real GLSL batcher's own Flush(true)-when-full
+                    // behavior (DrawSimple.cpp:68-69) -- chunk, never
+                    // drop; queue_line's own doc has the full
+                    // reasoning.
+                    if draw_params.len() >= draw::MAX_DRAWS {
+                        pipeline.record(
+                            &created.device,
+                            &created.queue,
+                            &mut frame.encoder,
+                            draw::LineDrawCall {
+                                frame_uniforms_buffer: buffer,
+                                vertices: &vertices,
+                                draw_params: &draw_params,
+                                target: &frame.view,
+                                load: wgpu::LoadOp::Load,
+                            },
+                        );
+                        vertices.clear();
+                        draw_params.clear();
+                    }
+                    let draw_id = draw_params.len() as u32;
+                    vertices.push(draw::LineVertex {
+                        coords: line.p1,
+                        draw_id,
+                    });
+                    vertices.push(draw::LineVertex {
+                        coords: line.p2,
+                        draw_id,
+                    });
+                    draw_params.push(draw::DrawParams {
+                        draw_color: line.color,
+                    });
+                }
+                if !draw_params.is_empty() {
                     pipeline.record(
                         &created.device,
                         &created.queue,
@@ -1761,41 +2127,113 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
                             load: wgpu::LoadOp::Load,
                         },
                     );
-                    vertices.clear();
-                    draw_params.clear();
                 }
-                let draw_id = draw_params.len() as u32;
-                vertices.push(draw::LineVertex {
-                    coords: line.p1,
-                    draw_id,
-                });
-                vertices.push(draw::LineVertex {
-                    coords: line.p2,
-                    draw_id,
-                });
-                draw_params.push(draw::DrawParams {
-                    draw_color: line.color,
-                });
             }
-            if draw_params.is_empty() {
-                continue;
+            BatchPayload::Tiles { cache_id, entries } => {
+                // A cache_id never (or not yet) uploaded is a real,
+                // reachable transient condition -- queue_tile's own
+                // doc has the full reasoning -- dropped cleanly, not
+                // a panic.
+                let Some(cached) = loop_state.texture_cache.get(*cache_id) else {
+                    continue;
+                };
+                let (_, pipeline) = loop_state
+                    .tile_pipeline
+                    .as_ref()
+                    .expect("tile_pipeline was just ensured above");
+                let sampler = loop_state
+                    .sampler
+                    .as_ref()
+                    .expect("sampler was just ensured above");
+                let mut vertices: Vec<draw::TileVertex> = Vec::new();
+                let mut draw_params: Vec<draw::TileDrawParams> = Vec::new();
+                for tile in entries {
+                    // Same real chunk-not-drop reasoning as the
+                    // Lines arm above, this time matching DrawTile.
+                    // cpp:188-197's own CanBuffer/Flush check.
+                    if draw_params.len() >= draw::MAX_DRAWS {
+                        pipeline.record(
+                            &created.device,
+                            &created.queue,
+                            &mut frame.encoder,
+                            draw::TileDrawCall {
+                                frame_uniforms_buffer: buffer,
+                                vertices: &vertices,
+                                draw_params: &draw_params,
+                                texture_view: &cached.view,
+                                sampler,
+                                target: &frame.view,
+                                load: wgpu::LoadOp::Load,
+                            },
+                        );
+                        vertices.clear();
+                        draw_params.clear();
+                    }
+                    let draw_id = draw_params.len() as u32;
+                    let draw::TileQuadCorners {
+                        top_left,
+                        top_right,
+                        bottom_right,
+                        bottom_left,
+                    } = tile.corners;
+                    // Real DrawTile.cpp:219-241's own two-triangle,
+                    // shared-diagonal layout: top_left/bottom_right
+                    // each appear in both triangles.
+                    vertices.push(draw::TileVertex {
+                        coords: top_left.0,
+                        draw_id,
+                        tex_coords: top_left.1,
+                    });
+                    vertices.push(draw::TileVertex {
+                        coords: top_right.0,
+                        draw_id,
+                        tex_coords: top_right.1,
+                    });
+                    vertices.push(draw::TileVertex {
+                        coords: bottom_right.0,
+                        draw_id,
+                        tex_coords: bottom_right.1,
+                    });
+                    vertices.push(draw::TileVertex {
+                        coords: top_left.0,
+                        draw_id,
+                        tex_coords: top_left.1,
+                    });
+                    vertices.push(draw::TileVertex {
+                        coords: bottom_right.0,
+                        draw_id,
+                        tex_coords: bottom_right.1,
+                    });
+                    vertices.push(draw::TileVertex {
+                        coords: bottom_left.0,
+                        draw_id,
+                        tex_coords: bottom_left.1,
+                    });
+                    draw_params.push(draw::TileDrawParams {
+                        draw_color: tile.draw_color,
+                        draw_flags: tile.draw_flags,
+                        _padding: [0; 3],
+                    });
+                }
+                if !draw_params.is_empty() {
+                    pipeline.record(
+                        &created.device,
+                        &created.queue,
+                        &mut frame.encoder,
+                        draw::TileDrawCall {
+                            frame_uniforms_buffer: buffer,
+                            vertices: &vertices,
+                            draw_params: &draw_params,
+                            texture_view: &cached.view,
+                            sampler,
+                            target: &frame.view,
+                            load: wgpu::LoadOp::Load,
+                        },
+                    );
+                }
             }
-            pipeline.record(
-                &created.device,
-                &created.queue,
-                &mut frame.encoder,
-                draw::LineDrawCall {
-                    frame_uniforms_buffer: buffer,
-                    vertices: &vertices,
-                    draw_params: &draw_params,
-                    target: &frame.view,
-                    load: wgpu::LoadOp::Load,
-                },
-            );
         }
-        loop_state.queued_lines.clear();
     }
-    loop_state.frame_uniforms_segments.clear();
     created
         .queue
         .submit(std::iter::once(frame.encoder.finish()));
@@ -2543,6 +2981,327 @@ mod tests {
             "RenderLoop's real begin_offscreen_frame/queue_line/unlock_frame path confirmed \
              empirically to composite a queued line draw correctly on top of its own clear, in \
              one combined submit, on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_queue_tile_renders_a_real_tile_through_the_real_lock_unlock_path() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop tile offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Same real call order and identity-modelviewproj substitution
+        // as render_loop_flushes_queued_line_draws_through_the_real_
+        // lock_unlock_path above -- that test's own doc has the full
+        // reasoning for both.
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+
+        // A real 1x1 opaque white texture: with draw_flags=0 (no
+        // PF_Masked/PF_Highlighted), tile.wgsl's own fs_main computes
+        // apply_poly_flags(texel, 0) * draw_color == texel * draw_color
+        // unchanged (common.wgsl's own apply_poly_flags is a no-op
+        // passthrough when draw_flags has neither bit set, confirmed
+        // by reading it directly) -- a white texel makes the final
+        // pixel exactly draw_color, isolating this test from needing
+        // to also reason about texture-color multiplication.
+        loop_state.upload_texture(&created, 99, 1, 1, &[255, 255, 255, 255], false);
+
+        // Same real rfx2=rfy2=0.02/fx2=fy2=50.0 derivation as the
+        // line test above: X=0,XL=50 -> NDC x in [-1.0, 0.0] (left
+        // half of the 64px target), matching that test's own P1/P2
+        // exactly so both tests share one hand-verified geometry
+        // derivation. Y=49.5,YL=1.0 -> NDC y in [-0.01, 0.01],
+        // straddling the single render row's own center symmetrically
+        // regardless of wgpu's NDC-to-viewport Y-flip convention
+        // (unlike the line test, a *filled* quad needs its own Y-span
+        // to actually cover that row's center, not just a degenerate
+        // zero-height line at it).
+        loop_state.queue_tile(TileDrawRequest {
+            cache_id: 99,
+            x: 0.0,
+            y: 49.5,
+            xl: 50.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [0.0, 1.0, 0.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop tile offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop tile offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the tile queued via RenderLoop::queue_tile and flushed by the real \
+             unlock_frame to actually render, got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected begin_offscreen_frame's own clear pass to survive outside the drawn \
+             tile's span, got {right_pixel:?}"
+        );
+        println!(
+            "RenderLoop's real upload_texture/queue_tile/unlock_frame path confirmed \
+             empirically to composite a queued tile draw correctly on top of its own clear, on \
+             adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    // The real regression test the ordered Vec<Batch> design exists
+    // for (this crate's own todo list: "use one ordered Vec<Batch...>
+    // ... not separate per-primitive-type queues flushed in a fixed
+    // order -- interleaved real draw calls must composite in real
+    // call order"). Queues a tile FIRST, then a line SECOND, both
+    // opaque, both covering the identical screen-space region --
+    // real call order means the line (queued later) must win the
+    // overlap, painting over the tile, not the other way around. A
+    // hypothetical fixed-kind-order flush (all tiles, then all lines,
+    // or vice versa, regardless of real queue order) would get this
+    // backwards for exactly this input. Negative control: temporarily
+    // sorted RenderLoop::batches by kind (Lines before Tiles) before
+    // the flush loop, confirmed this test then fails (red, not
+    // green), reverted.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_composites_interleaved_line_and_tile_draws_in_real_call_order() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop interleave offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+        loop_state.upload_texture(&created, 99, 1, 1, &[255, 255, 255, 255], false);
+
+        // Queued first: an opaque RED tile, same geometry as render_
+        // loop_queue_tile_renders_a_real_tile_through_the_real_lock_
+        // unlock_path above (NDC x in [-1.0, 0.0], y straddling 0).
+        loop_state.queue_tile(TileDrawRequest {
+            cache_id: 99,
+            x: 0.0,
+            y: 49.5,
+            xl: 50.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [1.0, 0.0, 0.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+        // Queued second: an opaque GREEN line covering the identical
+        // NDC x in [-1.0, 0.0] region (same P1/P2 as the plain line
+        // test above). Both SimpleLinePipeline and TilePipeline use
+        // blend: None (replace, not blend) -- whichever actually
+        // renders *last* wins the overlap outright, an unambiguous
+        // test oracle for real call-order compositing.
+        loop_state.queue_line(
+            [0.0, 50.0, 1.0],
+            [50.0, 50.0, 1.0],
+            50.0,
+            50.0,
+            [0.0, 1.0, 0.0, 1.0],
+        );
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(did_unlock);
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop interleave offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop interleave offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let overlap_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            overlap_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the line (queued SECOND) to win the overlap with the tile (queued \
+             FIRST), proving real call order, not primitive kind, decides final compositing; \
+             got {overlap_pixel:?} -- red here would mean tiles are being flushed after lines \
+             regardless of real queue order"
+        );
+        println!(
+            "RenderLoop confirmed empirically to composite interleaved tile-then-line draws in \
+             real call order (the line queued second wins the overlap), on adapter {:?} \
+             backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );

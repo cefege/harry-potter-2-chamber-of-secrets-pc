@@ -390,6 +390,129 @@ pub fn compute_tile_draw_flags(poly_flags: u32) -> u32 {
     draw_flags
 }
 
+/// `DrawTile`'s own real pre-`SubmitTileBatch` color adjustment
+/// (`DrawTile.cpp:33-43`, read in full, not just the `PF_Modulated`
+/// branch alone): `PF_Modulated` forces the whole color -- including
+/// alpha -- to opaque white first; then, unconditionally (a separate
+/// `if`/`else` immediately after, not an `else if` chained onto the
+/// `PF_Modulated` check above it), `Info.Texture->Alpha` overwrites
+/// alpha again when the real texture object exists and that alpha is
+/// strictly `> 0.f`, falling back to `1.0` otherwise. The two checks
+/// are independent, not mutually exclusive: a `PF_Modulated` tile
+/// whose texture has a real positive `Alpha` ends up with RGB forced
+/// to `1.0` but alpha taken from the texture, not `1.0` -- confirmed
+/// by reading both branches in sequence, this function's own tests
+/// exercise exactly that combination, not just each flag alone.
+/// `texture_alpha` is `None` for the real `!Info.Texture` case (a
+/// real `FTextureInfo` can genuinely have a null `Texture` pointer --
+/// the real source's own `&&` short-circuit), `Some(Info.Texture->
+/// Alpha)` otherwise.
+pub fn compute_tile_draw_color(
+    color: [f32; 4],
+    poly_flags: u32,
+    texture_alpha: Option<f32>,
+) -> [f32; 4] {
+    const PF_MODULATED: u32 = 0x0000_0040;
+    let mut color = color;
+    if poly_flags & PF_MODULATED != 0 {
+        color = [1.0, 1.0, 1.0, 1.0];
+    }
+    color[3] = match texture_alpha {
+        Some(alpha) if alpha > 0.0 => alpha,
+        _ => 1.0,
+    };
+    color
+}
+
+/// Groups `tile_quad_corners`' real inputs (clippy's
+/// `too_many_arguments` -- fifteen real `f32` values, same reasoning
+/// as `LineDrawCall`/`TileDrawCall` above). `rfx2`/`rfy2`/`fx2`/`fy2`
+/// are the same real per-segment/per-call values `draw_2d_line_
+/// screen_to_coords` takes in `hp2-wgpu`'s own `lib.rs` (that
+/// function's own doc has the full real citation for both); `x`/`y`/
+/// `xl`/`yl`/`u`/`v`/`ul`/`vl`/`z` are `DrawTile`'s own real `FLOAT`
+/// parameters, unchanged; `u_mult`/`v_mult` are `texture_uv_mult`'s
+/// own real per-bind output (`texture.rs`'s own doc has the full
+/// reasoning for why this function takes them as already-computed,
+/// rather than recomputing them itself from `UScale`/`VScale`/
+/// `USize`/`VSize` -- those four belong to the real `FTextureInfo`/
+/// `CachedTexture`, not to this pure screen-space quad geometry
+/// function).
+pub struct TileQuadRequest {
+    pub rfx2: f32,
+    pub rfy2: f32,
+    pub fx2: f32,
+    pub fy2: f32,
+    pub x: f32,
+    pub y: f32,
+    pub xl: f32,
+    pub yl: f32,
+    pub u: f32,
+    pub v: f32,
+    pub ul: f32,
+    pub vl: f32,
+    pub z: f32,
+    pub u_mult: f32,
+    pub v_mult: f32,
+}
+
+/// The four distinct real corners `SubmitTileBatch`'s own ES-path
+/// six-vertex quad (`DrawTile.cpp:213-245`) is built from -- `Out[0]`/
+/// `Out[3]` share `top_left`, `Out[2]`/`Out[4]` share `bottom_right`,
+/// so only four, not six, real `(Coords, TexCoords)` pairs are
+/// distinct. `unlock_frame`'s own flush (`hp2-wgpu`'s `lib.rs`)
+/// expands these into the real six-vertex, two-triangle
+/// `TriangleList` layout with a real per-chunk `DrawID` stamped in at
+/// that point -- not here, matching `QueuedLine`'s own established
+/// pattern of carrying no `DrawID` until flush time (this struct's
+/// own doc intentionally does not duplicate that reasoning, see
+/// `QueuedLine`'s doc in `lib.rs`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TileQuadCorners {
+    pub top_left: ([f32; 3], [f32; 2]),
+    pub top_right: ([f32; 3], [f32; 2]),
+    pub bottom_right: ([f32; 3], [f32; 2]),
+    pub bottom_left: ([f32; 3], [f32; 2]),
+}
+
+/// Real `SubmitTileBatch`'s own ES-path per-corner formula
+/// (`DrawTile.cpp:219-241`): `Coords = (RFX2 * Z * (X - Frame->FX2),
+/// RFY2 * Z * (Y - Frame->FY2), Z)` for the left edge (`X`) / top
+/// edge (`Y`), `X + XL` / `Y + YL` for the right/bottom edges;
+/// `TexCoords = (U * UMult, V * VMult)` for the top/left UV, `(U +
+/// UL) * UMult` / `(V + VL) * VMult` for the right/bottom UV --
+/// exactly `draw_2d_line_screen_to_coords`'s own `RFX2 * Z * (coord -
+/// FX2)` transform (`DrawSimple.cpp:80,82`), applied to a quad's four
+/// corners instead of a line's two endpoints; the real source applies
+/// the identical screen-to-clip formula to both call shapes.
+pub fn tile_quad_corners(request: TileQuadRequest) -> TileQuadCorners {
+    let TileQuadRequest {
+        rfx2,
+        rfy2,
+        fx2,
+        fy2,
+        x,
+        y,
+        xl,
+        yl,
+        u,
+        v,
+        ul,
+        vl,
+        z,
+        u_mult,
+        v_mult,
+    } = request;
+    let coord = |px: f32, py: f32| [rfx2 * z * (px - fx2), rfy2 * z * (py - fy2), z];
+    let tex = |pu: f32, pv: f32| [pu * u_mult, pv * v_mult];
+    TileQuadCorners {
+        top_left: (coord(x, y), tex(u, v)),
+        top_right: (coord(x + xl, y), tex(u + ul, v)),
+        bottom_right: (coord(x + xl, y + yl), tex(u + ul, v + vl)),
+        bottom_left: (coord(x, y + yl), tex(u, v + vl)),
+    }
+}
+
 /// `tile.wgsl`'s real WGSL source, embedded the same way `simple.wgsl`
 /// is (`SIMPLE_WGSL_SOURCE`'s own doc has the full reasoning).
 const TILE_WGSL_SOURCE: &str = concat!(
@@ -1106,6 +1229,106 @@ mod tests {
             DF_TRANSLUCENT,
             "PF_RenderFog + PF_Translucent together must clear PF_RenderFog before \
              translation, leaving only DF_Translucent set, matching the real source"
+        );
+    }
+
+    #[test]
+    fn compute_tile_draw_color_uses_texture_alpha_when_positive() {
+        let out = compute_tile_draw_color([0.5, 0.5, 0.5, 0.5], 0, Some(0.3));
+        assert_eq!(
+            out,
+            [0.5, 0.5, 0.5, 0.3],
+            "RGB must pass through unchanged, alpha must come from texture_alpha"
+        );
+    }
+
+    #[test]
+    fn compute_tile_draw_color_defaults_alpha_to_one_when_absent_or_non_positive() {
+        // real condition is `Info.Texture->Alpha > 0.f`, strictly
+        // greater than, not `>=` -- 0.0 itself does not count,
+        // hand-verified against DrawTile.cpp:40-43's own text before
+        // relying on it, not assumed from the flag's mere presence.
+        assert_eq!(
+            compute_tile_draw_color([0.1, 0.2, 0.3, 0.4], 0, None),
+            [0.1, 0.2, 0.3, 1.0],
+            "no real Texture object (None) must default alpha to 1.0"
+        );
+        assert_eq!(
+            compute_tile_draw_color([0.1, 0.2, 0.3, 0.4], 0, Some(0.0)),
+            [0.1, 0.2, 0.3, 1.0],
+            "texture_alpha of exactly 0.0 is not > 0.0, must still default to 1.0"
+        );
+    }
+
+    #[test]
+    fn compute_tile_draw_color_pf_modulated_forces_white_but_texture_alpha_still_overrides() {
+        const PF_MODULATED: u32 = 0x0000_0040;
+        // The subtle real case (DrawTile.cpp:33-43 read in full, not
+        // just the PF_Modulated branch alone): PF_Modulated forces
+        // RGBA to (1,1,1,1) first, but the texture-alpha check right
+        // after is unconditional, not an `else` -- it overrides alpha
+        // again. An earlier, wrong reading of this function (before
+        // the real source was re-read in full) would treat PF_
+        // Modulated's own W=1.0 as final, producing [1,1,1,1.0] here
+        // instead of the real [1,1,1,0.7].
+        let out = compute_tile_draw_color([0.1, 0.2, 0.3, 0.4], PF_MODULATED, Some(0.7));
+        assert_eq!(
+            out,
+            [1.0, 1.0, 1.0, 0.7],
+            "PF_Modulated forces RGB (and alpha, provisionally) to 1.0, but the texture's own \
+             positive Alpha must still override alpha again afterward, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn tile_quad_corners_matches_the_real_submit_tile_batch_formula() {
+        // rfx2=rfy2=0.02, fx2=fy2=50.0: same real values reference_
+        // perspective_scene() + draw_2d_line_screen_to_coords's own
+        // test above derives (fx=fy=100, effective_fov_angle=90).
+        // x=10,y=20,xl=30,yl=40 (tile rect left=10,top=20,right=40,
+        // bottom=60); u=0.1,v=0.2,ul=0.3,vl=0.4; z=1.0; u_mult=2.0,
+        // v_mult=0.5 (deliberately distinct from each other, so a
+        // mixed-up U/V multiplier bug would be caught). Hand-computed
+        // independently (scratch Python, not read off the
+        // implementation) before relying on it:
+        //   top_left:     coords=(-0.8,-0.6,1), tex=(0.2,0.1)
+        //   top_right:    coords=(-0.2,-0.6,1), tex=(0.8,0.1)
+        //   bottom_right: coords=(-0.2, 0.2,1), tex=(0.8,0.3)
+        //   bottom_left:  coords=(-0.8, 0.2,1), tex=(0.2,0.3)
+        let out = tile_quad_corners(TileQuadRequest {
+            rfx2: 0.02,
+            rfy2: 0.02,
+            fx2: 50.0,
+            fy2: 50.0,
+            x: 10.0,
+            y: 20.0,
+            xl: 30.0,
+            yl: 40.0,
+            u: 0.1,
+            v: 0.2,
+            ul: 0.3,
+            vl: 0.4,
+            z: 1.0,
+            u_mult: 2.0,
+            v_mult: 0.5,
+        });
+        let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        let close2 = |a: [f32; 2], b: [f32; 2]| (0..2).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        assert!(
+            close(out.top_left.0, [-0.8, -0.6, 1.0]) && close2(out.top_left.1, [0.2, 0.1]),
+            "top_left mismatch: {out:?}"
+        );
+        assert!(
+            close(out.top_right.0, [-0.2, -0.6, 1.0]) && close2(out.top_right.1, [0.8, 0.1]),
+            "top_right mismatch: {out:?}"
+        );
+        assert!(
+            close(out.bottom_right.0, [-0.2, 0.2, 1.0]) && close2(out.bottom_right.1, [0.8, 0.3]),
+            "bottom_right mismatch: {out:?}"
+        );
+        assert!(
+            close(out.bottom_left.0, [-0.8, 0.2, 1.0]) && close2(out.bottom_left.1, [0.2, 0.3]),
+            "bottom_left mismatch: {out:?}"
         );
     }
 
