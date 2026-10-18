@@ -1935,27 +1935,20 @@ impl RenderLoop {
     /// (`draw::LINE_TRANSPARENT`; `for_line_flags` reads only depth-cued).
     /// Needs a scene from `SetSceneNode` (`last_scene`), the same way
     /// `queue_point` needs one for its projection; returns `false`
-    /// without queueing otherwise. If no `set_scene_node` has run since
-    /// `lock_frame` (for example `DrawWorld` was skipped), a segment is
-    /// built from `last_scene` here, so the flash still draws with the
-    /// projection XOpenGL reuses from its stored `RProjZ`. Returns `true`
-    /// only when the quad was queued.
-    pub fn queue_end_flash(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        color: [f32; 4],
-    ) -> bool {
+    /// without queueing otherwise. `lock_frame`/`begin_offscreen_frame`
+    /// seed the frame's segment from `last_scene`, so a frame that skipped
+    /// `DrawWorld` still draws the flash with the projection XOpenGL reuses
+    /// from its stored `RProjZ`. Returns `true` only when the quad was queued.
+    pub fn queue_end_flash(&mut self, color: [f32; 4]) -> bool {
         if self.in_progress.is_none() {
             return false;
         }
         let Some(scene) = self.last_scene else {
             return false;
         };
-        if self.frame_uniforms_segments.is_empty() {
-            self.set_scene_node(device, queue, &scene);
-        }
-        let segment = self.frame_uniforms_segments.len() - 1;
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
+            return false;
+        };
         let (rfx2, rfy2) = scene_rfx2_rfy2(&scene);
         let corners = draw::flash_quad_corners(rfx2, rfy2, scene.fx, scene.fy);
         let state = draw::RenderState::for_line_flags(draw::LINE_TRANSPARENT);
@@ -2853,6 +2846,12 @@ pub fn lock_frame(
     // next one.
     loop_state.frame_uniforms_segments.clear();
     loop_state.batches.clear();
+    // XOpenGL reuses the last SetSceneNode projection for 2D draws in frames
+    // that never call it (modelviewprojMat, XOpenGL.cpp:1832/1879). Seed the
+    // frame's segment from last_scene so those draws are not dropped.
+    if let Some(scene) = loop_state.last_scene {
+        loop_state.set_scene_node(&created.device, &created.queue, &scene);
+    }
     let Some(surface) = created.surface.as_ref() else {
         loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
@@ -3055,6 +3054,12 @@ pub fn begin_offscreen_frame(
     // comment at the equivalent point for the full reasoning.
     loop_state.frame_uniforms_segments.clear();
     loop_state.batches.clear();
+    // XOpenGL reuses the last SetSceneNode projection for 2D draws in frames
+    // that never call it (modelviewprojMat, XOpenGL.cpp:1832/1879). Seed the
+    // frame's segment from last_scene so those draws are not dropped.
+    if let Some(scene) = loop_state.last_scene {
+        loop_state.set_scene_node(&created.device, &created.queue, &scene);
+    }
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut encoder = created
         .device
@@ -5142,18 +5147,89 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
     fn queue_end_flash_without_an_open_frame_queues_nothing_and_reports_false() {
         // The C++ caller counts and logs only a true return, so a rejected
         // flash must return false and leave no batch or segment behind.
         // last_scene is set, so only the open-frame gate can reject it.
+        let mut loop_state = RenderLoop::new();
+        loop_state.last_scene = Some(reference_perspective_scene());
+        assert!(!loop_state.queue_end_flash([1.0, 0.0, 0.0, 0.5]));
+        assert!(loop_state.batches.is_empty());
+        assert_eq!(loop_state.frame_uniforms_segment_count(), 0);
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_2d_point_in_a_frame_without_set_scene_node_matches_the_frame_that_set_it() {
+        // XOpenGL reuses the last SetSceneNode projection for 2D draws in
+        // frames that skip DrawWorld. Frame 2 never calls set_scene_node, so
+        // its point must render exactly as frame 1's point did. Before the
+        // frame-start seed, frame 2 silently dropped the point.
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");
         let mut loop_state = RenderLoop::new();
-        loop_state.last_scene = Some(reference_perspective_scene());
-        assert!(!loop_state.queue_end_flash(&created.device, &created.queue, [1.0, 0.0, 0.0, 0.5]));
-        assert!(loop_state.batches.is_empty());
-        assert_eq!(loop_state.frame_uniforms_segment_count(), 0);
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop 2D cross-frame test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let draw_point = |loop_state: &mut RenderLoop| {
+            loop_state.queue_point(0.5, 50.0, 49.5, 50.0, 1.0, 50.0, 50.0, [0.0, 1.0, 0.0], 0);
+        };
+
+        // Frame 1 sets the scene and draws the point.
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        draw_point(&mut loop_state);
+        assert!(
+            unlock_frame(&created, &mut loop_state, false),
+            "expected unlock_frame to end frame 1"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+        let frame_with_scene = read_64px_row(&created, &render_target);
+
+        // Frame 2 never calls set_scene_node; it inherits frame 1's projection.
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        draw_point(&mut loop_state);
+        assert!(
+            unlock_frame(&created, &mut loop_state, false),
+            "expected unlock_frame to end frame 2"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+        let frame_without_scene = read_64px_row(&created, &render_target);
+
+        let is_green = |px: &[u8]| px[1] >= 250 && px[0] <= 5 && px[2] <= 5;
+        let green_in_frame_1 = frame_with_scene
+            .chunks_exact(4)
+            .filter(|px| is_green(px))
+            .count();
+        assert!(
+            green_in_frame_1 > 0,
+            "frame 1 point must cover at least one pixel, or this test proves nothing"
+        );
+        assert_eq!(
+            frame_without_scene, frame_with_scene,
+            "a 2D point drawn in a frame without set_scene_node must match the frame that set it"
+        );
     }
 
     /// Clears a 64x1 target to blue, queues one EndFlash quad through the
@@ -5186,7 +5262,7 @@ mod tests {
             &reference_perspective_scene(),
         );
         assert!(
-            loop_state.queue_end_flash(&created.device, &created.queue, color),
+            loop_state.queue_end_flash(color),
             "expected queue_end_flash to queue with a scene and an open frame"
         );
         assert!(
@@ -5267,28 +5343,12 @@ mod tests {
             "expected unlock_frame to end frame 1"
         );
 
-        // Frame 2 has no set_scene_node: its segment list starts empty.
+        // Frame 2 has no set_scene_node. The frame-start seed must still give
+        // the flash frame 1's projection, with no test-side matrix override.
         begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
-        assert_eq!(loop_state.frame_uniforms_segment_count(), 0);
         assert!(
-            loop_state.queue_end_flash(&created.device, &created.queue, [1.0, 0.0, 0.0, 0.5]),
-            "expected queue_end_flash to queue from last_scene with no segment this frame"
-        );
-        assert_eq!(
-            loop_state.frame_uniforms_segment_count(),
-            1,
-            "expected queue_end_flash to build the segment it draws with"
-        );
-
-        // Same identity-modelviewproj substitution as the blend test above.
-        let mut identity_diagonal = [0u8; 64];
-        for i in 0..4 {
-            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
-        }
-        created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
-            256,
-            &identity_diagonal,
+            loop_state.queue_end_flash([1.0, 0.0, 0.0, 0.5]),
+            "expected queue_end_flash to queue from the frame-start seed"
         );
         assert!(
             unlock_frame(&created, &mut loop_state, false),
