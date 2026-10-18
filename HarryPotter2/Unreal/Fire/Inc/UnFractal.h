@@ -30,23 +30,6 @@ struct LineSeg
 };
 
 
-//
-// #Debugging purposes only. 
-//
-extern "C"
-{
-	extern FTime LTimeTotal1, LTimeTotal2, LinePixels;
-}
-extern __int64  TotalTime0;
-extern __int64  TotalTime1;
-extern __int64  TotalTime2;
-extern __int64  TotalTime3;
-extern __int64  TotalTime4;
-extern __int64  TotalPixels;
-extern INT 	TotalFrames;
-
-INT CycleCount();
-
 /*----------------------------------------------------------------------------
 	UFractalTexture.
 ----------------------------------------------------------------------------*/
@@ -225,11 +208,6 @@ class DLL_EXPORT_CLASS UFireTexture : public UFractalTexture
 	void FirePaint( INT MouseX, INT MouseY, DWORD Buttons );
 	void CloseSpark( INT SparkX, INT SparkY );
 	void DeleteSparks( INT SparkX, INT SparkY, INT AreaWidth );
-	void DrawFlashRamp( LineSeg LL, BYTE Color1, BYTE Color2 );
-	void MoveSpark( FSpark* Spark );
-	void MoveSparkTwo( FSpark* Spark );
-	void MoveSparkXY( FSpark* Spark, SBYTE Xspeed, SBYTE Yspeed );
-	void MoveSparkAngle( FSpark* Spark, BYTE Direction );
 	void RedrawSparks();
 	void PostDrawSparks();
 	void TempDrawSpark (INT PosX, INT PosY, INT Intensity );

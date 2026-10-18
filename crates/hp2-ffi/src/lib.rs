@@ -7,6 +7,12 @@ use std::ffi::c_void;
 use hp2_ffi_support::{guard, install_log_sink};
 use hp2_ini::Profile;
 
+mod fire_fire;
+mod fire_ice;
+mod fire_sparks;
+mod fire_water;
+mod fire_wet_wave;
+
 /// Route Rust log records to the engine log. Called from `main` before
 /// `appInit`; the C++ sink reads `GLog` per line, so records follow
 /// `appInit`'s log redirection. A null sink drops records.

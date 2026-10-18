@@ -437,6 +437,7 @@ dependencies = [
  "hp2-audio",
  "hp2-codecs",
  "hp2-ffi-support",
+ "hp2-fire",
  "hp2-import",
  "hp2-ini",
  "hp2-launcher",
@@ -454,6 +455,10 @@ dependencies = [
  "log",
  "parking_lot",
 ]
+
+[[package]]
+name = "hp2-fire"
+version = "0.1.0"
 
 [[package]]
 name = "hp2-import"

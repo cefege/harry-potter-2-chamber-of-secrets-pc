@@ -285,6 +285,11 @@ target_link_libraries(hp2_render PUBLIC Squish::Squish)
 
 hp2_add_engine_object(hp2_fire Fire ${HP2_FIRE_SOURCES})
 target_include_directories(hp2_fire PUBLIC ${HP2_FIRE_INCLUDE_DIRS})
+if(NOT EMSCRIPTEN)
+    # UnFractal.cpp calls hp2_rs_fire_* and includes hp2_rs.h; Core.h does not
+    # carry that include, so the Fire object needs hp2_ffi's include dir here.
+    target_link_libraries(hp2_fire PRIVATE hp2_ffi)
+endif()
 
 hp2_add_engine_object(hp2_editor_runtime Editor ${HP2_EDITOR_RUNTIME_SOURCES})
 target_include_directories(hp2_editor_runtime PRIVATE ${HP2_EDITOR_INCLUDE_DIRS})
