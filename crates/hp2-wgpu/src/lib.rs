@@ -2487,19 +2487,21 @@ impl RenderLoop {
         self.last_scene = Some(*scene);
     }
 
-    /// How many real `set_scene_node` segments exist for the current
-    /// (or most recently cleared) frame -- `0` before the first call
-    /// since the last `lock_frame`/`begin_offscreen_frame`.
+    /// How many segments the current (or most recently cleared) frame
+    /// holds: the frame-start seed (when `last_scene` existed) plus every
+    /// `set_scene_node` call since the last `lock_frame`/
+    /// `begin_offscreen_frame`. `0` only when neither happened.
     pub fn frame_uniforms_segment_count(&self) -> usize {
         self.frame_uniforms_segments.len()
     }
 
-    /// The real segment buffer `set_scene_node` created on its
-    /// `index`-th call since the last `lock_frame`/
-    /// `begin_offscreen_frame` (`0`-based). `None` if `index` is out
-    /// of range -- real callers (tests, future debug-readback
-    /// tooling) need to handle that, not assume a given segment
-    /// exists.
+    /// The segment buffer at `index` (`0`-based) for the current (or most
+    /// recently cleared) frame. When `last_scene` existed at frame start,
+    /// index 0 is the frame-start seed from `lock_frame`/
+    /// `begin_offscreen_frame`, and the first real `set_scene_node` call
+    /// is index 1. `None` if `index` is out of range -- real callers
+    /// (tests, future debug-readback tooling) need to handle that, not
+    /// assume a given segment exists.
     pub fn frame_uniforms_segment(&self, index: usize) -> Option<&wgpu::Buffer> {
         self.frame_uniforms_segments.get(index)
     }
@@ -2605,17 +2607,18 @@ pub struct SceneFrame {
     pub light_map_intensity: f32,
 }
 
-/// `zNear` for the perspective (non-ortho) path: the real source's
-/// `SetProjection(Frame, bNearZ)` is only ever called as
-/// `SetProjection(Frame, 0)` from `SetSceneNode` (the only call site
-/// this function replaces), and with neither `UNREAL_TOURNAMENT_
-/// OLDUNREAL` nor `bNearZ` set, `zNear` is unconditionally `1.0f` --
-/// confirmed by reading `ENGINE_VERSION` (`UnObjVer.h`: `433`) and
-/// grepping the whole tree for `UNREAL_TOURNAMENT_OLDUNREAL`, which
-/// does not exist anywhere in this codebase (a leftover portability
-/// macro from the upstream project this file was pinned from, never
-/// defined here), not assumed from the macro's mere presence in the
-/// source text.
+/// `zNear` for the perspective (non-ortho) path, matching the real
+/// source's `SetProjection(Frame, 0)` as called from `SetSceneNode`
+/// (`XOpenGL.cpp:1685`): with neither `UNREAL_TOURNAMENT_OLDUNREAL`
+/// nor `bNearZ` set, `zNear` is `1.0f`. `UNREAL_TOURNAMENT_OLDUNREAL`
+/// is not defined anywhere in this tree (checked by grep), so only
+/// the `1.0` branch exists here.
+///
+/// KNOWN PARITY GAP: `ThirdParty/XOpenGLDrv/Src/DrawGouraud.cpp:157`
+/// calls `SetProjection(Frame, 1)` mid-frame when `NoNearZ` and
+/// FOV/FX/FY changed or `!StoredbNearZ`, which sets `zNear` to `0.7`
+/// and rewrites the persisted `modelviewprojMat` that XOpenGL's
+/// EndFlash quad reads. This crate does not mirror that path.
 const PERSPECTIVE_Z_NEAR: f32 = 1.0;
 
 /// Real source's two `zFar` values (`XOpenGL.cpp`'s own `SetOrthoProjection`/
@@ -5331,20 +5334,23 @@ mod tests {
             view_formats: &[],
         });
 
-        // Frame 1 sets the scene, then ends. This records last_scene.
+        // Frame 1 sets a 60-degree scene, then ends. This records last_scene.
+        // RProjZ = tan(30 deg) ~= 0.577: the real projection maps the flash
+        // quad corners to NDC +-1 exactly; identity would not.
+        let mut scene = reference_perspective_scene();
+        scene.effective_fov_angle = 60.0;
+        scene.viewport_fov_angle = 60.0;
         begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
-        loop_state.set_scene_node(
-            &created.device,
-            &created.queue,
-            &reference_perspective_scene(),
-        );
+        loop_state.set_scene_node(&created.device, &created.queue, &scene);
         assert!(
             unlock_frame(&created, &mut loop_state, false),
             "expected unlock_frame to end frame 1"
         );
 
-        // Frame 2 has no set_scene_node. The frame-start seed must still give
-        // the flash frame 1's projection, with no test-side matrix override.
+        // Frame 2 has no set_scene_node. The frame-start seed must give the
+        // flash frame 1's real projection. At 60 degrees RProjZ ~= 0.577, so
+        // an identity matrix would leave the screen edges blue; the real
+        // projection covers every pixel. No test-side matrix override.
         begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
         assert!(
             loop_state.queue_end_flash([1.0, 0.0, 0.0, 0.5]),
@@ -8010,8 +8016,11 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         for i in 0..4 {
             identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
+        // Queued draws use the newest segment, which is the one set_scene_node
+        // just pushed. With a frame-start seed that is not index 0.
+        let segment = loop_state.frame_uniforms_segment_count() - 1;
         created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
+            loop_state.frame_uniforms_segment(segment).unwrap(),
             256,
             &identity_diagonal,
         );
