@@ -7,10 +7,25 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "Hp2GeometryServices.h"
 
 /*---------------------------------------------------------------------------------------
 	FPoly class implementation.
+
+	The polygon algorithms live in Rust (crates/hp2-engine/src/fpoly.rs); these
+	methods forward to the hp2_rs_engine_fpoly_* exports. Rust returns fatal
+	messages through an error buffer; FPolyFatal raises them with appErrorf,
+	matching the original fatal paths.
 ---------------------------------------------------------------------------------------*/
+
+enum { FPOLY_ERR_CAP = 256 };
+
+// Raises a fatal error reported by the Rust side (empty buffer = no error).
+static void FPolyFatal( const char* Err )
+{
+	if( Err[0] )
+		appErrorf( TEXT("%s"), ANSI_TO_TCHAR(Err) );
+}
 
 //
 // Initialize everything in an  editor polygon structure to defaults.
@@ -46,19 +61,8 @@ void FPoly::Reverse()
 {
 	guard(FPoly::Reverse);
 
-	FVector Temp;
-	int i,c;
+	hp2_rs_engine_fpoly_reverse( this );
 
-	Normal *= -1;
-
-	c=NumVertices/2;
-	for( i=0; i<c; i++ )
-	{
-		// Flip all points except middle if odd number of points.
-		Temp      = Vertex[i];
-		Vertex[i] = Vertex[(NumVertices-1)-i];
-		Vertex[(NumVertices-1)-i] = Temp;
-	}
 	unguard;
 }
 
@@ -69,23 +73,9 @@ void FPoly::Reverse()
 int FPoly::Fix()
 {
 	guard(FPoly::Fix);
-	int i,j,prev;
 
-	j=0; prev=NumVertices-1;
-	for( i=0; i<NumVertices; i++ )
-	{
-		if( !FPointsAreSame( Vertex[i], Vertex[prev] ) )
-		{
-			if( j != i )
-				Vertex[j] = Vertex[i];
-			prev = j;
-			j    ++;
-		}
-		else debugf( NAME_Warning, TEXT("FPoly::Fix: Collapsed a point") );
-	}
-	if (j>=3) NumVertices = j;
-	else      NumVertices = 0;
-	return NumVertices;
+	return hp2_rs_engine_fpoly_fix( &GHp2GeometryServices, this );
+
 	unguard;
 }
 
@@ -96,19 +86,8 @@ FLOAT FPoly::Area()
 {
 	guard(FPoly::Area);
 
-	FVector Side1,Side2;
-	FLOAT Area;
-	int i;
+	return hp2_rs_engine_fpoly_area( this );
 
-	Area  = 0.f;
-	Side1 = Vertex[1] - Vertex[0];
-	for( i=2; i<NumVertices; i++ )
-	{
-		Side2 = Vertex[i] - Vertex[0];
-		Area += (Side1 ^ Side2).Size();
-		Side1 = Side2;
-	}
-	return Area;
 	unguard;
 }
 
@@ -125,146 +104,26 @@ int FPoly::SplitWithPlane
 ) const
 {
 	guard(FPoly::SplitWithPlane);
-	
-	FVector 	Intersection;
-	FLOAT   	Dist=0,MaxDist=0,MinDist=0;
-	FLOAT		PrevDist,Thresh;
-	enum 	  	{V_FRONT,V_BACK,V_EITHER} Status,PrevStatus=V_EITHER;
-	int     	i,j;
 
-	if (VeryPrecise)	Thresh = THRESH_SPLIT_POLY_PRECISELY;	
-	else				Thresh = THRESH_SPLIT_POLY_WITH_PLANE;
-
-	// Find number of vertices.
 	check(NumVertices>=3);
 	check(NumVertices<=MAX_VERTICES);
 
-	// See if the polygon is split by SplitPoly, or it's on either side, or the
-	// polys are coplanar.  Go through all of the polygon points and
-	// calculate the minimum and maximum signed distance (in the direction
-	// of the normal) from each point to the plane of SplitPoly.
-	for( i=0; i<NumVertices; i++ )
-	{
-		Dist = FPointPlaneDist( Vertex[i], PlaneBase, PlaneNormal );
+	char Err[FPOLY_ERR_CAP] = {0};
+	int Result = hp2_rs_engine_fpoly_split_with_plane
+	(
+		&GHp2GeometryServices,
+		this,
+		&PlaneBase,
+		&PlaneNormal,
+		FrontPoly,
+		BackPoly,
+		VeryPrecise,
+		Err,
+		FPOLY_ERR_CAP
+	);
+	FPolyFatal( Err );
+	return Result;
 
-		if( i==0 || Dist>MaxDist ) MaxDist=Dist;
-		if( i==0 || Dist<MinDist ) MinDist=Dist;
-
-		if      (Dist > +Thresh) PrevStatus = V_FRONT;
-		else if (Dist < -Thresh) PrevStatus = V_BACK;
-	}
-	if( MaxDist<Thresh && MinDist>-Thresh )
-	{
-		return SP_Coplanar;
-	}
-	else if( MaxDist < Thresh )
-	{
-		return SP_Back;
-	}
-	else if( MinDist > -Thresh )
-	{
-		return SP_Front;
-	}
-	else
-	{
-		// Split.
-		if( FrontPoly==NULL )
-			return SP_Split; // Caller only wanted status.
-		if( NumVertices > MAX_VERTICES )
-			appErrorf( TEXT("%s"), TEXT("FPoly::SplitWithPlane: Vertex overflow") );
-
-		*FrontPoly = *this; // Copy all info.
-		FrontPoly->PolyFlags |= PF_EdCut; // Mark as cut.
-		FrontPoly->NumVertices =  0;
-
-		*BackPoly = *this; // Copy all info.
-		BackPoly->PolyFlags |= PF_EdCut; // Mark as cut.
-		BackPoly->NumVertices = 0;
-
-		j = NumVertices-1; // Previous vertex; have PrevStatus already.
-
-		for( i=0; i<NumVertices; i++ )
-		{
-			PrevDist	= Dist;
-      		Dist		= FPointPlaneDist( Vertex[i], PlaneBase, PlaneNormal );
-
-			if      (Dist > +Thresh)  	Status = V_FRONT;
-			else if (Dist < -Thresh)  	Status = V_BACK;
-			else						Status = PrevStatus;
-
-			if( Status != PrevStatus )
-	        {
-				// Crossing.  Either Front-to-Back or Back-To-Front.
-				// Intersection point is naturally on both front and back polys.
-				if( (Dist >= -Thresh) && (Dist < +Thresh) )
-				{
-					// This point lies on plane.
-					if( PrevStatus == V_FRONT )
-					{
-						FrontPoly->Vertex[FrontPoly->NumVertices++] = Vertex[i];
-						BackPoly ->Vertex[BackPoly ->NumVertices++] = Vertex[i];
-					}
-					else
-					{
-						BackPoly ->Vertex[BackPoly ->NumVertices++] = Vertex[i];
-						FrontPoly->Vertex[FrontPoly->NumVertices++] = Vertex[i];
-					}
-				}
-				else if( (PrevDist >= -Thresh) && (PrevDist < +Thresh) )
-				{
-					// Previous point lies on plane.
-					if (Status == V_FRONT)
-					{
-						FrontPoly->Vertex[FrontPoly->NumVertices++] = Vertex[j];
-						FrontPoly->Vertex[FrontPoly->NumVertices++] = Vertex[i];
-					}
-					else
-					{
-						BackPoly ->Vertex[BackPoly ->NumVertices++] = Vertex[j];
-						BackPoly ->Vertex[BackPoly ->NumVertices++] = Vertex[i];
-					}
-				}
-				else
-				{
-					// Intersection point is in between.
-					Intersection = FLinePlaneIntersection(Vertex[j],Vertex[i],PlaneBase,PlaneNormal);
-
-					if( PrevStatus == V_FRONT )
-					{
-						FrontPoly->Vertex[FrontPoly->NumVertices++] = Intersection;
-						BackPoly ->Vertex[BackPoly ->NumVertices++] = Intersection;
-						BackPoly ->Vertex[BackPoly ->NumVertices++]	= Vertex[i];
-					}
-					else
-					{
-						BackPoly ->Vertex[BackPoly ->NumVertices++] = Intersection;
-						FrontPoly->Vertex[FrontPoly->NumVertices++] = Intersection;
-						FrontPoly->Vertex[FrontPoly->NumVertices++]	= Vertex[i];
-					}
-				}
-			}
-			else
-			{
-        		if (Status==V_FRONT) FrontPoly->Vertex[FrontPoly->NumVertices++] = Vertex[i];
-        		else                 BackPoly ->Vertex[BackPoly ->NumVertices++] = Vertex[i];
-			}
-			j          = i;
-			PrevStatus = Status;
-		}
-
-		// Handle possibility of sliver polys due to precision errors.
-		if( FrontPoly->Fix()<3 )
-		{
-			debugf( NAME_Warning, TEXT("FPoly::SplitWithPlane: Ignored front sliver") );
-			return SP_Back;
-		}
-		else if( BackPoly->Fix()<3 )
-	    {
-			debugf( NAME_Warning, TEXT("FPoly::SplitWithPlane: Ignored back sliver") );
-			return SP_Front;
-		}
-		else return SP_Split;
-	}
 	unguard;
 }
 
@@ -308,76 +167,19 @@ int FPoly::SplitWithPlaneFast
 {
 	guard(FPoly::SplitWithPlaneFast);
 
-	enum {V_FRONT=0,V_BACK=1} Status,PrevStatus,VertStatus[MAX_VERTICES],*StatusPtr;
-	int Front=0,Back=0,i;
+	char Err[FPOLY_ERR_CAP] = {0};
+	int Result = hp2_rs_engine_fpoly_split_with_plane_fast
+	(
+		this,
+		&Plane,
+		FrontPoly,
+		BackPoly,
+		Err,
+		FPOLY_ERR_CAP
+	);
+	FPolyFatal( Err );
+	return Result;
 
-	StatusPtr = &VertStatus[0];
-	for( i=0; i<NumVertices; i++ )
-	{
-		FLOAT Dist = Plane.PlaneDot(Vertex[i]);
-		if( Dist >= 0.f )
-		{
-			*StatusPtr++ = V_FRONT;
-			if( Dist > +THRESH_SPLIT_POLY_WITH_PLANE )
-				Front=1;
-		}
-		else
-		{
-			*StatusPtr++ = V_BACK;
-			if( Dist < -THRESH_SPLIT_POLY_WITH_PLANE )
-				Back=1;
-		}
-	}
-	if( !Front )
-	{
-		if( Back ) return SP_Back;
-		else       return SP_Coplanar;
-	}
-	if( !Back )
-	{
-		return SP_Front;
-	}
-	else
-	{
-		// Split.
-		if( FrontPoly )
-		{
-			const FVector *V  = &Vertex            [0];
-			const FVector *W  = &Vertex            [NumVertices-1];
-			FVector *V1       = &FrontPoly->Vertex [0];
-			FVector *V2       = &BackPoly ->Vertex [0];
-			PrevStatus        = VertStatus         [NumVertices-1];
-			StatusPtr         = &VertStatus        [0];
-
-			int N1=0, N2=0;
-			for( i=0; i<NumVertices; i++ )
-			{
-				Status = *StatusPtr++;
-				if( Status != PrevStatus )
-				{
-					// Crossing.
-					*V1++ = *V2++ = FLinePlaneIntersection( *W, *V, Plane );
-					if( PrevStatus == V_FRONT )	{*V2++ = *V; N1++; N2+=2;}
-					else {*V1++ = *V; N2++; N1+=2;};
-				}
-				else if( Status==V_FRONT ) {*V1++ = *V; N1++;}
-				else {*V2++ = *V; N2++;};
-
-				PrevStatus = Status;
-				W          = V++;
-			}
-			FrontPoly->NumVertices	= N1;
-			FrontPoly->Base			= Base;
-			FrontPoly->Normal		= Normal;
-			FrontPoly->PolyFlags	= PolyFlags;
-
-			BackPoly->NumVertices	= N2;
-			BackPoly->Base			= Base;
-			BackPoly->Normal		= Normal;
-			BackPoly->PolyFlags		= PolyFlags;
-		}
-		return SP_Split;
-	}
 	unguard;
 }
 
@@ -388,26 +190,10 @@ void FPoly::SplitInHalf( FPoly *OtherHalf )
 {
 	guard(FPoly::SplitInHalf);
 
-	int m = NumVertices/2;
-	int i;
+	char Err[FPOLY_ERR_CAP] = {0};
+	hp2_rs_engine_fpoly_split_in_half( this, OtherHalf, Err, FPOLY_ERR_CAP );
+	FPolyFatal( Err );
 
-	if( (NumVertices<=3) || (NumVertices>MAX_VERTICES) )
-		appErrorf( TEXT("FPoly::SplitInHalf: %i Vertices"), NumVertices );
-
-	*OtherHalf = *this;
-
-	OtherHalf->NumVertices = (NumVertices-m) + 1;
-	NumVertices            = (m            ) + 1;
-
-	for( i=0; i<(OtherHalf->NumVertices-1); i++ )
-	{
-		OtherHalf->Vertex[i] = Vertex[i+m];
-	}
-	OtherHalf->Vertex[OtherHalf->NumVertices-1] = Vertex[0];
-
-	PolyFlags            |= PF_EdCut;
-	OtherHalf->PolyFlags |= PF_EdCut;
-	
 	unguard;
 }
 
@@ -420,18 +206,8 @@ int FPoly::CalcNormal( UBOOL bSilent )
 {
 	guard(FPoly::CalcNormal);
 
-	Normal = FVector(0,0,0);
-	for( int i=2; i<NumVertices; i++ )
-		Normal += (Vertex[i-1] - Vertex[0]) ^ (Vertex[i] - Vertex[0]);
+	return hp2_rs_engine_fpoly_calc_normal( &GHp2GeometryServices, this, bSilent );
 
-	if( Normal.SizeSquared() < (FLOAT)THRESH_ZERO_NORM_SQUARED )
-	{
-		if( !bSilent )
-			debugf( NAME_Warning, TEXT("FPoly::CalcNormal: Zero-area polygon") );
-		return 1;
-	}
-	Normal.Normalize();
-	return 0;
 	unguard;
 }
 
@@ -449,31 +225,15 @@ void FPoly::Transform
 {
 	guard(FPoly::Transform);
 
-	FVector 	Temp;
-	int 		i,m;
-
-	TextureU = TextureU.TransformVectorBy(Coords.VectorXform);
-	TextureV = TextureV.TransformVectorBy(Coords.VectorXform);
-
-	Base = (Base - PreSubtract).TransformVectorBy(Coords.PointXform) + PostAdd;
-	for( i=0; i<NumVertices; i++ )
-		Vertex[i]  = (Vertex[i] - PreSubtract).TransformVectorBy( Coords.PointXform ) + PostAdd;
-
-	// Flip vertex order if orientation is negative.
-	if( Orientation < 0.f )
-	{
-		m = NumVertices/2;
-		for( i=0; i<m; i++ )
-		{
-			Temp 					  = Vertex[i];
-			Vertex[i] 		          = Vertex[(NumVertices-1)-i];
-			Vertex[(NumVertices-1)-i] = Temp;
-		}
-	}
-
-	// Transform normal.  Since the transformation coordinate system is
-	// orthogonal but not orthonormal, it has to be renormalized here.
-	Normal = Normal.TransformVectorBy(Coords.VectorXform).SafeNormal();
+	hp2_rs_engine_fpoly_transform
+	(
+		this,
+		&Coords.PointXform,
+		&Coords.VectorXform,
+		&PreSubtract,
+		&PostAdd,
+		Orientation
+	);
 
 	unguard;
 }
@@ -486,56 +246,8 @@ INT FPoly::RemoveColinears()
 {
 	guard(FPoly::RemoveColinears);
 
-	FVector  SidePlaneNormal[MAX_VERTICES];
-	FVector  Side;
-	INT      i,j;
+	return hp2_rs_engine_fpoly_remove_colinears( this );
 
-	for( i=0; i<NumVertices; i++ )
-	{
-		j=i-1; if (j<0) j=NumVertices-1;
-
-		// Create cutting plane perpendicular to both this side and the polygon's normal.
-		Side = Vertex[i] - Vertex[j];
-		SidePlaneNormal[i] = Side ^ Normal;
-
-		if( !SidePlaneNormal[i].Normalize() )
-		{
-			// Eliminate these nearly identical points.
-			appMemcpy( &Vertex[i], &Vertex[i+1], (NumVertices-(i+1)) * sizeof (FVector) );
-			if (--NumVertices<3) {NumVertices = 0; return 0;}; // Collapsed.
-			i--;
-		}
-	}
-	for( i=0; i<NumVertices; i++ )
-	{
-		j=i+1; if (j>=NumVertices) j=0;
-
-		if( FPointsAreNear(SidePlaneNormal[i],SidePlaneNormal[j],FLOAT_NORMAL_THRESH) )
-	    {
-			// Eliminate colinear points.
-			appMemcpy (&Vertex[i],&Vertex[i+1],(NumVertices-(i+1)) * sizeof (FVector));
-			appMemcpy (&SidePlaneNormal[i],&SidePlaneNormal[i+1],(NumVertices-(i+1)) * sizeof (FVector));
-			if (--NumVertices<3) {NumVertices = 0; return 0;}; // Collapsed.
-			i--;
-		}
-		else
-		{
-			for( j=0; j<NumVertices; j++ )
-	        {
-				if (j != i)
-				{
-					switch( SplitWithPlane (Vertex[i],SidePlaneNormal[i],NULL,NULL,0) )
-					{
-						case SP_Front: return 0; // Nonconvex + Numerical precision error
-						case SP_Split: return 0; // Nonconvex
-						// SP_BACK: Means it's convex
-						// SP_COPLANAR: Means it's probably convex (numerical precision)
-					}
-				}
-			}
-		}
-	}
-	return 1; // Ok.
 	unguard;
 }
 
@@ -546,29 +258,12 @@ INT FPoly::RemoveColinears()
 int FPoly::Split( const FVector &Normal, const FVector &Base, int NoOverflow )
 {
 	guard(FPoly::Split);
-	if( NoOverflow && NumVertices>=FPoly::VERTEX_THRESHOLD )
-	{
-		// Don't split it, just reject it.
-		if( SplitWithPlaneFast( FPlane(Base,Normal), NULL, NULL )==SP_Back )
-			return 0;
-		else
-			return NumVertices;
-	}
-	else
-	{
-		// Split it.
-		FPoly Front, Back;
-		switch( SplitWithPlaneFast( FPlane(Base,Normal), &Front, &Back ))
-		{
-			case SP_Back:
-				return 0;
-			case SP_Split:
-				*this = Front;
-				return NumVertices;
-			default:
-				return NumVertices;
-		}
-	}
+
+	char Err[FPOLY_ERR_CAP] = {0};
+	int Result = hp2_rs_engine_fpoly_split( this, &Normal, &Base, NoOverflow, Err, FPOLY_ERR_CAP );
+	FPolyFatal( Err );
+	return Result;
+
 	unguard;
 }
 
@@ -580,42 +275,11 @@ int FPoly::Finalize( int NoError )
 {
 	guard(FPoly::Finalize);
 
-	// Check for problems.
-	Fix();
-	if( NumVertices<3 )
-	{
-		debugf( NAME_Warning, TEXT("FPoly::Finalize: Not enough vertices (%i)"), NumVertices );
-		if( NoError )
-			return -1;
-		else
-			appErrorf( TEXT("FPoly::Finalize: Not enough vertices (%i)"), NumVertices );
-	}
+	char Err[FPOLY_ERR_CAP] = {0};
+	int Result = hp2_rs_engine_fpoly_finalize( &GHp2GeometryServices, this, NoError, Err, FPOLY_ERR_CAP );
+	FPolyFatal( Err );
+	return Result;
 
-	// If no normal, compute from cross-product and normalize it.
-	if( Normal.IsZero() && NumVertices>=3 )
-	{
-		if( CalcNormal() )
-		{
-			debugf( NAME_Warning, TEXT("FPoly::Finalize: Normalization failed, verts=%i, size=%f"), NumVertices, Normal.Size() );
-			if( NoError )
-				return -1;
-			else
-				appErrorf( TEXT("FPoly::Finalize: Normalization failed, verts=%i, size=%f"), NumVertices, Normal.Size() );
-		}
-	}
-
-	// If texture U and V coordinates weren't specified, generate them.
-	if( TextureU.IsZero() && TextureV.IsZero() )
-	{
-		for( int i=1; i<NumVertices; i++ )
-		{
-			TextureU = ((Vertex[0] - Vertex[i]) ^ Normal).SafeNormal();
-			TextureV = (Normal ^ TextureU).SafeNormal();
-			if( TextureU.SizeSquared()!=0 && TextureV.SizeSquared()!=0 )
-				break;
-		}
-	}
-	return 0;
 	unguard;
 }
 
@@ -638,23 +302,8 @@ int FPoly::Faces( const FPoly &Test ) const
 {
 	guard(FPoly::Faces);
 
-	// Coplanar implies not facing.
-	if( IsCoplanar( Test ) )
-		return 0;
+	return hp2_rs_engine_fpoly_faces( this, &Test );
 
-	// If this poly is frontfaced relative to all of Test's points, they're not facing.
-	for( int i=0; i<Test.NumVertices; i++ )
-	{
-		if( !IsBackfaced( Test.Vertex[i] ) )
-		{
-			// If Test is frontfaced relative to on or more of this poly's points, they're facing.
-			for( int i=0; i<NumVertices; i++ )
-				if( Test.IsBackfaced( Vertex[i] ) )
-					return 1;
-			return 0;
-		}
-	}
-	return 0;
 	unguard;
 }
 

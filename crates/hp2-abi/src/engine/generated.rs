@@ -37,7 +37,7 @@ pub struct AActor {
     pub rotation: FRotator,
     _pad_420: [u8; 244],
     pub collision_radius: f32,
-    _pad_668: [u8; 4],
+    pub collision_width: f32,
     pub collision_height: f32,
     _pad_676: [u8; 212],
 }
@@ -48,6 +48,7 @@ const _: () = assert!(std::mem::offset_of!(AActor, physics) == 80);
 const _: () = assert!(std::mem::offset_of!(AActor, location) == 396);
 const _: () = assert!(std::mem::offset_of!(AActor, rotation) == 408);
 const _: () = assert!(std::mem::offset_of!(AActor, collision_radius) == 664);
+const _: () = assert!(std::mem::offset_of!(AActor, collision_width) == 668);
 const _: () = assert!(std::mem::offset_of!(AActor, collision_height) == 672);
 
 /// Layout mirror of C++ `APawn` (1912 bytes). Only the members listed in
@@ -204,6 +205,86 @@ const _: () = assert!(std::mem::offset_of!(FReachSpec, collision_height) == 28);
 const _: () = assert!(std::mem::offset_of!(FReachSpec, reach_flags) == 32);
 const _: () = assert!(std::mem::offset_of!(FReachSpec, b_pruned) == 36);
 
+/// Layout mirror of C++ `FPoly` (296 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FPoly {
+    pub base: FVector,
+    pub normal: FVector,
+    pub texture_u: FVector,
+    pub texture_v: FVector,
+    pub vertex: [FVector; 16],
+    pub poly_flags: u32,
+    _pad_244: [u8; 4],
+    pub actor: *mut c_void,
+    pub texture: *mut c_void,
+    _pad_264: [u8; 4],
+    pub num_vertices: i32,
+    pub i_link: i32,
+    pub i_brush_poly: i32,
+    pub pan_u: i16,
+    pub pan_v: i16,
+    pub save_poly_index: i32,
+    pub b_face_drag_sel: i32,
+    _pad_292: [u8; 4],
+}
+
+const _: () = assert!(size_of::<FPoly>() == 296);
+const _: () = assert!(std::mem::offset_of!(FPoly, base) == 0);
+const _: () = assert!(std::mem::offset_of!(FPoly, normal) == 12);
+const _: () = assert!(std::mem::offset_of!(FPoly, texture_u) == 24);
+const _: () = assert!(std::mem::offset_of!(FPoly, texture_v) == 36);
+const _: () = assert!(std::mem::offset_of!(FPoly, vertex) == 48);
+const _: () = assert!(std::mem::offset_of!(FPoly, poly_flags) == 240);
+const _: () = assert!(std::mem::offset_of!(FPoly, actor) == 248);
+const _: () = assert!(std::mem::offset_of!(FPoly, texture) == 256);
+const _: () = assert!(std::mem::offset_of!(FPoly, num_vertices) == 268);
+const _: () = assert!(std::mem::offset_of!(FPoly, i_link) == 272);
+const _: () = assert!(std::mem::offset_of!(FPoly, i_brush_poly) == 276);
+const _: () = assert!(std::mem::offset_of!(FPoly, pan_u) == 280);
+const _: () = assert!(std::mem::offset_of!(FPoly, pan_v) == 282);
+const _: () = assert!(std::mem::offset_of!(FPoly, save_poly_index) == 284);
+const _: () = assert!(std::mem::offset_of!(FPoly, b_face_drag_sel) == 288);
+
+/// Layout mirror of C++ `FBox` (28 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FBox {
+    pub min: FVector,
+    pub max: FVector,
+    pub is_valid: u8,
+    _pad_25: [u8; 3],
+}
+
+const _: () = assert!(size_of::<FBox>() == 28);
+const _: () = assert!(std::mem::offset_of!(FBox, min) == 0);
+const _: () = assert!(std::mem::offset_of!(FBox, max) == 12);
+const _: () = assert!(std::mem::offset_of!(FBox, is_valid) == 24);
+
+/// Layout mirror of C++ `FCheckResult` (56 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FCheckResult {
+    _pad_0: [u8; 8],
+    pub actor: *mut c_void,
+    pub location: FVector,
+    pub normal: FVector,
+    pub primitive: *mut c_void,
+    pub time: f32,
+    pub item: i32,
+}
+
+const _: () = assert!(size_of::<FCheckResult>() == 56);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, actor) == 8);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, location) == 16);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, normal) == 28);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, primitive) == 40);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, time) == 48);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, item) == 52);
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
@@ -216,5 +297,8 @@ mod layout_tests {
         assert_eq!(size_of::<AWind>(), 928);
         assert_eq!(size_of::<ULevel>(), 4624);
         assert_eq!(size_of::<FReachSpec>(), 40);
+        assert_eq!(size_of::<FPoly>(), 296);
+        assert_eq!(size_of::<FBox>(), 28);
+        assert_eq!(size_of::<FCheckResult>(), 56);
     }
 }

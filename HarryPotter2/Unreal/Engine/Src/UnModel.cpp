@@ -7,6 +7,14 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "Hp2GeometryServices.h"
+
+// reset_zones (Rust, hp2_abi::render_scene::FZoneProperties) writes through this layout.
+static_assert( sizeof(FZoneProperties) == 32, "FZoneProperties must match hp2-abi render_scene::FZoneProperties" );
+static_assert( offsetof(FZoneProperties,ZoneActor) == 0, "FZoneProperties::ZoneActor must match hp2-abi render_scene::FZoneProperties" );
+static_assert( offsetof(FZoneProperties,LastRenderTime) == 8, "FZoneProperties::LastRenderTime must match hp2-abi render_scene::FZoneProperties" );
+static_assert( offsetof(FZoneProperties,Connectivity) == 16, "FZoneProperties::Connectivity must match hp2-abi render_scene::FZoneProperties" );
+static_assert( offsetof(FZoneProperties,Visibility) == 24, "FZoneProperties::Visibility must match hp2-abi render_scene::FZoneProperties" );
 
 /*-----------------------------------------------------------------------------
 	Struct serializers.
@@ -286,8 +294,7 @@ void UModel::Serialize( FArchive& Ar )
 void UModel::PostLoad()
 {
 	guard(UModel::PostLoad);
-	for( INT i=0; i<Nodes.Num(); i++ )
-		Surfs(Nodes(i).iSurf).Nodes.AddItem(i);
+	hp2_rs_engine_model_post_load_nodes( &GHp2GeometryServices, this, Nodes.GetData(), Nodes.Num() );
 	Super::PostLoad();
 	unguard;
 }
@@ -295,10 +302,7 @@ void UModel::ModifySurf( INT Index, INT UpdateMaster )
 {
 	guard(UModel::ModifySurf);
 
-	Surfs.ModifyItem( Index );
-	FBspSurf& Surf = Surfs(Index);
-	if( UpdateMaster && Surf.Actor )
-		Surf.Actor->Brush->Polys->Element.ModifyItem( Surf.iBrushPoly );
+	hp2_rs_engine_model_modify_surf( &GHp2GeometryServices, this, Surfs.GetData(), Surfs.Num(), Index, UpdateMaster );
 
 	unguard;
 }
@@ -306,8 +310,7 @@ void UModel::ModifyAllSurfs( INT UpdateMaster )
 {
 	guard(UModel::ModifyAllSurfs);
 
-	for( INT i=0; i<Surfs.Num(); i++ )
-		ModifySurf( i, UpdateMaster );
+	hp2_rs_engine_model_modify_all_surfs( &GHp2GeometryServices, this, Surfs.GetData(), Surfs.Num(), UpdateMaster );
 
 	unguard;
 }
@@ -315,9 +318,7 @@ void UModel::ModifySelectedSurfs( INT UpdateMaster )
 {
 	guard(UModel::ModifySelectedSurfs);
 
-	for( INT i=0; i<Surfs.Num(); i++ )
-		if( Surfs(i).PolyFlags & PF_Selected )
-			ModifySurf( i, UpdateMaster );
+	hp2_rs_engine_model_modify_selected_surfs( &GHp2GeometryServices, this, Surfs.GetData(), Surfs.Num(), UpdateMaster );
 
 	unguard;
 }
@@ -374,12 +375,7 @@ void UModel::EmptyModel( INT EmptySurfInfo, INT EmptyPolys )
 	NumZones		= 0;
 	NumSharedSides	= 4;
 	NumZones = 0;
-	for( INT i=0; i<FBspNode::MAX_ZONES; i++ )
-	{
-		Zones[i].ZoneActor    = NULL;
-		Zones[i].Connectivity = ((QWORD)1)<<i;
-		Zones[i].Visibility   = ~(QWORD)0;
-	}	
+	hp2_rs_engine_model_reset_zones( Zones, FBspNode::MAX_ZONES );
 
 	unguard;
 }
@@ -413,16 +409,13 @@ UModel::UModel( ABrush* Owner, UBOOL InRootOutside )
 void UModel::BuildBound()
 {
 	guard(UModel::BuildBound);
-	if( Polys && Polys->Element.Num() )
-	{
-		TArray<FVector> Points;
-		for( INT i=0; i<Polys->Element.Num(); i++ )
-			for( INT j=0; j<Polys->Element(i).NumVertices; j++ )
-				Points.AddItem(Polys->Element(i).Vertex[j]);
-		BoundingBox    = FBox( &Points(0), Points.Num() );
-		BoundingSphere = FSphere( &Points(0), Points.Num() );
-	}
-	else BoundingBox = FBox(0);
+		hp2_rs_engine_model_build_bound
+		(
+			Polys ? Polys->Element.GetData() : NULL,
+			Polys ? Polys->Element.Num() : 0,
+			&BoundingBox,
+			&BoundingSphere
+		);
 	unguard;
 }
 
@@ -438,8 +431,16 @@ void UModel::Transform( ABrush* Owner )
 
 	FModelCoords Coords;
 	FLOAT Orientation = Owner->BuildCoords( &Coords, NULL );
-	for( INT i=0; i<Polys->Element.Num(); i++ )
-		Polys->Element( i ).Transform( Coords, Owner->PrePivot, Owner->Location, Orientation );
+	hp2_rs_engine_model_transform_polys
+	(
+		Polys->Element.GetData(),
+		Polys->Element.Num(),
+		&Coords.PointXform,
+		&Coords.VectorXform,
+		&Owner->PrePivot,
+		&Owner->Location,
+		Orientation
+	);
 
 	unguard;
 }
@@ -449,9 +450,7 @@ void UModel::Transform( ABrush* Owner )
 //
 UBOOL UModel::PotentiallyVisible( INT iLeaf1, INT iLeaf2 )
 {
-	// This is the amazing superfast patent-pending 1 cpu cycle potential visibility 
-	// algorithm programmed by the great Tim Sweeney!
-	return 1;
+	return hp2_rs_engine_model_potentially_visible( iLeaf1, iLeaf2 );
 }
 
 /*---------------------------------------------------------------------------------------

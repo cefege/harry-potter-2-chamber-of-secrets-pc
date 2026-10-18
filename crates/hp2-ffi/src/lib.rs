@@ -9,11 +9,13 @@ use hp2_ini::Profile;
 
 mod audio;
 mod engine;
+mod engine_prim_trace;
 mod fire_fire;
 mod fire_ice;
 mod fire_sparks;
 mod fire_water;
 mod fire_wet_wave;
+mod geometry;
 mod input;
 mod render;
 mod render_light;

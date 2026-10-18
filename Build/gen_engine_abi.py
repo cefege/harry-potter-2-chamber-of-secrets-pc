@@ -35,16 +35,20 @@ PROBE_FLAG_SOURCE = "Engine/Src/UnWind.cpp"
 RUST_OUT = ROOT / "crates" / "hp2-abi" / "src" / "engine" / "generated.rs"
 CPP_OUT = UNREAL / "Engine" / "Src" / "HP2EngineAbiAsserts.cpp"
 
-# Manifest key -> size in bytes. `FVector` and `FRotator` are struct mirrors.
+# Manifest key -> size in bytes. `FVector` and `FRotator` are struct mirrors;
+# `FVector[16]` is a fixed array of FVector.
 SCALAR_SIZES = {
     "f32": 4,
     "i32": 4,
+    "u32": 4,
+    "i16": 2,
     "u8": 1,
     "FVector": 12,
+    "FVector[16]": 192,
     "FRotator": 12,
     "ptr": 8,
 }
-RUST_TYPE = {"ptr": "*mut c_void"}
+RUST_TYPE = {"ptr": "*mut c_void", "FVector[16]": "[FVector; 16]", "u32": "u32", "i16": "i16"}
 
 
 @dataclass
@@ -67,6 +71,7 @@ MIRRORS = [
             ("Location", "FVector"),
             ("Rotation", "FRotator"),
             ("CollisionRadius", "f32"),
+            ("CollisionWidth", "f32"),
             ("CollisionHeight", "f32"),
         ],
     ),
@@ -105,6 +110,44 @@ MIRRORS = [
             ("CollisionHeight", "i32"),
             ("reachFlags", "i32"),
             ("bPruned", "u8"),
+        ],
+    ),
+    Mirror(
+        "FPoly",
+        "FPoly",
+        [
+            ("Base", "FVector"),
+            ("Normal", "FVector"),
+            ("TextureU", "FVector"),
+            ("TextureV", "FVector"),
+            ("Vertex", "FVector[16]"),
+            ("PolyFlags", "u32"),
+            ("Actor", "ptr"),
+            ("Texture", "ptr"),
+            ("NumVertices", "i32"),
+            ("iLink", "i32"),
+            ("iBrushPoly", "i32"),
+            ("PanU", "i16"),
+            ("PanV", "i16"),
+            ("SavePolyIndex", "i32"),
+            ("bFaceDragSel", "i32"),
+        ],
+    ),
+    Mirror(
+        "FBox",
+        "FBox",
+        [("Min", "FVector"), ("Max", "FVector"), ("IsValid", "u8")],
+    ),
+    Mirror(
+        "FCheckResult",
+        "FCheckResult",
+        [
+            ("Actor", "ptr"),
+            ("Location", "FVector"),
+            ("Normal", "FVector"),
+            ("Primitive", "ptr"),
+            ("Time", "f32"),
+            ("Item", "i32"),
         ],
     ),
 ]
