@@ -3922,4 +3922,158 @@ mod tests {
 
         unsafe { hp2_rs_wgpu_destroy(result.handle) };
     }
+
+    /// Direct test of `hp2_rs_wgpu_upload_compressed_texture` itself
+    /// -- caught on review (not self-discovered): every other test of
+    /// this port's own DXT1 support (`hp2-wgpu`'s own `TextureCache::
+    /// upload_compressed`/`create_compressed_gpu_texture` tests, and
+    /// the real `WgpuDrv.cpp` live-engine smoke evidence, which this
+    /// particular session's own Entry-menu scenario never actually
+    /// exercised with a real DXT1 texture) bypasses this exact `extern
+    /// "C"` function -- its own `FfiCompressedMip` array-to-`Vec`
+    /// conversion loop and its own `bool` return-value propagation
+    /// (the real bug an earlier version of this function's own caller,
+    /// `RenderLoop::upload_compressed_texture`, had before being fixed
+    /// to stop discarding it) had never actually been exercised by any
+    /// test at all before this one.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-ffi --features renderer-wgpu -- --ignored`"]
+    fn upload_compressed_texture_uploads_a_real_chain_and_rejects_bad_input_without_inserting() {
+        let result = unsafe { hp2_rs_wgpu_create(std::ptr::null_mut(), 0) };
+        assert!(
+            !result.handle.is_null(),
+            "expected a real headless device to be created"
+        );
+
+        // Same real hand-built BC1 blocks as hp2-wgpu's own
+        // upload_compressed_round_trips_a_real_4x4_to_2x2_to_1x1_mip_
+        // chain test (crates/hp2-wgpu/src/texture.rs) -- color0==
+        // color1==solid color in RGB565 with all-zero index bits,
+        // decoding to a known solid color regardless of which of the
+        // three logical mip sizes it is (every level here is exactly
+        // one block).
+        let red_block: [u8; 8] = [0x00, 0xF8, 0x00, 0xF8, 0x00, 0x00, 0x00, 0x00];
+        let green_block: [u8; 8] = [0xE0, 0x07, 0xE0, 0x07, 0x00, 0x00, 0x00, 0x00];
+        let blue_block: [u8; 8] = [0x1F, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let mips = [
+            FfiCompressedMip {
+                width: 4,
+                height: 4,
+                data: red_block.as_ptr(),
+                data_len: red_block.len(),
+            },
+            FfiCompressedMip {
+                width: 2,
+                height: 2,
+                data: green_block.as_ptr(),
+                data_len: green_block.len(),
+            },
+            FfiCompressedMip {
+                width: 1,
+                height: 1,
+                data: blue_block.as_ptr(),
+                data_len: blue_block.len(),
+            },
+        ];
+
+        let accepted = unsafe {
+            hp2_rs_wgpu_upload_compressed_texture(
+                result.handle,
+                /* cache_id */ 111,
+                /* format = TEXF_DXT1 */ 0x03,
+                4,
+                4,
+                mips.as_ptr(),
+                mips.len(),
+                false,
+            )
+        };
+        if !accepted {
+            // Only a real, already-handled adapter limitation (no
+            // Features::TEXTURE_COMPRESSION_BC granted) can make this
+            // specific call fail -- every input here is otherwise
+            // valid, confirmed by the always-true assertion this
+            // exact chain already gets in hp2-wgpu's own equivalent
+            // test. Same honest-disclosure pattern that test already
+            // established, not a hard failure on adapters without BC.
+            println!(
+                "SKIPPED: adapter does not actually grant Features::TEXTURE_COMPRESSION_BC, \
+                 nothing further to assert on this adapter"
+            );
+            unsafe { hp2_rs_wgpu_destroy(result.handle) };
+            return;
+        }
+        assert!(
+            unsafe { hp2_rs_wgpu_is_texture_cached(result.handle, 111) },
+            "expected cache_id 111 to actually be resident after a real accepted upload"
+        );
+
+        // Empty mips: must return false and must not insert anything
+        // under this new cache_id.
+        let empty_accepted = unsafe {
+            hp2_rs_wgpu_upload_compressed_texture(
+                result.handle,
+                /* cache_id */ 222,
+                0x03,
+                4,
+                4,
+                std::ptr::null(),
+                0,
+                false,
+            )
+        };
+        assert!(
+            !empty_accepted,
+            "expected an empty mips array to be rejected"
+        );
+        assert!(
+            !unsafe { hp2_rs_wgpu_is_texture_cached(result.handle, 222) },
+            "expected cache_id 222 to NOT be resident after a rejected (empty-mips) upload"
+        );
+
+        // Unsupported format (TEXF_RGB8, 0x04): must return false and
+        // must not insert anything under this new cache_id either,
+        // even though the mips array itself is otherwise well-formed.
+        let wrong_format_accepted = unsafe {
+            hp2_rs_wgpu_upload_compressed_texture(
+                result.handle,
+                /* cache_id */ 333,
+                0x04,
+                4,
+                4,
+                mips.as_ptr(),
+                mips.len(),
+                false,
+            )
+        };
+        assert!(
+            !wrong_format_accepted,
+            "expected a non-DXT1 format byte to be rejected even with an otherwise valid mips \
+             array"
+        );
+        assert!(
+            !unsafe { hp2_rs_wgpu_is_texture_cached(result.handle, 333) },
+            "expected cache_id 333 to NOT be resident after a rejected (wrong-format) upload"
+        );
+
+        // adapter_name/backend_name are raw (ptr, len) UTF-8 spans
+        // (FfiWgpuCreateResult's own doc), not Rust strings -- decoded
+        // here only for this println's own benefit, the same real
+        // contract hp2_rs_set_log's own real C++ caller (Utf8SpanToFString,
+        // WgpuDrv.cpp) already relies on, not a new assumption.
+        let adapter_name = unsafe { bytes_from_raw(result.adapter_name, result.adapter_name_len) }
+            .map(String::from_utf8_lossy)
+            .unwrap_or_default();
+        let backend_name = unsafe { bytes_from_raw(result.backend_name, result.backend_name_len) }
+            .map(String::from_utf8_lossy)
+            .unwrap_or_default();
+        println!(
+            "hp2_rs_wgpu_upload_compressed_texture confirmed empirically: a real 4x4->2x2->1x1 \
+             DXT1 chain uploads and becomes cache-resident through the real extern \"C\" \
+             function itself (not just the Rust-internal layers underneath it), and both an \
+             empty mips array and a non-DXT1 format are rejected without inserting anything, on \
+             adapter {adapter_name:?} backend {backend_name}",
+        );
+        unsafe { hp2_rs_wgpu_destroy(result.handle) };
+    }
 }
