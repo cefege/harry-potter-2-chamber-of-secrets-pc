@@ -1682,10 +1682,12 @@ pub fn begin_offscreen_frame(
 /// one real GPU draw call batches many logical ones via `DrawID`
 /// within a segment, not one GPU operation per engine draw call).
 /// Each segment's own real `DrawID`s are re-indexed to start at `0`
-/// for that segment's own local draw call, and capped at `simple.
-/// wgsl`'s real `MAX_DRAWS` -- `RenderLoop::queue_line`'s own doc has
-/// the full reasoning for why that cap is applied here, not at queue
-/// time. Skipped (queue cleared either way) if no lines were queued.
+/// for every chunk of `simple.wgsl`'s real `MAX_DRAWS` capacity
+/// worth of lines (one `record()` call per chunk, matching the real
+/// GLSL batcher's own `Flush(true)`-when-full behavior, `DrawSimple.
+/// cpp:68-69` -- no line is ever lost, unlike an earlier version of
+/// this doc and the flush logic it described, caught on review).
+/// Skipped (queue cleared either way) if no lines were queued.
 ///
 /// `loop_state.counts.presented` is incremented here, not in
 /// `lock_frame`, and only when `present` is `true` -- a successful

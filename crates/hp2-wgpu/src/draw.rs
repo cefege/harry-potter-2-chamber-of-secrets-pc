@@ -1147,18 +1147,7 @@ mod tests {
         // which is not what this test exists to check (the real
         // vertex geometry/NDC placement is).
         let mut texture_cache = crate::texture::TextureCache::new();
-        let cached = texture_cache.upload_rgba8(
-            &created,
-            1,
-            crate::texture::TextureDimensions {
-                width: 1,
-                height: 1,
-                u_scale: 1.0,
-                v_scale: 1.0,
-            },
-            &[255, 0, 0, 255],
-            false,
-        );
+        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // One quad (2 triangles, 6 vertices, matching SubmitTileBatch's
@@ -1341,18 +1330,7 @@ mod tests {
 
         let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
         let mut texture_cache = crate::texture::TextureCache::new();
-        let cached = texture_cache.upload_rgba8(
-            &created,
-            1,
-            crate::texture::TextureDimensions {
-                width: 1,
-                height: 1,
-                u_scale: 1.0,
-                v_scale: 1.0,
-            },
-            &[255, 0, 0, 255],
-            false,
-        );
+        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // Full-width quad this time (simpler: only the blend result
