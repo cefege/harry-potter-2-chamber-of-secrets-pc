@@ -380,6 +380,9 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	RustDevice = Result.handle;
 	// Real SetSampler's MaxAnisotropy (SetTexture.cpp:159-160).
 	hp2_rs_wgpu_set_max_anisotropy( RustDevice, MaxAnisotropy );
+	// Real UseSRGBTextures framebuffer half (XOpenGL.cpp:1175-1176):
+	// linear swapchain unless it is set.
+	hp2_rs_wgpu_set_srgb_framebuffer( RustDevice, UseSRGBTextures != 0 );
 	debugf( NAME_Init, TEXT("WgpuDrv: adapter \"%ls\" backend %ls"),
 		*Utf8SpanToFString( Result.adapter_name, Result.adapter_name_len ),
 		*Utf8SpanToFString( Result.backend_name, Result.backend_name_len ) );
@@ -862,8 +865,9 @@ void UWgpuRenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineF
 		return;
 
 	// hp2_rs_wgpu_draw_2d_line's own doc has the full real-formula
-	// detail and the known, explicitly scoped gaps (LineFlags,
-	// HitTesting, PF_Highlighted blend mode -- none applied yet).
+	// detail. LineFlags select the depth state and the blend is the
+	// real fixed PF_Highlighted (draw::RenderState::for_line_flags);
+	// HitTesting is not applied yet.
 	// Color.W is not passed at all: the real source always forces it
 	// to 1.f before use (DrawSimple.cpp:64), so there is nothing a
 	// caller-supplied alpha could correctly mean. Frame->FX2/FY2 are
@@ -890,7 +894,8 @@ void UWgpuRenderDevice::Draw2DLine( FSceneNode* Frame, FPlane Color, DWORD LineF
 		P1.X, P1.Y, P1.Z,
 		P2.X, P2.Y, P2.Z,
 		Frame->FX2, Frame->FY2,
-		Color.X, Color.Y, Color.Z );
+		Color.X, Color.Y, Color.Z,
+		LineFlags );
 	unguard;
 }
 
@@ -901,11 +906,10 @@ void UWgpuRenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD Line
 		return;
 
 	// hp2_rs_wgpu_queue_point's own doc has the full real-formula
-	// detail and the known, explicitly scoped gaps (LineFlags,
-	// HitTesting, PF_Highlighted blend mode -- none applied yet, same
-	// category of gap Draw2DLine's own override already has). Color.W
-	// is not passed at all, same real reason Draw2DLine's own override
-	// already has (DrawSimple.cpp:166: "Unfortunately this is usually
+	// detail. LineFlags and the fixed PF_Highlighted blend are applied
+	// the same way as Draw2DLine's; HitTesting is not applied yet.
+	// Color.W is not passed at all, same real reason Draw2DLine's own
+	// override already has (DrawSimple.cpp:166: "Unfortunately this is usually
 	// set to 0"). Frame->FX2/FY2 are read straight off this call's own
 	// real Frame, not derived from whatever scene SetSceneNode last
 	// cached -- the real source's own Draw2DPoint does the same
@@ -920,13 +924,19 @@ void UWgpuRenderDevice::Draw2DPoint( FSceneNode* Frame, FPlane Color, DWORD Line
 	hp2_rs_wgpu_queue_point( RustDevice,
 		X1, Y1, X2, Y2, Z,
 		Frame->FX2, Frame->FY2,
-		Color.X, Color.Y, Color.Z );
+		Color.X, Color.Y, Color.Z,
+		LineFlags );
 	unguard;
 }
 
 void UWgpuRenderDevice::ClearZ( FSceneNode* Frame )
 {
 	guard(UWgpuRenderDevice::ClearZ);
+	// Real XOpenGL ClearZ (XOpenGL.cpp:3030-3042): flush queued draws,
+	// then clear depth to 1.0. Its non-macOS SetSceneNode(Frame) call
+	// is a workaround the macOS build skips too.
+	if( RustDevice )
+		hp2_rs_wgpu_clear_z( RustDevice );
 	unguard;
 }
 

@@ -1083,8 +1083,16 @@ enum BatchPayload {
 
 struct Batch {
     segment: usize,
+    /// Blend/color-mask/depth state every draw in this batch shares
+    /// (`draw::RenderState`). A change starts a new batch, matching
+    /// XOpenGL's flush on `WillBlendStateChange` (SetTexture.cpp:690-695)
+    /// and on a `LineFlags` change (DrawSimple.cpp:34-45).
+    state: draw::RenderState,
     payload: BatchPayload,
 }
+
+/// `RenderLoop`'s per-kind pipeline caches (`RenderLoop::line_pipelines`).
+type PipelineCache<P> = std::collections::HashMap<(wgpu::TextureFormat, draw::RenderState), P>;
 
 /// Per-`CreatedDevice` state that must persist across the
 /// `lock_frame`/`unlock_frame` pair (`UWgpuRenderDevice::Lock`/
@@ -1155,27 +1163,20 @@ pub struct RenderLoop {
     /// call for the whole frame sharing a single (wrong, per the
     /// `frame_uniforms_segments` field above) `FrameUniforms` buffer.
     batches: Vec<Batch>,
-    /// Lazily built on first use against whichever `color_format` the
-    /// first real in-progress frame actually has -- cached and
-    /// *checked* against that format on every later use (a `RenderLoop`
-    /// is only ever used against one `CreatedDevice`/surface for its
-    /// whole real lifetime, so a mismatch here would mean a real
-    /// caller bug, not a condition to silently handle).
-    line_pipeline: Option<(wgpu::TextureFormat, draw::SimpleLinePipeline)>,
-    /// Same lazy-build-and-check contract as `line_pipeline`, for
-    /// `queue_tile`'s own real draws.
-    tile_pipeline: Option<(wgpu::TextureFormat, draw::TilePipeline)>,
-    /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
-    /// pipeline`, for `queue_point`'s own real draws.
-    point_pipeline: Option<(wgpu::TextureFormat, draw::SimpleTrianglePipeline)>,
-    /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
-    /// pipeline`/`point_pipeline`, for `queue_triangles`' own real
-    /// draws.
-    gouraud_pipeline: Option<(wgpu::TextureFormat, draw::GouraudPipeline)>,
-    /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
-    /// pipeline`/`point_pipeline`/`gouraud_pipeline`, for `queue_
-    /// complex_surface`'s own real draws.
-    complex_pipeline: Option<(wgpu::TextureFormat, draw::ComplexPipeline)>,
+    /// One pipeline per `(color format, draw::RenderState)` actually
+    /// used, built lazily in `dispatch_batches` (wgpu bakes blend,
+    /// color mask and depth state into the pipeline, where XOpenGL
+    /// sets them as global GL state in `SetBlend`/`SetDepth`).
+    line_pipelines: PipelineCache<draw::SimpleLinePipeline>,
+    tile_pipelines: PipelineCache<draw::TilePipeline>,
+    point_pipelines: PipelineCache<draw::SimpleTrianglePipeline>,
+    gouraud_pipelines: PipelineCache<draw::GouraudPipeline>,
+    complex_pipelines: PipelineCache<draw::ComplexPipeline>,
+    /// `draw::DEPTH_FORMAT` depth buffer matching the in-progress
+    /// frame's color target size, (re)created by the frame-begin
+    /// functions and cleared to 1.0 there (XOpenGL.cpp:2528-2550) and
+    /// by `clear_z`.
+    depth_target: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// Real `BindMap`'s own role (`texture.rs`'s own `TextureCache`
     /// doc has the full real citation) -- persists across frames
     /// (unlike `batches`/`frame_uniforms_segments`, never cleared by
@@ -1194,6 +1195,9 @@ pub struct RenderLoop {
     /// `texture::anisotropy_clamp(MaxAnisotropy)`, applied to every
     /// smooth sampler (`set_max_anisotropy`).
     anisotropy_clamp: u16,
+    /// Real `UseSRGBTextures`: selects an sRGB-encoding swapchain
+    /// format (`surface_color_format`). Off by default, like XOpenGL.
+    srgb_framebuffer: bool,
     /// Lazily created once this `RenderLoop`'s whole lifetime (unlike
     /// `texture_cache`'s own real per-`CacheID` entries, never
     /// invalidated/replaced): a real 1x1 opaque white GPU texture,
@@ -1379,14 +1383,16 @@ impl RenderLoop {
             counts: FrameCounts::default(),
             frame_uniforms_segments: Vec::new(),
             batches: Vec::new(),
-            line_pipeline: None,
-            tile_pipeline: None,
-            point_pipeline: None,
-            gouraud_pipeline: None,
-            complex_pipeline: None,
+            line_pipelines: PipelineCache::new(),
+            tile_pipelines: PipelineCache::new(),
+            point_pipelines: PipelineCache::new(),
+            gouraud_pipelines: PipelineCache::new(),
+            complex_pipelines: PipelineCache::new(),
+            depth_target: None,
             texture_cache: texture::TextureCache::new(),
             samplers: std::collections::HashMap::new(),
             anisotropy_clamp: 1,
+            srgb_framebuffer: false,
             dummy_texture: None,
             last_scene: None,
             capture: None,
@@ -1414,6 +1420,15 @@ impl RenderLoop {
     /// (`backing_scale`'s own doc).
     pub fn set_backing_scale(&mut self, scale: f64) {
         self.backing_scale = scale;
+    }
+
+    /// Real `UseSRGBTextures` framebuffer half (`srgb_framebuffer`).
+    /// A change forces the next `lock_frame` to reconfigure the surface.
+    pub fn set_srgb_framebuffer(&mut self, srgb: bool) {
+        if srgb != self.srgb_framebuffer {
+            self.srgb_framebuffer = srgb;
+            self.configured_size = None;
+        }
     }
 
     /// Real `MaxAnisotropy` ini value (`texture::anisotropy_clamp`).
@@ -1444,6 +1459,49 @@ impl RenderLoop {
         self.samplers
             .get(&cached.sampler_key)
             .expect("dispatch_batches ensures every bound texture's sampler first")
+    }
+
+    /// `depth_target`'s view, (re)created when the frame's color target
+    /// size changed.
+    fn ensure_depth_target(
+        &mut self,
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+    ) -> &wgpu::TextureView {
+        let stale = self
+            .depth_target
+            .as_ref()
+            .is_none_or(|(texture, _)| texture.width() != width || texture.height() != height);
+        if stale {
+            self.depth_target = Some(draw::create_depth_target(device, width, height));
+        }
+        &self.depth_target.as_ref().expect("just ensured above").1
+    }
+
+    /// Real `UXOpenGLRenderDevice::ClearZ` (XOpenGL.cpp:3030-3042):
+    /// everything queued so far is drawn against the current depth
+    /// buffer first (`Shaders[ActiveProgram]->Flush(false)`), then the
+    /// depth buffer is cleared to 1.0. Both are recorded into the
+    /// frame's own encoder, so call order is preserved without a
+    /// submit. No-op without a frame in progress.
+    pub fn clear_z(&mut self, created: &CreatedDevice) {
+        let Some(mut frame) = self.in_progress.take() else {
+            return;
+        };
+        let batches = std::mem::take(&mut self.batches);
+        dispatch_batches(created, self, &mut frame, batches);
+        if let Some((_, depth_view)) = &self.depth_target {
+            let _clear_z_pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("hp2-wgpu ClearZ pass"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(depth_clear_attachment(depth_view)),
+                    ..Default::default()
+                });
+        }
+        self.in_progress = Some(frame);
     }
 
     pub fn counts(&self) -> FrameCounts {
@@ -1503,8 +1561,18 @@ impl RenderLoop {
     /// batch for this same segment, otherwise pushes a new one --
     /// `Batch`'s own doc has the full reasoning for why a segment
     /// change (not just a primitive-kind change) is also a real new-
-    /// batch boundary in this port's own design.
-    pub fn queue_line(&mut self, p1: [f32; 3], p2: [f32; 3], fx2: f32, fy2: f32, color: [f32; 4]) {
+    /// batch boundary in this port's own design. `line_flags`: the real
+    /// `LineFlags` (`draw::RenderState::for_line_flags`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn queue_line(
+        &mut self,
+        p1: [f32; 3],
+        p2: [f32; 3],
+        fx2: f32,
+        fy2: f32,
+        color: [f32; 4],
+        line_flags: u32,
+    ) {
         if self.in_progress.is_none() {
             return;
         }
@@ -1519,16 +1587,19 @@ impl RenderLoop {
             p2: draw_2d_line_screen_to_coords(scene, fx2, fy2, p2),
             color,
         };
+        let state = draw::RenderState::for_line_flags(line_flags);
         match self.batches.last_mut() {
             Some(Batch {
                 segment: last_segment,
+                state: last_state,
                 payload: BatchPayload::Lines(lines),
-            }) if *last_segment == segment => {
+            }) if *last_segment == segment && *last_state == state => {
                 lines.push(line);
             }
             _ => {
                 self.batches.push(Batch {
                     segment,
+                    state,
                     payload: BatchPayload::Lines(vec![line]),
                 });
             }
@@ -1621,16 +1692,23 @@ impl RenderLoop {
             ),
             draw_flags: draw::compute_tile_draw_flags(request.poly_flags),
         };
+        // DrawTile passes RemoveOccludeIfSolid=1 (DrawTile.cpp:139).
+        let state = draw::RenderState::for_poly_flags(request.poly_flags, true);
         match self.batches.last_mut() {
             Some(Batch {
                 segment: last_segment,
+                state: last_state,
                 payload: BatchPayload::Tiles { cache_id, entries },
-            }) if *last_segment == segment && *cache_id == request.cache_id => {
+            }) if *last_segment == segment
+                && *last_state == state
+                && *cache_id == request.cache_id =>
+            {
                 entries.push(tile);
             }
             _ => {
                 self.batches.push(Batch {
                     segment,
+                    state,
                     payload: BatchPayload::Tiles {
                         cache_id: request.cache_id,
                         entries: vec![tile],
@@ -1694,6 +1772,7 @@ impl RenderLoop {
         fx2: f32,
         fy2: f32,
         color: [f32; 3],
+        line_flags: u32,
     ) {
         if self.in_progress.is_none() {
             return;
@@ -1721,16 +1800,19 @@ impl RenderLoop {
             corners,
             color: [color[0], color[1], color[2], 1.0],
         };
+        let state = draw::RenderState::for_line_flags(line_flags);
         match self.batches.last_mut() {
             Some(Batch {
                 segment: last_segment,
+                state: last_state,
                 payload: BatchPayload::Points(points),
-            }) if *last_segment == segment => {
+            }) if *last_segment == segment && *last_state == state => {
                 points.push(point);
             }
             _ => {
                 self.batches.push(Batch {
                     segment,
+                    state,
                     payload: BatchPayload::Points(vec![point]),
                 });
             }
@@ -1836,16 +1918,23 @@ impl RenderLoop {
             draw_color: [0.0, 0.0, 0.0, texture_alpha],
             draw_flags: draw::compute_tile_draw_flags(request.poly_flags),
         };
+        // DrawGouraud passes RemoveOccludeIfSolid=0 (DrawGouraud.cpp:74).
+        let state = draw::RenderState::for_poly_flags(request.poly_flags, false);
         match self.batches.last_mut() {
             Some(Batch {
                 segment: last_segment,
+                state: last_state,
                 payload: BatchPayload::Triangles { cache_id, meshes },
-            }) if *last_segment == segment && *cache_id == request.cache_id => {
+            }) if *last_segment == segment
+                && *last_state == state
+                && *cache_id == request.cache_id =>
+            {
                 meshes.push(mesh);
             }
             _ => {
                 self.batches.push(Batch {
                     segment,
+                    state,
                     payload: BatchPayload::Triangles {
                         cache_id: request.cache_id,
                         meshes: vec![mesh],
@@ -2011,9 +2100,12 @@ impl RenderLoop {
             y_axis: request.y_axis,
             draw_flags,
         };
+        // DrawComplex passes RemoveOccludeIfSolid=0 (DrawComplex.cpp:64).
+        let state = draw::RenderState::for_poly_flags(request.poly_flags, false);
         match self.batches.last_mut() {
             Some(Batch {
                 segment: last_segment,
+                state: last_state,
                 payload:
                     BatchPayload::Complex {
                         diffuse_cache_id,
@@ -2022,6 +2114,7 @@ impl RenderLoop {
                         surfaces,
                     },
             }) if *last_segment == segment
+                && *last_state == state
                 && *diffuse_cache_id == request.diffuse.cache_id
                 && *last_light_map_cache_id == light_map_cache_id
                 && *last_fog_map_cache_id == fog_map_cache_id =>
@@ -2031,6 +2124,7 @@ impl RenderLoop {
             _ => {
                 self.batches.push(Batch {
                     segment,
+                    state,
                     payload: BatchPayload::Complex {
                         diffuse_cache_id: request.diffuse.cache_id,
                         light_map_cache_id,
@@ -2611,6 +2705,10 @@ pub fn lock_frame(
             return FrameOutcome::NoDefaultConfig;
         };
         config.present_mode = present_mode;
+        let formats = surface.get_capabilities(&created.adapter).formats;
+        if let Some(format) = surface_color_format(&formats, loop_state.srgb_framebuffer) {
+            config.format = format;
+        }
         // Capture reads the presented surface texture back, which needs
         // COPY_SRC on the swapchain textures -- requested only when
         // capture is actually on and the surface really supports it
@@ -2640,13 +2738,16 @@ pub fn lock_frame(
         }
         wgpu::CurrentSurfaceTexture::Occluded => {
             loop_state.counts.occluded += 1;
-            // Same format `get_default_config` picks (`formats[0]`), so a
-            // captured occluded frame matches a captured visible one.
+            // Same format the configure step above picks, so a captured
+            // occluded frame matches a captured visible one.
             if loop_state
                 .capture
                 .as_ref()
                 .is_some_and(capture::FrameCapture::is_enabled)
-                && let Some(&format) = surface.get_capabilities(&created.adapter).formats.first()
+                && let Some(format) = surface_color_format(
+                    &surface.get_capabilities(&created.adapter).formats,
+                    loop_state.srgb_framebuffer,
+                )
             {
                 begin_capture_only_frame(created, loop_state, width, height, format, clear_color);
             }
@@ -2684,6 +2785,14 @@ pub fn lock_frame(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("hp2-wgpu frame encoder"),
         });
+    // Depth cleared with the color every Lock (XOpenGL.cpp:2528-2546).
+    let depth_view = loop_state
+        .ensure_depth_target(
+            &created.device,
+            texture.texture.width(),
+            texture.texture.height(),
+        )
+        .clone();
     {
         let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("hp2-wgpu clear pass"),
@@ -2696,6 +2805,7 @@ pub fn lock_frame(
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(depth_clear_attachment(&depth_view)),
             ..Default::default()
         });
     }
@@ -2744,6 +2854,31 @@ pub fn resolve_present_mode(
     }
 }
 
+/// Swapchain color format: the surface's preferred format (`formats[0]`,
+/// what `get_default_config` picks) in its sRGB-encoding variant only
+/// when `srgb` is set. XOpenGL writes a linear framebuffer unless
+/// `UseSRGBTextures` enables `GL_FRAMEBUFFER_SRGB` (XOpenGL.cpp:
+/// 1175-1176); an sRGB swapchain would encode the already gamma-space
+/// shader output a second time and wash the image out. Falls back to
+/// `formats[0]` when the wanted variant is not supported. `None` only
+/// for an empty `formats`.
+pub fn surface_color_format(
+    formats: &[wgpu::TextureFormat],
+    srgb: bool,
+) -> Option<wgpu::TextureFormat> {
+    let preferred = *formats.first()?;
+    let wanted = if srgb {
+        preferred.add_srgb_suffix()
+    } else {
+        preferred.remove_srgb_suffix()
+    };
+    Some(if formats.contains(&wanted) {
+        wanted
+    } else {
+        preferred
+    })
+}
+
 /// Real `lock_frame`/`unlock_frame` encoder-and-draw-queue machinery,
 /// exercised against a caller-owned offscreen `&wgpu::Texture`
 /// instead of acquiring one from a real surface -- the real
@@ -2782,6 +2917,9 @@ pub fn begin_offscreen_frame(
         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("hp2-wgpu offscreen frame encoder"),
         });
+    let depth_view = loop_state
+        .ensure_depth_target(&created.device, target.width(), target.height())
+        .clone();
     {
         let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("hp2-wgpu offscreen clear pass"),
@@ -2794,6 +2932,7 @@ pub fn begin_offscreen_frame(
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(depth_clear_attachment(&depth_view)),
             ..Default::default()
         });
     }
@@ -2804,6 +2943,19 @@ pub fn begin_offscreen_frame(
         color_format: target.format(),
         suboptimal: false,
     });
+}
+
+/// Depth attachment that clears to 1.0 (`glClearDepth(1.0)` +
+/// `glClear(GL_DEPTH_BUFFER_BIT)`, XOpenGL.cpp:2528-2546/3039).
+fn depth_clear_attachment(view: &wgpu::TextureView) -> wgpu::RenderPassDepthStencilAttachment<'_> {
+    wgpu::RenderPassDepthStencilAttachment {
+        view,
+        depth_ops: Some(wgpu::Operations {
+            load: wgpu::LoadOp::Clear(1.0),
+            store: wgpu::StoreOp::Store,
+        }),
+        stencil_ops: None,
+    }
 }
 
 /// `FramePresentable::CaptureOnly`'s frame start: (re)uses
@@ -2871,31 +3023,43 @@ fn dispatch_batches(
     frame: &mut InProgressFrame,
     batches: Vec<Batch>,
 ) {
-    let needs_line_pipeline = batches
-        .iter()
-        .any(|b| matches!(b.payload, BatchPayload::Lines(_)))
-        && !matches!(
-            &loop_state.line_pipeline,
-            Some((format, _)) if *format == frame.color_format
-        );
-    if needs_line_pipeline {
-        loop_state.line_pipeline = Some((
-            frame.color_format,
-            draw::SimpleLinePipeline::new(&created.device, frame.color_format),
-        ));
-    }
-    let needs_tile_pipeline = batches
-        .iter()
-        .any(|b| matches!(b.payload, BatchPayload::Tiles { .. }))
-        && !matches!(
-            &loop_state.tile_pipeline,
-            Some((format, _)) if *format == frame.color_format
-        );
-    if needs_tile_pipeline {
-        loop_state.tile_pipeline = Some((
-            frame.color_format,
-            draw::TilePipeline::new(&created.device, frame.color_format),
-        ));
+    // Every (kind, format, RenderState) a batch uses needs its own
+    // pipeline (RenderLoop::line_pipelines' own doc).
+    let format = frame.color_format;
+    let device = &created.device;
+    for batch in &batches {
+        let key = (format, batch.state);
+        match &batch.payload {
+            BatchPayload::Lines(_) => {
+                loop_state
+                    .line_pipelines
+                    .entry(key)
+                    .or_insert_with(|| draw::SimpleLinePipeline::new(device, format, batch.state));
+            }
+            BatchPayload::Tiles { .. } => {
+                loop_state
+                    .tile_pipelines
+                    .entry(key)
+                    .or_insert_with(|| draw::TilePipeline::new(device, format, batch.state));
+            }
+            BatchPayload::Points(_) => {
+                loop_state.point_pipelines.entry(key).or_insert_with(|| {
+                    draw::SimpleTrianglePipeline::new(device, format, batch.state)
+                });
+            }
+            BatchPayload::Triangles { .. } => {
+                loop_state
+                    .gouraud_pipelines
+                    .entry(key)
+                    .or_insert_with(|| draw::GouraudPipeline::new(device, format, batch.state));
+            }
+            BatchPayload::Complex { .. } => {
+                loop_state
+                    .complex_pipelines
+                    .entry(key)
+                    .or_insert_with(|| draw::ComplexPipeline::new(device, format, batch.state));
+            }
+        }
     }
     // Every resident texture a batch will bind needs its own key's
     // sampler (RenderLoop::samplers' own doc).
@@ -2946,54 +3110,20 @@ fn dispatch_batches(
             false,
         ));
     }
-    let needs_point_pipeline = batches
-        .iter()
-        .any(|b| matches!(b.payload, BatchPayload::Points(_)))
-        && !matches!(
-            &loop_state.point_pipeline,
-            Some((format, _)) if *format == frame.color_format
-        );
-    if needs_point_pipeline {
-        loop_state.point_pipeline = Some((
-            frame.color_format,
-            draw::SimpleTrianglePipeline::new(&created.device, frame.color_format),
-        ));
-    }
-    let needs_gouraud_pipeline = batches
-        .iter()
-        .any(|b| matches!(b.payload, BatchPayload::Triangles { .. }))
-        && !matches!(
-            &loop_state.gouraud_pipeline,
-            Some((format, _)) if *format == frame.color_format
-        );
-    if needs_gouraud_pipeline {
-        loop_state.gouraud_pipeline = Some((
-            frame.color_format,
-            draw::GouraudPipeline::new(&created.device, frame.color_format),
-        ));
-    }
-    let needs_complex_pipeline = batches
-        .iter()
-        .any(|b| matches!(b.payload, BatchPayload::Complex { .. }))
-        && !matches!(
-            &loop_state.complex_pipeline,
-            Some((format, _)) if *format == frame.color_format
-        );
-    if needs_complex_pipeline {
-        loop_state.complex_pipeline = Some((
-            frame.color_format,
-            draw::ComplexPipeline::new(&created.device, frame.color_format),
-        ));
-    }
 
+    // lock_frame/begin_offscreen_frame always create it before any
+    // frame can be in progress.
+    let depth_target = &loop_state
+        .depth_target
+        .as_ref()
+        .expect("the frame-begin functions create the depth target")
+        .1;
     for batch in &batches {
+        let key = (format, batch.state);
         let buffer = &loop_state.frame_uniforms_segments[batch.segment];
         match &batch.payload {
             BatchPayload::Lines(lines) => {
-                let (_, pipeline) = loop_state
-                    .line_pipeline
-                    .as_ref()
-                    .expect("line_pipeline was just ensured above");
+                let pipeline = &loop_state.line_pipelines[&key];
                 let mut vertices = Vec::new();
                 let mut draw_params: Vec<draw::DrawParams> = Vec::new();
                 for line in lines {
@@ -3011,6 +3141,7 @@ fn dispatch_batches(
                                 vertices: &vertices,
                                 draw_params: &draw_params,
                                 target: &frame.view,
+                                depth_target,
                                 load: wgpu::LoadOp::Load,
                             },
                         );
@@ -3040,6 +3171,7 @@ fn dispatch_batches(
                             vertices: &vertices,
                             draw_params: &draw_params,
                             target: &frame.view,
+                            depth_target,
                             load: wgpu::LoadOp::Load,
                         },
                     );
@@ -3053,10 +3185,7 @@ fn dispatch_batches(
                 let Some(cached) = loop_state.texture_cache.get(*cache_id) else {
                     continue;
                 };
-                let (_, pipeline) = loop_state
-                    .tile_pipeline
-                    .as_ref()
-                    .expect("tile_pipeline was just ensured above");
+                let pipeline = &loop_state.tile_pipelines[&key];
                 let sampler = loop_state.sampler_for(cached);
                 let mut vertices: Vec<draw::TileVertex> = Vec::new();
                 let mut draw_params: Vec<draw::TileDrawParams> = Vec::new();
@@ -3076,6 +3205,7 @@ fn dispatch_batches(
                                 texture_view: &cached.view,
                                 sampler,
                                 target: &frame.view,
+                                depth_target,
                                 load: wgpu::LoadOp::Load,
                             },
                         );
@@ -3140,16 +3270,14 @@ fn dispatch_batches(
                             texture_view: &cached.view,
                             sampler,
                             target: &frame.view,
+                            depth_target,
                             load: wgpu::LoadOp::Load,
                         },
                     );
                 }
             }
             BatchPayload::Points(points) => {
-                let (_, pipeline) = loop_state
-                    .point_pipeline
-                    .as_ref()
-                    .expect("point_pipeline was just ensured above");
+                let pipeline = &loop_state.point_pipelines[&key];
                 let mut vertices: Vec<draw::LineVertex> = Vec::new();
                 let mut draw_params: Vec<draw::DrawParams> = Vec::new();
                 for point in points {
@@ -3165,6 +3293,7 @@ fn dispatch_batches(
                                 vertices: &vertices,
                                 draw_params: &draw_params,
                                 target: &frame.view,
+                                depth_target,
                                 load: wgpu::LoadOp::Load,
                             },
                         );
@@ -3219,6 +3348,7 @@ fn dispatch_batches(
                             vertices: &vertices,
                             draw_params: &draw_params,
                             target: &frame.view,
+                            depth_target,
                             load: wgpu::LoadOp::Load,
                         },
                     );
@@ -3230,10 +3360,7 @@ fn dispatch_batches(
                 let Some(cached) = loop_state.texture_cache.get(*cache_id) else {
                     continue;
                 };
-                let (_, pipeline) = loop_state
-                    .gouraud_pipeline
-                    .as_ref()
-                    .expect("gouraud_pipeline was just ensured above");
+                let pipeline = &loop_state.gouraud_pipelines[&key];
                 let sampler = loop_state.sampler_for(cached);
                 let mut vertices: Vec<draw::GouraudVertex> = Vec::new();
                 let mut draw_params: Vec<draw::GouraudDrawParams> = Vec::new();
@@ -3256,6 +3383,7 @@ fn dispatch_batches(
                                 texture_view: &cached.view,
                                 sampler,
                                 target: &frame.view,
+                                depth_target,
                                 load: wgpu::LoadOp::Load,
                             },
                         );
@@ -3289,6 +3417,7 @@ fn dispatch_batches(
                             texture_view: &cached.view,
                             sampler,
                             target: &frame.view,
+                            depth_target,
                             load: wgpu::LoadOp::Load,
                         },
                     );
@@ -3308,10 +3437,7 @@ fn dispatch_batches(
                 let Some(diffuse_cached) = loop_state.texture_cache.get(*diffuse_cache_id) else {
                     continue;
                 };
-                let (_, pipeline) = loop_state
-                    .complex_pipeline
-                    .as_ref()
-                    .expect("complex_pipeline was just ensured above");
+                let pipeline = &loop_state.complex_pipelines[&key];
                 let sampler = loop_state.sampler_for(diffuse_cached);
                 // A real light-map/fog-map cache_id here is always
                 // already resident (queue_complex_surface only ever
@@ -3363,6 +3489,7 @@ fn dispatch_batches(
                                 fog_map_texture_view: fog_map_view,
                                 fog_map_sampler,
                                 target: &frame.view,
+                                depth_target,
                                 load: wgpu::LoadOp::Load,
                             },
                         );
@@ -3401,6 +3528,7 @@ fn dispatch_batches(
                             fog_map_texture_view: fog_map_view,
                             fog_map_sampler,
                             target: &frame.view,
+                            depth_target,
                             load: wgpu::LoadOp::Load,
                         },
                     );
@@ -4205,6 +4333,7 @@ mod tests {
             50.0,
             50.0,
             [0.0, 1.0, 0.0, 1.0],
+            0,
         );
         // Real unlock_frame: flushes the queued line into the frame's
         // own still-unsubmitted encoder (Load mode, after the clear),
@@ -4748,7 +4877,7 @@ mod tests {
         // Python) before relying on it: top_left=(-1.0,-0.01,1),
         // top_right=(0.0,-0.01,1), bottom_right=(0.0,0.01,1),
         // bottom_left=(-1.0,0.01,1).
-        loop_state.queue_point(0.5, 50.0, 49.5, 50.0, 1.0, 50.0, 50.0, [0.0, 1.0, 0.0]);
+        loop_state.queue_point(0.5, 50.0, 49.5, 50.0, 1.0, 50.0, 50.0, [0.0, 1.0, 0.0], 0);
         let did_unlock = unlock_frame(&created, &mut loop_state, false);
         assert!(
             did_unlock,
@@ -5298,6 +5427,7 @@ mod tests {
             50.0,
             50.0,
             [0.0, 1.0, 0.0, 1.0],
+            0,
         );
         let did_unlock = unlock_frame(&created, &mut loop_state, false);
         assert!(did_unlock);
@@ -5435,6 +5565,7 @@ mod tests {
             50.0,
             50.0,
             [0.0, 1.0, 0.0, 1.0],
+            0,
         );
 
         // Segment 1: a genuinely different modelviewproj_mat -- same
@@ -5467,6 +5598,7 @@ mod tests {
             50.0,
             50.0,
             [1.0, 0.0, 0.0, 1.0],
+            0,
         );
 
         unlock_frame(&created, &mut loop_state, false);
@@ -5609,6 +5741,7 @@ mod tests {
                 50.0,
                 50.0,
                 [0.0, 0.0, 1.0, 1.0],
+                0,
             );
         }
         // The 257th line: P1=(50,50,1)-P2=(100,50,1) -> NDC x in
@@ -5622,6 +5755,7 @@ mod tests {
             50.0,
             50.0,
             [0.0, 1.0, 0.0, 1.0],
+            0,
         );
         unlock_frame(&created, &mut loop_state, false);
         created
@@ -5866,6 +6000,29 @@ mod tests {
             resolve_present_mode(wgpu::PresentMode::Fifo, &[]),
             wgpu::PresentMode::Fifo
         );
+    }
+
+    #[test]
+    fn surface_color_format_is_linear_unless_srgb_is_requested() {
+        use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb, Rgba16Float};
+        // Preferred sRGB format, linear twin available: linear by default.
+        let caps = [Bgra8UnormSrgb, Bgra8Unorm, Rgba16Float];
+        assert_eq!(surface_color_format(&caps, false), Some(Bgra8Unorm));
+        assert_eq!(surface_color_format(&caps, true), Some(Bgra8UnormSrgb));
+        // Preferred linear format: sRGB twin chosen only on request.
+        let caps = [Bgra8Unorm, Bgra8UnormSrgb];
+        assert_eq!(surface_color_format(&caps, false), Some(Bgra8Unorm));
+        assert_eq!(surface_color_format(&caps, true), Some(Bgra8UnormSrgb));
+        // Wanted twin unsupported: keep the preferred format.
+        assert_eq!(
+            surface_color_format(&[Bgra8UnormSrgb], false),
+            Some(Bgra8UnormSrgb)
+        );
+        assert_eq!(
+            surface_color_format(&[Rgba16Float], true),
+            Some(Rgba16Float)
+        );
+        assert_eq!(surface_color_format(&[], false), None);
     }
 
     // Pins the Rust half of the real C++/Rust FFI contract
@@ -7403,6 +7560,259 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             pixel(52),
             &[0u8, 0, 255, 255],
             "expected U to repeat: blue at column 52, full row {row:?}"
+        );
+    }
+
+    /// Creates the 64x1 `Rgba8Unorm` target the tile blend/depth tests draw into.
+    fn new_64px_target(created: &CreatedDevice) -> wgpu::Texture {
+        created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop tile blend/depth test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        })
+    }
+
+    /// `begin_offscreen_frame` plus the reference scene and an identity
+    /// modelviewproj (frame uniforms offset 256), so a tile's `(x, y, z)`
+    /// reaches clip space unchanged and its depth is `z`.
+    fn begin_identity_frame(
+        created: &CreatedDevice,
+        loop_state: &mut RenderLoop,
+        target: &wgpu::Texture,
+        clear_color: wgpu::Color,
+    ) {
+        begin_offscreen_frame(created, loop_state, target, clear_color);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+    }
+
+    /// Tile over the whole 64-column row (`fx2=50`, `xl=100`, `y=49.5`,
+    /// `yl=1`), sampling texel (0,0) of `cache_id`. Its coverage scales with `z`,
+    /// so 0.5 covers the middle 32 columns, including column 32.
+    fn full_row_tile(cache_id: u64, z: f32, poly_flags: u32) -> TileDrawRequest {
+        TileDrawRequest {
+            cache_id,
+            x: 0.0,
+            y: 49.5,
+            xl: 100.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z,
+            color: [1.0, 1.0, 1.0, 1.0],
+            poly_flags,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        }
+    }
+
+    /// Copies the 64x1 target's row back to the CPU (256 bytes, RGBA8).
+    fn read_64px_row(created: &CreatedDevice, target: &wgpu::Texture) -> Vec<u8> {
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop tile blend/depth test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop tile blend/depth test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+        mapped[..256].to_vec()
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn translucent_tile_blends_one_one_minus_src_color() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        begin_identity_frame(
+            &created,
+            &mut loop_state,
+            &target,
+            wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.5,
+                a: 1.0,
+            },
+        );
+        loop_state.upload_texture(
+            &created,
+            301,
+            1,
+            1,
+            &[128, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        // PF_Translucent (0x4) -> DF_TRANSLUCENT; no alpha test, so the
+        // fragment is texel * draw_color = (128/255, 0, 0, 1). SetBlend's
+        // translucent case is ONE, ONE_MINUS_SRC_COLOR, per channel:
+        //   R: 0.502 * 1 + dst.r * (1 - 0.502), dst.r = 0    -> 128
+        //   G: 0 * 1 + dst.g * 1, dst.g = 0                  -> 0
+        //   B: 0 * 1 + dst.b * (1 - 0), dst.b = 0.5 (clear)  -> 128
+        //   A: 1 * 1 + dst.a * (1 - 1), dst.a = 1            -> 255
+        loop_state.queue_tile(full_row_tile(301, 1.0, 0x4));
+        assert!(
+            unlock_frame(&created, &mut loop_state, false),
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        let row = read_64px_row(&created, &target);
+        let pixel = &row[32 * 4..32 * 4 + 4];
+        println!("translucent tile pixel 32 = {pixel:?}");
+        for (channel, (got, want)) in pixel.iter().copied().zip([128u8, 0, 128, 255]).enumerate() {
+            assert!(
+                got.abs_diff(want) <= 2,
+                "channel {channel}: expected {want} +-2, got {got}, full row {row:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn opaque_tiles_depth_test_less_equal() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+        loop_state.upload_texture(
+            &created,
+            302,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        loop_state.upload_texture(
+            &created,
+            303,
+            1,
+            1,
+            &[0, 0, 255, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        // Depth is z (identity modelviewproj), cleared to 1.0. Smaller z is
+        // nearer. The near red tile (0.5) writes depth; the far blue tile
+        // (0.9) fails LessEqual against it, so red stays.
+        loop_state.queue_tile(full_row_tile(302, 0.5, 0));
+        loop_state.queue_tile(full_row_tile(303, 0.9, 0));
+        assert!(
+            unlock_frame(&created, &mut loop_state, false),
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        let row = read_64px_row(&created, &target);
+        assert_eq!(
+            &row[32 * 4..32 * 4 + 4],
+            &[255u8, 0, 0, 255],
+            "expected the nearer red tile at column 32 to survive the farther blue one, full row {row:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn clear_z_lets_later_far_tiles_draw_over_earlier_near_ones() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+        loop_state.upload_texture(
+            &created,
+            304,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        loop_state.upload_texture(
+            &created,
+            305,
+            1,
+            1,
+            &[0, 0, 255, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        // Same tiles as opaque_tiles_depth_test_less_equal, with ClearZ
+        // between them: the depth buffer is back at 1.0, so the far blue
+        // tile passes LessEqual and overwrites the red one.
+        loop_state.queue_tile(full_row_tile(304, 0.5, 0));
+        loop_state.clear_z(&created);
+        loop_state.queue_tile(full_row_tile(305, 0.9, 0));
+        assert!(
+            unlock_frame(&created, &mut loop_state, false),
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        let row = read_64px_row(&created, &target);
+        assert_eq!(
+            &row[32 * 4..32 * 4 + 4],
+            &[0u8, 0, 255, 255],
+            "expected blue to overwrite red at column 32 after clear_z, full row {row:?}"
         );
     }
 }

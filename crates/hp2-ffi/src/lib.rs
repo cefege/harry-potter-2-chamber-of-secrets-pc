@@ -2986,6 +2986,26 @@ pub unsafe extern "C" fn hp2_rs_wgpu_set_max_anisotropy(handle: *mut c_void, max
     })
 }
 
+/// Applies the real `UseSRGBTextures` framebuffer half: `true` selects
+/// an sRGB-encoding swapchain format (`hp2_wgpu::RenderLoop::
+/// set_srgb_framebuffer`, XOpenGL.cpp:1175-1176). Called by
+/// `WgpuDrv.cpp`'s `Init`.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not yet
+/// destroyed), or null (a no-op).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_set_srgb_framebuffer(handle: *mut c_void, srgb: bool) {
+    guard("hp2_rs_wgpu_set_srgb_framebuffer", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.set_srgb_framebuffer(srgb);
+    })
+}
+
 /// Replaces the frame-outcome-reporting half of
 /// `UWgpuRenderDevice::Exit`. Returns the live tally of every
 /// `hp2_rs_wgpu_lock` outcome since `handle` was created
@@ -3066,18 +3086,13 @@ pub unsafe extern "C" fn hp2_rs_wgpu_set_scene_node(
 /// this is usually set to 0"), so there is nothing a caller-supplied
 /// alpha could correctly mean.
 ///
-/// Known, explicitly scoped gaps, not silently pretended away:
-/// `LineFlags` (depth-cueing etc.) is not a parameter here and has no
-/// effect yet -- the real per-draw depth/blend pipeline-state axis
-/// (`SetBlend`'s seven real combinations, this crate's own module doc
-/// already has the full read) is not built. The real source's
-/// `HitTesting()` override (substituting `HitColor` for `Color`
-/// during an editor hit-test pass) is not applied either -- no
-/// hit-testing readback exists on this render device yet (tracked
-/// separately). `BlendMode = PF_Highlighted` (fixed, not configurable,
-/// in the real source) is not applied -- `SimpleLinePipeline`'s own
-/// doc already states its fixed opaque-replace blend state is a
-/// known, explicit first-proof limitation.
+/// `line_flags`: the real `LineFlags`. `LINE_DepthCued` selects
+/// depth-tested, depth-writing lines; otherwise depth is ignored. The
+/// blend is the real fixed `BlendMode = PF_Highlighted`
+/// (`hp2_wgpu::draw::RenderState::for_line_flags`). Not applied yet:
+/// the real `HitTesting()` override (substituting `HitColor` for
+/// `Color` during an editor hit-test pass); hit-testing readback is
+/// tracked separately.
 ///
 /// No-op (not a crash) on a null `handle`, when `handle` has no frame
 /// in progress, or when no `hp2_rs_wgpu_set_scene_node` call has ever
@@ -3103,6 +3118,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_draw_2d_line(
     r: f32,
     g: f32,
     b: f32,
+    line_flags: u32,
 ) {
     guard("hp2_rs_wgpu_draw_2d_line", (), move || {
         if handle.is_null() {
@@ -3116,7 +3132,27 @@ pub unsafe extern "C" fn hp2_rs_wgpu_draw_2d_line(
             fy2,
             // Color.W forced to 1.0 -- see this function's own doc.
             [r, g, b, 1.0],
+            line_flags,
         );
+    })
+}
+
+/// Replaces `UXOpenGLRenderDevice::ClearZ` (`hp2_wgpu::RenderLoop::
+/// clear_z`): draws everything queued so far, then clears the depth
+/// buffer to 1.0. No-op without a frame in progress.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_clear_z(handle: *mut c_void) {
+    guard("hp2_rs_wgpu_clear_z", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.clear_z(&handle.created);
     })
 }
 
@@ -3640,11 +3676,9 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_tile(
 /// 2d_line`'s own doc already states for lines (`DrawSimple.cpp:166`:
 /// `Color.W = 1.f; //Unfortunately this is usually set to 0.`).
 ///
-/// Known, explicitly scoped gaps, not silently pretended away, same
-/// category `hp2_rs_wgpu_draw_2d_line`'s own doc already names for
-/// lines: `LineFlags`, the real `HitTesting() ? HitColor : Color`
-/// substitution, and the real fixed `BlendMode = PF_Highlighted`
-/// (`DrawSimple.cpp:166-168`) are not applied yet.
+/// `line_flags`: same as `hp2_rs_wgpu_draw_2d_line`'s (depth state
+/// from `LINE_DepthCued`, fixed `PF_Highlighted` blend). The
+/// `HitTesting() ? HitColor : Color` substitution is not applied yet.
 ///
 /// # Safety
 /// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
@@ -3663,6 +3697,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_point(
     r: f32,
     g: f32,
     b: f32,
+    line_flags: u32,
 ) {
     guard("hp2_rs_wgpu_queue_point", (), move || {
         if handle.is_null() {
@@ -3671,7 +3706,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_point(
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
         handle
             .render_loop
-            .queue_point(x1, y1, x2, y2, z, fx2, fy2, [r, g, b]);
+            .queue_point(x1, y1, x2, y2, z, fx2, fy2, [r, g, b], line_flags);
     })
 }
 

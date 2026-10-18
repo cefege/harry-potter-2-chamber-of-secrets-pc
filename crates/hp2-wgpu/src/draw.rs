@@ -76,6 +76,9 @@ pub struct LineDrawCall<'a> {
     pub vertices: &'a [LineVertex],
     pub draw_params: &'a [DrawParams],
     pub target: &'a wgpu::TextureView,
+    /// Depth target. The caller clears it to 1.0 before the first draw
+    /// of a frame; the pass only loads and stores it.
+    pub depth_target: &'a wgpu::TextureView,
     /// The real `wgpu::LoadOp<wgpu::Color>` -- `Clear(color)` to
     /// start a fresh target (this crate's own first offscreen-
     /// readback test still uses this), or `Load` to draw on top of
@@ -106,6 +109,181 @@ pub struct LineDrawCall<'a> {
     pub load: wgpu::LoadOp<wgpu::Color>,
 }
 
+/// Depth format every pipeline in this module attaches.
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// Creates a `DEPTH_FORMAT` target of `width` x `height` for the color
+/// target. The caller clears it; pipelines only load and store it.
+pub fn create_depth_target(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("draw.rs depth target"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+// PolyFlags and LINE_* bits from Engine/Inc/UnObj.h and UnRender.h.
+const PF_INVISIBLE: u32 = 0x0000_0001;
+const PF_TRANSLUCENT: u32 = 0x0000_0004;
+const PF_MODULATED: u32 = 0x0000_0040;
+const PF_LUMOS_AFFECTED: u32 = 0x0080_0040;
+const PF_HIGHLIGHTED: u32 = 0x1000_0000;
+const PF_OCCLUDE: u32 = 0x8000_0000;
+const LINE_DEPTH_CUED: u32 = 0x0000_0002;
+
+/// Per-draw blend, color-mask and depth state (XOpenGL `SetBlend` and
+/// `SetDepth`). Each distinct value needs its own pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RenderState {
+    /// `None` is opaque replace.
+    pub blend: Option<wgpu::BlendState>,
+    pub color_write: bool,
+    pub depth_write: bool,
+    pub depth_compare: wgpu::CompareFunction,
+}
+
+impl RenderState {
+    /// Opaque replace, depth tested and written.
+    pub const OPAQUE: Self = Self {
+        blend: None,
+        color_write: true,
+        depth_write: true,
+        depth_compare: wgpu::CompareFunction::LessEqual,
+    };
+
+    /// State for a surface or tile from its `PolyFlags`.
+    /// `remove_occlude_if_solid` is set by tile draws only.
+    pub fn for_poly_flags(poly_flags: u32, remove_occlude_if_solid: bool) -> Self {
+        let mut flags = poly_flags;
+        if flags & (PF_TRANSLUCENT | PF_MODULATED | PF_HIGHLIGHTED) == 0 {
+            flags |= PF_OCCLUDE;
+        } else if remove_occlude_if_solid {
+            flags &= !PF_OCCLUDE;
+        }
+        Self {
+            blend: blend_for_poly_flags(flags),
+            color_write: flags & PF_INVISIBLE == 0,
+            depth_write: flags & PF_OCCLUDE != 0,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+        }
+    }
+
+    /// State for a line from its `LINE_*` flags. Lines always blend as
+    /// `PF_Highlighted`; only `LINE_DepthCued` lines test and write depth.
+    pub fn for_line_flags(line_flags: u32) -> Self {
+        let depth_cued = line_flags & LINE_DEPTH_CUED != 0;
+        Self {
+            blend: blend_for_poly_flags(PF_HIGHLIGHTED),
+            color_write: true,
+            depth_write: depth_cued,
+            depth_compare: if depth_cued {
+                wgpu::CompareFunction::LessEqual
+            } else {
+                wgpu::CompareFunction::Always
+            },
+        }
+    }
+
+    /// Color target for a pipeline that renders into `format`.
+    pub fn color_target(self, format: wgpu::TextureFormat) -> wgpu::ColorTargetState {
+        wgpu::ColorTargetState {
+            format,
+            blend: self.blend,
+            write_mask: if self.color_write {
+                wgpu::ColorWrites::ALL
+            } else {
+                wgpu::ColorWrites::empty()
+            },
+        }
+    }
+
+    /// Depth state over `DEPTH_FORMAT`, with default stencil and bias.
+    pub fn depth_stencil(self) -> wgpu::DepthStencilState {
+        wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(self.depth_write),
+            depth_compare: Some(self.depth_compare),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }
+    }
+}
+
+/// Depth load op paired with a pass's color `load`: a pass that clears
+/// its color target starts a fresh frame, so it clears depth to 1.0 too
+/// (XOpenGL clears both together, XOpenGL.cpp:2544-2546); any other
+/// pass keeps the depth already drawn.
+fn depth_load_for(load: wgpu::LoadOp<wgpu::Color>) -> wgpu::LoadOp<f32> {
+    match load {
+        wgpu::LoadOp::Clear(_) => wgpu::LoadOp::Clear(1.0),
+        _ => wgpu::LoadOp::Load,
+    }
+}
+
+/// Blend state for `poly_flags`, first match wins (XOpenGL `SetBlend`).
+/// `None` is opaque replace.
+fn blend_for_poly_flags(poly_flags: u32) -> Option<wgpu::BlendState> {
+    use wgpu::BlendFactor as F;
+    let (src, dst) = if poly_flags & PF_LUMOS_AFFECTED == PF_LUMOS_AFFECTED {
+        (F::OneMinusSrcAlpha, F::SrcAlpha)
+    } else if poly_flags & PF_INVISIBLE != 0 {
+        (F::Zero, F::One)
+    } else if poly_flags & PF_HIGHLIGHTED != 0 {
+        let src = if poly_flags & PF_TRANSLUCENT != 0 {
+            F::SrcAlpha
+        } else {
+            F::One
+        };
+        (src, F::OneMinusSrcAlpha)
+    } else if poly_flags & PF_TRANSLUCENT != 0 {
+        (F::One, F::OneMinusSrc)
+    } else if poly_flags & PF_MODULATED != 0 {
+        (F::Dst, F::Src)
+    } else {
+        return None;
+    };
+    Some(wgpu::BlendState {
+        color: wgpu::BlendComponent {
+            src_factor: src,
+            dst_factor: dst,
+            operation: wgpu::BlendOperation::Add,
+        },
+        alpha: wgpu::BlendComponent {
+            src_factor: alpha_factor(src),
+            dst_factor: alpha_factor(dst),
+            operation: wgpu::BlendOperation::Add,
+        },
+    })
+}
+
+/// Alpha-channel factor matching a color factor. GL applies the same
+/// blend function to alpha; wgpu needs the alpha factor spelled out.
+fn alpha_factor(factor: wgpu::BlendFactor) -> wgpu::BlendFactor {
+    use wgpu::BlendFactor as F;
+    match factor {
+        F::Src => F::SrcAlpha,
+        F::OneMinusSrc => F::OneMinusSrcAlpha,
+        F::Dst => F::DstAlpha,
+        F::OneMinusDst => F::OneMinusDstAlpha,
+        other => other,
+    }
+}
+
 /// One real, lazily-built `simple.wgsl` pipeline plus the two bind-
 /// group layouts `layout: None` derives for it from the shader's own
 /// `@group(0)`/`@group(1)` declarations -- kept so a real caller can
@@ -119,15 +297,14 @@ pub struct SimpleLinePipeline {
 }
 
 impl SimpleLinePipeline {
-    /// Builds the real pipeline against `color_format` (the real
-    /// target this pipeline will later render into -- `layout: None`
-    /// plus a fixed `ColorTargetState::blend: None` opaque-replace
-    /// blend state; `None` not an oversight, but this slice's own
-    /// honest scope: the real per-draw blend-state axis
-    /// (`SetBlend`'s seven real combinations, this crate's own module
-    /// doc already has the full read) is not wired here yet, only a
-    /// fixed-opaque first proof).
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    /// Builds the pipeline for `color_format`, the real target this
+    /// pipeline renders into. `state` supplies the blend, color-mask and
+    /// depth state; each distinct `RenderState` needs its own pipeline.
+    pub fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        state: RenderState,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("simple.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(SIMPLE_WGSL_SOURCE.into()),
@@ -165,17 +342,13 @@ impl SimpleLinePipeline {
                 topology: wgpu::PrimitiveTopology::LineList,
                 ..wgpu::PrimitiveState::default()
             },
-            depth_stencil: None,
+            depth_stencil: Some(state.depth_stencil()),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
             cache: None,
@@ -218,6 +391,7 @@ impl SimpleLinePipeline {
             vertices,
             draw_params,
             target,
+            depth_target,
             load,
         } = call;
         assert!(
@@ -289,6 +463,14 @@ impl SimpleLinePipeline {
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_target,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load_for(load),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
@@ -348,12 +530,15 @@ pub struct SimpleTrianglePipeline {
 }
 
 impl SimpleTrianglePipeline {
-    /// Same real contract as `SimpleLinePipeline::new` (that method's
-    /// own doc has the full reasoning for `layout: None`/fixed
-    /// `blend: None`) -- `primitive.topology` is the one real
-    /// difference, `TriangleList` matching `DrawSimpleTriangleProgram`'s
-    /// own real `GL_TRIANGLES` `DrawMode`.
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    /// Same contract as `SimpleLinePipeline::new`: `state` supplies the
+    /// blend, color-mask and depth state. `primitive.topology` is
+    /// `TriangleList`, matching `DrawSimpleTriangleProgram`'s
+    /// `GL_TRIANGLES` `DrawMode`.
+    pub fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        state: RenderState,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("simple.wgsl (draw.rs triangle production)"),
             source: wgpu::ShaderSource::Wgsl(SIMPLE_WGSL_SOURCE.into()),
@@ -387,17 +572,13 @@ impl SimpleTrianglePipeline {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 ..wgpu::PrimitiveState::default()
             },
-            depth_stencil: None,
+            depth_stencil: Some(state.depth_stencil()),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
             cache: None,
@@ -428,6 +609,7 @@ impl SimpleTrianglePipeline {
             vertices,
             draw_params,
             target,
+            depth_target,
             load,
         } = call;
         assert!(
@@ -492,6 +674,14 @@ impl SimpleTrianglePipeline {
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_target,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load_for(load),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
@@ -892,6 +1082,8 @@ pub struct TileDrawCall<'a> {
     pub texture_view: &'a wgpu::TextureView,
     pub sampler: &'a wgpu::Sampler,
     pub target: &'a wgpu::TextureView,
+    /// Depth target; see `LineDrawCall::depth_target`.
+    pub depth_target: &'a wgpu::TextureView,
     /// Same real correctness contract as `LineDrawCall::load` --
     /// `Load` plus recording into the live frame's own still-
     /// unsubmitted `CommandEncoder` (via `record`, never `render`)
@@ -904,34 +1096,7 @@ pub struct TileDrawCall<'a> {
 /// uniforms, `@group(1)` draw params, `@group(2)` diffuse texture/
 /// sampler), same reasoning as `SimpleLinePipeline`.
 ///
-/// Known, explicitly scoped limitation, not silently pretended away:
-/// a single fixed `blend: None` (opaque-replace) state, not the real
-/// `SetBlend`'s own seven `PolyFlags`-driven combinations (this
-/// crate's own module doc already has the full read of those).
-/// `None`, not a fixed alpha-blend state -- an earlier version of
-/// this pipeline used `BlendState::ALPHA_BLENDING` unconditionally,
-/// which is wrong for the common case, not just imprecise (caught on
-/// review): real `SetBlend` only enables blending for `PF_Translucent`/
-/// `PF_Modulated`/`PF_Highlighted` tiles -- an ordinary opaque tile
-/// (the overwhelming majority of real `DrawTile` calls, e.g. most HUD
-/// elements) gets no blending in the real source at all, and
-/// `DrawTile.cpp`'s own real `Color.W` default is `1.0f` only when
-/// `Info.Texture->Alpha <= 0.f` -- otherwise it is read straight from
-/// the real texture's `Alpha` field, with no guarantee it is `1.0`
-/// (`DrawSimple.cpp:64`'s own comment on `Draw2DLine`'s unrelated but
-/// analogous `Color.W` field: "Unfortunately this is usually set to
-/// 0"). Under a fixed alpha-blend pipeline, an ordinary opaque tile
-/// whose real `Color.W` is not `1.0` would blend `texel.a * Color.W`
-/// against the background instead of replacing it outright -- a real,
-/// visible transparency bug for ordinary, non-translucent tiles, not
-/// just a missing effect on the translucent ones. `blend: None` is
-/// correct for every tile that does not carry `PF_Translucent`/
-/// `PF_Modulated`/`PF_Highlighted`; those three remain visibly wrong
-/// (rendered fully opaque) until the real blend-state pipeline cache
-/// lands -- a real, known, explicitly scoped gap, not silently
-/// pretended away, and the right trade for right now: wrong-but-
-/// opaque on the minority (translucent effects) rather than wrong-
-/// and-invisible on the majority (ordinary tiles).
+/// Built for one `RenderState`; the caller keys its cache on it.
 pub struct TilePipeline {
     pipeline: wgpu::RenderPipeline,
     frame_uniforms_layout: wgpu::BindGroupLayout,
@@ -940,7 +1105,11 @@ pub struct TilePipeline {
 }
 
 impl TilePipeline {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        state: RenderState,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(TILE_WGSL_SOURCE.into()),
@@ -976,17 +1145,13 @@ impl TilePipeline {
                 })],
             },
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(state.depth_stencil()),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
             cache: None,
@@ -1024,6 +1189,7 @@ impl TilePipeline {
             texture_view,
             sampler,
             target,
+            depth_target,
             load,
         } = call;
         assert!(
@@ -1104,6 +1270,14 @@ impl TilePipeline {
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_target,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load_for(load),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
@@ -1221,18 +1395,15 @@ pub struct GouraudDrawCall<'a> {
     pub texture_view: &'a wgpu::TextureView,
     pub sampler: &'a wgpu::Sampler,
     pub target: &'a wgpu::TextureView,
+    /// Depth target; see `LineDrawCall::depth_target`.
+    pub depth_target: &'a wgpu::TextureView,
     pub load: wgpu::LoadOp<wgpu::Color>,
 }
 
 /// One real, lazily-built `gouraud.wgsl` pipeline plus its three
 /// bind-group layouts (`@group(0)` frame uniforms, `@group(1)` draw
-/// params, `@group(2)` diffuse texture/sampler), same reasoning and
-/// same known `blend: None` first-proof limitation as `TilePipeline`'s
-/// own doc already states in full (not duplicated here) -- `DrawColor`
-/// outside hit-testing never carries a real RGB tint for Gouraud
-/// meshes either way (`GouraudDrawParams`'s own doc has the real
-/// citation), so the same opaque-replace tradeoff applies with even
-/// less real-world downside than `TilePipeline`'s own case.
+/// params, `@group(2)` diffuse texture/sampler). Built for one
+/// `RenderState`; the caller keys its cache on it.
 pub struct GouraudPipeline {
     pipeline: wgpu::RenderPipeline,
     frame_uniforms_layout: wgpu::BindGroupLayout,
@@ -1241,7 +1412,11 @@ pub struct GouraudPipeline {
 }
 
 impl GouraudPipeline {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        state: RenderState,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gouraud.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(GOURAUD_WGSL_SOURCE.into()),
@@ -1287,17 +1462,13 @@ impl GouraudPipeline {
                 })],
             },
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(state.depth_stencil()),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
             cache: None,
@@ -1335,6 +1506,7 @@ impl GouraudPipeline {
             texture_view,
             sampler,
             target,
+            depth_target,
             load,
         } = call;
         assert!(
@@ -1416,6 +1588,14 @@ impl GouraudPipeline {
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_target,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load_for(load),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
@@ -1535,14 +1715,16 @@ pub struct ComplexDrawCall<'a> {
     pub fog_map_texture_view: &'a wgpu::TextureView,
     pub fog_map_sampler: &'a wgpu::Sampler,
     pub target: &'a wgpu::TextureView,
+    /// Depth target. The caller clears it to 1.0 before the first draw
+    /// of a frame; this pass only loads and stores it.
+    pub depth_target: &'a wgpu::TextureView,
     pub load: wgpu::LoadOp<wgpu::Color>,
 }
 
 /// One real, lazily-built `complex.wgsl` pipeline plus its three
 /// bind-group layouts (`@group(0)` frame uniforms, `@group(1)` draw
-/// params, `@group(2)` the six real texture/sampler bindings), same
-/// `blend: None` first-proof reasoning as `TilePipeline`/
-/// `GouraudPipeline`'s own doc already states in full.
+/// params, `@group(2)` the six real texture/sampler bindings). Built
+/// for one `RenderState`; the caller keys its cache on it.
 pub struct ComplexPipeline {
     pipeline: wgpu::RenderPipeline,
     frame_uniforms_layout: wgpu::BindGroupLayout,
@@ -1551,7 +1733,11 @@ pub struct ComplexPipeline {
 }
 
 impl ComplexPipeline {
-    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        state: RenderState,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("complex.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(COMPLEX_WGSL_SOURCE.into()),
@@ -1582,17 +1768,13 @@ impl ComplexPipeline {
                 })],
             },
             primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
+            depth_stencil: Some(state.depth_stencil()),
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
             cache: None,
@@ -1632,6 +1814,7 @@ impl ComplexPipeline {
             fog_map_texture_view,
             fog_map_sampler,
             target,
+            depth_target,
             load,
         } = call;
         assert!(
@@ -1733,6 +1916,14 @@ impl ComplexPipeline {
                     store: wgpu::StoreOp::Store,
                 },
             })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_target,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load_for(load),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
@@ -1760,6 +1951,132 @@ impl ComplexPipeline {
 mod tests {
     use super::*;
     use crate::{BackendChoice, HeadlessSurfaceCreator, backend_name, create_device_sync};
+
+    /// Depth view sized like `color_target`, cleared to 1.0 in its own
+    /// submitted encoder. The pipeline pass under test only loads it.
+    fn cleared_depth_view(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_target: &wgpu::Texture,
+    ) -> wgpu::TextureView {
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("draw.rs test depth target"),
+            size: color_target.size(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = depth.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("draw.rs test depth clear"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+        }
+        queue.submit([encoder.finish()]);
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the depth clear");
+        view
+    }
+
+    #[test]
+    fn render_state_for_poly_flags_follows_set_blend_precedence() {
+        // Plain surface: no blend bits, so PF_Occlude is forced on.
+        let plain = RenderState::for_poly_flags(0, false);
+        assert_eq!(plain.blend, None);
+        assert!(plain.color_write);
+        assert!(plain.depth_write);
+        assert_eq!(plain.depth_compare, wgpu::CompareFunction::LessEqual);
+
+        // Translucent surfaces leave PF_Occlude off unless it is set.
+        let translucent = RenderState::for_poly_flags(PF_TRANSLUCENT, false);
+        let blend = translucent.blend.expect("translucent blends");
+        assert_eq!(blend.color.src_factor, wgpu::BlendFactor::One);
+        assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::OneMinusSrc);
+        assert_eq!(blend.alpha.dst_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
+        assert!(!translucent.depth_write);
+
+        // Tile draws (remove=true) clear PF_Occlude on a blended surface.
+        let occluding = PF_TRANSLUCENT | PF_OCCLUDE;
+        assert!(RenderState::for_poly_flags(occluding, false).depth_write);
+        assert!(!RenderState::for_poly_flags(occluding, true).depth_write);
+
+        // Highlighted + translucent: SrcAlpha / OneMinusSrcAlpha.
+        let highlighted = RenderState::for_poly_flags(PF_HIGHLIGHTED | PF_TRANSLUCENT, false);
+        let blend = highlighted.blend.expect("highlighted blends");
+        assert_eq!(blend.color.src_factor, wgpu::BlendFactor::SrcAlpha);
+        assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
+
+        // Modulated: Dst / Src, alpha as DstAlpha / SrcAlpha.
+        let modulated = RenderState::for_poly_flags(PF_MODULATED, false);
+        let blend = modulated.blend.expect("modulated blends");
+        assert_eq!(blend.color.src_factor, wgpu::BlendFactor::Dst);
+        assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::Src);
+        assert_eq!(blend.alpha.src_factor, wgpu::BlendFactor::DstAlpha);
+        assert_eq!(blend.alpha.dst_factor, wgpu::BlendFactor::SrcAlpha);
+
+        // Invisible: no color writes, Zero/One blend.
+        let invisible = RenderState::for_poly_flags(PF_INVISIBLE, false);
+        assert!(!invisible.color_write);
+        let blend = invisible.blend.expect("invisible blends");
+        assert_eq!(blend.color.src_factor, wgpu::BlendFactor::Zero);
+        assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::One);
+
+        // LumosAffected wins over the other blend bits.
+        let lumos = RenderState::for_poly_flags(PF_LUMOS_AFFECTED, false);
+        let blend = lumos.blend.expect("lumos blends");
+        assert_eq!(blend.color.src_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
+        assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::SrcAlpha);
+    }
+
+    #[test]
+    fn render_state_for_line_flags_depth_cues_only_when_asked() {
+        let plain = RenderState::for_line_flags(0);
+        assert_eq!(plain.depth_compare, wgpu::CompareFunction::Always);
+        assert!(!plain.depth_write);
+        assert!(plain.color_write);
+        let blend = plain.blend.expect("lines blend as PF_Highlighted");
+        assert_eq!(blend.color.src_factor, wgpu::BlendFactor::One);
+        assert_eq!(blend.color.dst_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
+
+        let depth_cued = RenderState::for_line_flags(LINE_DEPTH_CUED);
+        assert_eq!(depth_cued.depth_compare, wgpu::CompareFunction::LessEqual);
+        assert!(depth_cued.depth_write);
+    }
+
+    #[test]
+    fn render_state_maps_to_wgpu_target_and_depth_state() {
+        let state = RenderState {
+            blend: None,
+            color_write: false,
+            depth_write: true,
+            depth_compare: wgpu::CompareFunction::Less,
+        };
+        let target = state.color_target(wgpu::TextureFormat::Rgba8Unorm);
+        assert_eq!(target.format, wgpu::TextureFormat::Rgba8Unorm);
+        assert!(target.write_mask.is_empty());
+        let opaque = RenderState::OPAQUE.color_target(wgpu::TextureFormat::Rgba8Unorm);
+        assert_eq!(opaque.write_mask, wgpu::ColorWrites::ALL);
+
+        let depth = state.depth_stencil();
+        assert_eq!(depth.format, DEPTH_FORMAT);
+        assert_eq!(depth.depth_write_enabled, Some(true));
+        assert_eq!(depth.depth_compare, Some(wgpu::CompareFunction::Less));
+    }
 
     // Needs a real GPU adapter. CI runners have none. Run with
     // `cargo test -p hp2-wgpu -- --ignored`. Not confounded by this
@@ -1797,7 +2114,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = SimpleLinePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            SimpleLinePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
 
         // One line, NDC (-1, 0) to (0, 0): covers only the left half
         // of the render target's width. DrawColor is bright green,
@@ -1841,6 +2159,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         pipeline.render(
             device,
@@ -1850,6 +2169,7 @@ mod tests {
                 vertices: &vertices,
                 draw_params: &draw_params,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
@@ -1967,7 +2287,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = SimpleLinePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            SimpleLinePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
         let vertices = [
             LineVertex {
                 coords: [-1.0, 0.0, 0.0],
@@ -1997,6 +2318,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         // Step 1, matching lock_frame exactly: record a clear pass
         // into a fresh encoder, do NOT submit it yet.
@@ -2041,6 +2363,7 @@ mod tests {
                 vertices: &vertices,
                 draw_params: &draw_params,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Load,
             },
         );
@@ -2404,7 +2727,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
 
         // A real 1x1 solid-red texture via TextureCache::upload_rgba8
         // (the real crate this pipeline is meant to be fed by, not a
@@ -2487,6 +2811,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         pipeline.render(
             device,
@@ -2498,6 +2823,7 @@ mod tests {
                 texture_view: &cached.view,
                 sampler: &sampler,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
@@ -2591,7 +2917,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
 
         // A real, hand-built single-block BC1/DXT1 4x4 texture, solid
         // opaque red -- color0 == color1 == pure red in RGB565
@@ -2687,6 +3014,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         pipeline.render(
             device,
@@ -2698,6 +3026,7 @@ mod tests {
                 texture_view: &cached_view,
                 sampler: &sampler,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
@@ -2803,7 +3132,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = GouraudPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            GouraudPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
 
         // Same real solid-red 1x1 texture technique as the tile
         // pipeline test above.
@@ -2900,6 +3230,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         pipeline.render(
             device,
@@ -2911,6 +3242,7 @@ mod tests {
                 texture_view: &cached.view,
                 sampler: &sampler,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
@@ -3006,7 +3338,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = ComplexPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            ComplexPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
 
         // Same real solid-red 1x1 texture technique as the tile/
         // gouraud pipeline tests -- bound for all three real layers
@@ -3103,6 +3436,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         pipeline.render(
             device,
@@ -3118,6 +3452,7 @@ mod tests {
                 fog_map_texture_view: &cached.view,
                 fog_map_sampler: &sampler,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
@@ -3221,7 +3556,8 @@ mod tests {
         });
         queue.write_buffer(&frame_buffer, 0, &frame_bytes);
 
-        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let pipeline =
+            TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
         let mut texture_cache = crate::texture::TextureCache::new();
         let cached = texture_cache.upload_rgba8(
             &created,
@@ -3290,6 +3626,7 @@ mod tests {
             view_formats: &[],
         });
         let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &render_target);
 
         pipeline.render(
             device,
@@ -3301,6 +3638,7 @@ mod tests {
                 texture_view: &cached.view,
                 sampler: &sampler,
                 target: &render_target_view,
+                depth_target: &depth_view,
                 load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
             },
         );
