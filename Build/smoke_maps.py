@@ -57,6 +57,7 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 REPORT_FORMAT_VERSION = 2
 SUPPORTED_MAP_VERSIONS = frozenset((76, 79))
 VULKAN_RENDER_DEVICE_CLASS = "VulkanDrv.VulkanRenderDevice"
+WGPU_RENDER_DEVICE_CLASS = "WgpuDrv.WgpuRenderDevice"
 VIDEO_DEVICE_KEYS = ("GameRenderDevice", "WindowedRenderDevice", "RenderDevice")
 # Loader environment mirrors Build/run_vulkan_smoke.py (MoltenVK via Homebrew).
 DEFAULT_VULKAN_ICD = Path("/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json")
@@ -560,18 +561,19 @@ def _replace_directory(directory: Path) -> None:
         raise SmokeError(f"cannot replace directory {directory}: {error}") from error
 
 
-def _vulkan_engine_ini(data_root: Path, destination: Path) -> Path:
-    """Generate an Engine.ini selecting the Vulkan render device.
+def _render_device_engine_ini(data_root: Path, destination: Path, device_class: str) -> Path:
+    """Generate an Engine.ini selecting ``device_class`` for every video device key.
 
-    The stock Default.ini carries legacy video devices that ApplyPortableConfig
-    would migrate to XOpenGLDrv at boot, so the Vulkan leg must hand the engine
-    an explicit selection (same discipline as Build/run_vulkan_smoke.py).
+    Serves the Vulkan and wgpu legs. The stock Default.ini carries legacy video
+    devices that ApplyPortableConfig would migrate to XOpenGLDrv at boot, so a
+    non-XOpenGL leg must hand the engine an explicit selection (same discipline
+    as Build/run_vulkan_smoke.py).
     """
     default_path = data_root / "System" / "Default.ini"
     text = default_path.read_text(encoding="utf-8", errors="replace")
     for key in VIDEO_DEVICE_KEYS:
         text, count = re.subn(
-            rf"^{key}=.*$", f"{key}={VULKAN_RENDER_DEVICE_CLASS}", text,
+            rf"^{key}=.*$", f"{key}={device_class}", text,
             count=1, flags=re.MULTILINE,
         )
         if count != 1:
@@ -1019,9 +1021,9 @@ def _arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "--renderer",
-        choices=("xopengl", "vulkan"),
+        choices=game_test.RENDERERS,
         required=True,
-        help="renderer to smoke (-xopengl or -vulkan is passed explicitly)",
+        help="renderer to smoke (-xopengl, -vulkan or -wgpu is passed explicitly)",
     )
     parser.add_argument(
         "--ticks",
@@ -1176,16 +1178,22 @@ def main() -> int:
         if not output.name:
             raise SmokeError(f"output path must name a JSON file: {arguments.output}")
         vulkan_environment: dict[str, str] | None = None
-        vulkan_ini: Path | None = None
+        renderer_ini: Path | None = None
+        ini_stem = output.name[:-5] if output.name.lower().endswith(".json") else output.name
         if arguments.renderer == "vulkan":
             if not arguments.vulkan_icd.is_file():
                 raise SmokeError(
                     f"vulkan ICD manifest not found: {arguments.vulkan_icd}"
                 )
             vulkan_environment = _vulkan_environment(arguments.vulkan_icd)
-            ini_stem = output.name[:-5] if output.name.lower().endswith(".json") else output.name
-            vulkan_ini = _vulkan_engine_ini(
-                data_root, output.with_name(f"{ini_stem}-vulkan-engine.ini")
+            renderer_ini = _render_device_engine_ini(
+                data_root, output.with_name(f"{ini_stem}-vulkan-engine.ini"),
+                VULKAN_RENDER_DEVICE_CLASS,
+            )
+        elif arguments.renderer == "wgpu":
+            renderer_ini = _render_device_engine_ini(
+                data_root, output.with_name(f"{ini_stem}-wgpu-engine.ini"),
+                WGPU_RENDER_DEVICE_CLASS,
             )
         logs = _log_directory(output)
         _replace_directory(logs)
@@ -1218,7 +1226,7 @@ def main() -> int:
                     max_map_seconds=arguments.max_map_seconds,
                     capture_frames_dir=capture_frames_dir,
                     extra_environment=vulkan_environment,
-                    ini_file=vulkan_ini,
+                    ini_file=renderer_ini,
                     engine_bin=arguments.engine_bin,
                 )
             else:
@@ -1270,8 +1278,8 @@ def main() -> int:
                 else None
             ),
             "vulkan_engine_ini": (
-                game_test._display_path(vulkan_ini, repo_root)
-                if vulkan_ini is not None
+                game_test._display_path(renderer_ini, repo_root)
+                if arguments.renderer == "vulkan" and renderer_ini is not None
                 else None
             ),
             "timeout_seconds": arguments.timeout,

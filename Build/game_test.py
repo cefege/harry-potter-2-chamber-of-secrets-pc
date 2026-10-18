@@ -44,6 +44,7 @@ import startup_rng_phase_trace
 ARM64_CPU_TYPE = 0x0100000C
 TERMINATION_GRACE_SECONDS = 5.0
 KILL_GRACE_SECONDS = 5.0
+RENDERERS = ("xopengl", "vulkan", "wgpu")
 
 FIDELITY_FORMAT_VERSION = 1
 FIDELITY_FIELDS = (
@@ -458,7 +459,7 @@ def build_launch_command(
     fixed_dt: float | None = None, input_script: Path | None = None,
     replay_stem: str | None = None, rng_seed: int | None = None,
 ) -> list[str]:
-    if renderer not in ("xopengl", "vulkan"):
+    if renderer not in RENDERERS:
         raise GameTestError(f"unsupported renderer: {renderer}")
     _positive_int(ticks)
     if fixed_dt is not None:
@@ -469,7 +470,7 @@ def build_launch_command(
     assert source is not None
     arguments = [
         str(executable), f"-datadir={data_root}", source,
-        "-xopengl" if renderer == "xopengl" else "-vulkan",
+        f"-{renderer}",
         "-NOFRONTEND", "-window",
     ]
     if no_sound:
@@ -2003,7 +2004,7 @@ def _arguments() -> argparse.Namespace:
     run.add_argument("--app", required=True, type=Path)
     run.add_argument("--data-root", required=True, type=Path)
     run.add_argument("--map", dest="selected_map", required=True)
-    run.add_argument("--renderer", required=True, choices=("xopengl", "vulkan"))
+    run.add_argument("--renderer", required=True, choices=RENDERERS)
     run.add_argument("--ticks", required=True, type=_argument_positive_int)
     run.add_argument("--timeout", required=True, type=_argument_positive_float)
     run.add_argument("--log", required=True, type=Path)
@@ -2014,7 +2015,7 @@ def _arguments() -> argparse.Namespace:
     paired.add_argument("--engine-bin", required=True, type=Path)
     paired.add_argument("--data-root", required=True, type=Path)
     paired.add_argument("--map", dest="selected_map", required=True)
-    paired.add_argument("--renderer", required=True, choices=("xopengl", "vulkan"))
+    paired.add_argument("--renderer", required=True, choices=RENDERERS)
     paired.add_argument("--ticks", required=True, type=_argument_positive_int)
     paired.add_argument("--fixed-dt", required=True, type=_argument_positive_float)
     paired.add_argument("--input-script", type=Path, default=None)

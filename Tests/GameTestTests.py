@@ -131,6 +131,19 @@ class GameTestContracts(unittest.TestCase):
             ),
         )
 
+    def test_build_launch_command_wgpu_passes_wgpu_flag(self) -> None:
+        self.assertEqual(
+            game_test.build_launch_command(
+                Path("/application"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "wgpu", 42
+            ),
+            [
+                "/application", f"-datadir={self.data_root}", "..\\Maps\\Entryhall_hub.unr",
+                "-wgpu", "-NOFRONTEND", "-window", "-testticks=42", "-log",
+            ],
+        )
+        with self.assertRaisesRegex(game_test.GameTestError, "unsupported renderer"):
+            game_test.build_launch_command(Path("app"), self.data_root, "..\\Maps\\Entryhall_hub.unr", "metal", 1)
+
     def test_replay_launch_command_replaces_map_with_replay_source(self) -> None:
         command = game_test.build_launch_command(
             Path("/application"), self.data_root, None, "xopengl", 42,

@@ -342,12 +342,31 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             "RenderDevice=GlideDrv.GlideRenderDevice\n",
             encoding="utf-8",
         )
-        destination = smoke_maps._vulkan_engine_ini(
-            data_root, self.root / "matrix-vulkan-engine.ini"
+        destination = smoke_maps._render_device_engine_ini(
+            data_root, self.root / "matrix-vulkan-engine.ini",
+            smoke_maps.VULKAN_RENDER_DEVICE_CLASS,
         )
         text = destination.read_text(encoding="utf-8")
         for key in smoke_maps.VIDEO_DEVICE_KEYS:
             self.assertIn(f"{key}=VulkanDrv.VulkanRenderDevice", text)
+        self.assertNotIn("D3DDrv", text)
+
+    def test_wgpu_engine_ini_rewrites_all_video_keys(self) -> None:
+        data_root = self.root / "Unreal"
+        (data_root / "System").mkdir(parents=True)
+        (data_root / "System" / "Default.ini").write_text(
+            "[Engine.Engine]\nGameRenderDevice=D3DDrv.D3DRenderDevice\n"
+            "WindowedRenderDevice=SoftDrv.SoftwareRenderDevice\n"
+            "RenderDevice=GlideDrv.GlideRenderDevice\n",
+            encoding="utf-8",
+        )
+        destination = smoke_maps._render_device_engine_ini(
+            data_root, self.root / "matrix-wgpu-engine.ini",
+            smoke_maps.WGPU_RENDER_DEVICE_CLASS,
+        )
+        text = destination.read_text(encoding="utf-8")
+        for key in smoke_maps.VIDEO_DEVICE_KEYS:
+            self.assertIn(f"{key}=WgpuDrv.WgpuRenderDevice", text)
         self.assertNotIn("D3DDrv", text)
 
     def test_vulkan_engine_ini_requires_each_video_key(self) -> None:
@@ -358,7 +377,9 @@ class SmokeVulkanContextContracts(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(smoke_maps.SmokeError, "WindowedRenderDevice"):
-            smoke_maps._vulkan_engine_ini(data_root, self.root / "broken.ini")
+            smoke_maps._render_device_engine_ini(
+                data_root, self.root / "broken.ini", smoke_maps.VULKAN_RENDER_DEVICE_CLASS
+            )
 
     def test_vulkan_environment_exports_loader_variables(self) -> None:
         environment = smoke_maps._vulkan_environment(Path("/icd/MoltenVK_icd.json"))
