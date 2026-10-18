@@ -38,6 +38,8 @@ set(HP2_CORE_SOURCES
 set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/AStatLog.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/HP2ActorSlotDumpHooks.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/HP2EngineAbiAsserts.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/HP2EngineServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"

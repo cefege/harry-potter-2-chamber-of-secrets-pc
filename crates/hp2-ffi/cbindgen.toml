@@ -16,7 +16,7 @@ no_includes = true
 # hp2_rs.h referencing an undeclared type (caught on review, not
 # self-caught: the header still "generated" with no error).
 parse_deps = true
-include = ["hp2-ffi-support", "hp2-wgpu", "hp2-fire", "hp2-render"]
+include = ["hp2-ffi-support", "hp2-wgpu", "hp2-fire", "hp2-render", "hp2-engine"]
 
 [export]
 # UnRender services and globals are passed to C++ by value of address through

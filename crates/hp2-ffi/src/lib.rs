@@ -8,6 +8,7 @@ use hp2_ffi_support::{guard, install_log_sink};
 use hp2_ini::Profile;
 
 mod audio;
+mod engine;
 mod fire_fire;
 mod fire_ice;
 mod fire_sparks;

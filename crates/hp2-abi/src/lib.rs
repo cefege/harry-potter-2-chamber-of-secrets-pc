@@ -196,6 +196,7 @@ pub mod poly_flags {
     pub const LUMOS_DISAPPEAR: u32 = LUMOS_AFFECTED;
 }
 
+pub mod engine;
 pub mod render_particle;
 pub mod render_scene;
 pub mod render_span;

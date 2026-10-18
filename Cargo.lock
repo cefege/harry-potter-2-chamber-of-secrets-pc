@@ -430,6 +430,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp2-engine"
+version = "0.1.0"
+dependencies = [
+ "hp2-abi",
+]
+
+[[package]]
 name = "hp2-ffi"
 version = "0.1.0"
 dependencies = [
@@ -437,6 +444,7 @@ dependencies = [
  "hp2-abi",
  "hp2-audio",
  "hp2-codecs",
+ "hp2-engine",
  "hp2-ffi-support",
  "hp2-fire",
  "hp2-import",

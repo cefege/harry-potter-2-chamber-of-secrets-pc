@@ -8,23 +8,6 @@
 	virtual void Destroy();
 	virtual UBOOL Tick( FLOAT DeltaTime, enum ELevelTick TickType );
 
-	inline FLOAT Radius() const
-	{
-		return Square(INT(WindRadius));
-	}
-	inline FLOAT InnerRadiusFrac() const
-	{
-		return WindRadiusInner / 256.0f;
-	}
-	inline FLOAT FlucFraction() const
-	{
-		return WindFluctuation / 255.0f;
-	}
-	inline FLOAT FlucPeriod() const
-	{
-		return Max((INT)WindFlucPeriod, 1) / 64.0f;
-	}
-
 	// Get the wind velocity at a location.
 	FVector GetWind( const FVector& Loc );
 

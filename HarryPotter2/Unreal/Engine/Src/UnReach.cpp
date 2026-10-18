@@ -9,6 +9,7 @@
 		* Created by Steven Polge 3/97
 =============================================================================*/
 #include "EnginePrivate.h"
+#include "HP2EngineServices.h"
 
 /* Monster path 
  returns true if supports typical (Skaarj) movement requirements
@@ -17,8 +18,7 @@ int FReachSpec::MonsterPath()
 {
 	guard(FReachSpec::MonsterPath);
 
-	return ( (CollisionRadius >= COMMONRADIUS) && (CollisionHeight >= MINCOMMONHEIGHT)
-			&& !(reachFlags & R_FLY) ); 
+	return hp2_rs_engine_reach_monster_path( this );
 	unguard;
 }
 
@@ -26,7 +26,7 @@ int FReachSpec::BotOnlyPath()
 {
 	guard(FReachSpec::BotOnlyPath);
 
-	return ( CollisionRadius < MINCOMMONRADIUS );
+	return hp2_rs_engine_reach_bot_only_path( this );
 	
 	unguard;
 }
@@ -39,10 +39,7 @@ FReachSpec FReachSpec::operator+ (const FReachSpec &Spec) const
 	guard(FReachSpec::operator+);
 	FReachSpec Combined;
 	
-	Combined.CollisionRadius = Min(CollisionRadius, Spec.CollisionRadius);
-	Combined.CollisionHeight = Min(CollisionHeight, Spec.CollisionHeight);
-	Combined.reachFlags = (reachFlags | Spec.reachFlags);
-	Combined.distance = distance + Spec.distance;
+	hp2_rs_engine_reach_combine( this, &Spec, &Combined );
 	
 	return Combined; 
 	unguard;
@@ -55,10 +52,7 @@ does not compare distance, start, and end
 int FReachSpec::operator<= (const FReachSpec &Spec)
 {
 	guard(FReachSpec::operator<=);
-	int result =  
-		(CollisionRadius >= Spec.CollisionRadius) &&
-		(CollisionHeight >= Spec.CollisionHeight) &&
-		((reachFlags | Spec.reachFlags) == Spec.reachFlags);
+	int result = hp2_rs_engine_reach_less_equal( this, &Spec );
 	return result; 
 	unguard;
 }
@@ -70,10 +64,7 @@ does not compare start and end
 int FReachSpec::operator== (const FReachSpec &Spec)
 {
 	guard(FReachSpec::operator ==);
-	int result = (distance == Spec.distance) && 
-		(CollisionRadius == Spec.CollisionRadius) &&
-		(CollisionHeight == Spec.CollisionHeight) &&
-		(reachFlags == Spec.reachFlags);
+	int result = hp2_rs_engine_reach_equal( this, &Spec );
 	
 	return result; 
 	unguard;
@@ -89,18 +80,7 @@ if no definition was possible
 int FReachSpec::defineFor(AActor * begin, AActor * dest, APawn * Scout)
 {
 	guard(FReachSpec::defineFor);
-	Start = begin;
-	End = dest;
-	Scout->Physics = PHYS_Walking;
-	Scout->JumpZ = 320.f; //FIXME- test with range of JumpZ values - or let reachable code set max needed
-	Scout->bCanWalk = 1;
-	Scout->bCanJump = 1;
-	Scout->bCanSwim = 1;
-	Scout->bCanFly = 0;
-	Scout->GroundSpeed = 320.f;
-	Scout->MaxStepHeight = 25; //FIXME - get this stuff from human class
-
-	return findBestReachable(Start->Location, End->Location,Scout);
+	return hp2_rs_engine_reach_define_for( &GHp2EngineServices, this, begin, dest, Scout );
 	unguard;
 }
 
@@ -108,84 +88,7 @@ int FReachSpec::findBestReachable(FVector &begin, FVector &Destination, APawn * 
 {
 	guard(FReachSpec::findBestReachable);
 
-	Scout->SetCollisionSize( HUMANRADIUS, HUMANHEIGHT );
-
-	int result = 0;
-	FLOAT stepsize = MAXCOMMONRADIUS - Scout->CollisionRadius;
-	int success;
-	int stilltrying = 1;
-	FLOAT bestRadius = 0;
-	FLOAT bestHeight = 0;
-	//debugf("Find reachspec from %f %f %f to %f %f %f", begin.X, begin.Y, begin.Z,
-	//	Destination.X, Destination.Y, Destination.Z);
-	while (stilltrying) //find out max radius
-	{
-		success = Scout->GetLevel()->FarMoveActor( Scout, begin);
-
-		if (success)
-			success = Scout->pointReachable(Destination);
-
-		if (success)
-		{
-			reachFlags = success;
-			result = 1;
-			bestRadius = Scout->CollisionRadius;
-			bestHeight = Scout->CollisionHeight;
-			Scout->SetCollisionSize( Scout->CollisionRadius + stepsize, MINCOMMONHEIGHT);
-			stepsize *= 0.5;
-			if ( (stepsize < 2) || (Scout->CollisionRadius > MAXCOMMONRADIUS) )
-				stilltrying = 0;
-		}
-		else
-		{
-			Scout->SetCollisionSize(Scout->CollisionRadius - stepsize, Scout->CollisionHeight);
-			stepsize *= 0.5;
-			if ( (stepsize < 2) || (Scout->CollisionRadius < HUMANRADIUS) )
-				stilltrying = 0;
-		}
-	}
-	
-	if (result)
-	{
-		Scout->SetCollisionSize(bestRadius, Scout->CollisionHeight + 4);
-		stilltrying = 1;
-		stepsize = MAXCOMMONHEIGHT - Scout->CollisionHeight; 
-	}
-
-	while (stilltrying) //find out max height
-	{
-		success = Scout->GetLevel()->FarMoveActor( Scout, begin);
-		if (success)
-			success = Scout->pointReachable(Destination);
-		if (success)
-		{
-			reachFlags = success;
-			bestHeight = Scout->CollisionHeight;
-			Scout->SetCollisionSize(Scout->CollisionRadius, Scout->CollisionHeight + stepsize);
-			stepsize *= 0.5;
-			if( stepsize<1.f || Scout->CollisionHeight>MAXCOMMONHEIGHT )
-				stilltrying = 0;
-		}
-		else
-		{
-			Scout->SetCollisionSize(Scout->CollisionRadius, Scout->CollisionHeight - stepsize);
-			stepsize *= 0.5f;
-			if( stepsize<1.f || Scout->CollisionHeight<HUMANHEIGHT+1 )
-				stilltrying = 0;
-		}
-	}
-
-	if (result)
-	{
-		CollisionRadius = appRound(Scout->CollisionRadius);
-		CollisionHeight = appRound(bestHeight);
-		FVector path = End->Location - Start->Location;
-		distance = appRound(path.Size()); //fixme - reachable code should calculate
-		if ( reachFlags & R_SWIM )
-			distance *= 2;
-	}
-
-	return result; 
+	return hp2_rs_engine_reach_find_best( &GHp2EngineServices, this, &begin, &Destination, Scout );
 	unguard;
 }
 
