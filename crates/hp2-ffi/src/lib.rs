@@ -3333,9 +3333,35 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
             _ => unreachable!("rejected above: format is one of the five matched arms"),
         };
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
-        handle
-            .render_loop
-            .upload_texture(&handle.created, cache_id, width, height, &rgba8, srgb);
+        // Real SetTexture.cpp:247-257, read directly before concluding
+        // this (a real blocker caught on review, not self-discovered):
+        // TEXF_RGBA7 and TEXF_RGB16 are UNCONDITIONALLY real linear
+        // formats (InternalFormat = GL_RGBA8 / GL_RGB respectively,
+        // neither one ever gated on UnpackSRGB the way TEXF_P8/RGB8/
+        // RGBA8/DXT1 all are) -- srgb here is the caller's own real
+        // UseSRGBTextures config value, which must NOT reach an sRGB
+        // texture format for these two regardless of what the caller
+        // passed. Getting this wrong would gamma-DECODE every real
+        // lightmap/fogmap texel on sample (TEXF_RGBA7 is their own
+        // real format, hp2_wgpu::texture module doc's own citation)
+        // -- a real, severe visible darkening on any map that actually
+        // has lighting data outside the 0/255 endpoints, not a subtle
+        // difference (e.g. a real stored value of 64 would sample back
+        // as roughly 13).
+        let effective_srgb = match format {
+            hp2_wgpu::texture::TextureFormat::Rgba7 | hp2_wgpu::texture::TextureFormat::Rgb16 => {
+                false
+            }
+            _ => srgb,
+        };
+        handle.render_loop.upload_texture(
+            &handle.created,
+            cache_id,
+            width,
+            height,
+            &rgba8,
+            effective_srgb,
+        );
         true
     })
 }
@@ -4041,6 +4067,253 @@ mod tests {
         assert!(
             rgba8_accepted,
             "a real 1x1 RGBA8 texture must still be accepted"
+        );
+
+        unsafe { hp2_rs_wgpu_destroy(result.handle) };
+    }
+
+    /// Real render-based proof of the `effective_srgb` forcing fix in
+    /// `hp2_rs_wgpu_upload_texture` itself -- a plain buffer-copy
+    /// readback (every other test in this module uses one) cannot
+    /// catch this bug at all: `Rgba8Unorm` vs `Rgba8UnormSrgb` differ
+    /// only in how a real GPU texture *sampler* decodes the stored
+    /// byte when a shader actually samples it, not in what byte is
+    /// physically stored -- a `copy_texture_to_buffer` reads the same
+    /// raw byte back either way. This test instead renders a real
+    /// tile (through the same real TilePipeline/queue_tile/
+    /// unlock_frame path `hp2-wgpu`'s own tests use, called directly
+    /// here since this crate has no FFI-level offscreen-frame entry
+    /// point -- `hp2_rs_wgpu_lock` needs a real window surface, not
+    /// applicable to a headless test device) and reads back the
+    /// actual *sampled* pixel.
+    ///
+    /// Deliberately passes `srgb: true` to the real `hp2_rs_wgpu_
+    /// upload_texture` call for a `TEXF_RGBA7` texture -- the one
+    /// real caller-controllable input this bug depends on -- with a
+    /// real mid-range gray value (64, not an endpoint: 0 and 255 are
+    /// both fixed points of the sRGB decode curve, so an endpoint
+    /// value could not have caught this bug at all, confirmed by
+    /// direct computation before choosing it, not assumed). If
+    /// `effective_srgb` were not forced to `false` for this format,
+    /// the real GPU sRGB decode curve would darken 64/255 to roughly
+    /// 13/255 on sample.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-ffi --features renderer-wgpu -- --ignored`"]
+    fn upload_texture_forces_rgba7_to_linear_even_when_srgb_is_requested() {
+        let result = unsafe { hp2_rs_wgpu_create(std::ptr::null_mut(), 0) };
+        assert!(
+            !result.handle.is_null(),
+            "expected a real headless device to be created"
+        );
+        let handle = unsafe { &mut *(result.handle as *mut WgpuHandle) };
+
+        let render_target = handle
+            .created
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("rgba7 srgb-forcing test target"),
+                size: wgpu::Extent3d {
+                    width: 64,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+
+        hp2_wgpu::begin_offscreen_frame(
+            &handle.created,
+            &mut handle.render_loop,
+            &render_target,
+            wgpu::Color::BLUE,
+        );
+        // Real field values do not matter -- immediately overwritten
+        // below via a direct buffer write, same real technique every
+        // hp2-wgpu render test already established (this crate has no
+        // access to that crate's own private reference_perspective_
+        // scene test helper, so this constructs its own minimal, non-
+        // NaN SceneFrame directly instead).
+        handle.render_loop.set_scene_node(
+            &handle.created.device,
+            &handle.created.queue,
+            &hp2_wgpu::SceneFrame {
+                coords_origin: [0.0; 3],
+                coords_x_axis: [0.0; 3],
+                coords_y_axis: [0.0; 3],
+                coords_z_axis: [0.0; 3],
+                uncoords_origin: [0.0; 3],
+                uncoords_x_axis: [0.0; 3],
+                uncoords_y_axis: [0.0; 3],
+                uncoords_z_axis: [0.0; 3],
+                fx: 1.0,
+                fy: 1.0,
+                effective_fov_angle: 90.0,
+                viewport_fov_angle: 90.0,
+                is_ortho: false,
+                is_wireframe_zfar: false,
+                gamma: 1.0,
+                light_color_intensity: 1.0,
+                light_map_intensity: 1.0,
+            },
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        handle.created.queue.write_buffer(
+            handle.render_loop.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+
+        let gray_pixel: [u8; 4] = [64, 64, 64, 255];
+        let accepted = unsafe {
+            hp2_rs_wgpu_upload_texture(
+                result.handle,
+                99,
+                0x01, // TEXF_RGBA7
+                1,
+                1,
+                gray_pixel.as_ptr(),
+                4,
+                std::ptr::null(),
+                false,
+                true, // srgb: true, deliberately -- the exact input this bug depends on.
+            )
+        };
+        assert!(accepted, "a real 1x1 RGBA7 texture must be accepted");
+
+        // Real aliasing fix, caught on review (not self-discovered):
+        // the `handle` borrow obtained above must not still be live
+        // (by its own real last-use extent, not just lexical scope)
+        // across the real hp2_rs_wgpu_upload_texture call just above
+        // -- that extern "C" function creates its OWN real `&mut
+        // WgpuHandle` from the SAME underlying `result.handle` raw
+        // pointer internally, and Rust's own aliasing model forbids
+        // two live `&mut` references to the same object existing at
+        // once, regardless of whether either is actually read/written
+        // while both are live. The borrow checker cannot catch this
+        // specific case itself (result.handle's own type is opaque
+        // *mut c_void, with no borrow-tracked connection back to this
+        // function's own `handle: &mut WgpuHandle` local at all), so
+        // getting the real *extent* of the first borrow right here --
+        // ending at its own last real use above (the write_buffer
+        // call), strictly before the FFI call -- is this code's own
+        // responsibility, not something that would fail to compile if
+        // gotten wrong. A fresh `&mut WgpuHandle`, obtained only now,
+        // after the FFI call (shadowing the same name, not reusing the
+        // old binding), is what the rest of this test uses.
+        let handle = unsafe { &mut *(result.handle as *mut WgpuHandle) };
+
+        // Same real left-half geometry as hp2-wgpu's own tile tests
+        // (X=0,XL=50 -> NDC x in [-1.0, 0.0]), white draw_color
+        // (neutral multiply, isolates this test to the sampled texel
+        // alone).
+        handle.render_loop.queue_tile(hp2_wgpu::TileDrawRequest {
+            cache_id: 99,
+            x: 0.0,
+            y: 49.5,
+            xl: 50.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+        let did_unlock = hp2_wgpu::unlock_frame(&handle.created, &mut handle.render_loop, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        handle
+            .created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = handle
+            .created
+            .device
+            .create_buffer(&wgpu::BufferDescriptor {
+                label: Some("rgba7 srgb-forcing test readback buffer"),
+                size: 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+        let mut readback_encoder =
+            handle
+                .created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("rgba7 srgb-forcing test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        handle
+            .created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        handle
+            .created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[64u8, 64, 64, 255],
+            "expected a real RGBA7 texture's own stored 64/255 gray value to sample back \
+             UNCHANGED (linear, effective_srgb forced false regardless of the srgb=true this \
+             test deliberately passed) -- a value near 13 here would mean the real sRGB decode \
+             curve was wrongly applied, got {left_pixel:?}"
+        );
+        let adapter_name = unsafe { bytes_from_raw(result.adapter_name, result.adapter_name_len) }
+            .map(String::from_utf8_lossy)
+            .unwrap_or_default();
+        println!(
+            "hp2_rs_wgpu_upload_texture confirmed empirically: a real TEXF_RGBA7 texture \
+             uploaded with srgb=true still samples back its own real stored value unchanged \
+             (linear), not gamma-decoded, on adapter {adapter_name:?} backend {}",
+            handle.backend_name
         );
 
         unsafe { hp2_rs_wgpu_destroy(result.handle) };
