@@ -151,8 +151,9 @@ class UWgpuRenderDevice : public URenderDevice
 	FPlane CurrentFlashScale;
 	FPlane CurrentFlashFog;
 
-	// Total UWgpuRenderDevice::EndFlash overlay draws (calls that pass the
-	// neutral-value skip) since the last Init, same reset/logging
+	// Total UWgpuRenderDevice::EndFlash overlay draws the Rust side queued
+	// (past the neutral-value skip, and only when a frame is open with a
+	// scene) since the last Init, same reset/logging
 	// convention as Draw2DLineCallCount above.
 	INT EndFlashDrawCount;
 

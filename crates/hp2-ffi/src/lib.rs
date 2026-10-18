@@ -3873,8 +3873,9 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_point(
 /// (`DrawSimple.cpp:207-256`) for `UWgpuRenderDevice::EndFlash`. `(r, g, b, a)`
 /// is the caller-computed `DrawColor` (`FlashFog.XYZ`, `1 - min(2 * FlashScale.X,
 /// 1)`). Queued as one full-viewport quad with the fixed `PF_Highlighted`
-/// blend and no depth test; a null `handle` or a frame with no `SetSceneNode`
-/// yet is a no-op.
+/// blend and no depth test. Returns `true` only when the quad was queued:
+/// a null `handle`, or a frame with no `SetSceneNode` yet or no open frame,
+/// returns `false` and queues nothing.
 ///
 /// # Safety
 /// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not yet
@@ -3887,13 +3888,13 @@ pub unsafe extern "C" fn hp2_rs_wgpu_end_flash(
     g: f32,
     b: f32,
     a: f32,
-) {
-    guard("hp2_rs_wgpu_end_flash", (), move || {
+) -> bool {
+    guard("hp2_rs_wgpu_end_flash", false, move || {
         if handle.is_null() {
-            return;
+            return false;
         }
         let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
-        handle.render_loop.queue_end_flash([r, g, b, a]);
+        handle.render_loop.queue_end_flash([r, g, b, a])
     })
 }
 

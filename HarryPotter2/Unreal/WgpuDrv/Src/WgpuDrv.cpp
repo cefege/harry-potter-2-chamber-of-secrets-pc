@@ -990,16 +990,17 @@ void UWgpuRenderDevice::EndFlash()
 		return;
 	const FLOAT Alpha = 1.f - Min( CurrentFlashScale.X * 2.f, 1.f );
 
-	// Logs only the first draw, same first-call reasoning as Draw2DLine.
+	// Counts and logs only draws the Rust side queued: it returns false when
+	// no frame is open or no SetSceneNode has run yet. Logs the first one.
+	if( !hp2_rs_wgpu_end_flash( RustDevice,
+		CurrentFlashFog.X, CurrentFlashFog.Y, CurrentFlashFog.Z, Alpha ) )
+		return;
 	if( EndFlashDrawCount == 0 )
 	{
 		debugf( NAME_Init, TEXT("WgpuDrv: EndFlash first draw: Fog=(%f,%f,%f) Alpha=%f"),
 			CurrentFlashFog.X, CurrentFlashFog.Y, CurrentFlashFog.Z, Alpha );
 	}
 	EndFlashDrawCount++;
-
-	hp2_rs_wgpu_end_flash( RustDevice,
-		CurrentFlashFog.X, CurrentFlashFog.Y, CurrentFlashFog.Z, Alpha );
 	unguard;
 }
 

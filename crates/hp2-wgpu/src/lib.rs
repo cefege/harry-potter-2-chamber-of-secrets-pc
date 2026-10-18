@@ -1934,21 +1934,25 @@ impl RenderLoop {
     /// `BlendMode = PF_Highlighted` / `LineFlags = LINE_Transparent`
     /// (`draw::LINE_TRANSPARENT`; `for_line_flags` reads only depth-cued).
     /// Needs a scene from `SetSceneNode` the same way `queue_point` does;
-    /// returns without queueing otherwise.
-    pub fn queue_end_flash(&mut self, color: [f32; 4]) {
+    /// returns `false` without queueing otherwise. `last_scene` is never
+    /// cleared, so a flash after a skipped `DrawWorld` reuses the previous
+    /// projection, as XOpenGL's stored `RProjZ` does. Returns `true` only
+    /// when the quad was queued.
+    pub fn queue_end_flash(&mut self, color: [f32; 4]) -> bool {
         if self.in_progress.is_none() {
-            return;
+            return false;
         }
         let Some(scene) = self.last_scene.as_ref() else {
-            return;
+            return false;
         };
         let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
-            return;
+            return false;
         };
         let (rfx2, rfy2) = scene_rfx2_rfy2(scene);
         let corners = draw::flash_quad_corners(rfx2, rfy2, scene.fx, scene.fy);
         let state = draw::RenderState::for_line_flags(draw::LINE_TRANSPARENT);
         self.push_point(segment, state, QueuedPoint { corners, color });
+        true
     }
 
     /// Appends `point` to the trailing `Points` batch when its segment and
@@ -5097,6 +5101,110 @@ mod tests {
             created.adapter_name,
             backend_name(created.backend)
         );
+    }
+
+    #[test]
+    fn flash_quad_corners_cover_the_viewport_at_any_size() {
+        // scene_rfx2_rfy2 with effective_fov 90 gives RProjZ = 1 and
+        // aspect = fy / fx (XOpenGL.cpp:1820). flash_quad_corners scales by
+        // the viewport size, which cancels against rfx2/rfy2, so the corners
+        // are (+-1, +-aspect, 1) for any size. A square and a wide viewport:
+        // a viewport term that fails to cancel shows up as a corner mismatch.
+        let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        for (fx, fy) in [(100.0_f32, 100.0_f32), (200.0, 100.0)] {
+            let scene = SceneFrame {
+                fx,
+                fy,
+                ..reference_perspective_scene()
+            };
+            let (rfx2, rfy2) = scene_rfx2_rfy2(&scene);
+            let aspect = fy / fx;
+            let c = draw::flash_quad_corners(rfx2, rfy2, fx, fy);
+            let check = |name: &str, got: [f32; 3], want: [f32; 3]| {
+                assert!(
+                    close(got, want),
+                    "fx={fx} fy={fy} {name}: got {got:?}, want {want:?}"
+                );
+            };
+            check("top_left", c.top_left, [-1.0, -aspect, 1.0]);
+            check("top_right", c.top_right, [1.0, -aspect, 1.0]);
+            check("bottom_right", c.bottom_right, [1.0, aspect, 1.0]);
+            check("bottom_left", c.bottom_left, [-1.0, aspect, 1.0]);
+        }
+    }
+
+    #[test]
+    fn queue_end_flash_without_an_open_frame_queues_nothing_and_reports_false() {
+        // The C++ caller counts and logs only a true return, so a rejected
+        // flash must return false and leave no batch behind.
+        let mut loop_state = RenderLoop::new();
+        assert!(!loop_state.queue_end_flash([1.0, 0.0, 0.0, 0.5]));
+        assert!(loop_state.batches.is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_end_flash_blends_fog_over_the_frame_with_one_minus_src_alpha() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop end_flash blend test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Same identity-modelviewproj substitution as the queue_point test:
+        // the flash corners are already in clip space.
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+
+        // Fog (1,0,0) at alpha 0.5 over the blue clear. PF_Highlighted is
+        // (One, OneMinusSrcAlpha), so dst = src + dst * (1 - a) = (1, 0, 0.5).
+        // A SrcAlpha blend would give (0.5, 0, 0.5); ignoring alpha, (1, 0, 0).
+        assert!(
+            loop_state.queue_end_flash([1.0, 0.0, 0.0, 0.5]),
+            "expected queue_end_flash to queue with a scene and an open frame"
+        );
+        assert!(
+            unlock_frame(&created, &mut loop_state, false),
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let row = read_64px_row(&created, &render_target);
+        for x in 0..64 {
+            let px = &row[x * 4..x * 4 + 4];
+            assert!(
+                px[0] >= 253 && px[1] <= 2 && (126..=130).contains(&px[2]),
+                "pixel {x} expected fog-over-blue (255, 0, ~128), got {px:?}"
+            );
+        }
     }
 
     #[test]
