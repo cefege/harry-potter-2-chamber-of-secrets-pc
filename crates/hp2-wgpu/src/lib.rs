@@ -922,6 +922,17 @@ struct QueuedTile {
     draw_flags: u32,
 }
 
+/// One real queued `Draw2DPoint` call's own real quad geometry
+/// (`point_quad_corners`'s own real output) plus the real per-draw
+/// `DrawColor` (`Color.W` already forced to `1.0` -- `queue_point`'s
+/// own doc has the full real reasoning, same as `QueuedLine::color`).
+/// Carries no segment of its own, same reasoning as `QueuedLine`/
+/// `QueuedTile`.
+struct QueuedPoint {
+    corners: draw::PointQuadCorners,
+    color: [f32; 4],
+}
+
 /// One ordered entry in `RenderLoop::batches`. Either queued lines or
 /// queued tiles for one real segment (`Batch::segment`, an index into
 /// `RenderLoop::frame_uniforms_segments` -- same real meaning as
@@ -972,16 +983,18 @@ struct QueuedTile {
 /// example): final compositing (both pipelines use `blend: None`, so
 /// whichever draw lands on a given pixel *last* wins outright) must
 /// follow real call order, not a per-primitive-kind fixed order.
-/// `batches` is one single ordered `Vec`; `queue_line`/`queue_tile`
-/// each either extend the last batch (same segment, same kind, same
-/// `cache_id` for tiles) or push a brand new one -- `unlock_frame`
-/// then replays `batches` in push order, which is real call order.
+/// `batches` is one single ordered `Vec`; `queue_line`/`queue_tile`/
+/// `queue_point` each either extend the last batch (same segment,
+/// same kind, same `cache_id` for tiles) or push a brand new one --
+/// `unlock_frame` then replays `batches` in push order, which is real
+/// call order.
 enum BatchPayload {
     Lines(Vec<QueuedLine>),
     Tiles {
         cache_id: u64,
         entries: Vec<QueuedTile>,
     },
+    Points(Vec<QueuedPoint>),
 }
 
 struct Batch {
@@ -1068,6 +1081,9 @@ pub struct RenderLoop {
     /// Same lazy-build-and-check contract as `line_pipeline`, for
     /// `queue_tile`'s own real draws.
     tile_pipeline: Option<(wgpu::TextureFormat, draw::TilePipeline)>,
+    /// Same lazy-build-and-check contract as `line_pipeline`/`tile_
+    /// pipeline`, for `queue_point`'s own real draws.
+    point_pipeline: Option<(wgpu::TextureFormat, draw::SimpleTrianglePipeline)>,
     /// Real `BindMap`'s own role (`texture.rs`'s own `TextureCache`
     /// doc has the full real citation) -- persists across frames
     /// (unlike `batches`/`frame_uniforms_segments`, never cleared by
@@ -1165,6 +1181,7 @@ impl RenderLoop {
             batches: Vec::new(),
             line_pipeline: None,
             tile_pipeline: None,
+            point_pipeline: None,
             texture_cache: texture::TextureCache::new(),
             sampler: None,
             last_scene: None,
@@ -1360,6 +1377,103 @@ impl RenderLoop {
                         cache_id: request.cache_id,
                         entries: vec![tile],
                     },
+                });
+            }
+        }
+    }
+
+    /// Real per-tick entry point a future `UWgpuRenderDevice::
+    /// Draw2DPoint` override will call through a future `hp2_rs_wgpu_
+    /// queue_point` FFI function -- not wired yet (same staged-rollout
+    /// reasoning `queue_tile`'s own doc already established: this is
+    /// real, tested Rust, not a stub, the FFI/`WgpuDrv.cpp` wiring is
+    /// a separate, following change). Mirrors `Draw2DPoint`'s own real
+    /// pipeline in order (`DrawSimple.cpp:154-205`, read in full):
+    /// `Color.W` forced to `1.0` (`color` here is `[f32; 3]`, same
+    /// convention `queue_line`'s own FFI wrapper already established
+    /// for `Draw2DLine` -- the real source always overwrites alpha,
+    /// so a caller-supplied one could never mean anything), `Z`
+    /// resolved via `resolve_point_z` *before* being passed into
+    /// `draw::point_quad_corners` (not after -- the real source
+    /// applies its own `Z` adjustment before computing any vertex
+    /// coordinates, `DrawSimple.cpp:170-173` runs before `:187-198`).
+    ///
+    /// `fx2`/`fy2` are the real `Frame->FX2`/`FY2` the actual
+    /// `Draw2DPoint` call received -- `DrawSimple.cpp:187` reads
+    /// `Frame->FX2` directly off its own `Frame` parameter, the exact
+    /// same real pattern `Draw2DLine`/`DrawTile` already established
+    /// (`draw_2d_line_screen_to_coords`'s own doc has the full real
+    /// citation and why this must never be derived from `self.
+    /// last_scene` instead). An earlier version of this function did
+    /// exactly that wrong derivation (`fx2: scene.fx * 0.5`) -- caught
+    /// by re-reading `DrawSimple.cpp:187` against this function's own
+    /// first draft before it was ever built, the same real mistake
+    /// `6de550c` already fixed once for `Draw2DLine` specifically;
+    /// fixed here before landing, not shipped and fixed later.
+    ///
+    /// Known, explicitly scoped gaps, not silently pretended away,
+    /// same category `hp2_rs_wgpu_draw_2d_line`'s own doc already
+    /// names for lines: the real `HitTesting() ? HitColor : Color`
+    /// substitution and the real fixed `BlendMode = PF_Highlighted`
+    /// (`DrawSimple.cpp:166-168`) are not applied -- `SimpleTriangle
+    /// Pipeline`'s own fixed `blend: None` is the same known first-
+    /// proof limitation `SimpleLinePipeline`'s own doc already states.
+    ///
+    /// Extends `self.batches`' own last entry when it is already a
+    /// `Points` batch for this same segment, otherwise pushes a new
+    /// one -- same real flush-boundary reasoning `Batch`'s own doc
+    /// already has (primitive-kind change, confirmed via `Draw2DPoint`'s
+    /// own real `SetProgram(Simple_Triangle_Prog)` call site,
+    /// `DrawSimple.cpp:162`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn queue_point(
+        &mut self,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        z: f32,
+        fx2: f32,
+        fy2: f32,
+        color: [f32; 3],
+    ) {
+        if self.in_progress.is_none() {
+            return;
+        }
+        let Some(scene) = self.last_scene.as_ref() else {
+            return;
+        };
+        let Some(segment) = self.frame_uniforms_segments.len().checked_sub(1) else {
+            return;
+        };
+        let (rfx2, rfy2) = scene_rfx2_rfy2(scene);
+        let z = resolve_point_z(scene.is_ortho, z);
+        let corners = draw::point_quad_corners(draw::PointQuadRequest {
+            rfx2,
+            rfy2,
+            fx2,
+            fy2,
+            x1,
+            y1,
+            x2,
+            y2,
+            z,
+        });
+        let point = QueuedPoint {
+            corners,
+            color: [color[0], color[1], color[2], 1.0],
+        };
+        match self.batches.last_mut() {
+            Some(Batch {
+                segment: last_segment,
+                payload: BatchPayload::Points(points),
+            }) if *last_segment == segment => {
+                points.push(point);
+            }
+            _ => {
+                self.batches.push(Batch {
+                    segment,
+                    payload: BatchPayload::Points(vec![point]),
                 });
             }
         }
@@ -1752,6 +1866,25 @@ pub fn draw_2d_line_screen_to_coords(
     [rfx2 * p[2] * (p[0] - fx2), rfy2 * p[2] * (p[1] - fy2), p[2]]
 }
 
+/// Real `Draw2DPoint`'s own Z adjustment (`DrawSimple.cpp:170-173`:
+/// `if (Frame->Viewport->IsOrtho()) Z = 1.f; else if (Z < 0.f) Z =
+/// -Z;`), applied *before* `draw::point_quad_corners`'s own per-
+/// corner transform -- a real, separate step `Draw2DLine`'s own
+/// formula has no equivalent of at all (confirmed by direct re-read
+/// of both functions, not assumed symmetric). `is_ortho` is `scene.
+/// is_ortho` (the real `Frame->Viewport->IsOrtho()` value `SetSceneNode`
+/// already cached for this segment, same source `draw_2d_line_screen_
+/// to_coords`'s own ortho/perspective branch uses).
+fn resolve_point_z(is_ortho: bool, z: f32) -> f32 {
+    if is_ortho {
+        1.0
+    } else if z < 0.0 {
+        -z
+    } else {
+        z
+    }
+}
+
 /// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`
 /// (plan's still-open "real draw-call forwarding" item's first piece:
 /// nothing is drawn by this function itself, but it is the real
@@ -2085,6 +2218,19 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
                 .create_sampler(&wgpu::SamplerDescriptor::default()),
         );
     }
+    let needs_point_pipeline = batches
+        .iter()
+        .any(|b| matches!(b.payload, BatchPayload::Points(_)))
+        && !matches!(
+            &loop_state.point_pipeline,
+            Some((format, _)) if *format == frame.color_format
+        );
+    if needs_point_pipeline {
+        loop_state.point_pipeline = Some((
+            frame.color_format,
+            draw::SimpleTrianglePipeline::new(&created.device, frame.color_format),
+        ));
+    }
 
     for batch in &batches {
         let buffer = &loop_state.frame_uniforms_segments[batch.segment];
@@ -2242,6 +2388,85 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
                             draw_params: &draw_params,
                             texture_view: &cached.view,
                             sampler,
+                            target: &frame.view,
+                            load: wgpu::LoadOp::Load,
+                        },
+                    );
+                }
+            }
+            BatchPayload::Points(points) => {
+                let (_, pipeline) = loop_state
+                    .point_pipeline
+                    .as_ref()
+                    .expect("point_pipeline was just ensured above");
+                let mut vertices: Vec<draw::LineVertex> = Vec::new();
+                let mut draw_params: Vec<draw::DrawParams> = Vec::new();
+                for point in points {
+                    // Same real chunk-not-drop reasoning as the
+                    // Lines/Tiles arms above.
+                    if draw_params.len() >= draw::MAX_DRAWS {
+                        pipeline.record(
+                            &created.device,
+                            &created.queue,
+                            &mut frame.encoder,
+                            draw::LineDrawCall {
+                                frame_uniforms_buffer: buffer,
+                                vertices: &vertices,
+                                draw_params: &draw_params,
+                                target: &frame.view,
+                                load: wgpu::LoadOp::Load,
+                            },
+                        );
+                        vertices.clear();
+                        draw_params.clear();
+                    }
+                    let draw_id = draw_params.len() as u32;
+                    let draw::PointQuadCorners {
+                        top_left,
+                        top_right,
+                        bottom_right,
+                        bottom_left,
+                    } = point.corners;
+                    // Same real two-triangle, shared-diagonal layout
+                    // as the Tiles arm's own TileQuadCorners (no
+                    // tex_coords here -- LineVertex has none).
+                    vertices.push(draw::LineVertex {
+                        coords: top_left,
+                        draw_id,
+                    });
+                    vertices.push(draw::LineVertex {
+                        coords: top_right,
+                        draw_id,
+                    });
+                    vertices.push(draw::LineVertex {
+                        coords: bottom_right,
+                        draw_id,
+                    });
+                    vertices.push(draw::LineVertex {
+                        coords: top_left,
+                        draw_id,
+                    });
+                    vertices.push(draw::LineVertex {
+                        coords: bottom_right,
+                        draw_id,
+                    });
+                    vertices.push(draw::LineVertex {
+                        coords: bottom_left,
+                        draw_id,
+                    });
+                    draw_params.push(draw::DrawParams {
+                        draw_color: point.color,
+                    });
+                }
+                if !draw_params.is_empty() {
+                    pipeline.record(
+                        &created.device,
+                        &created.queue,
+                        &mut frame.encoder,
+                        draw::LineDrawCall {
+                            frame_uniforms_buffer: buffer,
+                            vertices: &vertices,
+                            draw_params: &draw_params,
                             target: &frame.view,
                             load: wgpu::LoadOp::Load,
                         },
@@ -2476,6 +2701,33 @@ mod tests {
             (out[1] - (-0.4)).abs() < 1e-5,
             "expected y ~= -0.4 (from the passed fy2=70.0, not scene.fy*0.5=50.0), got {}",
             out[1]
+        );
+    }
+
+    #[test]
+    fn resolve_point_z_matches_the_real_draw_2d_point_z_adjustment() {
+        // Real DrawSimple.cpp:170-173: ortho always forces Z=1.0
+        // regardless of the input Z's own sign or magnitude; non-
+        // ortho negates a negative Z, leaves a non-negative Z alone.
+        assert_eq!(
+            resolve_point_z(true, -7.0),
+            1.0,
+            "ortho must force Z=1.0 even when the input Z is negative"
+        );
+        assert_eq!(
+            resolve_point_z(true, 7.0),
+            1.0,
+            "ortho must force Z=1.0 even when the input Z is already positive"
+        );
+        assert_eq!(
+            resolve_point_z(false, -7.0),
+            7.0,
+            "non-ortho must negate a negative Z"
+        );
+        assert_eq!(
+            resolve_point_z(false, 7.0),
+            7.0,
+            "non-ortho must leave a non-negative Z unchanged"
         );
     }
 
@@ -3158,6 +3410,140 @@ mod tests {
             "RenderLoop's real upload_texture/queue_tile/unlock_frame path confirmed \
              empirically to composite a queued tile draw correctly on top of its own clear, on \
              adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_queue_point_renders_a_real_point_through_the_real_lock_unlock_path() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop point offscreen test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        // Same real call order and identity-modelviewproj substitution
+        // as render_loop_flushes_queued_line_draws_through_the_real_
+        // lock_unlock_path above.
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+
+        // Same real rfx2=rfy2=0.02/fx2=fy2=50.0 derivation as the
+        // line/tile tests above. X1=0.5,X2=49.5 -> (after the real
+        // +-0.5 inset/expansion point_quad_corners applies) NDC x in
+        // [-1.0, 0.0], the same left-half span every other offscreen
+        // test in this file uses, not a coincidence: X1-0.5=0,
+        // X2+0.5=50, matching the line test's own raw P1.X=0/P2.X=50
+        // exactly. Y1=Y2=50 -> Y1-0.5=49.5/Y2+0.5=50.5, straddling the
+        // single render row's own center the same way the tile test's
+        // own Y=49.5/YL=1.0 does. Hand-computed independently (scratch
+        // Python) before relying on it: top_left=(-1.0,-0.01,1),
+        // top_right=(0.0,-0.01,1), bottom_right=(0.0,0.01,1),
+        // bottom_left=(-1.0,0.01,1).
+        loop_state.queue_point(0.5, 50.0, 49.5, 50.0, 1.0, 50.0, 50.0, [0.0, 1.0, 0.0]);
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop point offscreen test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop point offscreen test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[0u8, 255, 0, 255],
+            "expected the point queued via RenderLoop::queue_point and flushed by the real \
+             unlock_frame to actually render, got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected begin_offscreen_frame's own clear pass to survive outside the drawn \
+             point's span, got {right_pixel:?}"
+        );
+        println!(
+            "RenderLoop's real queue_point/unlock_frame path confirmed empirically to \
+             composite a queued point draw correctly on top of its own clear, on adapter {:?} \
+             backend {}",
             created.adapter_name,
             backend_name(created.backend)
         );

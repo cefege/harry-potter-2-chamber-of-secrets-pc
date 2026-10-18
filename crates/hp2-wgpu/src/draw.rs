@@ -322,6 +322,261 @@ impl SimpleLinePipeline {
     }
 }
 
+/// Real `DrawSimpleTriangleProgram`'s own Rust counterpart --
+/// confirmed (`XOpenGL.h:1900-1913`) to be a second, distinct real
+/// instantiation of the exact same `ShaderProgramImpl<DrawSimpleVertex,
+/// DrawSimpleParameters>` template `DrawSimpleLineProgram`
+/// (`SimpleLinePipeline`'s own real counterpart) is, bound as `Simple_
+/// Triangle_Prog` instead of `Simple_Line_Prog` -- the real vertex/
+/// fragment GLSL source is identical between the two, only the real
+/// `DrawMode`/topology differs (`GL_TRIANGLES` vs `GL_LINES`,
+/// confirmed by reading both `ActivateShader`/`CreateInputLayout`
+/// overrides, `DrawSimple.cpp:290-348`). This port keeps that same
+/// real one-template-two-instances shape as two separate Rust
+/// structs (not one parameterized by topology) rather than collapsing
+/// them -- `simple.wgsl`/`LineVertex`/`DrawParams`/`LineDrawCall` are
+/// all directly reused unchanged, only `new`'s own `primitive.topology`
+/// and `record`'s own vertex-count assert differ from
+/// `SimpleLinePipeline`'s. `Draw2DPoint` is this struct's own real
+/// production caller (`DrawSimple.cpp:154-205`, `EndFlash`'s own
+/// flash-overlay quad, `DrawSimple.cpp:207-256`, is not ported --
+/// no real caller/FFI wiring exists for it yet, tracked separately).
+pub struct SimpleTrianglePipeline {
+    pipeline: wgpu::RenderPipeline,
+    frame_uniforms_layout: wgpu::BindGroupLayout,
+    draw_params_layout: wgpu::BindGroupLayout,
+}
+
+impl SimpleTrianglePipeline {
+    /// Same real contract as `SimpleLinePipeline::new` (that method's
+    /// own doc has the full reasoning for `layout: None`/fixed
+    /// `blend: None`) -- `primitive.topology` is the one real
+    /// difference, `TriangleList` matching `DrawSimpleTriangleProgram`'s
+    /// own real `GL_TRIANGLES` `DrawMode`.
+    pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("simple.wgsl (draw.rs triangle production)"),
+            source: wgpu::ShaderSource::Wgsl(SIMPLE_WGSL_SOURCE.into()),
+        });
+        let vertex_attributes = [
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x3,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Uint32,
+                offset: std::mem::size_of::<[f32; 3]>() as u64,
+                shader_location: 1,
+            },
+        ];
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("simple.wgsl triangle pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<LineVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..wgpu::PrimitiveState::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let frame_uniforms_layout = pipeline.get_bind_group_layout(0);
+        let draw_params_layout = pipeline.get_bind_group_layout(1);
+        Self {
+            pipeline,
+            frame_uniforms_layout,
+            draw_params_layout,
+        }
+    }
+
+    /// Same real contract as `SimpleLinePipeline::record` (that
+    /// method's own doc has the full correctness reasoning for
+    /// `encoder`/`call.load`) -- `vertices.len().is_multiple_of(3)`
+    /// (`TriangleList`, not `LineList`'s own `is_multiple_of(2)`) is
+    /// the one real difference.
+    pub fn record(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        call: LineDrawCall<'_>,
+    ) {
+        let LineDrawCall {
+            frame_uniforms_buffer,
+            vertices,
+            draw_params,
+            target,
+            load,
+        } = call;
+        assert!(
+            draw_params.len() <= MAX_DRAWS,
+            "draw_params.len() ({}) exceeds simple.wgsl's real MAX_DRAWS ({MAX_DRAWS})",
+            draw_params.len()
+        );
+        assert!(
+            vertices.len().is_multiple_of(3),
+            "TriangleList topology needs a vertex count that is a multiple of 3, got {}",
+            vertices.len()
+        );
+
+        let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs triangle vertex buffer"),
+            size: (std::mem::size_of_val(vertices)) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
+
+        let mut padded_params = vec![
+            DrawParams {
+                draw_color: [0.0; 4]
+            };
+            MAX_DRAWS
+        ];
+        padded_params[..draw_params.len()].copy_from_slice(draw_params);
+        let draw_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs triangle draw-params buffer"),
+            size: (MAX_DRAWS * std::mem::size_of::<DrawParams>()) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&draw_params_buffer, 0, bytemuck::cast_slice(&padded_params));
+
+        let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs triangle frame uniforms bind group"),
+            layout: &self.frame_uniforms_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: frame_uniforms_buffer.as_entire_binding(),
+            }],
+        });
+        let draw_params_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("draw.rs triangle draw params bind group"),
+            layout: &self.draw_params_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: draw_params_buffer.as_entire_binding(),
+            }],
+        });
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("draw.rs triangle render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
+        pass.set_bind_group(1, &draw_params_bind_group, &[]);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..vertices.len() as u32, 0..1);
+    }
+
+    /// Same real contract as `SimpleLinePipeline::render`.
+    pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, call: LineDrawCall<'_>) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("draw.rs triangle render encoder"),
+        });
+        self.record(device, queue, &mut encoder, call);
+        queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after a real triangle render");
+    }
+}
+
+/// Groups `point_quad_corners`' real inputs, same clippy reasoning as
+/// `draw::TileQuadRequest`. `rfx2`/`rfy2`/`fx2`/`fy2`/`z` are the same
+/// real per-segment/per-call values `tile_quad_corners`/`draw_2d_line_
+/// screen_to_coords` already take; `x1`/`y1`/`x2`/`y2` are `Draw2DPoint`'s
+/// own real `FLOAT` parameters, unchanged (`z` is passed *after*
+/// `resolve_point_z`'s own real adjustment has already been applied --
+/// that function's own doc in `lib.rs` has the real citation for why,
+/// not duplicated here).
+pub struct PointQuadRequest {
+    pub rfx2: f32,
+    pub rfy2: f32,
+    pub fx2: f32,
+    pub fy2: f32,
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    pub z: f32,
+}
+
+/// The four real corners `Draw2DPoint`'s own real six-vertex quad
+/// (`DrawSimple.cpp:187-198`) is built from, deduplicated the same
+/// way `draw::TileQuadCorners` already is (`Out[0]`/`Out[3]` share
+/// `top_left`, `Out[2]`/`Out[4]` share `bottom_right`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointQuadCorners {
+    pub top_left: [f32; 3],
+    pub top_right: [f32; 3],
+    pub bottom_right: [f32; 3],
+    pub bottom_left: [f32; 3],
+}
+
+/// Real `Draw2DPoint`'s own per-corner formula (`DrawSimple.cpp:
+/// 187-198`): `Coords = (RFX2 * Z * (X1 - Frame->FX2 - 0.5f), RFY2 *
+/// Z * (Y1 - Frame->FY2 - 0.5f), Z)` for the top-left corner, `X2 +
+/// 0.5f`/`Y2 + 0.5f` for the right/bottom edges -- the real `±0.5`
+/// pixel inset/expansion past `X1`/`X2`/`Y1`/`Y2` themselves (not
+/// present in `Draw2DLine`'s own formula at all), confirmed by direct
+/// re-read, not assumed from `tile_quad_corners`'s own superficially
+/// similar shape: a degenerate `X1==X2, Y1==Y2` point still produces
+/// a real, visible 1x1-pixel-ish quad because of this offset, not a
+/// zero-area one.
+pub fn point_quad_corners(request: PointQuadRequest) -> PointQuadCorners {
+    let PointQuadRequest {
+        rfx2,
+        rfy2,
+        fx2,
+        fy2,
+        x1,
+        y1,
+        x2,
+        y2,
+        z,
+    } = request;
+    let coord = |px: f32, py: f32| [rfx2 * z * (px - fx2), rfy2 * z * (py - fy2), z];
+    PointQuadCorners {
+        top_left: coord(x1 - 0.5, y1 - 0.5),
+        top_right: coord(x2 + 0.5, y1 - 0.5),
+        bottom_right: coord(x2 + 0.5, y2 + 0.5),
+        bottom_left: coord(x1 - 0.5, y2 + 0.5),
+    }
+}
+
 /// Real `GetPolyFlagsAndDrawFlags`'s own core `PolyFlags` ->
 /// `DrawFlags` translation (`SetTexture.cpp:578-617`), the part that
 /// determines actual shader behavior -- not its `CachedPolyFlags`
@@ -1328,6 +1583,53 @@ mod tests {
         );
         assert!(
             close(out.bottom_left.0, [-0.8, 0.2, 1.0]) && close2(out.bottom_left.1, [0.2, 0.3]),
+            "bottom_left mismatch: {out:?}"
+        );
+    }
+
+    #[test]
+    fn point_quad_corners_matches_the_real_draw_2d_point_formula() {
+        // Same real rfx2=rfy2=0.02/fx2=fy2=50.0 derivation as tile_
+        // quad_corners's own test above. x1=10,y1=20,x2=15,y2=25
+        // (a small, non-degenerate point rect, so all four corners
+        // are distinguishable), z=1.0. Hand-computed independently
+        // (scratch Python) before relying on it:
+        //   top_left:     (-0.81, -0.61, 1.0)   [coord(x1-0.5,y1-0.5)]
+        //   top_right:    (-0.69, -0.61, 1.0)   [coord(x2+0.5,y1-0.5)]
+        //   bottom_right: (-0.69, -0.49, 1.0)   [coord(x2+0.5,y2+0.5)]
+        //   bottom_left:  (-0.81, -0.49, 1.0)   [coord(x1-0.5,y2+0.5)]
+        // The real +-0.5 inset/expansion (DrawSimple.cpp:187-198) is
+        // the one thing distinguishing this from tile_quad_corners's
+        // own formula -- without it, top_left would be (-0.8,-0.6,1)
+        // instead (coord(x1,y1), no offset), a real, hand-verified
+        // different value this test's own negative control confirms
+        // it actually discriminates (see commit message).
+        let out = point_quad_corners(PointQuadRequest {
+            rfx2: 0.02,
+            rfy2: 0.02,
+            fx2: 50.0,
+            fy2: 50.0,
+            x1: 10.0,
+            y1: 20.0,
+            x2: 15.0,
+            y2: 25.0,
+            z: 1.0,
+        });
+        let close = |a: [f32; 3], b: [f32; 3]| (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5);
+        assert!(
+            close(out.top_left, [-0.81, -0.61, 1.0]),
+            "top_left mismatch: {out:?}"
+        );
+        assert!(
+            close(out.top_right, [-0.69, -0.61, 1.0]),
+            "top_right mismatch: {out:?}"
+        );
+        assert!(
+            close(out.bottom_right, [-0.69, -0.49, 1.0]),
+            "bottom_right mismatch: {out:?}"
+        );
+        assert!(
+            close(out.bottom_left, [-0.81, -0.49, 1.0]),
             "bottom_left mismatch: {out:?}"
         );
     }
