@@ -471,7 +471,7 @@ hp2_add_executable(hp2_game
 )
 target_compile_definitions(hp2_game PRIVATE HP2_WITH_CLIENT_PACKAGES=1)
 if(WIN32)
-    set(HP2_WINDOWS_ICON_PATH "${HP2_UNREAL_ROOT}/WinDrv/Src/Res/Game.ico")
+    set(HP2_WINDOWS_ICON_PATH "${HP2_UNREAL_ROOT}/SDLLaunch/Res/Game.ico")
     set(HP2_WINDOWS_MANIFEST_PATH "${HP2_UNREAL_ROOT}/SDLLaunch/Res/HarryPotter2.manifest")
     set(HP2_WINDOWS_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HarryPotter2.rc")
     configure_file(
