@@ -2565,6 +2565,205 @@ mod tests {
 
     #[test]
     #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn tile_pipeline_renders_a_real_dxt1_compressed_texture_into_an_offscreen_texture() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tile dxt1 render test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+
+        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+
+        // A real, hand-built single-block BC1/DXT1 4x4 texture, solid
+        // opaque red -- color0 == color1 == pure red in RGB565
+        // (0xF800: R=11111,G=000000,B=00000 from the MSB), little-
+        // endian u16 each, then 4 bytes of 2-bit-per-texel index data
+        // all zero (every one of the 16 texels selects color0). BC1's
+        // own real decode rule when color0 <= color1 (true here, they
+        // are equal) produces color2 = lerp(color0,color1,0.5) = the
+        // same red (not a 4-color ramp) and reserves index 3 for
+        // transparent black -- irrelevant here since every index is 0,
+        // selecting color0/red directly, not derived from the ramp at
+        // all. A real BC1 hardware/driver decoder is what proves this
+        // byte layout right, not an assumption re-derived from the
+        // format's own written spec alone.
+        let dxt1_block: [u8; 8] = [0x00, 0xF8, 0x00, 0xF8, 0x00, 0x00, 0x00, 0x00];
+        let mut texture_cache = crate::texture::TextureCache::new();
+        let Some(cached) = texture_cache.upload_compressed(
+            &created,
+            1,
+            4,
+            4,
+            &[crate::texture::CompressedMipLevel {
+                width: 4,
+                height: 4,
+                data: &dxt1_block,
+            }],
+            false,
+        ) else {
+            println!(
+                "SKIPPED: adapter {:?} backend {} does not actually grant \
+                 Features::TEXTURE_COMPRESSION_BC -- the real engine's own SupportsS3TC-gated \
+                 graceful degradation (compute_tile_draw_flags's doc / create_compressed_gpu_\
+                 texture's own doc both already cover why this is a real, not a bug), nothing \
+                 to assert here on this adapter",
+                created.adapter_name,
+                backend_name(created.backend)
+            );
+            return;
+        };
+        let cached_view = cached.view.clone();
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
+        let vertices = [
+            TileVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+            },
+            TileVertex {
+                coords: [0.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 1.0],
+            },
+            TileVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+            },
+            TileVertex {
+                coords: [-1.0, -1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 1.0],
+            },
+            TileVertex {
+                coords: [0.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [1.0, 0.0],
+            },
+            TileVertex {
+                coords: [-1.0, 1.0, 0.0],
+                draw_id: 0,
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let draw_params = [TileDrawParams {
+            draw_color: [1.0, 1.0, 1.0, 1.0],
+            draw_flags: 0,
+            _padding: [0; 3],
+        }];
+
+        let render_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("tile dxt1 render test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let render_target_view = render_target.create_view(&wgpu::TextureViewDescriptor::default());
+
+        pipeline.render(
+            device,
+            queue,
+            TileDrawCall {
+                frame_uniforms_buffer: &frame_buffer,
+                vertices: &vertices,
+                draw_params: &draw_params,
+                texture_view: &cached_view,
+                sampler: &sampler,
+                target: &render_target_view,
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLUE),
+            },
+        );
+
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tile dxt1 render test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("tile dxt1 render test readback encoder"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+
+        let left_pixel = &mapped[8 * 4..8 * 4 + 4];
+        assert_eq!(
+            left_pixel,
+            &[255u8, 0, 0, 255],
+            "expected a real GPU BC1 hardware decoder to decode this hand-built block as solid \
+             opaque red, got {left_pixel:?}"
+        );
+        let right_pixel = &mapped[56 * 4..56 * 4 + 4];
+        assert_eq!(
+            right_pixel,
+            &[0u8, 0, 255, 255],
+            "expected a pixel outside the drawn quad's span to still read back the real clear \
+             color, blue -- got {right_pixel:?}"
+        );
+        println!(
+            "TextureCache::upload_compressed + TilePipeline::render confirmed empirically: a \
+             real hand-built DXT1/BC1 block, uploaded through create_compressed_gpu_texture and \
+             sampled through a real GPU hardware decoder, produced the right decoded color at \
+             the right position in a real offscreen texture on adapter {:?} backend {}",
+            created.adapter_name,
+            backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
     fn gouraud_pipeline_renders_a_real_textured_triangle_mesh_into_an_offscreen_texture() {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");

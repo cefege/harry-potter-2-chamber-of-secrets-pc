@@ -754,9 +754,23 @@ fn try_create_device_once(
     }
     let info = adapter.get_info();
     let adapter_limits = adapter.limits();
+    // Real `SupportsS3TC`'s own graceful degradation (SetTexture.cpp:
+    // 233: `if (!SupportsS3TC && IsHP2CompressedTexture(Info.Format))
+    // UnsupportedTexture = true;`, not a hard failure) -- requesting
+    // an unsupported feature would make request_device itself fail
+    // outright, so this intersects with what the real adapter actually
+    // reports rather than requiring it unconditionally. Checked again
+    // at actual DXT1 upload time via `device.features()` (what was
+    // actually granted, not just requested) -- `texture::texture_bytes`'s
+    // own doc already has the real per-format byte-size formula this
+    // compressed-format path depends on.
+    let required_features = adapter
+        .features()
+        .intersection(wgpu::Features::TEXTURE_COMPRESSION_BC);
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("hp2-wgpu device"),
         required_limits: adapter_limits.clone(),
+        required_features,
         ..Default::default()
     }))
     .ok()?;
@@ -5173,10 +5187,15 @@ mod tests {
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("device poll should succeed on a working device");
         println!(
-            "created device on adapter {:?} backend {}, max_texture_dimension_2d={}",
+            "created device on adapter {:?} backend {}, max_texture_dimension_2d={}, \
+             TEXTURE_COMPRESSION_BC granted={}",
             created.adapter_name,
             backend_name(created.backend),
-            created.adapter_limits.max_texture_dimension_2d
+            created.adapter_limits.max_texture_dimension_2d,
+            created
+                .device
+                .features()
+                .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
         );
     }
 

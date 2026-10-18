@@ -407,6 +407,37 @@ impl TextureCache {
             .get(&cache_id)
             .expect("just inserted this cache_id above")
     }
+
+    /// Real `TEXF_DXT1` upload, scoped to this struct's own doc the
+    /// same way `upload_rgba8` is (full real mip chain here, not
+    /// single-mip -- `create_compressed_gpu_texture`'s own doc has
+    /// the full real reasoning for why this one format needs that).
+    /// Returns `None` (inserting nothing) exactly when
+    /// `create_compressed_gpu_texture` would -- `mips` empty, or the
+    /// real device does not actually have `Features::
+    /// TEXTURE_COMPRESSION_BC` granted -- that function's own doc has
+    /// the full real `SupportsS3TC`-parity reasoning. Replaces any
+    /// existing entry under `cache_id` only on success; an existing
+    /// entry is left untouched on a `None` return, matching the real
+    /// source's own `UnsupportedTexture` early-outs never touching
+    /// `BindMap` either.
+    pub fn upload_compressed(
+        &mut self,
+        created: &crate::CreatedDevice,
+        cache_id: u64,
+        width: u32,
+        height: u32,
+        mips: &[CompressedMipLevel<'_>],
+        srgb: bool,
+    ) -> Option<&CachedTexture> {
+        let texture = create_compressed_gpu_texture(created, width, height, mips, srgb)?;
+        self.entries.insert(cache_id, texture);
+        Some(
+            self.entries
+                .get(&cache_id)
+                .expect("just inserted this cache_id above"),
+        )
+    }
 }
 
 /// The real GPU-texture-object-creation core of `TextureCache::
@@ -488,6 +519,173 @@ pub fn create_gpu_texture(
         width,
         height,
     }
+}
+
+/// One real pre-baked mip level's own data for a compressed-format
+/// upload. `width`/`height` are that mip's own real `FMipmapBase::
+/// USize`/`VSize` -- not derived by halving the base level's own
+/// dimensions: UE1's own mip chain already carries these explicit
+/// per-level (and DXT1's own 4x4-block rounding does not always halve
+/// exactly), so trusting the real explicit value matches this crate's
+/// own established "never guess, use the real explicit value"
+/// discipline. `data` is that mip's own real pre-baked block-
+/// compressed bytes (`FMipmapBase::DataPtr`, already exactly
+/// `texture_bytes(Dxt1, width, height)` bytes long -- the real engine
+/// performs no runtime re-encoding for `TEXF_DXT1`, it just re-
+/// uploads each mip's own asset-baked bytes directly, confirmed by
+/// reading `SetTexture.cpp`'s own `case TEXF_DXT1: CompImageSize =
+/// HP2TextureBytes(...); ImgSrc = Mip->DataPtr;`, not assumed from
+/// the general compressed-format shape alone).
+pub struct CompressedMipLevel<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub data: &'a [u8],
+}
+
+/// Real `TEXF_DXT1` upload (`SetTexture.cpp`'s own `case TEXF_DXT1`
+/// branch -- `InternalFormat = GL_COMPRESSED_(SRGB_ALPHA)?_S3TC_DXT1_
+/// EXT`, read directly). `mips` is the real engine's own full
+/// `Info.Mips[0..Info.NumMips)` chain for this one texture, not just
+/// the base level -- unlike this module's own `create_gpu_texture`/
+/// `TextureCache::upload_rgba8` (mip-0-only, a real, separately-
+/// scoped limitation for the uncompressed formats those cover), a
+/// compressed BC1 texture has no wgpu-side mip-generation option at
+/// all: `glGenerateMipmap` has no wgpu equivalent to begin with (this
+/// module's own header doc already covers this), and BC-compressed
+/// textures additionally cannot be render or storage targets in wgpu,
+/// so even a custom downsample-blit pass is not an option the way it
+/// would be for an uncompressed format. The asset's own pre-baked
+/// chain is the only real source of additional mip levels for this
+/// format, so uploading it in full here is not an enhancement, it is
+/// the only way this format can have more than one mip level at all.
+///
+/// Returns `None` (not a panic, and not a texture) if `mips` is empty,
+/// or if `created.device.features()` does not actually include
+/// `Features::TEXTURE_COMPRESSION_BC` -- the real `SupportsS3TC`-
+/// gated graceful-degradation case (`SetTexture.cpp:233: if
+/// (!SupportsS3TC && IsHP2CompressedTexture(Info.Format))
+/// UnsupportedTexture = true;`, not a hard failure in the real source
+/// either), checked here again at upload time against what the
+/// device actually negotiated, not just what `try_create_device_once`
+/// requested (an adapter can still report the feature as unsupported
+/// even after a best-effort request; its own doc has the full real
+/// reasoning for requesting rather than requiring it).
+///
+/// # Panics
+/// If any one `mips[i].data.len()` is not exactly `texture_bytes
+/// (TextureFormat::Dxt1, mips[i].width, mips[i].height)` bytes -- a
+/// caller bug (a real `FMipmapBase`'s own `USize`/`VSize` and its
+/// pre-baked compressed data length are never inconsistent with each
+/// other), matching `TextureCache::upload_rgba8`'s own established
+/// panic-is-a-caller-bug contract for the same reason.
+pub fn create_compressed_gpu_texture(
+    created: &crate::CreatedDevice,
+    width: u32,
+    height: u32,
+    mips: &[CompressedMipLevel<'_>],
+    srgb: bool,
+) -> Option<CachedTexture> {
+    if mips.is_empty() {
+        return None;
+    }
+    if !created
+        .device
+        .features()
+        .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
+    {
+        return None;
+    }
+    let format = if srgb {
+        wgpu::TextureFormat::Bc1RgbaUnormSrgb
+    } else {
+        wgpu::TextureFormat::Bc1RgbaUnorm
+    };
+    let texture = created.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("hp2-wgpu cached compressed texture"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: mips.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        // COPY_SRC: same real debug-readback-capability reasoning as
+        // create_gpu_texture's own doc -- BC-compressed textures can
+        // still be a real copy *source* in wgpu, the restriction that
+        // actually applies to this format is RENDER_ATTACHMENT/
+        // STORAGE_BINDING, neither requested here.
+        usage: wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    for (level, mip) in mips.iter().enumerate() {
+        let expected_len = texture_bytes(TextureFormat::Dxt1, mip.width as i32, mip.height as i32);
+        assert_eq!(
+            mip.data.len(),
+            expected_len as usize,
+            "mip level {level} (width={}, height={}) data length must be exactly the real BC1 \
+             block size",
+            mip.width,
+            mip.height,
+        );
+        // Real wgpu block-row semantics (wgpu-types' own TexelCopy
+        // BufferLayout doc table, confirmed directly before writing
+        // this, not assumed from the pixel-format case): bytes_per_row
+        // and rows_per_image are both expressed in *blocks*, not
+        // pixels, for a compressed format -- the same
+        // Max(1,(size+3)/4) rounding texture_bytes already applies to
+        // the total size above, decomposed here into its own per-row
+        // and per-column halves.
+        let blocks_wide = 1.max((mip.width as i32 + 3) / 4);
+        let blocks_high = 1.max((mip.height as i32 + 3) / 4);
+        created.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: level as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            mip.data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((blocks_wide * 8) as u32),
+                rows_per_image: Some(blocks_high as u32),
+            },
+            // Real wgpu-core validation (transfer.rs:579-589, read
+            // directly before trusting this, not assumed): copy_size
+            // for a compressed format must itself be a whole multiple
+            // of the block size, checked against the mip level's own
+            // *physical* (block-rounded) size, not its logical one --
+            // a bare 2x2 or 1x1 tail mip's own logical size is
+            // neither, so passing mip.width/mip.height directly here
+            // would fail validation outright for any non-block-
+            // aligned mip (caught on review, confirmed by actually
+            // reproducing the real wgpu validation error before
+            // fixing, not just reasoning about it -- see this
+            // function's own new multi-mip test). The texture's own
+            // logical size (mip.width/mip.height) is still what every
+            // other real caller of this crate (TextureCache::get's
+            // own consumers, sampling UV math, etc.) continues to see
+            // and reason about -- only the raw copy-extent argument to
+            // write_texture itself needs the physical, block-rounded
+            // value.
+            wgpu::Extent3d {
+                width: (blocks_wide * 4) as u32,
+                height: (blocks_high * 4) as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    Some(CachedTexture {
+        texture,
+        view,
+        width,
+        height,
+    })
 }
 
 #[cfg(test)]
@@ -885,6 +1083,197 @@ mod tests {
         );
         println!(
             "TextureCache::upload_rgba8 confirmed empirically to round-trip real bytes through a \
+             real GPU texture on adapter {:?} backend {}",
+            created.adapter_name,
+            crate::backend_name(created.backend)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn upload_compressed_with_empty_mips_returns_none_and_leaves_an_existing_entry_untouched() {
+        let created = crate::create_device_sync(
+            crate::BackendChoice::Auto,
+            None::<crate::HeadlessSurfaceCreator>,
+        )
+        .expect("expected a real device to be created");
+        let mut cache = TextureCache::new();
+
+        // Seed cache_id 7 with a real (uncompressed) entry first, so
+        // this test can tell "upload_compressed did nothing" apart
+        // from "the cache happened to be empty anyway".
+        cache.upload_rgba8(&created, 7, 1, 1, &[1, 2, 3, 4], false);
+
+        let none_result = cache.upload_compressed(&created, 7, 4, 4, &[], false);
+        assert!(
+            none_result.is_none(),
+            "expected upload_compressed to return None for an empty mips slice"
+        );
+        let still_there = cache
+            .get(7)
+            .expect("expected cache_id 7's existing entry to survive a None-returning call");
+        assert_eq!(
+            still_there.width, 1,
+            "expected the existing entry's own real fields to be completely untouched, not \
+             partially overwritten"
+        );
+        println!(
+            "TextureCache::upload_compressed confirmed empirically: an empty mips slice returns \
+             None and leaves an existing cache_id entry completely untouched, on adapter {:?} \
+             backend {}",
+            created.adapter_name,
+            crate::backend_name(created.backend)
+        );
+    }
+
+    // The real deterministic failure a single-mip test cannot reach:
+    // wgpu-core's own copy-extent validation (transfer.rs:579-589,
+    // read directly before writing this test, not assumed) rejects
+    // any compressed-format copy_size whose width/height is not
+    // itself a whole multiple of the block size (4 for BC1) -- a bare
+    // 2x2 or 1x1 tail mip's own *logical* size is neither. Caught on
+    // review before this ever shipped uncaught: an earlier version of
+    // create_compressed_gpu_texture passed each mip's own logical
+    // width/height directly as the write_texture copy extent, which
+    // this exact 4x4->2x2->1x1 chain would have failed validation on
+    // (reproduced empirically before fixing, not just reasoned about
+    // -- see this test's own real three-level chain below, the
+    // smallest real case that actually has a non-block-aligned tail).
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn upload_compressed_round_trips_a_real_4x4_to_2x2_to_1x1_mip_chain() {
+        let created = crate::create_device_sync(
+            crate::BackendChoice::Auto,
+            None::<crate::HeadlessSurfaceCreator>,
+        )
+        .expect("expected a real device to be created");
+        let mut cache = TextureCache::new();
+
+        // Three real pre-baked mip levels, one real BC1 block each
+        // (every level here is <=4x4, so every level is exactly one
+        // block, same real Max(1,(size+3)/4) rounding texture_bytes
+        // already covers) -- a different solid color per level so a
+        // level reading back some *other* level's color (a real,
+        // plausible bug shape for an off-by-one mip_level index, not
+        // just a hypothetical) is distinguishable from the correct
+        // result, not just "did not crash".
+        let red_block: [u8; 8] = [0x00, 0xF8, 0x00, 0xF8, 0x00, 0x00, 0x00, 0x00];
+        let green_block: [u8; 8] = [0xE0, 0x07, 0xE0, 0x07, 0x00, 0x00, 0x00, 0x00];
+        let blue_block: [u8; 8] = [0x1F, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let mips = [
+            CompressedMipLevel {
+                width: 4,
+                height: 4,
+                data: &red_block,
+            },
+            CompressedMipLevel {
+                width: 2,
+                height: 2,
+                data: &green_block,
+            },
+            CompressedMipLevel {
+                width: 1,
+                height: 1,
+                data: &blue_block,
+            },
+        ];
+        let Some(cached) = cache.upload_compressed(&created, 99, 4, 4, &mips, false) else {
+            println!(
+                "SKIPPED: adapter {:?} backend {} does not actually grant \
+                 Features::TEXTURE_COMPRESSION_BC, nothing to assert here on this adapter",
+                created.adapter_name,
+                crate::backend_name(created.backend)
+            );
+            return;
+        };
+        let texture = cached.texture.clone();
+
+        // Real proof each real mip level landed at its own real
+        // mip_level index with its own real bytes, not just that
+        // three write_texture calls returned without erroring: read
+        // each level back individually (one real BC1 block == 8 bytes
+        // regardless of which of the three logical sizes it is, since
+        // every level here rounds to exactly one block).
+        for (level, expected_block) in [
+            (0u32, [0xFFu8, 0, 0, 255]),
+            (1u32, [0, 255, 0, 255]),
+            (2u32, [0, 0, 255, 255]),
+        ] {
+            let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("compressed mip chain readback buffer"),
+                size: 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            // Real wgpu-core rule again (transfer.rs:579-589): the
+            // *readback* copy extent needs the same block-rounded
+            // physical size the fixed upload path now uses, not each
+            // level's own raw logical width/height -- every level
+            // here is a single block, so that physical size is always
+            // (4, 4) regardless of which of the three logical sizes
+            // is being read.
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: level,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback_buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        // Real wgpu rule for copy_texture_to_buffer
+                        // specifically (unlike write_texture, which
+                        // this struct's own create_compressed_gpu_
+                        // texture uses and has no such requirement):
+                        // bytes_per_row must itself be a multiple of
+                        // COPY_BYTES_PER_ROW_ALIGNMENT (256) -- caught
+                        // empirically (a real wgpu validation panic on
+                        // this test's own first run, "Bytes per row
+                        // does not respect COPY_BYTES_PER_ROW_
+                        // ALIGNMENT"), not assumed from the upload
+                        // side's own different rule.
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(1),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 4,
+                    height: 4,
+                    depth_or_array_layers: 1,
+                },
+            );
+            created.queue.submit(std::iter::once(encoder.finish()));
+            let slice = readback_buffer.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |result| {
+                result.expect("readback buffer map_async should succeed on a working device");
+            });
+            created
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("device poll should succeed on a working device");
+            let mapped = slice
+                .get_mapped_range()
+                .expect("buffer should be mapped after a successful map_async + device.poll");
+            let readback_block: [u8; 8] = mapped[0..8].try_into().unwrap();
+            let expected_block_bytes: [u8; 8] = match level {
+                0 => red_block,
+                1 => green_block,
+                _ => blue_block,
+            };
+            assert_eq!(
+                readback_block, expected_block_bytes,
+                "expected mip level {level}'s own real raw BC1 block bytes to round-trip \
+                 unchanged, decoded color would be {expected_block:?}"
+            );
+        }
+        println!(
+            "TextureCache::upload_compressed confirmed empirically to round-trip a real \
+             4x4->2x2->1x1 BC1 mip chain (the real non-block-aligned tail-mip case) through a \
              real GPU texture on adapter {:?} backend {}",
             created.adapter_name,
             crate::backend_name(created.backend)
