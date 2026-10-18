@@ -2,7 +2,7 @@
 //! implementation of `UClient`/`UViewport`, registered as
 //! `SDLDrv.SDLClient`/`SDLDrv.SDLViewport`.
 //!
-//! **Scope of this crate today: seven FFI-wired cutovers, not the
+//! **Scope of this crate today: eight FFI-wired cutovers, not the
 //! `USDLClient`/`USDLViewport` classes themselves.** `USDLClient :
 //! UClient, FNotifyHook` and `USDLViewport : UViewport` are UE1
 //! `UObject`-derived classes (`DECLARE_CLASS`,
@@ -98,6 +98,14 @@
 //!   `MaxJoystickAxes` (8), the >12-buttons-and-a-hat fold threshold
 //!   (including the exact boundary, 12 vs 14 buttons), `IgnoreHat`
 //!   suppression, and out-of-range device index failing cleanly.
+//! - `viewport`: pure decision logic from `USDLViewport`
+//!   (`SDLViewport.cpp`): `UpdateMouseScale`'s math, the constructor's
+//!   desktop colour-depth choice, `OpenWindow`'s size/flags/fullscreen
+//!   choice, `ResizeViewport`'s blit-flag and size transitions,
+//!   `IsFullscreen`, `SetModeCursor`'s index clamp, and `Lock`'s gate.
+//!   FFI-wired through `crates/hp2-ffi/src/viewport.rs`; the C++ shell
+//!   keeps every `SDL_*` call and `UViewport` field write. Reference
+//!   values were captured from the verbatim C++ bodies with clang++.
 //!
 //! **`USDLViewport` and Phase 3 (the wgpu renderer) are not cleanly
 //! separable in the plan's stated order.** `OpenWindow` calls
@@ -109,15 +117,16 @@
 //! or call through `RenDev` (`:160-212`). None of that can move to
 //! Rust before a render device exists on the Rust side to move it to.
 //!
-//! What can port independent of Phase 3, once the live-UObject FFI
-//! boundary is designed: the rest of window creation/cursor
-//! (`OpenWindow`'s `SDL_CreateWindow`/GL-attribute half, no small
-//! self-contained piece of it ported yet; `SetModeCursor`, whose only
-//! real logic -- clamping `SelectedCursor` against the `SystemCursors`
-//! array -- is a C++-owned array index, leaving nothing worth porting
-//! on its own), `ReleaseJoystickInput` (still inline C++, now the
-//! only remaining consumer of `GJoyAxisKeys`, called in turn by
-//! `ReleaseAllInput`),
+//! What remains in C++ and why: the `SDL_*` window/cursor calls and
+//! `OpenWindow`'s `SDL_CreateWindow`/GL-attribute half (they operate on
+//! the C++-owned `SdlWindow`), `SetModeCursor`'s `SDL_SetCursor` call
+//! (the index clamp is now `hp2_rs_viewport_mode_cursor_index`), and
+//! `UpdateInput`'s event pump, which calls `CauseInputEvent`,
+//! `Engine->Key`, `Engine->MousePosition`, and `Input->KeyDown`
+//! directly. Moving the pump needs a host callback table so Rust never
+//! holds a borrow across an engine call that can throw.
+//! `ReleaseJoystickInput` (still inline C++, now the only remaining
+//! consumer of `GJoyAxisKeys`, called in turn by `ReleaseAllInput`),
 //! and ungrabbed `SDL_MOUSEMOTION` (dispatches straight to
 //! `Engine->MousePosition` with no `HP2Make*Event` call, so it was
 //! never part of `input_event`'s scope).
@@ -140,4 +149,5 @@ pub mod joystick;
 pub mod joystick_input;
 pub mod mouse_capture;
 pub mod mouse_state;
+pub mod viewport;
 pub mod window_chrome;

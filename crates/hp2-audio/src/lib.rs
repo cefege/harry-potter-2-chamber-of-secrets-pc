@@ -1,8 +1,15 @@
 //! Rust port of `HarryPotter2/Unreal/ALAudio/Src/ALAudioSubsystem.cpp`
-//! (2304 lines) -- the OpenAL-Soft-backed implementation of
+//! (2261 lines) -- the OpenAL-Soft-backed implementation of
 //! `UAudioSubsystem`, registered as `ALAudio.ALAudioSubsystem`.
 //!
-//! **Scope of this crate today: three functions.** `UALAudioSubsystem`
+//! **Scope of this crate today:** the `priority` functions (three, below),
+//! `ambient` (the `HandleAmbience` admission, flags, source-id, and
+//! `UpdateAmbience` stop predicates, plus `sort`, a faithful port of the UE1
+//! `Sort` template that `HandleAmbience` uses), and `stream`, the
+//! streaming-buffer state machine (`UpdateStreamingSounds`,
+//! `ALAudioSubsystem.cpp:1495-1597`) with OpenAL and `GFileStream` calls
+//! passed in as closures. Device init, voice management, attenuation, and
+//! music are still C++. `UALAudioSubsystem`
 //! is a UE1 `UObject`-derived class (`DECLARE_CLASS(UALAudioSubsystem,
 //! UAudioSubsystem, CLASS_Config, ALAudio)`) whose state and virtual
 //! interface are deeply coupled to the live engine object graph --
@@ -85,4 +92,10 @@
 //! `Tests/AudioTests.cpp` (`TestFindLeastImportantSoundFfiBoundary`,
 //! same `audio_lifecycle` ctest).
 
+pub mod ambient;
+
 pub mod priority;
+
+pub mod stream;
+
+pub mod sort;

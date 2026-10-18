@@ -256,6 +256,11 @@ class ALAUDIO_API UALAudioSubsystem : public UAudioSubsystem
 	INT GetNewStreamStruct();
 	void SetI3DL2Listener( UI3DL2Listener* Listener );
 	UBOOL alError( TCHAR* Text, UBOOL Log = true );
+	// Callbacks for hp2_rs_audio_stream_tick (UpdateStreamingSounds). Ctx is an FStreamTickCalls from ALAudioSubsystem.cpp.
+	static ALuint StreamTickUnqueue( void* Ctx );
+	static BYTE StreamTickPopCompleted( void* Ctx, uintptr_t* Dest, BYTE* Terminal );
+	static void StreamTickQueue( void* Ctx, ALuint BufferIndex );
+	static BYTE StreamTickRequest( void* Ctx, uintptr_t Dest );
 	INT FindLeastImportantSound( USound *pIncomingSound );
 	static INT FindLeastPriorityNonTalkSource( const TArray<ALSource>& InSources );
 

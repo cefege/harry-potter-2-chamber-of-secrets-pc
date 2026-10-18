@@ -7,6 +7,7 @@
 #include "HP2MouseCapturePolicy.h"
 #include "UnRenDev.h"
 #include "FConfigCacheIni.h"
+#include <stddef.h>
 #include <errno.h>
 #include <string.h>
 #if __UNIX__
@@ -30,14 +31,21 @@ static const EInputKey GJoyAxisKeys[USDLClient::MaxJoystickAxes] =
 	IK_JoyX, IK_JoyY, IK_JoyZ, IK_JoyR, IK_JoyU, IK_JoyV, IK_UnknownEA, IK_UnknownEB
 };
 
+// Layout mirror of hp2-ffi's FfiViewportSize (crates/hp2-ffi/src/viewport.rs).
+static_assert(sizeof(FfiViewportSize) == 16, "FfiViewportSize drifted from hp2-ffi");
+static_assert(offsetof(FfiViewportSize, blit_flags) == 0, "FfiViewportSize drifted from hp2-ffi");
+static_assert(offsetof(FfiViewportSize, size_x) == 4, "FfiViewportSize drifted from hp2-ffi");
+static_assert(offsetof(FfiViewportSize, size_y) == 8, "FfiViewportSize drifted from hp2-ffi");
+static_assert(offsetof(FfiViewportSize, color_bytes) == 12, "FfiViewportSize drifted from hp2-ffi");
+static_assert(USDLViewport::NumSystemCursors == 7, "hp2_rs_viewport_mode_cursor_index assumes 7 system cursors");
+
 // Window pixels per viewport pixel; identity until both sizes are known.
 static void UpdateMouseScale( USDLViewport& Viewport )
 {
 	INT WindowX = 0, WindowY = 0;
 	if( Viewport.SdlWindow )
 		SDL_GetWindowSize( Viewport.SdlWindow, &WindowX, &WindowY );
-	Viewport.MouseScaleX = (WindowX > 0 && Viewport.SizeX > 0) ? (FLOAT)Viewport.SizeX / (FLOAT)WindowX : 1.f;
-	Viewport.MouseScaleY = (WindowY > 0 && Viewport.SizeY > 0) ? (FLOAT)Viewport.SizeY / (FLOAT)WindowY : 1.f;
+	hp2_rs_viewport_mouse_scale( WindowX, WindowY, Viewport.SizeX, Viewport.SizeY, &Viewport.MouseScaleX, &Viewport.MouseScaleY );
 }
 
 static void TextToUtf8( const TCHAR* Text, TArray<ANSICHAR>& Out )
@@ -83,22 +91,13 @@ USDLViewport::USDLViewport()
 
 	// Adopt the desktop display mode's depth. Headless hosts report no
 	// mode; the 32-bit default stands and everything degrades safely.
-	ColorBytes = 4;
 	SDL_DisplayMode DesktopMode;
 	memset( &DesktopMode, 0, sizeof(DesktopMode) );
-	if( SDL_GetDesktopDisplayMode( 0, &DesktopMode ) == 0 && DesktopMode.format != SDL_PIXELFORMAT_UNKNOWN )
-	{
-		const INT DesktopBits = SDL_BITSPERPIXEL( DesktopMode.format );
-		if( DesktopBits > 0 && DesktopBits <= 16 )
-		{
-			ColorBytes = 2;
-			Caps |= CC_RGB565;
-		}
-		else
-		{
-			ColorBytes = 4;
-		}
-	}
+	const bool bHasDesktopMode = SDL_GetDesktopDisplayMode( 0, &DesktopMode ) == 0 && DesktopMode.format != SDL_PIXELFORMAT_UNKNOWN;
+	INT DesktopRgb565 = 0;
+	hp2_rs_viewport_desktop_color_depth( bHasDesktopMode ? 1 : 0, bHasDesktopMode ? SDL_BITSPERPIXEL( DesktopMode.format ) : 0, &ColorBytes, &DesktopRgb565 );
+	if( DesktopRgb565 )
+		Caps |= CC_RGB565;
 
 	SDL_version Linked;
 	SDL_GetVersion( &Linked );
@@ -204,7 +203,7 @@ void USDLViewport::ShutdownAfterError()
 UBOOL USDLViewport::Lock( FPlane FlashScale, FPlane FlashFog, FPlane ScreenClear, DWORD RenderLockFlags, BYTE* HitData, INT* HitSize )
 {
 	guard(USDLViewport::Lock);
-	if( !RenDev || !SizeX || !SizeY )
+	if( !hp2_rs_viewport_lock_allowed( RenDev != NULL, SizeX, SizeY ) )
 		return 0;
 	RenDev->Lock( FlashScale, FlashFog, ScreenClear, RenderLockFlags, HitData, HitSize );
 	CurrentTime = appSeconds();
@@ -217,19 +216,12 @@ UBOOL USDLViewport::ResizeViewport( DWORD BlitType, INT NewX, INT NewY, INT NewC
 {
 	guard(USDLViewport::ResizeViewport);
 
-	if( !(BlitType & BLIT_NoWindowChange) )
-	{
-		if( BlitType & BLIT_Fullscreen )
-			BlitFlags |= BLIT_Fullscreen;
-		else
-			BlitFlags &= ~BLIT_Fullscreen;
-	}
-	if( NewX != INDEX_NONE )
-		SizeX = NewX;
-	if( NewY != INDEX_NONE )
-		SizeY = NewY;
-	if( NewColorBytes != INDEX_NONE )
-		ColorBytes = Clamp( NewColorBytes, 2, 4 );
+	FfiViewportSize State = { BlitFlags, SizeX, SizeY, ColorBytes };
+	hp2_rs_viewport_resize( &State, BlitType, NewX, NewY, NewColorBytes );
+	BlitFlags = State.blit_flags;
+	SizeX = State.size_x;
+	SizeY = State.size_y;
+	ColorBytes = State.color_bytes;
 
 	if( SdlWindow )
 	{
@@ -267,7 +259,7 @@ void USDLViewport::Repaint( UBOOL Blit )
 void USDLViewport::SetModeCursor()
 {
 	guard(USDLViewport::SetModeCursor);
-	const INT Index = Clamp( (INT)SelectedCursor, 0, (INT)NumSystemCursors - 1 );
+	const INT Index = hp2_rs_viewport_mode_cursor_index( (INT)SelectedCursor );
 	SDL_Cursor* Cursor = SystemCursors[Index];
 	if( Cursor )
 		SDL_SetCursor( Cursor );
@@ -296,8 +288,8 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 	}
 
 	(void)ParentHandle;
-	const INT Width  = NewX != INDEX_NONE ? NewX : (OpenX != INDEX_NONE ? OpenX : C->WindowedViewportX);
-	const INT Height = NewY != INDEX_NONE ? NewY : (OpenY != INDEX_NONE ? OpenY : C->WindowedViewportY);
+	INT Width = 0, Height = 0;
+	hp2_rs_viewport_open_window_size( NewX, NewY, OpenX, OpenY, C->WindowedViewportX, C->WindowedViewportY, &Width, &Height );
 
 	if( !SdlWindow )
 	{
@@ -321,9 +313,7 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 		SDL_GL_SetAttribute( SDL_GL_MULTISAMPLESAMPLES, 0 );
 #endif
 
-		DWORD Flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (Temporary ? SDL_WINDOW_HIDDEN : 0);
-		if( C->BorderlessWindow )
-			Flags |= SDL_WINDOW_BORDERLESS;
+		DWORD Flags = hp2_rs_viewport_window_flags( Temporary ? 1 : 0, C->BorderlessWindow ? 1 : 0 );
 		SdlWindow = SDL_CreateWindow(
 			"Harry Potter 2",
 			SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -334,9 +324,9 @@ void USDLViewport::OpenWindow( DWORD ParentWindow, UBOOL Temporary, INT NewX, IN
 
 	SizeX = Width;
 	SizeY = Height;
-	ColorBytes = C->WindowedColorBits <= 16 ? 2 : 4;
+	ColorBytes = hp2_rs_viewport_window_color_bytes( C->WindowedColorBits );
 	BlitFlags &= ~BLIT_Fullscreen;
-	if( C->StartupFullscreen || C->UseDesktopResolution )
+	if( hp2_rs_viewport_startup_fullscreen( C->StartupFullscreen, C->UseDesktopResolution ) )
 	{
 		BlitFlags |= BLIT_Fullscreen;
 		SDL_SetWindowFullscreen( SdlWindow, SDL_WINDOW_FULLSCREEN_DESKTOP );
@@ -749,7 +739,7 @@ void USDLViewport::TryRenderDevice( const TCHAR* ClassName, INT NewX, INT NewY, 
 
 UBOOL USDLViewport::IsFullscreen()
 {
-	return (BlitFlags & BLIT_Fullscreen) ? 1 : 0;
+	return hp2_rs_viewport_is_fullscreen( BlitFlags );
 }
 
 void USDLViewport::ToggleFullscreen()

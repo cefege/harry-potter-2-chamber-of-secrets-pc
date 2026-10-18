@@ -7,11 +7,13 @@ use std::ffi::c_void;
 use hp2_ffi_support::{guard, install_log_sink};
 use hp2_ini::Profile;
 
+mod audio;
 mod fire_fire;
 mod fire_ice;
 mod fire_sparks;
 mod fire_water;
 mod fire_wet_wave;
+mod viewport;
 
 /// Route Rust log records to the engine log. Called from `main` before
 /// `appInit`; the C++ sink reads `GLog` per line, so records follow
@@ -2534,139 +2536,6 @@ pub unsafe extern "C" fn hp2_rs_input_fold_joystick_hat(
         }
         count as i32
     })
-}
-
-/// Mirrors the three `ALSource` fields `hp2_audio::priority::
-/// SourceSlot` needs (`crates/hp2-audio/src/priority.rs`). Declared
-/// directly in this crate for the same cbindgen-parsing reason as
-/// the other FFI mirror structs above.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct FfiAudioSourceSlot {
-    pub has_sound: bool,
-    pub id: i32,
-    pub priority: f32,
-}
-
-/// Replaces `UALAudioSubsystem::FindLeastPriorityNonTalkSource`'s
-/// body (`ALAudioSubsystem.cpp:2085-2101`). `sources` must point to
-/// `count` contiguous `FfiAudioSourceSlot`s; the caller builds this
-/// array from its own `TArray<ALSource>` immediately before the call
-/// (no `ALSource` field Rust does not need crosses the boundary).
-///
-/// # Safety
-/// `sources` must be a valid, aligned pointer to at least `count`
-/// readable `FfiAudioSourceSlot`s (or `count == 0`, in which case
-/// `sources` may be dangling).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hp2_rs_audio_find_least_priority_non_talk_source(
-    sources: *const FfiAudioSourceSlot,
-    count: usize,
-) -> i32 {
-    guard(
-        "hp2_rs_audio_find_least_priority_non_talk_source",
-        -1,
-        move || unsafe {
-            let slots: Vec<hp2_audio::priority::SourceSlot> = if count == 0 {
-                Vec::new()
-            } else {
-                std::slice::from_raw_parts(sources, count)
-                    .iter()
-                    .map(|s| hp2_audio::priority::SourceSlot {
-                        has_sound: s.has_sound,
-                        id: s.id,
-                        priority: s.priority,
-                    })
-                    .collect()
-            };
-            hp2_audio::priority::find_least_priority_non_talk_source(&slots)
-        },
-    )
-}
-
-/// Replaces `UALAudioSubsystem::SoundPriority`'s body
-/// (`ALAudioSubsystem.cpp:1946-1961`). `dist_squared` is the caller's
-/// own `FDistSquared(Location, ViewTarget->Location)`; `flags` is the
-/// sound's `WorkingFlags`/`Flags` bits as-is.
-#[unsafe(no_mangle)]
-pub extern "C" fn hp2_rs_audio_sound_priority(
-    dist_squared: f32,
-    radius: f32,
-    audio_max_radius_multiplier: f32,
-    volume: f32,
-    flags: i32,
-) -> f32 {
-    guard("hp2_rs_audio_sound_priority", 0.0, move || {
-        hp2_audio::priority::sound_priority(
-            dist_squared,
-            radius,
-            audio_max_radius_multiplier,
-            volume,
-            flags,
-        )
-    })
-}
-
-/// Mirrors `hp2_audio::priority::LeastImportantSlot`
-/// (`crates/hp2-audio/src/priority.rs`). `sound` is a `USound*`'s raw
-/// identity bits (`(uintptr_t)Source.Sound` in C++); this crate never
-/// dereferences it, only compares it for equality.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct FfiLeastImportantSlot {
-    pub sound: usize,
-    pub id: i32,
-    pub dist_squared: f32,
-    pub volume: f32,
-    pub radius: f32,
-    pub flags: i32,
-}
-
-/// Replaces `UALAudioSubsystem::FindLeastImportantSound`'s body
-/// (`ALAudioSubsystem.cpp:2105-2156`). `slots` must point to `count`
-/// contiguous `FfiLeastImportantSlot`s in the same order as the real
-/// C++'s `Sources` array (the "most frequent sound" tie-break depends
-/// on that order -- see `find_least_important_sound`'s own doc).
-/// `incoming_sound` is the raw identity bits of the `USound*` about
-/// to play.
-///
-/// # Safety
-/// `slots` must be a valid, aligned pointer to at least `count`
-/// readable `FfiLeastImportantSlot`s (or `count == 0`, in which case
-/// `slots` may be dangling).
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hp2_rs_audio_find_least_important_sound(
-    slots: *const FfiLeastImportantSlot,
-    count: usize,
-    incoming_sound: usize,
-    audio_max_radius_multiplier: f32,
-) -> i32 {
-    guard(
-        "hp2_rs_audio_find_least_important_sound",
-        -1,
-        move || unsafe {
-            let owned: Vec<hp2_audio::priority::LeastImportantSlot> = if count == 0 {
-                Vec::new()
-            } else {
-                std::slice::from_raw_parts(slots, count)
-                    .iter()
-                    .map(|s| hp2_audio::priority::LeastImportantSlot {
-                        sound: s.sound,
-                        id: s.id,
-                        dist_squared: s.dist_squared,
-                        volume: s.volume,
-                        radius: s.radius,
-                        flags: s.flags,
-                    })
-                    .collect()
-            };
-            hp2_audio::priority::find_least_important_sound(
-                &owned,
-                incoming_sound,
-                audio_max_radius_multiplier,
-            )
-        },
-    )
 }
 
 /// Boxed on the heap, handed to C++ as an opaque `void* RustDevice`

@@ -1267,10 +1267,66 @@ void UALAudioSubsystem::UnpauseSounds( void )
 	}
 }
 
-static INT Compare(ALAmbient& A,ALAmbient& B)
+static_assert(sizeof(ALAmbient) == sizeof(FfiAmbientSound), "ALAmbient drifted from hp2-ffi FfiAmbientSound");
+static_assert(offsetof(ALAmbient, Actor) == offsetof(FfiAmbientSound, actor), "ALAmbient drifted from hp2-ffi FfiAmbientSound");
+static_assert(offsetof(ALAmbient, Priority) == offsetof(FfiAmbientSound, priority), "ALAmbient drifted from hp2-ffi FfiAmbientSound");
+static_assert(offsetof(ALAmbient, Flags) == offsetof(FfiAmbientSound, flags), "ALAmbient drifted from hp2-ffi FfiAmbientSound");
+static_assert(offsetof(ALAmbient, Id) == offsetof(FfiAmbientSound, id), "ALAmbient drifted from hp2-ffi FfiAmbientSound");
+
+// Per-call context for hp2_rs_audio_stream_tick: the ALStream being updated and the source it plays on.
+struct FStreamTickCalls
 {
-	return (B.Priority - A.Priority >= 0) ? 1 : -1;
+	UALAudioSubsystem*	Self;
+	ALStream*			Stream;
+	ALuint				Source;
+};
+
+static_assert(sizeof(FfiAudioStream) == 56, "FfiAudioStream must match hp2-ffi/src/audio.rs");
+static_assert(MAX_BUFFERS_PER_STREAM == 3, "FfiAudioStream arrays are sized for 3 buffers");
+
+// Each callback below is one call site of the original UpdateStreamingSounds loop, in the same order.
+ALuint UALAudioSubsystem::StreamTickUnqueue( void* Ctx )
+{
+	FStreamTickCalls* Calls = (FStreamTickCalls*)Ctx;
+	ALuint ProcessedBuffer = 0;
+	alSourceUnqueueBuffers( Calls->Source, 1, &ProcessedBuffer );
+	Calls->Self->alError(TEXT("unqueueing"));
+	return ProcessedBuffer;
 }
+
+BYTE UALAudioSubsystem::StreamTickPopCompleted( void* Ctx, uintptr_t* Dest, BYTE* Terminal )
+{
+	FStreamTickCalls* Calls = (FStreamTickCalls*)Ctx;
+	void* CompletedDestination = NULL;
+	UBOOL CompletionTerminal = 0;
+	if ( !GFileStream->PopCompletedChunk(Calls->Stream->Id - 1, CompletedDestination, CompletionTerminal) )
+		return 0;
+	*Dest = (uintptr_t)CompletedDestination;
+	*Terminal = CompletionTerminal ? 1 : 0;
+	return 1;
+}
+
+void UALAudioSubsystem::StreamTickQueue( void* Ctx, ALuint BufferIndex )
+{
+	FStreamTickCalls* Calls = (FStreamTickCalls*)Ctx;
+	ALStream& Stream = *Calls->Stream;
+	alBufferData(
+		Stream.Buffer[BufferIndex],
+		Stream.Format,
+		Stream.RefillData[BufferIndex],
+		Stream.StreamChunkSize,
+		Stream.Rate);
+	Calls->Self->alError(TEXT("bufferdata"));
+	alSourceQueueBuffers(Calls->Source, 1, &Stream.Buffer[BufferIndex]);
+	Calls->Self->alError(TEXT("queueing"));
+}
+
+BYTE UALAudioSubsystem::StreamTickRequest( void* Ctx, uintptr_t Dest )
+{
+	FStreamTickCalls* Calls = (FStreamTickCalls*)Ctx;
+	return GFileStream->RequestChunk(Calls->Stream->Id - 1, (BYTE*)Dest) ? 1 : 0;
+}
+
 
 void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 {
@@ -1390,7 +1446,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 			AActor* Actor = Level->Actors(i);
 			if ( Actor && Actor->AmbientSound )
 			{
-				INT Id = Actor->GetIndex()*16 + SLOT_Ambient*2;
+				INT Id = hp2_rs_audio_ambient_source_id(Actor->GetIndex());
 				INT j;
 				for( j=0; j<Sources.Num(); j++ )
 					if( Sources(j).Id==Id )
@@ -1402,7 +1458,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 						INT iAmbient = AmbientSounds.Add( 1 );
 						AmbientSounds(iAmbient).Actor		= Actor;
 						AmbientSounds(iAmbient).Priority	= SoundPriority( Viewport, Actor->Location, Actor->SoundVolume/255.f, Actor->SoundRadius, SF_Looping | SF_No3D | SF_UpdatePitch );
-						AmbientSounds(iAmbient).Flags		= SF_Looping | SF_No3D | SF_UpdatePitch;
+						AmbientSounds(iAmbient).Flags		= hp2_rs_audio_ambient_flags(1);
 						AmbientSounds(iAmbient).Id			= Id;
 					}
 					else
@@ -1417,12 +1473,12 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 						}
 //						unclock(GStats.DWORDStats(ALAudioStats.STATS_OcclusionCycles));
 					
-						if (FDistSquared(ViewLocation,Actor->Location)<=Square(RM*Actor->SoundRadius*GAudioMaxRadiusMultiplier) )
+						if (hp2_rs_audio_ambient_admitted(0, FDistSquared(ViewLocation,Actor->Location), Actor->SoundRadius, RM, GAudioMaxRadiusMultiplier) )
 						{
 							INT iAmbient = AmbientSounds.Add( 1 );
 							AmbientSounds(iAmbient).Actor		= Actor;
 							AmbientSounds(iAmbient).Priority	= SoundPriority( Viewport, Actor->Location, Actor->SoundVolume/255.f, RM*Actor->SoundRadius, SF_Looping | SF_UpdatePitch );
-							AmbientSounds(iAmbient).Flags		= SF_Looping | SF_UpdatePitch;
+							AmbientSounds(iAmbient).Flags		= hp2_rs_audio_ambient_flags(0);
 							AmbientSounds(iAmbient).Id			= Id;
 						}
 					}
@@ -1434,7 +1490,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 		//
 		if( AmbientSounds.Num() )
 		{
-			Sort( &AmbientSounds(0), AmbientSounds.Num() );
+			hp2_rs_audio_sort_ambient(reinterpret_cast<struct FfiAmbientSound*>(&AmbientSounds(0)), AmbientSounds.Num());
 			for( INT iAmbient = 0; iAmbient < AmbientSounds.Num(); iAmbient++ )
 			{
 				AActor* &Actor = AmbientSounds(iAmbient).Actor;
@@ -1460,7 +1516,7 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 			{
 				FLOAT NewDist = FDistSquared(ViewLocation,Sources(i).Actor->Location);				
 				if( 
-					(NewDist > Square(Sources(i).ZoneRadius*GAudioMaxRadiusMultiplier)) || 
+					(hp2_rs_audio_ambient_out_of_range(NewDist, Sources(i).ZoneRadius, GAudioMaxRadiusMultiplier) != 0) ||
 					(Sources(i).Actor->AmbientSound != Sources(i).Sound)
 				)
 				{
@@ -1499,97 +1555,44 @@ void UALAudioSubsystem::Update( FSceneNode* SceneNode )
 
 					ALStream& Stream = Streams(Sources(i).Sound->GetHandle(Sources(i).Id) - 1);
 					alGetSourcei( Sources(i).Source, AL_BUFFERS_PROCESSED, &Processed );
-
-					UBOOL TerminalObserved = !Stream.Alive;
-
 					alError(TEXT("Before queueing."),false);
-					for (INT ProcessedIndex = 0; ProcessedIndex < Processed; ++ProcessedIndex)
+
+					// The queue state machine is Rust (hp2_rs_audio_stream_tick). Copy in the fields it
+					// owns, run it, and copy back on success.
+					FfiAudioStream State;
+					for (INT BufferIndex = 0; BufferIndex < MAX_BUFFERS_PER_STREAM; ++BufferIndex)
 					{
-						ALuint ProcessedBuffer = 0;
-						alSourceUnqueueBuffers(Sources(i).Source, 1, &ProcessedBuffer);
-						alError(TEXT("unqueueing"));
-
-						INT BufferIndex = INDEX_NONE;
-						for (INT Candidate = 0; Candidate < Stream.NumBuffers; ++Candidate)
-						{
-							if (Stream.Buffer[Candidate] == ProcessedBuffer)
-							{
-								BufferIndex = Candidate;
-								break;
-							}
-						}
-						check(BufferIndex != INDEX_NONE);
-
-						if (Stream.BufferState[BufferIndex] == QueuedPending)
-							Stream.BufferState[BufferIndex] = FreePending;
-						else if (Stream.BufferState[BufferIndex] == QueuedReady)
-							Stream.BufferState[BufferIndex] = FreeReady;
-						else if (Stream.BufferState[BufferIndex] != QueuedNoPrefetch)
-							check(0);
+						State.buffers[BufferIndex] = Stream.Buffer[BufferIndex];
+						State.refill[BufferIndex] = (uintptr_t)Stream.RefillData[BufferIndex];
+						State.state[BufferIndex] = (BYTE)Stream.BufferState[BufferIndex];
 					}
+					State.num_buffers = Stream.NumBuffers;
+					State.alive = Stream.Alive ? 1 : 0;
+					State.reset = Stream.Reset ? 1 : 0;
 
-					void* CompletedDestination = NULL;
-					UBOOL CompletionTerminal = 0;
-					while (GFileStream->PopCompletedChunk(Stream.Id - 1, CompletedDestination, CompletionTerminal))
+					FStreamTickCalls Calls = { this, &Stream, Sources(i).Source };
+					FfiAudioStreamOps Ops;
+					Ops.unqueue = StreamTickUnqueue;
+					Ops.pop_completed = StreamTickPopCompleted;
+					Ops.queue = StreamTickQueue;
+					Ops.request = StreamTickRequest;
+					Ops.ctx = &Calls;
+
+					const INT Result = hp2_rs_audio_stream_tick(&State, Processed, Ops);
+					check(Result >= 0);
+					if (Result >= 0)
 					{
-						INT BufferIndex = INDEX_NONE;
-						INT Matches = 0;
-						for (INT Candidate = 0; Candidate < Stream.NumBuffers; ++Candidate)
+						for (INT BufferIndex = 0; BufferIndex < MAX_BUFFERS_PER_STREAM; ++BufferIndex)
 						{
-							if (Stream.RefillData[Candidate] == CompletedDestination)
-							{
-								BufferIndex = Candidate;
-								++Matches;
-							}
+							Stream.BufferState[BufferIndex] = (EALStreamBufferState)State.state[BufferIndex];
 						}
-						check(Matches == 1);
-
-						if (Stream.BufferState[BufferIndex] == QueuedPending)
-							Stream.BufferState[BufferIndex] = QueuedReady;
-						else if (Stream.BufferState[BufferIndex] == FreePending)
-							Stream.BufferState[BufferIndex] = FreeReady;
-						else
-							check(0);
-
-						if (CompletionTerminal)
+						Stream.Alive = State.alive != 0;
+						Stream.Reset = State.reset != 0;
+						if (Result == 1)
 						{
-							TerminalObserved = 1;
-							Stream.Alive = 0;
+							// Start playing again as source was stopped because it ran out of buffers.
+							alSourcePlay( Sources(i).Source );
 						}
-					}
-
-					for (INT BufferIndex = 0; BufferIndex < Stream.NumBuffers; ++BufferIndex)
-					{
-						if (Stream.BufferState[BufferIndex] != FreeReady)
-							continue;
-
-						check(Stream.RefillData[BufferIndex] != NULL);
-						alBufferData(
-							Stream.Buffer[BufferIndex],
-							Stream.Format,
-							Stream.RefillData[BufferIndex],
-							Stream.StreamChunkSize,
-							Stream.Rate);
-						alError(TEXT("bufferdata"));
-						alSourceQueueBuffers(Sources(i).Source, 1, &Stream.Buffer[BufferIndex]);
-						alError(TEXT("queueing"));
-
-						if (!TerminalObserved
-							&& GFileStream->RequestChunk(Stream.Id - 1, Stream.RefillData[BufferIndex]))
-						{
-							Stream.BufferState[BufferIndex] = QueuedPending;
-						}
-						else
-						{
-							Stream.BufferState[BufferIndex] = QueuedNoPrefetch;
-						}
-					}
-					
-					if ( Stream.Reset )
-					{
-						// Start playing again as source was stopped because it ran out of buffers.
-						alSourcePlay( Sources(i).Source );
-						Stream.Reset = 0;
 					}
 
 	//				GStats.DWORDStats(ALAudioStats.STATS_ActiveStreamingSounds)++;

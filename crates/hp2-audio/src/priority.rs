@@ -5,7 +5,7 @@
 /// Matches `UnAudio.h:26-39`'s `ESoundFlags` bits this function
 /// reads.
 const SF_MUSIC: i32 = 8;
-const SF_NO3D: i32 = 16;
+pub(crate) const SF_NO3D: i32 = 16;
 const SF_HAS_LIP_SYNC: i32 = 128;
 
 /// Matches `UnTemplate.h:123-126`'s `Clamp(X,Min,Max) = X<Min ? Min :
