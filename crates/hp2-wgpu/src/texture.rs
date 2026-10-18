@@ -344,6 +344,98 @@ pub struct CachedTexture {
     pub view: wgpu::TextureView,
     pub width: u32,
     pub height: u32,
+    /// Sampler state for this texture, fixed at its first upload
+    /// (`SamplerKey`'s own doc).
+    pub sampler_key: SamplerKey,
+}
+
+/// Real per-texture sampler state (`UXOpenGLRenderDevice::SetSampler`,
+/// SetTexture.cpp:138-166). XOpenGL runs `SetSampler` only when a
+/// `BindMap` entry is first created (`IsNewBind`, SetTexture.cpp:
+/// 528-536), so a texture keeps its first upload's key for its whole
+/// cache lifetime, including later re-uploads and reallocations.
+/// Not ported: the `NoFiltering`/`LODBias` ini keys (WgpuDrv registers
+/// neither) and `UseTrilinear=False` (XOpenGL's default is on, and any
+/// `MaxAnisotropy > 0` forces it on anyway, CheckExtensions.cpp:317).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct SamplerKey {
+    /// `GL_CLAMP_TO_EDGE` on U instead of `GL_REPEAT`: the texture is
+    /// a light/fog map (`Info.Texture == NULL`), or `0 < Info.UClamp <
+    /// Info.USize`.
+    pub clamp_u: bool,
+    /// Same as `clamp_u`, for V (`Info.VClamp`/`Info.VSize`).
+    pub clamp_v: bool,
+    /// `PF_NoSmooth` on the diffuse slot: nearest filtering, no
+    /// anisotropy.
+    pub no_smooth: bool,
+}
+
+impl SamplerKey {
+    pub const CLAMP_U: u32 = 1 << 0;
+    pub const CLAMP_V: u32 = 1 << 1;
+    pub const NO_SMOOTH: u32 = 1 << 2;
+
+    /// Decodes the FFI bit set (`CLAMP_U | CLAMP_V | NO_SMOOTH`);
+    /// unknown bits are ignored.
+    pub fn from_bits(bits: u32) -> Self {
+        Self {
+            clamp_u: bits & Self::CLAMP_U != 0,
+            clamp_v: bits & Self::CLAMP_V != 0,
+            no_smooth: bits & Self::NO_SMOOTH != 0,
+        }
+    }
+
+    /// The wgpu equivalent of `SetSampler`'s GL calls. Smooth
+    /// textures use linear mag/min/mip filtering (`GL_LINEAR` /
+    /// `GL_LINEAR_MIPMAP_LINEAR`) plus `anisotropy_clamp`.
+    /// `PF_NoSmooth` uses nearest throughout (`GL_NEAREST` /
+    /// `GL_NEAREST_MIPMAP_NEAREST`) with no anisotropy, which wgpu
+    /// requires for any non-linear filter.
+    pub fn descriptor(self, anisotropy_clamp: u16) -> wgpu::SamplerDescriptor<'static> {
+        let address_mode = |clamp: bool| {
+            if clamp {
+                wgpu::AddressMode::ClampToEdge
+            } else {
+                wgpu::AddressMode::Repeat
+            }
+        };
+        let (filter, mipmap_filter, anisotropy_clamp) = if self.no_smooth {
+            (
+                wgpu::FilterMode::Nearest,
+                wgpu::MipmapFilterMode::Nearest,
+                1,
+            )
+        } else {
+            (
+                wgpu::FilterMode::Linear,
+                wgpu::MipmapFilterMode::Linear,
+                anisotropy_clamp.max(1),
+            )
+        };
+        wgpu::SamplerDescriptor {
+            label: Some("hp2-wgpu texture sampler"),
+            address_mode_u: address_mode(self.clamp_u),
+            address_mode_v: address_mode(self.clamp_v),
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: filter,
+            min_filter: filter,
+            mipmap_filter,
+            anisotropy_clamp,
+            ..Default::default()
+        }
+    }
+}
+
+/// `MaxAnisotropy` ini value -> wgpu `anisotropy_clamp`. XOpenGL
+/// applies it only when non-zero, capped at the driver maximum
+/// (CheckExtensions.cpp:300-317, SetTexture.cpp:159-160). wgpu takes
+/// 1..=16 (1 = off) and caps at 16 itself. Fractional values truncate.
+pub fn anisotropy_clamp(max_anisotropy: f32) -> u16 {
+    if max_anisotropy >= 1.0 {
+        max_anisotropy.min(16.0) as u16
+    } else {
+        1
+    }
 }
 
 /// Real `UXOpenGLRenderDevice::SetTexture`'s own `UMult`/`VMult`
@@ -478,8 +570,9 @@ impl TextureCache {
         width: u32,
         height: u32,
         rgba8_bytes: &[u8],
-        srgb: bool,
+        options: TextureOptions,
     ) -> &CachedTexture {
+        let TextureOptions { srgb, sampler_key } = options;
         assert_eq!(
             rgba8_bytes.len(),
             width as usize * height as usize * 4,
@@ -504,13 +597,21 @@ impl TextureCache {
             write_rgba8_level(created, &existing.texture, width, height, rgba8_bytes);
             return existing;
         }
-        self.entries.insert(
-            cache_id,
-            create_gpu_texture(created, width, height, rgba8_bytes, srgb),
-        );
+        let sampler_key = self.first_sampler_key(cache_id, sampler_key);
+        let mut texture = create_gpu_texture(created, width, height, rgba8_bytes, srgb);
+        texture.sampler_key = sampler_key;
+        self.entries.insert(cache_id, texture);
         self.entries
             .get(&cache_id)
             .expect("just inserted this cache_id above")
+    }
+
+    /// The key a (re)allocated entry keeps: the existing entry's, if
+    /// any (`SamplerKey`'s own doc), else the caller's.
+    fn first_sampler_key(&self, cache_id: u64, requested: SamplerKey) -> SamplerKey {
+        self.entries
+            .get(&cache_id)
+            .map_or(requested, |existing| existing.sampler_key)
     }
 
     /// Real `TEXF_DXT1` upload, scoped to this struct's own doc the
@@ -535,8 +636,9 @@ impl TextureCache {
         width: u32,
         height: u32,
         mips: &[CompressedMipLevel<'_>],
-        srgb: bool,
+        options: TextureOptions,
     ) -> Option<&CachedTexture> {
+        let TextureOptions { srgb, sampler_key } = options;
         if mips.is_empty() {
             return None;
         }
@@ -566,7 +668,9 @@ impl TextureCache {
             write_bc1_levels(created, &existing.texture, mips);
             return Some(existing);
         }
-        let texture = create_compressed_gpu_texture(created, width, height, mips, srgb)?;
+        let sampler_key = self.first_sampler_key(cache_id, sampler_key);
+        let mut texture = create_compressed_gpu_texture(created, width, height, mips, srgb)?;
+        texture.sampler_key = sampler_key;
         self.entries.insert(cache_id, texture);
         Some(
             self.entries
@@ -574,6 +678,16 @@ impl TextureCache {
                 .expect("just inserted this cache_id above"),
         )
     }
+}
+
+/// Per-upload options for `TextureCache::upload_rgba8`/
+/// `upload_compressed`. `srgb`: `UnpackSRGB`'s `GL_RGBA8` vs
+/// `GL_SRGB8_ALPHA8` choice. `sampler_key`: used only when `cache_id`
+/// has no entry yet (`SamplerKey`'s own doc).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TextureOptions {
+    pub srgb: bool,
+    pub sampler_key: SamplerKey,
 }
 
 /// The real GPU-texture-object-creation core of `TextureCache::
@@ -636,6 +750,7 @@ pub fn create_gpu_texture(
         view,
         width,
         height,
+        sampler_key: SamplerKey::default(),
     }
 }
 
@@ -778,6 +893,7 @@ pub fn create_compressed_gpu_texture(
         view,
         width,
         height,
+        sampler_key: SamplerKey::default(),
     })
 }
 
@@ -1260,7 +1376,14 @@ mod tests {
         // (fcolor_memory_layout_is_r_g_b_a_matching_rgba8unorm above),
         // directly as Rgba8Unorm bytes.
         let bytes: [u8; 8] = [255, 0, 0, 255, 0, 255, 0, 255];
-        let cached = cache.upload_rgba8(&created, 42, 2, 1, &bytes, false);
+        let cached = cache.upload_rgba8(
+            &created,
+            42,
+            2,
+            1,
+            &bytes,
+            crate::texture::TextureOptions::default(),
+        );
         assert_eq!(cached.width, 2);
         assert_eq!(cached.height, 1);
 
@@ -1345,9 +1468,23 @@ mod tests {
         // Seed cache_id 7 with a real (uncompressed) entry first, so
         // this test can tell "upload_compressed did nothing" apart
         // from "the cache happened to be empty anyway".
-        cache.upload_rgba8(&created, 7, 1, 1, &[1, 2, 3, 4], false);
+        cache.upload_rgba8(
+            &created,
+            7,
+            1,
+            1,
+            &[1, 2, 3, 4],
+            crate::texture::TextureOptions::default(),
+        );
 
-        let none_result = cache.upload_compressed(&created, 7, 4, 4, &[], false);
+        let none_result = cache.upload_compressed(
+            &created,
+            7,
+            4,
+            4,
+            &[],
+            crate::texture::TextureOptions::default(),
+        );
         assert!(
             none_result.is_none(),
             "expected upload_compressed to return None for an empty mips slice"
@@ -1420,7 +1557,14 @@ mod tests {
                 data: &blue_block,
             },
         ];
-        let Some(cached) = cache.upload_compressed(&created, 99, 4, 4, &mips, false) else {
+        let Some(cached) = cache.upload_compressed(
+            &created,
+            99,
+            4,
+            4,
+            &mips,
+            crate::texture::TextureOptions::default(),
+        ) else {
             println!(
                 "SKIPPED: adapter {:?} backend {} does not actually grant \
                  Features::TEXTURE_COMPRESSION_BC, nothing to assert here on this adapter",
@@ -1533,7 +1677,14 @@ mod tests {
         .expect("expected a real device to be created");
         let mut cache = TextureCache::new();
         let red: [u8; 8] = [255, 0, 0, 255, 255, 0, 0, 255];
-        cache.upload_rgba8(&created, 5, 2, 1, &red, false);
+        cache.upload_rgba8(
+            &created,
+            5,
+            2,
+            1,
+            &red,
+            crate::texture::TextureOptions::default(),
+        );
         let before = cache
             .get(5)
             .expect("expected the first upload to be cached under cache_id 5")
@@ -1541,7 +1692,14 @@ mod tests {
             .clone();
 
         let blue: [u8; 8] = [0, 0, 255, 255, 0, 0, 255, 255];
-        cache.upload_rgba8(&created, 5, 2, 1, &blue, false);
+        cache.upload_rgba8(
+            &created,
+            5,
+            2,
+            1,
+            &blue,
+            crate::texture::TextureOptions::default(),
+        );
         assert_eq!(
             before,
             cache
@@ -1615,7 +1773,14 @@ mod tests {
         .expect("expected a real device to be created");
         let mut cache = TextureCache::new();
         let two_by_one: [u8; 8] = [255, 0, 0, 255, 0, 255, 0, 255];
-        cache.upload_rgba8(&created, 6, 2, 1, &two_by_one, false);
+        cache.upload_rgba8(
+            &created,
+            6,
+            2,
+            1,
+            &two_by_one,
+            crate::texture::TextureOptions::default(),
+        );
         let first = cache
             .get(6)
             .expect("expected the first upload to be cached under cache_id 6")
@@ -1625,7 +1790,14 @@ mod tests {
         let four_by_one: [u8; 16] = [
             0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255,
         ];
-        cache.upload_rgba8(&created, 6, 4, 1, &four_by_one, false);
+        cache.upload_rgba8(
+            &created,
+            6,
+            4,
+            1,
+            &four_by_one,
+            crate::texture::TextureOptions::default(),
+        );
         let cached = cache
             .get(6)
             .expect("expected cache_id 6 to still be cached after re-upload");
@@ -1662,7 +1834,14 @@ mod tests {
             data: &red_block,
         }];
         if cache
-            .upload_compressed(&created, 7, 4, 4, &red_mip, false)
+            .upload_compressed(
+                &created,
+                7,
+                4,
+                4,
+                &red_mip,
+                crate::texture::TextureOptions::default(),
+            )
             .is_none()
         {
             println!(
@@ -1685,7 +1864,14 @@ mod tests {
             data: &green_block,
         }];
         cache
-            .upload_compressed(&created, 7, 4, 4, &green_mip, false)
+            .upload_compressed(
+                &created,
+                7,
+                4,
+                4,
+                &green_mip,
+                crate::texture::TextureOptions::default(),
+            )
             .expect("expected the second upload to succeed, since the first one did");
         assert_eq!(
             before,
@@ -1748,5 +1934,82 @@ mod tests {
             readback_block, green_block,
             "expected mip 0 to read back the green block after the reuse upload"
         );
+    }
+
+    #[test]
+    fn anisotropy_clamp_maps_ini_values_to_wgpu_range() {
+        // Values below 1 mean off, as XOpenGL applies MaxAnisotropy only when non-zero.
+        assert_eq!(anisotropy_clamp(0.0), 1);
+        assert_eq!(anisotropy_clamp(0.5), 1);
+        assert_eq!(anisotropy_clamp(1.0), 1);
+        // Fractional values truncate.
+        assert_eq!(anisotropy_clamp(4.7), 4);
+        assert_eq!(anisotropy_clamp(16.0), 16);
+        // wgpu caps at 16 itself.
+        assert_eq!(anisotropy_clamp(64.0), 16);
+        // NaN and negatives are off.
+        assert_eq!(anisotropy_clamp(f32::NAN), 1);
+        assert_eq!(anisotropy_clamp(-3.0), 1);
+    }
+
+    #[test]
+    fn sampler_key_descriptor_matches_set_sampler() {
+        let default = SamplerKey::default().descriptor(8);
+        assert_eq!(default.address_mode_u, wgpu::AddressMode::Repeat);
+        assert_eq!(default.address_mode_v, wgpu::AddressMode::Repeat);
+        assert_eq!(default.mag_filter, wgpu::FilterMode::Linear);
+        assert_eq!(default.min_filter, wgpu::FilterMode::Linear);
+        assert_eq!(default.mipmap_filter, wgpu::MipmapFilterMode::Linear);
+        assert_eq!(default.anisotropy_clamp, 8);
+
+        let clamp_u = SamplerKey::from_bits(SamplerKey::CLAMP_U).descriptor(1);
+        assert_eq!(clamp_u.address_mode_u, wgpu::AddressMode::ClampToEdge);
+        assert_eq!(clamp_u.address_mode_v, wgpu::AddressMode::Repeat);
+
+        let clamp_v = SamplerKey::from_bits(SamplerKey::CLAMP_V).descriptor(1);
+        assert_eq!(clamp_v.address_mode_u, wgpu::AddressMode::Repeat);
+        assert_eq!(clamp_v.address_mode_v, wgpu::AddressMode::ClampToEdge);
+
+        // NO_SMOOTH forces nearest filtering and no anisotropy, whatever the ini asked for.
+        let no_smooth = SamplerKey::from_bits(SamplerKey::NO_SMOOTH).descriptor(16);
+        assert_eq!(no_smooth.mag_filter, wgpu::FilterMode::Nearest);
+        assert_eq!(no_smooth.min_filter, wgpu::FilterMode::Nearest);
+        assert_eq!(no_smooth.mipmap_filter, wgpu::MipmapFilterMode::Nearest);
+        assert_eq!(no_smooth.anisotropy_clamp, 1);
+
+        // Unknown bits are ignored.
+        assert_eq!(SamplerKey::from_bits(0xFFFF_FFF8), SamplerKey::default());
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn sampler_key_is_fixed_by_the_first_upload() {
+        let created = crate::create_device_sync(
+            crate::BackendChoice::Auto,
+            None::<crate::HeadlessSurfaceCreator>,
+        )
+        .expect("expected a real device to be created");
+        let mut cache = TextureCache::new();
+        let first_key = SamplerKey {
+            clamp_u: true,
+            clamp_v: false,
+            no_smooth: true,
+        };
+        cache.upload_rgba8(
+            &created,
+            3,
+            1,
+            1,
+            &[1, 2, 3, 4],
+            TextureOptions {
+                srgb: false,
+                sampler_key: first_key,
+            },
+        );
+        // Reallocating re-upload under the same cache_id, with a different key requested:
+        // the texture keeps the first upload's key.
+        let reallocated = cache.upload_rgba8(&created, 3, 2, 1, &[0; 8], TextureOptions::default());
+        assert_eq!(reallocated.sampler_key, first_key);
+        assert_eq!(reallocated.width, 2);
     }
 }

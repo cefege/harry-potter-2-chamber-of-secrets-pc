@@ -1184,20 +1184,16 @@ pub struct RenderLoop {
     /// resident until the real engine itself invalidates/replaces
     /// them, not just for one frame.
     texture_cache: texture::TextureCache,
-    /// Lazily created on first real tile draw (`unlock_frame`'s own
-    /// lazy-init, same point `tile_pipeline` itself is ensured) --
-    /// one shared `wgpu::Sampler` for every `queue_tile` draw this
-    /// `RenderLoop`'s whole lifetime, `wgpu::SamplerDescriptor::
-    /// default()` (bilinear-equivalent default filtering, no
-    /// anisotropy). A real, known, explicitly scoped gap, not
-    /// silently pretended away: the real source's own sampler state
-    /// varies per real `FTextureInfo` (wrap mode, `MaxAnisotropy`
-    /// ini key) -- this crate's own todo list already tracks real
-    /// per-texture sampler state and `MaxAnisotropy` wiring as a
-    /// separate, not-yet-done item; one fixed default sampler is the
-    /// right scope for the first real textured-quad draw to land,
-    /// not a blocker on wiring real per-texture sampler state first.
-    sampler: Option<wgpu::Sampler>,
+    /// One `wgpu::Sampler` per distinct `texture::SamplerKey` in use,
+    /// created lazily in `dispatch_batches` for every resident texture
+    /// a batch references. Replaces an earlier single
+    /// `SamplerDescriptor::default()` sampler (ClampToEdge + Nearest)
+    /// whose clamping collapsed every tiling BSP texture (UVs outside
+    /// 0..1) to its edge texels.
+    samplers: std::collections::HashMap<texture::SamplerKey, wgpu::Sampler>,
+    /// `texture::anisotropy_clamp(MaxAnisotropy)`, applied to every
+    /// smooth sampler (`set_max_anisotropy`).
+    anisotropy_clamp: u16,
     /// Lazily created once this `RenderLoop`'s whole lifetime (unlike
     /// `texture_cache`'s own real per-`CacheID` entries, never
     /// invalidated/replaced): a real 1x1 opaque white GPU texture,
@@ -1389,7 +1385,8 @@ impl RenderLoop {
             gouraud_pipeline: None,
             complex_pipeline: None,
             texture_cache: texture::TextureCache::new(),
-            sampler: None,
+            samplers: std::collections::HashMap::new(),
+            anisotropy_clamp: 1,
             dummy_texture: None,
             last_scene: None,
             capture: None,
@@ -1417,6 +1414,36 @@ impl RenderLoop {
     /// (`backing_scale`'s own doc).
     pub fn set_backing_scale(&mut self, scale: f64) {
         self.backing_scale = scale;
+    }
+
+    /// Real `MaxAnisotropy` ini value (`texture::anisotropy_clamp`).
+    /// A changed value drops every cached sampler so the next frame
+    /// rebuilds them with it.
+    pub fn set_max_anisotropy(&mut self, max_anisotropy: f32) {
+        let clamp = texture::anisotropy_clamp(max_anisotropy);
+        if clamp != self.anisotropy_clamp {
+            self.anisotropy_clamp = clamp;
+            self.samplers.clear();
+        }
+    }
+
+    /// Creates the sampler for `cache_id`'s `SamplerKey` if it does not
+    /// exist yet. No-op for a non-resident `cache_id`.
+    fn ensure_sampler(&mut self, device: &wgpu::Device, cache_id: u64) {
+        let Some(key) = self.texture_cache.get(cache_id).map(|t| t.sampler_key) else {
+            return;
+        };
+        let anisotropy_clamp = self.anisotropy_clamp;
+        self.samplers
+            .entry(key)
+            .or_insert_with(|| device.create_sampler(&key.descriptor(anisotropy_clamp)));
+    }
+
+    /// The sampler `ensure_sampler` created for `cached`.
+    fn sampler_for(&self, cached: &texture::CachedTexture) -> &wgpu::Sampler {
+        self.samplers
+            .get(&cached.sampler_key)
+            .expect("dispatch_batches ensures every bound texture's sampler first")
     }
 
     pub fn counts(&self) -> FrameCounts {
@@ -2090,13 +2117,13 @@ impl RenderLoop {
         width: u32,
         height: u32,
         rgba8_bytes: &[u8],
-        srgb: bool,
+        options: texture::TextureOptions,
     ) {
         if self.texture_cache.get(cache_id).is_some() {
             self.flush_pending_batches(created);
         }
         self.texture_cache
-            .upload_rgba8(created, cache_id, width, height, rgba8_bytes, srgb);
+            .upload_rgba8(created, cache_id, width, height, rgba8_bytes, options);
     }
 
     /// Uploads `mips` (a real full `Info.Mips[0..NumMips)` chain) into
@@ -2126,13 +2153,13 @@ impl RenderLoop {
         width: u32,
         height: u32,
         mips: &[texture::CompressedMipLevel<'_>],
-        srgb: bool,
+        options: texture::TextureOptions,
     ) -> bool {
         if self.texture_cache.get(cache_id).is_some() {
             self.flush_pending_batches(created);
         }
         self.texture_cache
-            .upload_compressed(created, cache_id, width, height, mips, srgb)
+            .upload_compressed(created, cache_id, width, height, mips, options)
             .is_some()
     }
 
@@ -2870,21 +2897,26 @@ fn dispatch_batches(
             draw::TilePipeline::new(&created.device, frame.color_format),
         ));
     }
-    if loop_state.sampler.is_none()
-        && batches.iter().any(|b| {
-            matches!(
-                b.payload,
-                BatchPayload::Tiles { .. }
-                    | BatchPayload::Triangles { .. }
-                    | BatchPayload::Complex { .. }
-            )
-        })
-    {
-        loop_state.sampler = Some(
-            created
-                .device
-                .create_sampler(&wgpu::SamplerDescriptor::default()),
-        );
+    // Every resident texture a batch will bind needs its own key's
+    // sampler (RenderLoop::samplers' own doc).
+    for batch in &batches {
+        match &batch.payload {
+            BatchPayload::Tiles { cache_id, .. } | BatchPayload::Triangles { cache_id, .. } => {
+                loop_state.ensure_sampler(&created.device, *cache_id);
+            }
+            BatchPayload::Complex {
+                diffuse_cache_id,
+                light_map_cache_id,
+                fog_map_cache_id,
+                ..
+            } => {
+                loop_state.ensure_sampler(&created.device, *diffuse_cache_id);
+                for id in [light_map_cache_id, fog_map_cache_id].into_iter().flatten() {
+                    loop_state.ensure_sampler(&created.device, *id);
+                }
+            }
+            BatchPayload::Lines(_) | BatchPayload::Points(_) => {}
+        }
     }
     // Real 1x1 opaque white dummy texture (RenderLoop::dummy_texture's
     // own doc has the full real reasoning) -- only actually needed
@@ -3025,10 +3057,7 @@ fn dispatch_batches(
                     .tile_pipeline
                     .as_ref()
                     .expect("tile_pipeline was just ensured above");
-                let sampler = loop_state
-                    .sampler
-                    .as_ref()
-                    .expect("sampler was just ensured above");
+                let sampler = loop_state.sampler_for(cached);
                 let mut vertices: Vec<draw::TileVertex> = Vec::new();
                 let mut draw_params: Vec<draw::TileDrawParams> = Vec::new();
                 for tile in entries {
@@ -3205,10 +3234,7 @@ fn dispatch_batches(
                     .gouraud_pipeline
                     .as_ref()
                     .expect("gouraud_pipeline was just ensured above");
-                let sampler = loop_state
-                    .sampler
-                    .as_ref()
-                    .expect("sampler was just ensured above");
+                let sampler = loop_state.sampler_for(cached);
                 let mut vertices: Vec<draw::GouraudVertex> = Vec::new();
                 let mut draw_params: Vec<draw::GouraudDrawParams> = Vec::new();
                 for mesh in meshes {
@@ -3286,48 +3312,34 @@ fn dispatch_batches(
                     .complex_pipeline
                     .as_ref()
                     .expect("complex_pipeline was just ensured above");
-                let sampler = loop_state
-                    .sampler
-                    .as_ref()
-                    .expect("sampler was just ensured above");
+                let sampler = loop_state.sampler_for(diffuse_cached);
                 // A real light-map/fog-map cache_id here is always
                 // already resident (queue_complex_surface only ever
                 // records Some(cache_id) after a successful real
                 // texture_cache.get) -- the dummy texture (RenderLoop::
                 // dummy_texture's own doc) covers the real None case,
-                // just ensured above whenever any batch needs it.
-                let light_map_view = match light_map_cache_id {
+                // just ensured above whenever any batch needs it. It only
+                // fills the bind group layout (its DF_LightMap/DF_FogMap
+                // flag is off), so the diffuse sampler serves it.
+                let layer = |cache_id: &Option<u64>| match cache_id {
                     Some(id) => {
-                        &loop_state
+                        let cached = loop_state
                             .texture_cache
                             .get(*id)
-                            .expect("queue_complex_surface only records an already-cached id")
-                            .view
+                            .expect("queue_complex_surface only records an already-cached id");
+                        (&cached.view, loop_state.sampler_for(cached))
                     }
-                    None => {
+                    None => (
                         &loop_state
                             .dummy_texture
                             .as_ref()
                             .expect("dummy_texture was just ensured above")
-                            .view
-                    }
+                            .view,
+                        sampler,
+                    ),
                 };
-                let fog_map_view = match fog_map_cache_id {
-                    Some(id) => {
-                        &loop_state
-                            .texture_cache
-                            .get(*id)
-                            .expect("queue_complex_surface only records an already-cached id")
-                            .view
-                    }
-                    None => {
-                        &loop_state
-                            .dummy_texture
-                            .as_ref()
-                            .expect("dummy_texture was just ensured above")
-                            .view
-                    }
-                };
+                let (light_map_view, light_map_sampler) = layer(light_map_cache_id);
+                let (fog_map_view, fog_map_sampler) = layer(fog_map_cache_id);
                 let mut vertices: Vec<draw::ComplexVertex> = Vec::new();
                 let mut draw_params: Vec<draw::ComplexDrawParams> = Vec::new();
                 for surface in surfaces {
@@ -3347,9 +3359,9 @@ fn dispatch_batches(
                                 diffuse_texture_view: &diffuse_cached.view,
                                 diffuse_sampler: sampler,
                                 light_map_texture_view: light_map_view,
-                                light_map_sampler: sampler,
+                                light_map_sampler,
                                 fog_map_texture_view: fog_map_view,
-                                fog_map_sampler: sampler,
+                                fog_map_sampler,
                                 target: &frame.view,
                                 load: wgpu::LoadOp::Load,
                             },
@@ -3385,9 +3397,9 @@ fn dispatch_batches(
                             diffuse_texture_view: &diffuse_cached.view,
                             diffuse_sampler: sampler,
                             light_map_texture_view: light_map_view,
-                            light_map_sampler: sampler,
+                            light_map_sampler,
                             fog_map_texture_view: fog_map_view,
-                            fog_map_sampler: sampler,
+                            fog_map_sampler,
                             target: &frame.view,
                             load: wgpu::LoadOp::Load,
                         },
@@ -4349,7 +4361,14 @@ mod tests {
         // by reading it directly) -- a white texel makes the final
         // pixel exactly draw_color, isolating this test from needing
         // to also reason about texture-color multiplication.
-        loop_state.upload_texture(&created, 99, 1, 1, &[255, 255, 255, 255], false);
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[255, 255, 255, 255],
+            crate::texture::TextureOptions::default(),
+        );
 
         // Same real rfx2=rfy2=0.02/fx2=fy2=50.0 derivation as the
         // line test above: X=0,XL=50 -> NDC x in [-1.0, 0.0] (left
@@ -4523,7 +4542,14 @@ mod tests {
         // Same real white draw_color convention as the plain tile test
         // above -- isolates this test from needing to also reason
         // about texture-color multiplication, white * texel == texel.
-        loop_state.upload_texture(&created, 99, 1, 1, &[255, 0, 0, 255], false);
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
         // Same real X=0,XL=50 -> NDC x in [-1.0, 0.0] (left half)
         // geometry as render_loop_queue_tile_renders_a_real_tile_
         // through_the_real_lock_unlock_path's own hand-verified
@@ -4554,7 +4580,14 @@ mod tests {
         // already resident), dispatching the tile queued above using
         // the still-red texture before this call's own blue bytes ever
         // reach self.texture_cache.
-        loop_state.upload_texture(&created, 99, 1, 1, &[0, 0, 255, 255], false);
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[0, 0, 255, 255],
+            crate::texture::TextureOptions::default(),
+        );
 
         // Same real symmetric formula as the left half, X=50,XL=50 ->
         // NDC x in [0.0, 1.0] (right half): rfx2*(px-fx2) with
@@ -4843,7 +4876,14 @@ mod tests {
             520,
             &1.0f32.to_le_bytes(),
         );
-        loop_state.upload_texture(&created, 99, 1, 1, &[255, 0, 0, 255], false);
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
 
         // Real GouraudVertex coords pass straight through to
         // modelviewproj_mat with no RFX2/FX2 screen-to-clip transform
@@ -5027,7 +5067,14 @@ mod tests {
             520,
             &1.0f32.to_le_bytes(),
         );
-        loop_state.upload_texture(&created, 99, 1, 1, &[255, 0, 0, 255], false);
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
 
         // No real light-map/fog-map (request.light_map/fog_map both
         // None below) -- deliberately exercises RenderLoop::dummy_
@@ -5208,7 +5255,14 @@ mod tests {
             256,
             &identity_diagonal,
         );
-        loop_state.upload_texture(&created, 99, 1, 1, &[255, 255, 255, 255], false);
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[255, 255, 255, 255],
+            crate::texture::TextureOptions::default(),
+        );
 
         // Queued first: an opaque RED tile, same geometry as render_
         // loop_queue_tile_renders_a_real_tile_through_the_real_lock_
@@ -6948,106 +7002,122 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     fn capture_presented_frame_writes_the_rendered_frame_and_meta() {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");
-        let dir = std::env::temp_dir().join(format!(
-            "hp2_capture_presented_frame_writes_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock should be after the Unix epoch")
-                .as_nanos()
-        ));
+        let dir = std::env::temp_dir().join(format!("hp2-capture-lib-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("expected a writable temp directory");
         let mut loop_state = RenderLoop::new();
         loop_state.capture = Some(capture::FrameCapture::new(
             dir.clone(),
-            "capture_test_map".into(),
-            Some(7),
+            "Entry".to_string(),
+            Some(30),
         ));
-        let texture = created.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("capture_presented_frame writes test texture"),
+        loop_state.set_backing_scale(2.0);
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("capture_presented_frame test target"),
             size: wgpu::Extent3d {
-                width: 3,
-                height: 2,
+                width: 64,
+                height: 1,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let mut rgba = Vec::with_capacity(24);
-        for i in 0u8..6 {
-            rgba.extend_from_slice(&[i * 10, i * 10 + 1, i * 10 + 2, 255]);
+
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
         }
-        created.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &rgba,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(12),
-                rows_per_image: Some(2),
-            },
-            wgpu::Extent3d {
-                width: 3,
-                height: 2,
-                depth_or_array_layers: 1,
-            },
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
         );
-
-        capture_presented_frame(&created, &mut loop_state, &texture);
-
+        loop_state.upload_texture(
+            &created,
+            99,
+            1,
+            1,
+            &[255, 255, 255, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        // Left half of the 64px target: green over the blue clear.
+        loop_state.queue_tile(TileDrawRequest {
+            cache_id: 99,
+            x: 0.0,
+            y: 49.5,
+            xl: 50.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 1.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [0.0, 1.0, 0.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
         assert!(
-            loop_state
-                .capture
-                .as_ref()
-                .is_some_and(|capture| capture.is_enabled()),
-            "expected capture to stay enabled after a successful write"
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
         );
-        let expected_rgb: Vec<u8> = rgba
-            .chunks_exact(4)
-            .flat_map(|pixel| [pixel[0], pixel[1], pixel[2]])
-            .collect();
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        capture_presented_frame(&created, &mut loop_state, &render_target);
+
         let mut reader = png::Decoder::new(std::io::BufReader::new(
             std::fs::File::open(dir.join("frame_000000.png"))
                 .expect("expected frame_000000.png to be written"),
         ))
         .read_info()
-        .expect("expected a valid PNG header");
+        .expect("expected a readable PNG header");
         assert_eq!(reader.info().color_type, png::ColorType::Rgb);
-        assert_eq!((reader.info().width, reader.info().height), (3, 2));
-        let mut buffer = vec![0; reader.output_buffer_size().expect("expected a frame size")];
+        assert_eq!((reader.info().width, reader.info().height), (64, 1));
+        let mut buffer = vec![
+            0;
+            reader
+                .output_buffer_size()
+                .expect("expected a PNG buffer size")
+        ];
         reader
             .next_frame(&mut buffer)
             .expect("expected the PNG pixel data to decode");
         assert_eq!(
-            buffer, expected_rgb,
-            "expected the PNG to hold the texture's own RGB pixels with alpha dropped"
+            &buffer[8 * 3..8 * 3 + 3],
+            &[0u8, 255, 0],
+            "expected green at pixel 8"
         );
-
+        assert_eq!(
+            &buffer[56 * 3..56 * 3 + 3],
+            &[0u8, 0, 255],
+            "expected the blue clear at pixel 56"
+        );
         let meta = std::fs::read_to_string(dir.join("frame_meta.json"))
             .expect("expected frame_meta.json to be written");
         assert_eq!(
             meta,
             format!(
-                "{{\"captures\":[{{\"width_px\":3,\"height_px\":2,\"backing_scale_factor\":1.000000,\"renderer\":\"{}\",\"ticks\":7,\"map\":\"capture_test_map\"}}]}}\n",
+                "{{\"captures\":[{{\"width_px\":64,\"height_px\":1,\"backing_scale_factor\":2.000000,\"renderer\":\"{}\",\"ticks\":30,\"map\":\"Entry\"}}]}}\n",
                 created.adapter_name
             )
         );
         std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
-        println!(
-            "capture_presented_frame wrote a real 3x2 frame and meta on adapter {:?} backend {}",
-            created.adapter_name,
-            backend_name(created.backend)
-        );
     }
 
     #[test]
@@ -7056,32 +7126,24 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");
         let dir = std::env::temp_dir().join(format!(
-            "hp2_capture_presented_frame_no_copy_src_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock should be after the Unix epoch")
-                .as_nanos()
+            "hp2-capture-lib-test-{}-nocopy",
+            std::process::id()
         ));
         std::fs::create_dir_all(&dir).expect("expected a writable temp directory");
         let mut loop_state = RenderLoop::new();
-        loop_state.capture = Some(capture::FrameCapture::new(
-            dir.clone(),
-            "capture_test_map".into(),
-            None,
-        ));
+        loop_state.capture = Some(capture::FrameCapture::new(dir.clone(), String::new(), None));
         let texture = created.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("capture_presented_frame no COPY_SRC test texture"),
             size: wgpu::Extent3d {
-                width: 3,
-                height: 2,
+                width: 4,
+                height: 4,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
@@ -7095,16 +7157,7 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             !dir.join("frame_000000.png").exists(),
             "expected no frame to be written when capture is disabled"
         );
-        assert!(
-            !dir.join("frame_meta.json").exists(),
-            "expected no meta to be written when capture is disabled"
-        );
         std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
-        println!(
-            "capture_presented_frame disabled capture for a non-COPY_SRC texture on adapter {:?} backend {}",
-            created.adapter_name,
-            backend_name(created.backend)
-        );
     }
 
     #[test]
@@ -7194,5 +7247,162 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             )
         );
         std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn tile_uvs_past_the_texture_edge_repeat_instead_of_clamping() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let render_target = created.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_loop tile repeat test target"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
+        loop_state.set_scene_node(
+            &created.device,
+            &created.queue,
+            &reference_perspective_scene(),
+        );
+        let mut identity_diagonal = [0u8; 64];
+        for i in 0..4 {
+            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        created.queue.write_buffer(
+            loop_state.frame_uniforms_segment(0).unwrap(),
+            256,
+            &identity_diagonal,
+        );
+        // 2x1 texture: texel 0 red, texel 1 blue. Nearest filtering, Repeat on U.
+        loop_state.upload_texture(
+            &created,
+            99,
+            2,
+            1,
+            &[255, 0, 0, 255, 0, 0, 255, 255],
+            crate::texture::TextureOptions {
+                srgb: false,
+                sampler_key: crate::texture::SamplerKey {
+                    clamp_u: false,
+                    clamp_v: false,
+                    no_smooth: true,
+                },
+            },
+        );
+        // fx2=50 maps x in 0..100 onto NDC -1..1, so xl=100 covers the whole
+        // 64px target. u_mult = 1 / (u_scale * 2) = 0.5, so ul=4.0 samples
+        // texture U 0..2 across the tile: two repeats. A clamped sampler
+        // would show blue at columns 36 and 52; a repeating one shows red
+        // at 36 and blue at 52.
+        loop_state.queue_tile(TileDrawRequest {
+            cache_id: 99,
+            x: 0.0,
+            y: 49.5,
+            xl: 100.0,
+            yl: 1.0,
+            u: 0.0,
+            v: 0.0,
+            ul: 4.0,
+            vl: 1.0,
+            z: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            poly_flags: 0,
+            u_scale: 1.0,
+            v_scale: 1.0,
+            texture_alpha: None,
+            fx2: 50.0,
+            fy2: 50.0,
+        });
+        let did_unlock = unlock_frame(&created, &mut loop_state, false);
+        assert!(
+            did_unlock,
+            "expected unlock_frame to find the frame begin_offscreen_frame began"
+        );
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed after the real unlock_frame submit");
+
+        let readback_buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("render_loop tile repeat test readback buffer"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut readback_encoder =
+            created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("render_loop tile repeat test readback encoder"),
+                });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &render_target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        created
+            .queue
+            .submit(std::iter::once(readback_encoder.finish()));
+        let slice = readback_buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.expect("readback buffer map_async should succeed on a working device");
+        });
+        created
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll should succeed on a working device");
+        let mapped = slice
+            .get_mapped_range()
+            .expect("buffer should be mapped after a successful map_async + device.poll");
+        let row = &mapped[..256];
+        let pixel = |column: usize| &row[column * 4..column * 4 + 4];
+        assert_eq!(
+            pixel(4),
+            &[255u8, 0, 0, 255],
+            "expected texel 0 (red) at column 4, full row {row:?}"
+        );
+        assert_eq!(
+            pixel(20),
+            &[0u8, 0, 255, 255],
+            "expected texel 1 (blue) at column 20, full row {row:?}"
+        );
+        assert_eq!(
+            pixel(36),
+            &[255u8, 0, 0, 255],
+            "expected U to repeat: red at column 36, full row {row:?}"
+        );
+        assert_eq!(
+            pixel(52),
+            &[0u8, 0, 255, 255],
+            "expected U to repeat: blue at column 52, full row {row:?}"
+        );
     }
 }

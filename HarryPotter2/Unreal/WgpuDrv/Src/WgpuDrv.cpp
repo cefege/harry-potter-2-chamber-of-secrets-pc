@@ -75,6 +75,20 @@ QWORD UploadTextureIfNeeded( void* RustDevice, UBOOL UseSRGBTextures, FTextureIn
 	// source's own reset running regardless of what UploadTexture itself
 	// goes on to do.
 	Info.bRealtimeChanged = 0;
+	// Real SetTexture.cpp:530-535 IsNewBind sampler inputs (SetSampler,
+	// SetTexture.cpp:138-166), as hp2_wgpu::texture::SamplerKey bits:
+	// CLAMP_U=1, CLAMP_V=2, NO_SMOOTH=4. Rust applies them only on a
+	// cache_id's first upload, matching SetSampler running only for a
+	// new BindMap entry. Every caller here binds the diffuse slot
+	// (Multi == 0) except light/fog maps, which pass PolyFlags = 0.
+	const UBOOL IsLightOrFogMap = Info.Texture == NULL;
+	DWORD SamplerFlags = 0;
+	if( IsLightOrFogMap || ( Info.UClamp > 0 && Info.UClamp < Info.USize ) )
+		SamplerFlags |= 1;
+	if( IsLightOrFogMap || ( Info.VClamp > 0 && Info.VClamp < Info.VSize ) )
+		SamplerFlags |= 2;
+	if( PolyFlags & PF_NoSmooth )
+		SamplerFlags |= 4;
 
 	if( Info.Format == TEXF_P8 && !Info.Palette )
 	{
@@ -127,7 +141,7 @@ QWORD UploadTextureIfNeeded( void* RustDevice, UBOOL UseSRGBTextures, FTextureIn
 		hp2_rs_wgpu_upload_compressed_texture( RustDevice, FixedCacheID, Info.Format,
 			(DWORD)Info.Mips[0]->USize, (DWORD)Info.Mips[0]->VSize,
 			&Mips(0), (size_t)Info.NumMips,
-			UseSRGBTextures != 0 );
+			UseSRGBTextures != 0, SamplerFlags );
 		return FixedCacheID;
 	}
 
@@ -172,7 +186,7 @@ QWORD UploadTextureIfNeeded( void* RustDevice, UBOOL UseSRGBTextures, FTextureIn
 			Mip->DataPtr, DataLen,
 			(const BYTE*)Info.Palette,
 			( PolyFlags & PF_Masked ) != 0,
-			UseSRGBTextures != 0 );
+			UseSRGBTextures != 0, SamplerFlags );
 	}
 	return FixedCacheID;
 }
@@ -364,6 +378,8 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	}
 
 	RustDevice = Result.handle;
+	// Real SetSampler's MaxAnisotropy (SetTexture.cpp:159-160).
+	hp2_rs_wgpu_set_max_anisotropy( RustDevice, MaxAnisotropy );
 	debugf( NAME_Init, TEXT("WgpuDrv: adapter \"%ls\" backend %ls"),
 		*Utf8SpanToFString( Result.adapter_name, Result.adapter_name_len ),
 		*Utf8SpanToFString( Result.backend_name, Result.backend_name_len ) );

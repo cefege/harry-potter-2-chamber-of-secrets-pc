@@ -185,21 +185,13 @@ class UWgpuRenderDevice : public URenderDevice
 	// matching XOpenGL.cpp's own StaticConstructor registration and
 	// real defaults exactly (RenderScale=1.f, UseAA=true,
 	// NumAASamples=4, MaxAnisotropy=16.f, UseSRGBTextures=false).
-	// Known, explicitly scoped gap, not silently pretended away: none
-	// of these five are wired to any real Rust-side behavior yet --
-	// unlike UseVSync, none of their real hooks exist in this wgpu
-	// port yet (RenderScale needs a real render-target-scaling+
-	// composite-blit path; UseAA needs a real MSAA-capable pipeline/
-	// framebuffer, not yet built at all; MaxAnisotropy needs a real
-	// per-sampler anisotropic-filtering setup, TilePipeline's own
-	// sampler is currently a hardcoded default; UseSRGBTextures has a
-	// real, already-existing Rust-side parameter -- hp2_wgpu::
-	// texture::TextureCache::upload_rgba8's own `srgb` bool -- but no
-	// real SetTexture call site threads a real value into it yet).
-	// Registered now so a real XOpenGL-style ini file parses without
-	// "unknown property" warnings and the values are available the
-	// moment each real hook is built, rather than registering them
-	// piecemeal alongside each hook later.
+	// Wired: MaxAnisotropy (hp2_rs_wgpu_set_max_anisotropy in Init,
+	// applied to every smooth texture sampler) and UseSRGBTextures
+	// (passed to every texture upload; RGBA7/RGB16 stay linear, as in
+	// SetTexture.cpp:247-257). Not wired yet: RenderScale (needs a
+	// scaled render target plus composite blit) and UseAA/NumAASamples
+	// (need an MSAA target and resolve). Those are registered anyway so
+	// an XOpenGL-style ini parses without "unknown property" warnings.
 	FLOAT RenderScale;
 	UBOOL UseAA;
 	INT NumAASamples;

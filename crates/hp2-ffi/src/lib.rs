@@ -2967,6 +2967,25 @@ pub unsafe extern "C" fn hp2_rs_wgpu_set_backing_scale(handle: *mut c_void, scal
     })
 }
 
+/// Applies the real `MaxAnisotropy` ini value to every smooth texture
+/// sampler (`hp2_wgpu::RenderLoop::set_max_anisotropy`; values below 1,
+/// including NaN, mean off). Called by `WgpuDrv.cpp`'s `Init`.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not yet
+/// destroyed), or null (a no-op).
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_set_max_anisotropy(handle: *mut c_void, max_anisotropy: f32) {
+    guard("hp2_rs_wgpu_set_max_anisotropy", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.set_max_anisotropy(max_anisotropy);
+    })
+}
+
 /// Replaces the frame-outcome-reporting half of
 /// `UWgpuRenderDevice::Exit`. Returns the live tally of every
 /// `hp2_rs_wgpu_lock` outcome since `handle` was created
@@ -3212,6 +3231,10 @@ unsafe fn palette_from_raw<'a>(ptr: *const u8) -> Option<&'a [hp2_wgpu::texture:
 /// internal `assert_eq!`, which this function's own explicit length
 /// check exists specifically to never reach with mismatched input).
 ///
+/// `sampler_flags`: `hp2_wgpu::texture::SamplerKey` bits (`CLAMP_U=1`,
+/// `CLAMP_V=2`, `NO_SMOOTH=4`), used only on `cache_id`'s first upload
+/// (that type's own doc).
+///
 /// # Safety
 /// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
 /// yet destroyed), or null. `data` must be valid for `data_len` bytes.
@@ -3230,6 +3253,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
     palette: *const u8,
     masked: bool,
     srgb: bool,
+    sampler_flags: u32,
 ) -> bool {
     guard("hp2_rs_wgpu_upload_texture", false, move || {
         if handle.is_null() {
@@ -3386,7 +3410,10 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
             width,
             height,
             &rgba8,
-            effective_srgb,
+            hp2_wgpu::texture::TextureOptions {
+                srgb: effective_srgb,
+                sampler_key: hp2_wgpu::texture::SamplerKey::from_bits(sampler_flags),
+            },
         );
         true
     })
@@ -3429,6 +3456,7 @@ pub struct FfiCompressedMip {
 /// panic) if the real device does not actually have `Features::
 /// TEXTURE_COMPRESSION_BC` granted, same real `SupportsS3TC`-gated
 /// graceful-degradation case that function's own doc covers.
+/// `sampler_flags`: same as `hp2_rs_wgpu_upload_texture`'s.
 ///
 /// # Safety
 /// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
@@ -3449,6 +3477,7 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_compressed_texture(
     mips: *const FfiCompressedMip,
     mip_count: usize,
     srgb: bool,
+    sampler_flags: u32,
 ) -> bool {
     guard("hp2_rs_wgpu_upload_compressed_texture", false, move || {
         if handle.is_null() {
@@ -3490,7 +3519,10 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_compressed_texture(
             width,
             height,
             &owned_mips,
-            srgb,
+            hp2_wgpu::texture::TextureOptions {
+                srgb,
+                sampler_key: hp2_wgpu::texture::SamplerKey::from_bits(sampler_flags),
+            },
         )
     })
 }
@@ -3963,6 +3995,7 @@ mod tests {
                     std::ptr::null(),
                     false,
                     false,
+                    0,
                 )
             };
             assert!(
@@ -4011,6 +4044,7 @@ mod tests {
                 palette.as_ptr().cast::<u8>(),
                 false,
                 false,
+                0,
             )
         };
         assert!(
@@ -4031,6 +4065,7 @@ mod tests {
                 std::ptr::null(),
                 false,
                 false,
+                0,
             )
         };
         assert!(
@@ -4054,6 +4089,7 @@ mod tests {
                 std::ptr::null(),
                 false,
                 false,
+                0,
             )
         };
         assert!(rgb16_accepted, "a real 1x1 RGB16 texture must be accepted");
@@ -4071,6 +4107,7 @@ mod tests {
                 std::ptr::null(),
                 false,
                 false,
+                0,
             )
         };
         assert!(rgb8_accepted, "a real 1x1 RGB8 texture must be accepted");
@@ -4088,6 +4125,7 @@ mod tests {
                 std::ptr::null(),
                 false,
                 false,
+                0,
             )
         };
         assert!(
@@ -4209,6 +4247,7 @@ mod tests {
                 std::ptr::null(),
                 false,
                 true, // srgb: true, deliberately -- the exact input this bug depends on.
+                0,
             )
         };
         assert!(accepted, "a real 1x1 RGBA7 texture must be accepted");
@@ -4408,6 +4447,7 @@ mod tests {
                 mips.as_ptr(),
                 mips.len(),
                 false,
+                0,
             )
         };
         if !accepted {
@@ -4442,6 +4482,7 @@ mod tests {
                 std::ptr::null(),
                 0,
                 false,
+                0,
             )
         };
         assert!(
@@ -4466,6 +4507,7 @@ mod tests {
                 mips.as_ptr(),
                 mips.len(),
                 false,
+                0,
             )
         };
         assert!(

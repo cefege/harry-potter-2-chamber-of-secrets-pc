@@ -2413,7 +2413,14 @@ mod tests {
         // which is not what this test exists to check (the real
         // vertex geometry/NDC placement is).
         let mut texture_cache = crate::texture::TextureCache::new();
-        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let cached = texture_cache.upload_rgba8(
+            &created,
+            1,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // One quad (2 triangles, 6 vertices, matching SubmitTileBatch's
@@ -2611,7 +2618,7 @@ mod tests {
                 height: 4,
                 data: &dxt1_block,
             }],
-            false,
+            crate::texture::TextureOptions::default(),
         ) else {
             println!(
                 "SKIPPED: adapter {:?} backend {} does not actually grant \
@@ -2801,7 +2808,14 @@ mod tests {
         // Same real solid-red 1x1 texture technique as the tile
         // pipeline test above.
         let mut texture_cache = crate::texture::TextureCache::new();
-        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let cached = texture_cache.upload_rgba8(
+            &created,
+            1,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // Same real six-vertex, two-triangle quad shape as the tile
@@ -3004,7 +3018,14 @@ mod tests {
         // read") -- reusing the diffuse texture there is simplest,
         // not a claim this is what a real two-layer surface would do.
         let mut texture_cache = crate::texture::TextureCache::new();
-        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let cached = texture_cache.upload_rgba8(
+            &created,
+            1,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // x_axis=(1,0,0,0), y_axis=(0,1,0,0): the real per-vertex UV
@@ -3202,7 +3223,14 @@ mod tests {
 
         let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
         let mut texture_cache = crate::texture::TextureCache::new();
-        let cached = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], false);
+        let cached = texture_cache.upload_rgba8(
+            &created,
+            1,
+            1,
+            1,
+            &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
 
         // Full-width quad this time (simpler: only the blend result
