@@ -479,6 +479,8 @@
 
 pub mod capture;
 pub mod draw;
+pub mod native_text;
+pub mod text_atlas;
 pub mod texture;
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
@@ -1233,6 +1235,10 @@ pub struct RenderLoop {
     /// and recorded per captured frame as `backing_scale_factor`, the
     /// same value XOpenGL.cpp:2728-2731 computes from SDL.
     backing_scale: f64,
+    /// Native-text glyph atlas (`text_atlas::TextAtlas`, XOpenGL's
+    /// `FNativeTextAtlas`); its pages live in `texture_cache`
+    /// (`native_text::NATIVE_TEXT_PAGE_CACHE_ID_BASE`).
+    text_atlas: text_atlas::TextAtlas,
     /// Offscreen render target for `FramePresentable::CaptureOnly`
     /// frames, reused while its size and format still match.
     capture_target: Option<wgpu::Texture>,
@@ -1415,6 +1421,7 @@ impl RenderLoop {
             capture: None,
             capture_initialized: false,
             backing_scale: 1.0,
+            text_atlas: text_atlas::TextAtlas::new(),
             capture_target: None,
             scene_target: None,
             postprocess_pipeline: None,
@@ -7970,5 +7977,153 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             );
         }
         std::fs::remove_dir_all(&dir).expect("expected the temp capture dir to be removable");
+    }
+
+    /// One native-text glyph (8x1 raster, all 255) drawn through the atlas.
+    fn native_text_test_layout(clip: bool, clip_x: f32) -> native_text::NativeTextLayout {
+        native_text::NativeTextLayout {
+            start_x: 0,
+            start_y: 0,
+            origin_x: 0.0,
+            origin_y: 49.5,
+            clip_x,
+            clip_y: 100.0,
+            clip,
+            poly_flags: 0,
+            color: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    fn native_text_test_glyph(draw_left: f64) -> native_text::NativeTextGlyph {
+        native_text::NativeTextGlyph {
+            key: text_atlas::GlyphKey {
+                font_identity: "native-text-test-font".to_owned(),
+                glyph: 7,
+                raster_point_size_64: 64 * 12,
+                antialias: true,
+                subpixel: false,
+            },
+            draw_left,
+            draw_top: 0.0,
+            raster_width: 8,
+            raster_height: 1,
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn native_text_glyph_draws_through_the_atlas() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        let glyphs = [native_text_test_glyph(0.0)];
+        let layout = native_text_test_layout(false, 100.0);
+
+        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+        let mut calls = 0usize;
+        let mut rasterize = |_index: usize| {
+            calls += 1;
+            Some(vec![255u8; 8])
+        };
+        assert!(loop_state.draw_native_text(
+            &created,
+            &layout,
+            &glyphs,
+            &[],
+            50.0,
+            50.0,
+            &mut rasterize,
+        ));
+        assert_eq!(calls, 1, "a cache miss must rasterize exactly once");
+        assert!(unlock_frame(&created, &mut loop_state, false));
+        let row = read_64px_row(&created, &target);
+        assert!(row[2 * 4] > 200, "glyph column 2 should be lit: {row:?}");
+        assert_eq!(
+            row[60 * 4],
+            0,
+            "column 60 is past the glyph and must stay black"
+        );
+
+        // Second frame, same glyph: the atlas hit must not rasterize again.
+        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+        let mut calls = 0usize;
+        let mut rasterize = |_index: usize| {
+            calls += 1;
+            Some(vec![255u8; 8])
+        };
+        assert!(loop_state.draw_native_text(
+            &created,
+            &layout,
+            &glyphs,
+            &[],
+            50.0,
+            50.0,
+            &mut rasterize,
+        ));
+        assert_eq!(calls, 0, "a cache hit must not rasterize");
+        assert!(unlock_frame(&created, &mut loop_state, false));
+        let row = read_64px_row(&created, &target);
+        assert!(
+            row[2 * 4] > 200,
+            "cached glyph column 2 should still be lit"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn native_text_rasterize_failure_queues_nothing() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        let glyphs = [native_text_test_glyph(0.0)];
+        let layout = native_text_test_layout(false, 100.0);
+
+        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+        let mut rasterize = |_index: usize| None;
+        assert!(!loop_state.draw_native_text(
+            &created,
+            &layout,
+            &glyphs,
+            &[],
+            50.0,
+            50.0,
+            &mut rasterize,
+        ));
+        assert!(unlock_frame(&created, &mut loop_state, false));
+        let row = read_64px_row(&created, &target);
+        assert!(
+            row.chunks(4).all(|pixel| pixel == [0, 0, 0, 255]),
+            "a failed draw must leave the clear color: {row:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn native_text_clipped_glyph_queues_no_tile() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        // Glyph starts at x=10, entirely right of clip_x=4: fully clipped.
+        let glyphs = [native_text_test_glyph(10.0)];
+        let layout = native_text_test_layout(true, 4.0);
+
+        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+        let mut rasterize = |_index: usize| Some(vec![255u8; 8]);
+        assert!(loop_state.draw_native_text(
+            &created,
+            &layout,
+            &glyphs,
+            &[],
+            50.0,
+            50.0,
+            &mut rasterize,
+        ));
+        assert!(
+            loop_state.batches.is_empty(),
+            "a fully clipped glyph must queue no tile"
+        );
     }
 }
