@@ -3507,3 +3507,136 @@ pub unsafe extern "C" fn hp2_rs_wgpu_queue_triangles(
         );
     })
 }
+
+/// Replaces `UXOpenGLRenderDevice::DrawComplexSurface`/`SetTextureHelper`
+/// (`DrawComplex.cpp:21-259`, read in full). Each real texture layer's
+/// own `cache_id` must already be `hp2_rs_wgpu_fix_cache_id`'s own
+/// output, and already cached (`hp2_rs_wgpu_upload_texture`/`hp2_rs_
+/// wgpu_is_texture_cached`), same real contract as `hp2_rs_wgpu_
+/// queue_tile`'s own diffuse `cache_id` -- `diffuse_cache_id` is
+/// always required (the real source's own `check(Surface.Texture)`
+/// assertion, `DrawComplex.cpp:60`); `has_light_map`/`has_fog_map`
+/// gate whether `light_map_cache_id`/`fog_map_cache_id` (otherwise
+/// ignored) are used at all, matching the real `Surface.LightMap`/
+/// `FogMap` null checks. `*_u_scale`/`*_v_scale`/`*_pan_x`/`*_pan_y`
+/// are each real layer's own `FTextureInfo::UScale`/`VScale`/`Pan.X`/
+/// `Pan.Y`, same real per-bind-freshness reasoning as every other
+/// `queue_*` function. `has_texture_fields`/`texture_diffuse`/
+/// `texture_specular`/`texture_alpha` encode the real combined
+/// `Surface.Texture->Texture` null check (`compute_complex_diffuse_
+/// info`'s own doc has the full real citation for why these three
+/// real fields share one fallback, not three independent `Option`s).
+/// `c_alpha` is the real `BYTE cAlpha` `DrawComplexSurface` itself
+/// receives. `x_axis`/`y_axis` are the real `Facet.MapCoords.XAxis`/
+/// `YAxis`, already packed as `(axis.X, axis.Y, axis.Z, axis |
+/// MapCoords.Origin)` -- the real dot-product bias baked into `.w`
+/// (`DrawComplex.cpp:193-194`, `FVector::operator|` confirmed the
+/// real dot product, `UnMath.h:686-689`), a future `WgpuDrv.cpp`
+/// override's own responsibility to compute, not this function's.
+/// `vertices`/`vertex_count` are the real, already fan-triangulated
+/// flat vertex list -- the real `FSavedPoly`/`FTransform*` linked-
+/// list walk (`DrawComplex.cpp:206-248`) is this function's own
+/// caller's responsibility, not this function's, same real reasoning
+/// `hp2_rs_wgpu_queue_triangles`'s own doc already establishes for
+/// its own fan/indexed expansion.
+///
+/// Known, explicitly scoped gaps, not silently pretended away, same
+/// category every other `queue_*` function's own doc already names:
+/// detail textures, macro textures, bump maps, the real shader-
+/// specialization system, `GIsEditor && PF_Selected`, and the real
+/// `HitTesting()` substitution are not applied -- `hp2_wgpu::
+/// RenderLoop::queue_complex_surface`'s own doc has the full citation
+/// for every one of these as a real, separately scoped, not-yet-
+/// ported `DrawComplexSurface` branch.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null. `vertices` must be valid for `vertex_count`
+/// contiguous real `hp2_wgpu::draw::ComplexVertexInput` values, or be
+/// null with `vertex_count == 0`.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_queue_complex_surface(
+    handle: *mut c_void,
+    diffuse_cache_id: u64,
+    diffuse_u_scale: f32,
+    diffuse_v_scale: f32,
+    diffuse_pan_x: f32,
+    diffuse_pan_y: f32,
+    has_light_map: bool,
+    light_map_cache_id: u64,
+    light_map_u_scale: f32,
+    light_map_v_scale: f32,
+    light_map_pan_x: f32,
+    light_map_pan_y: f32,
+    has_fog_map: bool,
+    fog_map_cache_id: u64,
+    fog_map_u_scale: f32,
+    fog_map_v_scale: f32,
+    fog_map_pan_x: f32,
+    fog_map_pan_y: f32,
+    poly_flags: u32,
+    has_texture_fields: bool,
+    texture_diffuse: f32,
+    texture_specular: f32,
+    texture_alpha: f32,
+    c_alpha: u8,
+    x_axis_x: f32,
+    x_axis_y: f32,
+    x_axis_z: f32,
+    x_axis_w: f32,
+    y_axis_x: f32,
+    y_axis_y: f32,
+    y_axis_z: f32,
+    y_axis_w: f32,
+    vertices: *const hp2_wgpu::draw::ComplexVertexInput,
+    vertex_count: usize,
+) {
+    guard("hp2_rs_wgpu_queue_complex_surface", (), move || {
+        if handle.is_null() {
+            return;
+        }
+        let Some(vertices) = (unsafe { typed_slice_from_raw(vertices, vertex_count) }) else {
+            log::warn!(
+                "hp2_rs_wgpu_queue_complex_surface: null vertices pointer with vertex_count != 0"
+            );
+            return;
+        };
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.queue_complex_surface(
+            hp2_wgpu::ComplexSurfaceDrawRequest {
+                diffuse: hp2_wgpu::ComplexTextureLayer {
+                    cache_id: diffuse_cache_id,
+                    u_scale: diffuse_u_scale,
+                    v_scale: diffuse_v_scale,
+                    pan_x: diffuse_pan_x,
+                    pan_y: diffuse_pan_y,
+                },
+                light_map: has_light_map.then_some(hp2_wgpu::ComplexTextureLayer {
+                    cache_id: light_map_cache_id,
+                    u_scale: light_map_u_scale,
+                    v_scale: light_map_v_scale,
+                    pan_x: light_map_pan_x,
+                    pan_y: light_map_pan_y,
+                }),
+                fog_map: has_fog_map.then_some(hp2_wgpu::ComplexTextureLayer {
+                    cache_id: fog_map_cache_id,
+                    u_scale: fog_map_u_scale,
+                    v_scale: fog_map_v_scale,
+                    pan_x: fog_map_pan_x,
+                    pan_y: fog_map_pan_y,
+                }),
+                poly_flags,
+                texture_fields: has_texture_fields.then_some((
+                    texture_diffuse,
+                    texture_specular,
+                    texture_alpha,
+                )),
+                c_alpha,
+                x_axis: [x_axis_x, x_axis_y, x_axis_z, x_axis_w],
+                y_axis: [y_axis_x, y_axis_y, y_axis_z, y_axis_w],
+            },
+            vertices,
+        );
+    })
+}

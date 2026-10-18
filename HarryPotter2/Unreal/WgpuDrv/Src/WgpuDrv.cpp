@@ -120,6 +120,7 @@ UBOOL UWgpuRenderDevice::Init( UViewport* InViewport, INT NewX, INT NewY, INT Ne
 	DrawTileCallCount = 0;
 	Draw2DPointCallCount = 0;
 	DrawTrianglesCallCount = 0;
+	DrawComplexSurfaceCallCount = 0;
 
 	// UE1 calls Init again on every fullscreen toggle without an Exit in
 	// between (see XOpenGL.cpp:370's own comment on this). Destroy any
@@ -263,7 +264,7 @@ void UWgpuRenderDevice::Exit()
 		// (hp2_wgpu::RenderLoop::set_scene_node's own doc): how many
 		// SetSceneNode calls one run actually made, not inferred or
 		// assumed from the engine's own architecture docs.
-		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i Draw2DPoint calls=%i DrawTriangles calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount, Draw2DPointCallCount, DrawTrianglesCallCount );
+		debugf( NAME_Init, TEXT("WgpuDrv: SetSceneNode calls=%i Draw2DLine calls=%i DrawTile calls=%i Draw2DPoint calls=%i DrawTriangles calls=%i DrawComplexSurface calls=%i"), SetSceneNodeCallCount, Draw2DLineCallCount, DrawTileCallCount, Draw2DPointCallCount, DrawTrianglesCallCount, DrawComplexSurfaceCallCount );
 		hp2_rs_wgpu_destroy( RustDevice );
 		RustDevice = NULL;
 	}
@@ -443,6 +444,134 @@ void UWgpuRenderDevice::SetSceneNode( FSceneNode* Frame )
 void UWgpuRenderDevice::DrawComplexSurface( FSceneNode* Frame, FSurfaceInfo& Surface, FSurfaceFacet& Facet, DWORD PolyFlags, BYTE cAlpha )
 {
 	guard(UWgpuRenderDevice::DrawComplexSurface);
+	if( !RustDevice )
+		return;
+
+	// Real check(Surface.Texture) (DrawComplex.cpp:60) -- every real
+	// DrawComplexSurface call has a real diffuse texture; defensively
+	// bail rather than dereference null, same established style every
+	// other override here already uses (none of them replicate the
+	// real source's own debug-only check()/guard() asserts literally).
+	if( !Surface.Texture )
+		return;
+
+	// Same real FixCacheID/is_texture_cached/upload_texture sequence
+	// as DrawTile/DrawTriangles' own overrides, factored into one
+	// lambda since DrawComplexSurface has up to three real texture
+	// layers (diffuse/light-map/fog-map) where the others have one.
+	// LayerPolyFlags is 0 for light-map/fog-map, not PolyFlags --
+	// matching the real SetTextureHelper's own light-map/fog-map call
+	// sites (DrawComplex.cpp:175,178), which pass a literal 0 as
+	// their own PolyFlags argument, not NextPolyFlags. Confirmed this
+	// actually matters, not just copied for its own sake: FixCacheID's
+	// only real use of PolyFlags is tagging the cache ID with
+	// PF_Masked (SetTexture.cpp:66), so a light-map/fog-map texture on
+	// a masked surface must not itself be tagged as masked.
+	auto UploadIfNeeded = [&]( FTextureInfo& Info, DWORD LayerPolyFlags ) -> QWORD
+	{
+		QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, LayerPolyFlags );
+		if( !hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
+		{
+			if( Info.Format == TEXF_P8 && !Info.Palette )
+			{
+				debugf( NAME_Warning, TEXT("WgpuDrv: DrawComplexSurface: TEXF_P8 texture %ls has a null Palette, skipping upload"),
+					Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
+			}
+			else if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
+			{
+				FMipmapBase* Mip = Info.Mips[0];
+				size_t DataLen = ( Info.Format == TEXF_P8 )
+					? (size_t)Mip->USize * (size_t)Mip->VSize
+					: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
+				hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
+					(DWORD)Mip->USize, (DWORD)Mip->VSize,
+					Mip->DataPtr, DataLen,
+					(const BYTE*)Info.Palette,
+					( LayerPolyFlags & PF_Masked ) != 0,
+					UseSRGBTextures != 0 );
+			}
+		}
+		return FixedCacheID;
+	};
+
+	QWORD DiffuseCacheID = UploadIfNeeded( *Surface.Texture, PolyFlags );
+	UBOOL HasLightMap = Surface.LightMap != NULL;
+	QWORD LightMapCacheID = HasLightMap ? UploadIfNeeded( *Surface.LightMap, 0 ) : 0;
+	// Real FogMap condition (DrawComplex.cpp:177) is strictly more
+	// restrictive than LightMap's own (DrawComplex.cpp:174) -- a non-
+	// null pointer alone is not enough, the first mip must actually
+	// have real data loaded. A real, deliberate asymmetry transcribed
+	// exactly, not a copy-paste of LightMap's own weaker condition.
+	UBOOL HasFogMap = Surface.FogMap && Surface.FogMap->Mips[0] && Surface.FogMap->Mips[0]->DataPtr;
+	QWORD FogMapCacheID = HasFogMap ? UploadIfNeeded( *Surface.FogMap, 0 ) : 0;
+	UBOOL HasTexture = Surface.Texture->Texture != NULL;
+
+	// Real XAxis/YAxis vec4 packing (DrawComplex.cpp:193-194):
+	// (axis.X, axis.Y, axis.Z, axis | MapCoords.Origin) -- the real
+	// dot product (FVector::operator|, UnMath.h:686-689, confirmed
+	// before relying on the operator name alone). ZAxis is computed
+	// by the real source too but never read anywhere in complex.wgsl's
+	// own base path (that shader's own module doc already confirms
+	// this), so it is not threaded through here.
+	FLOAT XAxisW = Facet.MapCoords.XAxis | Facet.MapCoords.Origin;
+	FLOAT YAxisW = Facet.MapCoords.YAxis | Facet.MapCoords.Origin;
+
+	// Real per-polygon fan triangulation (DrawComplex.cpp:206-248,
+	// read in full), two passes: count first -- Facet.Polys is a real
+	// linked list of independently-faceted FSavedPoly, each its own
+	// fan, not one single fan across the whole facet -- so TArray's
+	// own allocating constructor (TArray(InNum, Tag), confirmed via
+	// direct source read, not TRefArray's same-looking but non-
+	// allocating (InNum) constructor -- same real distinction
+	// DrawTriangles' own override already established) can be sized
+	// exactly once, then fill. Every real FSavedPoly::Pts entry is
+	// already an FTransform* (not FTransform**, unlike the real
+	// source's own local `FTransform** In = &Poly->Pts[0]` -- an
+	// equivalent, simpler way to reach the same real FTransform*
+	// values, not a behavior change).
+	INT TotalVertexCount = 0;
+	for( FSavedPoly* Poly = Facet.Polys; Poly; Poly = Poly->Next )
+		if( Poly->NumPts >= 3 )
+			TotalVertexCount += ( Poly->NumPts - 2 ) * 3;
+	if( TotalVertexCount <= 0 )
+		return;
+
+	TArray<ComplexVertexInput> Vertices( TotalVertexCount );
+	auto FillVertex = [&]( ComplexVertexInput& Vert, FTransform* P )
+	{
+		Vert.coords[0] = P->Point.X; Vert.coords[1] = P->Point.Y; Vert.coords[2] = P->Point.Z;
+	};
+	INT Out = 0;
+	for( FSavedPoly* Poly = Facet.Polys; Poly; Poly = Poly->Next )
+	{
+		const INT NumPts = Poly->NumPts;
+		if( NumPts < 3 )
+			continue;
+		for( INT i = 0; i < NumPts - 2; i++ )
+		{
+			FillVertex( Vertices(Out++), Poly->Pts[0] );
+			FillVertex( Vertices(Out++), Poly->Pts[i + 1] );
+			FillVertex( Vertices(Out++), Poly->Pts[i + 2] );
+		}
+	}
+
+	if( DrawComplexSurfaceCallCount == 0 )
+	{
+		debugf( NAME_Init, TEXT("WgpuDrv: DrawComplexSurface first call: TotalVertexCount=%i DiffuseCacheID=%llu HasLightMap=%i HasFogMap=%i"),
+			TotalVertexCount, DiffuseCacheID, HasLightMap, HasFogMap );
+	}
+	DrawComplexSurfaceCallCount++;
+
+	hp2_rs_wgpu_queue_complex_surface( RustDevice,
+		DiffuseCacheID, Surface.Texture->UScale, Surface.Texture->VScale, Surface.Texture->Pan.X, Surface.Texture->Pan.Y,
+		HasLightMap, LightMapCacheID, HasLightMap ? Surface.LightMap->UScale : 0.0f, HasLightMap ? Surface.LightMap->VScale : 0.0f, HasLightMap ? Surface.LightMap->Pan.X : 0.0f, HasLightMap ? Surface.LightMap->Pan.Y : 0.0f,
+		HasFogMap, FogMapCacheID, HasFogMap ? Surface.FogMap->UScale : 0.0f, HasFogMap ? Surface.FogMap->VScale : 0.0f, HasFogMap ? Surface.FogMap->Pan.X : 0.0f, HasFogMap ? Surface.FogMap->Pan.Y : 0.0f,
+		PolyFlags,
+		HasTexture, HasTexture ? Surface.Texture->Texture->Diffuse : 0.0f, HasTexture ? Surface.Texture->Texture->Specular : 0.0f, HasTexture ? Surface.Texture->Texture->Alpha : 0.0f,
+		cAlpha,
+		Facet.MapCoords.XAxis.X, Facet.MapCoords.XAxis.Y, Facet.MapCoords.XAxis.Z, XAxisW,
+		Facet.MapCoords.YAxis.X, Facet.MapCoords.YAxis.Y, Facet.MapCoords.YAxis.Z, YAxisW,
+		&Vertices(0), (size_t)TotalVertexCount );
 	unguard;
 }
 
