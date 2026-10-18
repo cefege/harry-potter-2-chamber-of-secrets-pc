@@ -8,8 +8,10 @@ Revision history:
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "HP2EngineServices.h"
 #include "UnRender.h"
 #include "NativeText.h"
+#include "Hp2CanvasServices.h"
 #include <cmath>
 
 void UCanvas::StaticConstructor()
@@ -85,38 +87,116 @@ void UCanvas::DrawTile
 	guard(UCanvas::DrawTile);
 	check(Texture);
 
-	// Compute clipping region.
-	FLOAT ClipY0 = /*SpanBuffer ? SpanBuffer->StartY :*/ 0;
-	FLOAT ClipY1 = /*SpanBuffer ? SpanBuffer->EndY   :*/ Frame->FY;
-
-	// Reject.
-	if( XL<=0.f || YL<=0.f || X+XL<=0.f || Y+YL<=ClipY0 || X>=Frame->FX || Y>=ClipY1 )
+	// Clip and reject against the frame. The math lives in Rust (hp2-engine canvas.rs).
+	Hp2CanvasTileRect Rect = { X, Y, XL, YL, U, V, UL, VL };
+	if( !hp2_rs_canvas_clip_tile( Frame->FX, Frame->FY, &Rect ) )
 		return;
-
-	// Clip.
-	if( X<0.f )
-		{FLOAT C=X*UL/XL; U-=C; UL+=C; XL+=X; X=0.f;}
-	if( Y<0.f )
-		{FLOAT C=Y*VL/YL; V-=C; VL+=C; YL+=Y; Y=0.f;}
-	if( XL>Frame->FX-X )
-		{UL+=(Frame->FX-X-XL)*UL/XL; XL=Frame->FX-X;}
-	if( YL>Frame->FY-Y )
-		{VL+=(Frame->FY-Y-YL)*VL/YL; YL=Frame->FY-Y;}
+	X = Rect.x; Y = Rect.y; XL = Rect.xl; YL = Rect.yl;
+	U = Rect.u; V = Rect.v; UL = Rect.ul; VL = Rect.vl;
 
 	// Draw it.
 	FTextureInfo Info;
 	if( !GIsEditor )
 		Texture = Texture->Get( Viewport->CurrentTime );
 	Texture->Lock( Info, Viewport->CurrentTime, -1, Viewport->RenDev );
-	FLOAT UF = Info.UScale * Info.USize / Texture->USize; U *= UF; UL *= UF;
-	FLOAT VF = Info.VScale * Info.VSize / Texture->VSize; V *= VF; VL *= VF;
+	FLOAT UF = hp2_rs_canvas_uv_factor( Info.UScale, Info.USize, Texture->USize ); U *= UF; UL *= UF;
+	FLOAT VF = hp2_rs_canvas_uv_factor( Info.VScale, Info.VSize, Texture->VSize ); V *= VF; VL *= VF;
 	Viewport->RenDev->DrawTile( Frame, Info, X, Y, XL, YL, U, V, UL, VL, SpanBuffer, Z, Color, Fog, PolyFlags | (Texture->PolyFlags&PF_Masked) );
 	Texture->Unlock( Info );
 
 	unguard;
 }
 
-//
+/*-----------------------------------------------------------------------------
+	UCanvas basic text functions.
+-----------------------------------------------------------------------------*/
+
+/*-----------------------------------------------------------------------------
+	UCanvas text port glue. Layout, clipping and drawing live in Rust
+	(hp2-engine canvas_text.rs); these helpers copy UCanvas state into
+	Hp2CanvasView, pass the Hp2CanvasServices context, and write back the
+	fields the Rust side changes. Engine touch-points are in Hp2CanvasServices.cpp.
+-----------------------------------------------------------------------------*/
+
+static Hp2Plane CanvasPlane( const FPlane& P )
+{
+	Hp2Plane Result = { P.X, P.Y, P.Z, P.W };
+	return Result;
+}
+
+// Copies at most MaxChars of a host string into the NUL-terminated UTF-16 buffer the Rust port reads.
+static void CanvasTextUnits( const TCHAR* Text, TArray<UNICHAR>& Units, INT MaxChars )
+{
+	const INT Len = Min( appStrlen(Text), MaxChars );
+	Units.Empty();
+	Units.Add( Len + 1 );
+	for( INT i=0; i<Len; i++ )
+		Units(i) = ToUnicode( Text[i] );
+	Units(Len) = 0;
+}
+
+static void FillCanvasTextView( const UCanvas* Canvas, UFont* Font, Hp2CanvasView& View )
+{
+	const FPlane Color = Canvas->Color.Plane();
+	View.font       = Font;
+	View.large_font = Canvas->LargeFont;
+	View.big_font   = Canvas->BigFont;
+	View.med_font   = Canvas->MedFont;
+	View.cur_x      = Canvas->CurX;
+	View.cur_y      = Canvas->CurY;
+	View.cur_yl     = Canvas->CurYL;
+	View.clip_x     = Canvas->ClipX;
+	View.clip_y     = Canvas->ClipY;
+	View.org_x      = Canvas->OrgX;
+	View.org_y      = Canvas->OrgY;
+	View.space_x    = Canvas->SpaceX;
+	View.space_y    = Canvas->SpaceY;
+	View.z          = Canvas->Z;
+	View.x          = Canvas->X;
+	View.has_frame  = Canvas->Frame ? 1 : 0;
+	View.frame_x    = Canvas->Frame ? Canvas->Frame->X : 0;
+	View.frame_y    = Canvas->Frame ? Canvas->Frame->Y : 0;
+	View.frame_fx   = Canvas->Frame ? Canvas->Frame->FX : 0.f;
+	View.frame_fy   = Canvas->Frame ? Canvas->Frame->FY : 0.f;
+	View.style      = Canvas->Style;
+	View.center     = Canvas->bCenter ? 1 : 0;
+	View.no_smooth  = Canvas->bNoSmooth ? 1 : 0;
+	View.color      = CanvasPlane( Color );
+}
+
+static void WriteBackCanvasTextView( UCanvas* Canvas, const Hp2CanvasView& View )
+{
+	Canvas->CurX  = View.cur_x;
+	Canvas->CurY  = View.cur_y;
+	Canvas->CurYL = View.cur_yl;
+	Canvas->ClipX = View.clip_x;
+	Canvas->ClipY = View.clip_y;
+	Canvas->OrgX  = View.org_x;
+	Canvas->OrgY  = View.org_y;
+}
+
+// One UCanvas text or tile call: the view copy, the DrawString texture slots and the engine context.
+struct FCanvasTextCall
+{
+	Hp2CanvasView    View;
+	FTextureInfo     Slots[HP2_CANVAS_TEXT_SLOTS];
+	Hp2CanvasTextCtx Ctx;
+
+	FCanvasTextCall( UCanvas* Canvas, UFont* Font, FFrame* Stack )
+	{
+		FillCanvasTextView( Canvas, Font, View );
+		Ctx.services = &GHp2CanvasServices;
+		Ctx.canvas   = Canvas;
+		Ctx.slots    = Slots;
+		Ctx.stack    = Stack;
+	}
+};
+
+/*-----------------------------------------------------------------------------
+	UCanvas pattern, icon and clip window. Math lives in Rust (hp2-engine canvas_text.rs);
+	the tile itself is drawn by UCanvas::DrawTile through the services table.
+-----------------------------------------------------------------------------*/
+
 // Draw titling pattern.
 //
 void UCanvas::DrawPattern
@@ -137,11 +217,13 @@ void UCanvas::DrawPattern
 )
 {
 	guard(UCanvas::DrawPattern);
-	DrawTile( Texture, X, Y, XL, YL, (X-OrgX)*Scale + Texture->USize, (Y-OrgY)*Scale + Texture->VSize, XL*Scale, YL*Scale, SpanBuffer, Z, Color, Fog, PolyFlags );
+	check(Texture);
+	FCanvasTextCall Call( this, NULL, NULL );
+	Hp2CanvasPatternArgs Args = { Texture, X, Y, XL, YL, Scale, OrgX, OrgY, SpanBuffer, Z, CanvasPlane(Color), CanvasPlane(Fog), PolyFlags };
+	hp2_rs_canvas_draw_pattern( &Call.Ctx, &Call.View, &Args );
 	unguard;
 }
 
-//
 // Draw a scaled sprite.  Takes care of clipping.
 // XSize and YSize are in pixels.
 //
@@ -160,134 +242,39 @@ void UCanvas::DrawIcon
 )
 {
 	guard(UCanvas::DrawIcon);
-	DrawTile( Texture, ScreenX, ScreenY, XSize, YSize, 0, 0, Texture->USize, Texture->VSize, SpanBuffer, Z, Color, Fog, PolyFlags );
+	check(Texture);
+	FCanvasTextCall Call( this, NULL, NULL );
+	Hp2CanvasPatternArgs Args = { Texture, ScreenX, ScreenY, XSize, YSize, 1.f, 0.f, 0.f, SpanBuffer, Z, CanvasPlane(Color), CanvasPlane(Fog), PolyFlags };
+	hp2_rs_canvas_draw_icon( &Call.Ctx, &Call.View, &Args );
 	unguard;
 }
 
-/*-----------------------------------------------------------------------------
-	Clip window.
------------------------------------------------------------------------------*/
-
+// Clip window.
 void UCanvas::SetClip( INT X, INT Y, INT XL, INT YL )
 {
 	guard(UCanvas::SetClip);
-
-	CurX  = 0;
-	CurY  = 0;
-	OrgX  = X;
-	OrgY  = Y;
-	ClipX = XL;
-	ClipY = YL;
-
+	FCanvasTextCall Call( this, NULL, NULL );
+	hp2_rs_canvas_set_clip( &Call.View, X, Y, XL, YL );
+	WriteBackCanvasTextView( this, Call.View );
 	unguard;
 }
 
-/*-----------------------------------------------------------------------------
-	UCanvas basic text functions.
------------------------------------------------------------------------------*/
-
-static inline FLOAT GetCanvasTextScale( const UCanvas* Canvas )
+static FLOAT GetCanvasTextScale( UCanvas* Canvas )
 {
-	const FLOAT Width = Canvas && Canvas->Frame ? Canvas->Frame->FX : (Canvas ? (FLOAT)Canvas->X : 0.f);
-	FLOAT UIScale = 1.f;
-	if( Canvas && Canvas->Viewport && Canvas->Viewport->GetOuterUClient() )
-		UIScale = Canvas->Viewport->GetOuterUClient()->GetUIScale();
-	if( appIsNan(UIScale) )
-		UIScale = 1.f;
-	UIScale = Clamp(UIScale, 0.75f, 2.f);
-	return Max(1.f, Width/640.f) * UIScale;
+	if( !Canvas )
+		return 1.f;
+	Hp2CanvasView View;
+	FillCanvasTextView( Canvas, Canvas->Font, View );
+	return hp2_rs_canvas_text_scale( &View, GHp2CanvasServices.ui_scale(Canvas) );
 }
 
-static inline UBOOL IsSafeCanvasTextFloat( FLOAT Value )
-{
-	const double WideValue = static_cast<double>(Value);
-	return !appIsNan(Value)
-		&& WideValue >= -static_cast<double>(MAXINT) - 1.0
-		&& WideValue <= static_cast<double>(MAXINT);
-}
-
-static inline UBOOL HasSafeCanvasTextRequestFloats( const UCanvas* Canvas )
+static UBOOL HasSafeCanvasTextRequestFloats( UCanvas* Canvas )
 {
 	if( !Canvas )
 		return 0;
-	const FLOAT TextScale = GetCanvasTextScale(Canvas);
-	return IsSafeCanvasTextFloat(TextScale)
-		&& IsSafeCanvasTextFloat(Canvas->SpaceX * TextScale)
-		&& IsSafeCanvasTextFloat(Canvas->SpaceY * TextScale)
-		&& IsSafeCanvasTextFloat(Canvas->OrgX)
-		&& IsSafeCanvasTextFloat(Canvas->OrgY)
-		&& IsSafeCanvasTextFloat(Canvas->ClipX)
-		&& IsSafeCanvasTextFloat(Canvas->ClipY)
-		&& IsSafeCanvasTextFloat(Canvas->CurX)
-		&& IsSafeCanvasTextFloat(Canvas->CurY);
-}
-
-static inline INT ScaleFontMetric( INT Value, FLOAT Scale )
-{
-	return Value>0 ? Max(1, appRound(Value*Scale)) : 0;
-}
-
-//
-// Draw a character.
-//
-static inline void DrawChar
-(
-	DWORD			Flags,
-	UCanvas*		Canvas,
-	FTextureInfo&	Info,
-	INT				X,
-	INT				Y,
-	INT				XL,
-	INT				YL,
-	INT				U, 
-	INT				V, 
-	INT				UL, 
-	INT				VL, 
-	FPlane			Color
-)
-{
-	guardSlow(DrawChar);
-
-	// Reject.
-	FSceneNode* Frame=Canvas->Frame;
-	if( !(Flags & PF_Invisible) && X+XL>0 && Y+YL>0 && X<Frame->X && Y<Frame->Y && XL>0 && YL>0 )
-	{
-		// Clip.
-		if( X<0 )
-			{INT C=X*UL/XL; U-=C; UL+=C; XL+=X; X=0;}
-		if( Y<0 )
-			{INT C=Y*VL/YL; V-=C; VL+=C; YL+=Y; Y=0;}
-		if( XL>Frame->X-X )
-			{UL+=(Frame->X-X-XL)*UL/XL; XL=Frame->X-X;}
-		if( YL>Frame->Y-Y )
-			{VL+=(Frame->Y-Y-YL)*VL/YL; YL=Frame->Y-Y;}
-
-		// Draw.
-		Canvas->Viewport->RenDev->DrawTile( Frame, Info, X, Y, XL, YL, U, V, UL, VL, NULL, Canvas->Z, Color, FPlane(0,0,0,0), Flags );
-	}
-	unguardSlow;
-}
-
-//
-// Get a character's dimensions.
-//
-static inline void GetCharSize( UFont* Font, TCHAR InCh, FLOAT TextScale, INT& Width, INT& Height )
-{
-	guardSlow(GetCharSize);
-	Width = 0;
-	Height = 0;
-	if( !Font || Font->CharactersPerPage<=0 )
-		return;
-	INT Ch    = (TCHARU)Font->RemapChar(InCh);
-	INT Page  = Ch / Font->CharactersPerPage;
-	INT Index = Ch - Page * Font->CharactersPerPage;
-	if( Page<Font->Pages.Num() && Index<Font->Pages(Page).Characters.Num() )
-	{
-		FFontCharacter& Char = Font->Pages(Page).Characters(Index);
-		Width = ScaleFontMetric(Char.USize, TextScale);
-		Height = ScaleFontMetric(Char.VSize, TextScale);
-	}
-	unguardSlow;
+	Hp2CanvasView View;
+	FillCanvasTextView( Canvas, Canvas->Font, View );
+	return hp2_rs_canvas_has_safe_request_floats( &View, GetCanvasTextScale(Canvas) ) ? 1 : 0;
 }
 class FCanvasTextLayoutDispatcher
 {
@@ -432,6 +419,12 @@ static UBOOL TryNativeCanvasText
 	return DispatchCanvasTextLayout(Dispatcher, Canvas->Frame, Request, !(Flags & PF_Invisible), OutWidth, OutHeight);
 }
 
+// Services entry point (Hp2CanvasServices.cpp): one native text backend attempt.
+UBOOL CanvasTryNativeTextForServices( UCanvas* Canvas, const Hp2NativeTextRequest& Req, UFont* Font, const TCHAR* Text, FPlane Color, INT& OutWidth, INT& OutHeight )
+{
+	return TryNativeCanvasText( Req.flags, Canvas, Font, Req.draw_x, Req.draw_y, Text, Color, Req.clip!=0, Req.amp!=0, Req.center!=0, Req.wrap!=0, Req.visible, OutWidth, OutHeight );
+}
+
 UBOOL RunCanvasNativeTextCompatibilityForTests( FNativeTextPlatformBackend* Backend, FCanvasNativeTextTestState& State, INT& OutWidth, INT& OutHeight )
 {
 	OutWidth = OutHeight = 0;
@@ -458,166 +451,6 @@ UBOOL RunCanvasNativeTextCompatibilityForTests( FNativeTextPlatformBackend* Back
 
 
 
-//
-// Draw a string of characters.
-// - returns pixels drawn
-//
-static INT DrawString
-(
-	DWORD			Flags,
-	UCanvas*		Canvas,
-	UFont*			Font,
-	INT				DrawX,
-	INT				DrawY,
-	const TCHAR*	Text,
-	FPlane			Color,
-	UBOOL			bClip,
-	UBOOL			bHandleApersand
-)
-{
-	if( !*Text || !HasSafeCanvasTextRequestFloats(Canvas) )
-		return 0;
-
-	INT NativeWidth, NativeHeight;
-	if( TryNativeCanvasText(Flags, Canvas, Font, DrawX, DrawY, Text, Color, bClip, bHandleApersand, 0, 0, appStrlen(Text), NativeWidth, NativeHeight) )
-		return NativeWidth;
-
-	if( Font->FontName )
-	{
-		INT OldX = DrawX;
-		Canvas->Viewport->DrawString( Flags, Font, DrawX, DrawY, Text, Color );
-		return DrawX - OldX;
-	}
-	if( Font->CharactersPerPage<=0 )
-		return 0;
-	guardSlow(DrawString);
-
-	const FLOAT TextScale = GetCanvasTextScale(Canvas);
-	const INT ScaledSpaceX = appRound(Canvas->SpaceX * TextScale);
-
-	// Font texture pages.
-	FTextureInfo Infos[5];
-	Infos[0].Texture=Infos[1].Texture=Infos[2].Texture=Infos[3].Texture=Infos[4].Texture=NULL;
-
-	// Draw all characters in string.
-	INT LineX = 0;
-	INT bDrawUnderline = 0;
-	INT UnderlineWidth = 0;
-	for( INT i=0; Text[i]; i++ )
-	{
-		INT bUnderlineNext = 0;
-		INT Ch = (TCHARU)Font->RemapChar(Text[i]);
-
-		// Handle ampersand underlining.
-		if( bHandleApersand )
-		{
-			if( bDrawUnderline )
-				Ch = (TCHARU)Font->RemapChar('_');
-			if( Text[i]=='&' )
-			{
-				if( !Text[i+1] )
-					break;
-				if( Text[i+1]!='&' )
-				{
-					bUnderlineNext = 1;
-					Ch = (TCHARU)Font->RemapChar(Text[i+1]);
-				}
-			}
-		}
-
-		// Process character if it's valid.
-	try_char:
-		INT NewPage = Ch / Font->CharactersPerPage;
-		UTexture* Tex;
-		if( NewPage<Font->Pages.Num() && (Tex=Font->Pages(NewPage).Texture)!=NULL )
-		{
-			INT        Index    = Ch - NewPage*Font->CharactersPerPage;
-			FFontPage& PageInfo = Font->Pages(NewPage);
-			if( Index<PageInfo.Characters.Num() )
-			{
-				// Get proper font page.
-				FTextureInfo& Info = Infos[Min(NewPage,4)];
-				if( Info.Texture!=Tex )
-				{
-					if( Info.Texture )
-						Info.Texture->Unlock( Info );
-					Tex->Lock( Info, Canvas->Viewport->CurrentTime, 0, Canvas->Viewport->RenDev );
-				}
-				FFontCharacter& Char = PageInfo.Characters(Index);
-
-				// Try upper case.
-				if( Char.USize==0 && Ch >= 'a' && Ch <= 'z' )
-				{
-					Ch += 'A'-'a';
-					goto try_char;
-				}
-
-				// Underlines use the underscore glyph but retain the underlined character's advance.
-				INT CharWidth = bDrawUnderline ? Min(UnderlineWidth, Char.USize) : Char.USize;
-				INT DrawWidth = ScaleFontMetric(CharWidth, TextScale);
-				INT DrawHeight = ScaleFontMetric(Char.VSize, TextScale);
-
-				INT X = LineX + DrawX;
-				INT Y = DrawY;
-				INT CU = Char.StartU;
-				INT CV = Char.StartV;
-				INT CUSize = CharWidth;
-				INT CVSize = Char.VSize;
-
-				if( (!bClip) || (X+DrawWidth>0 && X<=Canvas->ClipX && Y+DrawHeight>0 && Y<=Canvas->ClipY) )
-				{
-					if( bClip && DrawWidth>0 && DrawHeight>0 )
-					{
-						if( X<0 )
-						{
-							const INT Clip = Min(-X, DrawWidth);
-							const INT SourceClip = Min(CUSize, appRound((FLOAT)Clip*CUSize/DrawWidth));
-							X += Clip; DrawWidth -= Clip; CU += SourceClip; CUSize -= SourceClip;
-						}
-						if( Y<0 )
-						{
-							const INT Clip = Min(-Y, DrawHeight);
-							const INT SourceClip = Min(CVSize, appRound((FLOAT)Clip*CVSize/DrawHeight));
-							Y += Clip; DrawHeight -= Clip; CV += SourceClip; CVSize -= SourceClip;
-						}
-						if( X+DrawWidth > Canvas->ClipX && DrawWidth>0 )
-						{
-							const INT Keep = Max(0, (INT)(Canvas->ClipX-X));
-							CUSize = Min(CUSize, appRound((FLOAT)Keep*CUSize/DrawWidth));
-							DrawWidth = Keep;
-						}
-						if( Y+DrawHeight > Canvas->ClipY && DrawHeight>0 )
-						{
-							const INT Keep = Max(0, (INT)(Canvas->ClipY-Y));
-							CVSize = Min(CVSize, appRound((FLOAT)Keep*CVSize/DrawHeight));
-							DrawHeight = Keep;
-						}
-					}
-					if( DrawWidth>0 && DrawHeight>0 && CUSize>0 && CVSize>0 )
-						DrawChar( Flags, Canvas, Info, (INT)(Canvas->OrgX+X), (INT)(Canvas->OrgY+Y), DrawWidth, DrawHeight, CU, CV, CUSize, CVSize, Color );
-				}
-
-				if( bDrawUnderline )
-					CharWidth = UnderlineWidth;
-
-				if( !bUnderlineNext )
-					LineX += ScaleFontMetric(CharWidth, TextScale) + ScaledSpaceX;
-				else
-					UnderlineWidth = Char.USize;
-
-				bDrawUnderline = bUnderlineNext;
-			}
-		}
-	}
-
-	// Unlock font pages.
-	for( INT i=0; i<5; i++ )
-		if( Infos[i].Texture )
-			Infos[i].Texture->Unlock( Infos[i] );
-
-	return LineX;
-	unguardSlow;
-}
 
 //
 // Compute size and optionally print text with word wrap.
@@ -627,118 +460,13 @@ void VARARGS UCanvas::WrappedPrint( ERenderStyle Style, INT& XL, INT& YL, UFont*
 {
 	guard(UCanvas::WrappedPrint);
 
-	bool bDoTeletype = numChars ? true : false;
-
-	if( !HasSafeCanvasTextRequestFloats(this) || ClipX<0 || ClipY<0 || !*Text )
-	{
-		XL = YL = 0;
-		return;
-	}
-	if( (Font==LargeFont || Font==BigFont) && appStricmp(UObject::GetLanguage(),TEXT("INT")) )
-		Font = MedFont;//BigFont;!!
-	check(Font);
-	FPlane DrawColor = Color.Plane();
-
-	// Generate flags.
-	DWORD PolyFlags
-	=	(PF_NoSmooth | PF_Masked | PF_RenderHint)
-	|(	(Style==STY_None       ) ? PF_Invisible
-	:	(Style==STY_Translucent) ? PF_Translucent
-	:	(Style==STY_Modulated  ) ? PF_Modulated
-	:	                           0);
-
-	INT NativeWidth, NativeHeight;
-	if( TryNativeCanvasText(PolyFlags, this, Font, CurX, CurY, Text, DrawColor, 0, 0, Center, 1, numChars, NativeWidth, NativeHeight) )
-	{
-		XL = NativeWidth;
-		YL = NativeHeight;
-		CurY += NativeHeight;
-		return;
-	}
-	if( Font->FontName.Len()>0 )
-	{
-		// Viewport.DrawString handles word wrapping for inherently native fonts.
-		INT X = CurX, Y = CurY;
-		if( Center )
-			PolyFlags |= PF_TwoSided;
-		Viewport->DrawString( PolyFlags, Font, X, Y, Text, DrawColor );
-		XL = X-CurX;  YL = Y-CurY;
-		return;
-	}
-	const FLOAT TextScale = GetCanvasTextScale(this);
-	const INT ScaledSpaceX = appRound(SpaceX * TextScale);
-	const INT ScaledSpaceY = appRound(SpaceY * TextScale);
-
-
-	// Process each word until the current line overflows.
-	XL = YL = 0;
-	float OrigX = CurX;
-	do
-	{
-		INT iCleanWordEnd = 0, iTestWord;
-		INT TestXL = Center ? (INT)0 : (INT)CurX, CleanXL = 0;
-		INT TestYL = 0, CleanYL = 0;
-		UBOOL GotWord=0;
-		for( iTestWord=0; Text[iTestWord]!=0 && Text[iTestWord]!='\n'; )
-		{
-			INT ChW, ChH;
-			GetCharSize(Font, Text[iTestWord], TextScale, ChW, ChH);
-			if( ChW==0 )
-				// Try upper case.
-				if( Text[iTestWord] >= 'a' && Text[iTestWord] <= 'z' )
-					GetCharSize(Font, Text[iTestWord]+'A'-'a', TextScale, ChW, ChH);
-			TestXL              += ChW + ScaledSpaceX;
-			TestYL               = Max( TestYL, ChH + ScaledSpaceY );
-			if( TestXL>ClipX )
-				break;
-			iTestWord++;
-			UBOOL WordBreak = Text[iTestWord]==' ' || Text[iTestWord]=='\n' || Text[iTestWord]==0;
-			if( WordBreak || !GotWord )
-			{
-				iCleanWordEnd = iTestWord;
-				CleanXL       = TestXL;
-				CleanYL       = TestYL;
-				GotWord       = GotWord || WordBreak;
-			}
-		}
-		if( iCleanWordEnd==0 )
-			break;
-
-		if (bDoTeletype)
-		{
-			if (iCleanWordEnd > numChars)
-				iCleanWordEnd = numChars;	
-		}
-
-
-		// Sucessfully split this line, now draw it.
-		if( Style!=STY_None && OrgY+CurY<Frame->Y && OrgY+CurY+CleanYL>0 )
-		{
-			FString TextLine(Text);
-			INT LineX = Center ? (INT) (CurX-CleanXL/2) : (INT) (CurX);
-			LineX += DrawString( PolyFlags, this, Font, LineX, (INT) CurY, *(TextLine.Left(iCleanWordEnd)), DrawColor, 0, 0 );
-			CurX = LineX;
-		}
-
-		// Update position.
-		CurX  = OrigX;
-		CurY += CleanYL;
-		YL   += CleanYL;
-		XL    = Max(XL,CleanXL);
-		Text += iCleanWordEnd;
-
-		if (bDoTeletype)
-		{
-			numChars -= iCleanWordEnd;
-			if (!numChars)
-				break;
-		}
-
-		// Skip whitespace after word wrap.
-		while( *Text==' ' )
-			Text++;
-	}
-	while( *Text );
+	FCanvasTextCall Call( this, Font, NULL );
+	TArray<UNICHAR> Units;
+	CanvasTextUnits( Text, Units, MAXINT );
+	const Hp2CanvasSize Size = hp2_rs_canvas_wrapped_print( &Call.Ctx, &Call.View, Font, Style, Center ? 1 : 0, &Units(0), numChars );
+	WriteBackCanvasTextView( this, Call.View );
+	XL = Size.w;
+	YL = Size.h;
 
 	unguardf(( TEXT("(%s)"), Text ));
 }
@@ -815,17 +543,14 @@ void UCanvas::execStrLen( FFrame& Stack, RESULT_DECL )
 	P_GET_FLOAT_REF(YL);
 	P_FINISH;
 
-	INT XLi, YLi;
-	FLOAT OldCurX, OldCurY;
-	OldCurX = CurX;
-	OldCurY = CurY;
-	CurX = 0;
-	CurY = 0;
-	WrappedStrLenf( Font, XLi, YLi, TEXT("%s"), *InText );
-	CurY = OldCurY;
-	CurX = OldCurX;
-	*XL = XLi;
-	*YL = YLi;
+	FCanvasTextCall Call( this, Font, &Stack );
+	TArray<UNICHAR> Units;
+	// WrappedStrLenf formats through a 4096-TCHAR buffer, so at most 4095 units are measured.
+	CanvasTextUnits( *InText, Units, 4095 );
+	const Hp2CanvasSize Size = hp2_rs_canvas_native_str_len( &Call.Ctx, &Call.View, &Units(0) );
+	WriteBackCanvasTextView( this, Call.View );
+	*XL = Size.w;
+	*YL = Size.h;
 
 	unguard;
 }
@@ -838,25 +563,13 @@ void UCanvas::execDrawText( FFrame& Stack, RESULT_DECL )
 	P_GET_UBOOL_OPTX(CR,1);
 	P_GET_INT_OPTX(numChars,0);
 	P_GET_UBOOL_OPTX(bCursor,0);
-
 	P_FINISH;
-	if( !Font )
-	{
-		Stack.Logf( TEXT("DrawText: No font") );
-		return;
-	}
-	INT XL=0, YL=0;
-	if( Style!=STY_None )
-		WrappedPrint( (ERenderStyle)Style, XL, YL, Font, bCenter, *InText, numChars, bCursor );
-	CurX += XL;
-	CurYL = Max(CurYL,(FLOAT)YL);
-	if( CR )
-	{
-		CurX  = 0;
-		CurY += CurYL;
-		CurYL = 0;
-	}
 
+	FCanvasTextCall Call( this, Font, &Stack );
+	TArray<UNICHAR> Units;
+	CanvasTextUnits( *InText, Units, MAXINT );
+	hp2_rs_canvas_native_draw_text( &Call.Ctx, &Call.View, &Units(0), CR ? 1 : 0, numChars );
+	WriteBackCanvasTextView( this, Call.View );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UCanvas, 465, execDrawText );
@@ -877,25 +590,11 @@ void UCanvas::execDrawTile( FFrame& Stack, RESULT_DECL )
 		Stack.Logf( TEXT("DrawTile: Missing Texture") );
 		return;
 	}
-	if( Style!=STY_None ) DrawTile
-	(
-		Tex,
-		OrgX+CurX,
-		OrgY+CurY,
-		XL,
-		YL,
-		U,
-		V,
-		UL,
-		VL,
-		NULL,
-		Z,
-		Color.Plane(),
-		FPlane(0,0,0,0),
-		PF_TwoSided | (Style==STY_Translucent ? PF_Translucent : Style==STY_Modulated ? PF_Modulated : 0) | (bNoSmooth ? PF_NoSmooth : 0)
-	);
-	CurX += XL + SpaceX;
-	CurYL = Max(CurYL,YL);
+
+	FCanvasTextCall Call( this, Font, &Stack );
+	const Hp2CanvasTileRect Rect = { 0.f, 0.f, XL, YL, U, V, UL, VL };
+	hp2_rs_canvas_native_draw_tile( &Call.Ctx, &Call.View, Tex, &Rect );
+	WriteBackCanvasTextView( this, Call.View );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UCanvas, 466, execDrawTile );
@@ -991,41 +690,10 @@ void UCanvas::execDrawTileClipped( FFrame& Stack, RESULT_DECL )
 		return;
 	}
 
-	// Clip to ClipX and ClipY
-	if( XL > 0 && YL > 0 )
-	{		
-		if( CurX<0 )
-			{FLOAT C=CurX*UL/XL; U-=C; UL+=C; XL+=CurX; CurX=0;}
-		if( CurY<0 )
-			{FLOAT C=CurY*VL/YL; V-=C; VL+=C; YL+=CurY; CurY=0;}
-		if( XL>ClipX-CurX )
-			{UL+=(ClipX-CurX-XL)*UL/XL; XL=ClipX-CurX;}
-		if( YL>ClipY-CurY )
-			{VL+=(ClipY-CurY-YL)*VL/YL; YL=ClipY-CurY;}
-	
-		if( Style!=STY_None ) 
-			DrawTile
-			(
-				Tex,
-				OrgX+CurX,
-				OrgY+CurY,
-				XL,
-				YL,
-				U,
-				V,
-				UL,
-				VL,
-				NULL,
-				Z,
-				Color.Plane(),
-				FPlane(0,0,0,0),
-				PF_TwoSided | (/*Style==STY_Masked ? PF_Masked :*/ Style==STY_Translucent ? PF_Translucent : Style==STY_Modulated ? PF_Modulated : 0) | (bNoSmooth ? PF_NoSmooth : 0)
-			);
-
-		CurX += XL + SpaceX;
-		CurYL = Max(CurYL,YL);
-	}
-
+	FCanvasTextCall Call( this, Font, &Stack );
+	const Hp2CanvasTileRect Rect = { 0.f, 0.f, XL, YL, U, V, UL, VL };
+	hp2_rs_canvas_native_draw_tile_clipped( &Call.Ctx, &Call.View, Tex, &Rect );
+	WriteBackCanvasTextView( this, Call.View );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UCanvas, 468, execDrawTileClipped );
@@ -1037,30 +705,12 @@ void UCanvas::execDrawTextClipped( FFrame& Stack, RESULT_DECL )
 	P_GET_UBOOL_OPTX(CheckHotKey, 0);
 	P_FINISH;
 
-	if( !Font )
-	{
-		Stack.Logf( TEXT("DrawTextClipped: No font") );
-		return;
-	}
-
-	if( (Font==LargeFont || Font==BigFont) && appStricmp(UObject::GetLanguage(),TEXT("INT")) )
-		Font = MedFont;//BigFont;//!!
-	check(Font);
-
-	// Generate flags.
-	DWORD PolyFlags
-	=	(PF_NoSmooth | PF_Masked | PF_RenderHint)
-	|(	(Style==STY_None       ) ? PF_Invisible
-	:	(Style==STY_Translucent) ? PF_Translucent
-	:	(Style==STY_Modulated  ) ? PF_Modulated
-	:	                           0);
-
-	if( !HasSafeCanvasTextRequestFloats(this) )
-		return;
-
-	FPlane DrawColor = Color.Plane();
-	DrawString( PolyFlags, this, Font, (INT) CurX, (INT) CurY, *InText, DrawColor, 1, CheckHotKey );
-
+	FCanvasTextCall Call( this, Font, &Stack );
+	TArray<UNICHAR> Units;
+	CanvasTextUnits( *InText, Units, MAXINT );
+	hp2_rs_canvas_native_draw_text_clipped( &Call.Ctx, &Call.View, &Units(0), CheckHotKey ? 1 : 0 );
+	Font = (UFont*)Call.View.font;
+	WriteBackCanvasTextView( this, Call.View );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UCanvas, 469, execDrawTextClipped );
@@ -1073,25 +723,16 @@ void UCanvas::execTextSize( FFrame& Stack, RESULT_DECL )
 	P_GET_FLOAT_REF(YL);
 	P_FINISH;
 
-	if( !Font )
+	FCanvasTextCall Call( this, Font, &Stack );
+	TArray<UNICHAR> Units;
+	CanvasTextUnits( *InText, Units, MAXINT );
+	Hp2CanvasSize Size = { 0, 0 };
+	if( hp2_rs_canvas_native_text_size( &Call.Ctx, &Call.View, &Units(0), &Size ) )
 	{
-		Stack.Logf( TEXT("TextSize: No font") );
-		return;
+		*XL = Size.w;
+		*YL = Size.h;
 	}
-
-	INT XLi, YLi;
-	FLOAT OldCurX, OldCurY, OldClipX = ClipX;
-	OldCurX = CurX;
-	OldCurY = CurY;
-	CurX = 0;
-	CurY = 0;
-	ClipX = 32767;
-	WrappedPrint( STY_None, XLi, YLi, Font, 0, *InText );
-	CurY = OldCurY;
-	CurX = OldCurX;
-	ClipX = OldClipX;
-	*XL = XLi;
-	*YL = YLi;
+	WriteBackCanvasTextView( this, Call.View );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UCanvas, 470, execTextSize );

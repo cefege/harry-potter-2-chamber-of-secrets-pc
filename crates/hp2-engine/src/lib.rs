@@ -3,6 +3,8 @@
 //! every export, the same way the Render port does. `appRand`/`appFrand`,
 //! level and model queries stay in C++ behind that table.
 
+pub mod canvas;
+pub mod canvas_text;
 pub mod fpoly;
 pub mod math;
 pub mod model;

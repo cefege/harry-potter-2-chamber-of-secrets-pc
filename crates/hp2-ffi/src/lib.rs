@@ -8,6 +8,8 @@ use hp2_ffi_support::{guard, install_log_sink};
 use hp2_ini::Profile;
 
 mod audio;
+mod canvas;
+mod canvas_text;
 mod engine;
 mod engine_prim_trace;
 mod fire_fire;
