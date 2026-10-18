@@ -5156,9 +5156,11 @@ mod tests {
         assert_eq!(loop_state.frame_uniforms_segment_count(), 0);
     }
 
-    #[test]
-    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
-    fn render_loop_end_flash_blends_fog_over_the_frame_with_one_minus_src_alpha() {
+    /// Clears a 64x1 target to blue, queues one EndFlash quad through the
+    /// real `set_scene_node` projection (no matrix substitution: XOpenGL's
+    /// simple shader also applies `modelviewprojMat`, DrawSimple_GLSL.cpp:38),
+    /// and returns the row as RGBA8 bytes.
+    fn flash_row_over_blue_clear(color: [f32; 4]) -> Vec<u8> {
         let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
             .expect("expected a real device to be created");
         let mut loop_state = RenderLoop::new();
@@ -5177,29 +5179,14 @@ mod tests {
             view_formats: &[],
         });
 
-        // Same identity-modelviewproj substitution as the queue_point test:
-        // the flash corners are already in clip space.
         begin_offscreen_frame(&created, &mut loop_state, &render_target, wgpu::Color::BLUE);
         loop_state.set_scene_node(
             &created.device,
             &created.queue,
             &reference_perspective_scene(),
         );
-        let mut identity_diagonal = [0u8; 64];
-        for i in 0..4 {
-            identity_diagonal[i * 20..i * 20 + 4].copy_from_slice(&1.0f32.to_le_bytes());
-        }
-        created.queue.write_buffer(
-            loop_state.frame_uniforms_segment(0).unwrap(),
-            256,
-            &identity_diagonal,
-        );
-
-        // Fog (1,0,0) at alpha 0.5 over the blue clear. PF_Highlighted is
-        // (One, OneMinusSrcAlpha), so dst = src + dst * (1 - a) = (1, 0, 0.5).
-        // A SrcAlpha blend would give (0.5, 0, 0.5); ignoring alpha, (1, 0, 0).
         assert!(
-            loop_state.queue_end_flash(&created.device, &created.queue, [1.0, 0.0, 0.0, 0.5]),
+            loop_state.queue_end_flash(&created.device, &created.queue, color),
             "expected queue_end_flash to queue with a scene and an open frame"
         );
         assert!(
@@ -5211,12 +5198,35 @@ mod tests {
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("device poll should succeed after the real unlock_frame submit");
 
-        let row = read_64px_row(&created, &render_target);
-        for x in 0..64 {
-            let px = &row[x * 4..x * 4 + 4];
+        read_64px_row(&created, &render_target)
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_end_flash_blends_fog_over_the_frame_with_one_minus_src_alpha() {
+        // Fog (1,0,0) at alpha 0.5 over the blue clear. PF_Highlighted is
+        // (One, OneMinusSrcAlpha), so dst = src + dst * (1 - a) = (1, 0, 0.5).
+        // A SrcAlpha blend would give (0.5, 0, 0.5); ignoring alpha, (1, 0, 0).
+        // Every pixel, including the edges at x=0 and x=63, must be covered.
+        let row = flash_row_over_blue_clear([1.0, 0.0, 0.0, 0.5]);
+        for (x, px) in row.chunks_exact(4).enumerate() {
             assert!(
                 px[0] >= 253 && px[1] <= 2 && (126..=130).contains(&px[2]),
                 "pixel {x} expected fog-over-blue (255, 0, ~128), got {px:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn render_loop_end_flash_with_zero_fog_halves_the_frame_at_alpha_half() {
+        // Zero fog at alpha 0.5: dst = 0 + dst * (1 - 0.5) = (0, 0, ~128).
+        // Confirms the blend multiplies the frame rather than replacing it.
+        let row = flash_row_over_blue_clear([0.0, 0.0, 0.0, 0.5]);
+        for (x, px) in row.chunks_exact(4).enumerate() {
+            assert!(
+                px[0] <= 2 && px[1] <= 2 && (126..=130).contains(&px[2]),
+                "pixel {x} expected blue halved to (0, 0, ~128), got {px:?}"
             );
         }
     }
