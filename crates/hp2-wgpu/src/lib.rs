@@ -1985,6 +1985,38 @@ impl RenderLoop {
             .upload_rgba8(created, cache_id, width, height, rgba8_bytes, srgb);
     }
 
+    /// Uploads `mips` (a real full `Info.Mips[0..NumMips)` chain) into
+    /// `self.texture_cache` under `cache_id` -- thin passthrough to
+    /// `texture::TextureCache::upload_compressed` (that method's own
+    /// doc, and `texture::create_compressed_gpu_texture`'s own doc,
+    /// have the full real contract, including the real `None`-on-
+    /// unsupported-hardware case). A real future FFI wrapper calls
+    /// this before any `queue_tile`/`queue_complex_surface` call that
+    /// references the same `cache_id` can find it, same real ordering
+    /// requirement `upload_texture`'s own doc already establishes.
+    /// Returns whether the upload actually happened -- unlike `upload_
+    /// texture`, this one has a real failure mode (`upload_compressed`
+    /// can return `None`), so unlike that method this one does not
+    /// discard its own callee's result (caught on review before
+    /// landing: an earlier version of this method returned `()` the
+    /// same way `upload_texture` does, which would have silently told
+    /// a real FFI caller "uploaded" even when the real device lacks
+    /// `Features::TEXTURE_COMPRESSION_BC` and nothing was actually
+    /// cached).
+    pub fn upload_compressed_texture(
+        &mut self,
+        created: &CreatedDevice,
+        cache_id: u64,
+        width: u32,
+        height: u32,
+        mips: &[texture::CompressedMipLevel<'_>],
+        srgb: bool,
+    ) -> bool {
+        self.texture_cache
+            .upload_compressed(created, cache_id, width, height, mips, srgb)
+            .is_some()
+    }
+
     /// Real `SetTexture.cpp:502`'s own fast-path bailout check, the
     /// caller-facing half: lets a future FFI wrapper skip the real
     /// (potentially expensive -- P8-palette expansion, format

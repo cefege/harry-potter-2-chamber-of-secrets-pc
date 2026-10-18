@@ -3304,6 +3304,109 @@ pub unsafe extern "C" fn hp2_rs_wgpu_upload_texture(
     })
 }
 
+/// One real pre-baked mip level's own data, crossing the FFI boundary
+/// -- `hp2_rs_wgpu_upload_compressed_texture`'s own `mips` array
+/// element type. `width`/`height` are that mip's own real
+/// `FMipmapBase::USize`/`VSize`; `data`/`data_len` are that mip's own
+/// real `FMipmapBase::DataPtr` and its real pre-baked compressed byte
+/// length (`HP2TextureBytes`/`hp2_wgpu::texture::texture_bytes`'s own
+/// real per-format formula).
+#[cfg(feature = "renderer-wgpu")]
+#[repr(C)]
+pub struct FfiCompressedMip {
+    pub width: u32,
+    pub height: u32,
+    pub data: *const u8,
+    pub data_len: usize,
+}
+
+/// Replaces the real `TEXF_DXT1` branch of `UXOpenGLRenderDevice::
+/// UploadTexture` (`SetTexture.cpp:172-453`, read in full --
+/// `hp2_wgpu::texture::create_compressed_gpu_texture`'s own doc has
+/// the full real citation and reasoning for why this one format needs
+/// its own dedicated FFI function rather than reusing `hp2_rs_wgpu_
+/// upload_texture`'s own single-mip signature). `format` must be
+/// `0x03` (`TEXF_DXT1`) -- every other value is rejected cleanly
+/// (`false`, logged), the same `hp2_wgpu::texture::TextureFormat::
+/// from_raw`-plus-explicit-support-check shape `hp2_rs_wgpu_upload_
+/// texture`'s own doc already establishes, scoped down here to the
+/// one real format this function actually knows how to handle, not
+/// generalized ahead of a second real compressed format that does not
+/// exist in this engine (`is_compressed_texture`'s own doc already
+/// confirms `TEXF_DXT1` is the only one). `mips`/`mip_count` is the
+/// real full `Info.Mips[0..Info.NumMips)` chain for this one texture
+/// -- `create_compressed_gpu_texture`'s own doc has the full real
+/// reasoning for why this format, unlike the mip-0-only `hp2_rs_wgpu_
+/// upload_texture`, needs the whole chain. Returns `false` (not a
+/// panic) if the real device does not actually have `Features::
+/// TEXTURE_COMPRESSION_BC` granted, same real `SupportsS3TC`-gated
+/// graceful-degradation case that function's own doc covers.
+///
+/// # Safety
+/// `handle` must be exactly what `hp2_rs_wgpu_create` returned (not
+/// yet destroyed), or null. `mips` must be valid for `mip_count`
+/// contiguous real `FfiCompressedMip` values, or be null with
+/// `mip_count == 0`; each one's own `data`/`data_len` must itself be a
+/// valid, non-null (if `data_len != 0`) byte span, same contract
+/// `hp2_rs_wgpu_upload_texture`'s own `data`/`data_len` parameters
+/// already have.
+#[cfg(feature = "renderer-wgpu")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hp2_rs_wgpu_upload_compressed_texture(
+    handle: *mut c_void,
+    cache_id: u64,
+    format: u8,
+    width: u32,
+    height: u32,
+    mips: *const FfiCompressedMip,
+    mip_count: usize,
+    srgb: bool,
+) -> bool {
+    guard("hp2_rs_wgpu_upload_compressed_texture", false, move || {
+        if handle.is_null() {
+            return false;
+        }
+        if format != hp2_wgpu::texture::TextureFormat::Dxt1 as u8 {
+            log::warn!(
+                "hp2_rs_wgpu_upload_compressed_texture: format byte {format:#x} is not \
+                     TEXF_DXT1 (0x03), the only compressed format this function knows how to \
+                     upload, skipping"
+            );
+            return false;
+        }
+        let Some(raw_mips) = (unsafe { typed_slice_from_raw(mips, mip_count) }) else {
+            log::warn!(
+                "hp2_rs_wgpu_upload_compressed_texture: null mips pointer with mip_count != 0"
+            );
+            return false;
+        };
+        let mut owned_mips = Vec::with_capacity(raw_mips.len());
+        for raw_mip in raw_mips {
+            let Some(data) = (unsafe { bytes_from_raw(raw_mip.data, raw_mip.data_len) }) else {
+                log::warn!(
+                    "hp2_rs_wgpu_upload_compressed_texture: null mip data pointer with \
+                         data_len != 0"
+                );
+                return false;
+            };
+            owned_mips.push(hp2_wgpu::texture::CompressedMipLevel {
+                width: raw_mip.width,
+                height: raw_mip.height,
+                data,
+            });
+        }
+        let handle = unsafe { &mut *(handle as *mut WgpuHandle) };
+        handle.render_loop.upload_compressed_texture(
+            &handle.created,
+            cache_id,
+            width,
+            height,
+            &owned_mips,
+            srgb,
+        )
+    })
+}
+
 /// Replaces `UXOpenGLRenderDevice::DrawTile`/`SubmitTileBatch`
 /// (`DrawTile.cpp:24-56`/`117-265`, both read in full). `cache_id`
 /// must already be `hp2_rs_wgpu_fix_cache_id`'s own output, and the

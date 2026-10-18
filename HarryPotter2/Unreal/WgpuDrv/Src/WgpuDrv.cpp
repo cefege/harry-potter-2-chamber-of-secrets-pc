@@ -31,6 +31,112 @@ FString Utf8SpanToFString( const BYTE* Text, SIZE_T Len )
 	appFromUtf8InPlace( &Buffer(0), &Utf8(0), Buffer.Num() );
 	return FString( &Buffer(0) );
 }
+
+// Real FixCacheID/is_texture_cached/upload_texture(-or-compressed)
+// sequence every real draw override that touches a texture needs --
+// DrawTile/DrawTriangles/DrawComplexSurface (three times, for its own
+// diffuse/light-map/fog-map layers) all used to carry their own
+// separately-written copy of this; consolidated here once a third
+// real branch (TEXF_DXT1, this change) would otherwise have meant
+// tripling it a third time. Takes RustDevice/UseSRGBTextures as
+// explicit parameters rather than a UWgpuRenderDevice* -- this
+// class's own members have no `public:` specifier anywhere in
+// WgpuDrv.h (checked directly, not assumed), so a free function
+// cannot reach them through a bare pointer without either changing
+// that class's own access surface or adding a friend declaration;
+// passing the two real values this function actually needs avoids
+// both. CallerName is only used in the real TEXF_P8-null-Palette
+// warning's own real "WgpuDrv: <Caller>: ..." prefix, matching each
+// override's own previously-separate wording exactly, not merged
+// into one generic message that would lose which real override hit
+// it.
+QWORD UploadTextureIfNeeded( void* RustDevice, UBOOL UseSRGBTextures, FTextureInfo& Info, DWORD PolyFlags, const TCHAR* CallerName )
+{
+	QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, PolyFlags );
+	if( hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
+		return FixedCacheID;
+
+	if( Info.Format == TEXF_P8 && !Info.Palette )
+	{
+		// Real SetTexture.cpp:213-214's own appErrorf condition
+		// ("Encountered bogus P8 texture") -- logged and skipped
+		// here instead of aborting the whole process over it.
+		debugf( NAME_Warning, TEXT("WgpuDrv: %ls: TEXF_P8 texture %ls has a null Palette, skipping upload"),
+			CallerName, Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
+		return FixedCacheID;
+	}
+
+	if( Info.Format == TEXF_DXT1 )
+	{
+		// Real TEXF_DXT1 branch (SetTexture.cpp's own case TEXF_DXT1,
+		// read in full): the real full Info.Mips[0..NumMips) chain,
+		// not mip 0 only -- hp2_wgpu::texture::create_compressed_gpu_
+		// texture's own doc has the full real reasoning for why this
+		// one format needs it (no wgpu-side mip generation is
+		// possible for a compressed format at all, unlike the
+		// uncompressed formats below). Any one mip missing real data
+		// (Mips[i]/DataPtr null) drops the *whole* texture, same real
+		// "break on the first bad mip" behavior UploadTexture's own
+		// real per-mip loop has (SetTexture.cpp:354-360), not a
+		// partial upload of just the mips that happened to be valid.
+		if( Info.NumMips <= 0 || !Info.Mips[0] || !Info.Mips[0]->DataPtr )
+			return FixedCacheID;
+		TArray<FfiCompressedMip> Mips( Info.NumMips );
+		for( INT i = 0; i < Info.NumMips; ++i )
+		{
+			FMipmapBase* Mip = Info.Mips[i];
+			if( !Mip || !Mip->DataPtr )
+			{
+				debugf( NAME_Warning, TEXT("WgpuDrv: %ls: DXT1 texture %ls has invalid mip %i, skipping upload"),
+					CallerName, Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>"), i );
+				return FixedCacheID;
+			}
+			// Real HP2TextureBytes' own DXT1 formula (SetTexture.cpp:
+			// 21-30 -- a file-static function in a different real
+			// translation unit, not reachable from here, so
+			// replicated exactly rather than called): Max(1,(U+3)/4)
+			// * Max(1,(V+3)/4) * 8, the same real per-format byte
+			// size hp2_wgpu::texture::texture_bytes already computes
+			// Rust-side and create_compressed_gpu_texture's own
+			// assert depends on matching exactly.
+			Mips(i).width = (DWORD)Mip->USize;
+			Mips(i).height = (DWORD)Mip->VSize;
+			Mips(i).data = Mip->DataPtr;
+			Mips(i).data_len = (size_t)Max<INT>( 1, ( Mip->USize + 3 ) / 4 ) * (size_t)Max<INT>( 1, ( Mip->VSize + 3 ) / 4 ) * 8;
+		}
+		hp2_rs_wgpu_upload_compressed_texture( RustDevice, FixedCacheID, Info.Format,
+			(DWORD)Info.Mips[0]->USize, (DWORD)Info.Mips[0]->VSize,
+			&Mips(0), (size_t)Info.NumMips,
+			UseSRGBTextures != 0 );
+		return FixedCacheID;
+	}
+
+	if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
+	{
+		// Real UploadTexture (SetTexture.cpp, read in full), scoped
+		// to mip 0 only (TextureCache's own doc has the full real
+		// reasoning/limitation -- the real source's own per-mip loop,
+		// Bind->BaseMip through Info.NumMips, is not replicated here
+		// for these uncompressed formats) and to the two real formats
+		// hp2_rs_wgpu_upload_texture itself already supports (TEXF_
+		// P8/TEXF_RGBA8 -- that function's own doc has the real,
+		// explicitly scoped gap for TEXF_RGBA7/RGB16/RGB8: it logs
+		// and returns false, uploading nothing, rather than this
+		// override needing to know which formats are supported
+		// itself).
+		FMipmapBase* Mip = Info.Mips[0];
+		size_t DataLen = ( Info.Format == TEXF_P8 )
+			? (size_t)Mip->USize * (size_t)Mip->VSize
+			: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
+		hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
+			(DWORD)Mip->USize, (DWORD)Mip->VSize,
+			Mip->DataPtr, DataLen,
+			(const BYTE*)Info.Palette,
+			( PolyFlags & PF_Masked ) != 0,
+			UseSRGBTextures != 0 );
+	}
+	return FixedCacheID;
+}
 } // namespace
 
 void UWgpuRenderDevice::StaticConstructor()
@@ -455,55 +561,30 @@ void UWgpuRenderDevice::DrawComplexSurface( FSceneNode* Frame, FSurfaceInfo& Sur
 	if( !Surface.Texture )
 		return;
 
-	// Same real FixCacheID/is_texture_cached/upload_texture sequence
-	// as DrawTile/DrawTriangles' own overrides, factored into one
-	// lambda since DrawComplexSurface has up to three real texture
-	// layers (diffuse/light-map/fog-map) where the others have one.
-	// LayerPolyFlags is 0 for light-map/fog-map, not PolyFlags --
-	// matching the real SetTextureHelper's own light-map/fog-map call
-	// sites (DrawComplex.cpp:175,178), which pass a literal 0 as
-	// their own PolyFlags argument, not NextPolyFlags. Confirmed this
-	// actually matters, not just copied for its own sake: FixCacheID's
-	// only real use of PolyFlags is tagging the cache ID with
-	// PF_Masked (SetTexture.cpp:66), so a light-map/fog-map texture on
-	// a masked surface must not itself be tagged as masked.
-	auto UploadIfNeeded = [&]( FTextureInfo& Info, DWORD LayerPolyFlags ) -> QWORD
-	{
-		QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, LayerPolyFlags );
-		if( !hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
-		{
-			if( Info.Format == TEXF_P8 && !Info.Palette )
-			{
-				debugf( NAME_Warning, TEXT("WgpuDrv: DrawComplexSurface: TEXF_P8 texture %ls has a null Palette, skipping upload"),
-					Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
-			}
-			else if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
-			{
-				FMipmapBase* Mip = Info.Mips[0];
-				size_t DataLen = ( Info.Format == TEXF_P8 )
-					? (size_t)Mip->USize * (size_t)Mip->VSize
-					: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
-				hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
-					(DWORD)Mip->USize, (DWORD)Mip->VSize,
-					Mip->DataPtr, DataLen,
-					(const BYTE*)Info.Palette,
-					( LayerPolyFlags & PF_Masked ) != 0,
-					UseSRGBTextures != 0 );
-			}
-		}
-		return FixedCacheID;
-	};
-
-	QWORD DiffuseCacheID = UploadIfNeeded( *Surface.Texture, PolyFlags );
+	// Same real FixCacheID/is_texture_cached/upload_texture(-or-
+	// compressed) sequence as DrawTile/DrawTriangles' own overrides,
+	// via the shared UploadTextureIfNeeded (this file's own anonymous
+	// namespace) -- called up to three times since DrawComplexSurface
+	// has up to three real texture layers (diffuse/light-map/fog-map)
+	// where the others have one. The third argument is 0 for light-
+	// map/fog-map, not PolyFlags -- matching the real SetTextureHelper's
+	// own light-map/fog-map call sites (DrawComplex.cpp:175,178), which
+	// pass a literal 0 as their own PolyFlags argument, not
+	// NextPolyFlags. Confirmed this actually matters, not just copied
+	// for its own sake: FixCacheID's only real use of PolyFlags is
+	// tagging the cache ID with PF_Masked (SetTexture.cpp:66), so a
+	// light-map/fog-map texture on a masked surface must not itself be
+	// tagged as masked.
+	QWORD DiffuseCacheID = UploadTextureIfNeeded( RustDevice, UseSRGBTextures, *Surface.Texture, PolyFlags, TEXT("DrawComplexSurface") );
 	UBOOL HasLightMap = Surface.LightMap != NULL;
-	QWORD LightMapCacheID = HasLightMap ? UploadIfNeeded( *Surface.LightMap, 0 ) : 0;
+	QWORD LightMapCacheID = HasLightMap ? UploadTextureIfNeeded( RustDevice, UseSRGBTextures, *Surface.LightMap, 0, TEXT("DrawComplexSurface") ) : 0;
 	// Real FogMap condition (DrawComplex.cpp:177) is strictly more
 	// restrictive than LightMap's own (DrawComplex.cpp:174) -- a non-
 	// null pointer alone is not enough, the first mip must actually
 	// have real data loaded. A real, deliberate asymmetry transcribed
 	// exactly, not a copy-paste of LightMap's own weaker condition.
 	UBOOL HasFogMap = Surface.FogMap && Surface.FogMap->Mips[0] && Surface.FogMap->Mips[0]->DataPtr;
-	QWORD FogMapCacheID = HasFogMap ? UploadIfNeeded( *Surface.FogMap, 0 ) : 0;
+	QWORD FogMapCacheID = HasFogMap ? UploadTextureIfNeeded( RustDevice, UseSRGBTextures, *Surface.FogMap, 0, TEXT("DrawComplexSurface") ) : 0;
 	UBOOL HasTexture = Surface.Texture->Texture != NULL;
 
 	// Real XAxis/YAxis vec4 packing (DrawComplex.cpp:193-194):
@@ -643,34 +724,15 @@ void UWgpuRenderDevice::DrawTriangles( FSceneNode* Frame, FTextureInfo& Info, FT
 		}
 	}
 
-	// Same real FixCacheID/is_texture_cached/upload_texture sequence
-	// as DrawTile's own override -- hp2_rs_wgpu_queue_triangles's own
-	// doc has the full real-formula detail and the known, explicitly
-	// scoped gaps (detail/macro textures, bump maps, shader
-	// specialization, GIsEditor && PF_Selected, NoNearZ, HitTesting --
-	// none applied yet).
-	QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, PolyFlags );
-	if( !hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
-	{
-		if( Info.Format == TEXF_P8 && !Info.Palette )
-		{
-			debugf( NAME_Warning, TEXT("WgpuDrv: DrawTriangles: TEXF_P8 texture %ls has a null Palette, skipping upload"),
-				Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
-		}
-		else if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
-		{
-			FMipmapBase* Mip = Info.Mips[0];
-			size_t DataLen = ( Info.Format == TEXF_P8 )
-				? (size_t)Mip->USize * (size_t)Mip->VSize
-				: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
-			hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
-				(DWORD)Mip->USize, (DWORD)Mip->VSize,
-				Mip->DataPtr, DataLen,
-				(const BYTE*)Info.Palette,
-				( PolyFlags & PF_Masked ) != 0,
-				UseSRGBTextures != 0 );
-		}
-	}
+	// Same real FixCacheID/is_texture_cached/upload_texture(-or-
+	// compressed) sequence as DrawTile/DrawComplexSurface's own
+	// overrides, via the shared UploadTextureIfNeeded (this file's own
+	// anonymous namespace) -- hp2_rs_wgpu_queue_triangles's own doc has
+	// the full real-formula detail and the known, explicitly scoped
+	// gaps (detail/macro textures, bump maps, shader specialization,
+	// GIsEditor && PF_Selected, NoNearZ, HitTesting -- none applied
+	// yet).
+	QWORD FixedCacheID = UploadTextureIfNeeded( RustDevice, UseSRGBTextures, Info, PolyFlags, TEXT("DrawTriangles") );
 
 	UBOOL HasTexture = Info.Texture != NULL;
 
@@ -701,55 +763,11 @@ void UWgpuRenderDevice::DrawTile( FSceneNode* Frame, FTextureInfo& Info, FLOAT X
 	// override -- none applied yet, same category of gap Draw2DLine's
 	// own override already has for LineFlags/HitTesting/blend mode).
 	//
-	// Real FixCacheID call site (SetTexture.cpp's own, immediately
-	// before BindMap->Find) -- computed once per real DrawTile call,
-	// reused for the upload-or-skip check below and the final
-	// queue_tile call, matching the real source's own single call
-	// site exactly.
-	QWORD FixedCacheID = hp2_rs_wgpu_fix_cache_id( Info.CacheID, Info.Format, PolyFlags );
-
-	// Real SetTexture.cpp:502's own fast-path bailout, the caller-
-	// facing half (hp2_rs_wgpu_is_texture_cached's own doc): skips
-	// the real (potentially expensive -- P8 palette expansion) data
-	// extraction entirely when this exact real texture is already
-	// resident. Does not detect staleness (bRealtimeChanged) --
-	// hp2_wgpu::wgpu::texture::TextureCache's own doc already tracks
-	// real re-upload as a separate, not-yet-done item.
-	if( !hp2_rs_wgpu_is_texture_cached( RustDevice, FixedCacheID ) )
-	{
-		// Real UploadTexture (SetTexture.cpp, read in full), scoped
-		// to mip 0 only (TextureCache's own doc has the full real
-		// reasoning/limitation -- the real source's own per-mip loop,
-		// Bind->BaseMip through Info.NumMips, is not replicated here)
-		// and to the two real formats hp2_rs_wgpu_upload_texture
-		// itself already supports (TEXF_P8/TEXF_RGBA8 -- that
-		// function's own doc has the real, explicitly scoped gap for
-		// TEXF_RGBA7/RGB16/RGB8/DXT1: it logs and returns false,
-		// uploading nothing, rather than this override needing to
-		// know which formats are supported itself).
-		if( Info.Format == TEXF_P8 && !Info.Palette )
-		{
-			// Real SetTexture.cpp:213-214's own appErrorf condition
-			// ("Encountered bogus P8 texture") -- this override logs
-			// and skips the one texture instead of aborting the whole
-			// process over it.
-			debugf( NAME_Warning, TEXT("WgpuDrv: DrawTile: TEXF_P8 texture %ls has a null Palette, skipping upload"),
-				Info.Texture ? Info.Texture->GetFullName() : TEXT("<unknown>") );
-		}
-		else if( Info.NumMips > 0 && Info.Mips[0] && Info.Mips[0]->DataPtr )
-		{
-			FMipmapBase* Mip = Info.Mips[0];
-			size_t DataLen = ( Info.Format == TEXF_P8 )
-				? (size_t)Mip->USize * (size_t)Mip->VSize
-				: (size_t)Mip->USize * (size_t)Mip->VSize * 4;
-			hp2_rs_wgpu_upload_texture( RustDevice, FixedCacheID, Info.Format,
-				(DWORD)Mip->USize, (DWORD)Mip->VSize,
-				Mip->DataPtr, DataLen,
-				(const BYTE*)Info.Palette,
-				( PolyFlags & PF_Masked ) != 0,
-				UseSRGBTextures != 0 );
-		}
-	}
+	// Same real FixCacheID/is_texture_cached/upload_texture(-or-
+	// compressed) sequence as DrawTriangles/DrawComplexSurface's own
+	// overrides, via the shared UploadTextureIfNeeded (this file's own
+	// anonymous namespace).
+	QWORD FixedCacheID = UploadTextureIfNeeded( RustDevice, UseSRGBTextures, Info, PolyFlags, TEXT("DrawTile") );
 
 	UBOOL HasTextureAlpha = Info.Texture != NULL;
 
