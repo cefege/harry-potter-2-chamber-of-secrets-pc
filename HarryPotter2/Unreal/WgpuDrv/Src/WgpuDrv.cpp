@@ -1113,9 +1113,16 @@ UBOOL UWgpuRenderDevice::DrawCanvasText( FSceneNode* Frame, FCanvasTextLayout* L
 
 	FNativeTextRasterContext Context;
 	Context.Drawable = &Drawable;
-	return hp2_rs_wgpu_draw_native_text( RustDevice, &NativeLayout,
+	const UBOOL bDrawn = hp2_rs_wgpu_draw_native_text( RustDevice, &NativeLayout,
 		Glyphs.data(), Glyphs.size(), Underlines.data(), Underlines.size(),
 		Frame->FX2, Frame->FY2, RasterizeNativeTextGlyph, &Context ) ? 1 : 0;
+	static UBOOL bLoggedFirstCall = 0;
+	if( !bLoggedFirstCall )
+	{
+		bLoggedFirstCall = 1;
+		debugf( NAME_Dev, TEXT("WgpuDrv: DrawCanvasText first call: glyphs=%i underlines=%i result=%i"), (INT)Glyphs.size(), (INT)Underlines.size(), (INT)bDrawn );
+	}
+	return bDrawn;
 	unguard;
 }
 
