@@ -1985,6 +1985,47 @@ mod tests {
     }
 
     #[test]
+    fn draw_2d_line_screen_to_coords_uses_the_passed_fx2_fy2_not_scene_fx_fy_times_half() {
+        // Every other test in this file passes fx2/fy2 ==
+        // scene.fx*0.5/scene.fy*0.5 (the value they'd coincidentally
+        // equal if the real Draw2DLine call's own Frame happens to be
+        // the same one the last SetSceneNode call cached) -- none of
+        // them would catch a regression back to the earlier, wrong
+        // version of this function that derived fx2/fy2 internally
+        // from scene.fx/fy instead of using its own parameters
+        // (6de550c's real bug). This test deliberately picks fx2/fy2
+        // that differ from scene.fx*0.5/scene.fy*0.5 so the two
+        // interpretations produce different, distinguishable outputs.
+        //
+        // reference_perspective_scene(): fx=fy=100 (so scene.fx*0.5 =
+        // scene.fy*0.5 = 50.0, deliberately NOT passed here),
+        // effective_fov_angle=90 -> r_proj_z=tan(45deg)=1.0 ->
+        // rfx2=rfy2=2.0*1.0/100.0=0.02. P=(0, 50, 1), fx2=30.0,
+        // fy2=70.0 (both != 50.0): x = 0.02*1*(0-30) = -0.6,
+        // y = 0.02*1*(50-70) = -0.4 -- hand-computed independently,
+        // not read off the implementation. The old, wrong, scene-
+        // derived behavior would instead ignore these and compute
+        // x = -1.0, y = 0.0 (the same result the first test above
+        // gets with fx2=fy2=50.0), a clearly different value.
+        let out = draw_2d_line_screen_to_coords(
+            &reference_perspective_scene(),
+            30.0,
+            70.0,
+            [0.0, 50.0, 1.0],
+        );
+        assert!(
+            (out[0] - (-0.6)).abs() < 1e-5,
+            "expected x ~= -0.6 (from the passed fx2=30.0, not scene.fx*0.5=50.0), got {}",
+            out[0]
+        );
+        assert!(
+            (out[1] - (-0.4)).abs() < 1e-5,
+            "expected y ~= -0.4 (from the passed fy2=70.0, not scene.fy*0.5=50.0), got {}",
+            out[1]
+        );
+    }
+
+    #[test]
     fn frame_uniforms_view_and_model_mat_match_the_real_fixed_source_values() {
         let out = compute_frame_uniforms(&reference_perspective_scene());
         // XOpenGL.cpp's own Init: glm::scale(mat4(1), vec3(1,-1,-1)),
@@ -2737,7 +2778,7 @@ mod tests {
         // [-1.0, 0.0], same real derivation as the other RenderLoop
         // tests above) -- forces exactly one chunk flush inside
         // unlock_frame.
-        for _ in 0..256 {
+        for _ in 0..draw::MAX_DRAWS {
             loop_state.queue_line(
                 [0.0, 50.0, 1.0],
                 [50.0, 50.0, 1.0],
