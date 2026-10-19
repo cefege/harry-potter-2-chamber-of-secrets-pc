@@ -64,6 +64,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2InputServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ScrTexServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2SkeletalServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/Hp2UrlServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"

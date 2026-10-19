@@ -39,5 +39,6 @@ pub mod services;
 pub mod skeletal;
 pub mod tex;
 pub mod trace;
+pub mod url;
 pub mod vec;
 pub mod wind;

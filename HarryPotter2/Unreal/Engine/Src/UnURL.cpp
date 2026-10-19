@@ -7,6 +7,8 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "hp2_rs.h"
+#include "Hp2UrlServices.h"
 
 /*-----------------------------------------------------------------------------
 	FURL Statics.
@@ -28,34 +30,13 @@ INT		FURL::DefaultPort=0;
 void FURL::StaticInit()
 {
 	guard(FURL::StaticInit);
-
-	DefaultProtocol				= GConfig->GetStr( TEXT("URL"), TEXT("Protocol") );
-	DefaultProtocolDescription	= GConfig->GetStr( TEXT("URL"), TEXT("ProtocolDescription") );
-	DefaultName					= GConfig->GetStr( TEXT("URL"), TEXT("Name") );
-	DefaultMap					= GConfig->GetStr( TEXT("URL"), TEXT("Map") );
-	DefaultLocalMap				= GConfig->GetStr( TEXT("URL"), TEXT("LocalMap") );
-	DefaultHost					= GConfig->GetStr( TEXT("URL"), TEXT("Host") );
-	DefaultPortal				= GConfig->GetStr( TEXT("URL"), TEXT("Portal") );
-	DefaultMapExt				= GConfig->GetStr( TEXT("URL"), TEXT("MapExt") );
-	DefaultSaveExt				= GConfig->GetStr( TEXT("URL"), TEXT("SaveExt") );
-	DefaultPort					= appAtoi( GConfig->GetStr( TEXT("URL"), TEXT("Port") ) );
-
+	hp2_rs_engine_url_static_init( &GHp2UrlServices );
 	unguard;
 }
 void FURL::StaticExit()
 {
 	guard(FURL::StaticExit);
-
-	DefaultProtocol				= TEXT("");
-	DefaultProtocolDescription	= TEXT("");
-	DefaultName					= TEXT("");
-	DefaultMap					= TEXT("");
-	DefaultLocalMap				= TEXT("");
-	DefaultHost					= TEXT("");
-	DefaultPortal				= TEXT("");
-	DefaultMapExt				= TEXT("");
-	DefaultSaveExt				= TEXT("");
-
+	hp2_rs_engine_url_static_exit( &GHp2UrlServices );
 	unguard;
 }
 
@@ -67,51 +48,11 @@ ENGINE_API FArchive& operator<<( FArchive& Ar, FURL& U )
 	unguard;
 }
 
-// FIXME: Tim, what is this unimplemented declaration doing here?
-#ifdef _MSC_VER
-template FArchive& operator<<( FArchive& Ar, TArray<TCHAR>& );
-#endif
-
 UBOOL appFilePathToFURLToken( const TCHAR* Path, TCHAR* Out, INT OutCapacity )
 {
-	if( !Out || OutCapacity <= 0 )
-		return 0;
-	Out[0] = 0;
-	if( !Path || !*Path || appStrstr(Path,TEXT("://")) )
-		return 0;
-
-	UBOOL InOptions = 0;
-	INT Index = 0;
-	for( ; Path[Index]; ++Index )
-	{
-		if( Index >= OutCapacity-1 || Path[Index]=='#' )
-		{
-			Out[0] = 0;
-			return 0;
-		}
-		TCHAR Ch = Path[Index];
-		if( Ch=='?' )
-			InOptions = 1;
-		else if( !InOptions && (Ch=='/' || Ch=='\\') )
-			Ch = '\\';
-		Out[Index] = Ch;
-	}
-	Out[Index] = 0;
-	return Index > 0 && Out[0]!='?';
+	return hp2_rs_engine_url_file_path_to_token( Path, Out, OutCapacity );
 }
 
-
-/*-----------------------------------------------------------------------------
-	Internal.
------------------------------------------------------------------------------*/
-
-static UBOOL ValidNetChar( const TCHAR* c )
-{
-	if( appStrchr(c,' ') )
-		return 0;
-	else
-		return 1;
-}
 
 /*-----------------------------------------------------------------------------
 	Constructors.
@@ -131,241 +72,13 @@ FURL::FURL( const TCHAR* LocalFilename )
 {}
 
 //
-// Helper function.
-//
-TCHAR* appStrchr( TCHAR* Src, TCHAR A, TCHAR B )
-{
-	TCHAR* AA = appStrchr( Src, A );
-	TCHAR* BB = appStrchr( Src, B );
-	return (AA && (!BB || AA<BB)) ? AA : BB;
-}
-
-//
 // Construct a URL from text and an optional relative base.
 //
 FURL::FURL( FURL* Base, const TCHAR* TextURL, ETravelType Type )
-:	Protocol	( DefaultProtocol )
-,	Host		( DefaultHost )
-,	Map			( DefaultMap )
-,	Portal		( DefaultPortal )
-,	Port		( DefaultPort )
-,	Op			()
-,	Valid		( 1 )
 {
 	guard(FURL::FURL);
 	check(TextURL);
-
-	// Make a copy.
-	TCHAR Temp[1024], *URL=Temp;
-	appStrncpy( Temp, TextURL, ARRAY_COUNT(Temp) );
-
-	// Copy Base.
-	if( Type==TRAVEL_Relative )
-	{
-		check(Base);
-		Protocol = Base->Protocol;
-		Host     = Base->Host;
-		Map      = Base->Map;
-		Portal   = Base->Portal;
-		Port     = Base->Port;
-	}
-	if( Type==TRAVEL_Relative || Type==TRAVEL_Partial )
-	{
-		check(Base);
-		for( INT i=0; i<Base->Op.Num(); i++ )
-		{
-			if
-			(	appStricmp(*Base->Op(i),TEXT("PUSH"))!=0
-			&&	appStricmp(*Base->Op(i),TEXT("POP" ))!=0
-			&&	appStricmp(*Base->Op(i),TEXT("PEER"))!=0
-			&&	appStricmp(*Base->Op(i),TEXT("LOAD"))!=0 )
-				new(Op)FString(Base->Op(i));
-		}
-	}
-
-	// Skip leading blanks.
-	while( *URL == ' ' )
-		URL++;
-
-	// Options.
-	TCHAR* s = appStrchr(URL,'?','#');
-	if( s )
-	{
-		TCHAR OptionChar=*s, NextOptionChar=0;
-		*s++ = 0;
-		do
-		{
-			TCHAR* t = appStrchr(s,'?','#');
-			if( t )
-			{
-				NextOptionChar = *t;
-				*t++ = 0;
-			}
-			if( !ValidNetChar( s ) )
-			{
-				*this = FURL();
-				Valid = 0;
-				return;
-			}
-			if( OptionChar=='?' )
-				AddOption( s );
-			else
-				Portal = s;
-			s = t;
-			OptionChar = NextOptionChar;
-		} while( s );
-	}
-
-	// Handle pure filenames.
-	UBOOL FarHost=0;
-	UBOOL FarMap=0;
-	if( appStrlen(URL)>2 && URL[1]==':' )
-	{
-		// Pure filename.
-		Protocol = DefaultProtocol;
-		Host = DefaultHost;
-		Map = URL;
-		Portal = DefaultPortal;
-		URL = NULL;
-		FarHost = 1;
-		FarMap = 1;
-		Host = TEXT("");
-	}
-	else
-	{
-		// Parse protocol.
-		if
-		(	(appStrchr(URL,':')!=NULL)
-		&&	(appStrchr(URL,':')>URL+1)
-		&&	(appStrchr(URL,'.')==NULL || appStrchr(URL,':')<appStrchr(URL,'.')) )
-		{
-			TCHAR* s = URL;
-			URL      = appStrchr(URL,':');
-			*URL++   = 0;
-			Protocol = s;
-		}
-
-		// Parse optional leading slashes.
-		if( *URL=='/' )
-		{
-			URL++;
-			if( *URL++ != '/' )
-			{
-				*this = FURL();
-				Valid = 0;
-				return;
-			}
-			FarHost = 1;
-			Host = TEXT("");
-		}
-
-		// Parse optional host name and port.
-		const TCHAR* Dot = appStrchr(URL,'.');
-		if
-		(	(Dot)
-		&&	(Dot-URL>0)
-		&&	(appStrnicmp( Dot+1,*DefaultMapExt,  DefaultMapExt .Len() )!=0 || appIsAlnum(Dot[DefaultMapExt .Len()+1]) )
-		&&	(appStrnicmp( Dot+1,*DefaultSaveExt, DefaultSaveExt.Len() )!=0 || appIsAlnum(Dot[DefaultSaveExt.Len()+1]) ) )
-		{
-			TCHAR* s = URL;
-			URL     = appStrchr(URL,'/');
-			if( URL )
-				*URL++ = 0;
-			TCHAR* t = appStrchr(s,':');
-			if( t )
-			{
-				// Port.
-				*t++ = 0;
-				Port = appAtoi( t );
-			}
-			Host = s;
-			if( appStricmp(*Protocol,*DefaultProtocol)==0 )
-				Map = DefaultMap;
-			else
-				Map = TEXT("");
-			FarHost = 1;
-		}
-	}
-
-	// Copy existing options which aren't in current URL	
-	if( Type==TRAVEL_Absolute && Base && IsInternal())
-	{
-		for( INT i=0; i<Base->Op.Num(); i++ )
-		{
-			if
-			(	appStrnicmp(*Base->Op(i),TEXT("Name="),5)==0
-			||	appStrnicmp(*Base->Op(i),TEXT("Team=" ),5)==0
-			||	appStrnicmp(*Base->Op(i),TEXT("Class="),6)==0
-			||	appStrnicmp(*Base->Op(i),TEXT("Skin="),5)==0 
-			||	appStrnicmp(*Base->Op(i),TEXT("Face="),5)==0 
-			||	appStrnicmp(*Base->Op(i),TEXT("Voice="),6 )==0 
-			||	appStrnicmp(*Base->Op(i),TEXT("OverrideClass="),14)==0 )
-			{
-				TCHAR OptName[100];
-				TCHAR *Pos;
-
-				Pos = appStrchr( *Base->Op(i), '=');
-				if(Pos)
-					appStrncpy( OptName, *Base->Op(i), appCheckedIntSize(static_cast<SIZE_T>(Pos - *Base->Op(i)) + 1) );
-				else
-					appStrcpy( OptName, *Base->Op(i) );
-							
-				if( !appStrcmp( GetOption( OptName, TEXT("")), TEXT("") ) )
-				{
-					debugf( TEXT("URL: Adding default option %s"), *Base->Op(i) );
-					new(Op)FString( Base->Op(i) );
-				}
-			}
-		}
-	}
-
-	// Parse optional map and teleporter.
-	if( URL && *URL )
-	{
-		if(IsInternal())
-		{
-			// Portal.
-			FarMap = 1;
-			TCHAR* t = appStrchr(URL,'/');
-			if( t )
-			{
-				// Trailing slash.
-				*t++ = 0;
-				TCHAR* u = appStrchr(t,'/');
-				if( u )
-				{
-					*u++ = 0;
-					if( *u != 0 )
-					{
-						*this = FURL();
-						Valid = 0;
-						return;
-					}
-				}
-
-				// Portal name.
-				Portal = t;
-			}
-		}
-
-		// Map.
-		Map = URL;
-	}
-	
-	// Validate everything.
-	if
-	(	!ValidNetChar(*Protocol  )
-	||	!ValidNetChar(*Host      )
-	//||	!ValidNetChar(*Map       )
-	||	!ValidNetChar(*Portal    )
-	||	(!FarHost && !FarMap && !Op.Num()) )
-	{
-		*this = FURL();
-		Valid = 0;
-		return;
-	}
-
-	// Success.
+	hp2_rs_engine_url_construct( &GHp2UrlServices, this, Base, TextURL, Type );
 	unguard;
 }
 
@@ -380,46 +93,7 @@ FString FURL::String( UBOOL FullyQualified ) const
 {
 	guard(FURL::String);
 	FString Result;
-
-	// Emit protocol.
-	if( Protocol!=DefaultProtocol || FullyQualified )
-	{
-		Result += Protocol;
-		Result += TEXT(":");
-		if( Host!=DefaultHost )
-			Result += TEXT("//");
-	}
-
-	// Emit host.
-	if( Host!=DefaultHost || Port!=DefaultPort )
-	{
-		Result += Host;
-		if( Port!=DefaultPort )
-		{
-			Result += TEXT(":");
-			Result += FString::Printf( TEXT("%i"), Port );
-		}
-		Result += TEXT("/");
-	}
-
-	// Emit map.
-	if( Map )
-		Result += Map;
-
-	// Emit options.
-	for( INT i=0; i<Op.Num(); i++ )
-	{
-		Result += TEXT("?");
-		Result += Op(i);
-	}
-
-	// Emit portal.
-	if( Portal )
-	{
-		Result += TEXT("#");
-		Result += Portal;
-	}
-
+	hp2_rs_engine_url_string( &GHp2UrlServices, this, FullyQualified, &Result );
 	return Result;
 	unguard;
 }
@@ -437,7 +111,7 @@ FString FURL::String( UBOOL FullyQualified ) const
 UBOOL FURL::IsInternal() const
 {
 	guard(FURL::IsInternal);
-	return Protocol==DefaultProtocol;
+	return hp2_rs_engine_url_is_internal( &GHp2UrlServices, this );
 	unguard;
 }
 
@@ -448,7 +122,7 @@ UBOOL FURL::IsInternal() const
 UBOOL FURL::IsLocalInternal() const
 {
 	guard(FURL::IsLocalInternal);
-	return IsInternal() && Host.Len()==0;
+	return hp2_rs_engine_url_is_local_internal( &GHp2UrlServices, this );
 	unguard;
 }
 
@@ -458,14 +132,7 @@ UBOOL FURL::IsLocalInternal() const
 void FURL::AddOption( const TCHAR* Str )
 {
 	guard(FURL::AddOption);
-	const TCHAR* Separator = appStrchr(Str,'=');
-	INT Match = Separator ? appCheckedIntSize(static_cast<SIZE_T>(Separator + 1 - Str)) : appStrlen(Str)+1;
-	INT i;
-	for( i=0; i<Op.Num(); i++ )
-		if( appStrnicmp( *Op(i), Str, Match )==0 )
-			break;
-	if( i==Op.Num() )	new( Op )FString( Str );
-	else				Op( i ) = Str;
+	hp2_rs_engine_url_add_option( &GHp2UrlServices, this, Str );
 	unguard;
 }
 
@@ -475,13 +142,7 @@ void FURL::AddOption( const TCHAR* Str )
 void FURL::LoadURLConfig( const TCHAR* Section, const TCHAR* Filename )
 {
 	guard(FURL::LoadURLConfig);
-	TCHAR Text[32767], *Ptr=Text;
-	GConfig->GetSection( Section, Text, ARRAY_COUNT(Text), Filename );
-	while( *Ptr )
-	{
-		AddOption( Ptr );
-		Ptr += appStrlen(Ptr)+1;
-	}
+	hp2_rs_engine_url_load_config( &GHp2UrlServices, this, Section, Filename );
 	unguard;
 }
 
@@ -491,18 +152,7 @@ void FURL::LoadURLConfig( const TCHAR* Section, const TCHAR* Filename )
 void FURL::SaveURLConfig( const TCHAR* Section, const TCHAR* Item, const TCHAR* Filename ) const
 {
 	guard(FURL::SaveURLConfig);
-	for( INT i=0; i<Op.Num(); i++ )
-	{
-		TCHAR Temp[1024];
-		appStrcpy( Temp, *Op(i) );
-		TCHAR* Value = appStrchr(Temp,'=');
-		if( Value )
-		{
-			*Value++ = 0;
-			if( appStricmp(Temp,Item)==0 )
-				GConfig->SetString( Section, Temp, Value, Filename );
-		}
-	}
+	hp2_rs_engine_url_save_config( &GHp2UrlServices, this, Section, Item, Filename );
 	unguard;
 }
 
@@ -512,10 +162,7 @@ void FURL::SaveURLConfig( const TCHAR* Section, const TCHAR* Item, const TCHAR* 
 UBOOL FURL::HasOption( const TCHAR* Test ) const
 {
 	guard(FURL::HasOption);
-	for( INT i=0; i<Op.Num(); i++ )
-		if( appStricmp( *Op(i), Test )==0 )
-			return 1;
-	return 0;
+	return hp2_rs_engine_url_has_option( &GHp2UrlServices, this, Test );
 	unguard;
 }
 
@@ -525,10 +172,7 @@ UBOOL FURL::HasOption( const TCHAR* Test ) const
 const TCHAR* FURL::GetOption( const TCHAR* Match, const TCHAR* Default ) const
 {
 	guard(FURL::GetOption);
-	for( INT i=0; i<Op.Num(); i++ )
-		if( appStrnicmp( *Op(i), Match, appStrlen(Match) )==0 )
-			return *Op(i) + appStrlen(Match);
-	return Default;
+	return static_cast<const TCHAR*>( hp2_rs_engine_url_get_option( &GHp2UrlServices, this, Match, Default ) );
 	unguard;
 }
 
@@ -542,19 +186,7 @@ const TCHAR* FURL::GetOption( const TCHAR* Match, const TCHAR* Default ) const
 UBOOL FURL::operator==( const FURL& Other ) const
 {
 	guard(FURL::operator==);
-	if
-	(	Protocol	!= Other.Protocol
-	||	Host		!= Other.Host
-	||	Map			!= Other.Map
-	||	Port		!= Other.Port
-	||  Op.Num()    != Other.Op.Num() )
-		return 0;
-
-	for( int i=0; i<Op.Num(); i++ )
-		if( Op(i) != Other.Op(i) )
-			return 0;
-
-	return 1;
+	return hp2_rs_engine_url_equal( &GHp2UrlServices, this, &Other );
 	unguard;
 }
 
