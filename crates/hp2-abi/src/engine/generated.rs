@@ -1731,6 +1731,86 @@ pub struct UGesture {
 const _: () = assert!(size_of::<UGesture>() == 104);
 const _: () = assert!(std::mem::offset_of!(UGesture, points) == 72);
 
+/// Layout mirror of C++ `UConsole` (2760 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct UConsole {
+    _pad_0: [u8; 80],
+    pub viewport: *mut c_void,
+    _pad_88: [u8; 292],
+    pub top_line: i32,
+    _pad_384: [u8; 2060],
+    pub border_size: i32,
+    pub console_lines: i32,
+    pub border_lines: i32,
+    pub border_pixels: i32,
+    pub console_pos: f32,
+    pub console_dest: f32,
+    pub frame_x: f32,
+    pub frame_y: f32,
+    _pad_2476: [u8; 16],
+    _bits_2492: u8,
+    _pad_2493: [u8; 267],
+}
+
+impl UConsole {
+    pub fn b_no_draw_world(&self) -> bool {
+        self._bits_2492 & (1 << 2) != 0
+    }
+
+    pub fn set_b_no_draw_world(&mut self, value: bool) {
+        if value {
+            self._bits_2492 |= 1 << 2;
+        } else {
+            self._bits_2492 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_drew_world(&self) -> bool {
+        self._bits_2492 & (1 << 3) != 0
+    }
+
+    pub fn set_b_drew_world(&mut self, value: bool) {
+        if value {
+            self._bits_2492 |= 1 << 3;
+        } else {
+            self._bits_2492 &= !(1 << 3);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<UConsole>() == 2760);
+const _: () = assert!(std::mem::offset_of!(UConsole, viewport) == 80);
+const _: () = assert!(std::mem::offset_of!(UConsole, top_line) == 380);
+const _: () = assert!(std::mem::offset_of!(UConsole, border_size) == 2444);
+const _: () = assert!(std::mem::offset_of!(UConsole, console_lines) == 2448);
+const _: () = assert!(std::mem::offset_of!(UConsole, border_lines) == 2452);
+const _: () = assert!(std::mem::offset_of!(UConsole, border_pixels) == 2456);
+const _: () = assert!(std::mem::offset_of!(UConsole, console_pos) == 2460);
+const _: () = assert!(std::mem::offset_of!(UConsole, console_dest) == 2464);
+const _: () = assert!(std::mem::offset_of!(UConsole, frame_x) == 2468);
+const _: () = assert!(std::mem::offset_of!(UConsole, frame_y) == 2472);
+
+/// Layout mirror of C++ `FSceneNode` (408 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FSceneNode {
+    _pad_0: [u8; 208],
+    pub x: i32,
+    pub y: i32,
+    pub xb: i32,
+    pub yb: i32,
+    _pad_224: [u8; 184],
+}
+
+const _: () = assert!(size_of::<FSceneNode>() == 408);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, x) == 208);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, y) == 212);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, xb) == 216);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, yb) == 220);
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
@@ -1763,5 +1843,7 @@ mod layout_tests {
         assert_eq!(size_of::<ADecoration>(), 948);
         assert_eq!(size_of::<ACarcass>(), 980);
         assert_eq!(size_of::<UGesture>(), 104);
+        assert_eq!(size_of::<UConsole>(), 2760);
+        assert_eq!(size_of::<FSceneNode>(), 408);
     }
 }

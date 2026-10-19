@@ -91,6 +91,7 @@ class Mirror:
     bits: list = field(default_factory=list)  # 1-bit BITFIELD members
     base: str = None  # C++ base mirrored as the first member (Rust name = C++ name)
     packed: bool = False  # C++ class sits inside `#pragma pack(4)` (EngineClasses.h); base mirrors inherit it
+    private: tuple = ()  # C++ members private to the class; probe sees them (-fno-access-control), C++ static_asserts skip them
 
 
 MIRRORS = [
@@ -508,6 +509,26 @@ MIRRORS = [
         packed=True,
     ),
     Mirror("UGesture", "UGesture", [("Points", "TArray")], packed=True),
+    Mirror(
+        "UConsole",
+        "UConsole",
+        [
+            ("Viewport", "ptr"),
+            ("TopLine", "i32"),
+            ("BorderSize", "i32"),
+            ("ConsoleLines", "i32"),
+            ("BorderLines", "i32"),
+            ("BorderPixels", "i32"),
+            ("ConsolePos", "f32"),
+            ("ConsoleDest", "f32"),
+            ("FrameX", "f32"),
+            ("FrameY", "f32"),
+        ],
+        bits=["bNoDrawWorld", "bDrewWorld"],
+        packed=True,
+        private=("Viewport", "TopLine", "BorderSize", "ConsoleLines", "BorderLines", "BorderPixels", "ConsolePos", "ConsoleDest", "FrameX", "FrameY", "bNoDrawWorld", "bDrewWorld"),
+    ),
+    Mirror("FSceneNode", "FSceneNode", [("X", "i32"), ("Y", "i32"), ("XB", "i32"), ("YB", "i32")]),
 ]
 
 
@@ -540,6 +561,7 @@ def probe_source(mirrors):
     out = [
         '#include "EnginePrivate.h"',
         '#include "UnParticle.h"',
+        '#include "UnRender.h"',
         "#include <cstddef>",
         "#include <cstdio>",
         "#include <cstring>",
@@ -592,6 +614,7 @@ def run_probe(mirrors):
                 "-O0",
                 "-Wno-invalid-offsetof",
                 "-Wno-unused-function",
+                "-fno-access-control",
                 str(src),
                 "-o",
                 str(exe),
@@ -750,6 +773,7 @@ def render_cpp(probe):
         "",
         '#include "EnginePrivate.h"',
         '#include "UnParticle.h"',
+        '#include "UnRender.h"',
         "",
         "#if defined(__clang__)",
         '#pragma clang diagnostic ignored "-Winvalid-offsetof"',
@@ -761,6 +785,8 @@ def render_cpp(probe):
             f'static_assert(sizeof({m.cpp}) == {probe["size"][m.cpp]}, "hp2-abi engine::{m.rust} must match {m.cpp} size");'
         )
         for name, _ in m.fields:
+            if name in m.private:
+                continue
             lines.append(
                 f'static_assert(__builtin_offsetof({m.cpp}, {name}) == {probe["off"][(m.cpp, name)]}, "hp2-abi engine::{m.rust}.{snake(name)} must match {m.cpp}::{name} offset");'
             )

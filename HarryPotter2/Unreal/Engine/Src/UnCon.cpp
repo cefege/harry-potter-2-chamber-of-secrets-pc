@@ -5,6 +5,7 @@
 
 #include "EnginePrivate.h"
 #include "UnRender.h"
+#include "Hp2ConsoleServices.h"
 
 /*------------------------------------------------------------------------------
 	UConsole object implementation.
@@ -87,19 +88,7 @@ void UConsole::_Init( UViewport* InViewport )
 	guard(UConsole::_Init);
 	VERIFY_CLASS_SIZE(UConsole);
 
-	// Set properties.
-	Viewport		= InViewport;
-	TopLine			= MAX_LINES-1;
-	BorderSize		= 1; 
-
-	// Init scripting.
-	InitExecution();
-
-	// Start console log.
-	Logf(LocalizeGeneral("Engine",TEXT("Core")));
-	Logf(LocalizeGeneral("Copyright",TEXT("Core")));
-	Logf(TEXT(" "));
-	Logf(TEXT(" "));
+	hp2_rs_engine_console_init( &GHp2ConsoleServices, this, InViewport );
 
 	unguard;
 }
@@ -115,7 +104,7 @@ void UConsole::_Init( UViewport* InViewport )
 void UConsole::Serialize( const TCHAR* Data, EName ThisType )
 {
 	guard(UConsole::Serialize);
-	eventMessage( 0, Data, 0, ThisType );
+	hp2_rs_engine_console_serialize( &GHp2ConsoleServices, this, Data, (INT)ThisType );
 	unguard;
 }
 
@@ -126,7 +115,7 @@ void UConsole::execConsoleCommand( FFrame& Stack, RESULT_DECL )
 	P_GET_STR(S);
 	P_FINISH;
 
-	*(DWORD*)Result = Viewport->Exec( *S, *this );
+	*(DWORD*)Result = hp2_rs_engine_console_exec_command( &GHp2ConsoleServices, this, *S );
 
 	unguardexecSlow;
 }
@@ -137,7 +126,7 @@ void UConsole::execSaveTimeDemo( FFrame& Stack, RESULT_DECL )
 	guard(UConsole::execSaveTimeDemo);
 	P_GET_STR(S);
 	P_FINISH;
-	appSaveStringToFile( S, TEXT("fps.txt"), GFileManager );
+	hp2_rs_engine_console_save_time_demo( &GHp2ConsoleServices, &S );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UConsole, INDEX_NONE, execSaveTimeDemo );
@@ -149,7 +138,7 @@ void UConsole::execCreateNativeFont( FFrame& Stack, RESULT_DECL )
 	P_GET_INT(Height);
 	P_FINISH;
 
-	*(UFont**)Result = Viewport->CreateNativeFont( *FontName, Height );
+	*(UFont**)Result = (UFont*)hp2_rs_engine_console_create_native_font( &GHp2ConsoleServices, this, *FontName, Height );
 	unguardexec;
 }
 IMPLEMENT_FUNCTION( UConsole, -1, execCreateNativeFont );
@@ -162,7 +151,7 @@ UBOOL UConsole::GetDrawWorld()
 {
 	guard(UConsole::GetDrawWorld);
 
-	return !bNoDrawWorld;
+	return hp2_rs_engine_console_get_draw_world( this );
 	unguard;
 }
 
@@ -172,46 +161,10 @@ UBOOL UConsole::GetDrawWorld()
 // for example by shrinking the view according to the
 // size of the status bar.
 //
-FSceneNode SavedFrame;
 void UConsole::PreRender( FSceneNode* Frame )
 {
 	guard(UConsole::PreRender);
-
-	// Prevent status redraw due to changing.
-	eventTick( Viewport->CurrentTime - Viewport->LastUpdateTime );
-
-	// Save the Viewport.
-	SavedFrame = *Frame;
-
-	// Compute new status info.
-	BorderLines		= 0;
-	BorderPixels	= 0;
-	ConsoleLines	= 0;
-
-	// Compute sizing of all visible status bar components.
-	if( ConsolePos > 0.f )
-	{
-		// Show console.
-		ConsoleLines = appRound(Min(ConsolePos * (FLOAT)Frame->Y, (FLOAT)Frame->Y));
-	}
-
-	if( BorderSize>=2 )
-	{
-		// Encroach on screen area.
-		FLOAT Fraction = (FLOAT)(BorderSize-1) / (FLOAT)(MAX_BORDER-1);
-
-		BorderLines = appRound(Min((FLOAT)Frame->Y * 0.25f * Fraction,(FLOAT)Frame->Y));
-		BorderLines = ::Max(0,BorderLines);
-		Frame->Y -= 2 * BorderLines;
-
-		BorderPixels = appRound(Min((FLOAT)Frame->X * 0.25f * Fraction,(FLOAT)Frame->X)) & ~3;
-		Frame->X -= 2 * BorderPixels;
-	}
-
-	Frame->XB += BorderPixels;
-	Frame->YB += BorderLines;
-	Frame->ComputeRenderSize();
-
+	hp2_rs_engine_console_pre_render( &GHp2ConsoleServices, this, Frame );
 	unguard;
 }
 
@@ -223,12 +176,7 @@ void UConsole::PreRender( FSceneNode* Frame )
 void UConsole::PostRender( FSceneNode* Frame )
 {
 	guard(UConsole::PostRender);
-	
-	*Frame = SavedFrame;
-	FrameX = Frame->X;
-	FrameY = Frame->Y;
-	bDrewWorld = !bNoDrawWorld;
-
+	hp2_rs_engine_console_post_render( this, Frame );
 	unguard;
 }
 

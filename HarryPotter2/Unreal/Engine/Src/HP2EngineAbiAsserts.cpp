@@ -6,6 +6,7 @@
 
 #include "EnginePrivate.h"
 #include "UnParticle.h"
+#include "UnRender.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
@@ -327,3 +328,9 @@ static_assert(__builtin_offsetof(ADecoration, numLandings) == 908, "hp2-abi engi
 static_assert(sizeof(ACarcass) == 980, "hp2-abi engine::ACarcass must match ACarcass size");
 static_assert(sizeof(UGesture) == 104, "hp2-abi engine::UGesture must match UGesture size");
 static_assert(__builtin_offsetof(UGesture, Points) == 72, "hp2-abi engine::UGesture.points must match UGesture::Points offset");
+static_assert(sizeof(UConsole) == 2760, "hp2-abi engine::UConsole must match UConsole size");
+static_assert(sizeof(FSceneNode) == 408, "hp2-abi engine::FSceneNode must match FSceneNode size");
+static_assert(__builtin_offsetof(FSceneNode, X) == 208, "hp2-abi engine::FSceneNode.x must match FSceneNode::X offset");
+static_assert(__builtin_offsetof(FSceneNode, Y) == 212, "hp2-abi engine::FSceneNode.y must match FSceneNode::Y offset");
+static_assert(__builtin_offsetof(FSceneNode, XB) == 216, "hp2-abi engine::FSceneNode.xb must match FSceneNode::XB offset");
+static_assert(__builtin_offsetof(FSceneNode, YB) == 220, "hp2-abi engine::FSceneNode.yb must match FSceneNode::YB offset");

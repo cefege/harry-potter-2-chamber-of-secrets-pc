@@ -7,6 +7,7 @@ pub mod actcol;
 pub mod cam_mgr;
 pub mod canvas;
 pub mod canvas_text;
+pub mod console;
 pub mod coords;
 pub mod dynbsp;
 pub mod fpoly;
