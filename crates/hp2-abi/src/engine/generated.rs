@@ -495,7 +495,10 @@ pub struct APawn {
     pub base_eye_height: f32,
     pub eye_height: f32,
     pub floor: FVector,
-    _pad_1196: [u8; 68],
+    _pad_1196: [u8; 4],
+    pub ortho_zoom: f32,
+    pub fov_angle: f32,
+    _pad_1208: [u8; 56],
     pub reduced_damage_type: [u8; 4],
     _pad_1268: [u8; 20],
     pub skill: f32,
@@ -815,6 +818,8 @@ const _: () = assert!(std::mem::offset_of!(APawn, max_desired_speed) == 992);
 const _: () = assert!(std::mem::offset_of!(APawn, floor) == 1184);
 const _: () = assert!(std::mem::offset_of!(APawn, special_pause) == 1300);
 const _: () = assert!(std::mem::offset_of!(APawn, sight_counter) == 896);
+const _: () = assert!(std::mem::offset_of!(APawn, ortho_zoom) == 1200);
+const _: () = assert!(std::mem::offset_of!(APawn, fov_angle) == 1204);
 
 /// Layout mirror of C++ `APlayerPawn` (2928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -822,7 +827,10 @@ const _: () = assert!(std::mem::offset_of!(APawn, sight_counter) == 896);
 #[derive(Clone, Copy)]
 pub struct APlayerPawn {
     pub base: APawn,
-    _pad_1912: [u8; 64],
+    _pad_1912: [u8; 48],
+    pub show_flags: i32,
+    pub rend_map: i32,
+    _pad_1968: [u8; 8],
     pub view_target: *mut c_void,
     _pad_1984: [u8; 100],
     pub desired_fov: f32,
@@ -909,6 +917,8 @@ const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_side_move) == 2492);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, smooth_mouse_x) == 2408);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, smooth_mouse_y) == 2412);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, desired_fov) == 2084);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, show_flags) == 1960);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, rend_map) == 1964);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, view_target) == 1976);
 
 /// Layout mirror of C++ `AWind` (928 bytes). Only the members listed in
@@ -2380,24 +2390,114 @@ const _: () = assert!(std::mem::offset_of!(UInput, action) == 5136);
 const _: () = assert!(std::mem::offset_of!(UInput, delta) == 5140);
 const _: () = assert!(std::mem::offset_of!(UInput, key_down_table) == 5144);
 
+/// Layout mirror of C++ `UViewport` (352 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UViewport {
+    _pad_0: [u8; 88],
+    pub actor: *mut c_void,
+    _pad_96: [u8; 40],
+    pub canvas: *mut c_void,
+    pub input: *mut c_void,
+    pub ren_dev: *mut c_void,
+    _pad_160: [u8; 16],
+    pub last_update_time: [u8; 8],
+    pub size_x: i32,
+    pub size_y: i32,
+    _pad_192: [u8; 4],
+    pub frame_count: i32,
+    _pad_200: [u8; 8],
+    pub dragging: i32,
+    pub render_flags: u32,
+    pub extra_poly_flags: u32,
+    _pad_220: [u8; 28],
+    pub current_time: [u8; 8],
+    _pad_256: [u8; 12],
+    pub hit_testing: i32,
+    _pad_272: [u8; 16],
+    pub hit_sizes: TArrayRaw,
+    _pad_304: [u8; 24],
+    pub snap_buff: TArrayRaw,
+    pub snap_u: i32,
+    pub snap_v: i32,
+}
+
+const _: () = assert!(size_of::<UViewport>() == 352);
+const _: () = assert!(std::mem::offset_of!(UViewport, actor) == 88);
+const _: () = assert!(std::mem::offset_of!(UViewport, canvas) == 136);
+const _: () = assert!(std::mem::offset_of!(UViewport, input) == 144);
+const _: () = assert!(std::mem::offset_of!(UViewport, ren_dev) == 152);
+const _: () = assert!(std::mem::offset_of!(UViewport, last_update_time) == 176);
+const _: () = assert!(std::mem::offset_of!(UViewport, size_x) == 184);
+const _: () = assert!(std::mem::offset_of!(UViewport, size_y) == 188);
+const _: () = assert!(std::mem::offset_of!(UViewport, frame_count) == 196);
+const _: () = assert!(std::mem::offset_of!(UViewport, dragging) == 208);
+const _: () = assert!(std::mem::offset_of!(UViewport, render_flags) == 212);
+const _: () = assert!(std::mem::offset_of!(UViewport, extra_poly_flags) == 216);
+const _: () = assert!(std::mem::offset_of!(UViewport, current_time) == 248);
+const _: () = assert!(std::mem::offset_of!(UViewport, hit_testing) == 268);
+const _: () = assert!(std::mem::offset_of!(UViewport, hit_sizes) == 288);
+const _: () = assert!(std::mem::offset_of!(UViewport, snap_buff) == 328);
+const _: () = assert!(std::mem::offset_of!(UViewport, snap_u) == 344);
+const _: () = assert!(std::mem::offset_of!(UViewport, snap_v) == 348);
+
 /// Layout mirror of C++ `FSceneNode` (408 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FSceneNode {
-    _pad_0: [u8; 208],
+    pub viewport: *mut c_void,
+    _pad_8: [u8; 64],
+    pub coords: FCoords,
+    pub uncoords: FCoords,
+    _pad_168: [u8; 40],
     pub x: i32,
     pub y: i32,
     pub xb: i32,
     pub yb: i32,
-    _pad_224: [u8; 184],
+    pub fx: f32,
+    pub fy: f32,
+    pub fx15: f32,
+    pub fy15: f32,
+    pub fx2: f32,
+    pub fy2: f32,
+    pub zoom: f32,
+    pub effective_fov_angle: f32,
+    pub proj: FVector,
+    pub r_proj: FVector,
+    pub prj_xm: f32,
+    pub prj_ym: f32,
+    pub prj_xp: f32,
+    pub prj_yp: f32,
+    pub view_sides: [FVector; 4],
+    pub view_planes: [FPlane; 4],
 }
 
 const _: () = assert!(size_of::<FSceneNode>() == 408);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, viewport) == 0);
 const _: () = assert!(std::mem::offset_of!(FSceneNode, x) == 208);
 const _: () = assert!(std::mem::offset_of!(FSceneNode, y) == 212);
 const _: () = assert!(std::mem::offset_of!(FSceneNode, xb) == 216);
 const _: () = assert!(std::mem::offset_of!(FSceneNode, yb) == 220);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, fx) == 224);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, fy) == 228);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, fx15) == 232);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, fy15) == 236);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, fx2) == 240);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, fy2) == 244);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, zoom) == 248);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, effective_fov_angle) == 252);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, proj) == 256);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, r_proj) == 268);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, prj_xm) == 280);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, prj_ym) == 284);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, prj_xp) == 288);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, prj_yp) == 292);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, coords) == 72);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, uncoords) == 120);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, view_sides) == 296);
+const _: () = assert!(std::mem::offset_of!(FSceneNode, view_planes) == 344);
 
 /// Layout mirror of C++ `FSoundData` (48 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -2659,6 +2759,7 @@ mod layout_tests {
         assert_eq!(size_of::<UGesture>(), 104);
         assert_eq!(size_of::<UConsole>(), 2760);
         assert_eq!(size_of::<UInput>(), 5400);
+        assert_eq!(size_of::<UViewport>(), 352);
         assert_eq!(size_of::<FSceneNode>(), 408);
         assert_eq!(size_of::<FSoundData>(), 48);
         assert_eq!(size_of::<USound>(), 288);

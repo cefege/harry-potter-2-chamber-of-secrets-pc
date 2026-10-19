@@ -6,6 +6,9 @@
 pub mod actcol;
 pub mod audio;
 pub mod cam_mgr;
+pub mod camera;
+pub mod camera_exec;
+pub mod camera_math;
 pub mod canvas;
 pub mod canvas_text;
 pub mod console;

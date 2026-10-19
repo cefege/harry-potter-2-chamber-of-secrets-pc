@@ -14,6 +14,7 @@ mod engine;
 mod engine_actcol;
 mod engine_audio;
 mod engine_cam_mgr;
+mod engine_camera;
 mod engine_console;
 mod engine_dynbsp;
 mod engine_gesture;

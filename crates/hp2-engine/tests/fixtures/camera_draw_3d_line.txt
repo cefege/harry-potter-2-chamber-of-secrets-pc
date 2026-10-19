@@ -1,0 +1,222 @@
+case draw3d 0 branch=ortho_line map=13 x=640 y=480 fov=427002ed zoom=400e8c89 color=3f2025ea,3eb27f1c,3f7bfc44,3f800000 p1=41fc763a,c2433518,c33416b3 p2=41a58ee9,c2f7a964,4327d0c6
+calls 0
+case draw3d 1 branch=ortho_dot map=14 x=800 y=600 fov=4275adc3 zoom=4024af01 color=3e725598,3f59295b,3f34561a,3f800000 p1=c2ef1baf,433e25a8,c2b89529 p2=c2ef1ba2,433e25a8,c2b89529
+calls 0
+case draw3d 2 branch=ortho_dot_hidden map=15 x=1024 y=768 fov=431f7324 zoom=47435000 color=3f4052c6,3ea4a462,3cdbf880,3f800000 p1=42853a78,c2a7bf8e,c27443f5 p2=42853a85,c2a7bf8e,c27443f5
+calls 0
+case draw3d 3 branch=persp_line map=3 x=1280 y=720 fov=430a9f72 zoom=3fcbc83d color=3f394032,3e4ae56c,3f1f291f,3f800000 p1=434289b1,42527118,430fcb36 p2=42b1804f,42e71077,4308ed0e
+calls 1
+line 3f394032 3e4ae56c 3f1f291f 3f800000 00000000 4471becc 43e036ce 3be3e1c3 444729eb 440cfb5c 3bef4fcf
+case draw3d 4 branch=persp_near_p1 map=3 x=333 y=777 fov=4241e03d zoom=3fb3e47e color=3d9b0a70,3f24e0c8,3f387f09,3f800000 p1=c21ddfa6,c23540a2,c0a00000 p2=43213317,423c6238,42dae130
+calls 1
+line 3d9b0a70 3f24e0c8 3f387f09 3f800000 00000000 4397faa4 00000000 3f800000 43a60000 4216cd70 3c15b536
+case draw3d 5 branch=persp_discard map=3 x=1 y=1 fov=42880a78 zoom=40d60fc4 color=3e1433c0,3f3ed7d0,3e6d6f94,3f800000 p1=c2b9b846,428ca093,c0a00000 p2=4325fced,42ba3230,c1200000
+calls 0
+case draw3d 6 branch=ortho_line map=13 x=7 y=5 fov=428a16b8 zoom=3fc93c5d color=3ef1f2c4,3ec5ca88,3eaf8c86,3f800000 p1=c2e0925b,c2c1c543,4302f7e8 p2=c3102372,4251b8b2,431ac905
+calls 0
+case draw3d 7 branch=ortho_dot map=14 x=1600 y=900 fov=428443ae zoom=408c628d color=3dfa0a68,3ee28726,3e8aa800,3f800000 p1=43180253,c321f568,c29c729f p2=4318025a,c321f568,c29c729f
+calls 0
+case draw3d 8 branch=ortho_dot_hidden map=15 x=640 y=480 fov=43144a9c zoom=47435000 color=3f4d217a,3b3e9a00,3e8b79d2,3f800000 p1=c16ef9a3,42301dca,420026d0 p2=c16ef93a,42301dca,420026d0
+calls 0
+case draw3d 9 branch=persp_line map=3 x=800 y=600 fov=42ecc73c zoom=3f2ca9a0 color=3f498d24,3e6ce7c8,3c8fa800,3f800000 p1=c184e36f,c3420077,42d42520 p2=c2ce2c8b,418ee214,42481f6b
+calls 1
+line 3f498d24 3e6ce7c8 3c8fa800 3f800000 00000000 4374059b 00000000 3c1a75db 00000000 438c1666 3ca3bd51
+case draw3d 10 branch=persp_near_p1 map=3 x=1024 y=768 fov=42b71334 zoom=3f277d87 color=3f17178c,3f7d0ec4,3e3faf54,3f800000 p1=4344ae59,c32c1951,c0a00000 p2=43375ca9,c2e6b7a3,435a3520
+calls 1
+line 3f17178c 3f7d0ec4 3e3faf54 3f800000 00000000 447fc000 42215000 3f800000 4468b61e 42f0fb8d 3b962b42
+case draw3d 11 branch=persp_discard map=3 x=1280 y=720 fov=422a0d41 zoom=3fb17b81 color=3eb7ff28,3e7eab78,3e97d9f8,3f800000 p1=c2a41e3f,c28db45e,c0a00000 p2=c1fd3fd6,419eec3a,c1200000
+calls 0
+case draw3d 12 branch=ortho_line map=13 x=333 y=777 fov=41fd1e10 zoom=40b06b95 color=3f12c845,3e8bc9c0,3f71b867,3f800000 p1=c29199dd,c32d6701,c223188a p2=424d5c06,433f730f,42ca3ea8
+calls 0
+case draw3d 13 branch=ortho_dot map=14 x=1 y=1 fov=42766bf9 zoom=40e8d84f color=3f7b5374,3f1e0280,3f4f8ca8,3f800000 p1=c22e468d,c33d89e9,433eac2a p2=c22e4673,c33d89e9,433eac2a
+calls 1
+point 3f7b5374 3f1e0280 3f4f8ca8 3f800000 00000000 c2b4a181 c3c39cee c2b0a181 c3c29cee 3f800000
+case draw3d 14 branch=ortho_dot_hidden map=15 x=7 y=5 fov=42327f3a zoom=47435000 color=3f65c319,3dc882d0,3f64a909,3f800000 p1=432b1234,c30fb2ed,42097ce0 p2=432b123b,c30fb2ed,42097ce0
+calls 0
+case draw3d 15 branch=persp_line map=3 x=1600 y=900 fov=4278f0dd zoom=406cab80 color=3ee9f4b2,3f29cf80,3dc52b78,3f800000 p1=43002719,c28812d7,437864ef p2=4233499c,428eebbe,4327deb1
+calls 1
+line 3ee9f4b2 3f29cf80 3dc52b78 3f800000 00000000 44b97766 42ae0239 3b83eb58 44955a2b 4460c000 3bc332e4
+case draw3d 16 branch=persp_near_p1 map=3 x=640 y=480 fov=431622a2 zoom=406c338c color=3f05b73a,3f3c10f4,3edb9576,3f800000 p1=c1d17c39,c31c5b42,c0a00000 p2=c33a0606,42e179ba,42d26552
+calls 1
+line 3f05b73a 3f3c10f4 3edb9576 3f800000 00000000 42b86916 00000000 3f800000 432917ec 43a5ba4c 3c1bbe9c
+case draw3d 17 branch=persp_discard map=3 x=800 y=600 fov=43058b39 zoom=40f76a3d color=3f1ccdb6,3f6fcac9,3f6566c1,3f800000 p1=40cc1168,43431d51,c0a00000 p2=c2b04871,419b9c48,c1200000
+calls 0
+case draw3d 18 branch=ortho_line map=13 x=1024 y=768 fov=42cea6b7 zoom=4018d41e color=3f084856,3edb22ac,3df20890,3f800000 p1=4325f178,c15b37a1,c2a2e723 p2=43266ade,42e94e1c,41aa3b7e
+calls 0
+case draw3d 19 branch=ortho_dot map=14 x=1280 y=720 fov=43292e75 zoom=40b6424c color=3f3ca16e,3f6636a8,3e10bb14,3f800000 p1=42a2ea30,c1547b82,432c90f9 p2=42a2ea3d,c1547b82,432c90f9
+calls 0
+case draw3d 20 branch=ortho_dot_hidden map=15 x=333 y=777 fov=42cd8f5c zoom=47435000 color=3eaa79a8,3f114317,3f28c379,3f800000 p1=c2951b95,42e46d58,c32d0284 p2=c2951b88,42e46d58,c32d0284
+calls 0
+case draw3d 21 branch=persp_line map=3 x=1 y=1 fov=42b00690 zoom=3f8bccc8 color=3f388837,3e86ae32,3f64d3b0,3f800000 p1=4340225a,c2f06c22,42970165 p2=c288130f,42842895,43909648
+calls 1
+line 3f388837 3e86ae32 3f64d3b0 3f800000 00000000 3ec1a455 3f1e4823 3b62a1b4 00000000 3f5db0d0 3c58ffb1
+case draw3d 22 branch=persp_near_p1 map=3 x=7 y=5 fov=42b3d83a zoom=400920c0 color=3f7d497c,3f10b62b,3ede28fe,3f800000 p1=c30186c5,42bc02df,c0a00000 p2=c2bea1a3,c2125848,438bc0e7
+calls 1
+line 3f7d497c 3f10b62b 3ede28fe 3f800000 00000000 40138263 4002a3bf 3b6a784e 00000000 406b9200 3f800000
+case draw3d 23 branch=persp_discard map=3 x=1600 y=900 fov=429fbb89 zoom=4093a5f6 color=3f6d6fc8,3ede1ae8,3f227dca,3f800000 p1=42dd4a38,c32cc880,c0a00000 p2=424dfe1b,42ad4763,c1200000
+calls 0
+case draw3d 24 branch=ortho_line map=13 x=640 y=480 fov=42b38018 zoom=4042fa15 color=3f040d99,3ec20db0,3d286ea0,3f800000 p1=c297d941,433f52ed,c1fab126 p2=430c3302,42979dce,c1d3fccc
+calls 0
+case draw3d 25 branch=ortho_dot map=14 x=800 y=600 fov=41d0104e zoom=40818737 color=3f15440f,3edb359c,3f21ce4b,3f800000 p1=c24ccbdb,c24a4a48,428dac2d p2=c24ccbc1,c24a4a48,428dac2d
+calls 0
+case draw3d 26 branch=ortho_dot_hidden map=15 x=1024 y=768 fov=42c3d5eb zoom=47435000 color=3f60a121,3dcbf5a0,3f2ceacc,3f800000 p1=4223c118,4333b614,c1e9b0f4 p2=4223c132,4333b614,c1e9b0f4
+calls 0
+case draw3d 27 branch=persp_line map=3 x=1280 y=720 fov=42ec2aff zoom=3fb2f104 color=3f0c0f61,3f732912,3f41fc48,3f800000 p1=c1217327,425c80ce,436de932 p2=43171d6d,c2d9ff3d,41bf8b59
+calls 1
+line 3f0c0f61 3f732912 3f41fc48 3f800000 00000000 44987f63 00000000 3d2b129b 441bede3 43e07a4e 3b89bb73
+case draw3d 28 branch=persp_near_p1 map=3 x=333 y=777 fov=42bbf313 zoom=40d6f6da color=3f199bb7,3f7e447e,3f3e5025,3f800000 p1=43293334,431989f3,c0a00000 p2=c26ac4c2,c23c68c4,43207d1d
+calls 1
+line 3f199bb7 3f7e447e 3f3e5025 3f800000 00000000 42db631d 43ab749d 3bcc2d25 43a60000 44083960 3f800000
+case draw3d 29 branch=persp_discard map=3 x=1 y=1 fov=42c8f048 zoom=40cadf1f color=3ed17f00,3ed87208,3f5999ea,3f800000 p1=c3187998,42c60b28,c0a00000 p2=c32cee4a,428ef6cb,c1200000
+calls 0
+case draw3d 30 branch=ortho_line map=13 x=7 y=5 fov=4326fb6a zoom=40ac89a5 color=3f178e53,3f465edc,3f1e0cd3,3f800000 p1=c29d1477,c1cacbeb,c281c8a8 p2=c2df2e82,c150cc71,434253dd
+calls 0
+case draw3d 31 branch=ortho_dot map=14 x=1600 y=900 fov=430ac85d zoom=3ec04cc2 color=3eead6d6,3f0297f6,3efeb0de,3f800000 p1=c2b6ccb1,42c7e466,4290f31b p2=c2b6cca4,42c7e466,4290f31b
+calls 0
+case draw3d 32 branch=ortho_dot_hidden map=15 x=640 y=480 fov=42c78703 zoom=47435000 color=3ee10766,3f6efb56,3f6f50d6,3f800000 p1=428b17b4,429bdf4c,c22cb604 p2=428b17c1,429bdf4c,c22cb604
+calls 0
+case draw3d 33 branch=persp_line map=3 x=800 y=600 fov=431afa26 zoom=40aa0d39 color=3f75e4bb,3e09b3f8,3e803372,3f800000 p1=4273ee44,42e612a2,434e7e66 p2=41ce398e,41118e35,4307add6
+calls 1
+line 3f75e4bb 3e09b3f8 3e803372 3f800000 00000000 43d06e9b 4398f9c8 3bf182d9 43d51b53 43aeb96a 3b9eb008
+case draw3d 34 branch=persp_near_p1 map=3 x=1024 y=768 fov=4319236c zoom=3fc5ff43 color=3d4a38e0,3f718d3f,3f7d96f1,3f800000 p1=43209011,4198fbd2,c0a00000 p2=c30f6dfa,c1786bff,43934ebf
+calls 1
+line 3d4a38e0 3f718d3f 3f7d96f1 3f800000 00000000 43e23cf0 43bcc73b 3b5e7233 447fc000 43decce8 3f800000
+case draw3d 35 branch=persp_discard map=3 x=1280 y=720 fov=42e9cd84 zoom=409c7aae color=3df95e88,3f4627db,3f23aa36,3f800000 p1=c2bab5d7,42df2720,c0a00000 p2=c29e47a1,43262423,c1200000
+calls 0
+case draw3d 36 branch=ortho_line map=13 x=333 y=777 fov=423485c3 zoom=40f08bf0 color=3f246707,3ea6482a,3f6895ef,3f800000 p1=c1a113ca,c30d1fd3,c2423c64 p2=42b34a35,c2533ce1,c31556b8
+calls 0
+case draw3d 37 branch=ortho_dot map=14 x=1 y=1 fov=42f0e9fc zoom=40b337bd color=3d272d70,3f0a4965,3ec08f46,3f800000 p1=c162b5b2,4244ef81,c205b90e p2=c162b549,4244ef81,c205b90e
+calls 1
+point 3d272d70 3f0a4965 3ec08f46 3f800000 00000000 c219ccaf 43035d0b c211ccaf 43055d0b 3f800000
+case draw3d 38 branch=ortho_dot_hidden map=15 x=7 y=5 fov=42d93651 zoom=47435000 color=3e2eb5f8,3f6f255f,3f224eab,3f800000 p1=4304673a,c33abb7f,4318535c p2=43046741,c33abb7f,4318535c
+calls 0
+case draw3d 39 branch=persp_line map=3 x=1600 y=900 fov=428c8d32 zoom=400bc8ba color=3f4abd69,3e9d5b62,3f43b0c9,3f800000 p1=c347ea5d,43475dcd,42291545 p2=433b0d70,422f0ad1,43219892
+calls 0
+case draw3d 40 branch=persp_near_p1 map=3 x=640 y=480 fov=43080545 zoom=3fdabfeb color=3d722e50,3ea28208,3f32d868,3f800000 p1=429a879e,c31f2686,c0a00000 p2=c2971633,c2aeaade,43449121
+calls 1
+line 3d722e50 3ea28208 3f32d868 3f800000 00000000 43b1cb28 00000000 3f800000 43872b51 43369667 3ba6b396
+case draw3d 41 branch=persp_discard map=3 x=800 y=600 fov=4207c669 zoom=404824ad color=3ef959e0,3f712c9f,3f5a3900,3f800000 p1=c3036e23,4180b39c,c0a00000 p2=c3065394,c254c51e,c1200000
+calls 0
+case draw3d 42 branch=ortho_line map=13 x=1024 y=768 fov=42dffd79 zoom=40e27154 color=3ddef3c8,3df033b8,3a934800,3f800000 p1=42b00f53,430b8aa0,41efc2f4 p2=c31da9f3,c30b5344,430cad37
+calls 0
+case draw3d 43 branch=ortho_dot map=14 x=1280 y=720 fov=425ff809 zoom=3fc74611 color=3eb269cc,3e9d813a,3ecc2f3a,3f800000 p1=431feb1e,c26ead5e,c2fbc6cf p2=431feb25,c26ead5e,c2fbc6cf
+calls 0
+case draw3d 44 branch=ortho_dot_hidden map=15 x=333 y=777 fov=43286412 zoom=47435000 color=3f3710b6,3d701750,3da3c500,3f800000 p1=c3448140,42348316,41bd7db8 p2=c3448139,42348316,41bd7db8
+calls 0
+case draw3d 45 branch=persp_line map=3 x=1 y=1 fov=4278d505 zoom=4081ec46 color=3f7dd2d0,3ee75a7e,3ebb28f8,3f800000 p1=c347a3d8,c28c9c0c,427734c4 p2=c300c741,4306fd1c,435c49be
+calls 1
+line 3f7dd2d0 3ee75a7e 3ebb28f8 3f800000 00000000 00000000 3f7f5fb2 3c848da9 00000000 00000000 3b94c02d
+case draw3d 46 branch=persp_near_p1 map=3 x=7 y=5 fov=42625c1a zoom=40b8bf11 color=3e9b17c0,3f5d83a0,3f1a5e4d,3f800000 p1=c126bfb2,c2475044,c0a00000 p2=42b8ed46,c347ff14,438dba6b
+calls 0
+case draw3d 47 branch=persp_discard map=3 x=1600 y=900 fov=41f7d093 zoom=40cb4f6a color=3e1fe140,3c96c660,3e02ff78,3f800000 p1=c2f40e5e,43189e85,c0a00000 p2=c30c8032,c2c41af1,c1200000
+calls 0
+case draw3d 48 branch=ortho_line map=13 x=640 y=480 fov=41f7b1fe zoom=407d91e0 color=3dc54d68,3cb9e6c0,3ee82f28,3f800000 p1=c2e444d4,42ea9352,42867dc6 p2=432da7c3,430dece3,c1c99bde
+calls 0
+case draw3d 49 branch=ortho_dot map=14 x=800 y=600 fov=41f618eb zoom=40d01c4a color=3e8f3ed8,3f738964,3e4be544,3f800000 p1=431eceeb,426aef7b,42f0c5ce p2=431ecef2,426aef7b,42f0c5ce
+calls 1
+point 3e8f3ed8 3f738964 3e4be544 3f800000 00000000 488f467b 47d44097 488f46bb 47d44197 3f800000
+case draw3d 50 branch=ortho_dot_hidden map=15 x=1024 y=768 fov=426d0a45 zoom=47435000 color=3f0efcd0,3f1ad07b,3e87e490,3f800000 p1=c2cb17c6,c28c644c,42eb3e82 p2=c2cb17b9,c28c644c,42eb3e82
+calls 0
+case draw3d 51 branch=persp_line map=3 x=1280 y=720 fov=42f9d013 zoom=402ab882 color=3f254693,3de3c7e8,3f20ea14,3f800000 p1=c3064d56,42d63a91,423d759a p2=c2a16c28,c33325f6,42245f5c
+calls 0
+case draw3d 52 branch=persp_near_p1 map=3 x=333 y=777 fov=4233683c zoom=3fb1da9b color=3e549390,3f72c027,3c642940,3f800000 p1=42bab62b,c106e6ab,c0a00000 p2=c340022b,c0191d44,434b980a
+calls 1
+line 3e549390 3f72c027 3c642940 3f800000 00000000 43a60000 43a5bb70 3f800000 00000000 43b5a1bc 3ba0f2a6
+case draw3d 53 branch=persp_discard map=3 x=1 y=1 fov=4319e251 zoom=4089e3b5 color=3f0ef4a4,3da99de0,3e9a7746,3f800000 p1=42ce4129,4130d90c,c0a00000 p2=430f13db,c2f3be6d,c1200000
+calls 0
+case draw3d 54 branch=ortho_line map=13 x=7 y=5 fov=425b79f8 zoom=400353ef color=3f16efe7,3e06531c,3f365ba6,3f800000 p1=42f81ab2,41215658,42b52315 p2=42a343c0,c244b052,432803a5
+calls 0
+case draw3d 55 branch=ortho_dot map=14 x=1600 y=900 fov=42b9646d zoom=40ff8cc9 color=3f29877d,3da36df0,3f11c6f1,3f800000 p1=4242ef52,433aea3d,c19683e2 p2=4242ef6c,433aea3d,c19683e2
+calls 0
+case draw3d 56 branch=ortho_dot_hidden map=15 x=640 y=480 fov=42dac0ee zoom=47435000 color=3f2d927f,3f61f396,3ee204ee,3f800000 p1=c2c8a4de,420a22ac,4335cf5e p2=c2c8a4d1,420a22ac,4335cf5e
+calls 0
+case draw3d 57 branch=persp_line map=3 x=800 y=600 fov=426f396b zoom=40f90eb3 color=3db634b0,3e3ef5f8,3ef6da2e,3f800000 p1=c3178cae,430c1576,41c6c123 p2=431fb738,42c93495,438e113b
+calls 1
+line 3db634b0 3e3ef5f8 3ef6da2e 3f800000 00000000 4445be0f 4408910c 3b66a6b7 44351f3b 4415c000 3d24dde4
+case draw3d 58 branch=persp_near_p1 map=3 x=1024 y=768 fov=432391a1 zoom=40b46f11 color=3f456c94,3c6f3b80,3f7bf9b2,3f800000 p1=42f3bf00,427fe8be,c0a00000 p2=c2d1be94,42a1b9fd,430fb31e
+calls 1
+line 3f456c94 3c6f3b80 3f7bf9b2 3f800000 00000000 43e50694 43d4cc87 3be407f8 447fc000 443a3110 3f800000
+case draw3d 59 branch=persp_discard map=3 x=1280 y=720 fov=420b5858 zoom=3f640333 color=3f146de3,3f3e389c,3f440063,3f800000 p1=414fd9c4,c3336edd,c0a00000 p2=43449a78,432eabc9,c1200000
+calls 0
+case draw3d 60 branch=ortho_line map=13 x=333 y=777 fov=431b0e41 zoom=40f73016 color=3f4e8eac,3edc5dba,3e0f07ec,3f800000 p1=431b45e2,c2f66cea,c3143c0f p2=c2d88e93,c2a8fcab,432ec1e2
+calls 0
+case draw3d 61 branch=ortho_dot map=14 x=1 y=1 fov=42d58306 zoom=40ab6226 color=3f24bd6e,3f5279ed,3f3737f3,3f800000 p1=c3470f29,c30cc5e4,c283cac5 p2=c3470f22,c30cc5e4,c283cac5
+calls 1
+point 3f24bd6e 3f5279ed 3f3737f3 3f800000 00000000 c40b80d1 c3c5625a c40b00d1 c3c4625a 3f800000
+case draw3d 62 branch=ortho_dot_hidden map=15 x=7 y=5 fov=425587c2 zoom=47435000 color=3f7277b7,3e4c40a0,3e87ce82,3f800000 p1=c316f6ca,c28bc837,c2bb8f30 p2=c316f6c3,c28bc837,c2bb8f30
+calls 0
+case draw3d 63 branch=persp_line map=3 x=1600 y=900 fov=42c24d20 zoom=3ffcb5dc color=3f4070fd,3f4b5a96,3ea7e690,3f800000 p1=4328cb33,c284c458,435dfddb p2=c2318996,420eb74e,4367c6c8
+calls 1
+line 3f4070fd 3f4b5a96 3ea7e690 3f800000 00000000 44a717d3 436ee881 3b939bf3 4426348f 440baa96 3b8d60a9
+case draw3d 64 branch=persp_near_p1 map=3 x=640 y=480 fov=42cafdb4 zoom=40f18a3d color=3f49bdd4,3f5eef88,3e9913f4,3f800000 p1=42e17e26,429c7988,c0a00000 p2=430a1169,432b6a67,432af855
+calls 0
+case draw3d 65 branch=persp_discard map=3 x=800 y=600 fov=425b3451 zoom=406355d0 color=3d9849f0,3b607900,3f1acd73,3f800000 p1=40465e08,4293c19c,c0a00000 p2=42dfa468,c2a33bb5,c1200000
+calls 0
+case draw3d 66 branch=ortho_line map=13 x=1024 y=768 fov=4251434a zoom=3fc3b72f color=3f739dbf,3e33a9b0,3f0a6af9,3f800000 p1=41557456,c185bb02,432e7a71 p2=41112922,bf28a890,c2ccbed5
+calls 0
+case draw3d 67 branch=ortho_dot map=14 x=1280 y=720 fov=423f5c7a zoom=404c67a8 color=3f0060d1,3f534077,3ea0aa14,3f800000 p1=42e93ac6,c1d46205,431228f9 p2=42e93ad3,c1d46205,431228f9
+calls 0
+case draw3d 68 branch=ortho_dot_hidden map=15 x=333 y=777 fov=42cca7b7 zoom=47435000 color=3f7fcbad,3e98e7ae,3eb3d3f6,3f800000 p1=421d90d7,43283e39,4284cddd p2=421d90f1,43283e39,4284cddd
+calls 0
+case draw3d 69 branch=persp_line map=3 x=1 y=1 fov=430512ee zoom=40a2d43b color=3f21f82d,3f433759,3f7330ab,3f800000 p1=432bfa80,c300f574,438f3eb1 p2=c016814c,4310d7fd,426fe728
+calls 1
+line 3f21f82d 3f433759 3f7330ab 3f800000 00000000 3f2159e1 3ecdfbac 3b64c14f 3f3856ba 00000000 3c8896ac
+case draw3d 70 branch=persp_near_p1 map=3 x=7 y=5 fov=4321182a zoom=40f38c9e color=3df99e40,3d988648,3f0d1c40,3f800000 p1=4274b8bb,4213377a,c0a00000 p2=c291239e,c2f68282,438b73a2
+calls 1
+line 3df99e40 3d988648 3f0d1c40 3f800000 00000000 40564bc5 400f84af 3b6afa39 40c00000 40719008 3f800000
+case draw3d 71 branch=persp_discard map=3 x=1600 y=900 fov=424c7b19 zoom=40229f87 color=3e25e4ac,3f5a7336,3f172166,3f800000 p1=3fc70150,c0eff2f4,c0a00000 p2=4343c27c,c31661f0,c1200000
+calls 0
+case draw3d 72 branch=ortho_line map=13 x=640 y=480 fov=42f7f368 zoom=3f55a66e color=3f613324,3f277da9,3eaa9e86,3f800000 p1=430876fb,c2663308,43213871 p2=423f03c2,4288bfa1,3f9737b8
+calls 0
+case draw3d 73 branch=ortho_dot map=14 x=800 y=600 fov=42e76c44 zoom=3ea4d763 color=3e4dd1f0,3eecbc3e,3f522c2a,3f800000 p1=42b68542,c2a984ec,41e7f966 p2=42b6854f,c2a984ec,41e7f966
+calls 0
+case draw3d 74 branch=ortho_dot_hidden map=15 x=1024 y=768 fov=41db5cfc zoom=47435000 color=3f005ad3,3f24b886,3e9b666e,3f800000 p1=c27f27ba,4247d278,c2481c46 p2=c27f27a0,4247d278,c2481c46
+calls 0
+case draw3d 75 branch=persp_line map=3 x=1280 y=720 fov=42fa7440 zoom=400411d1 color=3f0a06c9,3f17561c,3f7abb85,3f800000 p1=4333b8d3,c3346828,412fce4c p2=c2984314,4315b7c4,42fb8895
+calls 1
+line 3f0a06c9 3f17561c 3f7abb85 3f800000 00000000 4491c7da 00000000 3dba632f 43ecd72a 4433c000 3c0245dc
+case draw3d 76 branch=persp_near_p1 map=3 x=333 y=777 fov=4238d13d zoom=401567fd color=3f6acdd5,3cde18a0,3f523988,3f800000 p1=42b5961c,4227e728,c0a00000 p2=c32e4a48,43329210,42d89552
+calls 0
+case draw3d 77 branch=persp_discard map=3 x=1 y=1 fov=42dbff92 zoom=4043e6ff color=3f03f15d,3e5d23e0,3eb79c20,3f800000 p1=433a54b1,421d1930,c0a00000 p2=43225be9,c2445db4,c1200000
+calls 0
+case draw3d 78 branch=ortho_line map=13 x=7 y=5 fov=42433f58 zoom=40f71469 color=3ee4ce40,3e9a780c,3f3fe3bd,3f800000 p1=c2da2fc0,426ccd56,4284e52e p2=c335d241,4175bd47,c309f150
+calls 0
+case draw3d 79 branch=ortho_dot map=14 x=1600 y=900 fov=42ba1275 zoom=40b0b8bb color=3e8d6506,3f453de9,3f3ec487,3f800000 p1=4347c8a7,424ec114,4340e8e3 p2=4347c8ae,424ec114,4340e8e3
+calls 0
+case draw3d 80 branch=ortho_dot_hidden map=15 x=640 y=480 fov=423dc213 zoom=47435000 color=3d312df0,3e3ea168,3f0edecb,3f800000 p1=c30b8027,c2d98ee3,c31870df p2=c30b8020,c2d98ee3,c31870df
+calls 0
+case draw3d 81 branch=persp_line map=3 x=800 y=600 fov=41db5957 zoom=3f89a7e9 color=3ef7c76a,3f752871,3f6e5059,3f800000 p1=c10029ab,433f1549,439583c8 p2=423f1e7d,c29217f0,4376dca0
+calls 1
+line 3ef7c76a 3f752871 3f6e5059 3f800000 00000000 44286df5 00000000 3b84bcfc 4405231a 4415c000 3b5b298c
+case draw3d 82 branch=persp_near_p1 map=3 x=1024 y=768 fov=42b9418f zoom=40812c68 color=3f63d39e,3f188ad1,3f391d17,3f800000 p1=429289f4,430ae2dc,c0a00000 p2=4101f475,42caa972,438fa472
+calls 1
+line 3f63d39e 3f188ad1 3f391d17 3f800000 00000000 440374e0 440b1f92 3b641f43 441eecc3 443fc000 3f800000
+case draw3d 83 branch=persp_discard map=3 x=1280 y=720 fov=428e8166 zoom=409c6180 color=3db6d640,3e17b884,3eb3990a,3f800000 p1=c31ad635,42a8cb32,c0a00000 p2=43283c6f,4245c320,c1200000
+calls 0
+case draw3d 84 branch=ortho_line map=13 x=333 y=777 fov=421c2143 zoom=4023dbc0 color=3f0d9836,3ebb1472,3f35fd8b,3f800000 p1=431747b4,413db6b3,430de509 p2=4319fca8,c0536e2c,c15538dd
+calls 0
+case draw3d 85 branch=ortho_dot map=14 x=1 y=1 fov=42d24589 zoom=4090d541 color=3f5da038,3f611d1a,3f535296,3f800000 p1=c183c1e2,c246c298,c3290be4 p2=c183c1ae,c246c298,c3290be4
+calls 1
+point 3f5da038 3f611d1a 3f535296 3f800000 00000000 c25c5523 c3252e48 c2545523 c3232e48 3f800000
+case draw3d 86 branch=ortho_dot_hidden map=15 x=7 y=5 fov=4313268e zoom=47435000 color=3dbdb628,3f0361b5,3f1ccfcb,3f800000 p1=c307b089,4340224b,c2dd1ba6 p2=c307b082,4340224b,c2dd1ba6
+calls 0
+case draw3d 87 branch=persp_line map=3 x=1600 y=900 fov=42a279d0 zoom=402de5c6 color=3f615615,3dc11978,3d9aaf58,3f800000 p1=c2d1294d,433ce4ff,433e8c01 p2=c1c1523c,c330b433,43661a27
+calls 1
+line 3f615615 3dc11978 3d9aaf58 3f800000 00000000 441eb738 00000000 3b8e6804 43cc0832 4460c000 3babf7da
+case draw3d 88 branch=persp_near_p1 map=3 x=640 y=480 fov=41b0de7d zoom=4002860e color=3db3c838,3eaeb300,3f55f86f,3f800000 p1=43001794,434783aa,c0a00000 p2=420c5c46,42b7fd5e,431ceed2
+calls 0
+case draw3d 89 branch=persp_discard map=3 x=800 y=600 fov=42dc4cd8 zoom=4084b8e9 color=3f7ec7a0,3edd0eae,3eb0a234,3f800000 p1=42da8756,43033c70,c0a00000 p2=42435eb2,41c4b8f0,c1200000
+calls 0
+case draw3d 90 branch=ortho_line map=13 x=1024 y=768 fov=42c01137 zoom=40c57ecc color=3e17bca8,3f139236,3e87ec24,3f800000 p1=42bb79b7,42ca33a6,c30b9246 p2=426e8102,c3217b8f,c32c3e21
+calls 0
+case draw3d 91 branch=ortho_dot map=14 x=1280 y=720 fov=41dc5301 zoom=40c85e76 color=3f7ae231,3f734f35,3ea75814,3f800000 p1=c29ef48e,c1a2d71c,c3079f94 p2=c29ef481,c1a2d71c,c3079f94
+calls 0
+case draw3d 92 branch=ortho_dot_hidden map=15 x=333 y=777 fov=42264b3c zoom=47435000 color=3f38d2b7,3f01bb3d,3ef18912,3f800000 p1=c28bd237,c33828ee,c33ed410 p2=c28bd22a,c33828ee,c33ed410
+calls 0
+case draw3d 93 branch=persp_line map=3 x=1 y=1 fov=428c41f8 zoom=40766cd6 color=3ed9929c,3f1d9267,3f2aa13f,3f800000 p1=c282bc1a,42911de7,43405769 p2=4343a5fe,433dca7b,43909f3e
+calls 1
+line 3ed9929c 3f1d9267 3f2aa13f 3f800000 00000000 3e840ba1 3f44cb9d 3baa5d1b 3f7b5ad6 3f77a968 3b6293aa
+case draw3d 94 branch=persp_near_p1 map=3 x=7 y=5 fov=42af53ae zoom=40bb36fe color=3f42c234,3f2deaa6,3f487756,3f800000 p1=c284cbe9,4319f54d,c0a00000 p2=42e13cd4,430e72b8,427474fb
+calls 0
+case draw3d 95 branch=persp_discard map=3 x=1600 y=900 fov=4314b405 zoom=3f6dbbdc color=3ef34eb4,3f72757d,3f281f62,3f800000 p1=c0fc3fc8,c33fd9ca,c0a00000 p2=41343214,c240cd98,c1200000
+calls 0

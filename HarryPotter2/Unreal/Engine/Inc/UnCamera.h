@@ -265,8 +265,6 @@ class ENGINE_API UViewport : public UPlayer
 	// UPlayer interface.
 	void ReadInput( FLOAT DeltaSeconds );
 	
-	UBOOL ScreenShot( const TCHAR* Filename );
-
 	// UViewport interface.
 	virtual UBOOL SetDrag( UBOOL NewDrag );
 	virtual UBOOL IsFullscreen()=0;

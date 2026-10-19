@@ -1,0 +1,262 @@
+case exec 0 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=GETPING
+  CMD "GETPING"
+  LOG AR "0"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 1 w=7 h=5 show=0 rend=0 in=1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=GETPING
+  CMD "GETPING"
+  INEXEC "GETPING" -> 1
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 2 w=7 h=5 show=0 rend=0 in=0 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=GETPING
+  CMD "GETPING"
+  INEXEC "GETPING" -> 0
+  LOG AR "0"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 3 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=2 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=INJECT hello world
+  CMD "INJECT hello world"
+  LOG AR "Injecting: hello world"
+  LOG CONN "hello world"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 4 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=1 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=INJECT hello
+  CMD "INJECT hello"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 5 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=1 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=INJECT hello
+  CMD "INJECT hello"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 6 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWALL
+  CMD "SHOWALL"
+  RET 1
+  STATE show=00000000 rend=0 hidden=0 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 7 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWACTORS
+  CMD "SHOWACTORS"
+  RET 1
+  STATE show=00000008 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 8 w=7 h=5 show=32776 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=HIDEACTORS
+  CMD "HIDEACTORS"
+  RET 1
+  STATE show=00008000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 9 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=RMODE 4
+  CMD "RMODE 4"
+  RET 1
+  STATE show=00000000 rend=4 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 10 w=7 h=5 show=0 rend=2 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=RMODE 0
+  CMD "RMODE 0"
+  RET 1
+  STATE show=00000000 rend=2 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 11 w=7 h=5 show=0 rend=2 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=RMODE 21
+  CMD "RMODE 21"
+  RET 1
+  STATE show=00000000 rend=2 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 12 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWBONES 1
+  CMD "SHOWBONES 1"
+  RET 1
+  STATE show=00010000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 13 w=7 h=5 show=65536 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWBONES 0
+  CMD "SHOWBONES 0"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 14 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWBOUNDS 1
+  CMD "SHOWBOUNDS 1"
+  RET 1
+  STATE show=00008000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 15 w=7 h=5 show=32768 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWBOUNDS 0
+  CMD "SHOWBOUNDS 0"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 16 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOT shot_a.bmp
+  CMD "SHOT shot_a.bmp"
+  READPIX 7x5
+  CREATE "Slot\/shot_a.bmp"
+  FILE "Slot\/shot_a.bmp" n=159 424d9f00000000000000360000002800000007000000050000000100180000000000690000000000000000000000000000000000000008c6fcc731f47ac4199189f0bcb59eeb15434eb2853f8a1292129cc9100494e3f4e379ffe695230d346daafda80191af6cb638db3e8b7e66efc55bbb601ac039ea57448ec9d344fe16845f7d6c0fb843a6b7b3d31ccb9acb6bf4ae4e9e3546d010a2282f8ea1c2e5e0
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 17 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=2 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOT
+  CMD "SHOT"
+  FILESIZE "UserDir\Shot0000.bmp" -> 54
+  FILESIZE "UserDir\Shot0001.bmp" -> 54
+  FILESIZE "UserDir\Shot0002.bmp" -> -1
+  FILESIZE "UserDir\Shot0002.bmp" -> -1
+  READPIX 7x5
+  CREATE "UserDir\Shot0002.bmp"
+  FILE "UserDir\Shot0002.bmp" n=159 424d9f000000000000003600000028000000070000000500000001001800000000006900000000000000000000000000000000000000454d4fe05dfcbff78612a2a6495a3a149f7f63ff3f3817283771302a9d5f81aa02ec011a5b1491fe3dccaf9b1c429501b9d36dc4696f536a5f966bbffd2dab5aeae0f1b5049c36b34be1862e465fb5d7b990057e2931b474c82c4359e7c62d4a6d2ac6e8880b275739
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 18 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOT
+  CMD "SHOT"
+  FILESIZE "UserDir\Shot0000.bmp" -> -1
+  FILESIZE "UserDir\Shot0000.bmp" -> -1
+  READPIX 7x5
+  CREATE "UserDir\Shot0000.bmp"
+  FILE "UserDir\Shot0000.bmp" n=159 424d9f00000000000000360000002800000007000000050000000100180000000000690000000000000000000000000000000000000082d4a1f98904042bf493ba5cd6fed53d28bc784cfa31a43ddccfc48b29bb6e7110f58934d092feef472bb4399083995306f1a2ad9453286ecf677bc39a41967bea699edd3f652868803eaedf1fafb26bcd6957283697cd1d2565d863305715c4cab263a183758cc891
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 19 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SNAP 1
+  CMD "SNAP 1"
+  READPIX 7x5
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=3x2 n=6 fnv=6a097bb1 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 20 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SNAP 0
+  CMD "SNAP 0"
+  READPIX 7x5
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=7x5 n=35 fnv=65f3eb79 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 21 w=13 h=9 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SNAP 2
+  CMD "SNAP 2"
+  READPIX 13x9
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=3x2 n=6 fnv=9a930a36 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 22 w=320 h=240 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=THUMBNAIL
+  CMD "THUMBNAIL"
+  READPIX 320x240
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=160x120 n=19200 fnv=2cd2342c dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 23 w=320 h=240 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=THUMBNAIL x=8 y=6
+  CMD "THUMBNAIL x=8 y=6"
+  READPIX 320x240
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=8x6 n=48 fnv=f01b4689 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 24 w=320 h=240 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=THUMBNAIL x=8 y=6|SAVETHUMBNAIL t.bmp
+  CMD "THUMBNAIL x=8 y=6"
+  READPIX 320x240
+  RET 1
+  CMD "SAVETHUMBNAIL t.bmp"
+  CREATE "Slot\/t.bmp"
+  FILE "Slot\/t.bmp" n=198 424dc60000000000000036000000280000000800000006000000010018000000000090000000000000000000000000000000000000007e807f807f7f7e807f7e807f807e7e7e7e7f7e7f8180807e7e7f828080817e7e7f7e7c80807d807e82817e847e807d7e7e817d807e807e81807e807f807c817e7f7c7e7f80807f7e7e80818080807e81807e827d807e807e80827e7e7f80827f7e7e7f807c817e7b7e7e807d807d817e7f7e7e7e7e807f807e7f7e80807a7e80807e7e80807f7f7e807e7e7d7e807f7d
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=8x6 n=48 fnv=c7bcbade dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 25 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SNAP 1|SAVESNAP s.bmp
+  CMD "SNAP 1"
+  READPIX 7x5
+  RET 1
+  CMD "SAVESNAP s.bmp"
+  CREATE "UserDir\/s.bmp"
+  FILE "UserDir\/s.bmp" n=102 424d6600000000000000360000002800000004000000040000000100180000000000300000000000000000000000000000000000000082bb9c82bb9c82bb9c82bb9c82bb9c82bb9c82bb9c82bb9c6089bc529854546fea82bb9c82bb9cc4a95896559082bb9c
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=3x2 n=6 fnv=7b2b40a6 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 26 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SAVETHUMBNAIL t.bmp
+  CMD "SAVETHUMBNAIL t.bmp"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 27 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SAVESNAP s.bmp
+  CMD "SAVESNAP s.bmp"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 28 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=GetDetailTextures
+  CMD "GetDetailTextures"
+  LOG AR "0"
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 29 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=ToggleDetailTextures
+  CMD "ToggleDetailTextures"
+  SAVECONFIG flags=16384
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 30 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=CONSOLE_CMD foo
+  CMD "CONSOLE_CMD foo"
+  CONSOLE "CONSOLE_CMD foo" executor=actor -> 1
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 31 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=0 plr=1 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=CONSOLE_CMD foo
+  CMD "CONSOLE_CMD foo"
+  CONSOLE "CONSOLE_CMD foo" executor=actor -> 0
+  PLAYER_EXEC "CONSOLE_CMD foo" -> 1
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 32 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=1 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=PLAYER_CMD
+  CMD "PLAYER_CMD"
+  PLAYER_EXEC "PLAYER_CMD" -> 1
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 33 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=NOPE_CMD
+  CMD "NOPE_CMD"
+  PLAYER_EXEC "NOPE_CMD" -> 0
+  RET 0
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case exec 34 w=7 h=5 show=8 rend=0 in=1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=SHOWALL|SHOWACTORS
+  CMD "SHOWALL"
+  INEXEC "SHOWALL" -> 1
+  RET 1
+  CMD "SHOWACTORS"
+  INEXEC "SHOWACTORS" -> 1
+  RET 1
+  STATE show=00000008 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case lock 0 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDLOCK flash=3e99999a,3f333333,3de147ae,3f800000 fog=3d4ccccd,3f666666,3e800000,3f000000 clear=3e4ccccd,3ecccccd,3f19999a,3f4ccccd flags=0 hit=0 hitsize=-1
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=1 render=00000000 extra=00000000 hit=0
+case lock 1 w=7 h=5 show=0 rend=4 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=1 hitsize=1 flags=3 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDLOCK flash=3e99999a,3f333333,3de147ae,3f800000 fog=3d4ccccd,3f666666,3e800000,3f000000 clear=3e4ccccd,3ecccccd,3f19999a,3f4ccccd flags=3 hit=1 hitsize=5
+  RET 1
+  STATE show=00000000 rend=4 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=1 render=00000003 extra=00010000 hit=1
+case lock 2 w=7 h=5 show=0 rend=2 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=16 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDLOCK flash=3e99999a,3f333333,3de147ae,3f800000 fog=3d4ccccd,3f666666,3e800000,3f000000 clear=3e4ccccd,3ecccccd,3f19999a,3f4ccccd flags=16 hit=0 hitsize=-1
+  RET 1
+  STATE show=00000000 rend=2 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=1 render=00000010 extra=00010000 hit=0
+case lock 3 w=7 h=5 show=0 rend=1 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=4294967295 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDLOCK flash=3e99999a,3f333333,3de147ae,3f800000 fog=3d4ccccd,3f666666,3e800000,3f000000 clear=3e4ccccd,3ecccccd,3f19999a,3f4ccccd flags=4294967295 hit=0 hitsize=-1
+  RET 1
+  STATE show=00000000 rend=1 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=1 render=ffffffff extra=00000000 hit=0
+case lock 4 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=1 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDLOCK flash=3e99999a,3f333333,3de147ae,3f800000 fog=3d4ccccd,3f666666,3e800000,3f000000 clear=3e4ccccd,3ecccccd,3f19999a,3f4ccccd flags=0 hit=1 hitsize=-1
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=1 render=00000000 extra=00000000 hit=1
+case unlock 0 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDUNLOCK blit=0
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case unlock 1 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=1 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDUNLOCK blit=1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case unlock 2 w=7 h=5 show=0 rend=0 in=-1 rd=1 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=1 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RDLOCK flash=3e99999a,3f333333,3de147ae,3f800000 fog=3d4ccccd,3f666666,3e800000,3f000000 clear=3e4ccccd,3ecccccd,3f19999a,3f4ccccd flags=0 hit=0 hitsize=-1
+  RET 1
+  RDUNLOCK blit=1
+  STATE show=00000000 rend=0 hidden=2 detail=0 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=1 render=00000000 extra=00000000 hit=0
+case setdrag 0 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=1 prevdrag=0 cmds=-
+  RET 0
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=1 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case setdrag 1 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=1 cmds=-
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case setdrag 2 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=1 prevdrag=1 cmds=-
+  RET 1
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=1 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 0 w=7 h=5 show=0 rend=4 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 1
+  STATE show=00000000 rend=4 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 1 w=7 h=5 show=0 rend=4 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=3 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 0
+  STATE show=00000000 rend=4 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 2 w=7 h=5 show=0 rend=1 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=3 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 1
+  STATE show=00000000 rend=1 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 3 w=7 h=5 show=0 rend=13 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=3 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 1
+  STATE show=00000000 rend=13 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 4 w=7 h=5 show=0 rend=14 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=3 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 1
+  STATE show=00000000 rend=14 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 5 w=7 h=5 show=0 rend=15 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=3 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 1
+  STATE show=00000000 rend=15 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 6 w=7 h=5 show=0 rend=2 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=3 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 0
+  STATE show=00000000 rend=2 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case iswire 7 w=7 h=5 show=0 rend=0 in=-1 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=0 hit=0 hitsize=0 flags=0 blit=0 delta=00000000 newdrag=0 prevdrag=0 cmds=-
+  RET 0
+  STATE show=00000000 rend=-1 hidden=0 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case readinput 0 w=7 h=5 show=0 rend=0 in=0 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=bf800000 newdrag=0 prevdrag=0 cmds=-
+  INREAD delta=bf800000 ar=OUT
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case readinput 1 w=7 h=5 show=0 rend=0 in=0 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=3f000000 newdrag=0 prevdrag=0 cmds=-
+  UPDATEINPUT reset=0
+  INREAD delta=3f000000 ar=OUT
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0
+case readinput 2 w=7 h=5 show=0 rend=0 in=0 rd=0 detail=0 con=-1 plr=0 conn=0 exist=0 nodes=0 actor=1 hit=0 hitsize=0 flags=0 blit=0 delta=be800000 newdrag=0 prevdrag=0 cmds=-
+  UPDATEINPUT reset=0
+  INREAD delta=be800000 ar=OUT
+  STATE show=00000000 rend=0 hidden=2 detail=-1 snap=0x0 n=0 fnv=811c9dc5 dragging=0 hitsizes=0 frame=0 render=00000000 extra=00000000 hit=0

@@ -69,6 +69,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2StatLogServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2AudioServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ParticleFxServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/Hp2CameraServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"
