@@ -37,31 +37,48 @@ const _: () = assert!(std::mem::offset_of!(FRotator, roll) == 8);
 #[repr(C, packed(4))]
 #[derive(Clone, Copy)]
 pub struct AActor {
-    _pad_0: [u8; 73],
+    _pad_0: [u8; 72],
+    _bits_72: u8,
     _bits_73: u8,
     _pad_74: [u8; 1],
     _bits_75: u8,
     _pad_76: [u8; 4],
     pub physics: u8,
-    _pad_81: [u8; 127],
+    pub role: u8,
+    _pad_82: [u8; 6],
+    pub owner: *mut c_void,
+    _pad_96: [u8; 112],
     pub x_level: *mut c_void,
-    _pad_216: [u8; 48],
+    pub tag: [u8; 4],
+    _pad_220: [u8; 12],
+    pub instigator: *mut c_void,
+    _pad_240: [u8; 16],
+    pub base: *mut c_void,
     pub region: FPointRegion,
-    _pad_280: [u8; 44],
+    _pad_280: [u8; 36],
+    pub standing_count: u8,
+    _pad_317: [u8; 7],
     pub latent_float: f32,
-    _pad_328: [u8; 48],
+    _pad_328: [u8; 8],
+    pub touching: [*mut c_void; 4],
+    _pad_368: [u8; 8],
     pub collision_tag: i32,
     _pad_380: [u8; 16],
     pub location: FVector,
     pub rotation: FRotator,
-    _pad_420: [u8; 12],
+    pub old_location: FVector,
     pub col_location: FVector,
     pub velocity: FVector,
-    _pad_456: [u8; 4],
+    pub ip_speed: f32,
     pub acceleration: FVector,
     _pad_472: [u8; 52],
     pub brush: *mut c_void,
-    _pad_532: [u8; 132],
+    _pad_532: [u8; 16],
+    pub saved_pre_pivot_z: f32,
+    _pad_552: [u8; 29],
+    _bits_581: u8,
+    _bits_582: u8,
+    _pad_583: [u8; 81],
     pub collision_radius: f32,
     pub collision_width: f32,
     pub collision_height: f32,
@@ -72,10 +89,42 @@ pub struct AActor {
     _pad_709: [u8; 7],
     pub mass: f32,
     pub buoyancy: f32,
-    _pad_724: [u8; 164],
+    pub rotation_rate: FRotator,
+    pub desired_rotation: FRotator,
+    _pad_748: [u8; 8],
+    pub pending_touch: *mut c_void,
+    _pad_764: [u8; 24],
+    pub net_priority: f32,
+    _pad_792: [u8; 4],
+    _bits_796: u8,
+    _pad_797: [u8; 91],
 }
 
 impl AActor {
+    pub fn b_hidden(&self) -> bool {
+        self._bits_72 & (1 << 1) != 0
+    }
+
+    pub fn set_b_hidden(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 1;
+        } else {
+            self._bits_72 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_static(&self) -> bool {
+        self._bits_72 & (1 << 0) != 0
+    }
+
+    pub fn set_b_static(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 0;
+        } else {
+            self._bits_72 &= !(1 << 0);
+        }
+    }
+
     pub fn b_delete_me(&self) -> bool {
         self._bits_73 & (1 << 2) != 0
     }
@@ -100,6 +149,30 @@ impl AActor {
         }
     }
 
+    pub fn b_collide_when_placing(&self) -> bool {
+        self._bits_581 & (1 << 7) != 0
+    }
+
+    pub fn set_b_collide_when_placing(&mut self, value: bool) {
+        if value {
+            self._bits_581 |= 1 << 7;
+        } else {
+            self._bits_581 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_movable(&self) -> bool {
+        self._bits_582 & (1 << 1) != 0
+    }
+
+    pub fn set_b_movable(&mut self, value: bool) {
+        if value {
+            self._bits_582 |= 1 << 1;
+        } else {
+            self._bits_582 &= !(1 << 1);
+        }
+    }
+
     pub fn b_collide_actors(&self) -> bool {
         self._bits_680 & (1 << 0) != 0
     }
@@ -112,6 +185,42 @@ impl AActor {
         }
     }
 
+    pub fn b_block_actors(&self) -> bool {
+        self._bits_680 & (1 << 2) != 0
+    }
+
+    pub fn set_b_block_actors(&mut self, value: bool) {
+        if value {
+            self._bits_680 |= 1 << 2;
+        } else {
+            self._bits_680 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_collide_world(&self) -> bool {
+        self._bits_680 & (1 << 1) != 0
+    }
+
+    pub fn set_b_collide_world(&mut self, value: bool) {
+        if value {
+            self._bits_680 |= 1 << 1;
+        } else {
+            self._bits_680 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_block_players(&self) -> bool {
+        self._bits_680 & (1 << 3) != 0
+    }
+
+    pub fn set_b_block_players(&mut self, value: bool) {
+        if value {
+            self._bits_680 |= 1 << 3;
+        } else {
+            self._bits_680 &= !(1 << 3);
+        }
+    }
+
     pub fn b_just_teleported(&self) -> bool {
         self._bits_708 & (1 << 5) != 0
     }
@@ -121,6 +230,78 @@ impl AActor {
             self._bits_708 |= 1 << 5;
         } else {
             self._bits_708 &= !(1 << 5);
+        }
+    }
+
+    pub fn b_fixed_rotation_dir(&self) -> bool {
+        self._bits_708 & (1 << 1) != 0
+    }
+
+    pub fn set_b_fixed_rotation_dir(&mut self, value: bool) {
+        if value {
+            self._bits_708 |= 1 << 1;
+        } else {
+            self._bits_708 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_rotate_to_desired(&self) -> bool {
+        self._bits_708 & (1 << 2) != 0
+    }
+
+    pub fn set_b_rotate_to_desired(&mut self, value: bool) {
+        if value {
+            self._bits_708 |= 1 << 2;
+        } else {
+            self._bits_708 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_bounce(&self) -> bool {
+        self._bits_708 & (1 << 0) != 0
+    }
+
+    pub fn set_b_bounce(&mut self, value: bool) {
+        if value {
+            self._bits_708 |= 1 << 0;
+        } else {
+            self._bits_708 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_interpolating(&self) -> bool {
+        self._bits_708 & (1 << 3) != 0
+    }
+
+    pub fn set_b_interpolating(&mut self, value: bool) {
+        if value {
+            self._bits_708 |= 1 << 3;
+        } else {
+            self._bits_708 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_interpolating_ignore_rot(&self) -> bool {
+        self._bits_708 & (1 << 4) != 0
+    }
+
+    pub fn set_b_interpolating_ignore_rot(&mut self, value: bool) {
+        if value {
+            self._bits_708 |= 1 << 4;
+        } else {
+            self._bits_708 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_net_owner(&self) -> bool {
+        self._bits_796 & (1 << 1) != 0
+    }
+
+    pub fn set_b_net_owner(&mut self, value: bool) {
+        if value {
+            self._bits_796 |= 1 << 1;
+        } else {
+            self._bits_796 &= !(1 << 1);
         }
     }
 }
@@ -138,10 +319,24 @@ const _: () = assert!(std::mem::offset_of!(AActor, collision_tag) == 376);
 const _: () = assert!(std::mem::offset_of!(AActor, col_location) == 432);
 const _: () = assert!(std::mem::offset_of!(AActor, latent_float) == 324);
 const _: () = assert!(std::mem::offset_of!(AActor, velocity) == 444);
+const _: () = assert!(std::mem::offset_of!(AActor, ip_speed) == 456);
 const _: () = assert!(std::mem::offset_of!(AActor, acceleration) == 460);
 const _: () = assert!(std::mem::offset_of!(AActor, region) == 264);
 const _: () = assert!(std::mem::offset_of!(AActor, mass) == 716);
 const _: () = assert!(std::mem::offset_of!(AActor, buoyancy) == 720);
+const _: () = assert!(std::mem::offset_of!(AActor, instigator) == 232);
+const _: () = assert!(std::mem::offset_of!(AActor, old_location) == 420);
+const _: () = assert!(std::mem::offset_of!(AActor, desired_rotation) == 736);
+const _: () = assert!(std::mem::offset_of!(AActor, net_priority) == 788);
+const _: () = assert!(std::mem::offset_of!(AActor, base) == 256);
+const _: () = assert!(std::mem::offset_of!(AActor, rotation_rate) == 724);
+const _: () = assert!(std::mem::offset_of!(AActor, pending_touch) == 756);
+const _: () = assert!(std::mem::offset_of!(AActor, saved_pre_pivot_z) == 548);
+const _: () = assert!(std::mem::offset_of!(AActor, owner) == 88);
+const _: () = assert!(std::mem::offset_of!(AActor, tag) == 216);
+const _: () = assert!(std::mem::offset_of!(AActor, standing_count) == 316);
+const _: () = assert!(std::mem::offset_of!(AActor, touching) == 336);
+const _: () = assert!(std::mem::offset_of!(AActor, role) == 81);
 
 /// Layout mirror of C++ `APawn` (1912 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -152,9 +347,13 @@ pub struct APawn {
     _bits_888: u8,
     _bits_889: u8,
     _bits_890: u8,
-    _pad_891: [u8; 21],
+    _bits_891: u8,
+    _bits_892: u8,
+    _pad_893: [u8; 15],
+    pub avg_physics_time: f32,
     pub foot_region: FPointRegion,
-    _pad_928: [u8; 20],
+    pub head_region: FPointRegion,
+    pub move_timer: f32,
     pub move_target: *mut c_void,
     _pad_956: [u8; 8],
     pub destination: FVector,
@@ -163,20 +362,54 @@ pub struct APawn {
     _pad_992: [u8; 4],
     pub melee_range: f32,
     pub ground_speed: f32,
-    _pad_1004: [u8; 8],
+    pub water_speed: f32,
+    pub air_speed: f32,
     pub accel_rate: f32,
     pub jump_z: f32,
     pub max_step_height: f32,
     pub max_mount_height: f32,
-    _pad_1028: [u8; 12],
+    pub step_height: f32,
+    pub step_width: f32,
+    pub air_control: f32,
     pub min_hit_wall: f32,
-    _pad_1044: [u8; 132],
+    pub visibility: u8,
+    _pad_1045: [u8; 3],
+    pub alertness: f32,
+    pub stimulus: f32,
+    pub sight_radius: f32,
+    pub peripheral_vision: f32,
+    pub hearing_threshold: f32,
+    pub last_seen_pos: FVector,
+    pub last_seeing_pos: FVector,
+    pub last_seen_time: f32,
+    pub enemy: *mut c_void,
+    pub weapon: *mut c_void,
+    _pad_1112: [u8; 40],
+    pub view_rotation: FRotator,
+    _pad_1164: [u8; 12],
     pub base_eye_height: f32,
-    _pad_1180: [u8; 84],
+    pub eye_height: f32,
+    _pad_1184: [u8; 80],
     pub reduced_damage_type: [u8; 4],
-    _pad_1268: [u8; 264],
+    _pad_1268: [u8; 20],
+    pub skill: f32,
+    pub special_goal: *mut c_void,
+    _pad_1300: [u8; 4],
+    pub noise1spot: FVector,
+    pub noise1time: f32,
+    pub noise1other: *mut c_void,
+    pub noise1loudness: f32,
+    pub noise2spot: FVector,
+    pub noise2time: f32,
+    pub noise2other: *mut c_void,
+    pub noise2loudness: f32,
+    _pad_1360: [u8; 4],
+    pub next_pawn: *mut c_void,
+    _pad_1372: [u8; 160],
     pub route_cache: [*mut c_void; 16],
-    _pad_1660: [u8; 252],
+    _pad_1660: [u8; 132],
+    pub player_replication_info: *mut c_void,
+    _pad_1800: [u8; 112],
 }
 
 impl APawn {
@@ -201,6 +434,18 @@ impl APawn {
             self._bits_888 |= 1 << 4;
         } else {
             self._bits_888 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_hit_sloped_wall(&self) -> bool {
+        self._bits_888 & (1 << 5) != 0
+    }
+
+    pub fn set_b_hit_sloped_wall(&mut self, value: bool) {
+        if value {
+            self._bits_888 |= 1 << 5;
+        } else {
+            self._bits_888 &= !(1 << 5);
         }
     }
 
@@ -252,6 +497,30 @@ impl APawn {
         }
     }
 
+    pub fn b_reduced_speed(&self) -> bool {
+        self._bits_889 & (1 << 3) != 0
+    }
+
+    pub fn set_b_reduced_speed(&mut self, value: bool) {
+        if value {
+            self._bits_889 |= 1 << 3;
+        } else {
+            self._bits_889 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_can_strafe(&self) -> bool {
+        self._bits_889 & (1 << 1) != 0
+    }
+
+    pub fn set_b_can_strafe(&mut self, value: bool) {
+        if value {
+            self._bits_889 |= 1 << 1;
+        } else {
+            self._bits_889 &= !(1 << 1);
+        }
+    }
+
     pub fn b_can_open_doors(&self) -> bool {
         self._bits_890 & (1 << 0) != 0
     }
@@ -299,6 +568,66 @@ impl APawn {
             self._bits_890 &= !(1 << 4);
         }
     }
+
+    pub fn b_lo_sflag(&self) -> bool {
+        self._bits_890 & (1 << 3) != 0
+    }
+
+    pub fn set_b_lo_sflag(&mut self, value: bool) {
+        if value {
+            self._bits_890 |= 1 << 3;
+        } else {
+            self._bits_890 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_avoid_ledges(&self) -> bool {
+        self._bits_890 & (1 << 6) != 0
+    }
+
+    pub fn set_b_avoid_ledges(&mut self, value: bool) {
+        if value {
+            self._bits_890 |= 1 << 6;
+        } else {
+            self._bits_890 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_stop_at_ledges(&self) -> bool {
+        self._bits_890 & (1 << 7) != 0
+    }
+
+    pub fn set_b_stop_at_ledges(&mut self, value: bool) {
+        if value {
+            self._bits_890 |= 1 << 7;
+        } else {
+            self._bits_890 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_jump_off_pawn(&self) -> bool {
+        self._bits_891 & (1 << 0) != 0
+    }
+
+    pub fn set_b_jump_off_pawn(&mut self, value: bool) {
+        if value {
+            self._bits_891 |= 1 << 0;
+        } else {
+            self._bits_891 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_no_zone_friction(&self) -> bool {
+        self._bits_892 & (1 << 1) != 0
+    }
+
+    pub fn set_b_no_zone_friction(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 1;
+        } else {
+            self._bits_892 &= !(1 << 1);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<APawn>() == 1912);
@@ -311,12 +640,73 @@ const _: () = assert!(std::mem::offset_of!(APawn, move_target) == 948);
 const _: () = assert!(std::mem::offset_of!(APawn, route_cache) == 1532);
 const _: () = assert!(std::mem::offset_of!(APawn, destination) == 964);
 const _: () = assert!(std::mem::offset_of!(APawn, accel_rate) == 1012);
+const _: () = assert!(std::mem::offset_of!(APawn, air_control) == 1036);
 const _: () = assert!(std::mem::offset_of!(APawn, desired_speed) == 988);
 const _: () = assert!(std::mem::offset_of!(APawn, max_mount_height) == 1024);
 const _: () = assert!(std::mem::offset_of!(APawn, min_hit_wall) == 1040);
 const _: () = assert!(std::mem::offset_of!(APawn, foot_region) == 912);
+const _: () = assert!(std::mem::offset_of!(APawn, head_region) == 928);
 const _: () = assert!(std::mem::offset_of!(APawn, melee_range) == 996);
 const _: () = assert!(std::mem::offset_of!(APawn, reduced_damage_type) == 1264);
+const _: () = assert!(std::mem::offset_of!(APawn, enemy) == 1096);
+const _: () = assert!(std::mem::offset_of!(APawn, weapon) == 1104);
+const _: () = assert!(std::mem::offset_of!(APawn, special_goal) == 1292);
+const _: () = assert!(std::mem::offset_of!(APawn, next_pawn) == 1364);
+const _: () = assert!(std::mem::offset_of!(APawn, noise1other) == 1320);
+const _: () = assert!(std::mem::offset_of!(APawn, noise2other) == 1348);
+const _: () = assert!(std::mem::offset_of!(APawn, player_replication_info) == 1792);
+const _: () = assert!(std::mem::offset_of!(APawn, visibility) == 1044);
+const _: () = assert!(std::mem::offset_of!(APawn, alertness) == 1048);
+const _: () = assert!(std::mem::offset_of!(APawn, stimulus) == 1052);
+const _: () = assert!(std::mem::offset_of!(APawn, sight_radius) == 1056);
+const _: () = assert!(std::mem::offset_of!(APawn, peripheral_vision) == 1060);
+const _: () = assert!(std::mem::offset_of!(APawn, hearing_threshold) == 1064);
+const _: () = assert!(std::mem::offset_of!(APawn, skill) == 1288);
+const _: () = assert!(std::mem::offset_of!(APawn, last_seen_pos) == 1068);
+const _: () = assert!(std::mem::offset_of!(APawn, last_seeing_pos) == 1080);
+const _: () = assert!(std::mem::offset_of!(APawn, last_seen_time) == 1092);
+const _: () = assert!(std::mem::offset_of!(APawn, noise1spot) == 1304);
+const _: () = assert!(std::mem::offset_of!(APawn, noise1time) == 1316);
+const _: () = assert!(std::mem::offset_of!(APawn, noise1loudness) == 1328);
+const _: () = assert!(std::mem::offset_of!(APawn, noise2spot) == 1332);
+const _: () = assert!(std::mem::offset_of!(APawn, noise2time) == 1344);
+const _: () = assert!(std::mem::offset_of!(APawn, noise2loudness) == 1356);
+const _: () = assert!(std::mem::offset_of!(APawn, move_timer) == 944);
+const _: () = assert!(std::mem::offset_of!(APawn, air_speed) == 1008);
+const _: () = assert!(std::mem::offset_of!(APawn, water_speed) == 1004);
+const _: () = assert!(std::mem::offset_of!(APawn, avg_physics_time) == 908);
+const _: () = assert!(std::mem::offset_of!(APawn, step_height) == 1028);
+const _: () = assert!(std::mem::offset_of!(APawn, step_width) == 1032);
+const _: () = assert!(std::mem::offset_of!(APawn, view_rotation) == 1152);
+const _: () = assert!(std::mem::offset_of!(APawn, eye_height) == 1180);
+
+/// Layout mirror of C++ `APlayerPawn` (2928 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct APlayerPawn {
+    pub base: APawn,
+    _pad_1912: [u8; 248],
+    _bits_2160: u8,
+    _pad_2161: [u8; 767],
+}
+
+impl APlayerPawn {
+    pub fn b_auto_jump(&self) -> bool {
+        self._bits_2160 & (1 << 4) != 0
+    }
+
+    pub fn set_b_auto_jump(&mut self, value: bool) {
+        if value {
+            self._bits_2160 |= 1 << 4;
+        } else {
+            self._bits_2160 &= !(1 << 4);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<APlayerPawn>() == 2928);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, base) == 0);
 
 /// Layout mirror of C++ `AWind` (928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -367,16 +757,24 @@ const _: () = assert!(std::mem::offset_of!(AWind, fluc_vel) == 916);
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ULevel {
-    _pad_0: [u8; 224],
+    _pad_0: [u8; 80],
+    pub actors: [u8; 24],
+    _pad_104: [u8; 120],
     pub reach_specs: TArrayRaw,
     pub model: *mut c_void,
     _pad_248: [u8; 168],
     pub hash: *mut c_void,
     pub brush_tracker: *mut c_void,
-    _pad_432: [u8; 4192],
+    _pad_432: [u8; 4156],
+    pub move_cycles: i32,
+    pub num_moves: i32,
+    _pad_4596: [u8; 28],
 }
 
 const _: () = assert!(size_of::<ULevel>() == 4624);
+const _: () = assert!(std::mem::offset_of!(ULevel, actors) == 80);
+const _: () = assert!(std::mem::offset_of!(ULevel, num_moves) == 4592);
+const _: () = assert!(std::mem::offset_of!(ULevel, move_cycles) == 4588);
 const _: () = assert!(std::mem::offset_of!(ULevel, model) == 240);
 const _: () = assert!(std::mem::offset_of!(ULevel, reach_specs) == 224);
 const _: () = assert!(std::mem::offset_of!(ULevel, hash) == 416);
@@ -761,6 +1159,168 @@ pub struct AInfo {
 const _: () = assert!(size_of::<AInfo>() == 888);
 const _: () = assert!(std::mem::offset_of!(AInfo, base) == 0);
 
+/// Layout mirror of C++ `AKeypoint` (888 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AKeypoint {
+    pub base: AActor,
+}
+
+const _: () = assert!(size_of::<AKeypoint>() == 888);
+const _: () = assert!(std::mem::offset_of!(AKeypoint, base) == 0);
+
+/// Layout mirror of C++ `AInterpolationPoint` (1680 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AInterpolationPoint {
+    pub base: AKeypoint,
+    _pad_888: [u8; 4],
+    _bits_892: u8,
+    _pad_893: [u8; 3],
+    pub pause: [f32; 8],
+    pub view_target_tag: [[u8; 4]; 8],
+    _bits_960: u8,
+    _pad_961: [u8; 3],
+    pub view_target: [*mut c_void; 8],
+    _pad_1028: [u8; 232],
+    pub prev: *mut c_void,
+    pub next: *mut c_void,
+    pub start_control_point: FVector,
+    pub end_control_point: FVector,
+    _pad_1300: [u8; 12],
+    pub smoothing: f32,
+    pub desired_speed: f32,
+    pub path_dist: f32,
+    _pad_1324: [u8; 356],
+}
+
+impl AInterpolationPoint {
+    pub fn b_end_of_path(&self) -> bool {
+        self._bits_892 & (1 << 0) != 0
+    }
+
+    pub fn set_b_end_of_path(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 0;
+        } else {
+            self._bits_892 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_instant_next_path(&self) -> bool {
+        self._bits_892 & (1 << 1) != 0
+    }
+
+    pub fn set_b_instant_next_path(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 1;
+        } else {
+            self._bits_892 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_face_move_direction(&self) -> bool {
+        self._bits_892 & (1 << 2) != 0
+    }
+
+    pub fn set_b_face_move_direction(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 2;
+        } else {
+            self._bits_892 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_constant_speed(&self) -> bool {
+        self._bits_892 & (1 << 5) != 0
+    }
+
+    pub fn set_b_constant_speed(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 5;
+        } else {
+            self._bits_892 &= !(1 << 5);
+        }
+    }
+
+    pub fn b_new_rotation_smoothing(&self) -> bool {
+        self._bits_960 & (1 << 0) != 0
+    }
+
+    pub fn set_b_new_rotation_smoothing(&mut self, value: bool) {
+        if value {
+            self._bits_960 |= 1 << 0;
+        } else {
+            self._bits_960 &= !(1 << 0);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<AInterpolationPoint>() == 1680);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, pause) == 896);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, view_target_tag) == 928);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, view_target) == 964);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, prev) == 1260);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, next) == 1268);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, start_control_point) == 1276);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, end_control_point) == 1288);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, smoothing) == 1312);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, desired_speed) == 1316);
+const _: () = assert!(std::mem::offset_of!(AInterpolationPoint, path_dist) == 1320);
+
+/// Layout mirror of C++ `AInterpolationManager` (1012 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AInterpolationManager {
+    pub base: AInfo,
+    pub dest: *mut c_void,
+    pub last: *mut c_void,
+    pub phys_alpha: f32,
+    pub phys_rate: f32,
+    pub remaining_pause: f32,
+    pub start_pause: f32,
+    pub pause_num: i32,
+    _pad_924: [u8; 36],
+    pub turn_rate_x: FVector,
+    pub turn_rate_z: FVector,
+    pub old_desired_x: FVector,
+    pub old_desired_z: FVector,
+    _bits_1008: u8,
+    _pad_1009: [u8; 3],
+}
+
+impl AInterpolationManager {
+    pub fn b_instant_move(&self) -> bool {
+        self._bits_1008 & (1 << 0) != 0
+    }
+
+    pub fn set_b_instant_move(&mut self, value: bool) {
+        if value {
+            self._bits_1008 |= 1 << 0;
+        } else {
+            self._bits_1008 &= !(1 << 0);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<AInterpolationManager>() == 1012);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, dest) == 888);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, last) == 896);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, phys_alpha) == 904);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, phys_rate) == 908);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, remaining_pause) == 912);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, start_pause) == 916);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, pause_num) == 920);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, turn_rate_x) == 960);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, turn_rate_z) == 972);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, old_desired_x) == 984);
+const _: () = assert!(std::mem::offset_of!(AInterpolationManager, old_desired_z) == 996);
+
 /// Layout mirror of C++ `AZoneInfo` (1320 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C, packed(4))]
@@ -770,7 +1330,10 @@ pub struct AZoneInfo {
     _pad_888: [u8; 4],
     pub zone_gravity: FVector,
     pub zone_velocity: FVector,
-    _pad_916: [u8; 28],
+    pub zone_ground_friction: f32,
+    pub zone_fluid_friction: f32,
+    pub zone_terminal_velocity: f32,
+    _pad_928: [u8; 16],
     pub damage_type: [u8; 4],
     _pad_948: [u8; 84],
     _bits_1032: u8,
@@ -820,6 +1383,9 @@ const _: () = assert!(size_of::<AZoneInfo>() == 1320);
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, base) == 0);
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_gravity) == 892);
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_velocity) == 904);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_fluid_friction) == 920);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_terminal_velocity) == 924);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_ground_friction) == 916);
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, damage_type) == 944);
 
 /// Layout mirror of C++ `AWarpZoneMarker` (1308 bytes). Only the members listed in
@@ -859,6 +1425,18 @@ impl ADecoration {
             self._bits_896 |= 1 << 0;
         } else {
             self._bits_896 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_bobbing(&self) -> bool {
+        self._bits_896 & (1 << 3) != 0
+    }
+
+    pub fn set_b_bobbing(&mut self, value: bool) {
+        if value {
+            self._bits_896 |= 1 << 3;
+        } else {
+            self._bits_896 &= !(1 << 3);
         }
     }
 }
@@ -904,6 +1482,7 @@ mod layout_tests {
         assert_eq!(size_of::<FRotator>(), 12);
         assert_eq!(size_of::<AActor>(), 888);
         assert_eq!(size_of::<APawn>(), 1912);
+        assert_eq!(size_of::<APlayerPawn>(), 2928);
         assert_eq!(size_of::<AWind>(), 928);
         assert_eq!(size_of::<ULevel>(), 4624);
         assert_eq!(size_of::<ANavigationPoint>(), 1284);
@@ -916,6 +1495,9 @@ mod layout_tests {
         assert_eq!(size_of::<AMover>(), 1584);
         assert_eq!(size_of::<FPointRegion>(), 16);
         assert_eq!(size_of::<AInfo>(), 888);
+        assert_eq!(size_of::<AKeypoint>(), 888);
+        assert_eq!(size_of::<AInterpolationPoint>(), 1680);
+        assert_eq!(size_of::<AInterpolationManager>(), 1012);
         assert_eq!(size_of::<AZoneInfo>(), 1320);
         assert_eq!(size_of::<AWarpZoneMarker>(), 1308);
         assert_eq!(size_of::<ADecoration>(), 948);

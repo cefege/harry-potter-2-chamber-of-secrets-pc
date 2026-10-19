@@ -1,8 +1,9 @@
 #!/bin/sh
-# Regenerates crates/hp2-engine/tests/fixtures/physic_scripted.txt.
+# Regenerates the scripted and family physics fixtures under
+# crates/hp2-engine/tests/fixtures/.
 # Takes the ORIGINAL UnPhysic.cpp and UnMath.h from the pinned git ref (default
-# 58a73d4, the pre-port source), applies two WORK-copy shims (the APawn::physWalking
-# body and the FRotator::Vector body call scripted harness hooks), compiles them -O3
+# 58a73d4, the pre-port source), applies a WORK-copy FRotator::Vector shim to the
+# scripted harness hook, compiles them -O3
 # with the real flags from compile_commands.json, and links them with
 # physic_harness.cpp, which scripts the engine services the bodies call.
 # Output is written to a temp file and renamed into place only on success.
@@ -55,12 +56,18 @@ def shim(path, head, body):
     e = match_brace(s, b)
     open(path, 'w', newline='').write(s[:b] + body + s[e + 1:])
 
-shim(work + '/HarryPotter2/Unreal/Engine/Src/UnPhysic.cpp',
-     'void APawn::physWalking(FLOAT deltaTime, INT Iterations)',
-     '{\n\tvoid hp2_harness_phys_walking( APawn* Pawn, FLOAT RemainingTime, INT Iterations );\n\thp2_harness_phys_walking( this, deltaTime, Iterations );\n}')
 shim(work + '/HarryPotter2/Unreal/Core/Inc/UnMath.h',
      'inline FVector FRotator::Vector()',
      '{\n\tFVector hp2_harness_rotation_vector( const FRotator& Rot );\n\treturn hp2_harness_rotation_vector( *this );\n}')
+
+src = open(work + '/HarryPotter2/Unreal/Core/Src/UnMath.cpp', newline='').read()
+head = 'FRotator FCoords::OrthoRotation() const'
+assert src.count(head) == 1, src.count(head)
+k = src.index(head)
+b = src.index('{', k)
+e = match_brace(src, b)
+open(work + '/OrthoRotation.cpp', 'w', newline='').write(
+    '#include "CorePrivate.h"\n' + src[k:e + 1] + '\n')
 PY
 
 python3 - "$CC_DB" "$REPO" "$WORK" > "$WORK/flags.txt" <<'PY'
@@ -79,11 +86,12 @@ PY
 FLAGS=$(cat "$WORK/flags.txt")
 cd "$WORK/HarryPotter2/Unreal/Engine/Src"
 eval "c++ $FLAGS -O3 -g -c UnPhysic.cpp -o $WORK/UnPhysic.o"
+eval "c++ $FLAGS -O3 -g -c $WORK/OrthoRotation.cpp -o $WORK/OrthoRotation.o"
 eval "c++ $FLAGS -O3 -g -fno-access-control -c $REPO/Build/physic_fixture_harness/physic_harness.cpp -o $WORK/harness.o"
 # Stub every undefined symbol except libc/libc++ ones and those the harness defines.
-nm -g --defined-only "$WORK/harness.o" | awk '{print $NF}' | sed 's/^_//' | sort > "$WORK/defined.txt"
-nm -u "$WORK/UnPhysic.o" | awk '{print $NF}' | sed 's/^_//' \
-  | grep -v -E '^(setjmp|__cxa_|__gxx|__stack_chk|_Unwind|_ZSt9|_ZTVN10__cxx|_ZTIPc|_ZTIi)' \
+nm -g --defined-only "$WORK/harness.o" "$WORK/OrthoRotation.o" | awk 'NF && $NF !~ /:$/ {print $NF}' | sed 's/^_//' | sort > "$WORK/defined.txt"
+nm -u "$WORK/UnPhysic.o" "$WORK/OrthoRotation.o" | awk 'NF && $NF !~ /:$/ {print $NF}' | sed 's/^_//' \
+  | grep -v -E '^(setjmp|__cxa_|__gxx|__stack_chk|_Unwind|_ZSt9|_ZTVN10__cxx|_ZTIPc|_ZTIi|_Z7appSqrtd$|GMath$)' \
   | sort | comm -23 - "$WORK/defined.txt" > "$WORK/syms.txt"
 python3 -c "
 import sys
@@ -91,8 +99,12 @@ syms=[l.strip() for l in open(sys.argv[1]) if l.strip()]
 print(''.join(f'__attribute__((used)) char stub{i}[64] __asm__(\"_{s}\");' + chr(10) for i,s in enumerate(syms)))
 " "$WORK/syms.txt" > "$WORK/stubs.cpp"
 c++ -c "$WORK/stubs.cpp" -o "$WORK/stubs.o"
-c++ "$WORK/harness.o" "$WORK/UnPhysic.o" "$WORK/stubs.o" -o "$WORK/physic_harness"
-"$WORK/physic_harness" > "$WORK/out.txt"
-cp "$WORK/out.txt" "$TMP_OUT"
-mv "$TMP_OUT" "$OUT"
-echo "wrote $(wc -l < "$OUT") records"
+c++ "$WORK/harness.o" "$WORK/UnPhysic.o" "$WORK/OrthoRotation.o" "$WORK/stubs.o" -o "$WORK/physic_harness"
+FIXTURES=$REPO/crates/hp2-engine/tests/fixtures
+for FAM in scripted motion walk fall swim move dispatch interp; do
+	if [ "$FAM" = scripted ]; then OUT=$FIXTURES/physic_scripted.txt; else OUT=$FIXTURES/physic_$FAM.txt; fi
+	TMP_OUT=$OUT.tmp
+	"$WORK/physic_harness" "$FAM" > "$TMP_OUT"
+	mv "$TMP_OUT" "$OUT"
+	echo "wrote $FAM: $(wc -l < "$OUT") records"
+done

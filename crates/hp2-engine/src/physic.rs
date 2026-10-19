@@ -4,6 +4,12 @@
 //! Field access goes through the generated `hp2_abi` mirrors. Engine calls go
 //! through `Hp2PhysicServices` (filled by `Hp2PhysicServices.cpp`). The
 //! bitfield flags for `fixedTurn` are passed in by the C++ shell.
+pub mod dispatch;
+pub mod fall;
+pub mod interp;
+pub mod motion;
+pub mod swim;
+pub mod walk;
 
 use std::ffi::c_void;
 
@@ -71,10 +77,85 @@ pub struct Hp2PhysicServices {
         unsafe extern "C" fn(actor: *mut c_void, normal: *const FVector, hit_actor: *mut c_void),
     /// `AActor::eventLanded(normal)`.
     pub event_landed: unsafe extern "C" fn(actor: *mut c_void, normal: *const FVector),
-    /// `setPhysics(physics, floor)`.
-    pub set_physics: unsafe extern "C" fn(actor: *mut c_void, physics: i32, floor: *mut c_void),
-    /// `APawn::physWalking(remaining, iterations)`.
-    pub phys_walking: unsafe extern "C" fn(actor: *mut c_void, remaining: f32, iterations: i32),
+    /// `GetLevel()->Model->PointRegion(Level, *location).Zone` (`AActor::findWaterLine`).
+    pub point_region_zone:
+        unsafe extern "C" fn(actor: *mut c_void, location: *const FVector) -> *mut c_void,
+    /// `debugf(TEXT("%s flew out of the world!"), GetName())`.
+    pub debugf_flew_out: unsafe extern "C" fn(actor: *mut c_void),
+    /// `GetLevel()->DestroyActor(actor)`.
+    pub destroy_actor: unsafe extern "C" fn(actor: *mut c_void),
+    /// `AActor::eventFalling()`.
+    pub event_falling: unsafe extern "C" fn(actor: *mut c_void),
+    /// `AProjectile::MaxSpeed` read through the class (`physProjectile`).
+    pub projectile_max_speed: unsafe extern "C" fn(actor: *mut c_void) -> f32,
+    /// `debugf(TEXT("%s fell out of the world!"), GetName())`.
+    pub log_fell_out_of_world: unsafe extern "C" fn(actor: *mut c_void),
+    /// `AActor::eventFellOutOfWorld()`.
+    pub event_fell_out_of_world: unsafe extern "C" fn(actor: *mut c_void),
+    /// `FVector::Rotation()`.
+    pub rotation_from_vector: unsafe extern "C" fn(vector: *const FVector, out: *mut FRotator),
+    /// First live actor in the level whose `Tag` matches the requested tag.
+    pub find_view_target:
+        unsafe extern "C" fn(actor: *mut c_void, tag: *const [u8; 4]) -> *mut c_void,
+    /// `AInterpolationManager::eventUpdateCamera(old_alpha)`.
+    pub event_update_camera: unsafe extern "C" fn(manager: *mut c_void, old_alpha: f32),
+    /// `AInterpolationPoint::eventInterpolateEnd(manager, forward)`.
+    pub event_interpolate_end:
+        unsafe extern "C" fn(point: *mut c_void, manager: *mut c_void, forward: i32),
+    /// `AInterpolationManager::eventFinishedInterpolation(NULL)`.
+    pub event_finished_interpolation: unsafe extern "C" fn(manager: *mut c_void),
+    /// `AActor::physTrailer(delta_time)`.
+    pub phys_trailer: unsafe extern "C" fn(actor: *mut c_void, delta_time: f32),
+    /// `AActor::physMovingBrush(delta_time)`.
+    pub phys_moving_brush: unsafe extern "C" fn(actor: *mut c_void, delta_time: f32),
+    /// `PendingTouch->eventPostTouch(this)`; `touched` is the receiver.
+    pub event_post_touch: unsafe extern "C" fn(touched: *mut c_void, toucher: *mut c_void),
+    /// `IsProbing(NAME_EndedRotation)`.
+    pub is_probing_ended_rotation: unsafe extern "C" fn(actor: *mut c_void) -> i32,
+    /// `AActor::eventEndedRotation()`.
+    pub event_ended_rotation: unsafe extern "C" fn(actor: *mut c_void),
+    /// `GMath.SinTab(i)`; the C++ side applies the table masking.
+    pub sin_tab: unsafe extern "C" fn(i: i32) -> f32,
+    /// `GMath.CosTab(i)`.
+    pub cos_tab: unsafe extern "C" fn(i: i32) -> f32,
+    /// `IsProbing(NAME_MayFall)`.
+    pub is_probing_may_fall: unsafe extern "C" fn(actor: *mut c_void) -> i32,
+    /// `APawn::eventMayFall()`.
+    pub event_may_fall: unsafe extern "C" fn(actor: *mut c_void),
+    /// `APawn::eventDoJump(1.f)`.
+    pub event_do_jump: unsafe extern "C" fn(actor: *mut c_void, value: f32),
+    /// `GetLevel()->FarMoveActor(actor, old_location, 0, 0)`.
+    pub far_move_actor: unsafe extern "C" fn(actor: *mut c_void, location: *const FVector),
+    /// `debugf(TEXT("%s fell out of the world!"), GetName())`.
+    pub debugf_fell_out: unsafe extern "C" fn(actor: *mut c_void),
+    /// `GetLevel()->SingleLineCheck(..., NULL, ...)`; owner only locates level.
+    pub single_line_check_no_source: unsafe extern "C" fn(
+        actor: *mut c_void,
+        hit: *mut FCheckResult,
+        end: *const FVector,
+        start: *const FVector,
+        trace: i32,
+        extent: *const FVector,
+    ) -> i32,
+
+    /// Snapshot fields needed by the original `AActor::physTrailer` body.
+    pub trailer_state: unsafe extern "C" fn(actor: *mut c_void, out: *mut c_void),
+    /// `UMesh::GetBoneCoords(owner, bone)` for trailer attachment points.
+    pub mesh_bone_coords:
+        unsafe extern "C" fn(mesh: *mut c_void, owner: *mut c_void, bone: i32, out: *mut c_void),
+    /// `FarMoveActor(actor, location, 0, 1)` used by physTrailer.
+    pub trailer_far_move_actor: unsafe extern "C" fn(actor: *mut c_void, location: *const FVector),
+}
+/// Plain snapshot returned by the C++ adapter for `AActor::physTrailer`.
+#[repr(C)]
+struct TrailerState {
+    owner: *mut c_void,
+    mesh: *mut c_void,
+    pre_pivot: [f32; 3],
+    mass: f32,
+    draw_type: i32,
+    anim_bone: i32,
+    flags: u32,
 }
 
 /// `FVector(x, y, z)`.
@@ -644,9 +725,9 @@ pub unsafe fn process_landed(
 
         if (*this).physics == PHYS_FALLING {
             if is_a(svc, this_v, CLASS_PAWN) {
-                (svc.set_physics)(this_v, PHYS_WALKING as i32, hit_actor);
+                dispatch::set_physics(this, svc, PHYS_WALKING, hit_actor as *mut AActor);
             } else {
-                (svc.set_physics)(this_v, PHYS_NONE as i32, hit_actor);
+                dispatch::set_physics(this, svc, PHYS_NONE, hit_actor as *mut AActor);
                 (*this).velocity = ZERO;
             }
         }
@@ -654,7 +735,7 @@ pub unsafe fn process_landed(
         if (*this).physics == PHYS_WALKING && is_a(svc, this_v, CLASS_PAWN) {
             (*this).acceleration = safe_normal((*this).acceleration);
             if remaining_time > 0.01 {
-                (svc.phys_walking)(this_v, remaining_time, iterations);
+                walk::phys_walking(this as *mut APawn, svc, remaining_time, iterations);
             }
         }
     }

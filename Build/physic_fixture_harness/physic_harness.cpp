@@ -12,6 +12,7 @@
 #include <cstring>
 #include <cmath>
 #include "EnginePrivate.h"
+#include "UnMesh.h"
 
 // ---- deterministic streams -------------------------------------------------
 
@@ -68,6 +69,20 @@ static uint64_t fnv1a( const char* P, size_t N )
 		H *= 1099511628211ULL;
 	}
 	return H;
+}
+
+class HarnessOutputDevice : public FOutputDevice
+{
+public:
+	void Serialize( const TCHAR*, EName ) { lg( "debugf\n" ); }
+};
+
+static HarnessOutputDevice g_harness_log;
+FOutputDevice* GLog = &g_harness_log;
+
+void FOutputDevice::Logf( const TCHAR*, ... )
+{
+	lg( "debugf\n" );
 }
 
 // ---- objects ------------------------------------------------------------------
@@ -139,24 +154,37 @@ void AActor::SetBase( AActor* NewBase, int bNotifyActor )
 	lg( "set_base %d\n", pidx( NewBase ) );
 }
 
-static int g_tag_mount, g_tag_hitwall, g_tag_landed, g_tag_fell;
+static int g_tag_mount, g_tag_hitwall, g_tag_landed, g_tag_fell, g_tag_falling, g_tag_may_fall, g_tag_do_jump;
+static int g_tag_update_camera, g_tag_interpolate_end, g_tag_finished_interpolation;
 
 UFunction* UObject::FindFunctionChecked( FName InName, UBOOL Global )
 {
-	int32_t Idx, M, H, L, Fo;
+	int32_t Idx, M, H, L, Fo, Falling, MayFall, DoJump, UpdateCamera, InterpolateEnd, FinishedInterpolation;
 	memcpy( &Idx, &InName, sizeof Idx );
 	memcpy( &M, &ENGINE_Mount, sizeof M );
 	memcpy( &H, &ENGINE_HitWall, sizeof H );
 	memcpy( &L, &ENGINE_Landed, sizeof L );
 	memcpy( &Fo, &ENGINE_FellOutOfWorld, sizeof Fo );
+	memcpy( &Falling, &ENGINE_Falling, sizeof Falling );
+	memcpy( &MayFall, &ENGINE_MayFall, sizeof MayFall );
+	memcpy( &DoJump, &ENGINE_DoJump, sizeof DoJump );
+	memcpy( &UpdateCamera, &ENGINE_UpdateCamera, sizeof UpdateCamera );
+	memcpy( &InterpolateEnd, &ENGINE_InterpolateEnd, sizeof InterpolateEnd );
+	memcpy( &FinishedInterpolation, &ENGINE_FinishedInterpolation, sizeof FinishedInterpolation );
 	if( Idx == M ) return (UFunction*)&g_tag_mount;
 	if( Idx == H ) return (UFunction*)&g_tag_hitwall;
 	if( Idx == L ) return (UFunction*)&g_tag_landed;
 	if( Idx == Fo ) return (UFunction*)&g_tag_fell;
+	if( Idx == Falling ) return (UFunction*)&g_tag_falling;
+	if( Idx == MayFall ) return (UFunction*)&g_tag_may_fall;
+	if( Idx == DoJump ) return (UFunction*)&g_tag_do_jump;
+	if( Idx == UpdateCamera ) return (UFunction*)&g_tag_update_camera;
+	if( Idx == InterpolateEnd ) return (UFunction*)&g_tag_interpolate_end;
+	if( Idx == FinishedInterpolation ) return (UFunction*)&g_tag_finished_interpolation;
 	abort();
 }
 
-static void process_event_body( UFunction* Function, void* Parms, void* Result )
+static void process_event_body( UObject* Receiver, UFunction* Function, void* Parms, void* Result )
 {
 	if( Function == (UFunction*)&g_tag_mount )
 	{
@@ -175,13 +203,31 @@ static void process_event_body( UFunction* Function, void* Parms, void* Result )
 	}
 	else if( Function == (UFunction*)&g_tag_fell )
 		lg( "event_fell_out_of_world\n" );
+	else if( Function == (UFunction*)&g_tag_falling )
+		lg( "event_falling\n" );
+	else if( Function == (UFunction*)&g_tag_may_fall )
+		lg( "event_may_fall\n" );
+	else if( Function == (UFunction*)&g_tag_do_jump )
+		lg( "event_do_jump %08x\n", fbits( ((APlayerPawn_eventDoJump_Parms*)Parms)->F ) );
+	else if( Function == (UFunction*)&g_tag_update_camera )
+		lg( "event_update_camera %08x\n", fbits( ((AInterpolationManager_eventUpdateCamera_Parms*)Parms)->Pct ) );
+	else if( Function == (UFunction*)&g_tag_interpolate_end )
+	{
+		AInterpolationPoint_eventInterpolateEnd_Parms* P = (AInterpolationPoint_eventInterpolateEnd_Parms*)Parms;
+		lg( "event_interpolate_end %d %d %d\n", pidx( (AActor*)Receiver ), pidx( (AActor*)P->Other ), P->bForward );
+	}
+	else if( Function == (UFunction*)&g_tag_finished_interpolation )
+	{
+		AActor_eventFinishedInterpolation_Parms* P = (AActor_eventFinishedInterpolation_Parms*)Parms;
+		lg( "event_finished_interpolation %d %d\n", pidx( (AActor*)Receiver ), pidx( (AActor*)P->Other ) );
+	}
 	else
 		abort();
 }
 
 // Vtable entry for objects with g_obj_vt; body is shared with the member override.
-static void process_event_fn( AActor*, UFunction* F, void* P, void* R ) { process_event_body( F, P, R ); }
-void AActor::ProcessEvent( UFunction* F, void* P, void* R ) { process_event_body( F, P, R ); }
+static void process_event_fn( AActor* Self, UFunction* F, void* P, void* R ) { process_event_body( Self, F, P, R ); }
+void AActor::ProcessEvent( UFunction* F, void* P, void* R ) { process_event_body( this, F, P, R ); }
 
 FLOAT appFrand()
 {
@@ -193,6 +239,19 @@ FLOAT appFrand()
 DOUBLE appSqrt( DOUBLE Value )
 {
 	return sqrt( Value );
+}
+DOUBLE appAtan2( DOUBLE Y, DOUBLE X )
+{
+	return atan2( Y, X );
+}
+
+FRotator FVector::Rotation()
+{
+	FRotator R;
+	R.Yaw = (INT)(appAtan2(Y,X) * (FLOAT)MAXWORD / (2.f*PI));
+	R.Pitch = (INT)(appAtan2(Z,appSqrt(X*X+Y*Y)) * (FLOAT)MAXWORD / (2.f*PI));
+	R.Roll = 0;
+	return R;
 }
 
 // Copied from UnMath.cpp (FVector::SafeNormal) so the harness builds the same
@@ -218,11 +277,6 @@ FVector hp2_harness_rotation_vector( const FRotator& Rot )
 	return FVector( X, Y, Z );
 }
 
-// Target of the WORK-copy shim in APawn::physWalking (see gen_physic.sh).
-void hp2_harness_phys_walking( APawn* Pawn, FLOAT RemainingTime, INT Iterations )
-{
-	lg( "phys_walking %08x %d\n", fbits( RemainingTime ), Iterations );
-}
 
 // Scripted hit: time, normal, location, actor. Draw order is fixed.
 static void scripted_hit( FCheckResult& Hit )
@@ -246,29 +300,131 @@ static void scripted_hit( FCheckResult& Hit )
 	lg( "hit %08x %08x %08x %08x %08x %08x %08x %d\n", fbits( T ), fbits( Nx ), fbits( Ny ), fbits( Nz ), fbits( Lx ), fbits( Ly ), fbits( Lz ), pidx( A ) );
 }
 
+static int g_walk_mode;
+static int g_walk_move_calls;
+static int g_walk_slc_calls;
 // ULevel virtual hooks. Slots are filled from the member-pointer offsets.
 static void* g_vt[4096];
 static void* g_obj_vt[4096];  // vptr target for subject/pool/zone objects (ProcessEvent slot only)
+static void* g_mesh_vt[4096];
+static FCoords g_bone_coords;
+
 
 static UBOOL hook_move_actor( ULevel* Self, AActor* Actor, FVector Delta, FRotator NewRot, FCheckResult& Hit, UBOOL Test, UBOOL IgnorePawns, UBOOL bIgnoreBases, UBOOL bNoFail )
 {
-	UBOOL Ret = (sm_next( &g_svc ) % 4 == 0) ? 1 : 0;
+	UBOOL Ret;
+	if( g_walk_mode == 1 || g_walk_mode == 2 )
+		Ret = (g_walk_move_calls++ < 2) ? 1 : 0;
+	else if( g_walk_mode == 3 || g_walk_mode == 6 )
+		Ret = (g_walk_move_calls++ < 3) ? 1 : 0;
+	else if( g_walk_mode == 4 )
+	{
+		int Call = g_walk_move_calls++;
+		Ret = Call != 0;
+		if( Call == 0 )
+		{
+			Hit.Time = 0.5f;
+			Hit.Normal = FVector( 0.f, 0.f, 0.8f );
+			Hit.Location = FVector( 0.f, 0.f, 0.f );
+			Hit.Actor = g_pool[0];
+		}
+		else if( Call <= 3 )
+		{
+			Hit.Time = 1.f;
+			Hit.Normal = FVector( 0.f, 0.f, 0.f );
+			Hit.Location = FVector( 0.f, 0.f, 0.f );
+			Hit.Actor = NULL;
+		}
+	}
+	else if( g_walk_mode == 5 )
+	{
+		++g_walk_move_calls;
+		Actor->Physics = PHYS_Swimming;
+		Ret = 1;
+	}
+	else
+		Ret = (sm_next( &g_svc ) % 4 == 0) ? 1 : 0;
+	if( Ret && (g_walk_mode == 1 || g_walk_mode == 2 || g_walk_mode == 3 || g_walk_mode == 5 || g_walk_mode == 6) )
+	{
+		Hit.Time = 1.f;
+		Hit.Normal = FVector( 0.f, 0.f, 0.f );
+		Hit.Location = FVector( 0.f, 0.f, 0.f );
+		Hit.Actor = NULL;
+	}
 	lg( "move %08x %08x %08x %d %d %d %d\n", fbits( Delta.X ), fbits( Delta.Y ), fbits( Delta.Z ), NewRot.Pitch, NewRot.Yaw, NewRot.Roll, Ret );
-	if( !Ret )
+	if( !Ret && g_walk_mode != 4 )
 		scripted_hit( Hit );
 	return Ret;
+}
+
+static UBOOL hook_far_move_actor( ULevel* Self, AActor* Actor, FVector Dest, UBOOL Test, UBOOL bNoCheck )
+{
+	lg( "far %08x %08x %08x %d %d\n", fbits( Dest.X ), fbits( Dest.Y ), fbits( Dest.Z ), Test, bNoCheck );
+	Actor->Location = Dest;
+	return 1;
 }
 
 static UBOOL hook_slc( ULevel* Self, FCheckResult& Hit, AActor* Src, const FVector& End, const FVector& Start, DWORD TraceFlags, FVector Extent, BYTE NodeFlags )
 {
-	UBOOL Ret = (sm_next( &g_svc ) % 3 == 0) ? 1 : 0;
+	UBOOL Ret;
+	UBOOL Scripted = 0;
+	if( g_walk_mode == 1 )
+	{
+		int Call = g_walk_slc_calls++;
+		if( Call == 0 )
+		{
+			Scripted = 1;
+			Ret = 1;
+			Hit.Time = 2.f/3.f;
+			Hit.Normal = FVector( 0.f, 0.f, 0.9f );
+			Hit.Location = FVector( 0.f, 0.f, 0.f );
+			Hit.Actor = NULL;
+		}
+		else
+			Ret = (sm_next( &g_svc ) % 3 == 0) ? 1 : 0;
+	}
+	else if( g_walk_mode == 2 || g_walk_mode == 3 || g_walk_mode == 4 || g_walk_mode == 6 )
+	{
+		int Call = g_walk_slc_calls++;
+		Scripted = 1;
+		int HitCall = (g_walk_mode == 2) ? 1 : (g_walk_mode == 3 || g_walk_mode == 6) ? 3 : -1;
+		int FloorCall = (g_walk_mode == 2) ? 22 : (g_walk_mode == 3 ? 7 : (g_walk_mode == 6 ? 4 : 0));
+		if( Call == HitCall )
+		{
+			Ret = 0;
+			Hit.Time = 0.5f;
+			Hit.Normal = (g_walk_mode == 2) ? FVector( 1.f, 0.f, 0.f ) : FVector( 0.8f, 0.6f, 0.f );
+			Hit.Location = FVector( 0.f, 0.f, 0.f );
+			Hit.Actor = NULL;
+		}
+		else if( Call == FloorCall )
+		{
+			Ret = 1;
+			Hit.Time = 2.f/3.f;
+			Hit.Normal = FVector( 0.f, 0.f, 0.9f );
+			Hit.Location = FVector( 0.f, 0.f, 0.f );
+			Hit.Actor = NULL;
+		}
+		else
+		{
+			Ret = 1;
+			Hit.Time = 1.f;
+			Hit.Normal = FVector( 0.f, 0.f, 0.f );
+			Hit.Location = FVector( 0.f, 0.f, 0.f );
+			Hit.Actor = NULL;
+		}
+	}
+	else
+		Ret = (sm_next( &g_svc ) % 3 == 0) ? 1 : 0;
 	lg( "slc %d %08x %08x %08x %08x %08x %08x %08x %08x %08x %d\n", (TraceFlags == TRACE_AllBlocking) ? 1 : 0,
 		fbits( End.X ), fbits( End.Y ), fbits( End.Z ), fbits( Start.X ), fbits( Start.Y ), fbits( Start.Z ),
 		fbits( Extent.X ), fbits( Extent.Y ), fbits( Extent.Z ), Ret );
-	if( !Ret )
+	lg( "slc_source %d %d\n", pidx( Src ), Src == NULL );
+	if( !Ret && !Scripted )
 		scripted_hit( Hit );
 	return Ret;
 }
+
 
 // Vtable slot of a virtual member function pointer (ARM member-pointer ABI, see above).
 static size_t vt_slot( const void* Pm )
@@ -279,16 +435,25 @@ static size_t vt_slot( const void* Pm )
 		abort();
 	return W[0] / sizeof(void*);
 }
+static FCoords hook_get_bone_coords( const UMesh* Self, AActor* Owner, INT Bone )
+{
+	return g_bone_coords;
+}
+
 
 static void install_level()
 {
 	// Apple arm64 uses the ARM member-pointer ABI: word0 is the exact vtable byte
 	// offset and word1 bit0 marks a virtual member (checked by vt_slot).
 	auto PmMove = &ULevel::MoveActor;
+	auto PmFar = &ULevel::FarMoveActor;
 	auto PmSlc = &ULevel::SingleLineCheck;
 	auto PmPe = &UObject::ProcessEvent;
 	g_vt[vt_slot( &PmMove )] = (void*)&hook_move_actor;
+	g_vt[vt_slot( &PmFar )] = (void*)&hook_far_move_actor;
 	g_vt[vt_slot( &PmSlc )] = (void*)&hook_slc;
+	auto PmBone = &UMesh::GetBoneCoords;
+	g_mesh_vt[vt_slot( &PmBone )] = (void*)&hook_get_bone_coords;
 	g_obj_vt[vt_slot( &PmPe )] = (void*)&process_event_fn;
 	g_level = (ULevel*)calloc( 1, sizeof(ULevel) );
 	void** Vt = g_vt;
@@ -575,7 +740,108 @@ static void print_case( int F, uint64_t Seed, const uint32_t* In, const uint32_t
 	printf( "\n" );
 }
 
-int main()
+// The original PointRegion body is outside the linked UnPhysic.o. Keep the
+// swim fixture's zone selection deterministic while exercising findWaterLine.
+static char g_swim_model_mem[8192] __attribute__((aligned(16)));
+static AZoneInfo* g_swim_other_zone;
+FPointRegion UModel::PointRegion( AZoneInfo* Zone, FVector Location ) const
+{
+	(void)Zone;
+	int Water = Location.Z < 0.f;
+	lg( "point_region %08x %d\n", fbits( Location.X ), Water );
+	AZoneInfo* ZoneAtPoint = g_zone->bWaterZone ? (Water ? g_zone : g_swim_other_zone) : (Water ? g_swim_other_zone : g_zone);
+	return FPointRegion( ZoneAtPoint, 0, 0 );
+}
+
+
+// Route the original virtual performPhysics calls through their original bodies.
+// The fixture objects share one synthetic vtable, so select the override by class.
+static void hook_dispatch_perform_physics( AActor* Actor, FLOAT DeltaSeconds )
+{
+	uint32_t Class = class_code( Actor );
+	if( Class == 1 || Class == 2 )
+		((APawn*)Actor)->APawn::performPhysics( DeltaSeconds );
+	else
+		Actor->AActor::performPhysics( DeltaSeconds );
+}
+
+struct FDispatchVTableInstaller
+{
+	FDispatchVTableInstaller()
+	{
+		auto PmPerform = &AActor::performPhysics;
+		g_obj_vt[vt_slot( &PmPerform )] = (void*)&hook_dispatch_perform_physics;
+	}
+};
+static FDispatchVTableInstaller GDispatchVTableInstaller;
+
+// The original engine's global math object is not linked into this harness.
+// Keep its full layout and the trig entries used by interpolation initialized.
+static void harness_setup_math_table( FLOAT* ManTbl, FLOAT* ExpTbl, FLOAT Power )
+{
+	union { FLOAT F; DWORD D; } Temp;
+	Temp.F = 1.0f;
+	for( DWORD i = 0; i < (1u << APPROX_EXP_BITS); ++i )
+	{
+		Temp.D = (Temp.D & 0x007fffff) + (i << (32 - APPROX_EXP_BITS));
+		ExpTbl[i] = (FLOAT)std::pow(std::fabs(Temp.F), Power);
+		if( std::isnan(ExpTbl[i]) ) ExpTbl[i] = 0.0f;
+	}
+	Temp.F = 1.0f;
+	for( DWORD i = 0; i < (1u << APPROX_MAN_BITS); ++i )
+	{
+		Temp.D = (Temp.D & 0xff800000) + (i << (32 - APPROX_EXP_BITS - APPROX_MAN_BITS));
+		ManTbl[i] = (FLOAT)std::pow(std::fabs(Temp.F), Power);
+		if( std::isnan(ManTbl[i]) ) ManTbl[i] = 0.0f;
+	}
+}
+
+FGlobalMath::FGlobalMath()
+:	WorldMin(-32700.0,-32700.0,-32700.0),
+	WorldMax(32700.0,32700.0,32700.0),
+	UnitCoords(FVector(0,0,0),FVector(1,0,0),FVector(0,1,0),FVector(0,0,1)),
+	UnitScale(FVector(1,1,1),0.0,SHEER_ZX),
+	ViewCoords(FVector(0,0,0),FVector(0,1,0),FVector(0,0,-1),FVector(1,0,0))
+{
+	for( INT i = 0; i < NUM_ANGLES; ++i )
+		TrigFLOAT[i] = sinf((FLOAT)i * 2.0f * PI / (FLOAT)NUM_ANGLES);
+	union { FLOAT F; DWORD D; } Temp;
+	for( DWORD D = 0; D < (1u << APPROX_MAN_BITS); ++D )
+	{
+		Temp.F = 1.0f;
+		Temp.D = (Temp.D & 0xff800000) + (D << (23 - APPROX_MAN_BITS));
+		Temp.F = (FLOAT)appSqrt(Temp.F);
+		Temp.D -= (64u << 23);
+		SqrtManTbl[D] = (FLOAT)(Temp.F * appSqrt(2.0));
+		SqrtManTbl[D + (1u << APPROX_MAN_BITS)] = Temp.F * 2.0f;
+	}
+	harness_setup_math_table(DivSqrtManTbl, DivSqrtExpTbl, -0.5f);
+	harness_setup_math_table(DivManTbl, DivExpTbl, -1.0f);
+}
+FGlobalMath GMath;
+
+// Family files: each defines fam_<name>() and prints its fixture lines to stdout.
+#include "physic_fam_motion.inc"
+#include "physic_fam_walk.inc"
+#include "physic_fam_fall.inc"
+#include "physic_fam_swim.inc"
+#include "physic_fam_move.inc"
+#include "physic_fam_dispatch.inc"
+#include "physic_fam_interp.inc"
+
+static int run_family( const char* Fam )
+{
+	if( !strcmp( Fam, "motion" ) ) { fam_motion(); return 0; }
+	if( !strcmp( Fam, "walk" ) ) { fam_walk(); return 0; }
+	if( !strcmp( Fam, "fall" ) ) { fam_fall(); return 0; }
+	if( !strcmp( Fam, "swim" ) ) { fam_swim(); return 0; }
+	if( !strcmp( Fam, "move" ) ) { fam_move(); return 0; }
+	if( !strcmp( Fam, "dispatch" ) ) { fam_dispatch(); return 0; }
+	if( !strcmp( Fam, "interp" ) ) { fam_interp(); return 0; }
+	return 2;
+}
+
+int main( int argc, char** argv )
 {
 	// Name indices: any distinct values; FindFunctionChecked compares against them.
 	int32_t Idx;
@@ -583,6 +849,12 @@ int main()
 	Idx = 1002; memcpy( &ENGINE_HitWall, &Idx, sizeof Idx );
 	Idx = 1003; memcpy( &ENGINE_Landed, &Idx, sizeof Idx );
 	Idx = 1004; memcpy( &ENGINE_FellOutOfWorld, &Idx, sizeof Idx );
+	Idx = 1005; memcpy( &ENGINE_Falling, &Idx, sizeof Idx );
+	Idx = 1006; memcpy( &ENGINE_MayFall, &Idx, sizeof Idx );
+	Idx = 1007; memcpy( &ENGINE_DoJump, &Idx, sizeof Idx );
+	Idx = 1008; memcpy( &ENGINE_UpdateCamera, &Idx, sizeof Idx );
+	Idx = 1009; memcpy( &ENGINE_InterpolateEnd, &Idx, sizeof Idx );
+	Idx = 1010; memcpy( &ENGINE_FinishedInterpolation, &Idx, sizeof Idx );
 
 	// Class chain: AActor <- APawn <- APlayerPawn; AActor <- ADecoration <- ACarcass.
 	for( int K = 0; K < 5; ++K )
@@ -593,10 +865,21 @@ int main()
 	((UClass*)g_cls_raw[4])->SuperField = (UClass*)g_cls_raw[3];
 
 	install_level();
+	const FCoords UnitCoords( FVector(0,0,0), FVector(1,0,0), FVector(0,1,0), FVector(0,0,1) );
+	memcpy( (void*)&GMath.UnitCoords, &UnitCoords, sizeof UnitCoords );
 
 	g_surf[0] = (FBspSurf*)calloc( 1, sizeof(FBspSurf) );
 	g_surf[1] = (FBspSurf*)calloc( 1, sizeof(FBspSurf) );
 	g_surf[1]->PolyFlags = PF_SpecialPoly;
+
+	// Family selection: "scripted" (default) runs the table below; others run their own .inc.
+	const char* Fam = argc > 1 ? argv[1] : "scripted";
+	if( strcmp( Fam, "scripted" ) != 0 )
+	{
+		int Rc = run_family( Fam );
+		if( Rc != 0 ) fprintf( stderr, "unknown family %s\n", Fam );
+		return Rc;
+	}
 
 	uint64_t Master[FN_COUNT];
 	for( int F = 0; F < FN_COUNT; ++F )
