@@ -15,6 +15,7 @@ pub mod math;
 pub mod mesh;
 pub mod model;
 pub mod mover;
+pub mod palette;
 pub mod particle;
 pub mod pawn;
 pub mod pawn_reach;

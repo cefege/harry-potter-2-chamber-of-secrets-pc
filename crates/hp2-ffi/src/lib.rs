@@ -15,6 +15,7 @@ mod engine_actcol;
 mod engine_dynbsp;
 mod engine_levact;
 mod engine_mover;
+mod engine_palette;
 mod engine_particle;
 mod engine_pawn;
 mod engine_pawn_reach;

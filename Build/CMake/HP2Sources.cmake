@@ -52,6 +52,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2PawnReachServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2PawnSenseServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ParticleServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/Hp2PaletteServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"
