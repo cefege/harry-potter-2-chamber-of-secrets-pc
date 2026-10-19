@@ -252,26 +252,9 @@ class ENGINE_API UMesh : public UBoxPrim
 
 	// UMesh interface.
 	UMesh( INT NumPolys, INT NumVerts, INT NumFrames );
-	virtual const FMeshAnimSeq* GetAnimSeq( FName SeqName ) const
-	{
-		guardSlow(UMesh::GetAnimSeq);
-		for( INT i=0; i<AnimSeqs.Num(); i++ )
-			if( SeqName == AnimSeqs(i).Name )
-				return &AnimSeqs(i);
-		return NULL;
-		unguardSlow;
-	}
-	virtual FMeshAnimSeq* GetAnimSeq( FName SeqName )
-	{
-		guardSlow(UMesh::GetAnimSeq);
-		for( INT i=0; i<AnimSeqs.Num(); i++ )
-			if( SeqName == AnimSeqs(i).Name )
-				return &AnimSeqs(i);
-		return NULL;
-		unguardSlow;
-	}
+	virtual const FMeshAnimSeq* GetAnimSeq( FName SeqName ) const;
+	virtual FMeshAnimSeq* GetAnimSeq( FName SeqName );
 	virtual void GetFrame( FVector* Verts, INT Size, FCoords Coords, AActor* Owner );
-	void AMD3DGetFrame( FVector* Verts, INT Size, FCoords Coords, AActor* Owner );
 	virtual INT GetNumTris() const
 	{
 		return Tris.Num();

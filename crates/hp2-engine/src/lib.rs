@@ -6,8 +6,11 @@
 pub mod actcol;
 pub mod canvas;
 pub mod canvas_text;
+pub mod coords;
 pub mod fpoly;
+pub mod lodmesh;
 pub mod math;
+pub mod mesh;
 pub mod model;
 pub mod mover;
 pub mod prim;

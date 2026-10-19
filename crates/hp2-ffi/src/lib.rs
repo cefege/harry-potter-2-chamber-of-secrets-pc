@@ -21,6 +21,7 @@ mod fire_water;
 mod fire_wet_wave;
 mod geometry;
 mod input;
+mod mesh;
 mod render;
 mod render_light;
 mod render_mesh;
