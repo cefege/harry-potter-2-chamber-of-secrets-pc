@@ -13,6 +13,7 @@ mod canvas_text;
 mod engine;
 mod engine_actcol;
 mod engine_mover;
+mod engine_physic;
 mod engine_prim_trace;
 mod engine_route;
 mod engine_tex;

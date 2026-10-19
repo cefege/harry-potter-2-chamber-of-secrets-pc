@@ -8,7 +8,9 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "hp2_rs.h"
 #include "UnMesh.h"
+#include "Hp2PhysicServices.h"
 
 void AActor::execMoveSmooth( FFrame& Stack, RESULT_DECL )
 {
@@ -289,52 +291,7 @@ int AActor::fixedTurn(int current, int desired, int deltaRate)
 {
 	guard(AActor::fixedTurn);
 
-	if (deltaRate == 0)
-		return (current & 65535);
-
-	int result = current & 65535;
-	current = result;
-	desired = desired & 65535;
-
-	if (bFixedRotationDir)
-	{
-		if (bRotateToDesired)
-		{
-			if (deltaRate > 0)
-			{
-				if (current > desired)
-					desired += 65536;
-				result += Min(deltaRate, desired - current);
-			}
-			else 
-			{
-				if (current < desired)
-					current += 65536;
-				result += ::Max(deltaRate, desired - current);
-			}
-		}
-		else
-			result += deltaRate;
-	}
-	else if (bRotateToDesired)
-	{
-		if (current > desired)
-		{
-			if (current - desired < 32768)
-				result -= Min((current - desired), Abs(deltaRate));
-			else
-				result += Min((desired + 65536 - current), Abs(deltaRate));
-		}
-		else
-		{
-			if (desired - current < 32768)
-				result += Min((desired - current), Abs(deltaRate));
-			else
-				result -= Min((current + 65536 - desired), Abs(deltaRate));
-		}
-	}
-
-	return (result & 65535);
+	return hp2_rs_engine_physic_fixed_turn( current, desired, deltaRate, bFixedRotationDir, bRotateToDesired );
 	unguard;
 }
 
@@ -1211,210 +1168,28 @@ bounds acceleration and velocity, adds effects of friction and momentum
 void APawn::calcVelocity(FVector AccelDir, FLOAT deltaTime, FLOAT maxSpeed, FLOAT friction, INT bFluid, INT bBrake, INT bBuoyant)
 {
 	guard(APawn::calcVelocity);
-	FLOAT effectiveFriction = ::Max((FLOAT)bFluid,friction); 
-	INT bWalkingPlayer = ( IsA(APlayerPawn::StaticClass()) && bIsWalking );
-	if (bBrake && Acceleration.IsZero()) 
-	{
-		FVector OldVel = Velocity;
-		FVector SumVel = FVector(0,0,0);
-
-		FLOAT RemainingTime = deltaTime;
-		// subdivide braking to get reasonably consistent results at lower frame rates
-		// (important for packet loss situations w/ networking)
-		while( RemainingTime > 0.03f )
-		{
-			Velocity = Velocity - (2 * Velocity) * 0.03f * effectiveFriction; //don't drift to a stop, brake
-			if ( (Velocity | OldVel) > 0.f )
-				SumVel += 0.03f * Velocity/deltaTime;
-			RemainingTime -= 0.03f;
-		}
-		Velocity = Velocity - (2 * Velocity) * RemainingTime * effectiveFriction; //don't drift to a stop, brake
-		if ( (Velocity | OldVel) > 0.f )
-			SumVel += RemainingTime * Velocity/deltaTime;
-		Velocity = SumVel;
-		if ( ((OldVel | Velocity) < 0.f)
-			|| (Velocity.SizeSquared() < 100) )//brake to a stop, not backwards
-			Velocity = FVector(0,0,0);
-	}
-	else
-	{
-		FLOAT VelSize = Velocity.Size();
-		if ( bWalkingPlayer )
-		{
-			if (Acceleration.SizeSquared() > 0.09f * AccelRate * AccelRate)
-					Acceleration = AccelDir * AccelRate * 0.3f;
-		}
-		else if (Acceleration.SizeSquared() > AccelRate * AccelRate)
-			Acceleration = AccelDir * AccelRate;
-		Velocity = Velocity - (Velocity - AccelDir * VelSize) * deltaTime * effectiveFriction;  
-	}
-
-	Velocity = Velocity * (1 - bFluid * friction * deltaTime) + Acceleration * deltaTime;
-
-	if (!IsA(APlayerPawn::StaticClass()))
-		maxSpeed *= DesiredSpeed;
-
-	if ( bBuoyant )
-		Velocity = Velocity + Region.Zone->ZoneGravity * deltaTime * (1.f - Buoyancy/Mass);
-
-	if ( bWalkingPlayer && (Velocity.SizeSquared() > 0.09f * maxSpeed * maxSpeed) )
-	{
-		FLOAT speed = Velocity.Size();
-		Velocity = Velocity/speed;
-		Velocity *= ::Max(0.3f * maxSpeed, speed * (1 - deltaTime * 2 * effectiveFriction)); 
-	}
-	else if (Velocity.SizeSquared() > maxSpeed * maxSpeed)
-	{
-		Velocity = Velocity.SafeNormal();
-		Velocity *= maxSpeed;
-	}
-
-
+	hp2_rs_engine_physic_calc_velocity( this, &AccelDir, deltaTime, maxSpeed, friction, bFluid, bBrake, bBuoyant, &GHp2PhysicServices );
 	unguard;
 }
 
 bool APawn::Mount(const FVector& MountDir, FCheckResult &Hit)
 {
 	guard(APawn::Mount);
-	if( MaxMountHeight > 0.f && Hit.Normal.Z > -0.1 && Hit.Normal.Z < 0.7 )
-	{
-		// Make sure pawn is facing in direction of wall.
-		if( (Hit.Normal | Rotation.Vector()) < 0.f )
-		{
-			FVector Extent = GetCylinderExtent();
-			FBspSurf* Surf = Hit.BspSurf( Extent.MaxVal() );
- 			if( Surf && (Surf->PolyFlags & PF_SpecialPoly) )
-			{
-				// Determine mount destination.
-				FVector MoveDir = -Hit.Normal;
-				MoveDir.Z = 0;
-				MoveDir.Normalize();
-
-				// Check path for up, forward, down movement, accounting for sloped walls.
-				FCheckResult Hit2;
-				FVector Location1 = Location + MountDir * MaxMountHeight;
-				FVector Location2 = Location1 + MoveDir * (2.0f * CollisionRadius + Hit.Normal.Z * MaxMountHeight);
-				FVector Location3 = Location2 - MountDir * MaxMountHeight - MoveDir * (Hit.Normal.Z * MaxMountHeight);
-
-				// Find resting height after moving up and forward.
-				if( GetLevel()->SingleLineCheck( Hit2, this, Location3, Location2, TRACE_VisBlocking, Extent ) == 0 )
-				{
-					float Threshold = Physics == PHYS_Falling ? 0.f : MaxStepHeight;
-					if( Hit2.Location.Z - Location.Z >= Threshold )
-					{
-						// See whether we can get there.
-						FVector MountLoc = Hit2.Location;
-						MountLoc.Z += 2.0f;			// Anticipate std walking physics offset.
-						Location1.Z = MountLoc.Z;
-						if( GetLevel()->SingleLineCheck( Hit2, this, Location1, Location, TRACE_VisBlocking, Extent ) 
-						&& GetLevel()->SingleLineCheck( Hit2, this, MountLoc, Location1, TRACE_VisBlocking, Extent ) )
-						{
-							SetBase( Hit.Actor );
-							eventMount( MountLoc - Location );
-							return true;
-						}
-					}
-				}
-			}
-		}
-	}
-	return false;
+	return hp2_rs_engine_physic_mount( this, &MountDir, &Hit, &GHp2PhysicServices ) != 0;
 	unguard;
 }
 
 void APawn::stepUp(FVector GravDir, FVector DesiredDir, FVector Delta, FCheckResult &Hit)
 {
 	guard(APawn::stepUp);
-
-	if( Mount( -GravDir, Hit ) )
-		return;
-
-	FVector Down = GravDir * MaxStepHeight;
-	FVector Up = -1 * Down;
-	GetLevel()->MoveActor(this, Up, Rotation, Hit); 
-	GetLevel()->MoveActor(this, Delta, Rotation, Hit);
-	if (Hit.Time < 1.f)
-	{
-		if ( IsA(APlayerPawn::StaticClass()) && Hit.Actor->IsA(ADecoration::StaticClass()) && ((ADecoration *)(Hit.Actor))->bPushable
-			&& ((Hit.Normal | DesiredDir) < -0.9) )
-		{
-			bJustTeleported = true;
-			Velocity *= Mass/(Mass + Hit.Actor->Mass);
-			processHitWall(Hit.Normal, Hit.Actor);
-			if ( Physics == PHYS_Falling )
-				return;
-		}
-		else if ((Abs(Hit.Normal.Z) < 0.2f) && (Hit.Time * Delta.SizeSquared() > 144.f))
-		{
-			// If we travelled 12 units, try again.
-			stepUp(GravDir, DesiredDir, Delta * (1 - Hit.Time), Hit);
-			if ( Physics == PHYS_Falling )
-				return;
-		}
-		else
-		{
-			// Slide along wall.
-			processHitWall(Hit.Normal, Hit.Actor);
-			FVector OriginalDelta = Delta;
-			FVector OldHitNormal = Hit.Normal;
-			Delta = (Delta - Hit.Normal * (Delta | Hit.Normal)) * (1.f - Hit.Time);
-			if( (Delta | OriginalDelta) >= 0 )
-			{
-				GetLevel()->MoveActor(this, Delta, Rotation, Hit);
-				if (Hit.Time < 1.f)
-				{
-					processHitWall(Hit.Normal, Hit.Actor);
-					if ( Physics == PHYS_Falling )
-						return;
-					TwoWallAdjust(DesiredDir, Delta, Hit.Normal, OldHitNormal, Hit.Time);
-					GetLevel()->MoveActor(this, Delta, Rotation, Hit);
-				}
-			}
-		}
-	}
-
-	GetLevel()->MoveActor(this, Down, Rotation, Hit);
-
-	if ((Hit.Time < 1.f) && (Hit.Normal.Z < 0.5f))
-	{
-		Delta = (Down - Hit.Normal * (Down | Hit.Normal))  * (1.f - Hit.Time);
-		if( (Delta | Down) >= 0 )
-			GetLevel()->MoveActor(this, Delta, Rotation, Hit);
-	} 
-
+	hp2_rs_engine_physic_step_up( this, &GravDir, &DesiredDir, &Delta, &Hit, &GHp2PhysicServices );
 	unguard;
 }
 
 void AActor::processHitWall(FVector HitNormal, AActor *HitActor)
 {
 	guard(AActor::processHitWall);
-
-	if ( HitActor->IsA(APawn::StaticClass()) )
-		return;
-	APawn* ThisPawn = Cast<APawn>(this);
-	if ( ThisPawn )
-	{
-		if ( Acceleration.IsZero() )
-			return;
-		FVector Dir = (ThisPawn->Destination - Location).SafeNormal();
-		if ( Physics == PHYS_Walking )
-		{
-			HitNormal.Z = 0;
-			Dir.Z = 0;
-		}
-		if ( ThisPawn->MinHitWall < (Dir | HitNormal) )
-			return;
-		if ( !IsProbing(NAME_HitWall) && (Physics != PHYS_Falling) )
-		{
-			//ThisPawn->MoveTimer = -1.f;  //FT: commented this out cause if a character is doing a moveto, and they barely
-			                               //    touch a wall, the MoveTo will end right away.  This is not the way it should be.
-			ThisPawn->bFromWall = 1;
-			return;
-		}
-	}
-	else if ( !IsProbing(NAME_HitWall) )
-		return;
-	eventHitWall(HitNormal, HitActor);
+	hp2_rs_engine_physic_process_hit_wall( this, &HitNormal, HitActor, &GHp2PhysicServices );
 	unguard;
 }
 
@@ -1422,92 +1197,7 @@ void AActor::processHitWall(FVector HitNormal, AActor *HitActor)
 void AActor::processLanded(FVector HitNormal, AActor *HitActor, FLOAT remainingTime, INT Iterations)
 {
 	guard(AActor::processLanded);
-
-	if ( !bIsPawn && Region.Zone->bBounceVelocity && (Region.Zone->ZoneVelocity != FVector(0,0,0)) )
-	{
-		Velocity = Region.Zone->ZoneVelocity + FVector(0,0,80);
-		return;
-	}
-	/*
-	// This inconsistent bit of code just causes trouble -- jsp.
-	if ( IsA(APawn::StaticClass()) ) //Check that it is a valid landing (not a BSP cut)
-	{
-		FCheckResult Hit(1.f);
-		GetLevel()->SingleLineCheck(Hit, this, Location -  FVector(0,0,0.2f * CollisionHeight + 8),
-			Location, TRACE_AllBlocking, 0.9f * GetCylinderExtent());  
-		if ( Hit.Time == 1.f ) //Not a valid landing
-		{
-			FVector Adjusted = Location;
-			if ( GetLevel()->FindSpot(1.1f * GetCylinderExtent(), Adjusted, 1, 0) && (Adjusted != Location) )
-			{
-				GetLevel()->FarMoveActor(this, Adjusted, 0, 0);
-				Velocity.X += appFrand() * 60 - 30;
-				Velocity.Y += appFrand() * 60 - 30; 
-				return;
-			}
-		}
-	}
-	else */
-	if ( IsA(ADecoration::StaticClass()) )
-	{
-		if ( ((ADecoration *)this)->numLandings < 5 ) // make sure its on a valid landing
-		{
-			FCheckResult Hit(1.f);
-			GetLevel()->SingleLineCheck(Hit, this, Location -  FVector(0,0,(CollisionHeight + CollisionRadius + 8)),
-				Location - FVector(0,0,(0.8f * CollisionHeight)) , TRACE_AllBlocking);  
-			if ( !Hit.Actor )
-			{
-				FVector partExtent = 0.5 * GetCylinderExtent();
-				partExtent.Z *= 2;
-				int bQuad1 = GetLevel()->SingleLineCheck(Hit, this, Location + FVector(0.5f * CollisionRadius, 0.5f * CollisionRadius, -8),
-					Location + FVector(0.5f * CollisionRadius, 0.5f * CollisionRadius, 0), TRACE_AllBlocking, partExtent);
-				int bQuad2 = GetLevel()->SingleLineCheck(Hit, this, Location + FVector(-0.5f * CollisionRadius, 0.5f * CollisionRadius, -8),
-					Location + FVector(-0.5f * CollisionRadius, 0.5f * CollisionRadius, 0), TRACE_AllBlocking, partExtent);
-				int bQuad3 = GetLevel()->SingleLineCheck(Hit, this, Location + FVector(-0.5f * CollisionRadius, -0.5f * CollisionRadius, -8),
-					Location + FVector(-0.5f * CollisionRadius, -0.5f * CollisionRadius, 0), TRACE_AllBlocking, partExtent);
-				int bQuad4 = GetLevel()->SingleLineCheck(Hit, this, Location + FVector(0.5f * CollisionRadius, -0.5f * CollisionRadius, -8),
-					Location + FVector(0.5f * CollisionRadius, -0.5f * CollisionRadius, 0), TRACE_AllBlocking, partExtent);
-				
-				if ( (bQuad1 + bQuad2 + bQuad3 + bQuad4 > 1) && !(bQuad1 + bQuad3 == 0) && !(bQuad2 + bQuad4 == 0) )
-				{
-					((ADecoration *)this)->numLandings++;
-					Velocity = 2 * Clamp( -1.f * Velocity.Z, 30.f, 30.f + CollisionRadius) * 
-								FVector((FLOAT)(bQuad1 + bQuad4 - bQuad2 - bQuad3), (FLOAT)(bQuad1 + bQuad2 - bQuad3 - bQuad4) , 0.5);
-					return;
-				}
-			}
-			if ( IsA(ACarcass::StaticClass()) && (HitNormal.Z < 0.9) && ((ACarcass *)this)->bSlidingCarcass )
-			{
-				if ( appFrand() < 0.2f )
-					((ADecoration *)this)->numLandings++;
-				Velocity = HitNormal * 120;
-				Velocity.Z = 70;
-				return;
-			}	
-			((ADecoration *)this)->numLandings = 0;
-		}
-		else
-			((ADecoration *)this)->numLandings = 0;
-	}
-
-	eventLanded(HitNormal);
-	if (Physics == PHYS_Falling)
-	{
-		if (IsA(APawn::StaticClass()))
-			setPhysics(PHYS_Walking, HitActor);
-		else
-		{
-			setPhysics(PHYS_None, HitActor);
-			Velocity = FVector(0,0,0);
-		}
-	}
-	if ((Physics == PHYS_Walking) && IsA(APawn::StaticClass()))
-	{
-		Acceleration = Acceleration.SafeNormal();
-		if (remainingTime > 0.01f)
-			((APawn *)this)->physWalking(remainingTime, Iterations);
-	}
-
+	hp2_rs_engine_physic_process_landed( this, &HitNormal, HitActor, remainingTime, Iterations, &GHp2PhysicServices );
 	unguard;
 }
 #pragma ENABLE_OPTIMIZATION 

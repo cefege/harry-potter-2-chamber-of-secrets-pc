@@ -13,6 +13,7 @@ pub mod math;
 pub mod mesh;
 pub mod model;
 pub mod mover;
+pub mod physic;
 pub mod prim;
 pub mod reach;
 pub mod route;
