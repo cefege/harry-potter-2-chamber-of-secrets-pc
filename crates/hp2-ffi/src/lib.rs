@@ -16,6 +16,7 @@ mod engine_cam_mgr;
 mod engine_console;
 mod engine_dynbsp;
 mod engine_gesture;
+mod engine_input;
 mod engine_levact;
 mod engine_mover;
 mod engine_palette;

@@ -329,6 +329,8 @@ static_assert(sizeof(ACarcass) == 980, "hp2-abi engine::ACarcass must match ACar
 static_assert(sizeof(UGesture) == 104, "hp2-abi engine::UGesture must match UGesture size");
 static_assert(__builtin_offsetof(UGesture, Points) == 72, "hp2-abi engine::UGesture.points must match UGesture::Points offset");
 static_assert(sizeof(UConsole) == 2760, "hp2-abi engine::UConsole must match UConsole size");
+static_assert(sizeof(UInput) == 5400, "hp2-abi engine::UInput must match UInput size");
+static_assert(__builtin_offsetof(UInput, Viewport) == 5120, "hp2-abi engine::UInput.viewport must match UInput::Viewport offset");
 static_assert(sizeof(FSceneNode) == 408, "hp2-abi engine::FSceneNode must match FSceneNode size");
 static_assert(__builtin_offsetof(FSceneNode, X) == 208, "hp2-abi engine::FSceneNode.x must match FSceneNode::X offset");
 static_assert(__builtin_offsetof(FSceneNode, Y) == 212, "hp2-abi engine::FSceneNode.y must match FSceneNode::Y offset");

@@ -1,0 +1,1162 @@
+header	version=1	mem_base=2928	mem_size=32	ik_max=255	alias_max=40
+name	index=0	text=None
+name	index=1	text=Fire
+name	index=2	text=Jump
+name	index=3	text=Turn
+name	index=4	text=Strafe
+name	index=5	text=Look
+name	index=6	text=Stance
+name	index=7	text=Hidden
+name	index=8	text=Walk
+name	index=9	text=Sprint
+name	index=10	text=Cycle
+name	index=11	text=IK_A
+name	index=12	text=IK_B
+name	index=13	text=IK_C
+name	index=14	text=IK_D
+name	index=15	text=IK_E
+name	index=16	text=IK_F
+name	index=17	text=IK_G
+name	index=18	text=IK_H
+name	index=19	text=IK_I
+name	index=20	text=IK_J
+name	index=21	text=IK_K
+name	index=22	text=IK_L
+key	index=0	name_index=11	text=IK_A
+key	index=1	name_index=12	text=IK_B
+key	index=2	name_index=13	text=IK_C
+key	index=3	name_index=14	text=IK_D
+key	index=4	name_index=15	text=IK_E
+key	index=5	name_index=16	text=IK_F
+key	index=6	name_index=17	text=IK_G
+key	index=7	name_index=18	text=IK_H
+key	index=8	name_index=19	text=IK_I
+key	index=9	name_index=20	text=IK_J
+key	index=10	name_index=21	text=IK_K
+key	index=11	name_index=22	text=IK_L
+key	index=12	name_index=0	text=None
+key	index=13	name_index=0	text=None
+key	index=14	name_index=0	text=None
+key	index=15	name_index=0	text=None
+key	index=16	name_index=0	text=None
+key	index=17	name_index=0	text=None
+key	index=18	name_index=0	text=None
+key	index=19	name_index=0	text=None
+key	index=20	name_index=0	text=None
+key	index=21	name_index=0	text=None
+key	index=22	name_index=0	text=None
+key	index=23	name_index=0	text=None
+key	index=24	name_index=0	text=None
+key	index=25	name_index=0	text=None
+key	index=26	name_index=0	text=None
+key	index=27	name_index=0	text=None
+key	index=28	name_index=0	text=None
+key	index=29	name_index=0	text=None
+key	index=30	name_index=0	text=None
+key	index=31	name_index=0	text=None
+key	index=32	name_index=0	text=None
+key	index=33	name_index=0	text=None
+key	index=34	name_index=0	text=None
+key	index=35	name_index=0	text=None
+key	index=36	name_index=0	text=None
+key	index=37	name_index=0	text=None
+key	index=38	name_index=0	text=None
+key	index=39	name_index=0	text=None
+key	index=40	name_index=0	text=None
+key	index=41	name_index=0	text=None
+key	index=42	name_index=0	text=None
+key	index=43	name_index=0	text=None
+key	index=44	name_index=0	text=None
+key	index=45	name_index=0	text=None
+key	index=46	name_index=0	text=None
+key	index=47	name_index=0	text=None
+key	index=48	name_index=0	text=None
+key	index=49	name_index=0	text=None
+key	index=50	name_index=0	text=None
+key	index=51	name_index=0	text=None
+key	index=52	name_index=0	text=None
+key	index=53	name_index=0	text=None
+key	index=54	name_index=0	text=None
+key	index=55	name_index=0	text=None
+key	index=56	name_index=0	text=None
+key	index=57	name_index=0	text=None
+key	index=58	name_index=0	text=None
+key	index=59	name_index=0	text=None
+key	index=60	name_index=0	text=None
+key	index=61	name_index=0	text=None
+key	index=62	name_index=0	text=None
+key	index=63	name_index=0	text=None
+key	index=64	name_index=0	text=None
+key	index=65	name_index=0	text=None
+key	index=66	name_index=0	text=None
+key	index=67	name_index=0	text=None
+key	index=68	name_index=0	text=None
+key	index=69	name_index=0	text=None
+key	index=70	name_index=0	text=None
+key	index=71	name_index=0	text=None
+key	index=72	name_index=0	text=None
+key	index=73	name_index=0	text=None
+key	index=74	name_index=0	text=None
+key	index=75	name_index=0	text=None
+key	index=76	name_index=0	text=None
+key	index=77	name_index=0	text=None
+key	index=78	name_index=0	text=None
+key	index=79	name_index=0	text=None
+key	index=80	name_index=0	text=None
+key	index=81	name_index=0	text=None
+key	index=82	name_index=0	text=None
+key	index=83	name_index=0	text=None
+key	index=84	name_index=0	text=None
+key	index=85	name_index=0	text=None
+key	index=86	name_index=0	text=None
+key	index=87	name_index=0	text=None
+key	index=88	name_index=0	text=None
+key	index=89	name_index=0	text=None
+key	index=90	name_index=0	text=None
+key	index=91	name_index=0	text=None
+key	index=92	name_index=0	text=None
+key	index=93	name_index=0	text=None
+key	index=94	name_index=0	text=None
+key	index=95	name_index=0	text=None
+key	index=96	name_index=0	text=None
+key	index=97	name_index=0	text=None
+key	index=98	name_index=0	text=None
+key	index=99	name_index=0	text=None
+key	index=100	name_index=0	text=None
+key	index=101	name_index=0	text=None
+key	index=102	name_index=0	text=None
+key	index=103	name_index=0	text=None
+key	index=104	name_index=0	text=None
+key	index=105	name_index=0	text=None
+key	index=106	name_index=0	text=None
+key	index=107	name_index=0	text=None
+key	index=108	name_index=0	text=None
+key	index=109	name_index=0	text=None
+key	index=110	name_index=0	text=None
+key	index=111	name_index=0	text=None
+key	index=112	name_index=0	text=None
+key	index=113	name_index=0	text=None
+key	index=114	name_index=0	text=None
+key	index=115	name_index=0	text=None
+key	index=116	name_index=0	text=None
+key	index=117	name_index=0	text=None
+key	index=118	name_index=0	text=None
+key	index=119	name_index=0	text=None
+key	index=120	name_index=0	text=None
+key	index=121	name_index=0	text=None
+key	index=122	name_index=0	text=None
+key	index=123	name_index=0	text=None
+key	index=124	name_index=0	text=None
+key	index=125	name_index=0	text=None
+key	index=126	name_index=0	text=None
+key	index=127	name_index=0	text=None
+key	index=128	name_index=0	text=None
+key	index=129	name_index=0	text=None
+key	index=130	name_index=0	text=None
+key	index=131	name_index=0	text=None
+key	index=132	name_index=0	text=None
+key	index=133	name_index=0	text=None
+key	index=134	name_index=0	text=None
+key	index=135	name_index=0	text=None
+key	index=136	name_index=0	text=None
+key	index=137	name_index=0	text=None
+key	index=138	name_index=0	text=None
+key	index=139	name_index=0	text=None
+key	index=140	name_index=0	text=None
+key	index=141	name_index=0	text=None
+key	index=142	name_index=0	text=None
+key	index=143	name_index=0	text=None
+key	index=144	name_index=0	text=None
+key	index=145	name_index=0	text=None
+key	index=146	name_index=0	text=None
+key	index=147	name_index=0	text=None
+key	index=148	name_index=0	text=None
+key	index=149	name_index=0	text=None
+key	index=150	name_index=0	text=None
+key	index=151	name_index=0	text=None
+key	index=152	name_index=0	text=None
+key	index=153	name_index=0	text=None
+key	index=154	name_index=0	text=None
+key	index=155	name_index=0	text=None
+key	index=156	name_index=0	text=None
+key	index=157	name_index=0	text=None
+key	index=158	name_index=0	text=None
+key	index=159	name_index=0	text=None
+key	index=160	name_index=0	text=None
+key	index=161	name_index=0	text=None
+key	index=162	name_index=0	text=None
+key	index=163	name_index=0	text=None
+key	index=164	name_index=0	text=None
+key	index=165	name_index=0	text=None
+key	index=166	name_index=0	text=None
+key	index=167	name_index=0	text=None
+key	index=168	name_index=0	text=None
+key	index=169	name_index=0	text=None
+key	index=170	name_index=0	text=None
+key	index=171	name_index=0	text=None
+key	index=172	name_index=0	text=None
+key	index=173	name_index=0	text=None
+key	index=174	name_index=0	text=None
+key	index=175	name_index=0	text=None
+key	index=176	name_index=0	text=None
+key	index=177	name_index=0	text=None
+key	index=178	name_index=0	text=None
+key	index=179	name_index=0	text=None
+key	index=180	name_index=0	text=None
+key	index=181	name_index=0	text=None
+key	index=182	name_index=0	text=None
+key	index=183	name_index=0	text=None
+key	index=184	name_index=0	text=None
+key	index=185	name_index=0	text=None
+key	index=186	name_index=0	text=None
+key	index=187	name_index=0	text=None
+key	index=188	name_index=0	text=None
+key	index=189	name_index=0	text=None
+key	index=190	name_index=0	text=None
+key	index=191	name_index=0	text=None
+key	index=192	name_index=0	text=None
+key	index=193	name_index=0	text=None
+key	index=194	name_index=0	text=None
+key	index=195	name_index=0	text=None
+key	index=196	name_index=0	text=None
+key	index=197	name_index=0	text=None
+key	index=198	name_index=0	text=None
+key	index=199	name_index=0	text=None
+key	index=200	name_index=0	text=None
+key	index=201	name_index=0	text=None
+key	index=202	name_index=0	text=None
+key	index=203	name_index=0	text=None
+key	index=204	name_index=0	text=None
+key	index=205	name_index=0	text=None
+key	index=206	name_index=0	text=None
+key	index=207	name_index=0	text=None
+key	index=208	name_index=0	text=None
+key	index=209	name_index=0	text=None
+key	index=210	name_index=0	text=None
+key	index=211	name_index=0	text=None
+key	index=212	name_index=0	text=None
+key	index=213	name_index=0	text=None
+key	index=214	name_index=0	text=None
+key	index=215	name_index=0	text=None
+key	index=216	name_index=0	text=None
+key	index=217	name_index=0	text=None
+key	index=218	name_index=0	text=None
+key	index=219	name_index=0	text=None
+key	index=220	name_index=0	text=None
+key	index=221	name_index=0	text=None
+key	index=222	name_index=0	text=None
+key	index=223	name_index=0	text=None
+key	index=224	name_index=0	text=None
+key	index=225	name_index=0	text=None
+key	index=226	name_index=0	text=None
+key	index=227	name_index=0	text=None
+key	index=228	name_index=0	text=None
+key	index=229	name_index=0	text=None
+key	index=230	name_index=0	text=None
+key	index=231	name_index=0	text=None
+key	index=232	name_index=0	text=None
+key	index=233	name_index=0	text=None
+key	index=234	name_index=0	text=None
+key	index=235	name_index=0	text=None
+key	index=236	name_index=0	text=None
+key	index=237	name_index=0	text=None
+key	index=238	name_index=0	text=None
+key	index=239	name_index=0	text=None
+key	index=240	name_index=0	text=None
+key	index=241	name_index=0	text=None
+key	index=242	name_index=0	text=None
+key	index=243	name_index=0	text=None
+key	index=244	name_index=0	text=None
+key	index=245	name_index=0	text=None
+key	index=246	name_index=0	text=None
+key	index=247	name_index=0	text=None
+key	index=248	name_index=0	text=None
+key	index=249	name_index=0	text=None
+key	index=250	name_index=0	text=None
+key	index=251	name_index=0	text=None
+key	index=252	name_index=0	text=None
+key	index=253	name_index=0	text=None
+key	index=254	name_index=0	text=None
+class	name=A	id=1
+class	name=B	id=2
+prop	class=A	index=0	name_index=1	kind=byte	offset=2928	flags=4
+prop	class=A	index=1	name_index=2	kind=byte	offset=2929	flags=4
+prop	class=A	index=2	name_index=7	kind=byte	offset=2930	flags=0
+prop	class=A	index=3	name_index=3	kind=float	offset=2932	flags=4
+prop	class=A	index=4	name_index=4	kind=float	offset=2936	flags=4
+prop	class=A	index=5	name_index=5	kind=float	offset=2940	flags=4
+prop	class=A	index=6	name_index=6	kind=float	offset=2944	flags=0
+prop	class=B	index=7	name_index=8	kind=byte	offset=2948	flags=4
+prop	class=B	index=8	name_index=3	kind=float	offset=2952	flags=0
+alias	index=0	name_index=9	command=BUTTON Fire|AXIS Turn SPEED=2
+alias	index=1	name_index=10	command=TOGGLE Jump
+alias	index=2	name_index=0	command=
+alias	index=3	name_index=0	command=
+alias	index=4	name_index=0	command=
+alias	index=5	name_index=0	command=
+alias	index=6	name_index=0	command=
+alias	index=7	name_index=0	command=
+alias	index=8	name_index=0	command=
+alias	index=9	name_index=0	command=
+alias	index=10	name_index=0	command=
+alias	index=11	name_index=0	command=
+alias	index=12	name_index=0	command=
+alias	index=13	name_index=0	command=
+alias	index=14	name_index=0	command=
+alias	index=15	name_index=0	command=
+alias	index=16	name_index=0	command=
+alias	index=17	name_index=0	command=
+alias	index=18	name_index=0	command=
+alias	index=19	name_index=0	command=
+alias	index=20	name_index=0	command=
+alias	index=21	name_index=0	command=
+alias	index=22	name_index=0	command=
+alias	index=23	name_index=0	command=
+alias	index=24	name_index=0	command=
+alias	index=25	name_index=0	command=
+alias	index=26	name_index=0	command=
+alias	index=27	name_index=0	command=
+alias	index=28	name_index=0	command=
+alias	index=29	name_index=0	command=
+alias	index=30	name_index=0	command=
+alias	index=31	name_index=0	command=
+alias	index=32	name_index=0	command=
+alias	index=33	name_index=0	command=
+alias	index=34	name_index=0	command=
+alias	index=35	name_index=0	command=
+alias	index=36	name_index=0	command=
+alias	index=37	name_index=0	command=
+alias	index=38	name_index=0	command=
+alias	index=39	name_index=0	command=
+binding	index=0	text=BUTTON Fire
+binding	index=1	text=PULSE Jump|AXIS Turn SPEED=2
+binding	index=2	text=AXIS Strafe SPEEDBASE=3 SPEED=0.5
+binding	index=3	text=AXIS Look
+binding	index=4	text=TOGGLE Fire
+binding	index=5	text=Sprint
+binding	index=6	text=KEYNAME 3
+binding	index=7	text=
+binding	index=8	text=OnRelease BUTTON Fire|BUTTON Hidden
+binding	index=9	text=ZZZ
+binding	index=10	text=BUTTON "Jump"
+binding	index=11	text=BUTTON Walk
+binding	index=12	text=
+binding	index=13	text=
+binding	index=14	text=
+binding	index=15	text=
+binding	index=16	text=
+binding	index=17	text=
+binding	index=18	text=
+binding	index=19	text=
+binding	index=20	text=
+binding	index=21	text=
+binding	index=22	text=
+binding	index=23	text=
+binding	index=24	text=
+binding	index=25	text=
+binding	index=26	text=
+binding	index=27	text=
+binding	index=28	text=
+binding	index=29	text=
+binding	index=30	text=
+binding	index=31	text=
+binding	index=32	text=
+binding	index=33	text=
+binding	index=34	text=
+binding	index=35	text=
+binding	index=36	text=
+binding	index=37	text=
+binding	index=38	text=
+binding	index=39	text=
+binding	index=40	text=
+binding	index=41	text=
+binding	index=42	text=
+binding	index=43	text=
+binding	index=44	text=
+binding	index=45	text=
+binding	index=46	text=
+binding	index=47	text=
+binding	index=48	text=
+binding	index=49	text=
+binding	index=50	text=
+binding	index=51	text=
+binding	index=52	text=
+binding	index=53	text=
+binding	index=54	text=
+binding	index=55	text=
+binding	index=56	text=
+binding	index=57	text=
+binding	index=58	text=
+binding	index=59	text=
+binding	index=60	text=
+binding	index=61	text=
+binding	index=62	text=
+binding	index=63	text=
+binding	index=64	text=
+binding	index=65	text=
+binding	index=66	text=
+binding	index=67	text=
+binding	index=68	text=
+binding	index=69	text=
+binding	index=70	text=
+binding	index=71	text=
+binding	index=72	text=
+binding	index=73	text=
+binding	index=74	text=
+binding	index=75	text=
+binding	index=76	text=
+binding	index=77	text=
+binding	index=78	text=
+binding	index=79	text=
+binding	index=80	text=
+binding	index=81	text=
+binding	index=82	text=
+binding	index=83	text=
+binding	index=84	text=
+binding	index=85	text=
+binding	index=86	text=
+binding	index=87	text=
+binding	index=88	text=
+binding	index=89	text=
+binding	index=90	text=
+binding	index=91	text=
+binding	index=92	text=
+binding	index=93	text=
+binding	index=94	text=
+binding	index=95	text=
+binding	index=96	text=
+binding	index=97	text=
+binding	index=98	text=
+binding	index=99	text=
+binding	index=100	text=
+binding	index=101	text=
+binding	index=102	text=
+binding	index=103	text=
+binding	index=104	text=
+binding	index=105	text=
+binding	index=106	text=
+binding	index=107	text=
+binding	index=108	text=
+binding	index=109	text=
+binding	index=110	text=
+binding	index=111	text=
+binding	index=112	text=
+binding	index=113	text=
+binding	index=114	text=
+binding	index=115	text=
+binding	index=116	text=
+binding	index=117	text=
+binding	index=118	text=
+binding	index=119	text=
+binding	index=120	text=
+binding	index=121	text=
+binding	index=122	text=
+binding	index=123	text=
+binding	index=124	text=
+binding	index=125	text=
+binding	index=126	text=
+binding	index=127	text=
+binding	index=128	text=
+binding	index=129	text=
+binding	index=130	text=
+binding	index=131	text=
+binding	index=132	text=
+binding	index=133	text=
+binding	index=134	text=
+binding	index=135	text=
+binding	index=136	text=
+binding	index=137	text=
+binding	index=138	text=
+binding	index=139	text=
+binding	index=140	text=
+binding	index=141	text=
+binding	index=142	text=
+binding	index=143	text=
+binding	index=144	text=
+binding	index=145	text=
+binding	index=146	text=
+binding	index=147	text=
+binding	index=148	text=
+binding	index=149	text=
+binding	index=150	text=
+binding	index=151	text=
+binding	index=152	text=
+binding	index=153	text=
+binding	index=154	text=
+binding	index=155	text=
+binding	index=156	text=
+binding	index=157	text=
+binding	index=158	text=
+binding	index=159	text=
+binding	index=160	text=
+binding	index=161	text=
+binding	index=162	text=
+binding	index=163	text=
+binding	index=164	text=
+binding	index=165	text=
+binding	index=166	text=
+binding	index=167	text=
+binding	index=168	text=
+binding	index=169	text=
+binding	index=170	text=
+binding	index=171	text=
+binding	index=172	text=
+binding	index=173	text=
+binding	index=174	text=
+binding	index=175	text=
+binding	index=176	text=
+binding	index=177	text=
+binding	index=178	text=
+binding	index=179	text=
+binding	index=180	text=
+binding	index=181	text=
+binding	index=182	text=
+binding	index=183	text=
+binding	index=184	text=
+binding	index=185	text=
+binding	index=186	text=
+binding	index=187	text=
+binding	index=188	text=
+binding	index=189	text=
+binding	index=190	text=
+binding	index=191	text=
+binding	index=192	text=
+binding	index=193	text=
+binding	index=194	text=
+binding	index=195	text=
+binding	index=196	text=
+binding	index=197	text=
+binding	index=198	text=
+binding	index=199	text=
+binding	index=200	text=
+binding	index=201	text=
+binding	index=202	text=
+binding	index=203	text=
+binding	index=204	text=
+binding	index=205	text=
+binding	index=206	text=
+binding	index=207	text=
+binding	index=208	text=
+binding	index=209	text=
+binding	index=210	text=
+binding	index=211	text=
+binding	index=212	text=
+binding	index=213	text=
+binding	index=214	text=
+binding	index=215	text=
+binding	index=216	text=
+binding	index=217	text=
+binding	index=218	text=
+binding	index=219	text=
+binding	index=220	text=
+binding	index=221	text=
+binding	index=222	text=
+binding	index=223	text=
+binding	index=224	text=
+binding	index=225	text=
+binding	index=226	text=
+binding	index=227	text=
+binding	index=228	text=
+binding	index=229	text=
+binding	index=230	text=
+binding	index=231	text=
+binding	index=232	text=
+binding	index=233	text=
+binding	index=234	text=
+binding	index=235	text=
+binding	index=236	text=
+binding	index=237	text=
+binding	index=238	text=
+binding	index=239	text=
+binding	index=240	text=
+binding	index=241	text=
+binding	index=242	text=
+binding	index=243	text=
+binding	index=244	text=
+binding	index=245	text=
+binding	index=246	text=
+binding	index=247	text=
+binding	index=248	text=
+binding	index=249	text=
+binding	index=250	text=
+binding	index=251	text=
+binding	index=252	text=
+binding	index=253	text=
+binding	index=254	text=
+call	op=exec	cmd=BUTTON Fire
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=0100000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Fire
+pre	act=3	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=3	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Jump
+pre	act=2	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=2	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Nope
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Fire
+pre	act=1	delta=00000000	running=1	actor=0	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=0	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Hidden
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Walk
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON Walk
+pre	act=1	delta=00000000	running=1	actor=1	class=B	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=16
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=B	mem=8000000000000000000000000000000000000000010000000000000000000000	keys=-
+call	op=exec	cmd=BUTTON "Fire"
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=0100000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=PULSE Jump
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8001000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=PULSE Jump
+pre	act=3	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=3	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=PULSE Nope
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=PULSE
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+log	Bad Button command
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=TOGGLE Fire
+pre	act=1	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=1	delta=00000000	running=1	actor=1	class=A	mem=8000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=TOGGLE Fire
+pre	act=3	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=3	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=TOGGLE Nope
+pre	act=3	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+log	Bad Toggle command
+ret	1
+post	act=3	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Turn SPEED=2
+pre	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=4	delta=3f000000	running=1	actor=1	class=A	mem=00000000ae47813f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Turn SPEEDBASE=3 SPEED=2
+pre	act=2	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=2	delta=3f000000	running=1	actor=1	class=A	mem=0000000000008040000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Strafe SPEEDBASE=0.5
+pre	act=2	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=2	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f0000803e0000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Strafe speed=abc
+pre	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Look
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Stance
+pre	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+log	Bad Axis command
+ret	1
+post	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Look
+pre	act=4	delta=3f000000	running=1	actor=0	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	Bad Axis command
+ret	1
+post	act=4	delta=3f000000	running=1	actor=0	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS
+pre	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	Bad Axis command
+ret	1
+post	act=4	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYNAME 3
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	D
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYNAME 20
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	e
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYNAME -1
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYNAME 255
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYNAME 0
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	A
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYNAME 11
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	L
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYBINDING A
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	BUTTON Fire
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYBINDING B
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	PULSE Jump|AXIS Turn SPEED=2
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYBINDING Q
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYBINDING Z
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYBINDING L
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+log	BUTTON Walk
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=KEYBINDING 
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=Sprint
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire
+event	viewport_exec	AXIS Turn SPEED=2
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=Cycle
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	TOGGLE Jump
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=Nope
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=   
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=Sprint extra
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire
+event	viewport_exec	AXIS Turn SPEED=2
+ret	1
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=BUTTON Fire|PULSE Jump
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire
+event	viewport_exec	PULSE Jump
+ret	-
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=OnRelease BUTTON Fire|BUTTON Jump
+pre	act=3	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire
+event	cache_create	size=48
+ret	-
+post	act=3	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=BUTTON Fire|OnRelease PULSE Jump
+pre	act=3	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+event	viewport_exec	PULSE Jump
+ret	-
+post	act=3	delta=3f000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=// comment|BUTTON Fire
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	
+event	viewport_exec	BUTTON Fire
+ret	-
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=BUTTON Fire // x
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire 
+ret	-
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=Some viewport command
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	Some viewport command
+ret	-
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+pre	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+event	viewport_exec	vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+ret	-
+post	act=1	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=Sprint
+pre	act=2	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=2	delta=3f000000	running=1	actor=1	class=A	mem=8000000000000040000000000000000000000000000000000000000000000000	keys=-
+call	op=exec_commands	cmd=
+pre	act=2	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	-
+post	act=2	delta=3f000000	running=1	actor=1	class=A	mem=800000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=0	act=1	delta=1056964608
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=2	act=1	delta=1048576000
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	AXIS Strafe SPEEDBASE=3 SPEED=0.5
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=1	act=2	delta=1036831949
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=00000000cdcc4c3e000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=5	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	Sprint
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=8	act=3	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	BUTTON Fire
+event	cache_create	size=48
+log	Bad Button command
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=7	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=9	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	viewport_exec	ZZZ
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=12	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=process	key=254	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=preprocess	key=3	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=preprocess	key=3	act=1	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=preprocess	key=3	act=3	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=preprocess	key=3	act=3	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=preprocess	key=3	act=2	delta=1056964608
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=preprocess	key=3	act=0	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=direct_axis	key=2	length=1056964608	delta=1048576000
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=00000000000000000000c03e0000000000000000000000000000000000000000	keys=-
+call	op=direct_axis	key=0	length=1065353216	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=direct_axis	key=7	length=1065353216	delta=1056964608
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=direct_axis	key=3	length=3223322624	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=direct_axis	key=1	length=1040187392	delta=1061158912
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=000000000000c03f000000000000000000000000000000000000000000000000	keys=-
+call	op=read_input	delta=1056964608
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=000000000000803f00000040000040c000008040000000000000000000000000	keys=0:1
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=00000000000020420000a0420000f0c200008040000000000000000000000000	keys=0:1
+call	op=read_input	delta=3212836864
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=000000000000803f00000040000040c000008040000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000008000008040000000000000000000000000	keys=-
+call	op=read_input	delta=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=000000000000803f00000040000040c000008040000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=000000000000807f0000807f000080ff00008040000000000000000000000000	keys=-
+call	op=read_input	delta=1056964608
+pre	act=0	delta=00000000	running=0	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+ret	-
+post	act=0	delta=00000000	running=0	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=-
+call	op=read_input	delta=1048576000
+pre	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000010000000000004000000000	keys=-
+event	cache_create	size=16
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000010000000000004000000000	keys=-
+call	op=read_input	delta=1036831949
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=000000000000803f000000000000000000000000000000000000000000000000	keys=1:1,2:1
+event	cache_create	size=48
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=00000000010070430100f0410000000000000000000000000000000000000000	keys=1:1,2:1
+call	op=reset_input
+pre	act=2	delta=3f000000	running=1	actor=1	class=A	mem=010101000000803f000000400000404000008040000000000000000000000000	keys=3:1,200:1
+event	viewport_update	1
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000010000000000000000000000000000008040000000000000000000000000	keys=-
+call	op=reset_input
+pre	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000010000000000a04000000000	keys=-
+event	viewport_update	1
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000a04000000000	keys=-
+call	op=init
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0100000000000040000000000000000000000000000000000000000000000000	keys=3:1
+event	viewport_update	1
+event	init_log
+ret	-
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=A
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=3
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=D
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=11
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=L
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=12
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=e
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=254
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=e
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=255
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=get_key_name	key=-1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	text=
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=A
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	1	key=0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=K
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	1	key=10
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=L
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	1	key=11
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=Z
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=l
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_key_name	name=IK_A
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Fire
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	off=2928
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Jump
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	off=2929
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Hidden
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Turn
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Walk
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Walk
+pre	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=16
+ret	off=2948
+post	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Fire
+pre	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=16
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_button	name=Nope
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Turn
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	off=2932
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Strafe
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	off=2936
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Look
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	off=2940
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Stance
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Fire
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Turn
+pre	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=16
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=find_axis	name=Walk
+pre	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=16
+ret	none
+post	act=0	delta=00000000	running=1	actor=1	class=B	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=key_state	key=3	pawn=1	player=1	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=key_state	key=3	pawn=1	player=1	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=-
+call	op=key_state	key=3	pawn=0	player=1	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=key_state	key=3	pawn=1	player=2	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=key_state	key=3	pawn=1	player=0	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=key_state	key=3	pawn=1	player=1	input=0
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=3:1
+call	op=key_state	key=254	pawn=1	player=1	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=254:1
+ret	1
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=254:1
+call	op=key_state	key=255	pawn=1	player=1	input=1
+pre	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=254:1
+ret	0
+post	act=0	delta=00000000	running=1	actor=1	class=A	mem=0000000000000000000000000000000000000000000000000000000000000000	keys=254:1
+call	op=exec	cmd=AXIS Turn SPEEDBASE=1.15 SPEED=0.13
+pre	act=4	delta=410b3333	running=1	actor=1	class=A	mem=00000000cdcc4c3e000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=4	delta=410b3333	running=1	actor=1	class=A	mem=000000004b15c03f000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Turn SPEED=0.55
+pre	act=4	delta=3ec7ae14	running=1	actor=1	class=A	mem=00000000a4703d3e000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=4	delta=3ec7ae14	running=1	actor=1	class=A	mem=00000000f1a23f3e000000000000000000000000000000000000000000000000	keys=-
+call	op=exec	cmd=AXIS Turn SPEED=0.15
+pre	act=2	delta=3dcccccd	running=1	actor=1	class=A	mem=00000000b81e853e000000000000000000000000000000000000000000000000	keys=-
+event	cache_create	size=48
+ret	1
+post	act=2	delta=3dcccccd	running=1	actor=1	class=A	mem=00000000cdcc8c3e000000000000000000000000000000000000000000000000	keys=-

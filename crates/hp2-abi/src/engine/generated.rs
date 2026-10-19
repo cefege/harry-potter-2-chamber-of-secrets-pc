@@ -1792,6 +1792,27 @@ const _: () = assert!(std::mem::offset_of!(UConsole, console_dest) == 2464);
 const _: () = assert!(std::mem::offset_of!(UConsole, frame_x) == 2468);
 const _: () = assert!(std::mem::offset_of!(UConsole, frame_y) == 2472);
 
+/// Layout mirror of C++ `UInput` (5400 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UInput {
+    _pad_0: [u8; 5120],
+    pub viewport: *mut c_void,
+    pub input_keys: *mut c_void,
+    pub action: i32,
+    pub delta: f32,
+    pub key_down_table: [u8; 255],
+    _pad_5399: [u8; 1],
+}
+
+const _: () = assert!(size_of::<UInput>() == 5400);
+const _: () = assert!(std::mem::offset_of!(UInput, viewport) == 5120);
+const _: () = assert!(std::mem::offset_of!(UInput, input_keys) == 5128);
+const _: () = assert!(std::mem::offset_of!(UInput, action) == 5136);
+const _: () = assert!(std::mem::offset_of!(UInput, delta) == 5140);
+const _: () = assert!(std::mem::offset_of!(UInput, key_down_table) == 5144);
+
 /// Layout mirror of C++ `FSceneNode` (408 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C)]
@@ -1844,6 +1865,7 @@ mod layout_tests {
         assert_eq!(size_of::<ACarcass>(), 980);
         assert_eq!(size_of::<UGesture>(), 104);
         assert_eq!(size_of::<UConsole>(), 2760);
+        assert_eq!(size_of::<UInput>(), 5400);
         assert_eq!(size_of::<FSceneNode>(), 408);
     }
 }

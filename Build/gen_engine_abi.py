@@ -61,6 +61,7 @@ SCALAR_SIZES = {
     "FPointRegion": 16,
     "ptr[8]": 64,
     "FName[8]": 32,
+    "u8[255]": 255,
 }
 RUST_TYPE = {
     "ptr": "*mut c_void",
@@ -80,6 +81,7 @@ RUST_TYPE = {
     "ptr[8]": "[*mut c_void; 8]",
     "FRotator[8]": "[FRotator; 8]",
     "FPlane": "FPlane",
+    "u8[255]": "[u8; 255]",
 }
 
 
@@ -527,6 +529,18 @@ MIRRORS = [
         bits=["bNoDrawWorld", "bDrewWorld"],
         packed=True,
         private=("Viewport", "TopLine", "BorderSize", "ConsoleLines", "BorderLines", "BorderPixels", "ConsolePos", "ConsoleDest", "FrameX", "FrameY", "bNoDrawWorld", "bDrewWorld"),
+    ),
+    Mirror(
+        "UInput",
+        "UInput",
+        [
+            ("Viewport", "ptr"),
+            ("InputKeys", "ptr"),
+            ("Action", "i32"),
+            ("Delta", "f32"),
+            ("KeyDownTable", "u8[255]"),
+        ],
+        private=("InputKeys", "Action", "Delta", "KeyDownTable"),
     ),
     Mirror("FSceneNode", "FSceneNode", [("X", "i32"), ("Y", "i32"), ("XB", "i32"), ("YB", "i32")]),
 ]

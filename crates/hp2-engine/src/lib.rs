@@ -12,6 +12,7 @@ pub mod coords;
 pub mod dynbsp;
 pub mod fpoly;
 pub mod gesture;
+pub mod input;
 pub mod levact;
 pub mod lodmesh;
 pub mod math;
