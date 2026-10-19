@@ -12,6 +12,8 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "hp2_rs.h"
+#include "Hp2ParamsServices.h"
 
 /*-----------------------------------------------------------------------------
 	Getters.
@@ -25,27 +27,7 @@
 UBOOL ENGINE_API GetFVECTOR( const TCHAR* Stream, FVector& Value )
 {
 	guard(GetFVECTOR);
-	int NumVects = 0;
-
-	// Support for old format.
-	NumVects += Parse( Stream, TEXT("X="), Value.X );
-	NumVects += Parse( Stream, TEXT("Y="), Value.Y );
-	NumVects += Parse( Stream, TEXT("Z="), Value.Z );
-
-	// New format.
-	if( NumVects==0 )
-	{
-		Value.X = appAtof(Stream);
-		Stream = appStrchr(Stream,',');
-		if( !Stream )
-			return 0;
-		Value.Y = appAtof(++Stream);
-		Stream = appStrchr(Stream,',');
-		if( !Stream ) return 0;
-		Value.Z = appAtof(++Stream);
-		NumVects=3;
-	}
-	return NumVects==3;
+	return hp2_rs_engine_params_get_fvector_stream( &GHp2ParamsServices, Stream, &Value );
 	unguard;
 }
 
@@ -61,22 +43,7 @@ UBOOL ENGINE_API GetSUBSTRING
 )
 {
 	guard(GetSUBSTRING);
-
-	const TCHAR* Found = appStrfind(Stream,Match);
-	const TCHAR* Start;
-
-	if( Found == NULL ) return 0; // didn't match.
-
-	Start = Found + appStrlen(Match);
-	if( *Start != '(' )
-		return 0;
-
-	appStrncpy( Value, Start+1, MaxLen );
-	TCHAR* Temp=appStrchr( Value, ')' );
-	if( Temp )
-		*Temp=0;
-
-	return 1;
+	return hp2_rs_engine_params_get_substring( &GHp2ParamsServices, Stream, Match, Value, MaxLen );
 	unguard;
 }
 
@@ -92,9 +59,7 @@ UBOOL ENGINE_API GetFVECTOR
 {
 	guard(GetFVECTOR);
 
-	TCHAR Temp[80];
-	if (!GetSUBSTRING(Stream,Match,Temp,80)) return 0;
-	return GetFVECTOR(Temp,Value);
+	return hp2_rs_engine_params_get_fvector( &GHp2ParamsServices, Stream, Match, &Value );
 
 	unguard;
 }
@@ -111,31 +76,7 @@ UBOOL ENGINE_API GetFROTATOR
 {
 	guard(GetFROTATOR);
 
-	FLOAT	Temp=0.f;
-	INT 	N = 0;
-
-	// Old format.
-	if( Parse(Stream,TEXT("PITCH="),Temp) ) {Rotation.Pitch = appRound(Temp * ScaleFactor); N++;}
-	if( Parse(Stream,TEXT("YAW="),  Temp) ) {Rotation.Yaw   = appRound(Temp * ScaleFactor); N++;}
-	if( Parse(Stream,TEXT("ROLL="), Temp) ) {Rotation.Roll  = appRound(Temp * ScaleFactor); N++;}
-
-	// New format.
-	if( N == 0 )
-	{
-		Rotation.Pitch = appRound(appAtof(Stream) * ScaleFactor);
-		Stream = appStrchr(Stream,',');
-		if( !Stream )
-			return 0;
-
-		Rotation.Yaw = appRound(appAtof(++Stream) * ScaleFactor);
-		Stream = appStrchr(Stream,',');
-		if( !Stream )
-			return 0;
-
-		Rotation.Roll = appRound(appAtof(++Stream) * ScaleFactor);
-		return 1;
-	}
-	return 0;
+	return hp2_rs_engine_params_get_frotator_stream( &GHp2ParamsServices, Stream, &Rotation, ScaleFactor );
 	unguard;
 }
 
@@ -152,9 +93,7 @@ UBOOL ENGINE_API GetFROTATOR
 {
 	guard(GetFROTATOR);
 
-	TCHAR Temp[80];
-	if (!GetSUBSTRING(Stream,Match,Temp,80)) return 0;
-	return GetFROTATOR(Temp,Value,ScaleFactor);
+	return hp2_rs_engine_params_get_frotator( &GHp2ParamsServices, Stream, Match, &Value, ScaleFactor );
 
 	unguard;
 }
