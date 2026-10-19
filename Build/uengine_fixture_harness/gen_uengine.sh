@@ -195,7 +195,7 @@ OBJS="$WORK/UnEngine.o $WORK/UnMisc.o $WORK/UnAnsi.o $WORK/harness.o"
   | grep -v -E '^(setjmp|__cxa_|__gxx|__stack_chk|__chkstk|_Unwind|_ZSt9|_ZTVN10__cxx|_ZTIPc|_ZTIi)' \
   | grep -v -E '^(bzero|mem[a-z]+|memset_pattern[0-9]+|str[a-z]+|v?snprintf|v?sprintf|v?fprintf|printf|malloc|calloc|realloc|free|abort|exit|fabs|sqrt|floor|ceil|fmod|pow|log|exp|sin|cos|tan|atan2?|acos|asin|rand|srand|time|clock|wcs[a-z]+|wcsn[a-z]+|atof|putchar)$' \
   | sort -u | comm -23 - "$WORK/defined.txt" > "$WORK/syms.txt"
-# Stubs: functions abort with STUB; data is zero-filled char[64]. Any stub hit fails the run.
+# Stubs: functions abort with STUB; data is zero-filled 1 MiB, 16-aligned. Any stub hit fails the run.
 python3 "$REPO/Build/fixture_common.py" stubs "$WORK/syms.txt" $OBJS > "$WORK/stubs.cpp"
 c++ -c "$WORK/stubs.cpp" -o "$WORK/stubs.o"
 c++ "$WORK/harness.o" "$WORK/UnEngine.o" "$WORK/UnMisc.o" "$WORK/UnAnsi.o" "$WORK/stubs.o" -o "$WORK/uengine_harness"

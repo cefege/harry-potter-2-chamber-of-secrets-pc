@@ -10,7 +10,7 @@
 #       Functions (BR26 branches, or UNSIGND pointer slots whose demangled name has a parameter
 #       list): abort stub that prints `STUB <name>` to stderr.
 #       Data (vtables/typeinfo, GOT/PAGE loads, or UNSIGND-only addresses of non-functions):
-#       zero-filled char[64], matching what the static storage of an unseeded process holds.
+#       zero-filled 1 MiB char arrays (16-aligned), matching what the static storage of an unseeded process holds.
 #       Anything unclassifiable: report UNCLASSIFIED on stderr and exit 1.
 import ctypes
 import json
@@ -84,10 +84,13 @@ def cmd_stubs(symfile, objs):
     for i, s in enumerate(funcs):
         out.append(f'extern "C" void hp2_stub_{i}(void) __asm__("_{s}");\n')
         out.append(f'extern "C" void hp2_stub_{i}(void) {{ std::fprintf(stderr, "STUB %s\\n", "{s}"); std::abort(); }}\n')
+    # Undefined Mach-O data symbols carry no size here. Reserve aligned BSS for
+    # large globals such as GMath's tables and the jmp_buf-carrying __Context::Env;
+    # the old 64-byte slots were smaller than macOS arm64's 192-byte jmp_buf.
     for i, s in enumerate(datas):
-        out.append(f'__attribute__((used)) char hp2_data_{i}[64] __asm__("_{s}");\n')
+        out.append(f'__attribute__((used, aligned(16))) char hp2_data_{i}[1 << 20] __asm__("_{s}");\n')
     print(''.join(out))
-    print(f'stub list: {len(funcs)} function (abort), {len(datas)} data (zero char[64])', file=sys.stderr)
+    print(f'stub list: {len(funcs)} function (abort), {len(datas)} data (zero char[1 MiB])', file=sys.stderr)
     for s in funcs:
         print(f'stub function {s}', file=sys.stderr)
     for s in datas:

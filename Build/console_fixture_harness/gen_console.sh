@@ -61,7 +61,7 @@ eval "c++ $FLAGS -O3 -g -fno-access-control -c $REPO/Build/console_fixture_harne
   | grep -v -E '^(setjmp|__cxa_|__gxx|__stack_chk|_Unwind|_ZSt9|_ZTVN10__cxx|_ZTIPc|_ZTIi)' \
   | grep -v -E '^(bzero|mem[a-z]+|str[a-z]+|v?snprintf|v?sprintf|v?fprintf|printf|malloc|calloc|realloc|free|abort|exit|fabs|sqrt|floor|ceil|fmod|pow|log|exp|sin|cos|tan|atan2?|acos|asin|rand|srand|time|clock|wcs[a-z]+)$' \
   | sort -u | comm -23 - "$WORK/defined.txt" > "$WORK/syms.txt"
-# Stubs: functions abort with STUB; data is zero-filled char[64] (bss-equivalent). Any stub hit fails the run.
+# Stubs: functions abort with STUB; data is zero-filled 1 MiB, 16-aligned (bss-equivalent). Any stub hit fails the run.
 python3 "$REPO/Build/fixture_common.py" stubs "$WORK/syms.txt" "$WORK/UnCon.o" "$WORK/harness.o" > "$WORK/stubs.cpp"
 c++ -c "$WORK/stubs.cpp" -o "$WORK/stubs.o"
 c++ "$WORK/harness.o" "$WORK/UnCon.o" "$WORK/stubs.o" -o "$WORK/console_harness"

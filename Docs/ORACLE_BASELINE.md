@@ -90,3 +90,30 @@ Consequences:
   set; the "excluded tests" caveat above is retired.
 - Phase 4 may use freshly built binaries (current capture hooks) for render
   baselines instead of the stale bundle.
+
+## In-place port: fixture stub acceptance (2026-10-19)
+
+The current in-place port pins each fixture generator to its own pre-port
+source ref; the historical whole-game baseline above is not a substitute
+for those objects.
+
+`Build/fixture_common.py` now reserves zero-filled, 16-byte-aligned 1 MiB BSS
+slots for unresolved data symbols. The old 64-byte slots were smaller than
+macOS arm64's 192-byte `jmp_buf` used by `__Context::Env`; `setjmp` could
+overwrite neighbouring stub storage. Function stubs still abort when reached.
+The reservation is not a general proof of arbitrary external symbol sizes.
+
+Acceptance command: `python3 /tmp/hp2_fixture_stub_regen.py` in `/tmp/m2wt`.
+That throwaway driver ran every tracked `Build/*_fixture_harness/gen_*.sh`
+with the absolute `out/macos-arm64` directory, retained each generator's log,
+and compared SHA-256 hashes of all tracked Rust fixture files after each run.
+
+Observed: **29/29 generators exited 0; all 94 tracked fixture files remained
+byte-identical.** No fixture refresh or golden acceptance is implied.
+Evidence:
+`/tmp/m2wt/out/macos-arm64/Testing/HP2/fixture_stub_regen/Artifacts/`
+(`baseline.json`, `results.json`, and per-generator logs).
+
+Profile: **data-none**, using the generators' synthetic inputs and pinned C++
+objects on macOS arm64. This does not establish retail, Linux, Windows, or
+Raspberry Pi runtime parity.
