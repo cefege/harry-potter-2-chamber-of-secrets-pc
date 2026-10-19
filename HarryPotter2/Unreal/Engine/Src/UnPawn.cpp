@@ -16,203 +16,10 @@
 #include "HP2PawnServices.h"
 #include "Hp2PawnReachServices.h"
 #include "Hp2PawnSenseServices.h"
-
-namespace
-{
-struct FModernHarryProperties
-{
-	UClass* HarryClass;
-	UBOOL bResolved;
-	UBOOL bValid;
-	UBoolProperty* ScreenRelativeMovement;
-	UBoolProperty* LockedOnTarget;
-	UBoolProperty* FixedFaceDirection;
-	UBoolProperty* InDuelingMode;
-	UBoolProperty* ReverseInput;
-	UBoolProperty* KeepStationary;
-	UBoolProperty* LockOutForward;
-	UBoolProperty* LockOutBackward;
-	UBoolProperty* LockOutStrafeLeft;
-	UBoolProperty* LockOutStrafeRight;
-	UBoolProperty* IsAiming;
-	UBoolProperty* E3DemoLockout;
-	UBoolProperty* AutoCenterCamera;
-	UObjectProperty* BossTarget;
-};
-
-static FModernHarryProperties GModernHarryProperties;
-static UBOOL GReportedModernHarryContractFailure;
-
-struct FModernAutoCenterOverride
-{
-	APlayerPawn* PlayerPawn;
-	UBoolProperty* Property;
-	UBOOL SavedValue;
-};
-
-static FModernAutoCenterOverride GModernAutoCenterOverride;
-
-static UBOOL ReadModernHarryBool( const APlayerPawn* PlayerPawn, const UBoolProperty* Property )
-{
-	return (*(const BITFIELD*)((const BYTE*)PlayerPawn + Property->Offset) & Property->BitMask) != 0;
-}
-
-static void WriteModernHarryBool( APlayerPawn* PlayerPawn, const UBoolProperty* Property, UBOOL Value )
-{
-	BITFIELD& Storage = *(BITFIELD*)((BYTE*)PlayerPawn + Property->Offset);
-	if( Value )
-		Storage |= Property->BitMask;
-	else
-		Storage &= ~Property->BitMask;
-}
-
-static void RestoreModernAutoCenter( APlayerPawn* PlayerPawn )
-{
-	if( GModernAutoCenterOverride.PlayerPawn!=PlayerPawn )
-		return;
-	WriteModernHarryBool
-	(
-		PlayerPawn,
-		GModernAutoCenterOverride.Property,
-		GModernAutoCenterOverride.SavedValue
-	);
-	appMemzero( &GModernAutoCenterOverride, sizeof(GModernAutoCenterOverride) );
-}
-
-static void SuppressModernAutoCenter
-(
-	APlayerPawn* PlayerPawn,
-	const FModernHarryProperties& Properties
-)
-{
-	if( !ReadModernHarryBool(PlayerPawn,Properties.AutoCenterCamera) )
-		return;
-	GModernAutoCenterOverride.PlayerPawn = PlayerPawn;
-	GModernAutoCenterOverride.Property = Properties.AutoCenterCamera;
-	GModernAutoCenterOverride.SavedValue = 1;
-	WriteModernHarryBool( PlayerPawn, Properties.AutoCenterCamera, 0 );
-}
-
-static FLOAT ExpandModernAnalogMovement
-(
-	FLOAT Value,
-	FLOAT DeltaSeconds,
-	FLOAT MaxAnalogFrameContribution,
-	FLOAT Scale
-)
-{
-	if( DeltaSeconds<=0.f || Abs(Value * DeltaSeconds)>MaxAnalogFrameContribution + 0.0001f )
-		return Value;
-	// A normalized SDL axis contributes at most 0.2*Speed before UInput divides by DeltaSeconds.
-	// Classify in that pre-divide domain so full-stick response stays monotonic at every frame rate.
-	return Value * DeltaSeconds * Scale;
-}
-
-static UObject* ReadModernHarryObject( const APlayerPawn* PlayerPawn, const UObjectProperty* Property )
-{
-	return *(UObject* const*)((const BYTE*)PlayerPawn + Property->Offset);
-}
-
-static UBOOL IsInScriptState( UObject* Object, const TCHAR* StateName )
-{
-	if( !Object || !Object->GetStateFrame() )
-		return 0;
-
-	const FName RequiredState( StateName, FNAME_Find );
-	for( UState* State=Object->GetStateFrame()->StateNode; State; State=State->GetSuperState() )
-		if( State->GetFName()==RequiredState )
-			return 1;
-	return 0;
-}
-
-static FModernHarryProperties* GetModernHarryProperties( APlayerPawn* PlayerPawn )
-{
-	FModernHarryProperties& Properties = GModernHarryProperties;
-	UClass* HarryClass = Properties.HarryClass;
-	if( !HarryClass || !PlayerPawn->IsA(HarryClass) )
-	{
-		HarryClass = NULL;
-		for( UClass* Candidate=PlayerPawn->GetClass(); Candidate; Candidate=Candidate->GetSuperClass() )
-			if( appStricmp(Candidate->GetPathName(),TEXT("HGame.Harry"))==0 )
-			{
-				HarryClass = Candidate;
-				break;
-			}
-		if( !HarryClass )
-			return NULL;
-	}
-	if( Properties.HarryClass!=HarryClass )
-	{
-		appMemzero( &Properties, sizeof(Properties) );
-		Properties.HarryClass = HarryClass;
-	}
-
-	if( !Properties.bResolved )
-	{
-		Properties.bResolved = 1;
-		const TCHAR* MissingProperty = NULL;
-
-		Properties.ScreenRelativeMovement = FindField<UBoolProperty>( HarryClass, TEXT("bScreenRelativeMovement") );
-		if( !Properties.ScreenRelativeMovement && !MissingProperty ) MissingProperty = TEXT("bScreenRelativeMovement");
-		Properties.LockedOnTarget = FindField<UBoolProperty>( HarryClass, TEXT("bLockedOnTarget") );
-		if( !Properties.LockedOnTarget && !MissingProperty ) MissingProperty = TEXT("bLockedOnTarget");
-		Properties.FixedFaceDirection = FindField<UBoolProperty>( HarryClass, TEXT("bFixedFaceDirection") );
-		if( !Properties.FixedFaceDirection && !MissingProperty ) MissingProperty = TEXT("bFixedFaceDirection");
-		Properties.InDuelingMode = FindField<UBoolProperty>( HarryClass, TEXT("bInDuelingMode") );
-		if( !Properties.InDuelingMode && !MissingProperty ) MissingProperty = TEXT("bInDuelingMode");
-		Properties.ReverseInput = FindField<UBoolProperty>( HarryClass, TEXT("bReverseInput") );
-		if( !Properties.ReverseInput && !MissingProperty ) MissingProperty = TEXT("bReverseInput");
-		Properties.KeepStationary = FindField<UBoolProperty>( HarryClass, TEXT("bKeepStationary") );
-		if( !Properties.KeepStationary && !MissingProperty ) MissingProperty = TEXT("bKeepStationary");
-		Properties.LockOutForward = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutForward") );
-		if( !Properties.LockOutForward && !MissingProperty ) MissingProperty = TEXT("bLockOutForward");
-		Properties.LockOutBackward = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutBackward") );
-		if( !Properties.LockOutBackward && !MissingProperty ) MissingProperty = TEXT("bLockOutBackward");
-		Properties.LockOutStrafeLeft = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutStrafeLeft") );
-		if( !Properties.LockOutStrafeLeft && !MissingProperty ) MissingProperty = TEXT("bLockOutStrafeLeft");
-		Properties.LockOutStrafeRight = FindField<UBoolProperty>( HarryClass, TEXT("bLockOutStrafeRight") );
-		if( !Properties.LockOutStrafeRight && !MissingProperty ) MissingProperty = TEXT("bLockOutStrafeRight");
-		Properties.IsAiming = FindField<UBoolProperty>( HarryClass, TEXT("bIsAiming") );
-		if( !Properties.IsAiming && !MissingProperty ) MissingProperty = TEXT("bIsAiming");
-		Properties.E3DemoLockout = FindField<UBoolProperty>( HarryClass, TEXT("bE3DemoLockout") );
-		if( !Properties.E3DemoLockout && !MissingProperty ) MissingProperty = TEXT("bE3DemoLockout");
-		Properties.AutoCenterCamera = FindField<UBoolProperty>( HarryClass, TEXT("bAutoCenterCamera") );
-		if( !Properties.AutoCenterCamera && !MissingProperty ) MissingProperty = TEXT("bAutoCenterCamera");
-		Properties.BossTarget = FindField<UObjectProperty>( HarryClass, TEXT("BossTarget") );
-		if( !Properties.BossTarget && !MissingProperty ) MissingProperty = TEXT("BossTarget");
-
-		Properties.bValid = MissingProperty==NULL;
-		if( MissingProperty && !GReportedModernHarryContractFailure )
-		{
-			debugf
-			(
-				NAME_Warning,
-				TEXT("Modern third-person controls disabled: HGame.Harry is missing required property %s"),
-				MissingProperty
-			);
-			GReportedModernHarryContractFailure = 1;
-		}
-	}
-
-	return Properties.bValid ? &Properties : NULL;
-}
-
-static UBOOL IsModernThirdPersonContext( APlayerPawn* PlayerPawn, const FModernHarryProperties& Properties )
-{
-	return
-		IsInScriptState(PlayerPawn,TEXT("PlayerWalking"))
-	&&	IsInScriptState(PlayerPawn->ViewTarget,TEXT("StateStandardCam"))
-	&&	!PlayerPawn->bShowMenu
-	&&	!PlayerPawn->bIsCaptured
-	&&	!ReadModernHarryBool(PlayerPawn,Properties.KeepStationary)
-	&&	!ReadModernHarryBool(PlayerPawn,Properties.E3DemoLockout)
-	&&	!ReadModernHarryObject(PlayerPawn,Properties.BossTarget)
-	&&	!ReadModernHarryBool(PlayerPawn,Properties.InDuelingMode)
-	&&	!ReadModernHarryBool(PlayerPawn,Properties.LockedOnTarget)
-	&&	!ReadModernHarryBool(PlayerPawn,Properties.FixedFaceDirection)
-	&&	!ReadModernHarryBool(PlayerPawn,Properties.ReverseInput);
-}
-}
+#include "Hp2PawnNativeInputServices.h"
+#include "Hp2PawnNativeAiServices.h"
+#include "Hp2PawnNativeMoveServices.h"
+#include "Hp2PawnNativeFilesServices.h"
 
 /*-----------------------------------------------------------------------------
 	APawn object implementation.
@@ -271,26 +78,13 @@ UBOOL APlayerPawn::BeginModernThirdPersonInput
 {
 	guard(APlayerPawn::BeginModernThirdPersonInput);
 
-	if( !bModernThirdPersonControls )
-		return 0;
-
-	RawBaseX = aBaseX;
-	RawStrafe = aStrafe;
-	RawCameraYaw = aTurn;
-	RawCameraPitch = aLookUp;
-
-	FModernHarryProperties* Properties = GetModernHarryProperties( this );
-	if( !Properties )
-		return 0;
-
-	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
-	if( !IsModernThirdPersonContext(this,*Properties) )
-		return 0;
-
-	aBaseX = 0.f;
-	aTurn = 0.f;
-	aLookUp = 0.f;
-	return 1;
+	FLOAT Raw[4] = { RawBaseX, RawStrafe, RawCameraYaw, RawCameraPitch };
+	const UBOOL Active = hp2_rs_engine_pawn_native_input_begin( &GHp2PawnNativeInputServices, this, Raw );
+	RawBaseX = Raw[0];
+	RawStrafe = Raw[1];
+	RawCameraYaw = Raw[2];
+	RawCameraPitch = Raw[3];
+	return Active;
 
 	unguard;
 }
@@ -307,44 +101,7 @@ void APlayerPawn::FinishModernThirdPersonInput
 {
 	guard(APlayerPawn::FinishModernThirdPersonInput);
 
-	if( !Active || !bModernThirdPersonControls )
-		return;
-
-	FModernHarryProperties* Properties = GetModernHarryProperties( this );
-	if( !Properties )
-		return;
-
-	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
-	if
-	(	ReadModernHarryBool(this,Properties->KeepStationary)
-	||	!IsModernThirdPersonContext(this,*Properties) )
-	{
-		aForward = 0.f;
-		aStrafe = 0.f;
-		aSideMove = 0.f;
-		return;
-	}
-
-	const FLOAT CameraScale = DesiredFOV * 0.01111f;
-	SmoothMouseX += RawCameraYaw * CameraScale;
-	SmoothMouseY += RawCameraPitch * CameraScale;
-
-	RawBaseX = ExpandModernAnalogMovement( RawBaseX, DeltaSeconds, 0.2f, 20000.f ); // JoyX Speed=1 -> RotLeft/Right Speed=200.
-	aForward = ExpandModernAnalogMovement( aForward, DeltaSeconds, 0.4f, 15000.f ); // JoyY Speed=2 -> MoveForward Speed=300.
-	FLOAT EffectiveSide = 1.2f * RawBaseX + 0.8f * RawStrafe;
-	if
-	(	(EffectiveSide<0.f && ReadModernHarryBool(this,Properties->LockOutStrafeLeft))
-	||	(EffectiveSide>0.f && ReadModernHarryBool(this,Properties->LockOutStrafeRight)) )
-		EffectiveSide = 0.f;
-	if
-	(	(aForward>0.f && ReadModernHarryBool(this,Properties->LockOutForward))
-	||	(aForward<0.f && ReadModernHarryBool(this,Properties->LockOutBackward)) )
-		aForward = 0.f;
-
-	aSideMove = EffectiveSide;
-	aStrafe = 1.25f * EffectiveSide;
-	SuppressModernAutoCenter( this, *Properties );
-	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 1 );
+	hp2_rs_engine_pawn_native_input_finish( &GHp2PawnNativeInputServices, this, Active, RawBaseX, RawStrafe, RawCameraYaw, RawCameraPitch, DeltaSeconds );
 
 	unguard;
 }
@@ -353,38 +110,7 @@ void APlayerPawn::ApplyModernThirdPersonMovement()
 {
 	guard(APlayerPawn::ApplyModernThirdPersonMovement);
 
-	RestoreModernAutoCenter( this );
-
-	if( !bModernThirdPersonControls )
-		return;
-
-	FModernHarryProperties* Properties = GetModernHarryProperties( this );
-	if( !Properties )
-		return;
-
-	const UBOOL WasActive = ReadModernHarryBool( this, Properties->ScreenRelativeMovement );
-	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 0 );
-	if( !WasActive || !IsModernThirdPersonContext(this,*Properties) )
-		return;
-	WriteModernHarryBool( this, Properties->ScreenRelativeMovement, 1 );
-
-	const FCoords CameraAxes = GMath.UnitCoords / FRotator(0,ViewTarget->Rotation.Yaw,0);
-	Acceleration = aForward * CameraAxes.XAxis + aSideMove * CameraAxes.YAxis;
-	Acceleration.Z = 0.f;
-
-	if( !ReadModernHarryBool(this,Properties->IsAiming) )
-	{
-		if( Acceleration.X!=0.f || Acceleration.Y!=0.f )
-			DesiredRotation.Yaw = Acceleration.Rotation().Yaw;
-		else if( Velocity.X!=0.f || Velocity.Y!=0.f )
-		{
-			FVector PlanarVelocity = Velocity;
-			PlanarVelocity.Z = 0.f;
-			DesiredRotation.Yaw = PlanarVelocity.Rotation().Yaw;
-		}
-		else
-			DesiredRotation.Yaw = Rotation.Yaw;
-	}
+	hp2_rs_engine_pawn_native_input_apply( &GHp2PawnNativeInputServices, this );
 
 	unguard;
 }
@@ -421,7 +147,8 @@ void AActor::execGetNextInt( FFrame& Stack, RESULT_DECL )
 	TArray<FRegistryObjectInfo> List;
 	GetRegistryObjects( List, UClass::StaticClass(), TempClass, 0 );
 
-	*(FString*)Result = (CurrentInt<List.Num()) ? List(CurrentInt).Object : TEXT("");
+	INT Index = hp2_rs_engine_pawn_native_files_registry_index( List.Num(), CurrentInt );
+	*(FString*)Result = (Index >= 0) ? List(Index).Object : TEXT("");
 
 	unguard;
 }
@@ -441,8 +168,9 @@ void AActor::execGetNextIntDesc( FFrame& Stack, RESULT_DECL )
 	TArray<FRegistryObjectInfo> List;
 	GetRegistryObjects( List, UClass::StaticClass(), TempClass, 0 );
 
-	*EntryName = (CurrentInt<List.Num()) ? List(CurrentInt).Object : TEXT("");
-	*Description = (CurrentInt<List.Num()) ? List(CurrentInt).Description : TEXT("");
+	INT Index = hp2_rs_engine_pawn_native_files_registry_index( List.Num(), CurrentInt );
+	*EntryName = (Index >= 0) ? List(Index).Object : TEXT("");
+	*Description = (Index >= 0) ? List(Index).Description : TEXT("");
 
 	unguard;
 }
@@ -463,20 +191,22 @@ void AActor::execGetCacheEntry( FFrame& Stack, RESULT_DECL )
 	TMultiMap<FString,FString>* Sec = CacheIni.GetSectionPrivate( TEXT("Cache"), 0, 1, IniName );
 	if( Sec )
 	{
-		INT i = 0;
+		TArray<FString> Keys;
+		TArray<FString> Values;
+		TArray<BYTE> Empty;
 		for( TMultiMap<FString,FString>::TIterator It(*Sec); It; ++It )
 		{
-			if( *(*It.Value()) )
-			{
-				if( i == Num )
-				{
-					*GUID = *It.Key();
-					*Filename = *It.Value();
-					*(UBOOL*)Result = 1;
-					return;
-				}
-				i++;
-			}
+			Keys.AddItem( *It.Key() );
+			Values.AddItem( *It.Value() );
+			Empty.AddItem( *(*It.Value()) ? 0 : 1 );
+		}
+		INT Index = hp2_rs_engine_pawn_native_files_cache_entry_index( Num, Empty.Num() ? &Empty(0) : NULL, Empty.Num() );
+		if( Index >= 0 )
+		{
+			*GUID = Keys(Index);
+			*Filename = Values(Index);
+			*(UBOOL*)Result = 1;
+			return;
 		}
 	}
 	*(UBOOL*)Result = 0;
@@ -490,60 +220,9 @@ void AActor::execMoveCacheEntry( FFrame& Stack, RESULT_DECL )
 	P_GET_STR_OPTX(NewFilename,TEXT(""));
 	P_FINISH;
 
-	*(UBOOL*)Result = 0;
-	TCHAR IniName[256], OrigFilename[256];
-	FConfigCacheIni CacheIni;
-	appSprintf( IniName, TEXT("%s") PATH_SEPARATOR TEXT("cache.ini"), *GSys->CachePath );
-	if( !CacheIni.GetString( TEXT("Cache"), *GUID, OrigFilename, ARRAY_COUNT(OrigFilename), IniName ) )
-		return;
-	if( !*(*NewFilename) )
-		NewFilename = OrigFilename;
-	INT i;
-	while( (i=NewFilename.InStr(TEXT("/"))) != -1 )
-		NewFilename = NewFilename.Mid(i+1);
-	while( (i=NewFilename.InStr(TEXT("\\"))) != -1 )
-		NewFilename = NewFilename.Mid(i+1);
-	while( (i=NewFilename.InStr(TEXT(":"))) != -1 )
-		NewFilename = NewFilename.Mid(i+1);
-
-	// get file extension
-	FString FileExt = NewFilename;
-	i = FileExt.InStr( TEXT(".") );
-	if( i == -1 )
-	{
-		debugf(TEXT("MoveCacheEntry: No extension: %s"), *NewFilename);
-		return;
-	}
-	while( i != -1 )
-	{
-		FileExt = FileExt.Mid( i + 1 );
-		i = FileExt.InStr( TEXT(".") );
-	}
-	FileExt = FString(TEXT(".")) + FileExt;
-	
-	// get the destination path from a Paths array entry such as ../Maps/*.unr
-	for( i=0; i<GSys->Paths.Num(); i++ )
-	{
-		if( GSys->Paths(i).Right( FileExt.Len() ) == FileExt )
-		{
-			INT SeparatorIndex = GSys->Paths(i).Len() - 1;
-			for( ; SeparatorIndex>=0; --SeparatorIndex )
-			{
-				const TCHAR Ch = (*GSys->Paths(i))[SeparatorIndex];
-				if( Ch=='/' || Ch=='\\' || Ch==':' )
-					break;
-			}
-
-			FString DestPath = GSys->Paths(i).Left( SeparatorIndex + 1 );
-			debugf( TEXT("MoveCacheEntry: %s -> %s"), *(GSys->CachePath + FString(PATH_SEPARATOR) + GUID + GSys->CacheExt), *(DestPath + NewFilename) );
-			if( GFileManager->Move( *(DestPath + NewFilename), *(GSys->CachePath + FString(PATH_SEPARATOR) + GUID + GSys->CacheExt) ) )
-			{
-				CacheIni.SetString( TEXT("Cache"), *GUID, TEXT(""), IniName );
-				*(UBOOL*)Result = 1;
-			}
-			return;
-		}
-	}
+	TArray<UNICHAR> GuidUnits = Hp2PawnNativeFilesUnits( *GUID );
+	TArray<UNICHAR> NewFilenameUnits = Hp2PawnNativeFilesUnits( *NewFilename );
+	*(UBOOL*)Result = hp2_rs_engine_pawn_native_files_move_cache_entry( &GHp2PawnNativeFilesServices, GuidUnits.GetData(), NewFilenameUnits.GetData() );
 	unguard;
 }
 
@@ -556,62 +235,9 @@ void APawn::execCheckValidSkinPackage( FFrame& Stack, RESULT_DECL )
 	P_GET_STR(MeshName);
 	P_FINISH;
 
-	INT bProscribed = 0;
-	INT bFound = 0;
-	Pkg = Pkg.Caps();
-
-	// make sure package is in serverpackages
-	TCHAR *ClassName = TEXT("engine.gameengine");
-	TCHAR *PropertyName = TEXT("serverpackages");
-	UClass* Class;
-	UProperty* Property;
-	if
-	( (Class=FindObject<UClass>( ANY_PACKAGE, ClassName))!=NULL )
-	{
-		if
-		( (Property=FindField<UProperty>( Class, PropertyName))!=NULL )
-		{
-			TCHAR Temp[2048] = TEXT("");
-			if( Class->Defaults.Num() )
-				Property->ExportText( 0, Temp, &Class->Defaults(0), &Class->Defaults(0), PPF_Localized );
-			FString List = Temp;
-			List.Caps();
-			if ( Pkg.InStr(List) )
-			{
-				bFound = 1;
-			}
-		}
-	}
-	// make sure player isn't getting textures from wrong package
-	if( !bFound )
-		bProscribed = true;
-	else if ( (appStricmp(TEXT("UNREALSHARE"),*Pkg) == 0) || (appStricmp(TEXT("UNREALI"),*Pkg) == 0) || (appStricmp(TEXT("BOTPACK"),*Pkg) == 0) )
-		bProscribed = true;
-	else
-	{
-		FString LegalName = MeshName + TEXT("SKINS");
-		LegalName = LegalName.Caps();
-		if ( FString(Pkg).InStr(*LegalName) == -1 )
-		{
-			FString SkinPacks[] = {
-				TEXT("BOSSSKINS"), 
-				TEXT("SOLDIERSKINS"),
-				TEXT("SGIRLSKINS"),
-				TEXT("COMMANDOSKINS"),
-				TEXT("TNALIMESHSKINS"),
-				TEXT("TSKMSKINS"),
-				TEXT("TCOWMESHSKINS") };
-			for ( INT i=0; i<8; i++ )
-			{
-				if ( FString(Pkg).InStr(*SkinPacks[i]) != -1 )
-				{
-					bProscribed = true;
-					break;
-				}
-			}
-		}
-	}
-	*(UBOOL*)Result = !bProscribed;
+	TArray<UNICHAR> PkgUnits = Hp2PawnNativeFilesUnits( *Pkg );
+	TArray<UNICHAR> MeshUnits = Hp2PawnNativeFilesUnits( *MeshName );
+	*(UBOOL*)Result = hp2_rs_engine_pawn_native_files_check_valid_skin_package( &GHp2PawnNativeFilesServices, PkgUnits.GetData(), MeshUnits.GetData() );
 	unguard;
 }
 
@@ -624,10 +250,9 @@ void APlayerPawn::execUpdateURL( FFrame& Stack, RESULT_DECL )
 	P_GET_UBOOL(bSaveDefault);
 	P_FINISH;
 
-	UGameEngine* GameEngine = CastChecked<UGameEngine>( GetLevel()->Engine );
-	GameEngine->LastURL.AddOption( *(NewOption + TEXT("=") + NewValue) );
-	if( bSaveDefault )
-		GameEngine->LastURL.SaveURLConfig( TEXT("DefaultPlayer"), *NewOption, TEXT("User") );
+	TArray<UNICHAR> OptionUnits = Hp2PawnNativeFilesUnits( *NewOption );
+	TArray<UNICHAR> ValueUnits = Hp2PawnNativeFilesUnits( *NewValue );
+	hp2_rs_engine_pawn_native_files_update_url( &GHp2PawnNativeFilesServices, this, OptionUnits.GetData(), ValueUnits.GetData(), bSaveDefault ? 1 : 0 );
 	unguard;
 }
 
@@ -638,10 +263,8 @@ void APlayerPawn::execGetDefaultURL( FFrame& Stack, RESULT_DECL )
 	P_GET_STR(Option);
 	P_FINISH;
 
-	FURL URL;
-	URL.LoadURLConfig( TEXT("DefaultPlayer"), TEXT("User") );
-
-	*(FString*)Result = FString( URL.GetOption(*(Option + FString(TEXT("="))), TEXT("")) );
+	TArray<UNICHAR> OptionUnits = Hp2PawnNativeFilesUnits( *Option );
+	*(FString*)Result = Hp2PawnNativeFilesString( hp2_rs_engine_pawn_native_files_get_default_url( &GHp2PawnNativeFilesServices, OptionUnits.GetData() ) );
 	unguard;
 }
 
@@ -651,7 +274,7 @@ void AActor::execGetURLMap( FFrame& Stack, RESULT_DECL )
 
 	P_FINISH;
 
-	*(FString*)Result = ((UGameEngine*)GetLevel()->Engine)->LastURL.Map;
+	*(FString*)Result = Hp2PawnNativeFilesString( hp2_rs_engine_pawn_native_files_url_map( &GHp2PawnNativeFilesServices, this ) );
 	unguard;
 }
 
@@ -669,56 +292,16 @@ void AActor::execGetNextSkin( FFrame& Stack, RESULT_DECL )
 	TArray<FRegistryObjectInfo> List;
 	GetRegistryObjects( List, UTexture::StaticClass(), NULL, 0 );
 
-	INT UseSkin = -1;
-	INT FirstSkin = -1;
-	INT PrevSkin = -1;
-	INT UseNext = 0;
-
-	INT n = appStrlen( *Prefix );
-
+	// Registry names as NUL-terminated UNICHAR strings for the Rust search.
+	TArray<TArray<UNICHAR>> NameUnits;
 	for( INT i=0; i<List.Num(); i++ )
-	{
-		// if it matches the prefix
-		if( appStrnicmp(*List(i).Object, *Prefix, n) == 0 )
-		{
-			if( UseNext )
-			{
-				UseSkin = i;
-				UseNext = 0;
-				break;
-			}
-
-			if( FirstSkin == -1 )
-				FirstSkin = i;
-
-			if( appStricmp(*List(i).Object, *CurrentSkin) == 0 ) 
-			{
-				if ( Dir == -1 )
-				{
-					UseSkin = PrevSkin;
-					break;
-				}
-				else if ( Dir == 0 )
-				{
-					UseSkin = i;
-					break;
-				}
-				else
-				{
-					UseNext = 1;
-				}
-			}
-			PrevSkin = i;
-		}	
-	}
-	
-	if( UseNext )
-		UseSkin = FirstSkin;
-
-	// if we wanted to use the previous skin and
-	// it didn't exist, choose the last skin.
-	if( UseSkin == -1 )
-		UseSkin = PrevSkin;
+		NameUnits.AddItem( Hp2PawnNativeFilesUnits( *List(i).Object ) );
+	TArray<const UNICHAR*> NamePtrs;
+	for( INT i=0; i<NameUnits.Num(); i++ )
+		NamePtrs.AddItem( NameUnits(i).GetData() );
+	TArray<UNICHAR> PrefixUnits = Hp2PawnNativeFilesUnits( *Prefix );
+	TArray<UNICHAR> CurrentUnits = Hp2PawnNativeFilesUnits( *CurrentSkin );
+	INT UseSkin = hp2_rs_engine_pawn_native_files_next_skin_index( NamePtrs.GetData(), NamePtrs.Num(), PrefixUnits.GetData(), CurrentUnits.GetData(), Dir );
 
 	if( UseSkin >= 0 && UseSkin < List.Num() )
 	{
@@ -739,12 +322,7 @@ void APlayerPawn::execGetEntryLevel( FFrame& Stack, RESULT_DECL )
 	guard(APlayerPawn::execGetEntryLevel);
 	P_FINISH;
 
-	check(XLevel);
-	check(XLevel->Engine);
-	check((UGameEngine*)(XLevel->Engine));
-	check(((UGameEngine*)(XLevel->Engine))->GEntry);
-
-	*(ALevelInfo**)Result = ((UGameEngine*)(XLevel->Engine))->GEntry->GetLevelInfo();
+	*(ALevelInfo**)Result = (ALevelInfo*)hp2_rs_engine_pawn_native_files_entry_level( &GHp2PawnNativeFilesServices, this );
 
 	unguard;
 }
@@ -755,9 +333,7 @@ void APlayerPawn::execResetKeyboard( FFrame& Stack, RESULT_DECL )
 
 	P_FINISH;
 
-	UViewport* Viewport = Cast<UViewport>(Player);
-	if( Viewport && Viewport->Input )
-		ResetConfig(Viewport->Input->GetClass());
+	hp2_rs_engine_pawn_native_files_reset_keyboard( &GHp2PawnNativeFilesServices, this );
 	unguard;
 }
 
@@ -770,29 +346,7 @@ void APawn::execFindBestInventoryPath( FFrame& Stack, RESULT_DECL )
 	P_FINISH;
 
 	clock(GetLevel()->FindPathCycles);
-	AActor * bestPath = NULL;
-	AActor * newPath;
-	FLOAT BestWeight = findPathTowardBestInventory(newPath, 1, *Weight, bPredictRespawns);
-	//debugf(NAME_DevPath,"BestWeight is %f compared to weight %f", BestWeight, *Weight);
-	if ( BestWeight > *Weight )
-	{
-		bestPath = newPath;
-		*Weight = BestWeight;
-		//debugf(NAME_DevPath,"Recommend move to %s", bestPath->GetName());
-
-		SpecialPause = 0.f;
-		bShootSpecial = 0;
-
-		if ( bestPath && bestPath->IsProbing(NAME_SpecialHandling) )
-		{
-			//debugf(NAME_DevPath,"Handle Special");
-			HandleSpecial(bestPath);
-			//debugf(NAME_DevPath,"Done Handle Special");
-		}
-
-		if ( bestPath == SpecialGoal )
-			SpecialGoal = NULL;
-	}
+	AActor* bestPath = (AActor*)hp2_rs_engine_pawn_native_files_find_best_inventory_path( &GHp2PawnNativeFilesServices, this, *Weight, bPredictRespawns ? 1 : 0, Weight );
 	unclock(GetLevel()->FindPathCycles);
 	//debugf("Find path to time was %f", GetLevel()->FindPathCycles * MSecPerCycle);
 
@@ -809,67 +363,9 @@ void AActor::execGetMapName( FFrame& Stack, RESULT_DECL )
 	P_GET_INT(Dir);
 	P_FINISH;
 
-	*(FString*)Result = TEXT("");
-	TCHAR Wildcard[256];
-	TArray<FString> MapNames;
-	appSprintf( Wildcard, TEXT("*.%s"), *FURL::DefaultMapExt );
-	for( INT DoCD=0; DoCD<1+(GCdPath[0]!=0); DoCD++ )
-	{
-		for( INT i=0; i<GSys->Paths.Num(); i++ )
-		{
-			if( appStrstr( *GSys->Paths(i), Wildcard ) )
-			{
-				TCHAR Tmp[256]=TEXT("");
-				if( DoCD )
-				{
-					appStrcat( Tmp, GCdPath );
-					appStrcat( Tmp, TEXT("System") PATH_SEPARATOR );
-				}
-				appStrcat( Tmp, *GSys->Paths(i) );
-				*appStrstr( Tmp, Wildcard )=0;
-				appStrcat( Tmp, *Prefix );
-				appStrcat( Tmp, Wildcard );
-				TArray<FString>	TheseNames = GFileManager->FindFiles(Tmp,1,0);
-				for( INT i=0; i<TheseNames.Num(); i++ )
-				{
-					INT j;
-					for( j=0; j<MapNames.Num(); j++ )
-						if( appStricmp(*MapNames(j),*TheseNames(i))==0 )
-							break;
-					if( j==MapNames.Num() )
-						new(MapNames)FString(TheseNames(i));
-				}
-			}
-		}
-	}
-	FString Seperator = FString::Printf(TEXT("\\"));
-	for( INT i=0; i<MapNames.Num(); i++ )
-	{
-		// Strip out any leading path crap (for umod meta packages).
-		while( MapNames(i).InStr( Seperator ) >= 0 )
-		{
-			INT Pos = MapNames(i).InStr( Seperator ) + 1;
-			MapNames(i) = MapNames(i).Right( MapNames(i).Len() - Pos );
-		}
-	}
-	for( INT i=0; i<MapNames.Num(); i++ )
-	{
-		if( appStrcmp(*MapNames(i),*MapName)==0 )
-		{
-			INT Offset = i+Dir;
-			if( Offset < 0 )
-				Offset = MapNames.Num() - 1;
-			else if( Offset >= MapNames.Num() )
-				Offset = 0;
-			*(FString*)Result = MapNames(Offset);
-			return;
-		}
-	}
-	if( MapNames.Num() > 0 )
-		*(FString*)Result = MapNames(0);
-	else
-		*(FString*)Result = FString(TEXT(""));
-
+	TArray<UNICHAR> PrefixUnits = Hp2PawnNativeFilesUnits( *Prefix );
+	TArray<UNICHAR> MapUnits = Hp2PawnNativeFilesUnits( *MapName );
+	*(FString*)Result = Hp2PawnNativeFilesString( hp2_rs_engine_pawn_native_files_get_map_name( &GHp2PawnNativeFilesServices, PrefixUnits.GetData(), MapUnits.GetData(), Dir ) );
 	unguard;
 }
 
@@ -880,18 +376,8 @@ void APlayerPawn::execConsoleCommand( FFrame& Stack, RESULT_DECL )
 	P_GET_STR(Command);
 	P_FINISH;
 
-	*(FString*)Result = TEXT("");
-	FStringOutputDevice StrOut;
-	if( Player )
-	{
-		Player->Exec( *Command, StrOut );
-		*(FString*)Result = *StrOut;
-	}
-	else
-	{
-		GetLevel()->Engine->Exec( *Command, StrOut );
-		*(FString*)Result = *StrOut;
-	}
+	TArray<UNICHAR> CommandUnits = Hp2PawnNativeFilesUnits( *Command );
+	*(FString*)Result = Hp2PawnNativeFilesString( hp2_rs_engine_pawn_native_files_console_command( &GHp2PawnNativeFilesServices, this, CommandUnits.GetData() ) );
 	unguard;
 }
 
@@ -902,20 +388,7 @@ void APlayerPawn::execScreenToWorld( FFrame& Stack, RESULT_DECL )
 	P_GET_VECTOR(S);
 	P_FINISH;
 
-	// Unproject point using viewport dimensions.
-	UViewport* Viewport = GetLevel()->Engine->Client->Viewports(0);
-	const FLOAT EffectiveFovAngle = UClient::GetEffectiveFovAngle( FovAngle, Viewport->SizeX, Viewport->SizeY, GetLevel()->Engine->Client->MaintainVerticalFOV );
-	FLOAT ProjZ = Viewport->SizeX / appTan(EffectiveFovAngle * PI/360.f);
-	FLOAT Z = S.Z / ProjZ;
-	FVector C( (2.f * S.X - Viewport->SizeX) * Z, (2.f * S.Y - Viewport->SizeY) * Z, S.Z );
-
-	// Convert from camera to world space, using player's current view.
-	AActor*		ViewActor    = this;
-	FVector		ViewLocation = Location;
-	FRotator	ViewRotation = Rotation;
-	eventPlayerCalcView( ViewActor, ViewLocation, ViewRotation );
-
-	*(FVector*)Result = C.TransformVectorBy( GMath.UnitCoords * ViewRotation ) + ViewLocation;
+	hp2_rs_engine_pawn_native_files_screen_to_world( &GHp2PawnNativeFilesServices, this, S.X, S.Y, S.Z, Result );
 	unguard;
 }
 
@@ -925,8 +398,7 @@ void APawn::execStopWaiting( FFrame& Stack, RESULT_DECL )
 
 	P_FINISH;
 
-	if( GetStateFrame()->LatentAction == EPOLL_Sleep )
-		LatentFloat = -1.f;
+	hp2_rs_engine_pawn_native_ai_stop_waiting( &GHp2PawnNativeAiServices, this );
 
 	unguardSlow;
 }
@@ -955,29 +427,7 @@ void AActor::execPlayerCanSeeMe( FFrame& Stack, RESULT_DECL )
 	guard(AActor::PlayerCanSeeMe);
 	P_FINISH;
 
-	int seen = 0;
-	int NetMode = GetLevel()->GetLevelInfo()->NetMode;
-	if ( (NetMode == NM_Standalone)
-		|| ((NetMode == NM_Client) && (bNetTemporary || (Role == ROLE_Authority))) )
-	{
-		// just check local player visibility
-		for( INT i=0; i<GetLevel()->Engine->Client->Viewports.Num(); i++ )
-			if ( TestCanSeeMe( GetLevel()->Engine->Client->Viewports(i)->Actor ) )
-			{
-				seen = 1;
-				break;
-			}
-	}
-	else
-	{
-		for ( APawn *next=GetLevel()->GetLevelInfo()->PawnList; next!=NULL; next=next->nextPawn )
-			if ( TestCanSeeMe((APlayerPawn *)next) )
-			{
-				seen = 1;
-				break;
-			}
-	}
-	*(DWORD*)Result = seen;
+	*(DWORD*)Result = hp2_rs_engine_pawn_native_ai_player_can_see_me( &GHp2PawnNativeAiServices, this );
 	unguard;
 }
 
@@ -985,16 +435,7 @@ int AActor::TestCanSeeMe( APlayerPawn *Viewer )
 {
 	guard(AActor::TestCanSeeMe);
 
-	if ( !Viewer )
-		return 0;
-	if ( Viewer->ViewTarget == this )
-		return 1;
-
-	float distSq = (Location - Viewer->Location).SizeSquared();
-	return ( (distSq < 100000.f * (CollisionRadius + 3.6)) 
-		&& (Viewer->bBehindView 
-			|| (Square(Viewer->ViewRotation.Vector() | (Location - Viewer->Location)) >= 0.25f * distSq))
-		&& Viewer->LineOfSightTo(this) );
+	return hp2_rs_engine_pawn_native_ai_test_can_see_me( &GHp2PawnNativeAiServices, this, Viewer );
 
 	unguard;
 }
@@ -1034,34 +475,7 @@ void APawn::execPickTarget( FFrame& Stack, RESULT_DECL )
 	P_GET_VECTOR(FireDir);
 	P_GET_VECTOR(projStart);
 	P_FINISH;
-	APawn *pick = NULL;
-	for ( APawn *next=GetLevel()->GetLevelInfo()->PawnList; next!=NULL; next=next->nextPawn )
-	{
-		if ( (next != this) && (next->Health > 0) && next->bProjTarget
-			&& (!PlayerReplicationInfo || !next->PlayerReplicationInfo
-				|| !GetLevel()->GetLevelInfo()->Game->bTeamGame
-				|| (PlayerReplicationInfo->Team != next->PlayerReplicationInfo->Team)) )
-		{
-			FLOAT newAim = FireDir | (next->Location - projStart);
-			if ( newAim > 0 )
-			{
-				FLOAT FireDist = (next->Location - projStart).SizeSquared();
-				if ( FireDist < 4000000.f )
-				{
-					FireDist = appSqrt(FireDist);
-					newAim = newAim/FireDist;
-					if ( (newAim > *bestAim) && LineOfSightTo(next) )
-					{
-						pick = next;
-						*bestAim = newAim;
-						*bestDist = FireDist;
-					}
-				}
-			}
-		}
-	}
-
-	*(APawn**)Result = pick; 
+	*(APawn**)Result = (APawn*)hp2_rs_engine_pawn_native_ai_pick_target( &GHp2PawnNativeAiServices, this, bestAim, bestDist, &FireDir, &projStart );
 	unguardSlow;
 }
 
@@ -1074,34 +488,7 @@ void APawn::execPickAnyTarget( FFrame& Stack, RESULT_DECL )
 	P_GET_VECTOR(FireDir);
 	P_GET_VECTOR(projStart);
 	P_FINISH;
-	AActor *pick = NULL;
-
-	for( INT iActor=0; iActor<GetLevel()->Actors.Num(); iActor++ )
-		if( GetLevel()->Actors(iActor) )
-		{
-			AActor* next = GetLevel()->Actors(iActor);
-			if ( next->bProjTarget && !next->IsA(APawn::StaticClass()) )
-			{
-				FLOAT newAim = FireDir | (next->Location - projStart);
-				if ( newAim > 0 )
-				{
-					FLOAT FireDist = (next->Location - projStart).SizeSquared();
-					if ( FireDist < 4000000.f )
-					{
-						FireDist = appSqrt(FireDist);
-						newAim = newAim/FireDist;
-						if ( (newAim > *bestAim) && LineOfSightTo(next) )
-						{
-							pick = next;
-							*bestAim = newAim;
-							*bestDist = FireDist;
-						}
-					}
-				}
-			}
-		}
-
-	*(AActor**)Result = pick; 
+	*(AActor**)Result = (AActor*)hp2_rs_engine_pawn_native_ai_pick_any_target( &GHp2PawnNativeAiServices, this, bestAim, bestDist, &FireDir, &projStart );
 	unguardSlow;
 }
 
@@ -1111,8 +498,7 @@ void APawn::execAddPawn( FFrame& Stack, RESULT_DECL )
 
 	P_FINISH;
 
-	nextPawn = GetLevel()->GetLevelInfo()->PawnList;
-	GetLevel()->GetLevelInfo()->PawnList = this;
+	hp2_rs_engine_pawn_native_ai_add_pawn( &GHp2PawnNativeAiServices, this );
 	unguardSlow;
 }
 
@@ -1122,21 +508,7 @@ void APawn::execRemovePawn( FFrame& Stack, RESULT_DECL )
 
 	P_FINISH;
 
-	APawn *next = GetLevel()->GetLevelInfo()->PawnList;
-	if ( next == this )
-		GetLevel()->GetLevelInfo()->PawnList = next->nextPawn;
-	else
-	{
-		while ( next )
-		{
-			if ( next->nextPawn == this )
-			{
-				next->nextPawn = nextPawn;
-				break;
-			}
-			next = next->nextPawn;
-		}
-	}
+	hp2_rs_engine_pawn_native_ai_remove_pawn( &GHp2PawnNativeAiServices, this );
 
 	unguardSlow;
 }
@@ -1150,26 +522,14 @@ void APawn::execWaitForLanding( FFrame& Stack, RESULT_DECL )
 
 	P_FINISH;
 
-	LatentFloat = 2.5;
-	if (Physics == PHYS_Falling)
-		GetStateFrame()->LatentAction = AI_PollWaitForLanding;
+	hp2_rs_engine_pawn_native_ai_wait_for_landing( &GHp2PawnNativeAiServices, this );
 	unguardSlow;
 }
 
 void APawn::execPollWaitForLanding( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollWaitForLanding);
-	if( Physics != PHYS_Falling )
-	{
-		GetStateFrame()->LatentAction = 0;
-	}
-	else
-	{
-		FLOAT DeltaSeconds = *(FLOAT*)Result;
-		LatentFloat -= DeltaSeconds;
-		if ( LatentFloat < 0 )
-			eventLongFall();
-	}
+	hp2_rs_engine_pawn_native_ai_poll_wait_for_landing( &GHp2PawnNativeAiServices, this, Result );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollWaitForLanding, execPollWaitForLanding);
@@ -1193,66 +553,8 @@ void APawn::execFindStairRotation( FFrame& Stack, RESULT_DECL )
 	P_GET_FLOAT(deltaTime);
 	P_FINISH;
 
-	if(deltaTime > 0.33f)
-	{
-		*(DWORD*)Result = ViewRotation.Pitch;
-		return;
-	}
-	if(ViewRotation.Pitch > 32768)
-		ViewRotation.Pitch = (ViewRotation.Pitch & 65535) - 65536;
-	
 	FCheckResult Hit(1.f);
-	FRotator LookRot = ViewRotation;
-	LookRot.Pitch = 0;
-	FVector Dir = LookRot.Vector();
-	FVector EyeSpot = Location + FVector(0,0,BaseEyeHeight);
-	FLOAT height = CollisionHeight + BaseEyeHeight; 
-	FVector CollisionSlice(CollisionRadius,CollisionRadius,1);
-
-	GetLevel()->SingleLineCheck(Hit, this, EyeSpot + 2 * height * Dir, EyeSpot, TRACE_VisBlocking, CollisionSlice);
-	FLOAT Dist = 2 * height * Hit.Time;
-	INT stairRot = 0;
-	if(Dist > 0.8 * height)
-	{
-		FVector Spot = EyeSpot + 0.5f * Dist * Dir;
-		FLOAT Down = 3 * height;
-		GetLevel()->SingleLineCheck(Hit, this, Spot - FVector(0,0,Down), Spot, TRACE_VisBlocking, CollisionSlice);
-		if(Hit.Time < 1.f)
-		{
-			FLOAT firstDown = Down * Hit.Time;
-			if (firstDown < 0.7f * height - 6.f) // then up or level
-			{
-				Spot = EyeSpot + Dist * Dir;
-				GetLevel()->SingleLineCheck(Hit, this, Spot - FVector(0,0,Down), Spot, TRACE_VisBlocking, CollisionSlice);
-				stairRot = ::Max(0, ViewRotation.Pitch);
-				if( Down * Hit.Time < firstDown - 10 ) 
-					stairRot = 5400;
-			}
-			else if(firstDown > 0.7f * height + 6.f) // then down or level
-			{
-				GetLevel()->SingleLineCheck(Hit, this, Location + 0.9f*Dist*Dir, Location, TRACE_VisBlocking);
-				if(Hit.Time == 1.f)
-				{
-					Spot = EyeSpot + Dist * Dir;
-					GetLevel()->SingleLineCheck(Hit, this, Spot - FVector(0,0,Down), Spot, TRACE_VisBlocking, CollisionSlice);
-					stairRot = Min(0, ViewRotation.Pitch);
-					if (Down * Hit.Time > firstDown + 10)
-						stairRot = -5000;
-				}
-			}
-		}
-	}
-	INT Diff = Abs(ViewRotation.Pitch - stairRot);
-	if( Diff > 0 )
-	{
-		FLOAT RotRate = 8;
-		if( Diff < 1000 )
-			RotRate = 8000/Diff; 
-
-		RotRate = ::Min(1.f, RotRate * deltaTime);
-		stairRot = appRound(FLOAT(ViewRotation.Pitch) * ( 1 - RotRate) + FLOAT(stairRot) * RotRate);
-	}
-	*(DWORD*)Result = stairRot; 
+	*(DWORD*)Result = hp2_rs_engine_pawn_native_ai_find_stair_rotation( &GHp2PawnNativeAiServices, this, deltaTime, &Hit );
 	unguardSlow;
 }
 
@@ -1284,66 +586,7 @@ void APawn::execactorReachable( FFrame& Stack, RESULT_DECL )
 		return;
 	}
 	clock(GetLevel()->FindPathCycles);
-	AActor *RealActor = NULL;
-
-	if ( actor->IsA(AInventory::StaticClass()) && ((AInventory *)actor)->MyMarker )
-	{
-		RealActor = actor;
-		actor = ((AInventory *)actor)->MyMarker;
-	}
-	if ( actor->IsA(ANavigationPoint::StaticClass()) && GetLevel()->ReachSpecs.Num() && (CollisionRadius <= MAXCOMMONRADIUS) )
-	{
-		FLOAT MaxDistSq = ::Max(48.f, CollisionRadius);
-		FVector Dir;
-		INT bOnPath = 0;
-		MaxDistSq = MaxDistSq * MaxDistSq;
-		if ( MoveTarget && MoveTarget->IsA(ANavigationPoint::StaticClass())
-			&& (Abs(MoveTarget->Location.Z - Location.Z) < CollisionHeight) ) 
-		{
-			Dir = MoveTarget->Location - Location;
-			Dir.Z = 0;
-			if ( (Dir | Dir) < MaxDistSq )
-			{
-				bOnPath = 1;
-				if ( (MoveTarget == actor) || CanMoveTo(MoveTarget, actor) )
-				{
-					*(DWORD*)Result = 1;
-					unclock(GetLevel()->FindPathCycles);
-					return;
-				}
-			}
-		}
-		ANavigationPoint *Nav = GetLevel()->GetLevelInfo()->NavigationPointList;
-		while (Nav)
-		{
-			if ( Abs(Nav->Location.Z - Location.Z) < CollisionHeight )
-			{
-				Dir = Nav->Location - Location;
-				Dir.Z = 0;
-				if ( (Dir | Dir) < MaxDistSq ) 
-				{
-					bOnPath = 1;
-					if ( (Nav == actor) || CanMoveTo(Nav, actor) )
-					{
-						*(DWORD*)Result = 1;
-						unclock(GetLevel()->FindPathCycles);
-						return;
-					}
-				}
-			}
-			Nav = Nav->nextNavigationPoint;
-		}
-		if ( bOnPath && (Physics != PHYS_Flying) )
-		{
-			*(DWORD*)Result = 0;
-			unclock(GetLevel()->FindPathCycles);
-			return;
-		}
-	}	
-	if ( RealActor )
-		actor = RealActor;
-
-	*(DWORD*)Result = actorReachable(actor);  
+	*(DWORD*)Result = hp2_rs_engine_pawn_native_move_actor_reachable( &GHp2PawnNativeMoveServices, this, actor );
 	unclock(GetLevel()->FindPathCycles);
 	unguardSlow;
 }
@@ -1406,26 +649,8 @@ void APawn::execFindPathTo( FFrame& Stack, RESULT_DECL )
 	P_FINISH;
 
 	clock(GetLevel()->FindPathCycles);
-	AActor * bestPath = NULL;
-	AActor * newPath;
-	if (findPathTo(point, bSinglePath, newPath, bClearPaths))
-		bestPath = newPath;
-	SpecialPause = 0.f;
-	bShootSpecial = 0;
-
-	if ( bestPath && bestPath->IsProbing(NAME_SpecialHandling) )
-	{
-		//debugf(NAME_DevPath,"Handle Special");
-		HandleSpecial(bestPath);
-		//debugf(NAME_DevPath,"Done Handle Special");
-	}
-
-	if ( bestPath == SpecialGoal )
-		SpecialGoal = NULL;
+	*(AActor**)Result = (AActor*)hp2_rs_engine_pawn_native_move_find_path_to( &GHp2PawnNativeMoveServices, this, &point, bSinglePath, bClearPaths );
 	unclock(GetLevel()->FindPathCycles);
-	//debugf("Find path to time was %f", GetLevel()->FindPathCycles * MSecPerCycle);
-
-	*(AActor**)Result = bestPath; 
 	unguardSlow;
 }
 
@@ -1445,26 +670,8 @@ void APawn::execFindPathToward( FFrame& Stack, RESULT_DECL )
 		return;
 	}
 	clock(GetLevel()->FindPathCycles);
-	AActor * bestPath = NULL;
-	AActor * newPath;
-	if (findPathToward(goal, bSinglePath, newPath, bClearPaths))
-		bestPath = newPath;
-	SpecialPause = 0.f;
-	bShootSpecial = 0;
-
-	if ( bestPath && bestPath->IsProbing(NAME_SpecialHandling) )
-	{
-		//debugf(NAME_DevPath,"Handle Special");
-		HandleSpecial(bestPath);
-		//debugf(NAME_DevPath,"Done Handle Special");
-	}
-
-	if ( bestPath == SpecialGoal )
-		SpecialGoal = NULL;
+	*(AActor**)Result = (AActor*)hp2_rs_engine_pawn_native_move_find_path_toward( &GHp2PawnNativeMoveServices, this, goal, bSinglePath, bClearPaths );
 	unclock(GetLevel()->FindPathCycles);
-	//debugf("Find path toward time was %f", GetLevel()->FindPathCycles * MSecPerCycle);
-
-	*(AActor**)Result = bestPath; 
 	unguardSlow;
 }
 
@@ -1479,16 +686,8 @@ void APawn::execFindRandomDest( FFrame& Stack, RESULT_DECL )
 	P_FINISH;
 
 	clock(GetLevel()->FindPathCycles);
-	if (bClearPaths)
-		clearPaths();
-	ANavigationPoint * bestPath = NULL;
-	AActor * newPath;
-	if ( findRandomDest(newPath) )
-		bestPath = (ANavigationPoint *)newPath;
-
+	*(ANavigationPoint**)Result = (ANavigationPoint*)hp2_rs_engine_pawn_native_move_find_random_dest( &GHp2PawnNativeMoveServices, this, bClearPaths );
 	unclock(GetLevel()->FindPathCycles);
-
-	*(ANavigationPoint**)Result = bestPath; 
 	unguardSlow;
 }
 
@@ -1513,10 +712,8 @@ void AActor::execMakeNoise( FFrame& Stack, RESULT_DECL )
 
 	P_GET_FLOAT(Loudness);
 	P_FINISH;
-	
-	//debugf(" %s Make Noise with instigator", GetFullName(),Instigator->GetClass()->GetName());
-	if ( GetLevel()->GetLevelInfo()->NetMode != NM_Client )
-		CheckNoiseHearing(Loudness);
+
+	hp2_rs_engine_pawn_native_move_make_noise( &GHp2PawnNativeMoveServices, this, Loudness );
 	unguardSlow;
 }
 
@@ -1544,26 +741,14 @@ void APawn::execMoveTo( FFrame& Stack, RESULT_DECL )
 	P_GET_FLOAT_OPTX(speed, 1.f);
 	P_FINISH;
 
-	FVector Move = dest - Location;
-	MoveTarget = NULL;
-	bReducedSpeed = 0;
-	DesiredSpeed = ::Max(0.f, Min(MaxDesiredSpeed, speed));
-	FLOAT MoveSize = Move.Size();
-	setMoveTimer(MoveSize); 
-	GetStateFrame()->LatentAction = AI_PollMoveTo;
-	Destination = dest;
-	Focus = dest;
-	rotateToward(Focus);
-	moveToward(Destination);
+	hp2_rs_engine_pawn_native_move_move_to( &GHp2PawnNativeMoveServices, this, &dest, speed, AI_PollMoveTo );
 	unguardSlow;
 }
 
 void APawn::execPollMoveTo( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollMoveTo);
-	rotateToward(Focus);
-	if( moveToward(Destination) )
-		GetStateFrame()->LatentAction = 0;
+	hp2_rs_engine_pawn_native_move_poll_move_to( &GHp2PawnNativeMoveServices, this );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollMoveTo, execPollMoveTo);
@@ -1580,28 +765,7 @@ void APawn::execMoveToward( FFrame& Stack, RESULT_DECL )
 	P_GET_FLOAT_OPTX(speed, 1.f);
 	P_FINISH;
 
-	if (!goal)
-	{
-		//Stack.Log("MoveToward with no goal");
-		return;
-	}
-
-	FVector Move = goal->Location - Location;	
-	bReducedSpeed = 0;
-	DesiredSpeed = ::Max(0.f, Min(MaxDesiredSpeed, speed));
-	if (goal->IsA(APawn::StaticClass()))
-		MoveTimer = 1.2f; //max before re-assess movetoward
-	else
-	{
-		FLOAT MoveSize = Move.Size();
-		setMoveTimer(MoveSize);
-	}
-	MoveTarget = goal;
-	Destination = MoveTarget->Location; 
-	Focus = Destination;
-	GetStateFrame()->LatentAction = AI_PollMoveToward;
-	rotateToward(Focus);
-	moveToward(Destination);
+	hp2_rs_engine_pawn_native_move_move_toward( &GHp2PawnNativeMoveServices, this, goal, speed, AI_PollMoveToward );
 	unguardSlow;
 }
 
@@ -1609,35 +773,7 @@ void APawn::execPollMoveToward( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollMoveToward);
 
-	if( !MoveTarget )
-	{
-		//Stack.Log("MoveTarget cleared during movetoward");
-		GetStateFrame()->LatentAction = 0;
-		return;
-	}
-
-	Destination = MoveTarget->Location;
-	if( Physics==PHYS_Flying && MoveTarget->IsA(APawn::StaticClass()) )
-		Destination.Z += 0.7f * MoveTarget->CollisionHeight;
-	else if( Physics == PHYS_Spider )
-		Destination = Destination - MoveTarget->CollisionRadius * Floor;
-
-	Focus = Destination;
-	rotateToward(Focus);
-	FLOAT oldDesiredSpeed = DesiredSpeed;
-	if ( bAdvancedTactics && (Physics == PHYS_Walking) )
-		eventAlterDestination();
-	if( moveToward(Destination) )
-		GetStateFrame()->LatentAction = 0;
-	if ( bAdvancedTactics && (Physics == PHYS_Walking) )
-		Destination = MoveTarget->Location;
-	if( MoveTarget->IsA(APawn::StaticClass()) )
-	{
-		DesiredSpeed = oldDesiredSpeed; //don't slow down when moving toward a pawn
-		if (!bCanSwim && MoveTarget->Region.Zone->bWaterZone)
-			MoveTimer = -1.f; //give up
-	}
-
+	hp2_rs_engine_pawn_native_move_poll_move_toward( &GHp2PawnNativeMoveServices, this );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollMoveToward, execPollMoveToward);
@@ -1653,20 +789,7 @@ void APawn::execStrafeTo( FFrame& Stack, RESULT_DECL )
 	P_GET_VECTOR(FocalPoint);
 	P_FINISH;
 
-	FVector Move = Dest - Location;
-	MoveTarget = NULL;
-	bReducedSpeed = 0;
-	if (bIsPlayer)
-		DesiredSpeed = MaxDesiredSpeed;
-	else
-		DesiredSpeed = 0.8f * MaxDesiredSpeed;
-	FLOAT MoveSize = Move.Size();
-	setMoveTimer(MoveSize); 
-	GetStateFrame()->LatentAction = AI_PollStrafeTo;
-	Destination = Dest;
-	Focus = FocalPoint;
-	rotateToward(Focus);
-	moveToward(Destination);
+	hp2_rs_engine_pawn_native_move_strafe_to( &GHp2PawnNativeMoveServices, this, &Dest, &FocalPoint, AI_PollStrafeTo );
 	unguardSlow;
 }
 
@@ -1674,10 +797,7 @@ void APawn::execPollStrafeTo( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollStrafeTo);
 
-	rotateToward( Focus );
-	if( moveToward(Destination) )
-		GetStateFrame()->LatentAction = 0;
-
+	hp2_rs_engine_pawn_native_move_poll_strafe_to( &GHp2PawnNativeMoveServices, this );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollStrafeTo, execPollStrafeTo);
@@ -1693,25 +813,7 @@ void APawn::execStrafeFacing( FFrame& Stack, RESULT_DECL )
 	P_GET_ACTOR(goal);
 	P_FINISH;
 
-	if (!goal)
-	{
-		//Stack.Log("StrafeFacing without goal");
-		return;
-	}
-	FVector Move = Dest - Location;	
-	bReducedSpeed = 0;
-	if (bIsPlayer)
-		DesiredSpeed = MaxDesiredSpeed;
-	else
-		DesiredSpeed = 0.8f * MaxDesiredSpeed;
-	FLOAT MoveSize = Move.Size();
-	setMoveTimer(MoveSize); 
-	Destination = Dest;
-	FaceTarget = goal;
-	Focus = FaceTarget->Location;
-	GetStateFrame()->LatentAction = AI_PollStrafeFacing;
-	rotateToward(Focus);
-	moveToward(Destination);
+	hp2_rs_engine_pawn_native_move_strafe_facing( &GHp2PawnNativeMoveServices, this, &Dest, goal, AI_PollStrafeFacing );
 	unguardSlow;
 }
 
@@ -1719,22 +821,7 @@ void APawn::execPollStrafeFacing( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollStrafeFacing);
 
-	if( !FaceTarget )
-	{
-		//Stack.Log("FaceTarget cleared during strafefacing");
-		GetStateFrame()->LatentAction = 0;
-		return;
-	}
-
-	Focus = FaceTarget->Location;
-	FVector RealDest = Destination;
-	rotateToward( Focus );
-	if ( bAdvancedTactics && (Physics == PHYS_Walking) )
-		eventAlterDestination();
-	if( moveToward(Destination) )
-		GetStateFrame()->LatentAction = 0;
-	Destination = RealDest;
-
+	hp2_rs_engine_pawn_native_move_poll_strafe_facing( &GHp2PawnNativeMoveServices, this );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollStrafeFacing, execPollStrafeFacing);
@@ -1748,17 +835,8 @@ void APawn::execTurnToward( FFrame& Stack, RESULT_DECL )
 
 	P_GET_ACTOR(goal);
 	P_FINISH;
-	
-	if (!goal)
-		return;
 
-	FaceTarget = goal;
-	GetStateFrame()->LatentAction = AI_PollTurnToward;
-	if ( !bCanStrafe && ((Physics == PHYS_Flying) || (Physics == PHYS_Swimming)) )
-		Acceleration = Rotation.Vector() * AccelRate;
-
-	Focus = FaceTarget->Location;
-	rotateToward(Focus);
+	hp2_rs_engine_pawn_native_move_turn_toward( &GHp2PawnNativeMoveServices, this, goal, AI_PollTurnToward );
 	unguardSlow;
 }
 
@@ -1766,20 +844,7 @@ void APawn::execPollTurnToward( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollTurnToward);
 
-	if( !FaceTarget )
-	{
-		//Stack.Log("FaceTarget cleared during turntoward");
-		GetStateFrame()->LatentAction = 0;
-		return;
-	}
-
-	if( !bCanStrafe && (Physics==PHYS_Flying || Physics==PHYS_Swimming) )
-		Acceleration = Rotation.Vector() * AccelRate;
-
-	Focus = FaceTarget->Location;
-	if( rotateToward(Focus) )
-		GetStateFrame()->LatentAction = 0;  
-
+	hp2_rs_engine_pawn_native_move_poll_turn_toward( &GHp2PawnNativeMoveServices, this );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollTurnToward, execPollTurnToward);
@@ -1794,18 +859,7 @@ void APawn::execTurnTo( FFrame& Stack, RESULT_DECL )
 	P_GET_VECTOR(FocalPoint);
 	P_FINISH;
 
-	MoveTarget = NULL;
-	GetStateFrame()->LatentAction = AI_PollTurnTo;
-	Focus = FocalPoint;
-
-	//FT: if in phys_walking, make the turn to focus be in the same plane as this
-	if( Physics == PHYS_Walking )
-		Focus.Z = Location.Z;
-
-	if ( !bCanStrafe && ((Physics == PHYS_Flying) || (Physics == PHYS_Swimming)) )
-		Acceleration = Rotation.Vector() * AccelRate;
-
-	rotateToward(Focus);
+	hp2_rs_engine_pawn_native_move_turn_to( &GHp2PawnNativeMoveServices, this, &FocalPoint, AI_PollTurnTo );
 	unguardSlow;
 }
 
@@ -1813,12 +867,7 @@ void APawn::execPollTurnTo( FFrame& Stack, RESULT_DECL )
 {
 	guardSlow(APawn::execPollTurnTo);
 
-	if( !bCanStrafe && (Physics==PHYS_Flying || Physics==PHYS_Swimming) )
-		Acceleration = Rotation.Vector() * AccelRate;
-
-	if( rotateToward(Focus) )
-		GetStateFrame()->LatentAction = 0;  
-
+	hp2_rs_engine_pawn_native_move_poll_turn_to( &GHp2PawnNativeMoveServices, this );
 	unguardSlow;
 }
 IMPLEMENT_FUNCTION( APawn, AI_PollTurnTo, execPollTurnTo);
@@ -1902,14 +951,7 @@ void APawn::ShowSelf()
 	guard(APawn::ShowSelf);
 
 	clock(GetLevel()->SeePlayer);
-	for ( APawn *Pawn=GetLevel()->GetLevelInfo()->PawnList; Pawn!=NULL; Pawn=Pawn->nextPawn )
-		if( Pawn!=this && Pawn->SightCounter<0.f )
-		{
-			//check visibility
-			if ( Pawn->IsProbing(NAME_SeePlayer) && Pawn->LineOfSightTo(this, 1) )
-				Pawn->eventSeePlayer(this);
-		}
-
+	hp2_rs_engine_pawn_native_move_show_self( &GHp2PawnNativeMoveServices, this );
 	unclock(GetLevel()->SeePlayer);
 	unguard;
 }

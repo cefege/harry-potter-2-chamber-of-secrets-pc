@@ -1,0 +1,516 @@
+begin ctx=000 k=0 bits=00 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0000 logs=0
+finish ctx=000 vec=0 aforward=43160001 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0001 logs=0
+finish ctx=000 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0001 logs=0
+apply ctx=000 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=0001 logs=0
+begin ctx=001 k=0 bits=00 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=001 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=001 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=001 acc=00000000:00000000:00000000 desired=1111 flags=0000 logs=0
+begin ctx=002 k=0 bits=00 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=002 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=002 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=002 acc=00000000:00000000:00000000 desired=1111 flags=0000 logs=0
+begin ctx=003 k=0 bits=00 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=003 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=003 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=003 acc=00000000:00000000:00000000 desired=1111 flags=0000 logs=0
+begin ctx=004 k=0 bits=01 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=004 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=004 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=004 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=005 k=0 bits=01 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=005 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=005 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=005 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=006 k=0 bits=01 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=006 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=006 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=006 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=007 k=0 bits=01 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=007 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=007 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=007 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=008 k=0 bits=02 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=008 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=008 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=008 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=009 k=0 bits=02 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=009 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=009 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=009 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=010 k=0 bits=02 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=010 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=010 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=010 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=011 k=0 bits=02 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=011 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=011 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=011 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=012 k=0 bits=03 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0400 logs=0
+finish ctx=012 vec=0 aforward=43160001 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0401 logs=0
+finish ctx=012 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0401 logs=0
+apply ctx=012 acc=3f42524c:3e8b1af3:00000000 desired=1111 flags=0401 logs=0
+begin ctx=013 k=0 bits=03 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=013 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=013 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=013 acc=00000000:00000000:00000000 desired=1111 flags=0400 logs=0
+begin ctx=014 k=0 bits=03 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=014 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=014 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=014 acc=00000000:00000000:00000000 desired=1111 flags=0400 logs=0
+begin ctx=015 k=0 bits=03 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=015 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=015 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=015 acc=00000000:00000000:00000000 desired=1111 flags=0400 logs=0
+begin ctx=016 k=0 bits=04 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0140 logs=0
+finish ctx=016 vec=0 aforward=00000000 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0141 logs=0
+finish ctx=016 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0141 logs=0
+apply ctx=016 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=0141 logs=0
+begin ctx=017 k=0 bits=04 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=017 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=017 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=017 acc=00000000:00000000:00000000 desired=1111 flags=0140 logs=0
+begin ctx=018 k=0 bits=04 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=018 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=018 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=018 acc=00000000:00000000:00000000 desired=1111 flags=0140 logs=0
+begin ctx=019 k=0 bits=04 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=019 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=019 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=019 acc=00000000:00000000:00000000 desired=1111 flags=0140 logs=0
+begin ctx=020 k=0 bits=05 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0280 logs=0
+finish ctx=020 vec=0 aforward=43160001 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0281 logs=0
+finish ctx=020 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0281 logs=0
+apply ctx=020 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=0281 logs=0
+begin ctx=021 k=0 bits=05 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=021 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=021 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=021 acc=00000000:00000000:00000000 desired=1111 flags=0280 logs=0
+begin ctx=022 k=0 bits=05 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=022 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=022 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=022 acc=00000000:00000000:00000000 desired=1111 flags=0280 logs=0
+begin ctx=023 k=0 bits=05 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=023 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=023 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=023 acc=00000000:00000000:00000000 desired=1111 flags=0280 logs=0
+begin ctx=024 k=0 bits=06 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=1000 logs=0
+finish ctx=024 vec=0 aforward=43160001 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0001 logs=0
+finish ctx=024 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0001 logs=0
+apply ctx=024 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=1001 logs=0
+begin ctx=025 k=0 bits=06 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=025 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=025 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=025 acc=00000000:00000000:00000000 desired=1111 flags=1000 logs=0
+begin ctx=026 k=0 bits=06 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=026 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=026 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=026 acc=00000000:00000000:00000000 desired=1111 flags=1000 logs=0
+begin ctx=027 k=0 bits=06 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=027 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=027 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=027 acc=00000000:00000000:00000000 desired=1111 flags=1000 logs=0
+begin ctx=028 k=0 bits=07 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=028 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=028 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=028 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=029 k=0 bits=07 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=029 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=029 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=029 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=030 k=0 bits=07 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=030 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=030 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=030 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=031 k=0 bits=07 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=031 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=031 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=031 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=032 k=1 bits=00 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0000 logs=0
+finish ctx=032 vec=0 aforward=43160001 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0001 logs=0
+finish ctx=032 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0001 logs=0
+apply ctx=032 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=0001 logs=0
+begin ctx=033 k=1 bits=00 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=033 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=033 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=033 acc=00000000:00000000:00000000 desired=1111 flags=0000 logs=0
+begin ctx=034 k=1 bits=00 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=034 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=034 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=034 acc=00000000:00000000:00000000 desired=1111 flags=0000 logs=0
+begin ctx=035 k=1 bits=00 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=035 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=035 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=035 acc=00000000:00000000:00000000 desired=1111 flags=0000 logs=0
+begin ctx=036 k=1 bits=01 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=036 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=036 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=036 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=037 k=1 bits=01 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=037 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=037 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=037 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=038 k=1 bits=01 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=038 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=038 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=038 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=039 k=1 bits=01 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=039 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=039 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=039 acc=00000000:00000000:00000000 desired=1111 flags=0020 logs=0
+begin ctx=040 k=1 bits=02 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=040 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=040 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=040 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=041 k=1 bits=02 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=041 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=041 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=041 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=042 k=1 bits=02 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=042 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=042 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=042 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=043 k=1 bits=02 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=043 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=043 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=043 acc=00000000:00000000:00000000 desired=1111 flags=0002 logs=0
+begin ctx=044 k=1 bits=03 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0400 logs=0
+finish ctx=044 vec=0 aforward=43160001 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0401 logs=0
+finish ctx=044 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0401 logs=0
+apply ctx=044 acc=3f42524c:3e8b1af3:00000000 desired=1111 flags=0401 logs=0
+begin ctx=045 k=1 bits=03 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=045 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=045 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=045 acc=00000000:00000000:00000000 desired=1111 flags=0400 logs=0
+begin ctx=046 k=1 bits=03 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=046 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=046 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=046 acc=00000000:00000000:00000000 desired=1111 flags=0400 logs=0
+begin ctx=047 k=1 bits=03 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=047 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=047 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=047 acc=00000000:00000000:00000000 desired=1111 flags=0400 logs=0
+begin ctx=048 k=1 bits=04 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0140 logs=0
+finish ctx=048 vec=0 aforward=00000000 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0141 logs=0
+finish ctx=048 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0141 logs=0
+apply ctx=048 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=0141 logs=0
+begin ctx=049 k=1 bits=04 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=049 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=049 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=049 acc=00000000:00000000:00000000 desired=1111 flags=0140 logs=0
+begin ctx=050 k=1 bits=04 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=050 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=050 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=050 acc=00000000:00000000:00000000 desired=1111 flags=0140 logs=0
+begin ctx=051 k=1 bits=04 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=051 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=051 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=051 acc=00000000:00000000:00000000 desired=1111 flags=0140 logs=0
+begin ctx=052 k=1 bits=05 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=0280 logs=0
+finish ctx=052 vec=0 aforward=43160001 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0281 logs=0
+finish ctx=052 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0281 logs=0
+apply ctx=052 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=0281 logs=0
+begin ctx=053 k=1 bits=05 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=053 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=053 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=053 acc=00000000:00000000:00000000 desired=1111 flags=0280 logs=0
+begin ctx=054 k=1 bits=05 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=054 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=054 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=054 acc=00000000:00000000:00000000 desired=1111 flags=0280 logs=0
+begin ctx=055 k=1 bits=05 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=055 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=055 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=055 acc=00000000:00000000:00000000 desired=1111 flags=0280 logs=0
+begin ctx=056 k=1 bits=06 state=0 modern=1 ret=1 raw=3f400000:bf000000:3e800000:be000000 pawn=00000000:bf000000:00000000:00000000 flags=1000 logs=0
+finish ctx=056 vec=0 aforward=43160001 astrafe=4379c002 aside=4347ccce abasex=3e99999a smoothx=3ed995ac smoothy=bf3331e4 flags=0001 logs=0
+finish ctx=056 vec=1 aforward=450ca000 astrafe=bf266667 aside=bf051eb9 abasex=3e99999a smoothx=4149fae2 smoothy=401ffb16 flags=0001 logs=0
+apply ctx=056 acc=3f42524c:3e8b1af3:00000000 desired=3585 flags=1001 logs=0
+begin ctx=057 k=1 bits=06 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=057 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=057 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=057 acc=00000000:00000000:00000000 desired=1111 flags=1000 logs=0
+begin ctx=058 k=1 bits=06 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=058 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=058 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=058 acc=00000000:00000000:00000000 desired=1111 flags=1000 logs=0
+begin ctx=059 k=1 bits=06 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=059 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=059 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=059 acc=00000000:00000000:00000000 desired=1111 flags=1000 logs=0
+begin ctx=060 k=1 bits=07 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=060 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=060 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=060 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=061 k=1 bits=07 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=061 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=061 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=061 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=062 k=1 bits=07 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=062 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=062 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=062 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=063 k=1 bits=07 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=063 vec=0 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=063 vec=1 aforward=00000000 astrafe=00000000 aside=00000000 abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=063 acc=00000000:00000000:00000000 desired=1111 flags=0014 logs=0
+begin ctx=064 k=2 bits=00 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=064 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=064 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=064 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=065 k=2 bits=00 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=065 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=065 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=065 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=066 k=2 bits=00 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=066 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=066 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=066 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=067 k=2 bits=00 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=067 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=067 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=067 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=068 k=2 bits=01 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=068 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=068 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=068 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=069 k=2 bits=01 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=069 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=069 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=069 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=070 k=2 bits=01 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=070 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=070 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=070 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=071 k=2 bits=01 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=071 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=071 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=071 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=072 k=2 bits=02 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=072 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=072 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=072 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=073 k=2 bits=02 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=073 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=073 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=073 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=074 k=2 bits=02 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=074 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=074 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=074 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=075 k=2 bits=02 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=075 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=075 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=075 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=076 k=2 bits=03 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=076 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=076 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=076 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=077 k=2 bits=03 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=077 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=077 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=077 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=078 k=2 bits=03 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=078 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=078 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=078 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=079 k=2 bits=03 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=079 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=079 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=079 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=080 k=2 bits=04 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=080 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=080 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=080 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=081 k=2 bits=04 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=081 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=081 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=081 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=082 k=2 bits=04 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=082 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=082 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=082 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=083 k=2 bits=04 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=083 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=083 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=083 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=084 k=2 bits=05 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=084 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=084 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=084 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=085 k=2 bits=05 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=085 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=085 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=085 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=086 k=2 bits=05 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=086 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=086 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=086 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=087 k=2 bits=05 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=087 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=087 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=087 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=088 k=2 bits=06 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=088 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=088 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=088 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=089 k=2 bits=06 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=089 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=089 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=089 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=090 k=2 bits=06 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=090 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=090 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=090 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=091 k=2 bits=06 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=091 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=091 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=091 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=092 k=2 bits=07 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=092 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=092 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=092 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=093 k=2 bits=07 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=093 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=093 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=093 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=094 k=2 bits=07 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=094 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=094 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=094 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=095 k=2 bits=07 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=095 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=095 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=095 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=096 k=3 bits=00 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=1 missing=bInDuelingMode
+finish ctx=096 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=096 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=096 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=097 k=3 bits=00 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=097 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=097 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=097 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=098 k=3 bits=00 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=098 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=098 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=098 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=099 k=3 bits=00 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=099 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=099 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=099 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0
+begin ctx=100 k=3 bits=01 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=100 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=100 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=100 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=101 k=3 bits=01 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=101 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=101 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=101 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=102 k=3 bits=01 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=102 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=102 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=102 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=103 k=3 bits=01 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0020 logs=0
+finish ctx=103 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+finish ctx=103 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0020 logs=0
+apply ctx=103 acc=00000000:00000000:00000000 desired=1111 flags=0021 logs=0
+begin ctx=104 k=3 bits=02 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=104 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=104 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=104 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=105 k=3 bits=02 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=105 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=105 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=105 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=106 k=3 bits=02 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=106 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=106 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=106 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=107 k=3 bits=02 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0002 logs=0
+finish ctx=107 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+finish ctx=107 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0002 logs=0
+apply ctx=107 acc=00000000:00000000:00000000 desired=1111 flags=0003 logs=0
+begin ctx=108 k=3 bits=03 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=108 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=108 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=108 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=109 k=3 bits=03 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=109 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=109 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=109 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=110 k=3 bits=03 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=110 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=110 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=110 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=111 k=3 bits=03 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0400 logs=0
+finish ctx=111 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+finish ctx=111 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0400 logs=0
+apply ctx=111 acc=00000000:00000000:00000000 desired=1111 flags=0401 logs=0
+begin ctx=112 k=3 bits=04 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=112 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=112 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=112 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=113 k=3 bits=04 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=113 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=113 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=113 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=114 k=3 bits=04 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=114 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=114 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=114 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=115 k=3 bits=04 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0140 logs=0
+finish ctx=115 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+finish ctx=115 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0140 logs=0
+apply ctx=115 acc=00000000:00000000:00000000 desired=1111 flags=0141 logs=0
+begin ctx=116 k=3 bits=05 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=116 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=116 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=116 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=117 k=3 bits=05 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=117 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=117 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=117 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=118 k=3 bits=05 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=118 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=118 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=118 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=119 k=3 bits=05 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0280 logs=0
+finish ctx=119 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+finish ctx=119 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0280 logs=0
+apply ctx=119 acc=00000000:00000000:00000000 desired=1111 flags=0281 logs=0
+begin ctx=120 k=3 bits=06 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=120 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=120 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=120 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=121 k=3 bits=06 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=121 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=121 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=121 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=122 k=3 bits=06 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=122 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=122 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=122 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=123 k=3 bits=06 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=1000 logs=0
+finish ctx=123 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+finish ctx=123 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=1000 logs=0
+apply ctx=123 acc=00000000:00000000:00000000 desired=1111 flags=1001 logs=0
+begin ctx=124 k=3 bits=07 state=0 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=124 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=124 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=124 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=125 k=3 bits=07 state=1 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=125 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=125 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=125 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=126 k=3 bits=07 state=2 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=126 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=126 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=126 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=127 k=3 bits=07 state=3 modern=1 ret=0 raw=3f400000:bf000000:3e800000:be000000 pawn=3f400000:bf000000:3e800000:be000000 flags=0014 logs=0
+finish ctx=127 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+finish ctx=127 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0014 logs=0
+apply ctx=127 acc=00000000:00000000:00000000 desired=1111 flags=0015 logs=0
+begin ctx=128 k=0 bits=00 state=0 modern=0 ret=0 raw=40e00000:40f00000:41000000:41080000 pawn=3f400000:bf000000:3e800000:be000000 flags=0000 logs=0
+finish ctx=128 vec=0 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+finish ctx=128 vec=1 aforward=3f19999a astrafe=3dcccccd aside=3e4ccccd abasex=3e99999a smoothx=3e000000 smoothy=bf000000 flags=0000 logs=0
+apply ctx=128 acc=00000000:00000000:00000000 desired=1111 flags=0001 logs=0

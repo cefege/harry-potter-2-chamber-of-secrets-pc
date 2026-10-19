@@ -349,17 +349,19 @@ pub struct APawn {
     _bits_890: u8,
     _bits_891: u8,
     _bits_892: u8,
-    _pad_893: [u8; 15],
+    _pad_893: [u8; 3],
+    pub sight_counter: f32,
+    _pad_900: [u8; 8],
     pub avg_physics_time: f32,
     pub foot_region: FPointRegion,
     pub head_region: FPointRegion,
     pub move_timer: f32,
     pub move_target: *mut c_void,
-    _pad_956: [u8; 8],
+    pub face_target: *mut c_void,
     pub destination: FVector,
-    _pad_976: [u8; 12],
+    pub focus: FVector,
     pub desired_speed: f32,
-    _pad_992: [u8; 4],
+    pub max_desired_speed: f32,
     pub melee_range: f32,
     pub ground_speed: f32,
     pub water_speed: f32,
@@ -389,12 +391,13 @@ pub struct APawn {
     _pad_1164: [u8; 12],
     pub base_eye_height: f32,
     pub eye_height: f32,
-    _pad_1184: [u8; 80],
+    pub floor: FVector,
+    _pad_1196: [u8; 68],
     pub reduced_damage_type: [u8; 4],
     _pad_1268: [u8; 20],
     pub skill: f32,
     pub special_goal: *mut c_void,
-    _pad_1300: [u8; 4],
+    pub special_pause: f32,
     pub noise1spot: FVector,
     pub noise1time: f32,
     pub noise1other: *mut c_void,
@@ -617,6 +620,30 @@ impl APawn {
         }
     }
 
+    pub fn b_shoot_special(&self) -> bool {
+        self._bits_891 & (1 << 1) != 0
+    }
+
+    pub fn set_b_shoot_special(&mut self, value: bool) {
+        if value {
+            self._bits_891 |= 1 << 1;
+        } else {
+            self._bits_891 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_advanced_tactics(&self) -> bool {
+        self._bits_891 & (1 << 7) != 0
+    }
+
+    pub fn set_b_advanced_tactics(&mut self, value: bool) {
+        if value {
+            self._bits_891 |= 1 << 7;
+        } else {
+            self._bits_891 &= !(1 << 7);
+        }
+    }
+
     pub fn b_no_zone_friction(&self) -> bool {
         self._bits_892 & (1 << 1) != 0
     }
@@ -679,6 +706,12 @@ const _: () = assert!(std::mem::offset_of!(APawn, step_height) == 1028);
 const _: () = assert!(std::mem::offset_of!(APawn, step_width) == 1032);
 const _: () = assert!(std::mem::offset_of!(APawn, view_rotation) == 1152);
 const _: () = assert!(std::mem::offset_of!(APawn, eye_height) == 1180);
+const _: () = assert!(std::mem::offset_of!(APawn, face_target) == 956);
+const _: () = assert!(std::mem::offset_of!(APawn, focus) == 976);
+const _: () = assert!(std::mem::offset_of!(APawn, max_desired_speed) == 992);
+const _: () = assert!(std::mem::offset_of!(APawn, floor) == 1184);
+const _: () = assert!(std::mem::offset_of!(APawn, special_pause) == 1300);
+const _: () = assert!(std::mem::offset_of!(APawn, sight_counter) == 896);
 
 /// Layout mirror of C++ `APlayerPawn` (2928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -686,9 +719,30 @@ const _: () = assert!(std::mem::offset_of!(APawn, eye_height) == 1180);
 #[derive(Clone, Copy)]
 pub struct APlayerPawn {
     pub base: APawn,
-    _pad_1912: [u8; 248],
+    _pad_1912: [u8; 64],
+    pub view_target: *mut c_void,
+    _pad_1984: [u8; 100],
+    pub desired_fov: f32,
+    _pad_2088: [u8; 72],
     _bits_2160: u8,
-    _pad_2161: [u8; 767],
+    _pad_2161: [u8; 1],
+    _bits_2162: u8,
+    _pad_2163: [u8; 245],
+    pub smooth_mouse_x: f32,
+    pub smooth_mouse_y: f32,
+    _pad_2416: [u8; 16],
+    pub a_base_x: f32,
+    _pad_2436: [u8; 16],
+    pub a_forward: f32,
+    pub a_turn: f32,
+    pub a_strafe: f32,
+    _pad_2464: [u8; 4],
+    pub a_look_up: f32,
+    _pad_2472: [u8; 20],
+    pub a_side_move: f32,
+    _pad_2496: [u8; 424],
+    _bits_2920: u8,
+    _pad_2921: [u8; 7],
 }
 
 impl APlayerPawn {
@@ -703,10 +757,56 @@ impl APlayerPawn {
             self._bits_2160 &= !(1 << 4);
         }
     }
+
+    pub fn b_show_menu(&self) -> bool {
+        self._bits_2162 & (1 << 6) != 0
+    }
+
+    pub fn set_b_show_menu(&mut self, value: bool) {
+        if value {
+            self._bits_2162 |= 1 << 6;
+        } else {
+            self._bits_2162 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_is_captured(&self) -> bool {
+        self._bits_2920 & (1 << 1) != 0
+    }
+
+    pub fn set_b_is_captured(&mut self, value: bool) {
+        if value {
+            self._bits_2920 |= 1 << 1;
+        } else {
+            self._bits_2920 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_modern_third_person_controls(&self) -> bool {
+        self._bits_2920 & (1 << 2) != 0
+    }
+
+    pub fn set_b_modern_third_person_controls(&mut self, value: bool) {
+        if value {
+            self._bits_2920 |= 1 << 2;
+        } else {
+            self._bits_2920 &= !(1 << 2);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<APlayerPawn>() == 2928);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, base) == 0);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_base_x) == 2432);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_forward) == 2452);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_turn) == 2456);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_strafe) == 2460);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_look_up) == 2468);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, a_side_move) == 2492);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, smooth_mouse_x) == 2408);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, smooth_mouse_y) == 2412);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, desired_fov) == 2084);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, view_target) == 1976);
 
 /// Layout mirror of C++ `AWind` (928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -866,12 +966,14 @@ pub struct AInventory {
     pub base: AActor,
     _pad_888: [u8; 156],
     pub max_desireability: f32,
-    _pad_1048: [u8; 140],
+    pub my_marker: *mut c_void,
+    _pad_1056: [u8; 132],
 }
 
 const _: () = assert!(size_of::<AInventory>() == 1188);
 const _: () = assert!(std::mem::offset_of!(AInventory, base) == 0);
 const _: () = assert!(std::mem::offset_of!(AInventory, max_desireability) == 1044);
+const _: () = assert!(std::mem::offset_of!(AInventory, my_marker) == 1048);
 
 /// Layout mirror of C++ `AInventorySpot` (1292 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
