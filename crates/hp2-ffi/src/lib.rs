@@ -36,6 +36,7 @@ mod engine_route;
 mod engine_scr_tex;
 mod engine_skeletal;
 mod engine_tex;
+mod engine_uengine;
 mod engine_url;
 mod fire_fire;
 mod fire_ice;

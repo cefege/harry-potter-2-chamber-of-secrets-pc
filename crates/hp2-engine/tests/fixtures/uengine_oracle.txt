@@ -1,0 +1,347 @@
+scenario	init_default
+url_static_init
+engine_mem_init	65536	GEngineMem
+cache_init	5242880	4096
+localize	General	Yes	Core
+localize	General	No	Core
+new_object	UCylinder
+new_object	UOrientedCylinder
+new_object	UAlignedOvalCylinder
+new_object	UOrientedOvalCylinder
+new_object	UBox
+add_to_root
+log_engine_initialized
+state	Audio=0 Render=0 Client=0 Cylinder=1 OCylinder=1 OvalCylinder=1 OOvalCylinder=1 Box=1 CurrentTickRate=00000000 GIsRunning=1
+scenario	init_no_client
+url_static_init
+engine_mem_init	65536	GEngineMem
+cache_init	1048576	4096
+localize	General	Yes	Core
+localize	General	No	Core
+new_object	UCylinder
+new_object	UOrientedCylinder
+new_object	UAlignedOvalCylinder
+new_object	UOrientedOvalCylinder
+new_object	UBox
+add_to_root
+log_engine_initialized
+state	Audio=0 Render=0 Client=0 Cylinder=1 OCylinder=1 OvalCylinder=1 OOvalCylinder=1 Box=1 CurrentTickRate=00000000 GIsRunning=1
+scenario	init_clamp_high
+url_static_init
+engine_mem_init	65536	GEngineMem
+cache_init	1073741824	4096
+localize	General	Yes	Core
+localize	General	No	Core
+new_object	UCylinder
+new_object	UOrientedCylinder
+new_object	UAlignedOvalCylinder
+new_object	UOrientedOvalCylinder
+new_object	UBox
+add_to_root
+log_engine_initialized
+state	Audio=0 Render=0 Client=0 Cylinder=1 OCylinder=1 OvalCylinder=1 OOvalCylinder=1 Box=1 CurrentTickRate=00000000 GIsRunning=1
+scenario	init_clamp_low
+url_static_init
+engine_mem_init	65536	GEngineMem
+cache_init	1048576	4096
+localize	General	Yes	Core
+localize	General	No	Core
+new_object	UCylinder
+new_object	UOrientedCylinder
+new_object	UAlignedOvalCylinder
+new_object	UOrientedOvalCylinder
+new_object	UBox
+add_to_root
+log_engine_initialized
+state	Audio=0 Render=0 Client=0 Cylinder=1 OCylinder=1 OvalCylinder=1 OOvalCylinder=1 Box=1 CurrentTickRate=00000000 GIsRunning=1
+scenario	audio_ok
+parse_param	NOSOUND
+load_audio_class
+construct_audio
+audio_init
+state	Audio=1 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	audio_fail
+parse_param	NOSOUND
+load_audio_class
+construct_audio
+audio_init
+log_audio_init_failed
+audio_delete
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	audio_nosound
+parse_param	NOSOUND
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	audio_no_usesound
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	audio_not_client
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exit_with_audio
+audio_delete
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exit_without_audio
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	destroy
+remove_from_root
+url_static_exit
+engine_mem_exit
+cache_exit	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	flush_client
+gcache_flush
+client_flush	1
+gcache_flush
+client_flush	0
+state	Audio=0 Render=0 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	flush_no_client
+gcache_flush
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	max_tick_editor
+result	max_tick_editor	41f00000
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	max_tick_game
+result	max_tick_game	00000000
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_sys
+gsys_exec	CLAIM sys
+result	exec_claim_sys	1
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_static
+gsys_exec	CLAIM static
+static_exec	CLAIM static
+result	exec_claim_static	1
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_gcache
+gsys_exec	CLAIM gcache
+static_exec	CLAIM gcache
+gcache_exec	CLAIM gcache
+gexec_exec	CLAIM gcache
+client_exec	CLAIM gcache
+render_exec	CLAIM gcache
+audio_exec	CLAIM gcache
+result	exec_claim_gcache	0
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_gexec
+gsys_exec	CLAIM gexec
+static_exec	CLAIM gexec
+gcache_exec	CLAIM gexec
+gexec_exec	CLAIM gexec
+result	exec_claim_gexec	1
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_client
+gsys_exec	CLAIM client
+static_exec	CLAIM client
+gcache_exec	CLAIM client
+gexec_exec	CLAIM client
+client_exec	CLAIM client
+result	exec_claim_client	1
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_render
+gsys_exec	CLAIM render
+static_exec	CLAIM render
+gcache_exec	CLAIM render
+gexec_exec	CLAIM render
+client_exec	CLAIM render
+render_exec	CLAIM render
+result	exec_claim_render	1
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_claim_audio
+gsys_exec	CLAIM audio
+static_exec	CLAIM audio
+gcache_exec	CLAIM audio
+gexec_exec	CLAIM audio
+client_exec	CLAIM audio
+render_exec	CLAIM audio
+audio_exec	CLAIM audio
+result	exec_claim_audio	1
+state	Audio=1 Render=1 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_null_optionals
+static_exec	NOPE
+gcache_exec	NOPE
+result	exec_null_optionals	0
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_flush
+gsys_exec	FLUSH
+static_exec	FLUSH
+gcache_exec	FLUSH
+gexec_exec	FLUSH
+client_exec	FLUSH
+gcache_flush
+client_flush	1
+log	Flushed engine caches
+result	exec_flush	1
+state	Audio=0 Render=0 Client=1 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_crackurl_valid
+gsys_exec	CRACKURL unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal
+static_exec	CRACKURL unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal
+gcache_exec	CRACKURL unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal
+gexec_exec	CRACKURL unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal
+url_crack	unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal
+logfs	     Protocol: %s	unreal
+logfs	         Host: %s	127.0.0.1
+logfi	         Port: %i	7777
+logfs	          Map: %s	Entry
+logfi	   NumOptions: %i	2
+logfis	     Option %i: %s	0	?Game=x
+logfis	     Option %i: %s	1	?Listen
+logfs	       Portal: %s	Portal
+logfs	       String: '%s'	unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal
+url_free
+result	exec_crackurl_valid	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_crackurl_bad
+gsys_exec	CRACKURL bogus
+static_exec	CRACKURL bogus
+gcache_exec	CRACKURL bogus
+gexec_exec	CRACKURL bogus
+url_crack	bogus
+logf	BAD URL
+url_free
+result	exec_crackurl_bad	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	exec_unknown
+gsys_exec	NOPE
+static_exec	NOPE
+gcache_exec	NOPE
+gexec_exec	NOPE
+result	exec_unknown	0
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	key_no_console
+result	key_no_console	0
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	key_console_yes
+console_key_type	121
+result	key_console_yes	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	key_console_no
+console_key_type	121
+result	key_console_no	0
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_no_console
+input_pre_process	121	1	3e000000
+input_process	121	1	3e000000	ar=glog
+result	ie_no_console	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_console_release
+console_key_event	121	3	3e000000
+input_pre_process	121	3	3e000000
+result	ie_console_release	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_console_press
+console_key_event	121	1	3e000000
+result	ie_console_press	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_console_pre_fail
+console_key_event	121	1	3e000000
+input_pre_process	121	1	3e000000
+result	ie_console_pre_fail	0
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_console_process
+console_key_event	121	1	3e000000
+input_pre_process	121	1	3e000000
+input_process	121	1	3e000000	ar=console
+result	ie_console_process	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_console_process_fail
+console_key_event	121	1	3e000000
+input_pre_process	121	1	3e000000
+input_process	121	1	3e000000	ar=console
+result	ie_console_process_fail	0
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_menu_yes
+console_key_event	89	1	3e000000
+result	ie_menu_yes	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_menu_no
+console_key_event	78	1	3e000000
+result	ie_menu_no	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_menu_other_class
+console_key_event	121	1	3e000000
+result	ie_menu_other_class	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_menu_nomatch_key
+console_key_event	120	1	3e000000
+result	ie_menu_nomatch_key	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	ie_hud_no_menu
+console_key_event	121	1	3e000000
+result	ie_hud_no_menu	1
+state	Audio=0 Render=0 Client=0 Cylinder=0 OCylinder=0 OvalCylinder=0 OOvalCylinder=0 Box=0 CurrentTickRate=00000000 GIsRunning=1
+scenario	cmdlet_editor
+config_get_language	256
+set_language	fr
+load_engine_class
+construct_engine
+url_static_init
+engine_mem_init	65536	GEngineMem
+cache_init	5242880	4096
+localize	General	Yes	Core
+localize	General	No	Core
+new_object	UCylinder
+new_object	UOrientedCylinder
+new_object	UAlignedOvalCylinder
+new_object	UOrientedOvalCylinder
+new_object	UBox
+add_to_root
+log_engine_initialized
+app_seconds	0000000000000000
+app_seconds	0000000040000000
+engine_tick	3e800000
+app_seconds	0000000080000000
+app_sleep	00000000
+app_seconds	00000000c0000000
+engine_tick	3f000000
+app_seconds	0000000100000000
+app_sleep	00000000
+app_seconds	0000000140000000
+engine_tick	3f000000
+set_current_tick_rate	4019999a
+app_seconds	0000000180000000
+app_sleep	00000000
+app_seconds	00000001c0000000
+engine_tick	3f000000
+app_seconds	0000000200000000
+app_sleep	00000000
+app_seconds	0000000240000000
+engine_tick	3f000000
+app_seconds	0000000280000000
+app_sleep	00000000
+app_seconds	00000002c0000000
+engine_tick	3f000000
+set_current_tick_rate	40000000
+app_seconds	0000000300000000
+app_sleep	00000000
+result	cmdlet_editor	0
+state	Audio=0 Render=0 Client=0 Cylinder=1 OCylinder=1 OvalCylinder=1 OOvalCylinder=1 Box=1 CurrentTickRate=40000000 GIsRunning=0
+scenario	cmdlet_game_no_lang
+config_get_language	256
+load_engine_class
+construct_engine
+url_static_init
+engine_mem_init	65536	GEngineMem
+cache_init	5242880	4096
+localize	General	Yes	Core
+localize	General	No	Core
+new_object	UCylinder
+new_object	UOrientedCylinder
+new_object	UAlignedOvalCylinder
+new_object	UOrientedOvalCylinder
+new_object	UBox
+add_to_root
+log_engine_initialized
+app_seconds	0000000000000000
+app_seconds	0000000040000000
+engine_tick	3e800000
+app_seconds	0000000080000000
+engine_tick	3e800000
+app_seconds	00000000c0000000
+engine_tick	3e800000
+app_seconds	0000000100000000
+engine_tick	3e800000
+app_seconds	0000000140000000
+engine_tick	3e800000
+set_current_tick_rate	40800000
+app_seconds	0000000180000000
+engine_tick	3e800000
+result	cmdlet_game_no_lang	0
+state	Audio=0 Render=0 Client=0 Cylinder=1 OCylinder=1 OvalCylinder=1 OOvalCylinder=1 Box=1 CurrentTickRate=40800000 GIsRunning=0
