@@ -33,6 +33,7 @@ mod engine_physic;
 mod engine_player;
 mod engine_prim_trace;
 mod engine_route;
+mod engine_scr_tex;
 mod engine_tex;
 mod fire_fire;
 mod fire_ice;

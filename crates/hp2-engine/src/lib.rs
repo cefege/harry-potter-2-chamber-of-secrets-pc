@@ -34,6 +34,7 @@ pub mod player;
 pub mod prim;
 pub mod reach;
 pub mod route;
+pub mod scr_tex;
 pub mod services;
 pub mod tex;
 pub mod trace;

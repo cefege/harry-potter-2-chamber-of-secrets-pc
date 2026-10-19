@@ -62,6 +62,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2PawnNativeFilesServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ConsoleServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2InputServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ScrTexServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"

@@ -26,9 +26,6 @@ class ENGINE_API  UScriptedTexture : public UTexture
 	AActor*			NotifyActor;
     UTexture*		SourceTexture;
 
-	// UScriptedTexture Interface.
-	void DrawTile( FLOAT X, FLOAT Y, FLOAT XL, FLOAT YL, FLOAT U, FLOAT V, FLOAT UL, FLOAT VL, UTexture *Tex, FTextureInfo *Info, UBOOL bMasked, UBOOL bUseColor=0, BYTE ColorIndex=0 );
-
 	// Natives.
 	DECLARE_FUNCTION(execDrawText)
 	DECLARE_FUNCTION(execDrawTile)
@@ -37,9 +34,10 @@ class ENGINE_API  UScriptedTexture : public UTexture
 	DECLARE_FUNCTION(execTextSize)
 
 private:
+	friend struct Hp2ScrTexAccess;
 	UTexture*		OldSourceTex;
 	BYTE*			LocalSourceBitmap;
-	TMap< UTexture*, TArray< BYTE > >*	PaletteMap;
+	void*			PaletteMap;		// Rust-owned palette cache (hp2_engine::scr_tex::PaletteCache)
 	FLOAT			LocalTime;
 };
 
