@@ -37,6 +37,7 @@ pub mod route;
 pub mod scr_tex;
 pub mod services;
 pub mod skeletal;
+pub mod stat_log;
 pub mod tex;
 pub mod trace;
 pub mod uengine;

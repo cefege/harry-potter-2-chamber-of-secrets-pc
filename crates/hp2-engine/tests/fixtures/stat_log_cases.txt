@@ -1,0 +1,31 @@
+case=LocalBatcher_show in=lparams=lp;bwatermark=0;dedicated=0;lfn=Game.log;lurl=/bin/batcher ret=- out=GIsRequestingExit=0 trace=CP(/bin/batcher,Game.log,1)=h1
+case=LocalBatcher_dedicated in=lparams=lp;bwatermark=0;dedicated=1;lfn=Game.log;lurl=/bin/batcher ret=- out=GIsRequestingExit=0 trace=CP(/bin/batcher,Game.log,0)=h2
+case=SilentBatcher_show in=lparams=lp;bwatermark=0;dedicated=0;lfn=Game.log;lurl=/bin/batcher ret=- out=GIsRequestingExit=0 trace=CP(/bin/batcher,-b false Game.log,1)=h3
+case=BatchLocal in=lparams=lp;bwatermark=0;dedicated=0;dlurl=/bin/dl;ldir=/logs ret=- out=GIsRequestingExit=0 trace=CP(/bin/dl,/logs,1)=h4
+case=BrowseRelative in=lparams=lp;bwatermark=0;url=Maps/A.u ret=- out=GIsRequestingExit=0 trace=LU(/work/Maps/A.u)
+case=WorldBatcher_first in=lparams=lp;bwatermark=0;dedicated=0;external=0;wurl=/bin/wb;wparams=wp;bwbe=0;dbwbe=0;cpnull=0 ret=- out=DefBWBE=0;GIsRequestingExit=0 trace=DBG(ngWorldStats: ExecuteWorldLogBatcher)|CP(/bin/wb,wp,1)=h5|DBG(bWorldBatchError is 0)|SC
+case=WorldBatcher_running in=lparams=lp;bwatermark=0;dedicated=0;external=0;wurl=/bin/wb;wparams=wp;bwbe=0;dbwbe=0;cpnull=0;gpr=0 ret=- out=DefBWBE=0;GIsRequestingExit=0 trace=DBG(ngWorldStats: ExecuteWorldLogBatcher)|GPR(h5)=0|DBG(ngWorldStats: Old batcher was still running or handle was invalid.)|CP(/bin/wb,wp,1)=h6|DBG(bWorldBatchError is 0)|SC
+case=WorldBatcher_prev_fail in=lparams=lp;bwatermark=0;dedicated=0;external=0;wurl=/bin/wb;wparams=wp;bwbe=0;dbwbe=0;cpnull=0;gpr=1;rc=-1 ret=- out=DefBWBE=1;GIsRequestingExit=0 trace=DBG(ngWorldStats: ExecuteWorldLogBatcher)|GPR(h6)=1/-1|DBG(ngWorldStats: Previous batcher failed with return code -1.)|CP(/bin/wb,wp,1)=h7|DBG(bWorldBatchError is 1)|SC
+case=WorldBatcher_prev_ok in=lparams=lp;bwatermark=0;dedicated=0;external=0;wurl=/bin/wb;wparams=wp;bwbe=0;dbwbe=0;cpnull=0;gpr=1;rc=0 ret=- out=DefBWBE=0;GIsRequestingExit=0 trace=DBG(ngWorldStats: ExecuteWorldLogBatcher)|GPR(h7)=1/0|CP(/bin/wb,wp,1)=h8|DBG(bWorldBatchError is 0)|SC
+case=WorldBatcher_create_fail in=lparams=lp;bwatermark=0;dedicated=0;external=0;wurl=/bin/wb;wparams=wp;bwbe=0;dbwbe=0;cpnull=1;gpr=1;rc=0 ret=- out=DefBWBE=1;GIsRequestingExit=0 trace=DBG(ngWorldStats: ExecuteWorldLogBatcher)|GPR(h8)=1/0|CP(/bin/wb,wp,1)=h0|DBG(ngWorldStats: Failed to launch batcher.)|DBG(bWorldBatchError is 1)|SC
+case=WorldBatcher_external in=lparams=lp;bwatermark=0;external=1;bwbe=1;dbwbe=0 ret=- out=DefBWBE=0;GIsRequestingExit=0 trace=-
+case=InitialCheck_basic in=lparams=lp;bwatermark=0;gameclass=Engine.GameInfo;classes=Engine.GameInfo,Engine.Actor,Core.Object;files=Engine.u:1234,Engine.dylib:777,Core.u:55 ret=- out=GIsRequestingExit=0 trace=EV(GameClass,Class Engine.GameInfo)|FSZ(Engine.u)=1234|EV2(CodePackageChecksum,Engine.u,88e4b283968941c3a2e0cb84aa663d85)|FSZ(Engine.dylib)=777|EV2(CodePackageChecksum,Engine.dylib,ace65900e5d8e654977cf89dcc370e72)|FSZ(Core.u)=55|EV2(CodePackageChecksum,Core.u,a245503702d2b04b7d047e1afec3e6dc)|FSZ(Core.dylib)=-1
+case=InitialCheck_dedup in=lparams=lp;bwatermark=0;gameclass=Engine.GameInfo;classes=Engine.GameInfo,Engine.Actor;files=Engine.u:1234,Engine.dylib:777 ret=- out=GIsRequestingExit=0 trace=EV(GameClass,Class Engine.GameInfo)|FSZ(Engine.u)=1234|EV2(CodePackageChecksum,Engine.u,88e4b283968941c3a2e0cb84aa663d85)|FSZ(Engine.dylib)=777|EV2(CodePackageChecksum,Engine.dylib,ace65900e5d8e654977cf89dcc370e72)
+case=LogMutator in=lparams=lp;bwatermark=0;mutclass=Engine.Mutator ret=- out=GIsRequestingExit=0 trace=EV(GameMutator,Class Engine.Mutator)
+case=GetPlayerChecksum_nosecret in=lparams=lp;bwatermark=0;secret=;pname=Player One ret=- out=Checksum=NoChecksum;GIsRequestingExit=0 trace=-
+case=GetPlayerChecksum_secret in=lparams=lp;bwatermark=0;secret=xyz;pname=Player One ret=- out=Checksum=71715a59e6b194691177811072a8fbe3;GIsRequestingExit=0 trace=-
+case=OpenLog_nonworld in=lparams=lp;bwatermark=0;inst=1;bworld=0;slfile=Logs/x.log ret=- out=GIsRequestingExit=0 trace=MKD(../Logs)|CFW(Logs/x.log)=a1
+case=FileLog_nonworld in=lparams=lp;bwatermark=0;inst=1;bworld=0;ev=Hello ret=- out=GIsRequestingExit=0 trace=SER(a1,480065006c006c006f000d000a00)
+case=FileFlush in=lparams=lp;bwatermark=0;inst=1 ret=- out=GIsRequestingExit=0 trace=FLU(a1)
+case=CloseLog_nonworld in=lparams=lp;bwatermark=0;inst=1;bworld=0;slfile=Logs/x.log;slfinal=Logs/x.final.log ret=- out=GIsRequestingExit=0 trace=ARD(a1)|MV(Logs/x.final.log,Logs/x.log)
+case=OpenLog_world in=lparams=lp;bwatermark=0;inst=1;bworld=1;slfile=Logs/w.log ret=- out=GIsRequestingExit=0 trace=MKD(../Logs)|CFW(Logs/w.log)=a2
+case=Watermark in=lparams=lp;bwatermark=0;inst=1;ev=Mark ret=- out=GIsRequestingExit=0 trace=-
+case=GetChecksum in=lparams=lp;bwatermark=0;inst=1 ret=- out=Checksum=15b0ea2705c7f51e786c6b39d96da428;GIsRequestingExit=0 trace=-
+case=GetChecksum_twice in=lparams=lp;bwatermark=0;inst=1 ret=- out=Checksum=2899735db7e2a67fed57e8ba9e6f67be2899735db7e2a67fed57e8ba9e6f67be;GIsRequestingExit=0 trace=-
+case=FileLog_world in=lparams=lp;bwatermark=0;inst=1;bworld=1;ev=Hi ret=- out=GIsRequestingExit=0 trace=SER(a2,efa7cea7aaa7ada7)
+case=Watermark_nocontext in=lparams=lp;bwatermark=0;inst=2;ev=Mark ret=- out=GIsRequestingExit=0 trace=ASSERT(Runtime && Runtime->Context)
+case=GetChecksum_nocontext in=lparams=lp;bwatermark=0;inst=2 ret=- out=GIsRequestingExit=0 trace=ASSERT(Runtime && Runtime->Context)
+case=CloseLog_world in=lparams=lp;bwatermark=0;inst=1;bworld=1;slfile=Logs/w.log;slfinal=Logs/w.final.log ret=- out=GIsRequestingExit=0 trace=ARD(a2)|MV(Logs/w.final.log,Logs/w.log)
+case=Checksum_backslash in=lparams=lp;bwatermark=0;files=..\Maps\Engine.u:4096;file=..\Maps\Engine.u ret=0 out=GIsRequestingExit=1 trace=FSZ(..\Maps\Engine.u)=4096|LOG(Package ..\Maps\Engine.u has checksum 0e822d0c672454c5a7d469edc92d8c73)
+case=Checksum_slash in=lparams=lp;bwatermark=0;files=Maps/Foo.u:2048;file=Maps/Foo.u ret=0 out=GIsRequestingExit=1 trace=FSZ(Maps/Foo.u)=2048|LOG(Package Maps/Foo.u has checksum 9aef0852b3c5eff7e7f85eadbea60f32)
+case=Checksum_missing in=lparams=lp;bwatermark=0;files=Maps/Other.u:10;file=Nope.u ret=- out=GIsRequestingExit=0 trace=FSZ(Nope.u)=-1|ERR(Could not open file: Nope.u)

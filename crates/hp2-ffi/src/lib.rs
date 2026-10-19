@@ -35,6 +35,7 @@ mod engine_prim_trace;
 mod engine_route;
 mod engine_scr_tex;
 mod engine_skeletal;
+mod engine_stat_log;
 mod engine_tex;
 mod engine_uengine;
 mod engine_url;
