@@ -8,6 +8,8 @@
 
 #include "EnginePrivate.h"
 #include "UnRender.h"
+#include "hp2_rs.h"
+#include "Hp2CamMgrServices.h"
 
 /*-----------------------------------------------------------------------------
 	UClient implementation.
@@ -29,19 +31,12 @@ void UClient::PostEditChange()
 {
 	guard(UClient::PostEditChange);
 	Super::PostEditChange();
-	Brightness = Clamp(Brightness,0.f,1.f);
-	MipFactor = Clamp(MipFactor,-3.f,3.f);
-	ParticleDensity = Max(ParticleDensity, 0);
+	hp2_rs_engine_cam_mgr_post_edit_change( &Brightness, &MipFactor, &ParticleDensity );
 	unguard;
 }
 FLOAT UClient::GetEffectiveFovAngle( FLOAT AuthoredHFov, INT ViewportX, INT ViewportY, UBOOL bMaintainVerticalFOV )
 {
-	if( !bMaintainVerticalFOV || ViewportX<=0 || ViewportY<=0 || 3.0*ViewportX<=4.0*ViewportY )
-		return AuthoredHFov;
-
-	const DOUBLE AspectScale = (3.0*ViewportX) / (4.0*ViewportY);
-	const FLOAT EffectiveHFov = (FLOAT)(2.0 * appAtan(appTan(AuthoredHFov * PI/360.0) * AspectScale) * 180.0/PI);
-	return Min( EffectiveHFov, 169.999f );
+	return hp2_rs_engine_cam_mgr_get_effective_fov_angle( AuthoredHFov, ViewportX, ViewportY, bMaintainVerticalFOV );
 }
 void UClient::StaticConstructor()
 {
@@ -101,17 +96,7 @@ void UClient::Destroy()
 UBOOL UClient::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 {
 	guard(UClient::Exec);
-	if( ParseCommand(&Cmd,TEXT("BRIGHTNESS")) )
-	{
-		if( (Brightness+=0.1f) >= 1.f )
-			Brightness = 0;
-		Engine->Flush(1);
-		SaveConfig();
-		if( Viewports.Num() && Viewports(0)->Actor )//!!ugly
-			Viewports(0)->Actor->eventClientMessage( *FString::Printf(TEXT("Brightness level %i/10"), appRound(Brightness*10+1)), NAME_None, 0 );
-		return 1;
-	}
-	else return 0;
+	return hp2_rs_engine_cam_mgr_exec( &GHp2CamMgrServices, this, &Brightness, Cmd );
 	unguard;
 }
 
@@ -132,10 +117,7 @@ void UClient::Flush( UBOOL AllowPrecache )
 {
 	guard(UClient::Flush);
 
-	for( INT i=0; i<Viewports.Num(); i++ )
-		if( Viewports(i)->RenDev )
-			Viewports(i)->RenDev->Flush(AllowPrecache);
-
+	hp2_rs_engine_cam_mgr_flush( &GHp2CamMgrServices, this, AllowPrecache );
 	unguard;
 }
 
