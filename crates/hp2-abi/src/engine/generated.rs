@@ -6,7 +6,7 @@
 
 use std::ffi::c_void;
 
-use crate::FVector;
+use crate::{FPlane, FVector};
 
 /// Layout of `TArray<T>` (`UnTemplate.h`): `T* Data; INT ArrayNum; INT ArrayMax;`.
 #[repr(C)]
@@ -1170,6 +1170,149 @@ pub struct AKeypoint {
 const _: () = assert!(size_of::<AKeypoint>() == 888);
 const _: () = assert!(std::mem::offset_of!(AKeypoint, base) == 0);
 
+/// Layout mirror of C++ `UParticle` (140 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UParticle {
+    pub last_position: FVector,
+    pub position: FVector,
+    pub velocity: FVector,
+    pub age: f32,
+    pub lifetime: f32,
+    pub alpha: f32,
+    pub alpha_full: f32,
+    pub alpha_delta: f32,
+    pub color: FPlane,
+    pub color_delta: FPlane,
+    pub width: f32,
+    pub width_full: f32,
+    pub width_delta: f32,
+    pub length: f32,
+    pub length_full: f32,
+    pub length_delta: f32,
+    pub tail: f32,
+    pub drip_timer: f32,
+    pub chaos_delay: f32,
+    pub spin: f32,
+    pub spin_rate: f32,
+    pub id: i32,
+    pub priority_tag: i32,
+}
+
+const _: () = assert!(size_of::<UParticle>() == 140);
+const _: () = assert!(std::mem::offset_of!(UParticle, last_position) == 0);
+const _: () = assert!(std::mem::offset_of!(UParticle, position) == 12);
+const _: () = assert!(std::mem::offset_of!(UParticle, velocity) == 24);
+const _: () = assert!(std::mem::offset_of!(UParticle, age) == 36);
+const _: () = assert!(std::mem::offset_of!(UParticle, lifetime) == 40);
+const _: () = assert!(std::mem::offset_of!(UParticle, alpha) == 44);
+const _: () = assert!(std::mem::offset_of!(UParticle, alpha_full) == 48);
+const _: () = assert!(std::mem::offset_of!(UParticle, alpha_delta) == 52);
+const _: () = assert!(std::mem::offset_of!(UParticle, color) == 56);
+const _: () = assert!(std::mem::offset_of!(UParticle, color_delta) == 72);
+const _: () = assert!(std::mem::offset_of!(UParticle, width) == 88);
+const _: () = assert!(std::mem::offset_of!(UParticle, width_full) == 92);
+const _: () = assert!(std::mem::offset_of!(UParticle, width_delta) == 96);
+const _: () = assert!(std::mem::offset_of!(UParticle, length) == 100);
+const _: () = assert!(std::mem::offset_of!(UParticle, length_full) == 104);
+const _: () = assert!(std::mem::offset_of!(UParticle, length_delta) == 108);
+const _: () = assert!(std::mem::offset_of!(UParticle, tail) == 112);
+const _: () = assert!(std::mem::offset_of!(UParticle, drip_timer) == 116);
+const _: () = assert!(std::mem::offset_of!(UParticle, chaos_delay) == 120);
+const _: () = assert!(std::mem::offset_of!(UParticle, spin) == 124);
+const _: () = assert!(std::mem::offset_of!(UParticle, spin_rate) == 128);
+const _: () = assert!(std::mem::offset_of!(UParticle, id) == 132);
+const _: () = assert!(std::mem::offset_of!(UParticle, priority_tag) == 136);
+
+/// Layout mirror of C++ `AParticleFX` (1288 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AParticleFX {
+    pub base: AActor,
+    _pad_888: [u8; 156],
+    _bits_1044: u8,
+    _pad_1045: [u8; 11],
+    pub alpha_delay: f32,
+    pub color_delay: f32,
+    pub size_delay: f32,
+    pub alpha_grow_period: f32,
+    pub size_grow_period: f32,
+    pub chaos: f32,
+    pub chaos_delay: f32,
+    pub elasticity: f32,
+    pub attraction: FVector,
+    pub damping: f32,
+    _pad_1104: [u8; 12],
+    pub wind_modifier: f32,
+    _bits_1120: u8,
+    _pad_1121: [u8; 67],
+    pub color_palette: *mut c_void,
+    pub render_primitive: u8,
+    _pad_1197: [u8; 15],
+    pub last_update_location: FVector,
+    _pad_1224: [u8; 12],
+    pub last_update_rotation: FRotator,
+    _pad_1248: [u8; 40],
+}
+
+impl AParticleFX {
+    pub fn b_update(&self) -> bool {
+        self._bits_1044 & (1 << 0) != 0
+    }
+
+    pub fn set_b_update(&mut self, value: bool) {
+        if value {
+            self._bits_1044 |= 1 << 0;
+        } else {
+            self._bits_1044 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_system_relative(&self) -> bool {
+        self._bits_1044 & (1 << 2) != 0
+    }
+
+    pub fn set_b_system_relative(&mut self, value: bool) {
+        if value {
+            self._bits_1044 |= 1 << 2;
+        } else {
+            self._bits_1044 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_wind_per_particle(&self) -> bool {
+        self._bits_1120 & (1 << 0) != 0
+    }
+
+    pub fn set_b_wind_per_particle(&mut self, value: bool) {
+        if value {
+            self._bits_1120 |= 1 << 0;
+        } else {
+            self._bits_1120 &= !(1 << 0);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<AParticleFX>() == 1288);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, attraction) == 1088);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, damping) == 1100);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, wind_modifier) == 1116);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, chaos) == 1076);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, chaos_delay) == 1080);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, elasticity) == 1084);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, alpha_delay) == 1056);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, color_delay) == 1060);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, size_delay) == 1064);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, alpha_grow_period) == 1068);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, size_grow_period) == 1072);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, color_palette) == 1188);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, render_primitive) == 1196);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, last_update_location) == 1212);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, last_update_rotation) == 1236);
+
 /// Layout mirror of C++ `AInterpolationPoint` (1680 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C, packed(4))]
@@ -1496,6 +1639,8 @@ mod layout_tests {
         assert_eq!(size_of::<FPointRegion>(), 16);
         assert_eq!(size_of::<AInfo>(), 888);
         assert_eq!(size_of::<AKeypoint>(), 888);
+        assert_eq!(size_of::<UParticle>(), 140);
+        assert_eq!(size_of::<AParticleFX>(), 1288);
         assert_eq!(size_of::<AInterpolationPoint>(), 1680);
         assert_eq!(size_of::<AInterpolationManager>(), 1012);
         assert_eq!(size_of::<AZoneInfo>(), 1320);

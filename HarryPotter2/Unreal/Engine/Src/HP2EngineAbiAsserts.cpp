@@ -5,6 +5,7 @@
 // expressible as static_asserts; the generator checks them with its probe.
 
 #include "EnginePrivate.h"
+#include "UnParticle.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Winvalid-offsetof"
@@ -232,6 +233,46 @@ static_assert(__builtin_offsetof(FPointRegion, iLeaf) == 8, "hp2-abi engine::FPo
 static_assert(__builtin_offsetof(FPointRegion, ZoneNumber) == 12, "hp2-abi engine::FPointRegion.zone_number must match FPointRegion::ZoneNumber offset");
 static_assert(sizeof(AInfo) == 888, "hp2-abi engine::AInfo must match AInfo size");
 static_assert(sizeof(AKeypoint) == 888, "hp2-abi engine::AKeypoint must match AKeypoint size");
+static_assert(sizeof(UParticle) == 140, "hp2-abi engine::UParticle must match UParticle size");
+static_assert(__builtin_offsetof(UParticle, LastPosition) == 0, "hp2-abi engine::UParticle.last_position must match UParticle::LastPosition offset");
+static_assert(__builtin_offsetof(UParticle, Position) == 12, "hp2-abi engine::UParticle.position must match UParticle::Position offset");
+static_assert(__builtin_offsetof(UParticle, Velocity) == 24, "hp2-abi engine::UParticle.velocity must match UParticle::Velocity offset");
+static_assert(__builtin_offsetof(UParticle, Age) == 36, "hp2-abi engine::UParticle.age must match UParticle::Age offset");
+static_assert(__builtin_offsetof(UParticle, Lifetime) == 40, "hp2-abi engine::UParticle.lifetime must match UParticle::Lifetime offset");
+static_assert(__builtin_offsetof(UParticle, Alpha) == 44, "hp2-abi engine::UParticle.alpha must match UParticle::Alpha offset");
+static_assert(__builtin_offsetof(UParticle, AlphaFull) == 48, "hp2-abi engine::UParticle.alpha_full must match UParticle::AlphaFull offset");
+static_assert(__builtin_offsetof(UParticle, AlphaDelta) == 52, "hp2-abi engine::UParticle.alpha_delta must match UParticle::AlphaDelta offset");
+static_assert(__builtin_offsetof(UParticle, Color) == 56, "hp2-abi engine::UParticle.color must match UParticle::Color offset");
+static_assert(__builtin_offsetof(UParticle, ColorDelta) == 72, "hp2-abi engine::UParticle.color_delta must match UParticle::ColorDelta offset");
+static_assert(__builtin_offsetof(UParticle, Width) == 88, "hp2-abi engine::UParticle.width must match UParticle::Width offset");
+static_assert(__builtin_offsetof(UParticle, WidthFull) == 92, "hp2-abi engine::UParticle.width_full must match UParticle::WidthFull offset");
+static_assert(__builtin_offsetof(UParticle, WidthDelta) == 96, "hp2-abi engine::UParticle.width_delta must match UParticle::WidthDelta offset");
+static_assert(__builtin_offsetof(UParticle, Length) == 100, "hp2-abi engine::UParticle.length must match UParticle::Length offset");
+static_assert(__builtin_offsetof(UParticle, LengthFull) == 104, "hp2-abi engine::UParticle.length_full must match UParticle::LengthFull offset");
+static_assert(__builtin_offsetof(UParticle, LengthDelta) == 108, "hp2-abi engine::UParticle.length_delta must match UParticle::LengthDelta offset");
+static_assert(__builtin_offsetof(UParticle, Tail) == 112, "hp2-abi engine::UParticle.tail must match UParticle::Tail offset");
+static_assert(__builtin_offsetof(UParticle, DripTimer) == 116, "hp2-abi engine::UParticle.drip_timer must match UParticle::DripTimer offset");
+static_assert(__builtin_offsetof(UParticle, ChaosDelay) == 120, "hp2-abi engine::UParticle.chaos_delay must match UParticle::ChaosDelay offset");
+static_assert(__builtin_offsetof(UParticle, Spin) == 124, "hp2-abi engine::UParticle.spin must match UParticle::Spin offset");
+static_assert(__builtin_offsetof(UParticle, SpinRate) == 128, "hp2-abi engine::UParticle.spin_rate must match UParticle::SpinRate offset");
+static_assert(__builtin_offsetof(UParticle, Id) == 132, "hp2-abi engine::UParticle.id must match UParticle::Id offset");
+static_assert(__builtin_offsetof(UParticle, PriorityTag) == 136, "hp2-abi engine::UParticle.priority_tag must match UParticle::PriorityTag offset");
+static_assert(sizeof(AParticleFX) == 1288, "hp2-abi engine::AParticleFX must match AParticleFX size");
+static_assert(__builtin_offsetof(AParticleFX, Attraction) == 1088, "hp2-abi engine::AParticleFX.attraction must match AParticleFX::Attraction offset");
+static_assert(__builtin_offsetof(AParticleFX, Damping) == 1100, "hp2-abi engine::AParticleFX.damping must match AParticleFX::Damping offset");
+static_assert(__builtin_offsetof(AParticleFX, WindModifier) == 1116, "hp2-abi engine::AParticleFX.wind_modifier must match AParticleFX::WindModifier offset");
+static_assert(__builtin_offsetof(AParticleFX, Chaos) == 1076, "hp2-abi engine::AParticleFX.chaos must match AParticleFX::Chaos offset");
+static_assert(__builtin_offsetof(AParticleFX, ChaosDelay) == 1080, "hp2-abi engine::AParticleFX.chaos_delay must match AParticleFX::ChaosDelay offset");
+static_assert(__builtin_offsetof(AParticleFX, Elasticity) == 1084, "hp2-abi engine::AParticleFX.elasticity must match AParticleFX::Elasticity offset");
+static_assert(__builtin_offsetof(AParticleFX, AlphaDelay) == 1056, "hp2-abi engine::AParticleFX.alpha_delay must match AParticleFX::AlphaDelay offset");
+static_assert(__builtin_offsetof(AParticleFX, ColorDelay) == 1060, "hp2-abi engine::AParticleFX.color_delay must match AParticleFX::ColorDelay offset");
+static_assert(__builtin_offsetof(AParticleFX, SizeDelay) == 1064, "hp2-abi engine::AParticleFX.size_delay must match AParticleFX::SizeDelay offset");
+static_assert(__builtin_offsetof(AParticleFX, AlphaGrowPeriod) == 1068, "hp2-abi engine::AParticleFX.alpha_grow_period must match AParticleFX::AlphaGrowPeriod offset");
+static_assert(__builtin_offsetof(AParticleFX, SizeGrowPeriod) == 1072, "hp2-abi engine::AParticleFX.size_grow_period must match AParticleFX::SizeGrowPeriod offset");
+static_assert(__builtin_offsetof(AParticleFX, ColorPalette) == 1188, "hp2-abi engine::AParticleFX.color_palette must match AParticleFX::ColorPalette offset");
+static_assert(__builtin_offsetof(AParticleFX, RenderPrimitive) == 1196, "hp2-abi engine::AParticleFX.render_primitive must match AParticleFX::RenderPrimitive offset");
+static_assert(__builtin_offsetof(AParticleFX, LastUpdateLocation) == 1212, "hp2-abi engine::AParticleFX.last_update_location must match AParticleFX::LastUpdateLocation offset");
+static_assert(__builtin_offsetof(AParticleFX, LastUpdateRotation) == 1236, "hp2-abi engine::AParticleFX.last_update_rotation must match AParticleFX::LastUpdateRotation offset");
 static_assert(sizeof(AInterpolationPoint) == 1680, "hp2-abi engine::AInterpolationPoint must match AInterpolationPoint size");
 static_assert(__builtin_offsetof(AInterpolationPoint, Pause) == 896, "hp2-abi engine::AInterpolationPoint.pause must match AInterpolationPoint::Pause offset");
 static_assert(__builtin_offsetof(AInterpolationPoint, ViewTargetTag) == 928, "hp2-abi engine::AInterpolationPoint.view_target_tag must match AInterpolationPoint::ViewTargetTag offset");

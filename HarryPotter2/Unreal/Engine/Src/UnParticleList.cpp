@@ -15,10 +15,7 @@
 #include "EnginePrivate.h"
 #include "UnParticleList.h"
 #include "UnParticle.h"
-#include <math.h>
-#include <list>
-
-using namespace std;
+#include "hp2_rs.h"
 
 
 /*-----------------------------------------------------------------------------
@@ -28,11 +25,7 @@ using namespace std;
 class UParticleListPriv: public UParticleList
 {
 	DECLARE_CLASS(UParticleListPriv,UParticleList,CLASS_Transient,Engine)
-	typedef list<UParticle> TParticles;
-
-	TParticles Particles;
-	TParticles::iterator itParticles;
-	bool bAdvance;			// Whether to advance to next particle.
+	void* RustList;		// Rust particle list (crates/hp2-engine/src/particle.rs); owns the UParticle nodes.
 	AActor* ActorOwner;
 
 public:
@@ -41,8 +34,7 @@ public:
 	UParticleListPriv(AActor* Owner = NULL)
 	{
 		ActorOwner = Owner;
-		itParticles = Particles.begin();
-		bAdvance = true;
+		RustList = hp2_rs_engine_particle_list_new();
 		WorldBox = FBox(0);
 	}
 
@@ -61,116 +53,60 @@ public:
 		}
 		
 		Super::Destroy();
+		hp2_rs_engine_particle_list_free( RustList );
+		RustList = NULL;
 		unguard;
 	}
 
 	// UParticleList interface.
 	UParticle* StartParticle()
 	{
-		// Set the iterator to the first particle on the list.
-		itParticles = Particles.begin();
-
-		// Return the first particle.
-		return GetCurrentParticle();
+		return (UParticle*)hp2_rs_engine_particle_list_start( RustList );
 	}
 
 	UParticle* NextParticle()
 	{
-		// Set the iterator to the next particle on the list.
-		if (bAdvance)
-			++itParticles;
-		bAdvance = true;
-
-		// Return the current particle.
-		return GetCurrentParticle();
-	}
-
-	inline UParticle* GetCurrentParticle()
-	{
-		// Return a null pointer if there are no particles on the list.
-		if (itParticles == Particles.end())
-		{
-			bAdvance = false;
-			return 0;
-		}
-
-		// Return the first particle.
-		return &(*itParticles);
+		return (UParticle*)hp2_rs_engine_particle_list_next( RustList );
 	}
 
 	void Add(UParticle& Particle)
 	{
-		Particles.push_back(Particle);
+		hp2_rs_engine_particle_list_add( RustList, &Particle );
 	}
 
 	void Remove(UParticle* Particle)
 	{
-		// If the particle is the currently selected particle, remove and reset the iterator.
-		if (&(*itParticles) == Particle)
-		{
-			itParticles = Particles.erase(itParticles);
-			bAdvance = false;
-			return;
-		}
-
-		// Find the particle.
-		TParticles::iterator it = Particles.begin();
-		for (; it != Particles.end(); ++it)
-			if (&(*it) == Particle)
-				break;
-
-		// If the particle cannot be found, nothing more is required.
-		if (it == Particles.end())
-			return;
-
-		// Remove the particle.
-		Particles.erase(it);
+		hp2_rs_engine_particle_list_remove( RustList, Particle );
 	}
 
 	void RemoveCurrent()
 	{
-		itParticles = Particles.erase(itParticles);
-		bAdvance = false;
+		hp2_rs_engine_particle_list_remove_current( RustList );
 	}
 
 	void RemoveFromFront()
 	{
-		Particles.pop_front();
+		hp2_rs_engine_particle_list_remove_from_front( RustList );
 	}
 
 	void RemoveAll()
 	{
-		Particles.clear();
+		hp2_rs_engine_particle_list_remove_all( RustList );
 	}
 
 	int Size()
 	{
-		const SIZE_T Count = Particles.size();
-		check( Count<=static_cast<SIZE_T>(MAXINT) );
-		return static_cast<INT>(Count);
+		return hp2_rs_engine_particle_list_size( RustList );
 	}
 
 	UParticle* GetParticle( int Id )
 	{
-		// Find the particle.
-		TParticles::iterator it = Particles.begin();
-		for (; it != Particles.end(); ++it)
-			if ( it->Id == Id )
-				return &(*it);
-			
-		return NULL;	
+		return (UParticle*)hp2_rs_engine_particle_list_get_particle( RustList, Id );
 	}
 
 	void UpdateBox()
 	{
-		WorldBox = FBox(0);
-		for( TParticles::iterator it = Particles.begin(); it != Particles.end(); ++it )
-		{
-			const UParticle& particle = *it;
-			FVector Size( Max(particle.Width, particle.Length)*0.5f );
-			WorldBox += particle.Position - Size;
-			WorldBox += particle.Position + Size;
-		}
+		hp2_rs_engine_particle_list_update_box( RustList, &WorldBox );
 	}
 };
 
