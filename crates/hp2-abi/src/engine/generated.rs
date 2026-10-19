@@ -8,6 +8,15 @@ use std::ffi::c_void;
 
 use crate::FVector;
 
+/// Layout of `TArray<T>` (`UnTemplate.h`): `T* Data; INT ArrayNum; INT ArrayMax;`.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TArrayRaw {
+    pub data: *mut c_void,
+    pub num: i32,
+    pub max: i32,
+}
+
 /// Layout mirror of C++ `FRotator` (12 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C)]
@@ -25,21 +34,59 @@ const _: () = assert!(std::mem::offset_of!(FRotator, roll) == 8);
 
 /// Layout mirror of C++ `AActor` (888 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
-#[repr(C)]
+#[repr(C, packed(4))]
 #[derive(Clone, Copy)]
 pub struct AActor {
-    _pad_0: [u8; 80],
+    _pad_0: [u8; 73],
+    _bits_73: u8,
+    _pad_74: [u8; 6],
     pub physics: u8,
     _pad_81: [u8; 127],
     pub x_level: *mut c_void,
-    _pad_216: [u8; 180],
+    _pad_216: [u8; 108],
+    pub latent_float: f32,
+    _pad_328: [u8; 48],
+    pub collision_tag: i32,
+    _pad_380: [u8; 16],
     pub location: FVector,
     pub rotation: FRotator,
-    _pad_420: [u8; 244],
+    _pad_420: [u8; 12],
+    pub col_location: FVector,
+    _pad_444: [u8; 80],
+    pub brush: *mut c_void,
+    _pad_532: [u8; 132],
     pub collision_radius: f32,
     pub collision_width: f32,
     pub collision_height: f32,
-    _pad_676: [u8; 212],
+    _pad_676: [u8; 4],
+    _bits_680: u8,
+    _pad_681: [u8; 207],
+}
+
+impl AActor {
+    pub fn b_delete_me(&self) -> bool {
+        self._bits_73 & (1 << 2) != 0
+    }
+
+    pub fn set_b_delete_me(&mut self, value: bool) {
+        if value {
+            self._bits_73 |= 1 << 2;
+        } else {
+            self._bits_73 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_collide_actors(&self) -> bool {
+        self._bits_680 & (1 << 0) != 0
+    }
+
+    pub fn set_b_collide_actors(&mut self, value: bool) {
+        if value {
+            self._bits_680 |= 1 << 0;
+        } else {
+            self._bits_680 &= !(1 << 0);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<AActor>() == 888);
@@ -50,24 +97,47 @@ const _: () = assert!(std::mem::offset_of!(AActor, rotation) == 408);
 const _: () = assert!(std::mem::offset_of!(AActor, collision_radius) == 664);
 const _: () = assert!(std::mem::offset_of!(AActor, collision_width) == 668);
 const _: () = assert!(std::mem::offset_of!(AActor, collision_height) == 672);
+const _: () = assert!(std::mem::offset_of!(AActor, brush) == 524);
+const _: () = assert!(std::mem::offset_of!(AActor, collision_tag) == 376);
+const _: () = assert!(std::mem::offset_of!(AActor, col_location) == 432);
+const _: () = assert!(std::mem::offset_of!(AActor, latent_float) == 324);
 
 /// Layout mirror of C++ `APawn` (1912 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
-#[repr(C)]
+#[repr(C, packed(4))]
 #[derive(Clone, Copy)]
 pub struct APawn {
     pub base: AActor,
-    _pad_888: [u8; 1],
+    _bits_888: u8,
     _bits_889: u8,
-    _pad_890: [u8; 110],
+    _bits_890: u8,
+    _pad_891: [u8; 57],
+    pub move_target: *mut c_void,
+    _pad_956: [u8; 44],
     pub ground_speed: f32,
     _pad_1004: [u8; 12],
     pub jump_z: f32,
     pub max_step_height: f32,
-    _pad_1024: [u8; 888],
+    _pad_1024: [u8; 152],
+    pub base_eye_height: f32,
+    _pad_1180: [u8; 352],
+    pub route_cache: [*mut c_void; 16],
+    _pad_1660: [u8; 252],
 }
 
 impl APawn {
+    pub fn b_is_player(&self) -> bool {
+        self._bits_888 & (1 << 1) != 0
+    }
+
+    pub fn set_b_is_player(&mut self, value: bool) {
+        if value {
+            self._bits_888 |= 1 << 1;
+        } else {
+            self._bits_888 &= !(1 << 1);
+        }
+    }
+
     pub fn b_can_jump(&self) -> bool {
         self._bits_889 & (1 << 4) != 0
     }
@@ -115,6 +185,42 @@ impl APawn {
             self._bits_889 &= !(1 << 7);
         }
     }
+
+    pub fn b_can_open_doors(&self) -> bool {
+        self._bits_890 & (1 << 0) != 0
+    }
+
+    pub fn set_b_can_open_doors(&mut self, value: bool) {
+        if value {
+            self._bits_890 |= 1 << 0;
+        } else {
+            self._bits_890 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_can_do_special(&self) -> bool {
+        self._bits_890 & (1 << 1) != 0
+    }
+
+    pub fn set_b_can_do_special(&mut self, value: bool) {
+        if value {
+            self._bits_890 |= 1 << 1;
+        } else {
+            self._bits_890 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_hunting(&self) -> bool {
+        self._bits_890 & (1 << 5) != 0
+    }
+
+    pub fn set_b_hunting(&mut self, value: bool) {
+        if value {
+            self._bits_890 |= 1 << 5;
+        } else {
+            self._bits_890 &= !(1 << 5);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<APawn>() == 1912);
@@ -122,10 +228,13 @@ const _: () = assert!(std::mem::offset_of!(APawn, base) == 0);
 const _: () = assert!(std::mem::offset_of!(APawn, ground_speed) == 1000);
 const _: () = assert!(std::mem::offset_of!(APawn, jump_z) == 1016);
 const _: () = assert!(std::mem::offset_of!(APawn, max_step_height) == 1020);
+const _: () = assert!(std::mem::offset_of!(APawn, base_eye_height) == 1176);
+const _: () = assert!(std::mem::offset_of!(APawn, move_target) == 948);
+const _: () = assert!(std::mem::offset_of!(APawn, route_cache) == 1532);
 
 /// Layout mirror of C++ `AWind` (928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
-#[repr(C)]
+#[repr(C, packed(4))]
 #[derive(Clone, Copy)]
 pub struct AWind {
     pub base: AActor,
@@ -172,13 +281,126 @@ const _: () = assert!(std::mem::offset_of!(AWind, fluc_vel) == 916);
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ULevel {
-    _pad_0: [u8; 240],
+    _pad_0: [u8; 224],
+    pub reach_specs: TArrayRaw,
     pub model: *mut c_void,
-    _pad_248: [u8; 4376],
+    _pad_248: [u8; 168],
+    pub hash: *mut c_void,
+    pub brush_tracker: *mut c_void,
+    _pad_432: [u8; 4192],
 }
 
 const _: () = assert!(size_of::<ULevel>() == 4624);
 const _: () = assert!(std::mem::offset_of!(ULevel, model) == 240);
+const _: () = assert!(std::mem::offset_of!(ULevel, reach_specs) == 224);
+const _: () = assert!(std::mem::offset_of!(ULevel, hash) == 416);
+const _: () = assert!(std::mem::offset_of!(ULevel, brush_tracker) == 424);
+
+/// Layout mirror of C++ `ANavigationPoint` (1284 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct ANavigationPoint {
+    pub base: AActor,
+    _pad_888: [u8; 8],
+    pub upstream_paths: [i32; 16],
+    pub paths: [i32; 16],
+    pub pruned_paths: [i32; 16],
+    _pad_1088: [u8; 128],
+    pub visited_weight: i32,
+    _pad_1220: [u8; 8],
+    pub best_path_weight: i32,
+    pub next_navigation_point: *mut ANavigationPoint,
+    pub next_ordered: *mut ANavigationPoint,
+    pub prev_ordered: *mut ANavigationPoint,
+    pub start_path: *mut c_void,
+    pub previous_path: *mut c_void,
+    pub cost: i32,
+    pub extra_cost: i32,
+    _bits_1280: u8,
+    _pad_1281: [u8; 3],
+}
+
+impl ANavigationPoint {
+    pub fn b_player_only(&self) -> bool {
+        self._bits_1280 & (1 << 0) != 0
+    }
+
+    pub fn set_b_player_only(&mut self, value: bool) {
+        if value {
+            self._bits_1280 |= 1 << 0;
+        } else {
+            self._bits_1280 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_end_point(&self) -> bool {
+        self._bits_1280 & (1 << 1) != 0
+    }
+
+    pub fn set_b_end_point(&mut self, value: bool) {
+        if value {
+            self._bits_1280 |= 1 << 1;
+        } else {
+            self._bits_1280 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_special_cost(&self) -> bool {
+        self._bits_1280 & (1 << 3) != 0
+    }
+
+    pub fn set_b_special_cost(&mut self, value: bool) {
+        if value {
+            self._bits_1280 |= 1 << 3;
+        } else {
+            self._bits_1280 &= !(1 << 3);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<ANavigationPoint>() == 1284);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, base) == 0);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, paths) == 960);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, upstream_paths) == 896);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, pruned_paths) == 1024);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, visited_weight) == 1216);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, best_path_weight) == 1228);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, next_navigation_point) == 1232);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, next_ordered) == 1240);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, prev_ordered) == 1248);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, start_path) == 1256);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, previous_path) == 1264);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, cost) == 1272);
+const _: () = assert!(std::mem::offset_of!(ANavigationPoint, extra_cost) == 1276);
+
+/// Layout mirror of C++ `AInventory` (1188 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AInventory {
+    pub base: AActor,
+    _pad_888: [u8; 156],
+    pub max_desireability: f32,
+    _pad_1048: [u8; 140],
+}
+
+const _: () = assert!(size_of::<AInventory>() == 1188);
+const _: () = assert!(std::mem::offset_of!(AInventory, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AInventory, max_desireability) == 1044);
+
+/// Layout mirror of C++ `AInventorySpot` (1292 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AInventorySpot {
+    pub base: ANavigationPoint,
+    pub marked_item: *mut c_void,
+}
+
+const _: () = assert!(size_of::<AInventorySpot>() == 1292);
+const _: () = assert!(std::mem::offset_of!(AInventorySpot, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AInventorySpot, marked_item) == 1284);
 
 /// Layout mirror of C++ `FReachSpec` (40 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -268,7 +490,7 @@ const _: () = assert!(std::mem::offset_of!(FBox, is_valid) == 24);
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FCheckResult {
-    _pad_0: [u8; 8],
+    pub next: *mut c_void,
     pub actor: *mut c_void,
     pub location: FVector,
     pub normal: FVector,
@@ -284,6 +506,147 @@ const _: () = assert!(std::mem::offset_of!(FCheckResult, normal) == 28);
 const _: () = assert!(std::mem::offset_of!(FCheckResult, primitive) == 40);
 const _: () = assert!(std::mem::offset_of!(FCheckResult, time) == 48);
 const _: () = assert!(std::mem::offset_of!(FCheckResult, item) == 52);
+const _: () = assert!(std::mem::offset_of!(FCheckResult, next) == 0);
+
+/// Layout mirror of C++ `AMover` (1584 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AMover {
+    pub base: AActor,
+    _pad_888: [u8; 93],
+    pub mover_encroach_type: u8,
+    pub mover_glide_type: u8,
+    pub bump_type: u8,
+    pub key_num: u8,
+    pub prev_key_num: u8,
+    pub num_keys: u8,
+    pub world_raytrace_key: u8,
+    pub brush_raytrace_key: u8,
+    _pad_989: [u8; 3],
+    pub move_times: [f32; 8],
+    pub move_time: f32,
+    pub stay_open_time: f32,
+    pub other_time: f32,
+    pub encroach_damage: i32,
+    _pad_1040: [u8; 4],
+    pub player_bump_event: [u8; 4],
+    pub bump_event: [u8; 4],
+    pub saved_trigger: *mut c_void,
+    pub damage_threshold: f32,
+    pub num_trigger_events: i32,
+    pub leader: *mut c_void,
+    pub follower: *mut c_void,
+    pub return_group: [u8; 4],
+    pub delay_time: f32,
+    pub attach_tag: [u8; 4],
+    pub opening_sound: *mut c_void,
+    pub opened_sound: *mut c_void,
+    pub closing_sound: *mut c_void,
+    pub closed_sound: *mut c_void,
+    pub move_ambient_sound: *mut c_void,
+    pub fail_sound: *mut c_void,
+    pub mover_radius: f32,
+    pub mover_volume: u8,
+    pub mover_pitch: u8,
+    _pad_1150: [u8; 2],
+    pub key_pos: [FVector; 8],
+    pub key_rot: [FRotator; 8],
+    pub base_pos: FVector,
+    pub old_pos: FVector,
+    pub old_pre_pivot: FVector,
+    pub saved_pos: FVector,
+    pub base_rot: FRotator,
+    pub old_rot: FRotator,
+    pub saved_rot: FRotator,
+    pub phys_alpha: f32,
+    pub phys_rate: f32,
+    pub my_marker: *mut c_void,
+    pub trigger_actor: *mut c_void,
+    pub trigger_actor2: *mut c_void,
+    pub waiting_pawn: *mut c_void,
+    _pad_1468: [u8; 4],
+    pub recommended_trigger: *mut c_void,
+    pub sim_old_pos: FVector,
+    pub sim_old_rot_pitch: i32,
+    pub sim_old_rot_yaw: i32,
+    pub sim_old_rot_roll: i32,
+    pub sim_interpolate: FVector,
+    pub real_position: FVector,
+    pub real_rotation: FRotator,
+    pub client_update: i32,
+    _pad_1544: [u8; 4],
+    pub mover_spring_time: f32,
+    pub mover_max_amplitude: f32,
+    pub mover_fluctuations: u8,
+    _pad_1557: [u8; 3],
+    pub hit_position: FVector,
+    pub hit_normal: FVector,
+}
+
+const _: () = assert!(size_of::<AMover>() == 1584);
+const _: () = assert!(std::mem::offset_of!(AMover, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_encroach_type) == 981);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_glide_type) == 982);
+const _: () = assert!(std::mem::offset_of!(AMover, bump_type) == 983);
+const _: () = assert!(std::mem::offset_of!(AMover, key_num) == 984);
+const _: () = assert!(std::mem::offset_of!(AMover, prev_key_num) == 985);
+const _: () = assert!(std::mem::offset_of!(AMover, num_keys) == 986);
+const _: () = assert!(std::mem::offset_of!(AMover, world_raytrace_key) == 987);
+const _: () = assert!(std::mem::offset_of!(AMover, brush_raytrace_key) == 988);
+const _: () = assert!(std::mem::offset_of!(AMover, move_times) == 992);
+const _: () = assert!(std::mem::offset_of!(AMover, move_time) == 1024);
+const _: () = assert!(std::mem::offset_of!(AMover, stay_open_time) == 1028);
+const _: () = assert!(std::mem::offset_of!(AMover, other_time) == 1032);
+const _: () = assert!(std::mem::offset_of!(AMover, encroach_damage) == 1036);
+const _: () = assert!(std::mem::offset_of!(AMover, player_bump_event) == 1044);
+const _: () = assert!(std::mem::offset_of!(AMover, bump_event) == 1048);
+const _: () = assert!(std::mem::offset_of!(AMover, saved_trigger) == 1052);
+const _: () = assert!(std::mem::offset_of!(AMover, damage_threshold) == 1060);
+const _: () = assert!(std::mem::offset_of!(AMover, num_trigger_events) == 1064);
+const _: () = assert!(std::mem::offset_of!(AMover, leader) == 1068);
+const _: () = assert!(std::mem::offset_of!(AMover, follower) == 1076);
+const _: () = assert!(std::mem::offset_of!(AMover, return_group) == 1084);
+const _: () = assert!(std::mem::offset_of!(AMover, delay_time) == 1088);
+const _: () = assert!(std::mem::offset_of!(AMover, attach_tag) == 1092);
+const _: () = assert!(std::mem::offset_of!(AMover, opening_sound) == 1096);
+const _: () = assert!(std::mem::offset_of!(AMover, opened_sound) == 1104);
+const _: () = assert!(std::mem::offset_of!(AMover, closing_sound) == 1112);
+const _: () = assert!(std::mem::offset_of!(AMover, closed_sound) == 1120);
+const _: () = assert!(std::mem::offset_of!(AMover, move_ambient_sound) == 1128);
+const _: () = assert!(std::mem::offset_of!(AMover, fail_sound) == 1136);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_radius) == 1144);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_volume) == 1148);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_pitch) == 1149);
+const _: () = assert!(std::mem::offset_of!(AMover, key_pos) == 1152);
+const _: () = assert!(std::mem::offset_of!(AMover, key_rot) == 1248);
+const _: () = assert!(std::mem::offset_of!(AMover, base_pos) == 1344);
+const _: () = assert!(std::mem::offset_of!(AMover, old_pos) == 1356);
+const _: () = assert!(std::mem::offset_of!(AMover, old_pre_pivot) == 1368);
+const _: () = assert!(std::mem::offset_of!(AMover, saved_pos) == 1380);
+const _: () = assert!(std::mem::offset_of!(AMover, base_rot) == 1392);
+const _: () = assert!(std::mem::offset_of!(AMover, old_rot) == 1404);
+const _: () = assert!(std::mem::offset_of!(AMover, saved_rot) == 1416);
+const _: () = assert!(std::mem::offset_of!(AMover, phys_alpha) == 1428);
+const _: () = assert!(std::mem::offset_of!(AMover, phys_rate) == 1432);
+const _: () = assert!(std::mem::offset_of!(AMover, my_marker) == 1436);
+const _: () = assert!(std::mem::offset_of!(AMover, trigger_actor) == 1444);
+const _: () = assert!(std::mem::offset_of!(AMover, trigger_actor2) == 1452);
+const _: () = assert!(std::mem::offset_of!(AMover, waiting_pawn) == 1460);
+const _: () = assert!(std::mem::offset_of!(AMover, recommended_trigger) == 1472);
+const _: () = assert!(std::mem::offset_of!(AMover, sim_old_pos) == 1480);
+const _: () = assert!(std::mem::offset_of!(AMover, sim_old_rot_pitch) == 1492);
+const _: () = assert!(std::mem::offset_of!(AMover, sim_old_rot_yaw) == 1496);
+const _: () = assert!(std::mem::offset_of!(AMover, sim_old_rot_roll) == 1500);
+const _: () = assert!(std::mem::offset_of!(AMover, sim_interpolate) == 1504);
+const _: () = assert!(std::mem::offset_of!(AMover, real_position) == 1516);
+const _: () = assert!(std::mem::offset_of!(AMover, real_rotation) == 1528);
+const _: () = assert!(std::mem::offset_of!(AMover, client_update) == 1540);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_spring_time) == 1548);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_max_amplitude) == 1552);
+const _: () = assert!(std::mem::offset_of!(AMover, mover_fluctuations) == 1556);
+const _: () = assert!(std::mem::offset_of!(AMover, hit_position) == 1560);
+const _: () = assert!(std::mem::offset_of!(AMover, hit_normal) == 1572);
 
 #[cfg(test)]
 mod layout_tests {
@@ -296,9 +659,13 @@ mod layout_tests {
         assert_eq!(size_of::<APawn>(), 1912);
         assert_eq!(size_of::<AWind>(), 928);
         assert_eq!(size_of::<ULevel>(), 4624);
+        assert_eq!(size_of::<ANavigationPoint>(), 1284);
+        assert_eq!(size_of::<AInventory>(), 1188);
+        assert_eq!(size_of::<AInventorySpot>(), 1292);
         assert_eq!(size_of::<FReachSpec>(), 40);
         assert_eq!(size_of::<FPoly>(), 296);
         assert_eq!(size_of::<FBox>(), 28);
         assert_eq!(size_of::<FCheckResult>(), 56);
+        assert_eq!(size_of::<AMover>(), 1584);
     }
 }
