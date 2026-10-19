@@ -131,6 +131,34 @@ thread_local! {
     static GSECONDS_PER_CYCLE: Cell<f32> = const { Cell::new(0.0) };
     static SCRIPT_CYCLES: Cell<f32> = const { Cell::new(0.0) };
 }
+#[derive(Clone, Copy)]
+struct PostLoadActors {
+    level: Obj,
+    level_outer: Obj,
+    iterator: Obj,
+    iterator_index: i32,
+    actors: [Obj; 2],
+    actor_outers: [Obj; 2],
+    xlevels: [Obj; 2],
+}
+
+thread_local! {
+    static POST_LOAD_ACTORS: RefCell<Option<PostLoadActors>> = const { RefCell::new(None) };
+}
+
+fn dump_post_load_xlevels() {
+    POST_LOAD_ACTORS.with(|state| {
+        let state = state.borrow();
+        let state = state.as_ref().expect("post-load actors initialized");
+        for (index, xlevel) in state.xlevels.iter().enumerate() {
+            push_record(format!(
+                "xlevel\t{}\t{}",
+                index * 2,
+                i32::from(*xlevel == state.level)
+            ));
+        }
+    });
+}
 
 fn begin_scenario() {
     CORE_TRACE.with(|t| t.borrow_mut().clear());
@@ -2034,8 +2062,107 @@ unsafe extern "C" fn record_uobject_post_load(_obj: Obj) {
     push_record("uobject_post_load");
 }
 
-unsafe extern "C" fn record_retarget_xlevels(_obj: Obj) {
-    push_service("level_retarget_actor_xlevels");
+unsafe extern "C" fn post_load_actor_iterator_new(iterator_out: *mut Obj) -> i32 {
+    POST_LOAD_ACTORS.with(|state| {
+        let mut state = state.borrow_mut();
+        let state = state.as_mut().unwrap();
+        state.iterator_index = 0;
+        unsafe { *iterator_out = state.iterator };
+    });
+    0
+}
+
+unsafe extern "C" fn post_load_actor_iterator_get(iterator: Obj) -> Obj {
+    POST_LOAD_ACTORS.with(|state| {
+        let state = state.borrow();
+        let state = state.as_ref().unwrap();
+        assert_eq!(iterator, state.iterator);
+        state
+            .actors
+            .get(state.iterator_index as usize)
+            .copied()
+            .unwrap_or(ptr::null_mut())
+    })
+}
+
+unsafe extern "C" fn post_load_actor_iterator_next(iterator: Obj) {
+    POST_LOAD_ACTORS.with(|state| {
+        let mut state = state.borrow_mut();
+        let state = state.as_mut().unwrap();
+        assert_eq!(iterator, state.iterator);
+        state.iterator_index += 1;
+    });
+}
+
+unsafe extern "C" fn post_load_actor_iterator_delete(iterator: Obj) {
+    POST_LOAD_ACTORS.with(|state| {
+        assert_eq!(iterator, state.borrow().as_ref().unwrap().iterator);
+    });
+}
+
+unsafe extern "C" fn post_load_object_get_outer(obj: Obj) -> Obj {
+    POST_LOAD_ACTORS.with(|state| {
+        let state = state.borrow();
+        let state = state.as_ref().unwrap();
+        if obj == state.level {
+            state.level_outer
+        } else {
+            let index = state.actors.iter().position(|actor| *actor == obj).unwrap();
+            state.actor_outers[index]
+        }
+    })
+}
+
+unsafe extern "C" fn post_load_actor_set_xlevel(actor: Obj, level: Obj) {
+    POST_LOAD_ACTORS.with(|state| {
+        let mut state = state.borrow_mut();
+        let state = state.as_mut().unwrap();
+        let index = state
+            .actors
+            .iter()
+            .position(|candidate| *candidate == actor)
+            .unwrap();
+        state.xlevels[index] = level;
+    });
+}
+
+fn run_post_load_case(name: &str, mixed: bool) {
+    let mut level: ULevel = unsafe { std::mem::zeroed() };
+    let mut actors: [AActor; 2] = unsafe { std::mem::zeroed() };
+    let mut level_outer = 0u8;
+    let mut other_outer = 0u8;
+    let obj = &mut level as *mut ULevel as Obj;
+    let actor_ptrs = actors.each_mut().map(|actor| actor as *mut AActor as Obj);
+    let same_outer = &mut level_outer as *mut u8 as Obj;
+    let different_outer = &mut other_outer as *mut u8 as Obj;
+
+    let mut iterator_marker = 0u8;
+    let iterator = &mut iterator_marker as *mut u8 as Obj;
+    POST_LOAD_ACTORS.with(|state| {
+        *state.borrow_mut() = Some(PostLoadActors {
+            level: obj,
+            level_outer: same_outer,
+            iterator,
+            iterator_index: 0,
+            actors: actor_ptrs,
+            actor_outers: [same_outer, if mixed { different_outer } else { same_outer }],
+            xlevels: [ptr::null_mut(); 2],
+        });
+    });
+
+    let mut services: Hp2LevelCoreServices = all_never();
+    services.uobject_post_load = record_uobject_post_load;
+    services.actor_iterator_new = post_load_actor_iterator_new;
+    services.actor_iterator_get = post_load_actor_iterator_get;
+    services.actor_iterator_next = post_load_actor_iterator_next;
+    services.actor_iterator_delete = post_load_actor_iterator_delete;
+    services.object_get_outer = post_load_object_get_outer;
+    services.actor_set_xlevel = post_load_actor_set_xlevel;
+    run_scenario(name, &[], &[], || unsafe {
+        level::level_post_load(&services, obj).unwrap();
+        dump_post_load_xlevels();
+    });
+    POST_LOAD_ACTORS.with(|state| *state.borrow_mut() = None);
 }
 
 unsafe extern "C" fn record_high_detail(_obj: Obj, value: i32) {
@@ -2080,23 +2207,8 @@ fn core_simple_level_scenarios_match_fixture() {
         level::level_modify(&services, obj)
     });
 
-    // The outer-match and outer-mixed cases differ only in the C++ body's `xlevel`
-    // output, which is excluded below; the port's call sequence is identical for both.
-    services = all_never();
-    services.uobject_post_load = record_uobject_post_load;
-    services.level_retarget_actor_xlevels = record_retarget_xlevels;
-    run_scenario(
-        "core.post_load_outer_match",
-        &["xlevel\t"],
-        &["level_retarget_actor_xlevels"],
-        || unsafe { level::level_post_load(&services, obj) },
-    );
-    run_scenario(
-        "core.post_load_outer_mixed",
-        &["xlevel\t"],
-        &["level_retarget_actor_xlevels"],
-        || unsafe { level::level_post_load(&services, obj) },
-    );
+    run_post_load_case("core.post_load_outer_match", false);
+    run_post_load_case("core.post_load_outer_mixed", true);
 
     services = all_never();
     services.uobject_destroy = record_uobject_destroy;

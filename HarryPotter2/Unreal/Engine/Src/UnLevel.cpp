@@ -116,7 +116,7 @@ void ULevel::Modify( UBOOL DoTransArrays )
 void ULevel::PostLoad()
 {
 	guard(ULevel::PostLoad);
-	hp2_rs_engine_level_post_load( &GHp2LevelCoreServices, this );
+	Hp2RethrowPending( hp2_rs_engine_level_post_load( &GHp2LevelCoreServices, this ) );
 	unguard;
 }
 void ULevel::SetActorCollision( UBOOL bCollision )

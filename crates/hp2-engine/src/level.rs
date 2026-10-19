@@ -20,6 +20,9 @@
 //! - `ZoneDist[Zone1][Zone2]` is read through raw pointer arithmetic with no bounds
 //!   check, as in the original.
 //! - `appRound` is `as i32`; out-of-range floats saturate in Rust where C is UB.
+//! - `PostLoad` uses a C++-allocated opaque `TObjectIterator` handle because the
+//!   iterator's object-array layout is private to Core; constructor exceptions
+//!   are returned through the pending-exception bridge and rethrown by the shell.
 
 use std::ffi::{c_char, c_void};
 use std::ptr;
@@ -146,9 +149,18 @@ pub struct Hp2LevelCoreServices {
     pub level_client_viewports_num: unsafe extern "C" fn(obj: Obj) -> i32,
     /// `Engine->Client->Viewports(i)`.
     pub level_client_viewport: unsafe extern "C" fn(obj: Obj, i: i32) -> Obj,
-    /// `#if ENGINE_VERSION>230` body of `ULevel::PostLoad`: for every AActor
-    /// whose outer is this level's outer, `It->XLevel = this`.
-    pub level_retarget_actor_xlevels: unsafe extern "C" fn(obj: Obj),
+    /// Construct the original `TObjectIterator<AActor>`; nonzero is a pending C++ exception.
+    pub actor_iterator_new: unsafe extern "C" fn(iterator_out: *mut Obj) -> i32,
+    /// Dereference the iterator, or null when exhausted.
+    pub actor_iterator_get: unsafe extern "C" fn(iterator: Obj) -> Obj,
+    /// Increment the iterator.
+    pub actor_iterator_next: unsafe extern "C" fn(iterator: Obj),
+    /// Destroy the iterator handle.
+    pub actor_iterator_delete: unsafe extern "C" fn(iterator: Obj),
+    /// `obj->GetOuter()`.
+    pub object_get_outer: unsafe extern "C" fn(obj: Obj) -> Obj,
+    /// `actor->XLevel = level`.
+    pub actor_set_xlevel: unsafe extern "C" fn(actor: Obj, level: Obj),
     /// `obj->Time.GetFloat()` (`TimeSeconds.GetFloat()`).
     pub level_time_seconds_get_float: unsafe extern "C" fn(obj: Obj) -> f32,
 
@@ -743,10 +755,28 @@ pub unsafe fn level_modify(s: &Hp2LevelCoreServices, obj: Obj) {
 ///
 /// # Safety
 /// `obj` must be a live ULevel.
-pub unsafe fn level_post_load(s: &Hp2LevelCoreServices, obj: Obj) {
+#[allow(clippy::result_unit_err)] // Err(()) means the C++ iterator constructor left an exception pending.
+pub unsafe fn level_post_load(s: &Hp2LevelCoreServices, obj: Obj) -> Result<(), ()> {
     unsafe {
         (s.uobject_post_load)(obj);
-        (s.level_retarget_actor_xlevels)(obj);
+
+        // ENGINE_VERSION>230: retarget actors that share this level's outer.
+        let mut iterator = std::ptr::null_mut();
+        if (s.actor_iterator_new)(&mut iterator) != 0 {
+            return Err(());
+        }
+        loop {
+            let actor = (s.actor_iterator_get)(iterator);
+            if actor.is_null() {
+                break;
+            }
+            if (s.object_get_outer)(actor) == (s.object_get_outer)(obj) {
+                (s.actor_set_xlevel)(actor, obj);
+            }
+            (s.actor_iterator_next)(iterator);
+        }
+        (s.actor_iterator_delete)(iterator);
+        Ok(())
     }
 }
 

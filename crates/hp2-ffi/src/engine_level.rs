@@ -91,13 +91,19 @@ pub extern "C" fn hp2_rs_engine_level_modify(svc: *const Hp2LevelCoreServices, o
 }
 
 /// `ULevel::PostLoad()`.
+///
+/// # Safety
+/// `svc` must point to a live level-core services table; `obj` must be a live ULevel.
 #[unsafe(no_mangle)]
-pub extern "C" fn hp2_rs_engine_level_post_load(
+pub unsafe extern "C" fn hp2_rs_engine_level_post_load(
     svc: *const Hp2LevelCoreServices,
     obj: *mut c_void,
-) {
-    guard("hp2_rs_engine_level_post_load", (), move || unsafe {
-        level::level_post_load(&*svc, obj)
+) -> i32 {
+    guard("hp2_rs_engine_level_post_load", 1, move || unsafe {
+        match level::level_post_load(&*svc, obj) {
+            Ok(()) => 0,
+            Err(()) => 1,
+        }
     })
 }
 

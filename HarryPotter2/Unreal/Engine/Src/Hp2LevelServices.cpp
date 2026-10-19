@@ -92,14 +92,23 @@ static void CoreLevelReachSpecsShrink( void* Obj ) { ((ULevel*)Obj)->ReachSpecs.
 static int32_t CoreLevelHasClient( void* Obj ) { return ((ULevel*)Obj)->Engine->Client != NULL ? 1 : 0; }
 static int32_t CoreLevelClientViewportsNum( void* Obj ) { return ((ULevel*)Obj)->Engine->Client->Viewports.Num(); }
 static void* CoreLevelClientViewport( void* Obj, int32_t I ) { return ((ULevel*)Obj)->Engine->Client->Viewports( I ); }
-// The ENGINE_VERSION>230 body of ULevel::PostLoad.
-static void CoreLevelRetargetActorXLevels( void* Obj )
+// TObjectIterator operations used by the Rust ULevel::PostLoad loop.
+static int32_t CoreActorIteratorNew( void** Out )
 {
-	ULevel* Level = (ULevel*)Obj;
-	for( TObjectIterator<AActor> It; It; ++It )
-		if( It->GetOuter() == Level->GetOuter() )
-			It->XLevel = Level;
+	*Out = NULL;
+	return Hp2FfiCall( [&]{ *Out = new TObjectIterator<AActor>(); } );
 }
+static void* CoreActorIteratorGet( void* Iterator )
+{
+	TObjectIterator<AActor>* It = (TObjectIterator<AActor>*)Iterator;
+	if( !static_cast<UBOOL>(*It) )
+		return NULL;
+	return It->operator*();
+}
+static void CoreActorIteratorNext( void* Iterator ) { ++(*(TObjectIterator<AActor>*)Iterator); }
+static void CoreActorIteratorDelete( void* Iterator ) { delete (TObjectIterator<AActor>*)Iterator; }
+static void* CoreObjectGetOuter( void* Obj ) { return ((UObject*)Obj)->GetOuter(); }
+static void CoreActorSetXLevel( void* Actor, void* Level ) { ((AActor*)Actor)->XLevel = (ULevel*)Level; }
 static float CoreLevelTimeSecondsGetFloat( void* Obj ) { return ((ULevel*)Obj)->TimeSeconds.GetFloat(); }
 
 // Collision hash and brush tracker.
@@ -282,7 +291,12 @@ static constexpr Hp2LevelCoreServices MakeCoreServices(void)
 	s.level_has_client = CoreLevelHasClient;
 	s.level_client_viewports_num = CoreLevelClientViewportsNum;
 	s.level_client_viewport = CoreLevelClientViewport;
-	s.level_retarget_actor_xlevels = CoreLevelRetargetActorXLevels;
+	s.actor_iterator_new = CoreActorIteratorNew;
+	s.actor_iterator_get = CoreActorIteratorGet;
+	s.actor_iterator_next = CoreActorIteratorNext;
+	s.actor_iterator_delete = CoreActorIteratorDelete;
+	s.object_get_outer = CoreObjectGetOuter;
+	s.actor_set_xlevel = CoreActorSetXLevel;
 	s.level_time_seconds_get_float = CoreLevelTimeSecondsGetFloat;
 	s.collision_hash_new = CoreCollisionHashNew;
 	s.collision_hash_add_actor = CoreCollisionHashAddActor;
