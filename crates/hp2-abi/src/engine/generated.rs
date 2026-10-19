@@ -49,17 +49,25 @@ pub struct AActor {
     _pad_0: [u8; 72],
     _bits_72: u8,
     _bits_73: u8,
-    _pad_74: [u8; 1],
+    _bits_74: u8,
     _bits_75: u8,
-    _pad_76: [u8; 4],
+    _bits_76: u8,
+    _pad_77: [u8; 3],
     pub physics: u8,
     pub role: u8,
-    _pad_82: [u8; 6],
+    pub remote_role: u8,
+    _pad_83: [u8; 1],
+    pub net_tag: i32,
     pub owner: *mut c_void,
-    _pad_96: [u8; 52],
+    pub tick_parent: *mut c_void,
+    pub tick_parent2: *mut c_void,
+    _pad_112: [u8; 24],
+    pub timer_rate: f32,
+    pub timer_counter: f32,
+    pub life_span: f32,
     pub anim_sequence: [u8; 4],
     pub anim_frame: f32,
-    _pad_156: [u8; 4],
+    pub anim_rate: f32,
     pub tween_rate: f32,
     pub tween_alpha: f32,
     pub anim_bone: u8,
@@ -72,7 +80,8 @@ pub struct AActor {
     pub tag: [u8; 4],
     _pad_220: [u8; 12],
     pub instigator: *mut c_void,
-    _pad_240: [u8; 16],
+    pub ambient_sound: *mut c_void,
+    pub inventory: *mut c_void,
     pub base: *mut c_void,
     pub region: FPointRegion,
     _pad_280: [u8; 36],
@@ -91,27 +100,60 @@ pub struct AActor {
     pub velocity: FVector,
     pub ip_speed: f32,
     pub acceleration: FVector,
-    _pad_472: [u8; 16],
+    _pad_472: [u8; 8],
+    pub hit_actor: *mut c_void,
     pub draw_type: u8,
-    _pad_489: [u8; 27],
+    pub style: u8,
+    _pad_490: [u8; 2],
+    pub sprite: *mut c_void,
+    pub texture: *mut c_void,
+    pub skin: *mut c_void,
     pub mesh: *mut c_void,
     pub brush: *mut c_void,
     pub draw_scale: f32,
     pub pre_pivot: FVector,
     pub saved_pre_pivot_z: f32,
-    _pad_552: [u8; 19],
+    pub scale_glow: f32,
+    _pad_556: [u8; 4],
+    pub visibility_radius: f32,
+    pub visibility_height: f32,
+    pub ambient_glow: u8,
+    _pad_569: [u8; 1],
+    pub fatness: u8,
     pub wideness: u8,
-    _pad_572: [u8; 9],
+    _pad_572: [u8; 8],
+    _bits_580: u8,
     _bits_581: u8,
     _bits_582: u8,
-    _pad_583: [u8; 81],
+    _pad_583: [u8; 1],
+    pub multi_skins: [*mut c_void; 8],
+    pub sound_radius: u8,
+    pub sound_volume: u8,
+    pub sound_pitch: u8,
+    pub sound_occlusion: u8,
+    _pad_652: [u8; 12],
     pub collision_radius: f32,
     pub collision_width: f32,
     pub collision_height: f32,
     pub collide_type: u8,
     _pad_677: [u8; 3],
     _bits_680: u8,
-    _pad_681: [u8; 27],
+    _pad_681: [u8; 3],
+    pub light_type: u8,
+    pub light_effect: u8,
+    pub light_brightness: u8,
+    pub light_hue: u8,
+    pub light_saturation: u8,
+    pub light_radius: u8,
+    pub light_radius_inner: u8,
+    pub light_period: u8,
+    pub light_phase: u8,
+    _pad_693: [u8; 1],
+    pub volume_brightness: u8,
+    pub volume_radius: u8,
+    _pad_696: [u8; 4],
+    _bits_700: u8,
+    _pad_701: [u8; 7],
     _bits_708: u8,
     _pad_709: [u8; 7],
     pub mass: f32,
@@ -121,11 +163,15 @@ pub struct AActor {
     _pad_748: [u8; 8],
     pub pending_touch: *mut c_void,
     pub anim_last: f32,
-    _pad_768: [u8; 20],
+    pub anim_min_rate: f32,
+    pub sim_anim: FPlane,
     pub net_priority: f32,
-    _pad_792: [u8; 4],
+    pub net_update_frequency: f32,
     _bits_796: u8,
-    _pad_797: [u8; 91],
+    _bits_797: u8,
+    _pad_798: [u8; 10],
+    pub render_interface: *mut c_void,
+    _pad_816: [u8; 72],
 }
 
 impl AActor {
@@ -189,6 +235,30 @@ impl AActor {
         }
     }
 
+    pub fn b_anim_notify(&self) -> bool {
+        self._bits_72 & (1 << 6) != 0
+    }
+
+    pub fn set_b_anim_notify(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 6;
+        } else {
+            self._bits_72 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_anim_finished(&self) -> bool {
+        self._bits_72 & (1 << 3) != 0
+    }
+
+    pub fn set_b_anim_finished(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 3;
+        } else {
+            self._bits_72 &= !(1 << 3);
+        }
+    }
+
     pub fn b_delete_me(&self) -> bool {
         self._bits_73 & (1 << 2) != 0
     }
@@ -213,6 +283,90 @@ impl AActor {
         }
     }
 
+    pub fn b_ticked(&self) -> bool {
+        self._bits_73 & (1 << 4) != 0
+    }
+
+    pub fn set_b_ticked(&mut self, value: bool) {
+        if value {
+            self._bits_73 |= 1 << 4;
+        } else {
+            self._bits_73 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_timer_loop(&self) -> bool {
+        self._bits_73 & (1 << 7) != 0
+    }
+
+    pub fn set_b_timer_loop(&mut self, value: bool) {
+        if value {
+            self._bits_73 |= 1 << 7;
+        } else {
+            self._bits_73 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_light_changed(&self) -> bool {
+        self._bits_73 & (1 << 5) != 0
+    }
+
+    pub fn set_b_light_changed(&mut self, value: bool) {
+        if value {
+            self._bits_73 |= 1 << 5;
+        } else {
+            self._bits_73 &= !(1 << 5);
+        }
+    }
+
+    pub fn b_always_tick(&self) -> bool {
+        self._bits_74 & (1 << 7) != 0
+    }
+
+    pub fn set_b_always_tick(&mut self, value: bool) {
+        if value {
+            self._bits_74 |= 1 << 7;
+        } else {
+            self._bits_74 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_always_relevant(&self) -> bool {
+        self._bits_74 & (1 << 6) != 0
+    }
+
+    pub fn set_b_always_relevant(&mut self, value: bool) {
+        if value {
+            self._bits_74 |= 1 << 6;
+        } else {
+            self._bits_74 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_only_owner_see(&self) -> bool {
+        self._bits_74 & (1 << 4) != 0
+    }
+
+    pub fn set_b_only_owner_see(&mut self, value: bool) {
+        if value {
+            self._bits_74 |= 1 << 4;
+        } else {
+            self._bits_74 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_is_mover(&self) -> bool {
+        self._bits_74 & (1 << 5) != 0
+    }
+
+    pub fn set_b_is_mover(&mut self, value: bool) {
+        if value {
+            self._bits_74 |= 1 << 5;
+        } else {
+            self._bits_74 &= !(1 << 5);
+        }
+    }
+
     pub fn b_is_pawn(&self) -> bool {
         self._bits_75 & (1 << 3) != 0
     }
@@ -225,6 +379,138 @@ impl AActor {
         }
     }
 
+    pub fn b_stasis(&self) -> bool {
+        self._bits_75 & (1 << 1) != 0
+    }
+
+    pub fn set_b_stasis(&mut self, value: bool) {
+        if value {
+            self._bits_75 |= 1 << 1;
+        } else {
+            self._bits_75 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_force_stasis(&self) -> bool {
+        self._bits_75 & (1 << 2) != 0
+    }
+
+    pub fn set_b_force_stasis(&mut self, value: bool) {
+        if value {
+            self._bits_75 |= 1 << 2;
+        } else {
+            self._bits_75 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_net_optional(&self) -> bool {
+        self._bits_75 & (1 << 5) != 0
+    }
+
+    pub fn set_b_net_optional(&mut self, value: bool) {
+        if value {
+            self._bits_75 |= 1 << 5;
+        } else {
+            self._bits_75 &= !(1 << 5);
+        }
+    }
+
+    pub fn b_net_temporary(&self) -> bool {
+        self._bits_75 & (1 << 4) != 0
+    }
+
+    pub fn set_b_net_temporary(&mut self, value: bool) {
+        if value {
+            self._bits_75 |= 1 << 4;
+        } else {
+            self._bits_75 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_replicate_instigator(&self) -> bool {
+        self._bits_75 & (1 << 6) != 0
+    }
+
+    pub fn set_b_replicate_instigator(&mut self, value: bool) {
+        if value {
+            self._bits_75 |= 1 << 6;
+        } else {
+            self._bits_75 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_can_move_in_special_pause(&self) -> bool {
+        self._bits_76 & (1 << 3) != 0
+    }
+
+    pub fn set_b_can_move_in_special_pause(&mut self, value: bool) {
+        if value {
+            self._bits_76 |= 1 << 3;
+        } else {
+            self._bits_76 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_in_special_pause(&self) -> bool {
+        self._bits_76 & (1 << 4) != 0
+    }
+
+    pub fn set_b_in_special_pause(&mut self, value: bool) {
+        if value {
+            self._bits_76 |= 1 << 4;
+        } else {
+            self._bits_76 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_client_anim(&self) -> bool {
+        self._bits_76 & (1 << 1) != 0
+    }
+
+    pub fn set_b_client_anim(&mut self, value: bool) {
+        if value {
+            self._bits_76 |= 1 << 1;
+        } else {
+            self._bits_76 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_sim_fall(&self) -> bool {
+        self._bits_76 & (1 << 2) != 0
+    }
+
+    pub fn set_b_sim_fall(&mut self, value: bool) {
+        if value {
+            self._bits_76 |= 1 << 2;
+        } else {
+            self._bits_76 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_unlit(&self) -> bool {
+        self._bits_580 & (1 << 0) != 0
+    }
+
+    pub fn set_b_unlit(&mut self, value: bool) {
+        if value {
+            self._bits_580 |= 1 << 0;
+        } else {
+            self._bits_580 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_mesh_enviro_map(&self) -> bool {
+        self._bits_580 & (1 << 3) != 0
+    }
+
+    pub fn set_b_mesh_enviro_map(&mut self, value: bool) {
+        if value {
+            self._bits_580 |= 1 << 3;
+        } else {
+            self._bits_580 &= !(1 << 3);
+        }
+    }
+
     pub fn b_collide_when_placing(&self) -> bool {
         self._bits_581 & (1 << 7) != 0
     }
@@ -234,6 +520,18 @@ impl AActor {
             self._bits_581 |= 1 << 7;
         } else {
             self._bits_581 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_carried_item(&self) -> bool {
+        self._bits_581 & (1 << 2) != 0
+    }
+
+    pub fn set_b_carried_item(&mut self, value: bool) {
+        if value {
+            self._bits_581 |= 1 << 2;
+        } else {
+            self._bits_581 &= !(1 << 2);
         }
     }
 
@@ -306,6 +604,42 @@ impl AActor {
             self._bits_680 |= 1 << 6;
         } else {
             self._bits_680 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_proj_target(&self) -> bool {
+        self._bits_680 & (1 << 4) != 0
+    }
+
+    pub fn set_b_proj_target(&mut self, value: bool) {
+        if value {
+            self._bits_680 |= 1 << 4;
+        } else {
+            self._bits_680 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_special_lit(&self) -> bool {
+        self._bits_700 & (1 << 0) != 0
+    }
+
+    pub fn set_b_special_lit(&mut self, value: bool) {
+        if value {
+            self._bits_700 |= 1 << 0;
+        } else {
+            self._bits_700 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_dark_light(&self) -> bool {
+        self._bits_700 & (1 << 4) != 0
+    }
+
+    pub fn set_b_dark_light(&mut self, value: bool) {
+        if value {
+            self._bits_700 |= 1 << 4;
+        } else {
+            self._bits_700 &= !(1 << 4);
         }
     }
 
@@ -392,6 +726,54 @@ impl AActor {
             self._bits_796 &= !(1 << 1);
         }
     }
+
+    pub fn b_simulated_pawn(&self) -> bool {
+        self._bits_796 & (1 << 6) != 0
+    }
+
+    pub fn set_b_simulated_pawn(&mut self, value: bool) {
+        if value {
+            self._bits_796 |= 1 << 6;
+        } else {
+            self._bits_796 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_demo_recording(&self) -> bool {
+        self._bits_796 & (1 << 7) != 0
+    }
+
+    pub fn set_b_demo_recording(&mut self, value: bool) {
+        if value {
+            self._bits_796 |= 1 << 7;
+        } else {
+            self._bits_796 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_net_initial(&self) -> bool {
+        self._bits_796 & (1 << 0) != 0
+    }
+
+    pub fn set_b_net_initial(&mut self, value: bool) {
+        if value {
+            self._bits_796 |= 1 << 0;
+        } else {
+            self._bits_796 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_client_demo_recording(&self) -> bool {
+        self._bits_797 & (1 << 0) != 0
+    }
+
+    pub fn set_b_client_demo_recording(&mut self, value: bool) {
+        if value {
+            self._bits_797 |= 1 << 0;
+        } else {
+            self._bits_797 &= !(1 << 0);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<AActor>() == 888);
@@ -438,8 +820,182 @@ const _: () = assert!(std::mem::offset_of!(AActor, pre_pivot) == 536);
 const _: () = assert!(std::mem::offset_of!(AActor, wideness) == 571);
 const _: () = assert!(std::mem::offset_of!(AActor, collide_type) == 676);
 const _: () = assert!(std::mem::offset_of!(AActor, aux_anims) == 180);
+const _: () = assert!(std::mem::offset_of!(AActor, tick_parent) == 96);
+const _: () = assert!(std::mem::offset_of!(AActor, tick_parent2) == 104);
 const _: () = assert!(std::mem::offset_of!(AActor, level) == 200);
+const _: () = assert!(std::mem::offset_of!(AActor, remote_role) == 82);
+const _: () = assert!(std::mem::offset_of!(AActor, net_tag) == 84);
+const _: () = assert!(std::mem::offset_of!(AActor, life_span) == 144);
+const _: () = assert!(std::mem::offset_of!(AActor, timer_rate) == 136);
+const _: () = assert!(std::mem::offset_of!(AActor, timer_counter) == 140);
+const _: () = assert!(std::mem::offset_of!(AActor, anim_rate) == 156);
+const _: () = assert!(std::mem::offset_of!(AActor, anim_min_rate) == 768);
+const _: () = assert!(std::mem::offset_of!(AActor, sim_anim) == 772);
+const _: () = assert!(std::mem::offset_of!(AActor, ambient_sound) == 240);
+const _: () = assert!(std::mem::offset_of!(AActor, net_update_frequency) == 792);
+const _: () = assert!(std::mem::offset_of!(AActor, visibility_radius) == 560);
+const _: () = assert!(std::mem::offset_of!(AActor, visibility_height) == 564);
+const _: () = assert!(std::mem::offset_of!(AActor, multi_skins) == 584);
+const _: () = assert!(std::mem::offset_of!(AActor, render_interface) == 808);
+const _: () = assert!(std::mem::offset_of!(AActor, hit_actor) == 480);
+const _: () = assert!(std::mem::offset_of!(AActor, texture) == 500);
+const _: () = assert!(std::mem::offset_of!(AActor, sprite) == 492);
+const _: () = assert!(std::mem::offset_of!(AActor, skin) == 508);
+const _: () = assert!(std::mem::offset_of!(AActor, inventory) == 248);
 const _: () = assert!(std::mem::offset_of!(AActor, draw_type) == 488);
+const _: () = assert!(std::mem::offset_of!(AActor, style) == 489);
+const _: () = assert!(std::mem::offset_of!(AActor, light_type) == 684);
+const _: () = assert!(std::mem::offset_of!(AActor, light_effect) == 685);
+const _: () = assert!(std::mem::offset_of!(AActor, light_brightness) == 686);
+const _: () = assert!(std::mem::offset_of!(AActor, light_hue) == 687);
+const _: () = assert!(std::mem::offset_of!(AActor, light_saturation) == 688);
+const _: () = assert!(std::mem::offset_of!(AActor, light_radius) == 689);
+const _: () = assert!(std::mem::offset_of!(AActor, light_radius_inner) == 690);
+const _: () = assert!(std::mem::offset_of!(AActor, light_period) == 691);
+const _: () = assert!(std::mem::offset_of!(AActor, light_phase) == 692);
+const _: () = assert!(std::mem::offset_of!(AActor, volume_brightness) == 694);
+const _: () = assert!(std::mem::offset_of!(AActor, volume_radius) == 695);
+const _: () = assert!(std::mem::offset_of!(AActor, sound_radius) == 648);
+const _: () = assert!(std::mem::offset_of!(AActor, sound_volume) == 649);
+const _: () = assert!(std::mem::offset_of!(AActor, sound_pitch) == 650);
+const _: () = assert!(std::mem::offset_of!(AActor, sound_occlusion) == 651);
+const _: () = assert!(std::mem::offset_of!(AActor, ambient_glow) == 568);
+const _: () = assert!(std::mem::offset_of!(AActor, fatness) == 570);
+const _: () = assert!(std::mem::offset_of!(AActor, scale_glow) == 552);
+
+/// Layout mirror of C++ `APlayerReplicationInfo` (1016 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct APlayerReplicationInfo {
+    pub base: AReplicationInfo,
+    pub player_name: TArrayRaw,
+    pub old_name: TArrayRaw,
+    pub player_id: i32,
+    pub team_name: TArrayRaw,
+    pub team: u8,
+    _pad_941: [u8; 3],
+    pub team_id: i32,
+    pub score: f32,
+    pub deaths: f32,
+    pub voice_type: *mut c_void,
+    pub has_flag: *mut c_void,
+    pub ping: i32,
+    pub packet_loss: u8,
+    _pad_977: [u8; 3],
+    _bits_980: u8,
+    _pad_981: [u8; 3],
+    pub talk_texture: *mut c_void,
+    pub player_zone: *mut c_void,
+    pub player_location: *mut c_void,
+    pub start_time: i32,
+    pub time_acc: i32,
+}
+
+impl APlayerReplicationInfo {
+    pub fn b_is_female(&self) -> bool {
+        self._bits_980 & (1 << 0) != 0
+    }
+
+    pub fn set_b_is_female(&mut self, value: bool) {
+        if value {
+            self._bits_980 |= 1 << 0;
+        } else {
+            self._bits_980 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_is_a_bot(&self) -> bool {
+        self._bits_980 & (1 << 1) != 0
+    }
+
+    pub fn set_b_is_a_bot(&mut self, value: bool) {
+        if value {
+            self._bits_980 |= 1 << 1;
+        } else {
+            self._bits_980 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_feigning_death(&self) -> bool {
+        self._bits_980 & (1 << 2) != 0
+    }
+
+    pub fn set_b_feigning_death(&mut self, value: bool) {
+        if value {
+            self._bits_980 |= 1 << 2;
+        } else {
+            self._bits_980 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_is_spectator(&self) -> bool {
+        self._bits_980 & (1 << 3) != 0
+    }
+
+    pub fn set_b_is_spectator(&mut self, value: bool) {
+        if value {
+            self._bits_980 |= 1 << 3;
+        } else {
+            self._bits_980 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_waiting_player(&self) -> bool {
+        self._bits_980 & (1 << 4) != 0
+    }
+
+    pub fn set_b_waiting_player(&mut self, value: bool) {
+        if value {
+            self._bits_980 |= 1 << 4;
+        } else {
+            self._bits_980 &= !(1 << 4);
+        }
+    }
+
+    pub fn b_admin(&self) -> bool {
+        self._bits_980 & (1 << 5) != 0
+    }
+
+    pub fn set_b_admin(&mut self, value: bool) {
+        if value {
+            self._bits_980 |= 1 << 5;
+        } else {
+            self._bits_980 &= !(1 << 5);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<APlayerReplicationInfo>() == 1016);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, base) == 0);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, player_name) == 888);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, old_name) == 904);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, player_id) == 920);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, team_name) == 924);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, team) == 940);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, team_id) == 944);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, score) == 948);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, deaths) == 952);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, voice_type) == 956);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, has_flag) == 964);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, ping) == 972);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, packet_loss) == 976);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, talk_texture) == 984);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, player_zone) == 992);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, player_location) == 1000);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, start_time) == 1008);
+const _: () = assert!(std::mem::offset_of!(APlayerReplicationInfo, time_acc) == 1012);
+
+/// Layout mirror of C++ `AReplicationInfo` (888 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AReplicationInfo {
+    pub base: AInfo,
+}
+
+const _: () = assert!(size_of::<AReplicationInfo>() == 888);
+const _: () = assert!(std::mem::offset_of!(AReplicationInfo, base) == 0);
 
 /// Layout mirror of C++ `APawn` (1912 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -454,7 +1010,8 @@ pub struct APawn {
     _bits_892: u8,
     _pad_893: [u8; 3],
     pub sight_counter: f32,
-    _pad_900: [u8; 8],
+    pub pain_time: f32,
+    pub speech_time: f32,
     pub avg_physics_time: f32,
     pub foot_region: FPointRegion,
     pub head_region: FPointRegion,
@@ -489,7 +1046,8 @@ pub struct APawn {
     pub last_seen_time: f32,
     pub enemy: *mut c_void,
     pub weapon: *mut c_void,
-    _pad_1112: [u8; 40],
+    _pad_1112: [u8; 32],
+    pub selected_item: *mut c_void,
     pub view_rotation: FRotator,
     _pad_1164: [u8; 12],
     pub base_eye_height: f32,
@@ -498,7 +1056,9 @@ pub struct APawn {
     _pad_1196: [u8; 4],
     pub ortho_zoom: f32,
     pub fov_angle: f32,
-    _pad_1208: [u8; 56],
+    _pad_1208: [u8; 20],
+    pub health: i32,
+    _pad_1232: [u8; 32],
     pub reduced_damage_type: [u8; 4],
     _pad_1268: [u8; 20],
     pub skill: f32,
@@ -514,7 +1074,9 @@ pub struct APawn {
     pub noise2loudness: f32,
     _pad_1360: [u8; 4],
     pub next_pawn: *mut c_void,
-    _pad_1372: [u8; 160],
+    _pad_1372: [u8; 92],
+    pub carried_decoration: *mut c_void,
+    _pad_1472: [u8; 60],
     pub route_cache: [*mut c_void; 16],
     _pad_1660: [u8; 132],
     pub player_replication_info: *mut c_void,
@@ -555,6 +1117,18 @@ impl APawn {
             self._bits_888 |= 1 << 5;
         } else {
             self._bits_888 &= !(1 << 5);
+        }
+    }
+
+    pub fn b_behind_view(&self) -> bool {
+        self._bits_888 & (1 << 0) != 0
+    }
+
+    pub fn set_b_behind_view(&mut self, value: bool) {
+        if value {
+            self._bits_888 |= 1 << 0;
+        } else {
+            self._bits_888 &= !(1 << 0);
         }
     }
 
@@ -761,6 +1335,18 @@ impl APawn {
             self._bits_892 &= !(1 << 1);
         }
     }
+
+    pub fn b_view_target(&self) -> bool {
+        self._bits_892 & (1 << 0) != 0
+    }
+
+    pub fn set_b_view_target(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 0;
+        } else {
+            self._bits_892 &= !(1 << 0);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<APawn>() == 1912);
@@ -820,6 +1406,11 @@ const _: () = assert!(std::mem::offset_of!(APawn, special_pause) == 1300);
 const _: () = assert!(std::mem::offset_of!(APawn, sight_counter) == 896);
 const _: () = assert!(std::mem::offset_of!(APawn, ortho_zoom) == 1200);
 const _: () = assert!(std::mem::offset_of!(APawn, fov_angle) == 1204);
+const _: () = assert!(std::mem::offset_of!(APawn, pain_time) == 900);
+const _: () = assert!(std::mem::offset_of!(APawn, speech_time) == 904);
+const _: () = assert!(std::mem::offset_of!(APawn, health) == 1228);
+const _: () = assert!(std::mem::offset_of!(APawn, carried_decoration) == 1464);
+const _: () = assert!(std::mem::offset_of!(APawn, selected_item) == 1144);
 
 /// Layout mirror of C++ `APlayerPawn` (2928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -827,18 +1418,26 @@ const _: () = assert!(std::mem::offset_of!(APawn, fov_angle) == 1204);
 #[derive(Clone, Copy)]
 pub struct APlayerPawn {
     pub base: APawn,
-    _pad_1912: [u8; 48],
+    pub player: *mut c_void,
+    pub password: TArrayRaw,
+    _pad_1936: [u8; 24],
     pub show_flags: i32,
     pub rend_map: i32,
     _pad_1968: [u8; 8],
     pub view_target: *mut c_void,
-    _pad_1984: [u8; 100],
+    _pad_1984: [u8; 32],
+    pub hud_type: *mut c_void,
+    pub scoring_type: *mut c_void,
+    _pad_2032: [u8; 52],
     pub desired_fov: f32,
     _pad_2088: [u8; 72],
     _bits_2160: u8,
     _pad_2161: [u8; 1],
     _bits_2162: u8,
-    _pad_2163: [u8; 245],
+    _pad_2163: [u8; 1],
+    _bits_2164: u8,
+    _bits_2165: u8,
+    _pad_2166: [u8; 242],
     pub smooth_mouse_x: f32,
     pub smooth_mouse_y: f32,
     _pad_2416: [u8; 16],
@@ -851,7 +1450,15 @@ pub struct APlayerPawn {
     pub a_look_up: f32,
     _pad_2472: [u8; 20],
     pub a_side_move: f32,
-    _pad_2496: [u8; 424],
+    _pad_2496: [u8; 292],
+    pub game_replication_info: *mut c_void,
+    _pad_2796: [u8; 20],
+    pub target_view_rotation: FRotator,
+    pub target_eye_height: f32,
+    pub target_weapon_view_offset: FVector,
+    pub demo_view_pitch: i32,
+    pub demo_view_yaw: i32,
+    _pad_2852: [u8; 68],
     _bits_2920: u8,
     _pad_2921: [u8; 7],
 }
@@ -878,6 +1485,54 @@ impl APlayerPawn {
             self._bits_2162 |= 1 << 6;
         } else {
             self._bits_2162 &= !(1 << 6);
+        }
+    }
+
+    pub fn b_ready_to_play(&self) -> bool {
+        self._bits_2164 & (1 << 1) != 0
+    }
+
+    pub fn set_b_ready_to_play(&mut self, value: bool) {
+        if value {
+            self._bits_2164 |= 1 << 1;
+        } else {
+            self._bits_2164 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_fixed_camera(&self) -> bool {
+        self._bits_2165 & (1 << 2) != 0
+    }
+
+    pub fn set_b_fixed_camera(&mut self, value: bool) {
+        if value {
+            self._bits_2165 |= 1 << 2;
+        } else {
+            self._bits_2165 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_never_auto_switch(&self) -> bool {
+        self._bits_2165 & (1 << 3) != 0
+    }
+
+    pub fn set_b_never_auto_switch(&mut self, value: bool) {
+        if value {
+            self._bits_2165 |= 1 << 3;
+        } else {
+            self._bits_2165 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_cheats_enabled(&self) -> bool {
+        self._bits_2165 & (1 << 6) != 0
+    }
+
+    pub fn set_b_cheats_enabled(&mut self, value: bool) {
+        if value {
+            self._bits_2165 |= 1 << 6;
+        } else {
+            self._bits_2165 &= !(1 << 6);
         }
     }
 
@@ -920,6 +1575,16 @@ const _: () = assert!(std::mem::offset_of!(APlayerPawn, desired_fov) == 2084);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, show_flags) == 1960);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, rend_map) == 1964);
 const _: () = assert!(std::mem::offset_of!(APlayerPawn, view_target) == 1976);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, player) == 1912);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, target_view_rotation) == 2816);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, target_eye_height) == 2828);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, target_weapon_view_offset) == 2832);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, demo_view_pitch) == 2844);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, demo_view_yaw) == 2848);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, game_replication_info) == 2788);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, scoring_type) == 2024);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, hud_type) == 2016);
+const _: () = assert!(std::mem::offset_of!(APlayerPawn, password) == 1920);
 
 /// Layout mirror of C++ `AWind` (928 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -972,16 +1637,40 @@ const _: () = assert!(std::mem::offset_of!(AWind, fluc_vel) == 916);
 pub struct ULevel {
     _pad_0: [u8; 80],
     pub actors: [u8; 24],
-    _pad_104: [u8; 120],
+    pub net_driver: *mut c_void,
+    pub engine: *mut c_void,
+    _pad_120: [u8; 96],
+    pub demo_rec_driver: *mut c_void,
     pub reach_specs: TArrayRaw,
     pub model: *mut c_void,
-    _pad_248: [u8; 168],
+    pub text_blocks: [*mut c_void; 16],
+    pub time_seconds: [u8; 8],
+    _pad_384: [u8; 32],
     pub hash: *mut c_void,
     pub brush_tracker: *mut c_void,
-    _pad_432: [u8; 4156],
+    pub first_deleted: *mut c_void,
+    pub newly_spawned: *mut c_void,
+    pub in_tick: i32,
+    pub ticked: i32,
+    pub i_first_dynamic_actor: i32,
+    pub i_first_net_relevant_actor: i32,
+    pub net_tag: i32,
+    pub zone_dist: [u8; 4096],
+    pub b_in_special_pause_mode: i32,
+    pub net_tick_cycles: i32,
+    pub net_diff_cycles: i32,
+    pub actor_tick_cycles: i32,
+    pub audio_tick_cycles: i32,
+    pub find_path_cycles: i32,
     pub move_cycles: i32,
     pub num_moves: i32,
-    _pad_4596: [u8; 28],
+    pub num_reps: i32,
+    pub num_pv: i32,
+    pub get_relevant_cycles: i32,
+    pub num_rpc: i32,
+    pub see_player: i32,
+    pub spawning: i32,
+    pub unused: i32,
 }
 
 const _: () = assert!(size_of::<ULevel>() == 4624);
@@ -992,6 +1681,103 @@ const _: () = assert!(std::mem::offset_of!(ULevel, model) == 240);
 const _: () = assert!(std::mem::offset_of!(ULevel, reach_specs) == 224);
 const _: () = assert!(std::mem::offset_of!(ULevel, hash) == 416);
 const _: () = assert!(std::mem::offset_of!(ULevel, brush_tracker) == 424);
+const _: () = assert!(std::mem::offset_of!(ULevel, engine) == 112);
+const _: () = assert!(std::mem::offset_of!(ULevel, net_driver) == 104);
+const _: () = assert!(std::mem::offset_of!(ULevel, demo_rec_driver) == 216);
+const _: () = assert!(std::mem::offset_of!(ULevel, time_seconds) == 376);
+const _: () = assert!(std::mem::offset_of!(ULevel, newly_spawned) == 440);
+const _: () = assert!(std::mem::offset_of!(ULevel, in_tick) == 448);
+const _: () = assert!(std::mem::offset_of!(ULevel, ticked) == 452);
+const _: () = assert!(std::mem::offset_of!(ULevel, b_in_special_pause_mode) == 4564);
+const _: () = assert!(std::mem::offset_of!(ULevel, i_first_dynamic_actor) == 456);
+const _: () = assert!(std::mem::offset_of!(ULevel, i_first_net_relevant_actor) == 460);
+const _: () = assert!(std::mem::offset_of!(ULevel, net_tag) == 464);
+const _: () = assert!(std::mem::offset_of!(ULevel, net_tick_cycles) == 4568);
+const _: () = assert!(std::mem::offset_of!(ULevel, net_diff_cycles) == 4572);
+const _: () = assert!(std::mem::offset_of!(ULevel, actor_tick_cycles) == 4576);
+const _: () = assert!(std::mem::offset_of!(ULevel, audio_tick_cycles) == 4580);
+const _: () = assert!(std::mem::offset_of!(ULevel, find_path_cycles) == 4584);
+const _: () = assert!(std::mem::offset_of!(ULevel, get_relevant_cycles) == 4604);
+const _: () = assert!(std::mem::offset_of!(ULevel, num_reps) == 4596);
+const _: () = assert!(std::mem::offset_of!(ULevel, num_pv) == 4600);
+const _: () = assert!(std::mem::offset_of!(ULevel, num_rpc) == 4608);
+const _: () = assert!(std::mem::offset_of!(ULevel, see_player) == 4612);
+const _: () = assert!(std::mem::offset_of!(ULevel, spawning) == 4616);
+const _: () = assert!(std::mem::offset_of!(ULevel, unused) == 4620);
+const _: () = assert!(std::mem::offset_of!(ULevel, first_deleted) == 432);
+const _: () = assert!(std::mem::offset_of!(ULevel, text_blocks) == 248);
+const _: () = assert!(std::mem::offset_of!(ULevel, zone_dist) == 468);
+
+/// Layout mirror of C++ `ALevelInfo` (1716 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct ALevelInfo {
+    pub base: AZoneInfo,
+    pub time_dilation: f32,
+    pub time_seconds: f32,
+    _pad_1328: [u8; 120],
+    pub pauser: TArrayRaw,
+    _pad_1464: [u8; 24],
+    _bits_1488: u8,
+    _bits_1489: u8,
+    _pad_1490: [u8; 54],
+    pub level_action: u8,
+    _pad_1545: [u8; 7],
+    pub net_mode: u8,
+    _pad_1553: [u8; 107],
+    pub ai_profile: [i32; 8],
+    pub avg_ai_time: f32,
+    _pad_1696: [u8; 20],
+}
+
+impl ALevelInfo {
+    pub fn b_players_only(&self) -> bool {
+        self._bits_1488 & (1 << 2) != 0
+    }
+
+    pub fn set_b_players_only(&mut self, value: bool) {
+        if value {
+            self._bits_1488 |= 1 << 2;
+        } else {
+            self._bits_1488 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_no_cheating(&self) -> bool {
+        self._bits_1489 & (1 << 0) != 0
+    }
+
+    pub fn set_b_no_cheating(&mut self, value: bool) {
+        if value {
+            self._bits_1489 |= 1 << 0;
+        } else {
+            self._bits_1489 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_allow_fov(&self) -> bool {
+        self._bits_1489 & (1 << 1) != 0
+    }
+
+    pub fn set_b_allow_fov(&mut self, value: bool) {
+        if value {
+            self._bits_1489 |= 1 << 1;
+        } else {
+            self._bits_1489 &= !(1 << 1);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<ALevelInfo>() == 1716);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, base) == 0);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, time_dilation) == 1320);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, time_seconds) == 1324);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, level_action) == 1544);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, net_mode) == 1552);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, ai_profile) == 1660);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, avg_ai_time) == 1692);
+const _: () = assert!(std::mem::offset_of!(ALevelInfo, pauser) == 1448);
 
 /// Layout mirror of C++ `ANavigationPoint` (1284 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -1077,16 +1863,161 @@ const _: () = assert!(std::mem::offset_of!(ANavigationPoint, extra_cost) == 1276
 #[derive(Clone, Copy)]
 pub struct AInventory {
     pub base: AActor,
-    _pad_888: [u8; 156],
+    _pad_888: [u8; 4],
+    _bits_892: u8,
+    _pad_893: [u8; 59],
+    pub player_view_offset: FVector,
+    pub player_view_mesh: *mut c_void,
+    pub player_view_scale: f32,
+    _pad_976: [u8; 16],
+    pub third_person_mesh: *mut c_void,
+    pub third_person_scale: f32,
+    _pad_1004: [u8; 16],
+    pub charge: i32,
+    _pad_1024: [u8; 4],
+    _bits_1028: u8,
+    _pad_1029: [u8; 15],
     pub max_desireability: f32,
     pub my_marker: *mut c_void,
-    _pad_1056: [u8; 132],
+    _bits_1056: u8,
+    _pad_1057: [u8; 3],
+    pub flash_count: u8,
+    _pad_1061: [u8; 127],
+}
+
+impl AInventory {
+    pub fn b_activatable(&self) -> bool {
+        self._bits_892 & (1 << 0) != 0
+    }
+
+    pub fn set_b_activatable(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 0;
+        } else {
+            self._bits_892 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_active(&self) -> bool {
+        self._bits_892 & (1 << 2) != 0
+    }
+
+    pub fn set_b_active(&mut self, value: bool) {
+        if value {
+            self._bits_892 |= 1 << 2;
+        } else {
+            self._bits_892 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_is_an_armor(&self) -> bool {
+        self._bits_1028 & (1 << 0) != 0
+    }
+
+    pub fn set_b_is_an_armor(&mut self, value: bool) {
+        if value {
+            self._bits_1028 |= 1 << 0;
+        } else {
+            self._bits_1028 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_steady_flash3rd(&self) -> bool {
+        self._bits_1056 & (1 << 0) != 0
+    }
+
+    pub fn set_b_steady_flash3rd(&mut self, value: bool) {
+        if value {
+            self._bits_1056 |= 1 << 0;
+        } else {
+            self._bits_1056 &= !(1 << 0);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<AInventory>() == 1188);
 const _: () = assert!(std::mem::offset_of!(AInventory, base) == 0);
 const _: () = assert!(std::mem::offset_of!(AInventory, max_desireability) == 1044);
 const _: () = assert!(std::mem::offset_of!(AInventory, my_marker) == 1048);
+const _: () = assert!(std::mem::offset_of!(AInventory, charge) == 1020);
+const _: () = assert!(std::mem::offset_of!(AInventory, player_view_offset) == 952);
+const _: () = assert!(std::mem::offset_of!(AInventory, player_view_mesh) == 964);
+const _: () = assert!(std::mem::offset_of!(AInventory, player_view_scale) == 972);
+const _: () = assert!(std::mem::offset_of!(AInventory, third_person_mesh) == 992);
+const _: () = assert!(std::mem::offset_of!(AInventory, third_person_scale) == 1000);
+const _: () = assert!(std::mem::offset_of!(AInventory, flash_count) == 1060);
+
+/// Layout mirror of C++ `AWeapon` (1456 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AWeapon {
+    pub base: AInventory,
+    _pad_1188: [u8; 20],
+    pub ammo_type: *mut c_void,
+    _bits_1216: u8,
+    _bits_1217: u8,
+    _pad_1218: [u8; 238],
+}
+
+impl AWeapon {
+    pub fn b_locked_on(&self) -> bool {
+        self._bits_1216 & (1 << 7) != 0
+    }
+
+    pub fn set_b_locked_on(&mut self, value: bool) {
+        if value {
+            self._bits_1216 |= 1 << 7;
+        } else {
+            self._bits_1216 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_hide_weapon(&self) -> bool {
+        self._bits_1217 & (1 << 6) != 0
+    }
+
+    pub fn set_b_hide_weapon(&mut self, value: bool) {
+        if value {
+            self._bits_1217 |= 1 << 6;
+        } else {
+            self._bits_1217 &= !(1 << 6);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<AWeapon>() == 1456);
+const _: () = assert!(std::mem::offset_of!(AWeapon, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AWeapon, ammo_type) == 1208);
+
+/// Layout mirror of C++ `APickup` (1224 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct APickup {
+    pub base: AInventory,
+    _pad_1188: [u8; 8],
+    pub num_copies: i32,
+    _pad_1200: [u8; 24],
+}
+
+const _: () = assert!(size_of::<APickup>() == 1224);
+const _: () = assert!(std::mem::offset_of!(APickup, base) == 0);
+const _: () = assert!(std::mem::offset_of!(APickup, num_copies) == 1196);
+
+/// Layout mirror of C++ `AAmmo` (1260 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AAmmo {
+    pub base: APickup,
+    pub ammo_amount: i32,
+    _pad_1228: [u8; 32],
+}
+
+const _: () = assert!(size_of::<AAmmo>() == 1260);
+const _: () = assert!(std::mem::offset_of!(AAmmo, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AAmmo, ammo_amount) == 1224);
 
 /// Layout mirror of C++ `AInventorySpot` (1292 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -1855,7 +2786,18 @@ pub struct AZoneInfo {
     _pad_948: [u8; 84],
     _bits_1032: u8,
     _bits_1033: u8,
-    _pad_1034: [u8; 286],
+    _pad_1034: [u8; 2],
+    pub ambient_brightness: u8,
+    pub ambient_hue: u8,
+    pub ambient_saturation: u8,
+    _pad_1039: [u8; 1],
+    pub fog_color: [u8; 4],
+    _pad_1044: [u8; 12],
+    pub tex_u_pan_speed: f32,
+    pub tex_v_pan_speed: f32,
+    _pad_1064: [u8; 24],
+    _bits_1088: u8,
+    _pad_1089: [u8; 231],
 }
 
 impl AZoneInfo {
@@ -1894,6 +2836,18 @@ impl AZoneInfo {
             self._bits_1033 &= !(1 << 1);
         }
     }
+
+    pub fn b_reverb_zone(&self) -> bool {
+        self._bits_1088 & (1 << 0) != 0
+    }
+
+    pub fn set_b_reverb_zone(&mut self, value: bool) {
+        if value {
+            self._bits_1088 |= 1 << 0;
+        } else {
+            self._bits_1088 &= !(1 << 0);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<AZoneInfo>() == 1320);
@@ -1904,6 +2858,85 @@ const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_fluid_friction) == 92
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_terminal_velocity) == 924);
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, zone_ground_friction) == 916);
 const _: () = assert!(std::mem::offset_of!(AZoneInfo, damage_type) == 944);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, ambient_brightness) == 1036);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, ambient_hue) == 1037);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, ambient_saturation) == 1038);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, fog_color) == 1040);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, tex_u_pan_speed) == 1056);
+const _: () = assert!(std::mem::offset_of!(AZoneInfo, tex_v_pan_speed) == 1060);
+
+/// Layout mirror of C++ `AGameReplicationInfo` (1356 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct AGameReplicationInfo {
+    pub base: AReplicationInfo,
+    pub game_name: TArrayRaw,
+    pub game_class: TArrayRaw,
+    _bits_920: u8,
+    _pad_921: [u8; 3],
+    pub remaining_time: i32,
+    pub elapsed_time: i32,
+    pub remaining_minute: i32,
+    _pad_936: [u8; 4],
+    pub num_players: i32,
+    _pad_944: [u8; 8],
+    pub server_name: TArrayRaw,
+    pub short_name: TArrayRaw,
+    pub admin_name: TArrayRaw,
+    pub admin_email: TArrayRaw,
+    _pad_1016: [u8; 4],
+    pub motd_line1: TArrayRaw,
+    pub motd_line2: TArrayRaw,
+    pub motd_line3: TArrayRaw,
+    pub motd_line4: TArrayRaw,
+    pub game_ended_comments: TArrayRaw,
+    _pad_1100: [u8; 256],
+}
+
+impl AGameReplicationInfo {
+    pub fn b_team_game(&self) -> bool {
+        self._bits_920 & (1 << 0) != 0
+    }
+
+    pub fn set_b_team_game(&mut self, value: bool) {
+        if value {
+            self._bits_920 |= 1 << 0;
+        } else {
+            self._bits_920 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_stop_count_down(&self) -> bool {
+        self._bits_920 & (1 << 2) != 0
+    }
+
+    pub fn set_b_stop_count_down(&mut self, value: bool) {
+        if value {
+            self._bits_920 |= 1 << 2;
+        } else {
+            self._bits_920 &= !(1 << 2);
+        }
+    }
+}
+
+const _: () = assert!(size_of::<AGameReplicationInfo>() == 1356);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, remaining_time) == 924);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, elapsed_time) == 928);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, remaining_minute) == 932);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, num_players) == 940);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, game_name) == 888);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, game_class) == 904);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, server_name) == 952);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, short_name) == 968);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, admin_name) == 984);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, admin_email) == 1000);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, motd_line1) == 1020);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, motd_line2) == 1036);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, motd_line3) == 1052);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, motd_line4) == 1068);
+const _: () = assert!(std::mem::offset_of!(AGameReplicationInfo, game_ended_comments) == 1084);
 
 /// Layout mirror of C++ `AWarpZoneMarker` (1308 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -2718,12 +3751,18 @@ mod layout_tests {
     fn sizes_match_cpp() {
         assert_eq!(size_of::<FRotator>(), 12);
         assert_eq!(size_of::<AActor>(), 888);
+        assert_eq!(size_of::<APlayerReplicationInfo>(), 1016);
+        assert_eq!(size_of::<AReplicationInfo>(), 888);
         assert_eq!(size_of::<APawn>(), 1912);
         assert_eq!(size_of::<APlayerPawn>(), 2928);
         assert_eq!(size_of::<AWind>(), 928);
         assert_eq!(size_of::<ULevel>(), 4624);
+        assert_eq!(size_of::<ALevelInfo>(), 1716);
         assert_eq!(size_of::<ANavigationPoint>(), 1284);
         assert_eq!(size_of::<AInventory>(), 1188);
+        assert_eq!(size_of::<AWeapon>(), 1456);
+        assert_eq!(size_of::<APickup>(), 1224);
+        assert_eq!(size_of::<AAmmo>(), 1260);
         assert_eq!(size_of::<AInventorySpot>(), 1292);
         assert_eq!(size_of::<FReachSpec>(), 40);
         assert_eq!(size_of::<FPoly>(), 296);
@@ -2740,6 +3779,7 @@ mod layout_tests {
         assert_eq!(size_of::<AInterpolationPoint>(), 1680);
         assert_eq!(size_of::<AInterpolationManager>(), 1012);
         assert_eq!(size_of::<AZoneInfo>(), 1320);
+        assert_eq!(size_of::<AGameReplicationInfo>(), 1356);
         assert_eq!(size_of::<AWarpZoneMarker>(), 1308);
         assert_eq!(size_of::<ADecoration>(), 948);
         assert_eq!(size_of::<ACarcass>(), 980);

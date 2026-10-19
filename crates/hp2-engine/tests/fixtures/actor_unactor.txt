@@ -1,0 +1,797 @@
+case get_skin 0 fill=0 index=0
+res skin=null
+case get_skin 1 fill=0 index=1
+res skin=null
+case get_skin 2 fill=0 index=2
+res skin=null
+case get_skin 3 fill=0 index=3
+res skin=null
+case get_skin 4 fill=0 index=4
+res skin=null
+case get_skin 5 fill=0 index=5
+res skin=null
+case get_skin 6 fill=0 index=6
+res skin=null
+case get_skin 7 fill=0 index=7
+res skin=null
+case get_skin 8 fill=1 index=0
+res skin=tex0
+case get_skin 9 fill=1 index=1
+res skin=tex1
+case get_skin 10 fill=1 index=2
+res skin=tex2
+case get_skin 11 fill=1 index=3
+res skin=tex3
+case get_skin 12 fill=1 index=4
+res skin=tex4
+case get_skin 13 fill=1 index=5
+res skin=tex5
+case get_skin 14 fill=1 index=6
+res skin=tex6
+case get_skin 15 fill=1 index=7
+res skin=tex7
+case get_net_priority 0 always_relevant=0 time=0 net_update_freq=0
+ res_priority=00000000
+case get_net_priority 1 always_relevant=0 time=0 net_update_freq=5
+ res_priority=00000000
+case get_net_priority 2 always_relevant=0 time=0 net_update_freq=20
+ res_priority=00000000
+case get_net_priority 3 always_relevant=0 time=0.5 net_update_freq=0
+ res_priority=3f400000
+case get_net_priority 4 always_relevant=0 time=0.5 net_update_freq=5
+ res_priority=3f400000
+case get_net_priority 5 always_relevant=0 time=0.5 net_update_freq=20
+ res_priority=3f400000
+case get_net_priority 6 always_relevant=0 time=2 net_update_freq=0
+ res_priority=40400000
+case get_net_priority 7 always_relevant=0 time=2 net_update_freq=5
+ res_priority=40400000
+case get_net_priority 8 always_relevant=0 time=2 net_update_freq=20
+ res_priority=40400000
+case get_net_priority 9 always_relevant=1 time=0 net_update_freq=0
+ res_priority=00000000
+case get_net_priority 10 always_relevant=1 time=0 net_update_freq=5
+ res_priority=00000000
+case get_net_priority 11 always_relevant=1 time=0 net_update_freq=20
+ res_priority=00000000
+case get_net_priority 12 always_relevant=1 time=0.5 net_update_freq=0
+ res_priority=00000000
+case get_net_priority 13 always_relevant=1 time=0.5 net_update_freq=5
+ res_priority=3ec00000
+case get_net_priority 14 always_relevant=1 time=0.5 net_update_freq=20
+ res_priority=3f400000
+case get_net_priority 15 always_relevant=1 time=2 net_update_freq=0
+ res_priority=00000000
+case get_net_priority 16 always_relevant=1 time=2 net_update_freq=5
+ res_priority=3fc00000
+case get_net_priority 17 always_relevant=1 time=2 net_update_freq=20
+ res_priority=40400000
+case set_collision 0 old_collide=0 hash=0 new=000
+res collide=0 block=0 players=0
+case set_collision 1 old_collide=0 hash=0 new=111
+res collide=1 block=1 players=1
+case set_collision 2 old_collide=0 hash=0 new=101
+res collide=1 block=0 players=1
+case set_collision 3 old_collide=0 hash=1 new=000
+res collide=0 block=0 players=0
+case set_collision 4 old_collide=0 hash=1 new=111
+hook hash self AddActor
+res collide=1 block=1 players=1
+case set_collision 5 old_collide=0 hash=1 new=101
+hook hash self AddActor
+res collide=1 block=0 players=1
+case set_collision 6 old_collide=1 hash=0 new=000
+res collide=0 block=0 players=0
+case set_collision 7 old_collide=1 hash=0 new=111
+res collide=1 block=1 players=1
+case set_collision 8 old_collide=1 hash=0 new=101
+res collide=1 block=0 players=1
+case set_collision 9 old_collide=1 hash=1 new=000
+hook hash self RemoveActor
+res collide=0 block=0 players=0
+case set_collision 10 old_collide=1 hash=1 new=111
+hook hash self RemoveActor
+hook hash self AddActor
+res collide=1 block=1 players=1
+case set_collision 11 old_collide=1 hash=1 new=101
+hook hash self RemoveActor
+hook hash self AddActor
+res collide=1 block=0 players=1
+case set_collision_size 0 old_collide=0 hash=0 radius=20 height=40
+ res_radius=41a00000 height=42200000 collide=0
+case set_collision_size 1 old_collide=0 hash=0 radius=0 height=0
+ res_radius=00000000 height=00000000 collide=0
+case set_collision_size 2 old_collide=0 hash=0 radius=-1 height=5
+ res_radius=bf800000 height=40a00000 collide=0
+case set_collision_size 3 old_collide=0 hash=1 radius=20 height=40
+ res_radius=41a00000 height=42200000 collide=0
+case set_collision_size 4 old_collide=0 hash=1 radius=0 height=0
+ res_radius=00000000 height=00000000 collide=0
+case set_collision_size 5 old_collide=0 hash=1 radius=-1 height=5
+ res_radius=bf800000 height=40a00000 collide=0
+case set_collision_size 6 old_collide=1 hash=0 radius=20 height=40
+ res_radius=41a00000 height=42200000 collide=1
+case set_collision_size 7 old_collide=1 hash=0 radius=0 height=0
+ res_radius=00000000 height=00000000 collide=1
+case set_collision_size 8 old_collide=1 hash=0 radius=-1 height=5
+ res_radius=bf800000 height=40a00000 collide=1
+case set_collision_size 9 old_collide=1 hash=1 radius=20 height=40
+hook hash self RemoveActor
+hook hash self AddActor
+ res_radius=41a00000 height=42200000 collide=1
+case set_collision_size 10 old_collide=1 hash=1 radius=0 height=0
+hook hash self RemoveActor
+hook hash self AddActor
+ res_radius=00000000 height=00000000 collide=1
+case set_collision_size 11 old_collide=1 hash=1 radius=-1 height=5
+hook hash self RemoveActor
+hook hash self AddActor
+ res_radius=bf800000 height=40a00000 collide=1
+case set_owner 0 old_owner=0 new_owner=0
+res owner=null
+case set_owner 1 old_owner=0 new_owner=1
+hook event owner GainedChild self
+res owner=owner
+case set_owner 2 old_owner=1 new_owner=0
+hook event owner LostChild self
+res owner=null
+case set_owner 3 old_owner=1 new_owner=1
+hook event owner LostChild self
+hook event owner GainedChild self
+res owner=owner
+case set_base 0 old_base=0 new_base=0 notify=0
+res base=null
+case set_base 1 old_base=0 new_base=0 notify=1
+res base=null
+case set_base 2 old_base=0 new_base=1 notify=0
+hook event base Attach self
+res base=base
+case set_base 3 old_base=0 new_base=1 notify=1
+hook event base Attach self
+hook event self BaseChange null
+res base=base
+case set_base 4 old_base=0 new_base=2 notify=0
+res base=null
+case set_base 5 old_base=0 new_base=2 notify=1
+res base=null
+case set_base 6 old_base=1 new_base=0 notify=0
+hook event base Detach self
+res base=null
+case set_base 7 old_base=1 new_base=0 notify=1
+hook event base Detach self
+hook event self BaseChange null
+res base=null
+case set_base 8 old_base=1 new_base=1 notify=0
+res base=base
+case set_base 9 old_base=1 new_base=1 notify=1
+res base=base
+case set_base 10 old_base=1 new_base=2 notify=0
+res base=base
+case set_base 11 old_base=1 new_base=2 notify=1
+res base=base
+case begin_touch 0 self_role=projectile other_role=trigger touching_full=0
+hook isa self AProjectile 1
+hook isa other ATrigger 1
+hook event other Touch self
+hook event self Touch other
+res touching0=null touching1=null
+case begin_touch 1 self_role=projectile other_role=trigger touching_full=1
+hook isa self AProjectile 1
+hook isa other ATrigger 1
+hook event other Touch self
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook event self Touch other
+res touching0=null touching1=null
+case begin_touch 2 self_role=trigger other_role=projectile touching_full=0
+hook isa self AProjectile 0
+hook isa other AProjectile 1
+hook isa self ATrigger 1
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 3 self_role=trigger other_role=projectile touching_full=1
+hook isa self AProjectile 0
+hook isa other AProjectile 1
+hook isa self ATrigger 1
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 4 self_role=plain other_role=plain touching_full=0
+hook isa self AProjectile 0
+hook isa other AProjectile 0
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 5 self_role=plain other_role=plain touching_full=1
+hook isa self AProjectile 0
+hook isa other AProjectile 0
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 6 self_role=plain other_role=trigger touching_full=0
+hook isa self AProjectile 0
+hook isa other AProjectile 0
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 7 self_role=plain other_role=trigger touching_full=1
+hook isa self AProjectile 0
+hook isa other AProjectile 0
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 8 self_role=projectile other_role=plain touching_full=0
+hook isa self AProjectile 1
+hook isa other ATrigger 0
+hook isa other AProjectile 0
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 9 self_role=projectile other_role=plain touching_full=1
+hook isa self AProjectile 1
+hook isa other ATrigger 0
+hook isa other AProjectile 0
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 10 self_role=trigger other_role=plain touching_full=0
+hook isa self AProjectile 0
+hook isa other AProjectile 0
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case begin_touch 11 self_role=trigger other_role=plain touching_full=1
+hook isa self AProjectile 0
+hook isa other AProjectile 0
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook is_valid touch
+hook event self UnTouch touch
+hook event self Touch other
+hook event other Touch self
+res touching0=null touching1=null
+case end_touch 0 self_touching=0 other_touching=0 no_notify_self=0
+res self_touch0=null other_touch0=null
+case end_touch 1 self_touching=0 other_touching=0 no_notify_self=1
+res self_touch0=null other_touch0=null
+case end_touch 2 self_touching=0 other_touching=1 no_notify_self=0
+hook event other UnTouch self
+res self_touch0=null other_touch0=null
+case end_touch 3 self_touching=0 other_touching=1 no_notify_self=1
+hook event other UnTouch self
+res self_touch0=null other_touch0=null
+case end_touch 4 self_touching=1 other_touching=0 no_notify_self=0
+hook event self UnTouch other
+res self_touch0=null other_touch0=null
+case end_touch 5 self_touching=1 other_touching=0 no_notify_self=1
+res self_touch0=null other_touch0=null
+case end_touch 6 self_touching=1 other_touching=1 no_notify_self=0
+hook event self UnTouch other
+hook event other UnTouch self
+res self_touch0=null other_touch0=null
+case end_touch 7 self_touching=1 other_touching=1 no_notify_self=1
+hook event other UnTouch self
+res self_touch0=null other_touch0=null
+case is_overlapping 0 self_brush=0 other=near
+res overlapping=1
+case is_overlapping 1 self_brush=0 other=far
+res overlapping=0
+case is_overlapping 2 self_brush=0 other=brush
+hook is_brush other 1
+res overlapping=0
+case is_overlapping 3 self_brush=1 other=near
+hook is_brush self 1
+res overlapping=0
+case is_overlapping 4 self_brush=1 other=far
+hook is_brush self 1
+res overlapping=0
+case is_overlapping 5 self_brush=1 other=brush
+hook is_brush self 1
+res overlapping=0
+case get_visibility_box 0 radius=0 height=0
+ res_min=41100000 =41980000 =41e80000  max=41300000 =41a80000 =41f80000
+case get_visibility_box 1 radius=100 height=50
+ res_min=c2b60000 =c2a20000 =c1a80000  max=42de0000 =42f20000 =42a20000
+case get_visibility_box 2 radius=-1 height=2
+ res_min=41200000 =41a00000 =41d80000  max=41200000 =41a00000 =42040000
+case carcass_update_frequency 0 physics=0 anim=0 net_update_freq=2
+ res_freq=40000000
+case carcass_update_frequency 1 physics=0 anim=0 net_update_freq=4
+ res_freq=40800000
+case carcass_update_frequency 2 physics=0 anim=0 net_update_freq=9
+ res_freq=40800000
+case carcass_update_frequency 3 physics=0 anim=1 net_update_freq=2
+ res_freq=40000000
+case carcass_update_frequency 4 physics=0 anim=1 net_update_freq=4
+ res_freq=40800000
+case carcass_update_frequency 5 physics=0 anim=1 net_update_freq=9
+ res_freq=41100000
+case carcass_update_frequency 6 physics=1 anim=0 net_update_freq=2
+ res_freq=40000000
+case carcass_update_frequency 7 physics=1 anim=0 net_update_freq=4
+ res_freq=40800000
+case carcass_update_frequency 8 physics=1 anim=0 net_update_freq=9
+ res_freq=41100000
+case carcass_update_frequency 9 physics=1 anim=1 net_update_freq=2
+ res_freq=40000000
+case carcass_update_frequency 10 physics=1 anim=1 net_update_freq=4
+ res_freq=40800000
+case carcass_update_frequency 11 physics=1 anim=1 net_update_freq=9
+ res_freq=41100000
+case get_hit_actor 0 hit_actor=0
+res hit=self
+case get_hit_actor 1 hit_actor=1
+res hit=other
+case post_edit_change 0 editor=0
+hook uobject_post_edit_change self
+res light_changed=0
+case post_edit_change 1 editor=1
+hook uobject_post_edit_change self
+res light_changed=1
+case zone_info_post_edit_change 0 editor=0
+hook uobject_post_edit_change zone
+res done=1
+case zone_info_post_edit_change 1 editor=1
+hook uobject_post_edit_change zone
+hook cache_flush
+res done=1
+case get_primitive 0 collide_type=0 mesh=0
+res prim=prim_cyl
+case get_primitive 1 collide_type=0 mesh=1
+res prim=prim_cyl
+case get_primitive 2 collide_type=1 mesh=0
+res prim=prim_ocyl
+case get_primitive 3 collide_type=1 mesh=1
+res prim=prim_ocyl
+case get_primitive 4 collide_type=2 mesh=0
+res prim=prim_box
+case get_primitive 5 collide_type=2 mesh=1
+res prim=prim_box
+case get_primitive 6 collide_type=3 mesh=0
+res prim=prim_cyl
+case get_primitive 7 collide_type=3 mesh=1
+res prim=mesh
+case get_primitive 8 collide_type=4 mesh=0
+res prim=prim_oval
+case get_primitive 9 collide_type=4 mesh=1
+res prim=prim_oval
+case get_primitive 10 collide_type=5 mesh=0
+res prim=prim_ooval
+case get_primitive 11 collide_type=5 mesh=1
+res prim=prim_ooval
+case spawned 0 collide_type=3 mesh=0 brush=0
+hook validate prim_cyl self
+res done=1
+case spawned 1 collide_type=3 mesh=0 brush=1
+hook validate brush_model self
+res done=1
+case spawned 2 collide_type=3 mesh=1 brush=0
+hook validate mesh self
+res done=1
+case spawned 3 collide_type=3 mesh=1 brush=1
+hook validate mesh self
+res done=1
+case spawned 4 collide_type=0 mesh=0 brush=0
+res done=1
+case spawned 5 collide_type=0 mesh=0 brush=1
+res done=1
+case spawned 6 collide_type=0 mesh=1 brush=0
+res done=1
+case spawned 7 collide_type=0 mesh=1 brush=1
+res done=1
+case process_event 0 begun=0 function=0
+res done=1
+case process_event 1 begun=0 function=1
+res done=1
+case process_event 2 begun=1 function=0
+hook super_process_event self null parms null
+res done=1
+case process_event 3 begun=1 function=1
+hook super_process_event self func parms null
+res done=1
+case destroy 0 render_iface=0
+hook uobject_destroy self
+res render_iface=null
+case destroy 1 render_iface=1
+hook remove_from_root render_iface
+hook cond_destroy render_iface
+hook delete_ri render_iface
+hook uobject_destroy self
+res render_iface=null
+case post_load 0 localized=0 brush=0 polys=0 collide_type=3
+hook uobject_postload self
+res done=1
+case post_load 1 localized=0 brush=0 polys=0 collide_type=0
+hook uobject_postload self
+res done=1
+case post_load 2 localized=0 brush=0 polys=1 collide_type=3
+hook uobject_postload self
+res done=1
+case post_load 3 localized=0 brush=0 polys=1 collide_type=0
+hook uobject_postload self
+res done=1
+case post_load 4 localized=0 brush=1 polys=0 collide_type=3
+hook uobject_postload self
+hook set_flags brush_model 1
+hook validate brush_model self
+res done=1
+case post_load 5 localized=0 brush=1 polys=0 collide_type=0
+hook uobject_postload self
+hook set_flags brush_model 1
+res done=1
+case post_load 6 localized=0 brush=1 polys=1 collide_type=3
+hook uobject_postload self
+hook set_flags brush_model 1
+hook set_flags polys 1
+hook validate brush_model self
+res done=1
+case post_load 7 localized=0 brush=1 polys=1 collide_type=0
+hook uobject_postload self
+hook set_flags brush_model 1
+hook set_flags polys 1
+res done=1
+case post_load 8 localized=1 brush=0 polys=0 collide_type=3
+hook uobject_postload self
+hook load_localized self
+res done=1
+case post_load 9 localized=1 brush=0 polys=0 collide_type=0
+hook uobject_postload self
+hook load_localized self
+res done=1
+case post_load 10 localized=1 brush=0 polys=1 collide_type=3
+hook uobject_postload self
+hook load_localized self
+res done=1
+case post_load 11 localized=1 brush=0 polys=1 collide_type=0
+hook uobject_postload self
+hook load_localized self
+res done=1
+case post_load 12 localized=1 brush=1 polys=0 collide_type=3
+hook uobject_postload self
+hook load_localized self
+hook set_flags brush_model 1
+hook validate brush_model self
+res done=1
+case post_load 13 localized=1 brush=1 polys=0 collide_type=0
+hook uobject_postload self
+hook load_localized self
+hook set_flags brush_model 1
+res done=1
+case post_load 14 localized=1 brush=1 polys=1 collide_type=3
+hook uobject_postload self
+hook load_localized self
+hook set_flags brush_model 1
+hook set_flags polys 1
+hook validate brush_model self
+res done=1
+case post_load 15 localized=1 brush=1 polys=1 collide_type=0
+hook uobject_postload self
+hook load_localized self
+hook set_flags brush_model 1
+hook set_flags polys 1
+res done=1
+case set_player 0 prev_actor=0 pawn_player=0
+hook event pawn Possess null
+hook possessed pawn
+res pawn_player=player
+case set_player 1 prev_actor=0 pawn_player=1
+hook event pawn Possess null
+hook possessed pawn
+res pawn_player=player
+case set_player 2 prev_actor=1 pawn_player=0
+hook event pawn Possess null
+hook possessed pawn
+res pawn_player=player
+case set_player 3 prev_actor=1 pawn_player=1
+hook event pawn Possess null
+hook possessed pawn
+res pawn_player=player
+case get_cylinder_extent 0 collide_type=0 width=0
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 1 collide_type=0 width=7
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 2 collide_type=1 width=0
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 3 collide_type=1 width=7
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 4 collide_type=2 width=0
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 5 collide_type=2 width=7
+ res=41400000 =40e00000 =41c00000
+case get_cylinder_extent 6 collide_type=3 width=0
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 7 collide_type=3 width=7
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 8 collide_type=4 width=0
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 9 collide_type=4 width=7
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 10 collide_type=5 width=0
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 11 collide_type=5 width=7
+ res=41400000 =41400000 =41c00000
+case get_cylinder_extent 12 collide_type=3 mesh=1 brush=0
+hook collision_extent mesh self
+ res=41800000 =41c00000 =42000000
+case get_cylinder_extent 13 collide_type=3 mesh=0 brush=1
+hook collision_extent brush_model self
+ res=41800000 =41c00000 =42000000
+case get_render_bounding_box 0 exact=0 mesh=0 brush=0
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 1 exact=0 mesh=0 brush=1
+hook brush_render_box brush_model self exact=0
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 2 exact=0 mesh=1 brush=0
+hook mesh_render_box mesh self exact=0
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 3 exact=0 mesh=1 brush=1
+hook mesh_render_box mesh self exact=0
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 4 exact=1 mesh=0 brush=0
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 5 exact=1 mesh=0 brush=1
+hook brush_render_box brush_model self exact=1
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 6 exact=1 mesh=1 brush=0
+hook mesh_render_box mesh self exact=1
+ res_origin=00000000 =00000000 =00000000
+case get_render_bounding_box 7 exact=1 mesh=1 brush=1
+hook mesh_render_box mesh self exact=1
+ res_origin=00000000 =00000000 =00000000
+case serialize_persistence 0 loading=0 saving=0 trans=0
+hook set_flags self 1073741824
+hook uclass_static
+hook preload ar class
+hook uclass_static
+hook is_loading ar
+hook is_saving ar
+hook serialize_bin class ar self
+hook properties_size class
+hook count_bytes ar 96
+res done=1
+case serialize_persistence 1 loading=0 saving=0 trans=1
+hook set_flags self 1073741824
+hook uclass_static
+hook preload ar class
+hook uclass_static
+hook is_loading ar
+hook is_saving ar
+hook serialize_bin class ar self
+hook properties_size class
+hook count_bytes ar 96
+res done=1
+case serialize_persistence 2 loading=1 saving=0 trans=0
+hook set_flags self 1073741824
+hook uclass_static
+hook preload ar class
+hook uclass_static
+hook is_loading ar
+hook is_trans ar
+hook serialize_tagged class ar self
+hook properties_size class
+hook count_bytes ar 96
+res done=1
+case serialize_persistence 3 loading=1 saving=0 trans=1
+hook set_flags self 1073741824
+hook uclass_static
+hook preload ar class
+hook uclass_static
+hook is_loading ar
+hook is_trans ar
+hook serialize_bin class ar self
+hook properties_size class
+hook count_bytes ar 96
+res done=1
+case serialize_persistence 4 loading=0 saving=1 trans=0
+hook set_flags self 1073741824
+hook uclass_static
+hook preload ar class
+hook uclass_static
+hook is_loading ar
+hook is_saving ar
+hook is_trans ar
+hook serialize_tagged class ar self
+hook properties_size class
+hook count_bytes ar 96
+res done=1
+case serialize_persistence 5 loading=0 saving=1 trans=1
+hook set_flags self 1073741824
+hook uclass_static
+hook preload ar class
+hook uclass_static
+hook is_loading ar
+hook is_saving ar
+hook is_trans ar
+hook serialize_bin class ar self
+hook properties_size class
+hook count_bytes ar 96
+res done=1
+case trace_texture 0 surf=0 trace_decals=0
+hook single_line_check level self flags=4
+hook bsp_surf kind=0
+res texture=null flags=0
+case trace_texture 1 surf=0 trace_decals=1
+hook single_line_check level self flags=4
+hook bsp_surf kind=0
+res texture=null flags=0
+case trace_texture 2 surf=1 trace_decals=0
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case trace_texture 3 surf=1 trace_decals=1
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case trace_texture 4 surf=2 trace_decals=0
+hook single_line_check level self flags=4
+hook bsp_surf kind=2
+res texture=tex0 flags=272
+case trace_texture 5 surf=2 trace_decals=1
+hook single_line_check level self flags=4
+hook bsp_surf kind=2
+res texture=tex0 flags=272
+case trace_decal_flip 0 decal_flip bits=c2f9c011,c2806d88,c3403786,c23debef,c21a5c65,4333d97e,42660df8,c32c177c,c2ac21da,c3239b49,419c25bb,c23a2a88,3eabca48,3ef02178,3f51258f,c2b47e18,c252fe5c,c1cdf3d5
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case trace_decal_flip 1 decal_flip bits=c2ce9b20,c30a5e56,428a785a,4295980c,c1e5adf9,430d8135,c32a7cc4,4330f252,433328fc,c311ffef,428bdafe,c2cebc3c,bf0e74e0,3f2b36c3,3efc6968,c2aff5ca,c300ef61,4296e771
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex1 flags=1
+case trace_decal_flip 2 decal_flip bits=42b8d80b,42b8772b,42e7ba34,c2d30ea5,4329c9c7,c287208c,c2c22a38,42c49d95,430bbec2,43383df8,c29b123b,421dfe2b,3e9e6643,3f643650,3ea9801e,c21e9ac7,4279a31b,42ee8f45
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case trace_decal_flip 3 decal_flip bits=c339480c,c1835e72,c2d651e9,4132677c,c3152ecf,c3438a8d,42f0ad9c,429dda0c,430248a1,c236a682,c31eab86,c33bbb8c,bf3015da,bea876a1,bf25a290,42e149f6,427b6796,42d6a557
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case trace_decal_flip 4 decal_flip bits=43122578,c309f7f7,c03babc0,c3347b29,c2a0c26d,c25c8d83,c3387f8f,432732f7,c1290155,c316b4c4,c1a3262a,431dd19c,bf7019ce,be2ff885,be9a4d36,c32a6048,42b19e2f,426f334b
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex1 flags=1
+case trace_decal_flip 5 decal_flip bits=c2ad3d21,c3200b14,4333ccab,c28e4eba,41812dc6,421a16da,432026cb,428478de,41347977,430d67a4,c31f00c1,4281dcba,3f28ec0a,be0345e1,bf3d8980,c0b7509a,c31faca3,430b0cc5
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case trace_decal_flip 6 decal_flip bits=c3086e1e,c106a3c6,c316206a,42c8b7f9,c2e1045e,431e2c43,4343cac7,c281ea16,4346fa85,c0091656,c2c8f4a3,c307bd4c,bdd05e88,bf768488,be7fb4f8,412947c5,c2c463aa,c2e47398
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex1 flags=1
+case trace_decal_flip 7 decal_flip bits=c341273c,41048e47,43432a4c,c273ae63,c2c3fbbc,429293f0,42e7d955,c3244d98,4300aa69,4347fe57,42ce5932,c34538d0,be9286c1,3edb16ac,bf5b7930,c23d745a,c2ce26a4,429b11fd
+hook single_line_check level self flags=4
+hook bsp_surf kind=1
+res texture=tex0 flags=1
+case net_receive 0 pawn_small
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook isa self APawn 1
+hook isa self APawn 1
+hook far_move level  dest=3fc00000 =00000000 =00000000 test=0 no_check=1
+hook isa self APlayerReplicationInfo 0
+res loc= =3fc00000 =00000000 =00000000 anim=3dcccccc,3ecccccc,40400001,3ecccccc loop=1 min=3f000000 tele=0
+case net_receive 1 pawn_smooth
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook isa self APawn 1
+hook move_smooth self delta=418c0000 =00000000 =00000000
+hook far_move level  dest=41c80000 =00000000 =00000000 test=0 no_check=1
+hook isa self APlayerReplicationInfo 0
+res loc= =41c80000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=3e4ccccd tele=0
+case net_receive 2 mover
+hook isa self AMover 1
+hook isa self AMover 1
+hook set_physics self 9
+hook isa self APlayerPawn 0
+hook isa self APlayerReplicationInfo 0
+res loc= =00000000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=00000000 tele=0 key=1,2 alpha=3d23d70a rate=3d4ccccc interpolating=1
+case net_receive 3 pawn_fma
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook isa self APawn 1
+hook move_smooth self delta=4141512c =41130cdc =41fc4ab7
+hook far_move level  dest=418a1569 =4152125f =4234355e test=0 no_check=1
+hook isa self APlayerReplicationInfo 0
+res loc= =418a1569 =4152125f =4234355e anim=00000000,00000000,00000000,00000000 loop=0 min=3e4ccccd tele=0
+case net_receive 4 generic_state
+hook isa self AMover 0
+hook hash self RemoveActor
+hook hash self AddActor
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook move_actor level self delta=00000000 =00000000 =00000000 rot=123,-456,789 flags=0,0,0,1
+hook hash self RemoveActor
+hook hash self AddActor
+hook hash self RemoveActor
+hook event self Bump base
+hook event base Bump self
+hook event base Attach self
+hook event self BaseChange null
+hook isa self APlayerReplicationInfo 0
+res loc= =00000000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=3e4ccccd tele=0 base=base collide=0 block=1,0 radius=40400000 height=40800000 rot=123,-456,789
+case net_receive 5 demo_view
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 1
+hook isa self APlayerReplicationInfo 0
+res loc= =00000000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=00000000 tele=0 viewrot=1234,-5678
+case net_receive 6 pawn_teleport
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook isa self APawn 1
+hook far_move level  dest=42c80000 =00000000 =00000000 test=0 no_check=1
+hook isa self APlayerReplicationInfo 0
+res loc= =42c80000 =00000000 =00000000 anim=3dcccccc,3ecccccc,40400001,3ecccccc loop=0 min=3e4ccccd tele=0
+case net_receive 7 pri_ping
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook isa self APlayerReplicationInfo 1
+res loc= =00000000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=00000000 tele=0 ping=5
+case net_receive 8 pawn_over_10000
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 0
+hook isa self APawn 1
+hook far_move level  dest=42ca0000 =00000000 =00000000 test=0 no_check=1
+hook isa self APlayerReplicationInfo 0
+res loc= =42ca0000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=3e4ccccd tele=0
+case net_receive 9 demo_driver_absent
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 1
+hook isa self APlayerReplicationInfo 0
+res loc= =00000000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=3e4ccccd tele=0 viewrot=0,0
+case net_receive 10 demo_server_connection_absent
+hook isa self AMover 0
+hook isa self AMover 0
+hook isa self APlayerPawn 1
+hook isa self APlayerReplicationInfo 0
+res loc= =00000000 =00000000 =00000000 anim=00000000,00000000,00000000,00000000 loop=0 min=3e4ccccd tele=0 viewrot=0,0

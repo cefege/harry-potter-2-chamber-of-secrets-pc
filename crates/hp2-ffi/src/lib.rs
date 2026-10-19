@@ -12,6 +12,8 @@ mod canvas;
 mod canvas_text;
 mod engine;
 mod engine_actcol;
+mod engine_actor;
+mod engine_actor_rep;
 mod engine_audio;
 mod engine_cam_mgr;
 mod engine_camera;

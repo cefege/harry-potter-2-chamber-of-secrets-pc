@@ -4,6 +4,8 @@
 //! level and model queries stay in C++ behind that table.
 
 pub mod actcol;
+pub mod actor;
+pub mod actor_rep;
 pub mod audio;
 pub mod cam_mgr;
 pub mod camera;
