@@ -2235,6 +2235,217 @@ const _: () = assert!(std::mem::offset_of!(FSceneNode, y) == 212);
 const _: () = assert!(std::mem::offset_of!(FSceneNode, xb) == 216);
 const _: () = assert!(std::mem::offset_of!(FSceneNode, yb) == 220);
 
+/// Layout mirror of C++ `FSoundData` (48 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FSoundData {
+    _pad_0: [u8; 40],
+    pub owner: *mut c_void,
+}
+
+const _: () = assert!(size_of::<FSoundData>() == 48);
+const _: () = assert!(std::mem::offset_of!(FSoundData, owner) == 40);
+
+/// Layout mirror of C++ `USound` (288 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct USound {
+    _pad_0: [u8; 72],
+    pub data: FSoundData,
+    pub lip_sync_data: FLipSyncData,
+    pub original_size: i32,
+    pub duration: f32,
+    pub raw_num_samples: i32,
+    pub raw_bits_per_sample: i32,
+    pub raw_num_channels: i32,
+    pub raw_sample_rate: i32,
+    pub open_streams: TArrayRaw,
+    _pad_216: [u8; 32],
+    pub handle: i32,
+    pub ref_count: i32,
+    pub file_type: [u8; 4],
+    _pad_260: [u8; 20],
+    pub core_flags: i32,
+    pub working_flags: i32,
+}
+
+const _: () = assert!(size_of::<USound>() == 288);
+const _: () = assert!(std::mem::offset_of!(USound, data) == 72);
+const _: () = assert!(std::mem::offset_of!(USound, lip_sync_data) == 120);
+const _: () = assert!(std::mem::offset_of!(USound, original_size) == 176);
+const _: () = assert!(std::mem::offset_of!(USound, duration) == 180);
+const _: () = assert!(std::mem::offset_of!(USound, raw_num_samples) == 184);
+const _: () = assert!(std::mem::offset_of!(USound, raw_bits_per_sample) == 188);
+const _: () = assert!(std::mem::offset_of!(USound, raw_num_channels) == 192);
+const _: () = assert!(std::mem::offset_of!(USound, raw_sample_rate) == 196);
+const _: () = assert!(std::mem::offset_of!(USound, open_streams) == 200);
+const _: () = assert!(std::mem::offset_of!(USound, handle) == 248);
+const _: () = assert!(std::mem::offset_of!(USound, ref_count) == 252);
+const _: () = assert!(std::mem::offset_of!(USound, file_type) == 256);
+const _: () = assert!(std::mem::offset_of!(USound, core_flags) == 280);
+const _: () = assert!(std::mem::offset_of!(USound, working_flags) == 284);
+
+/// Layout mirror of C++ `FLipSyncData` (56 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FLipSyncData {
+    _pad_0: [u8; 40],
+    pub owner: *mut c_void,
+    pub m_i_max_amplitude: i32,
+    _pad_52: [u8; 4],
+}
+
+const _: () = assert!(size_of::<FLipSyncData>() == 56);
+const _: () = assert!(std::mem::offset_of!(FLipSyncData, owner) == 40);
+const _: () = assert!(std::mem::offset_of!(FLipSyncData, m_i_max_amplitude) == 48);
+
+/// Layout mirror of C++ `FWaveModInfo` (120 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FWaveModInfo {
+    pub p_samples_per_sec: *mut c_void,
+    pub p_avg_bytes_per_sec: *mut c_void,
+    pub p_block_align: *mut c_void,
+    pub p_bits_per_sample: *mut c_void,
+    pub p_channels: *mut c_void,
+    pub old_bits_per_sample: u32,
+    _pad_44: [u8; 4],
+    pub p_wave_data_size: *mut c_void,
+    pub p_master_size: *mut c_void,
+    pub sample_data_start: *mut c_void,
+    pub sample_data_end: *mut c_void,
+    pub sample_data_size: u32,
+    _pad_84: [u8; 4],
+    pub wave_data_end: *mut c_void,
+    pub sample_loops_num: i32,
+    _pad_100: [u8; 4],
+    pub p_sample_loop: *mut c_void,
+    pub new_data_size: u32,
+    pub noise_gate: i32,
+}
+
+const _: () = assert!(size_of::<FWaveModInfo>() == 120);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_samples_per_sec) == 0);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_avg_bytes_per_sec) == 8);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_block_align) == 16);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_bits_per_sample) == 24);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_channels) == 32);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, old_bits_per_sample) == 40);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_wave_data_size) == 48);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_master_size) == 56);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, sample_data_start) == 64);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, sample_data_end) == 72);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, sample_data_size) == 80);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, wave_data_end) == 88);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, sample_loops_num) == 96);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, p_sample_loop) == 104);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, new_data_size) == 112);
+const _: () = assert!(std::mem::offset_of!(FWaveModInfo, noise_gate) == 116);
+
+/// Layout mirror of C++ `FRiffWaveHeader` (12 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FRiffWaveHeader {
+    pub r_id: u32,
+    pub chunk_len: u32,
+    pub w_id: u32,
+}
+
+const _: () = assert!(size_of::<FRiffWaveHeader>() == 12);
+const _: () = assert!(std::mem::offset_of!(FRiffWaveHeader, r_id) == 0);
+const _: () = assert!(std::mem::offset_of!(FRiffWaveHeader, chunk_len) == 4);
+const _: () = assert!(std::mem::offset_of!(FRiffWaveHeader, w_id) == 8);
+
+/// Layout mirror of C++ `FRiffChunkOld` (8 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FRiffChunkOld {
+    pub chunk_id: u32,
+    pub chunk_len: u32,
+}
+
+const _: () = assert!(size_of::<FRiffChunkOld>() == 8);
+const _: () = assert!(std::mem::offset_of!(FRiffChunkOld, chunk_id) == 0);
+const _: () = assert!(std::mem::offset_of!(FRiffChunkOld, chunk_len) == 4);
+
+/// Layout mirror of C++ `FFormatChunk` (20 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FFormatChunk {
+    pub w_format_tag: u16,
+    pub n_channels: u16,
+    pub n_samples_per_sec: u32,
+    pub n_avg_bytes_per_sec: u32,
+    pub n_block_align: u16,
+    pub w_bits_per_sample: u16,
+    pub cb_size: u16,
+    _pad_18: [u8; 2],
+}
+
+const _: () = assert!(size_of::<FFormatChunk>() == 20);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, w_format_tag) == 0);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, n_channels) == 2);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, n_samples_per_sec) == 4);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, n_avg_bytes_per_sec) == 8);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, n_block_align) == 12);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, w_bits_per_sample) == 14);
+const _: () = assert!(std::mem::offset_of!(FFormatChunk, cb_size) == 16);
+
+/// Layout mirror of C++ `FSampleChunk` (36 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FSampleChunk {
+    pub dw_manufacturer: u32,
+    pub dw_product: u32,
+    pub dw_sample_period: u32,
+    pub dw_midi_unity_note: u32,
+    pub dw_midi_pitch_fraction: u32,
+    pub dw_smpte_format: u32,
+    pub dw_smpte_offset: u32,
+    pub c_sample_loops: u32,
+    pub cb_sampler_data: u32,
+}
+
+const _: () = assert!(size_of::<FSampleChunk>() == 36);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_manufacturer) == 0);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_product) == 4);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_sample_period) == 8);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_midi_unity_note) == 12);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_midi_pitch_fraction) == 16);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_smpte_format) == 20);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, dw_smpte_offset) == 24);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, c_sample_loops) == 28);
+const _: () = assert!(std::mem::offset_of!(FSampleChunk, cb_sampler_data) == 32);
+
+/// Layout mirror of C++ `FSampleLoop` (24 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FSampleLoop {
+    pub dw_identifier: u32,
+    pub dw_type: u32,
+    pub dw_start: u32,
+    pub dw_end: u32,
+    pub dw_fraction: u32,
+    pub dw_play_count: u32,
+}
+
+const _: () = assert!(size_of::<FSampleLoop>() == 24);
+const _: () = assert!(std::mem::offset_of!(FSampleLoop, dw_identifier) == 0);
+const _: () = assert!(std::mem::offset_of!(FSampleLoop, dw_type) == 4);
+const _: () = assert!(std::mem::offset_of!(FSampleLoop, dw_start) == 8);
+const _: () = assert!(std::mem::offset_of!(FSampleLoop, dw_end) == 12);
+const _: () = assert!(std::mem::offset_of!(FSampleLoop, dw_fraction) == 16);
+const _: () = assert!(std::mem::offset_of!(FSampleLoop, dw_play_count) == 20);
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
@@ -2283,5 +2494,14 @@ mod layout_tests {
         assert_eq!(size_of::<UConsole>(), 2760);
         assert_eq!(size_of::<UInput>(), 5400);
         assert_eq!(size_of::<FSceneNode>(), 408);
+        assert_eq!(size_of::<FSoundData>(), 48);
+        assert_eq!(size_of::<USound>(), 288);
+        assert_eq!(size_of::<FLipSyncData>(), 56);
+        assert_eq!(size_of::<FWaveModInfo>(), 120);
+        assert_eq!(size_of::<FRiffWaveHeader>(), 12);
+        assert_eq!(size_of::<FRiffChunkOld>(), 8);
+        assert_eq!(size_of::<FFormatChunk>(), 20);
+        assert_eq!(size_of::<FSampleChunk>(), 36);
+        assert_eq!(size_of::<FSampleLoop>(), 24);
     }
 }

@@ -4,6 +4,7 @@
 //! level and model queries stay in C++ behind that table.
 
 pub mod actcol;
+pub mod audio;
 pub mod cam_mgr;
 pub mod canvas;
 pub mod canvas_text;

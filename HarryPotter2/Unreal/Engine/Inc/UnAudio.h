@@ -105,9 +105,6 @@ public:
 class ENGINE_API FLipSyncData : public TLazyArray<BYTE>
 {
 public:
-	static const float	fAmpSampleInterval;
-	static const float	fAmpSampleWindowSize;
-
 	USound* Owner;
 
 	FLipSyncData( USound* InOwner );
@@ -117,11 +114,6 @@ public:
 
 protected:
 	INT		m_iMaxAmplitude;
-
-	BYTE	GetInterpAmplitude( FLOAT fTime );
-
-	void	CalcMaxAmplitude( void );
-	BYTE	GetMaxAmplitude( void );
 };
 
 
@@ -319,15 +311,6 @@ struct FSampleLoop				// Immediately following cbSamplerData in the SMPL chunk.
 //
 // Structure for in-memory interpretation and modification of WAVE sound structures.
 //
-//	Sample access functions	-tg
-//
-typedef enum
-{
-	Sample_window_trailing,
-	Sample_window_leading,
-	Sample_window_centered
-}	eSampleWindowType;
-
 class ENGINE_API FWaveModInfo
 {
 public:
@@ -371,24 +354,6 @@ public:
 	// Returns 0 if invalid data encountered.
 	// UBOOL ReadWaveInfo( TArray<BYTE>& WavData );
 	UBOOL ReadWaveInfo( TArray<BYTE>& WavData );
-	
-	// Handle RESIZING and updating of all variables needed for the new size:
-	// notably the (possibly multiple) loop structures.
-	UBOOL UpdateWaveData( TArray<BYTE>& WavData);
-
-	// Wave size and/or bitdepth reduction.
-	void Reduce16to8();
-	void HalveData();
-	void HalveReduce16to8(); 
-
-	// Filters.
-	void NoiseGateFilter(); 
-
-	DWORD	GetSampleWindowAmplitude( float fTime, float fWindowSize, eSampleWindowType SampleWindowType = Sample_window_trailing);
-
-	BYTE	*OffsetFromTime( float fTime );
-	BYTE	SampleAmplitude( BYTE *pcBuffer );
-	int		SampleSize( void );
 };
 
 /*-----------------------------------------------------------------------------
