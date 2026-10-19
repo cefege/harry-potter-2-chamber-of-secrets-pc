@@ -8,6 +8,7 @@ pub mod canvas;
 pub mod canvas_text;
 pub mod coords;
 pub mod fpoly;
+pub mod levact;
 pub mod lodmesh;
 pub mod math;
 pub mod mesh;

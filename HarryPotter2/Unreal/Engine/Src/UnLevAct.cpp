@@ -10,6 +10,7 @@ Revision history:
 #include "UnNet.h"
 
 #include "HP2TraceHooks.h"
+#include "hp2_rs.h"
 
 extern void HP2ActorTransitionPreBeginBefore( AActor* Actor );
 extern void HP2ActorTransitionPreBeginAfter( AActor* Actor );
@@ -895,27 +896,8 @@ UBOOL ULevel::DropToFloor( AActor *Actor)
 
 UBOOL DoMultiLineCheck(AActor* Actor)
 {
-	AMover* Mover;
-
-	// if this is not a mover, do check
- 	if(!Actor->IsA(AMover::StaticClass()) )
-		return 1;
-
-	Mover  = (AMover*)Actor;
-
-	if(Mover->MoverEncroachType == ME_StopWhenEncroach)
-		return 1;
-
-	if(Mover->MoverEncroachType == ME_ReturnWhenEncroach)
-		return 1;
-
-	if(Mover->MoverEncroachType == ME_CrushWhenEncroach)
-		return 1;
-
-	if(Mover->MoverEncroachType == ME_IgnoreWhenEncroach)
-		return 1;
-
-	return 0;
+	const UBOOL bIsMover = Actor->IsA(AMover::StaticClass());
+	return hp2_rs_engine_levact_do_multi_line_check( bIsMover, bIsMover ? ((AMover*)Actor)->MoverEncroachType : 0 );
 }
 
 //
@@ -1158,104 +1140,30 @@ UBOOL ULevel::MoveActor
 //
 FVector FindDeltaFromRotationYaw(FVector origin, FVector point, int angle)
 {
-	FVector  retVector;
-
-	float A, B, x, y, length;
-	float sinAlpha, cosAlpha;
-	float sinBetha, cosBetha;
-
-	A = point.X - origin.X;
-	B = point.Y - origin.Y;
-
-	length = appSqrt(A * A + B * B);
-
-	cosBetha = A / length;
-	sinBetha = B / length;
-
-	sinAlpha = appSin(angle / (32768.0f / PI));
-	cosAlpha = appCos(angle / (32768.0f / PI));
-
-	x = length * (cosAlpha * cosBetha - sinAlpha * sinBetha) + origin.X;
-	y = length * (sinAlpha * cosBetha + cosAlpha * sinBetha) + origin.Y;
-
-	retVector.X = x;
-	retVector.Y = y;
-	retVector.Z = point.Z;
-
+	FVector retVector;
+	hp2_rs_engine_levact_find_delta_from_rotation_yaw( &origin, &point, angle, &retVector );
 	return retVector;
 }
 
 FVector FindDeltaFromRotationRoll(FVector origin, FVector point, int angle)
 {
-	FVector  retVector;
-
-	float A, B, y, z, length;
-	float sinAlpha, cosAlpha;
-	float sinBetha, cosBetha;
-
-	A = point.Y - origin.Y;
-	B = point.Z - origin.Z;
-
-	length = appSqrt(A * A + B * B);
-
-	cosBetha = A / length;
-	sinBetha = B / length;
-
-	sinAlpha = appSin(-angle / (32768.0f / PI));		// Orientation problem
-	cosAlpha = appCos(-angle / (32768.0f / PI));		// Orientation problem
-
-	y = length * (cosAlpha * cosBetha - sinAlpha * sinBetha) + origin.Y;
-	z = length * (sinAlpha * cosBetha + cosAlpha * sinBetha) + origin.Z;
-
-	retVector.Y = y;
-	retVector.Z = z;
-	retVector.X = point.X;
-
+	FVector retVector;
+	hp2_rs_engine_levact_find_delta_from_rotation_roll( &origin, &point, angle, &retVector );
 	return retVector;
 }
 
 FVector FindDeltaFromRotationPitch(FVector origin, FVector point, int angle)
 {
-	FVector  retVector;
-
-	float A, B, x, z, length;
-	float sinAlpha, cosAlpha;
-	float sinBetha, cosBetha;
-
-	A = point.X - origin.X;
-	B = point.Z - origin.Z;
-
-	length = appSqrt(A * A + B * B);
-
-	cosBetha = A / length;
-	sinBetha = B / length;
-
-	sinAlpha = appSin(angle / (32768.0f / PI));
-	cosAlpha = appCos(angle / (32768.0f / PI));
-
-	x = length * (cosAlpha * cosBetha - sinAlpha * sinBetha) + origin.X;
-	z = length * (sinAlpha * cosBetha + cosAlpha * sinBetha) + origin.Z;
-
-	retVector.X = x;
-	retVector.Z = z;
-	retVector.Y = point.Y;
-
+	FVector retVector;
+	hp2_rs_engine_levact_find_delta_from_rotation_pitch( &origin, &point, angle, &retVector );
 	return retVector;
 }
 
 FVector FindDeltaFromRotation(FVector origin, FVector point, int yaw, int roll, int pitch)
 {
-	FVector v1, v2, v3;
-
-	v1 = FindDeltaFromRotationRoll (origin, point, roll );
-	v2 = FindDeltaFromRotationPitch(origin, v1,    pitch);
-	v3 = FindDeltaFromRotationYaw  (origin, v2,    yaw  );
-
-	v3.X -= point.X;
-	v3.Y -= point.Y;
-	v3.Z -= point.Z;
-
-	return v3;
+	FVector retVector;
+	hp2_rs_engine_levact_find_delta_from_rotation( &origin, &point, yaw, roll, pitch, &retVector );
+	return retVector;
 }
 
 //
@@ -1356,6 +1264,81 @@ UBOOL ULevel::CheckEncroachment
 }
 
 /*-----------------------------------------------------------------------------
+	Rust check services (`LevActServices` in crates/hp2-engine/src/levact.rs,
+	same field order). The thunks perform the C++ owner calls.
+-----------------------------------------------------------------------------*/
+
+struct Hp2LevActServices
+{
+	FCheckResult* (*AllocCheckResults)( void* Mem, INT Count );
+	INT (*ModelPointCheck)( void* Level, FCheckResult* Hit, const FVector* Location, const FVector* Extent );
+	INT (*ModelLineCheck)( void* Level, FCheckResult* Hit, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags );
+	FCheckResult* (*HashActorPointCheck)( void* Hash, void* Mem, const FVector* Location, const FVector* Extent, DWORD Flags );
+	FCheckResult* (*HashActorLineCheck)( void* Hash, void* Mem, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags );
+	INT (*ActorIsA)( const void* Actor, INT Kind );
+	INT (*ActorIsOwnedBy)( const void* Actor, const void* Other );
+	INT (*ActorIsBlockedBy)( const void* Actor, const void* Other );
+};
+
+static FCheckResult* Hp2LevActAllocCheckResults( void* Mem, INT Count )
+{
+	return new(*(FMemStack*)Mem, Count) FCheckResult;
+}
+
+static INT Hp2LevActModelPointCheck( void* Level, FCheckResult* Hit, const FVector* Location, const FVector* Extent )
+{
+	return ((ALevelInfo*)Level)->GetLevel()->Model->PointCheck( *Hit, NULL, *Location, *Extent, 0 );
+}
+
+static INT Hp2LevActModelLineCheck( void* Level, FCheckResult* Hit, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags )
+{
+	return ((ALevelInfo*)Level)->GetLevel()->Model->LineCheck( *Hit, NULL, *End, *Start, *Extent, (BYTE)Flags );
+}
+
+static FCheckResult* Hp2LevActHashActorPointCheck( void* Hash, void* Mem, const FVector* Location, const FVector* Extent, DWORD Flags )
+{
+	return ((FCollisionHashBase*)Hash)->ActorPointCheck( *(FMemStack*)Mem, *Location, *Extent, Flags );
+}
+
+static FCheckResult* Hp2LevActHashActorLineCheck( void* Hash, void* Mem, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags )
+{
+	return ((FCollisionHashBase*)Hash)->ActorLineCheck( *(FMemStack*)Mem, *End, *Start, *Extent, (BYTE)Flags );
+}
+
+// Kind: 0 = ALevelInfo, 1 = AMover, 2 = AZoneInfo (matches ACTOR_KIND_* in levact.rs).
+static INT Hp2LevActActorIsA( const void* Actor, INT Kind )
+{
+	AActor* A = (AActor*)Actor;
+	if( Kind==0 )
+		return A->IsA(ALevelInfo::StaticClass());
+	if( Kind==1 )
+		return A->IsA(AMover::StaticClass());
+	return A->IsA(AZoneInfo::StaticClass());
+}
+
+static INT Hp2LevActActorIsOwnedBy( const void* Actor, const void* Other )
+{
+	return ((AActor*)Actor)->IsOwnedBy( (AActor*)Other );
+}
+
+static INT Hp2LevActActorIsBlockedBy( const void* Actor, const void* Other )
+{
+	return ((AActor*)Actor)->IsBlockedBy( (AActor*)Other );
+}
+
+static const Hp2LevActServices GHp2LevActServices =
+{
+	Hp2LevActAllocCheckResults,
+	Hp2LevActModelPointCheck,
+	Hp2LevActModelLineCheck,
+	Hp2LevActHashActorPointCheck,
+	Hp2LevActHashActorLineCheck,
+	Hp2LevActActorIsA,
+	Hp2LevActActorIsOwnedBy,
+	Hp2LevActActorIsBlockedBy,
+};
+
+/*-----------------------------------------------------------------------------
 	SinglePointCheck.
 -----------------------------------------------------------------------------*/
 
@@ -1375,18 +1358,9 @@ UBOOL ULevel::SinglePointCheck
 {
 	guard(ULevel::SinglePointCheck);
 	FMemMark Mark(GMem);
-	FCheckResult* Hits = MultiPointCheck( GMem, Location, Extent, ExtraNodeFlags, Level, bActors );
-	if( !Hits )
-	{
-		Mark.Pop();
-		return 1;
-	}
-	Hit = *Hits;
-	for( Hits = Hits->GetNext(); Hits!=NULL; Hits = Hits->GetNext() )
-		if( (Hits->Location-Location).SizeSquared() < (Hit.Location-Location).SizeSquared() )
-			Hit = *Hits;
+	UBOOL Result = hp2_rs_engine_levact_single_point_check( &GHp2LevActServices, &GMem, Hash, &Hit, Level, &Location, &Extent, ExtraNodeFlags, bActors ) != 0;
 	Mark.Pop();
-	return 0;
+	return Result;
 	unguard;
 }
 
@@ -1397,25 +1371,7 @@ UBOOL ULevel::SinglePointCheck
 FCheckResult* ULevel::MultiPointCheck( FMemStack& Mem, FVector Location, FVector Extent, DWORD ExtraNodeFlags, ALevelInfo* Level, UBOOL bActors )
 {
 	guard(ULevel::MultiPointCheck);
-	FCheckResult* Result=NULL;
-
-	// Check with actors.
-	if( bActors && Hash )
-		Result = Hash->ActorPointCheck( Mem, Location, Extent, ExtraNodeFlags );
-
-	// Check with level.
-	if( Level )
-	{
-		FCheckResult TestHit(1.f);
-		if( Level->GetLevel()->Model->PointCheck( TestHit, NULL, Location, Extent, 0 )==0 )
-		{
-			// Hit.
-			TestHit.GetNext() = Result;
-			Result            = new(GMem)FCheckResult(TestHit);
-			Result->Actor     = Level;
-		}
-	}
-	return Result;
+	return (FCheckResult*)hp2_rs_engine_levact_multi_point_check( &GHp2LevActServices, &GMem, Hash, &Mem, Level, &Location, &Extent, ExtraNodeFlags, bActors );
 	unguard;
 }
 
@@ -1438,69 +1394,10 @@ UBOOL ULevel::SingleLineCheck
 )
 {
 	guard(ULevel::Trace);
-
-	// Get list of hit actors.
 	FMemMark Mark(GMem);
-	FCheckResult* FirstHit = MultiLineCheck
-	(
-		GMem,
-		End,
-		Start,
-		Extent,
-		(TraceFlags & TRACE_AllColliding) ? 1 : 0,
-		(TraceFlags & TRACE_Level       ) ? GetLevelInfo() : NULL,
-		ExtraNodeFlags
-	);
-
-	// Skip owned actors and return the one nearest actor.
-	FCheckResult* Check;
-	for( Check = FirstHit; Check!=NULL; Check=Check->GetNext() )
-	{
-		if( !SourceActor || !SourceActor->IsOwnedBy( Check->Actor ) )
-		{
-			if( Check->Actor->IsA(ALevelInfo::StaticClass()) )
-			{
-				if( TraceFlags & TRACE_Level )
-					break;
-			}
-			else if( Check->Actor->IsA(AMover::StaticClass()) )
-			{
-				if( TraceFlags & TRACE_Movers )
-					break;
-			}
-			else if( Check->Actor->IsA(AZoneInfo::StaticClass()) )
-			{
-				if( TraceFlags & TRACE_ZoneChanges )
-					break;
-			}
-			else
-			{
-				// Distinguish based on blocking status.
-				if( SourceActor && SourceActor->IsBlockedBy(Check->Actor) )
-				{
-					if( TraceFlags & TRACE_BlockActors )
-						break;
-				}
-				else
-				{
-					if( TraceFlags & TRACE_Others )
-						break;
-				}
-			}
-		}
-	}
-	if( Check )
-	{
-		Hit = *Check;
-	}
-	else
-	{
-		Hit.Time = 1.f;
-		Hit.Actor = NULL;
-	}
-
+	UBOOL Result = hp2_rs_engine_levact_single_line_check( &GHp2LevActServices, &GMem, Hash, &Hit, SourceActor, (TraceFlags & TRACE_Level) ? GetLevelInfo() : NULL, &End, &Start, &Extent, TraceFlags, ExtraNodeFlags ) != 0;
 	Mark.Pop();
-	return Check==NULL;
+	return Result;
 	unguard;
 }
 
@@ -1520,70 +1417,7 @@ FCheckResult* ULevel::MultiLineCheck
 )
 {
 	guard(ULevel::MultiLineCheck);
-	INT NumHits=0;
-	FCheckResult Hits[64];
-
-	// Check for collision with the level, and cull by the end point for speed.
-	FLOAT Dilation = 1.f;
-	INT bOnlyCheckForMovers = 0;
-	INT bHitWorld = 0;
-
-	guard(CheckWithLevel);
-	if( LevelInfo && LevelInfo->GetLevel()->Model->LineCheck( Hits[NumHits], NULL, End, Start, Extent, ExtraNodeFlags )==0 )
-	{
-		bHitWorld = 1;
-		Hits[NumHits].Actor = LevelInfo;
-		FLOAT Dist = (Hits[NumHits].Location - Start).Size();
-		Dilation = ::Min(1.f, Hits[NumHits].Time * (Dist + 5)/(Dist+0.0001f));
-		End = Start + (End - Start) * Dilation;
-		if( (Hits[NumHits].Time < 0.01f) && (Dist < 30) )
-			bOnlyCheckForMovers = 1;
-		NumHits++;
-	}
-	unguard;
-
-	// Check with actors.
-	guard(CheckWithActors);
-	if( (bCheckActors || LevelInfo) && Hash )
-	{
-		for( FCheckResult* Link=Hash->ActorLineCheck( Mem, End, Start, Extent, ExtraNodeFlags ); Link && NumHits<ARRAY_COUNT(Hits); Link=Link->GetNext() )
-		{
-			if( !bCheckActors && !Link->Actor->IsA(AMover::StaticClass()) )
-				// Only interested in Mover actors.
-				continue;
-			if ( !bOnlyCheckForMovers || Link->Actor->IsA(AMover::StaticClass()) )
-			{
-				if ( bHitWorld && Link->Actor->IsA(AMover::StaticClass()) 
-					&& (Link->Normal == Hits[0].Normal)
-					&& ((Link->Location - Hits[0].Location).SizeSquared() < 4) ) // make sure it wins compared to world
-				{
-					FVector TraceDir = End - Start;
-					FLOAT TraceDist = TraceDir.Size();
-					TraceDir = TraceDir/TraceDist;
-					Link->Location = Hits[0].Location - 2 * TraceDir;
-					Link->Time = (Link->Location - Start).Size();
-					Link->Time = Link->Time/TraceDist;
-				}
-				Link->Time *= Dilation;
-				Hits[NumHits++] = *Link;
-			}
-		}
-	}
-	unguard;
-
-	// Sort the list.
-	FCheckResult* Result = NULL;
-	if( NumHits )
-	{
-		appQsort( Hits, NumHits, sizeof(Hits[0]), (QSORT_COMPARE)CompareHits );
-		Result = new(Mem,NumHits)FCheckResult;
-		for( INT i=0; i<NumHits; i++ )
-		{
-			Result[i]      = Hits[i];
-			Result[i].Next = (i+1<NumHits) ? &Result[i+1] : NULL;
-		}
-	}
-	return Result;
+	return (FCheckResult*)hp2_rs_engine_levact_multi_line_check( &GHp2LevActServices, &GMem, Hash, &Mem, LevelInfo, &End, &Start, &Extent, bCheckActors, ExtraNodeFlags );
 	unguard;
 }
 
