@@ -15,6 +15,7 @@ pub mod model;
 pub mod mover;
 pub mod prim;
 pub mod reach;
+pub mod route;
 pub mod services;
 pub mod trace;
 pub mod vec;

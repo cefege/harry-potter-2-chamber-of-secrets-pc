@@ -1,0 +1,26 @@
+scenario
+seed 3
+farz 4f6e6b28
+reachy 4e6e6b28
+pawn 00000000 00000000 00000000 1 42200000 42a00000 42700000 1 -1
+goalpawn 42c80000 00000000 00000000 1 42200000 42a00000 42700000 1 -1
+call mf
+= ret 1
+= best 
+= cache - - - - - - - - - - - - - - - -
+call toward G 0 0
+= ret 0
+= best -
+= cache - - - - - - - - - - - - - - - -
+call toward G 1 1
+= ret 0
+= best -
+= cache - - - - - - - - - - - - - - - -
+call inv 0 00000000 0
+= ret f:00000000
+= best -
+= cache - - - - - - - - - - - - - - - -
+call random
+= ret 0
+= best -
+= cache - - - - - - - - - - - - - - - -

@@ -45,6 +45,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ActColServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2MoverServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2MeshServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/HP2RouteServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Engine.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/palette.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/ULodMesh.cpp"

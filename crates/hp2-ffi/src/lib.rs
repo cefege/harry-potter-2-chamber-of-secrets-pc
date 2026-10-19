@@ -14,6 +14,7 @@ mod engine;
 mod engine_actcol;
 mod engine_mover;
 mod engine_prim_trace;
+mod engine_route;
 mod fire_fire;
 mod fire_ice;
 mod fire_sparks;
