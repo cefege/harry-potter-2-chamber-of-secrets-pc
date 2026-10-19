@@ -7,6 +7,7 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "hp2_rs.h"
 #include "UnRender.h"
 
 #if _MSC_VER
@@ -47,11 +48,9 @@ IMPLEMENT_CLASS(UBitmap);
 //
 FPlane ENGINE_API FGetHSV( BYTE H, BYTE S, BYTE V )
 {
-	FLOAT Brightness = V * 1.4f / 255.f;
-	Brightness *= 0.7f/(0.01f + appSqrt(Brightness));
-	Brightness  = Clamp(Brightness,0.f,1.f);
-	FVector Hue = (H<86) ? FVector((85-H)/85.f,(H-0)/85.f,0) : (H<171) ? FVector(0,(170-H)/85.f,(H-85)/85.f) : FVector((H-170)/85.f,0,(255-H)/84.f);
-	return FPlane( (Hue + S/255.f * (FVector(1,1,1) - Hue)) * Brightness, 0 );
+	FPlane P;
+	hp2_rs_tex_fget_hsv( H, S, V, &P.X );
+	return P;
 }
 
 /*-----------------------------------------------------------------------------
@@ -166,36 +165,10 @@ void UTexture::Tick( FLOAT DeltaSeconds )
 
 	Prime(); 
 
-	// Update.
-	if( MaxFrameRate == 0.f )
-	{
-		// Constant update.
+	// Frame-rate catch-up math lives in hp2_rs_tex_tick_plan (hp2_engine::tex::tick_plan).
+	DWORD Ticks = hp2_rs_tex_tick_plan( MaxFrameRate, MinFrameRate, &Accumulator, DeltaSeconds );
+	for( DWORD i=0; i<Ticks; i++ )
 		ConstantTimeTick();
-	}
-	else
-	{
-		// Catch up.
-		FLOAT MinTime  = 1.f/Clamp(MaxFrameRate,0.1f,100.f);
-		FLOAT MaxTime  = 1.f/Clamp(MinFrameRate,0.1f,100.f);
-		Accumulator   += DeltaSeconds;
-		if( Accumulator < MinTime )
-		{
-			// Skip update.
-		}
-		else if( Accumulator < MaxTime )
-		{
-			// Normal update.
-			ConstantTimeTick();
-			Accumulator = 0;
-		}
-		else
-		{
-			ConstantTimeTick();
-			Accumulator -= MaxTime;
-			if( Accumulator > MaxTime )
-				Accumulator = MaxTime;
-		}
-	}
 	unguardobj;
 }
 
@@ -204,8 +177,9 @@ void UTexture::Tick( FLOAT DeltaSeconds )
 //
 void UTexture::Prime()
 {
-	// Regular priming.
-	while( PrimeCurrent < PrimeCount )
+	// Regular priming; step count from hp2_rs_tex_prime_steps.
+	DWORD Steps = hp2_rs_tex_prime_steps( PrimeCurrent, PrimeCount );
+	for( DWORD i=0; i<Steps; i++ )
 	{
 		PrimeCurrent++;
 		ConstantTimeTick();
@@ -428,6 +402,23 @@ void UTexture::Init( INT InUSize, INT InVSize )
 	unguardobj;
 }
 
+#define MAX_TEX_MIP_DESCS 32
+
+// Fill one TexMipDesc per mip for the Rust texture helpers.
+static INT FillTexMipDescs( TArray<FMipmap>& Mips, TexMipDesc* Descs )
+{
+	INT Count = Mips.Num();
+	check(Count<=MAX_TEX_MIP_DESCS);
+	for( INT i=0; i<Count; i++ )
+	{
+		Descs[i].data   = Mips(i).DataArray.Num() ? &Mips(i).DataArray(0) : NULL;
+		Descs[i].len    = Mips(i).DataArray.Num();
+		Descs[i].size_u = Mips(i).USize;
+		Descs[i].size_v = Mips(i).VSize;
+	}
+	return Count;
+}
+
 //
 // Generate all mipmaps for a texture.  Call this after setting the texture's palette.
 // Erik changed: converted to simpler 2x2 box filter with 24-bit color intermediates.
@@ -439,14 +430,9 @@ void UTexture::CreateMips( UBOOL FullMips, UBOOL Downsample )
 	check(Palette!=NULL);
 	FColor* Colors = GetColors(); 
 
-	// Create average color.
-	FPlane C(0,0,0,0);
-	if( Format == TEXF_P8 )
-	{
-		for( INT i=0; i<Mips(0).DataArray.Num(); i++ )
-			C += Colors[Mips(0).DataArray(i)].Plane();
-	}
-	MipZero = FColor(C/Mips(0).DataArray.Num());
+	// Create average color (hp2_rs_tex_mip_zero; non-P8 gives zero).
+	MipZero.Int4 = hp2_rs_tex_mip_zero( Colors, Mips(0).DataArray.Num() ? &Mips(0).DataArray(0) : NULL,
+		Mips(0).DataArray.Num(), Format==TEXF_P8 );
 
 	// Empty any mipmaps.
 	if( Mips.Num() > 1 )
@@ -470,103 +456,10 @@ void UTexture::CreateMips( UBOOL FullMips, UBOOL Downsample )
 		}
 		if( Downsample )
 		{
-			// Build each mip from the next-larger mip.
-			FColor* TrueSource = NULL;
-			FColor* TrueDest   = NULL;		
-			for( INT MipLevel=1; MipLevel<Mips.Num(); MipLevel++ )
-			{
-				FMipmap&  Src        = Mips(MipLevel-1);
-				FMipmap&  Dest       = Mips(MipLevel  );
-				INT       ThisUTile  = Src.USize;
-				INT       ThisVTile  = Src.VSize;
-
-				// Cascade down the mip sequence with truecolor source and destination textures.			
-				TrueSource = TrueDest; // Last destination is current source..
-				TrueDest = new(TEXT("FColor"))FColor[Src.USize * Src.VSize];
-				if( !(PolyFlags & PF_Masked) )
-				{
-					// Source coordinate masking important for degenerate mipmap sizes.
-					DWORD MaskU = (ThisUTile-1);
-					DWORD MaskV = (ThisVTile-1);
-					INT   UD    = (1 & MaskU);
-					INT   VD    = (1 & MaskV)*ThisUTile;
-
-					// Non-masked mipmap.
-					for( INT V=0; V<Dest.VSize; V++ )
-					{
-						for( INT U=0; U<Dest.USize; U++)
-						{
-							// Get 4 pixels from a one-higher-level mipmap.
-							INT TexCoord = U*2 + V*2*ThisUTile;
-							FVector C(0,0,0);
-							if( TrueSource )
-							{	
-								C += TrueSource[ TexCoord +  0 +  0 ].Plane();
-								C += TrueSource[ TexCoord + UD +  0 ].Plane();
-								C += TrueSource[ TexCoord +  0 + VD ].Plane();
-								C += TrueSource[ TexCoord + UD + VD ].Plane();
-							}
-							else
-							{
-								C += Colors[ Src.DataArray( TexCoord +  0 +  0 ) ].Plane();
-								C += Colors[ Src.DataArray( TexCoord + UD +  0 ) ].Plane();
-								C += Colors[ Src.DataArray( TexCoord +  0 + VD ) ].Plane(); 
-								C += Colors[ Src.DataArray( TexCoord + UD + VD ) ].Plane();
-							}
-							FColor MipTexel;
-							TrueDest[V*Dest.USize+U] = MipTexel = FColor( C/4.f );
-							Dest.DataArray(V*Dest.USize+U) = Palette->BestMatch( MipTexel, 0 );
-						}
-					}
-				}
-				else
-				{
-					// Masked mipmap.
-					DWORD MaskU = (ThisUTile-1);
-					DWORD MaskV = (ThisVTile-1);
-					for( INT V=0; V<Dest.VSize; V++ )
-					{
-						for( INT U=0; U<Dest.USize; U++) 
-						{
-							INT F = 0;
-							BYTE B;
-							FPlane C(0,0,0,0);
-							INT TexCoord = V*2*ThisUTile + U*2;
-							for( INT I=0; I<2; I++ )
-							{
-								for( INT J=0; J<2; J++ )
-								{
-									B = Src.DataArray(TexCoord + (I&MaskU) + (J&MaskV)*ThisUTile);
-									if( B )
-									{
-										F++;
-										if( TrueSource )
-											C += TrueSource[TexCoord + (I&MaskU) + (J&MaskV)*ThisUTile].Plane();
-										else
-											C += Colors[B].Plane();
-									}
-								}
-							}						
-
-							// One masked texel or less becomes a non-masked texel.
-							if( F >= 2 )
-							{
-								FColor MipTexel = TrueDest[V*Dest.USize+U] = FColor( C / F );
-								Dest.DataArray(V*Dest.USize+U) = Palette->BestMatch( MipTexel, 1 );
-							}
-							else
-							{
-								TrueDest[V*Dest.USize+U] = FColor(0,0,0);
-								Dest.DataArray(V*Dest.USize+U) = 0;
-							}
-						}
-					}
-				}
-				if( TrueSource )
-					delete TrueSource; 
-			}
-			if( TrueDest )
-				delete TrueDest;
+			// Build each mip from the next-larger mip (hp2_rs_tex_create_mips_downsample).
+			TexMipDesc Descs[MAX_TEX_MIP_DESCS];
+			FillTexMipDescs( Mips, Descs );
+			hp2_rs_tex_create_mips_downsample( Colors, Descs, Mips.Num(), (PolyFlags & PF_Masked) ? 1 : 0 );
 		}
 	}
 	unguardobj;
@@ -580,23 +473,10 @@ void UTexture::CreateMips( UBOOL FullMips, UBOOL Downsample )
 void UTexture::CreateColorRange()
 {
 	guard(UTexture::CreateColorRange);
-	if( Palette )
-	{
-		MaxColor = FColor(0,0,0,0);
-		FColor* Colors = GetColors();
-		for( INT i=0; i<Mips.Num(); i++ )
-		{
-			for( INT j=0; j<Mips(i).DataArray.Num(); j++ )
-			{
-				FColor& Color = Colors[Mips(i).DataArray(j)];
-				MaxColor.R    = ::Max(MaxColor.R, Color.R);
-				MaxColor.G    = ::Max(MaxColor.G, Color.G);
-				MaxColor.B    = ::Max(MaxColor.B, Color.B);
-				MaxColor.A    = ::Max(MaxColor.A, Color.A);
-			}
-		}
-	}
-	else MaxColor = FColor(255,255,255,255);
+	TexMipDesc Descs[MAX_TEX_MIP_DESCS];
+	INT Count = FillTexMipDescs( Mips, Descs );
+	// Palette-less textures get opaque white; otherwise hp2_rs_tex_color_range.
+	MaxColor.Int4 = hp2_rs_tex_color_range( Palette ? GetColors() : NULL, Descs, Count );
 	unguardobj;
 }
 
@@ -649,25 +529,7 @@ IMPLEMENT_CLASS(UPalette);
 void UPalette::FixPalette()
 {
 	guard(UPalette::FixPalette);
-
-	FColor TempColors[256];
-	for( int i=0; i<256; i++ )
-		TempColors[i] = Colors(0);
-
-	for( int iColor=0; iColor<8; iColor++ )
-	{
-		int iStart = (iColor==0) ? 1 : 32*iColor;
-		for( int iShade=0; iShade<28; iShade++ )
-			TempColors[16 + iColor + (iShade<<3)] = Colors(iStart + iShade);
-
-	}
-	for( int i=0; i<256; i++ )
-	{
-		Colors(i) = TempColors[i];
-		Colors(i).A = i+0x10;
-	}
-	Colors(0).A=0;
-
+	hp2_rs_tex_fix_palette( &Colors(0) );
 	unguardobj;
 }
 
@@ -677,36 +539,7 @@ void UPalette::FixPalette()
 BYTE UPalette::BestMatch( FColor Color, INT First )
 {
 	guard(UPalette::BestMatch);
-	INT BestDelta         = MAXINT;
-	INT BestUnscaledDelta = MAXINT;
-	INT BestColor         = First;
-	INT TexRed            = Color.R;
-	INT TexBlue           = Color.B;
-	INT TexGreen          = Color.G;
-	for( INT TestColor=First; TestColor<NUM_PAL_COLORS; TestColor++ )
-	{
-		// By comparing unscaled green, saves about 4 out of every 5 full comparisons.
-		FColor* ColorPtr   = &Colors(TestColor);
-		INT     GreenDelta = Square(ColorPtr->G - TexGreen);
-
-		// Same as comparing 8*GreenDelta with BestDelta.
-		if( GreenDelta < BestUnscaledDelta )
-		{
-			INT Delta = 
-			(
-				8 * GreenDelta                     +
-				4 * Square(ColorPtr->R - TexRed  ) +
-				1 * Square(ColorPtr->B - TexBlue )
-			);
-			if( Delta < BestDelta ) 
-			{
-				BestColor         = TestColor;
-				BestDelta         = Delta;
-				BestUnscaledDelta = (Delta + 7) >> 3; 
-			}
-		}
-	}
-	return BestColor;
+	return hp2_rs_tex_best_match( &Colors(0), Color.Int4, First );
 	unguardobj;
 }
 
@@ -1002,28 +835,10 @@ void FTextureInfo::Unload()
 }
 void FTextureInfo::CacheMaxColor()
 {
-	if( Format==TEXF_RGBA7 && GET_COLOR_DWORD(*MaxColor)==0xffffffff )
-	{
-		DWORD* Tmp = (DWORD*)Mips[0]->DataPtr;
-		DWORD  Max = 0x01010101;
-		for( INT i=0; i<VClamp; i++ )
-		{
-			for( INT j=0; j<UClamp; j++ )
-			{
-				DWORD Flow = (Max - *Tmp) & 0x80808080;
-				if( Flow )
-				{
-					DWORD MaxMask = Flow - (Flow >> 7);
-					Max = (*Tmp & MaxMask) | (Max & (0x7f7f7f7f - MaxMask)) ;
-				}
-				Tmp++;
-			}
-			Tmp += USize - UClamp;
-		}
-		check(!(Max&0x80808080));
-		GET_COLOR_DWORD(*MaxColor) = Max;
-		*MaxColor = FColor(MaxColor->B*2,MaxColor->G*2,MaxColor->R*2,255);
-	}
+	// RGBA7 max-colour scan and FColor(B*2,G*2,R*2,255) live in hp2_rs_tex_cache_max_color.
+	// Mip 0 is usize*vclamp DWORDs, so usize*vclamp*4 bytes bound every read.
+	MaxColor->Int4 = hp2_rs_tex_cache_max_color( Format, MaxColor->Int4, (const BYTE*)Mips[0]->DataPtr,
+		USize*VClamp*4, USize, UClamp, VClamp );
 }
 
 
