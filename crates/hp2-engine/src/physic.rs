@@ -482,7 +482,7 @@ pub unsafe fn mount(
 
 /// `TwoWallAdjust(DesiredDir, Delta, HitNormal, OldHitNormal, HitTime)`
 /// (`AActor.h`).
-fn two_wall_adjust(
+pub(crate) fn two_wall_adjust(
     desired_dir: FVector,
     delta: &mut FVector,
     hit_normal: FVector,

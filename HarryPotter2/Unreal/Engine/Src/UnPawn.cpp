@@ -13,6 +13,9 @@
 #include "EnginePrivate.h"
 #include "UnNet.h"
 #include "FConfigCacheIni.h"
+#include "HP2PawnServices.h"
+#include "Hp2PawnReachServices.h"
+#include "Hp2PawnSenseServices.h"
 
 namespace
 {
@@ -1823,26 +1826,7 @@ IMPLEMENT_FUNCTION( APawn, AI_PollTurnTo, execPollTurnTo);
 //=================================================================================
 void APawn::setMoveTimer(FLOAT MoveSize)
 {
-	guard(APawn::setMoveTimer);
-
-	FLOAT MaxSpeed = 200.f; //safety in case called with Physics = PHYS_None (shouldn't be)
-
-	if (Physics == PHYS_Walking)
-		MaxSpeed = GroundSpeed;
-	else if (Physics == PHYS_Falling)
-		MaxSpeed = GroundSpeed;
-	else if (Physics == PHYS_Flying)
-		MaxSpeed = AirSpeed;
-	else if (Physics == PHYS_Swimming)
-		MaxSpeed = WaterSpeed;
-	else if (Physics == PHYS_Spider)
-		MaxSpeed = GroundSpeed;
-
-	if ( DesiredSpeed * MaxSpeed == 0.f )
-		MoveTimer = 0.5;
-	else
-		MoveTimer = 1.f + 1.3f * MoveSize/(DesiredSpeed * MaxSpeed); 
-	unguard;
+	hp2_rs_engine_pawn_sense_set_move_timer( this, MoveSize );
 }
 
 /* moveToward()
@@ -1851,129 +1835,7 @@ move Actor toward a point.  Returns 1 if Actor reached point
 */
 int APawn::moveToward(const FVector &Dest)
 {
-	guard(APawn::moveToward);
-	FVector Direction = Dest - Location;
-	if (Physics == PHYS_Walking) 
-		Direction.Z = 0.f;
-	else if (Physics == PHYS_Falling)
-	{
-		// use air control if low grav
-		if ( Region.Zone->ZoneGravity.Z > 0.9 * ((AZoneInfo *)Region.Zone->GetClass()->GetDefaultObject())->ZoneGravity.Z )
-		{
-			Direction.Z = 0;
-			Acceleration = Direction.SafeNormal();
-			Acceleration *= AccelRate;
-			if ( (Velocity.Z < 0) && (Location.Z + 100 < Dest.Z) )
-			{
-				if( Physics == PHYS_Walking ) //This condition may want to be removed, and just set the desiredrot regardless of physics.  Same for the other spots in this function.
-					DesiredRotation.Yaw = Rotation.Yaw;
-				return 1;
-			}
-		}
-		return 0;
-	}
-
-	if ( MoveTarget && MoveTarget->IsA(AInventory::StaticClass()) 
-		 && (Abs(Location.Z - MoveTarget->Location.Z) < CollisionHeight)
-		 && (Square(Location.X - MoveTarget->Location.X) + Square(Location.Y - MoveTarget->Location.Y) < Square(CollisionRadius))
-	   )
-		 MoveTarget->eventTouch(this);
-	
-	FLOAT Distance = Direction.Size();
-
-	INT bGlider = ( !bCanStrafe && ((Physics == PHYS_Flying) || (Physics == PHYS_Swimming)) ); 
-
-	//if(   (Direction.X * Direction.X + Direction.Y * Direction.Y < 256)
-	//   && (Abs(Direction.Z) < ::Max(48.f, CollisionHeight))
-	//  )
-
-	FLOAT   speed = Velocity.Size(); 
-	//SizeSquared();
-	FVector MovedVector = Location - OldLocation;
-	//Note: you can only be not moving if you have a velocity.  If you are just starting your moveto and dont have a velocity yet, it will think you're not moving.
-	UBOOL   bIsMoving = (MovedVector != FVector(0,0,0))  ||  speed == 0;
-
-	//if(   ( ((Location-OldLocation)|Direction) < 0)
-	//   && (Abs(Direction.Z) < ::Max(48.f, CollisionHeight))
-	//  )
-	FLOAT DirectionSq = Direction.X * Direction.X + Direction.Y * Direction.Y;
-	FLOAT MovedVectorSq = MovedVector.X * MovedVector.X + MovedVector.Y * MovedVector.Y;
-
-	if(   (bIsMoving ? (   (MovedVector|(Dest-OldLocation)) > 0 && (MovedVector|Direction) < 0   //We moved, so see if we passed our Dest.  The first dot makes sure you're moving towards Dest, the second dot is negative if you passed Dest.
-	                    && DirectionSq/3/3 < MovedVectorSq //also, you can only make it to your target if you're close to your target ( relate how much you just moved to how far you are from the target.  The /3 is just a rough number. )
-	                   )
-	                 : ( DirectionSq < 16 ) //We're not moving, see if we're within 4 units, or so.
-	      )
-	   && (Abs(Direction.Z) < ::Max(48.f, CollisionHeight)
-	      )
-	  )
-	{
-		if ( !bGlider )
-			Acceleration = FVector(0,0,0);
-		//May want to try a MoveActor here at some point.
-		if( Physics == PHYS_Walking )
-			DesiredRotation.Yaw = Rotation.Yaw;
-		return 1;
-	}
-	else if ( bGlider )
-	{
-		Direction = Rotation.Vector();
-	}
-	else if ( Distance > 0.f )
-	{
-		Direction = Direction/Distance;
-	}
-
-	Acceleration = Direction * AccelRate;
-
-	//Also, if we're not moving, dont do the full wait timer bit
-	// This doens't work, cause if your velocity is zero because you just started a move to, it'll think your not moving.
-	// This needs some work
-	if( !bIsMoving )
-		MoveTimer = ::Min( 0.25f, MoveTimer );
-
-	if (MoveTimer < 0.f)
-	{
-		if( Physics == PHYS_Walking )
-			DesiredRotation.Yaw = Rotation.Yaw;
-		return 1;
-	}
-
-	if (MoveTarget && MoveTarget->IsA(APawn::StaticClass()))
-	{
-		if (Distance < CollisionRadius + MoveTarget->CollisionRadius + 0.8 * MeleeRange)
-		{
-			if( Physics == PHYS_Walking )
-				DesiredRotation.Yaw = Rotation.Yaw;
-			return 1;
-		}
-		return 0;
-	}
-
-	if ( !bGlider && (speed > 100) )
-	{
-		FVector VelDir = Velocity/speed;
-		Acceleration -= 0.2f * (1 - (Direction | VelDir)) * speed * (VelDir - Direction); 
-	}
-
-	if (Distance < 1.4 * AvgPhysicsTime * speed )
-	{
-		if (!bReducedSpeed) //haven't reduced speed yet
-		{
-			DesiredSpeed = 0.5f * DesiredSpeed;
-			bReducedSpeed = 1;
-		}
-		if (speed > 0)
-			DesiredSpeed = Min(DesiredSpeed, 200.f/speed);
-		if ( bGlider ) 
-		{
-			if( Physics == PHYS_Walking )
-				DesiredRotation.Yaw = Rotation.Yaw;
-			return 1;
-		}
-	}
-	return 0;
-	unguard;
+	return hp2_rs_engine_pawn_sense_move_toward( &GHp2PawnSenseServices, this, &Dest );
 }
 
 /* rotateToward()
@@ -1982,211 +1844,17 @@ rotate Actor toward a point.  Returns 1 if target rotation achieved.
 */
 int APawn::rotateToward(const FVector &FocalPoint)
 {
-	guard(APawn::rotateToward);
-	if (Physics == PHYS_Spider)
-		return 1;
-	FVector Direction = FocalPoint - Location;
-
-	// Rotate toward destination
-	DesiredRotation = Direction.Rotation();
-	DesiredRotation.Yaw = DesiredRotation.Yaw & 65535;
-	if ( (Physics == PHYS_Walking) && (!MoveTarget || !MoveTarget->IsA(APawn::StaticClass())) )
-		DesiredRotation.Pitch = 0;
-
-	//only base success on Yaw 
-	int success = (Abs(DesiredRotation.Yaw - (Rotation.Yaw & 65535)) < 100);
-	if (!success) //check if on opposite sides of zero
-		success = (Abs(DesiredRotation.Yaw - (Rotation.Yaw & 65535)) > 65535-100);	
-
-	return success;
-	unguard;
+	return hp2_rs_engine_pawn_sense_rotate_toward( &GHp2PawnSenseServices, this, &FocalPoint );
 }
 
 DWORD APawn::LineOfSightTo(AActor *Other, int bShowSelf)
 {
-	guard(APawn::LineOfSightTo);
-	if (!Other)
-		return 0;
-
-	//FIXME - when PVS, only do this test if in same PVS
-	if (Other == Enemy)
-		bShowSelf = 0;
-	if ( bShowSelf ) //only players do showself
-		bLOSflag = !bLOSflag;
-
-	FLOAT distSq = (Other->Location - Location).SizeSquared();
-	FLOAT maxdistSq; 
-
-	if (bShowSelf)
-	{
-		if ( Other->IsA(APawn::StaticClass()) )
-		{
-			maxdistSq = SightRadius * Min(1.f, (FLOAT)((APawn *)Other)->Visibility * 0.0078125f);
-			if ( bIsPlayer )
-				maxdistSq = Min(16000000.f, maxdistSq * maxdistSq);
-			else
-				maxdistSq = Min(12000000.f, maxdistSq * maxdistSq);
-		}
-		else
-			maxdistSq = SightRadius * SightRadius;
-		if (distSq > maxdistSq)
-			return 0;
-		//check field of view
-		FVector SightDir = (Other->Location - Location).SafeNormal();
-		Stimulus = (SightDir | Rotation.Vector()) - PeripheralVision;
-		if ( Stimulus > 0 )
-			Stimulus = 0.8f* Stimulus + 0.2f;
-		else
-			Stimulus = 0.17f * Stimulus + 0.2f;
-		if ( Stimulus <= 0 )
-			return 0;
-		FLOAT heightMod = Abs(Other->Location.Z - Location.Z)/(::Max(1.f, Skill + 1));
-		distSq += heightMod * heightMod;
-		distSq = distSq/(Stimulus * Stimulus);
-		if (distSq > maxdistSq)
-			return 0;
-		Stimulus = 1;
-	}
-	else
-	{
-		if ( bIsPlayer )
-		{
-			if ( Other->IsA(APawn::StaticClass()) )
-			{
-				maxdistSq = 5000 * Min(1.f, (FLOAT)(((APawn *)Other)->Visibility + 16) * 0.015f);
-				maxdistSq = Min(25000000.f, maxdistSq * maxdistSq);
-			}
-			else
-				maxdistSq = 16000000.f;
-		}
-		else if ( Other->IsA(APawn::StaticClass()) )
-		{
-			maxdistSq = 4000 * Min(1.f, (FLOAT)(((APawn *)Other)->Visibility + 16) * 0.015f);
-			maxdistSq = Min(16000000.f, maxdistSq * maxdistSq);
-		}
-		else
-			maxdistSq = 9000000.f;
-		if (distSq > maxdistSq)
-			return 0;
-	}
-
-	FVector ViewPoint = Location;
-	ViewPoint.Z += BaseEyeHeight; //look from eyes
-
-	if (Other == Enemy)
-	{
-		if ( GetLevel()->Model->FastLineCheck(Other->Location, ViewPoint) )
-		{
-			LastSeeingPos = Location;
-			LastSeenPos = Enemy->Location;
-			return 1;
-		}
-		if ( GetLevel()->Model->FastLineCheck(Other->Location, Location) )
-		{
-			LastSeeingPos = Location;
-			LastSeenPos = Enemy->Location;
-			return 1;
-		}
-		if ( distSq > 1000000.f)
-			return 0;
-	}
-	else if ( distSq > 1000000.f ) 
-	{
-		if ( Other->IsA(APawn::StaticClass()) )
-		{
-			if ( !bLOSflag && (distSq > 0.5 * maxdistSq) )
-				return 0;
-			if ( !bIsPlayer && (appFrand() < 0.5) )
-				return 0;
-		}
-		return ( GetLevel()->Model->FastLineCheck(Other->Location, ViewPoint) );
-	}		
-	
-	//try viewpoint to head
-	FVector OtherBody = Other->Location;
-	if ( !bShowSelf || !bLOSflag )
-	{
-		OtherBody.Z += Other->CollisionHeight * 0.8f;
-		if ( GetLevel()->Model->FastLineCheck(OtherBody, ViewPoint) )
-			return 1;
-	}
-
-	if ( (distSq > 250000) || !Other->IsA(APawn::StaticClass()) )
-		return 0;
-
-	//try checking sides - look at dist to four side points, and cull furthest and closest
-	FVector Points[4];
-	Points[0] = Other->Location - FVector(Other->CollisionRadius, -1 * Other->CollisionRadius, 0);
-	Points[1] = Other->Location + FVector(Other->CollisionRadius, Other->CollisionRadius, 0);
-	Points[2] = Other->Location - FVector(Other->CollisionRadius, Other->CollisionRadius, 0);
-	Points[3] = Other->Location + FVector(Other->CollisionRadius, -1 * Other->CollisionRadius, 0);
-	int imin = 0;
-	int imax = 0;
-	FLOAT currentmin = Points[0].SizeSquared(); 
-	FLOAT currentmax = currentmin; 
-	for (INT i=1;i<4;i++)
-	{
-		FLOAT nextsize = Points[i].SizeSquared(); 
-		if (nextsize > currentmax)
-		{
-			currentmax = nextsize;
-			imax = i;
-		}
-		else if (nextsize < currentmin)
-		{
-			currentmin = nextsize;
-			imin = i;
-		}
-	}
-
-	int bSkip = bLOSflag;
-	for (INT i=0;i<4;i++)
-		if ( (i != imin) && (i != imax) )
-		{
-			if ( bSkip && bShowSelf )
-				bSkip = 0;
-			else
-			{
-				bSkip = 1;
-				if ( GetLevel()->Model->FastLineCheck(Points[i], ViewPoint) )
-					return 1;
-			}
-		}
-
-	return 0;
-	unguard;
+	return hp2_rs_engine_pawn_sense_line_of_sight_to( &GHp2PawnSenseServices, this, Other, bShowSelf );
 }
 
 int APawn::CanHear(FVector NoiseLoc, FLOAT Loudness, APawn *Other)
 {
-	guard(APawn::CanHear);
-
-	FLOAT DistSq = (Location - NoiseLoc).SizeSquared();
-
-	if ( !bIsPlayer || !GetLevel()->GetLevelInfo()->Game->bTeamGame || !Other->bIsPlayer
-		|| !PlayerReplicationInfo || !Other->PlayerReplicationInfo 
-		|| (PlayerReplicationInfo->Team != Other->PlayerReplicationInfo->Team) )
-	{
-		if ( DistSq > 4000000.f * Loudness * Loudness)
-			return 0;
-		if ( DistSq == 0.f )
-			return 1;
-
-		//FIXME - provide some hearing out of line of sight? (maybe PVS)
-		// Note - a loudness of 1.f is a typical loud noise
-
-		FLOAT perceived = Min(1200000.f/DistSq, 2.f);
-			
-		Stimulus = Loudness * perceived + Alertness * Min(0.5f,perceived); 	
-		if (Stimulus < HearingThreshold)
-			return 0;
-	}	
-	else if ( DistSq > 16000000.f * Loudness * Loudness )
-		return 0;
-
-	//FIXME - check PVS
-	return ( GetLevel()->Model->FastLineCheck(NoiseLoc, Location) );
-	unguard;
+	return hp2_rs_engine_pawn_sense_can_hear( &GHp2PawnSenseServices, this, &NoiseLoc, Loudness, Other );
 }
 
 /* Send a HearNoise() message to all Pawns which could possibly hear this noise
@@ -2196,76 +1864,11 @@ void AActor::CheckNoiseHearing(FLOAT Loudness)
 {
 	guard(AActor::CheckNoiseHearing);
 
-	APawn *NoiseOwner = this->Instigator;
-	if ( !NoiseOwner )
+	if ( !this->Instigator )
 		return;
 
 	clock(GetLevel()->SeePlayer);
-	float CurrentTime = GetLevel()->TimeSeconds.GetFloat();
-
-	// allow only one noise per 0.2f seconds from a given instigator & area (within 50 units) unless much louder 
-	if ( (NoiseOwner->noise1time > CurrentTime - 0.2f)
-		 && ((NoiseOwner->noise1spot - Location).SizeSquared() < 2500) 
-		 && (NoiseOwner->noise1loudness >= 0.9 * Loudness) )
-	{
-		unclock(GetLevel()->SeePlayer);
-		return;
-	}
-
-	if ( (NoiseOwner->noise2time > CurrentTime - 0.2f)
-		 && ((NoiseOwner->noise2spot - Location).SizeSquared() < 2500) 
-		 && (NoiseOwner->noise2loudness >= 0.9 * Loudness) )
-	{
-		unclock(GetLevel()->SeePlayer);
-		return;
-	}
-
-	// put this noise in a slot
-	if ( NoiseOwner->noise1time < CurrentTime - 0.18f )
-	{
-		NoiseOwner->noise1time = CurrentTime;
-		NoiseOwner->noise1spot = Location;
-		NoiseOwner->noise1loudness = Loudness;
-	}
-	else if ( NoiseOwner->noise2time < CurrentTime - 0.18f )
-	{
-		NoiseOwner->noise2time = CurrentTime;
-		NoiseOwner->noise2spot = Location;
-		NoiseOwner->noise2loudness = Loudness;
-	}
-	else if ( ((NoiseOwner->noise1spot - Location).SizeSquared() < 2500) 
-			  && (NoiseOwner->noise1loudness <= Loudness) ) 
-	{
-		NoiseOwner->noise1time = CurrentTime;
-		NoiseOwner->noise1spot = Location;
-		NoiseOwner->noise1loudness = Loudness;
-	}
-	else if ( NoiseOwner->noise2loudness <= Loudness ) 
-	{
-		NoiseOwner->noise1time = CurrentTime;
-		NoiseOwner->noise1spot = Location;
-		NoiseOwner->noise1loudness = Loudness;
-	}
-
-	if ( !NoiseOwner->bIsPlayer && (!NoiseOwner->Enemy || !NoiseOwner->Enemy->bIsPlayer) )
-	{
-		// non-player related noise. Inform only others of same class
-		for ( APawn *next=GetLevel()->GetLevelInfo()->PawnList; next!=NULL; next=next->nextPawn )
-			if ( (next != this->Instigator) && next->IsProbing(NAME_HearNoise)
-				&& (next->IsA(GetClass()) || this->IsA(next->GetClass())) 
-				&& next->CanHear(Location, Loudness, NoiseOwner) )
-				next->eventHearNoise(Loudness, this);
-		unclock(GetLevel()->SeePlayer);
-		return;
-	}
-
-	// all pawns can hear this noise
-	for ( APawn *P=GetLevel()->GetLevelInfo()->PawnList; P!=NULL; P=P->nextPawn )
-		if ( !P->IsA(APlayerPawn::StaticClass())
-			 && (P != this->Instigator) && P->IsProbing(NAME_HearNoise)
-			 && P->CanHear(Location, Loudness, NoiseOwner) )
-			 P->eventHearNoise(Loudness, this);
-
+	hp2_rs_engine_pawn_sense_check_noise_hearing( &GHp2PawnSenseServices, this, Loudness );
 	unclock(GetLevel()->SeePlayer);
 	unguard;
 }
@@ -2277,12 +1880,9 @@ void APawn::CheckEnemyVisible()
 	clock(GetLevel()->SeePlayer);
 	if ( Enemy )
 	{
-		check(Enemy->IsValid());  
-		if ( !LineOfSightTo(Enemy) )
-			eventEnemyNotVisible();
-		else
-			LastSeenTime = GetLevel()->TimeSeconds.GetFloat();
+		check(Enemy->IsValid());
 	}
+	hp2_rs_engine_pawn_sense_check_enemy_visible( &GHp2PawnSenseServices, this );
 	unclock(GetLevel()->SeePlayer);
 
 	unguard;
@@ -2316,285 +1916,27 @@ void APawn::ShowSelf()
 
 int APawn::actorReachable(AActor *Other, int bKnowVisible)
 {
-	guard(AActor::actorReachable);
-
-	if (!Other)
-		return 0;
-
-	FVector Dir = Other->Location - Location;
-	FLOAT distsq = Dir.SizeSquared();
-	checkSlow(Other->Region.Zone!=NULL);
-
-	if ( !Other->IsA(APawn::StaticClass()) )
-	{
-		if ( !GIsEditor ) //only look past 800 for pawns
-		{
-			if(distsq > 640000.f) //non-pawns must be within 800.0
-				return 0;
-			if (Other->Region.Zone->bPainZone 
-				&& (Other->Region.Zone->DamageType != ReducedDamageType) ) 
-				return 0;
-		}
-	}
-	else if ( ((APawn *)Other)->FootRegion.Zone->bPainZone  
-				&& (((APawn *)Other)->FootRegion.Zone->DamageType != ReducedDamageType) ) 
-		return 0;
-	
-	if ( Other->Region.Zone->bWaterZone && !bCanSwim)
-		return 0;
-
-	//check other visible
-	if ( !bKnowVisible )
-	{
-		FCheckResult Hit(1.f);
-		FVector	ViewPoint = Location;
-		ViewPoint.Z += BaseEyeHeight; //look from eyes
-		GetLevel()->SingleLineCheck(Hit, this, Other->Location, ViewPoint, TRACE_VisBlocking);
-		if( Hit.Time!=1.f && Hit.Actor!=Other )
-			return 0;
-	}
-
-	if (Other->IsA(APawn::StaticClass()))
-	{
-		FLOAT Threshold = CollisionRadius + ::Min(1.5f * CollisionRadius, MeleeRange) + Other->CollisionRadius;
-		FLOAT Thresholdsq = Threshold * Threshold;
-		if (distsq <= Thresholdsq)
-			return 1;
-		else if(distsq > 640000.f)
-		{
-			FLOAT dist = Dir.Size();
-			Threshold = ::Max(dist - 800.f, Threshold);
-		}
-		FVector realLoc = Location;
-		FVector aPoint = Other->Location; //adjust destination
-		if ( GetLevel()->FarMoveActor(this, Other->Location, 1) )
-		{
-			aPoint = Location;
-			GetLevel()->FarMoveActor(this, realLoc,1,1);
-		}
-		return Reachable(aPoint, Threshold, Other);
-	}
-	else
-	{
-		FLOAT Threshold = 15.f;
-		if ( Other->IsA(AInventory::StaticClass()) || Other->IsA(ATrigger::StaticClass()) )
-			Threshold = CollisionRadius + Other->CollisionRadius - 2;
-		FVector realLoc = Location;
-		FVector aPoint = Other->Location;
-		if ( GetLevel()->FarMoveActor(this, Other->Location, 1) )
-		{
-			aPoint = Location; //adjust destination
-			GetLevel()->FarMoveActor(this, realLoc,1,1);
-		}
-		if ( Other->bBlockActors || Other->IsA(AWarpZoneMarker::StaticClass()) )
-			return Reachable(aPoint, Threshold, Other);
-		else
-			return Reachable(aPoint, Threshold, NULL);
-	}
-	return 0;
-	unguard;
+	return hp2_rs_engine_pawn_reach_actor_reachable( &GHp2PawnReachServices, this, Other, bKnowVisible );
 }
 
 int APawn::pointReachable(FVector aPoint, int bKnowVisible)
 {
-	guard(AActor::pointReachable);
-
-	if (!GIsEditor)
-	{
-		FVector Dir2D = aPoint - Location;
-		Dir2D.Z = 0.f;
-		if (Dir2D.SizeSquared() > 640000.f) //points must be within 800.f
-			return 0;
-	}
-
-	FPointRegion NewRegion = GetLevel()->Model->PointRegion( Level, aPoint );
-	if (!Region.Zone->bWaterZone && !bCanSwim && NewRegion.Zone->bWaterZone)
-		return 0;
-
-	if (!FootRegion.Zone->bPainZone && NewRegion.Zone->bPainZone
-		&& (NewRegion.Zone->DamageType != ReducedDamageType) )
-		return 0;
-
-	//check aPoint visible
-	if ( !bKnowVisible )
-	{
-		FCheckResult Hit(1.f);
-		FVector	ViewPoint = Location;
-		ViewPoint.Z += BaseEyeHeight; //look from eyes
-		if ( !GetLevel()->Model->FastLineCheck(aPoint, ViewPoint) )
-			return 0;
-	}
-
-	FVector realLoc = Location;
-	if ( GetLevel()->FarMoveActor(this, aPoint, 1) )
-	{
-		aPoint = Location; //adjust destination
-		GetLevel()->FarMoveActor(this, realLoc,1,1);
-	}
-	return Reachable(aPoint, 15.f, NULL);
-
-	unguard;
+	return hp2_rs_engine_pawn_reach_point_reachable( &GHp2PawnReachServices, this, &aPoint, bKnowVisible );
 }
 
 int APawn::Reachable(FVector aPoint, FLOAT Threshold, AActor* GoalActor)
 {
-	guard(AActor::Reachable);
-
-	if ( Region.Zone->bWaterZone )
-		return swimReachable(aPoint, Threshold, 0, GoalActor);
-	else if ( (Physics == PHYS_Walking) || (Physics == PHYS_Swimming) ) 
-		return walkReachable(aPoint, Threshold, 0, GoalActor);
-	else if (Physics == PHYS_Flying)
-		return flyReachable(aPoint, Threshold, 0, GoalActor);
-	else //if (Physics == PHYS_Falling)
-		return 0; // jumpReachable(aPoint, Threshold, 0, GoalActor);
-
-	unguard;
+	return hp2_rs_engine_pawn_reach_reachable( &GHp2PawnReachServices, this, &aPoint, Threshold, GoalActor );
 }
 
 int APawn::flyReachable(FVector Dest, FLOAT Threshold, int reachFlags, AActor* GoalActor)
 {
-	guard(APawn::flyReachable);
-
-	reachFlags = reachFlags | R_FLY;
-	int success = 0;
-	FVector OriginalPos = Location;
-	FVector realVel = Velocity;
-	int stillmoving = 1;
-	FLOAT closeSquared = Threshold * Threshold; 
-	FVector Direction = Dest - Location;
-	FLOAT Movesize = ::Max(200.f, CollisionRadius);
-	FLOAT MoveSizeSquared = Movesize * Movesize;
-	int ticks = 100; 
-
-	while (stillmoving) 
-	{
-		Direction = Dest - Location;
-		FLOAT DistanceSquared = Direction.SizeSquared(); 
-		if ( (DistanceSquared > closeSquared) || (Abs(Direction.Z) > CollisionHeight) )  //move not too small to do
-		{
-			if ( DistanceSquared < MoveSizeSquared ) 
-				stillmoving = flyMove(Direction, GoalActor, 8.f, 0);
-			else
-			{
-				Direction = Direction.SafeNormal();
-				stillmoving = flyMove(Direction * Movesize, GoalActor, 4.1f, 0);
-			}
-			if ( stillmoving == 5 ) //bumped into goal
-			{
-				stillmoving = 0;
-				success = 1;
-			}
-			if ( stillmoving && Region.Zone->bWaterZone )
-			{
-				stillmoving = 0;
-				if ( bCanSwim && (!Region.Zone->bPainZone || (Region.Zone->DamageType == ReducedDamageType)) )
-				{
-					reachFlags = swimReachable(Dest, Threshold, reachFlags, GoalActor);
-					success = reachFlags;
-				}
-			}
-		}
-		else
-		{
-			stillmoving = 0;
-			success = 1;
-		}
-		ticks--;
-		if (ticks < 0)
-			stillmoving = 0;
-	}
-
-	if ( !success && GoalActor && GoalActor->IsA(AWarpZoneMarker::StaticClass()) )
-		success = ( Region.Zone == ((AWarpZoneMarker *)GoalActor)->markedWarpZone );
-	GetLevel()->FarMoveActor(this, OriginalPos, 1, 1); //move actor back to starting point
-	Velocity = realVel;	
-	if (success)
-		return reachFlags;
-	else
-		return 0;
-	unguard;
+	return hp2_rs_engine_pawn_reach_fly_reachable( &GHp2PawnReachServices, this, &Dest, Threshold, reachFlags, GoalActor );
 }
 
 int APawn::swimReachable(FVector Dest, FLOAT Threshold, int reachFlags, AActor* GoalActor)
 {
-	guard(APawn::swimReachable);
-
-	//debugf("Swim reach to %f %f %f from %f %f %f",Dest.X,Dest.Y,Dest.Z,Location.X,Location.Y, Location.Z);
-	reachFlags = reachFlags | R_SWIM;
-	int success = 0;
-	FVector OriginalPos = Location;
-	FVector realVel = Velocity;
-	int stillmoving = 1;
-	FLOAT closeSquared = Threshold * Threshold; 
-	FVector Direction = Dest - Location;
-	FLOAT Movesize = ::Max(200.f, CollisionRadius);
-	FLOAT MoveSizeSquared = Movesize * Movesize;
-	int ticks = 100; 
-
-	while (stillmoving) 
-	{
-		Direction = Dest - Location;
-		FLOAT DistanceSquared = Direction.SizeSquared(); 
-		if ( (DistanceSquared > closeSquared) || (Abs(Direction.Z) > CollisionHeight) )  //move not too small to do
-		{
-			if ( DistanceSquared < MoveSizeSquared ) 
-				stillmoving = swimMove(Direction, GoalActor, 8.f, 0);
-			else
-			{
-				Direction = Direction.SafeNormal();
-				stillmoving = swimMove(Direction * Movesize, GoalActor, 4.1f, 0);
-			}
-			if ( stillmoving == 5 ) //bumped into goal
-			{
-				stillmoving = 0;
-				success = 1;
-			}
-			if ( !Region.Zone->bWaterZone )
-			{
-				stillmoving = 0;
-				if (bCanFly)
-				{
-					reachFlags = flyReachable(Dest, Threshold, reachFlags, GoalActor);
-					success = reachFlags;
-				}
-				else if ( bCanWalk && (Dest.Z < Location.Z + 50 + MaxStepHeight) ) // 50 = default navigationpoint height
-				{
-					FCheckResult Hit(1.f);
-					GetLevel()->MoveActor(this, FVector(0,0,::Max(CollisionHeight + MaxStepHeight,Dest.Z - Location.Z)), Rotation, Hit, 1, 1);
-					if (Hit.Time == 1.f)
-					{
-						success = flyReachable(Dest, Threshold, reachFlags, GoalActor);
-						reachFlags = R_WALK | (success & !R_FLY);
-					}
-				}
-			}
-			else if ( Region.Zone->bPainZone && (Region.Zone->DamageType != ReducedDamageType) )
-			{
-				stillmoving = 0;
-				success = 0;
-			}
-		}
-		else
-		{
-			stillmoving = 0;
-			success = 1;
-		}
-		ticks--;
-		if (ticks < 0)
-			stillmoving = 0;
-	}
-
-	if ( !success && GoalActor && GoalActor->IsA(AWarpZoneMarker::StaticClass()) )
-		success = ( Region.Zone == ((AWarpZoneMarker *)GoalActor)->markedWarpZone );
-
-	GetLevel()->FarMoveActor(this, OriginalPos, 1, 1); //move actor back to starting point
-	Velocity = realVel;	
-	if (success)
-		return reachFlags;
-	else
-		return 0;
-	unguard;
+	return hp2_rs_engine_pawn_reach_swim_reachable( &GHp2PawnReachServices, this, &Dest, Threshold, reachFlags, GoalActor );
 }
 /*walkReachable() -
 //walkReachable returns 0 if Actor cannot reach dest, and 1 if it can reach dest by moving in
@@ -2608,173 +1950,12 @@ initialize Scout to be able to do all these things
 */
 int APawn::walkReachable(FVector Dest, FLOAT Threshold, int reachFlags, AActor* GoalActor)
 {
-	guard(APawn::walkReachable);
-
-	//debugf("Walk reach to %f %f %f from %f %f %f",Dest.X,Dest.Y,Dest.Z,Location.X,Location.Y, Location.Z);
-	reachFlags = reachFlags | R_WALK;
-	int success = 0;
-	FVector OriginalPos = Location;
-	FVector realVel = Velocity;
-	int stillmoving = 1;
-	FLOAT closeSquared = Threshold * Threshold; //should it be less for path building? its 15 * 15
-	FLOAT Movesize = 16.f;
-	FVector Direction;
-	if (!GIsEditor)
-	{
-		if (bCanJump)
-			Movesize = ::Max(128.f, CollisionRadius);
-		else
-			Movesize = CollisionRadius;
-	}
-	
-	int ticks = 100; 
-	FLOAT MoveSizeSquared = Movesize * Movesize;
-	FLOAT MaxZDiff = CollisionHeight;
-	if ( GoalActor )
-		MaxZDiff = ::Max(CollisionHeight, GoalActor->CollisionHeight);
-	FCheckResult Hit(1.f);
-
-	while (stillmoving == 1) 
-	{
-		Direction = Dest - Location;
-		FLOAT Zdiff = Direction.Z;
-		Direction.Z = 0; //this is a 2D move
-		FLOAT DistanceSquared = Direction.SizeSquared(); //2D size
-		if ( (Zdiff > MaxZDiff) && (DistanceSquared < 0.8 * (Zdiff - MaxZDiff) * (Zdiff - MaxZDiff)) )
-			stillmoving = 0; //too steep to get there
-		else
-		{
-			if (DistanceSquared > closeSquared) //move not too small to do
-			{
-				if (DistanceSquared < MoveSizeSquared) 
-					stillmoving = walkMove(Direction, Hit, GoalActor, 8.f, 0);
-				else
-				{
-					Direction = Direction.SafeNormal();
-					stillmoving = walkMove(Direction * Movesize, Hit, GoalActor, 4.1f, 0);
-				} 
-				if (stillmoving != 1)
-				{
-					if ( stillmoving == 5 ) //bumped into goal
-					{
-						stillmoving = 0;
-						success = 1;
-					}
-					else if ( Region.ZoneNumber == 0 )
-					{
-						stillmoving = 0;
-						success = 0;
-					}
-					else if (bCanFly)
-					{
-						stillmoving = 0;
-						reachFlags = flyReachable(Dest, Threshold, reachFlags, GoalActor);
-						success = reachFlags;
-					}
-					else if (bCanJump) 
-					{
-						//debugf("try to jump");
-						reachFlags = reachFlags | R_JUMP;
-						if (stillmoving == -1) 
-						{
-							FVector Landing;
-							Direction = Direction.SafeNormal();
-							stillmoving = FindBestJump(Dest, GroundSpeed * Direction, Landing, 1);
-						}
-						else if (stillmoving == 0)
-						{
-							FVector Landing;
-							Direction = Direction.SafeNormal();
-							stillmoving = FindJumpUp(Dest, GroundSpeed * Direction, Landing, 1);
-						}
-					}
-					else if ( (stillmoving == -1) && (Movesize > MaxStepHeight) ) //try smaller  
-					{
-						stillmoving = 1;
-						Movesize = MaxStepHeight;
-					}
-				}
-				/*else // FIXME - make sure fully on path
-				{
-					FCheckResult Hit(1.f);
-					GetLevel()->SingleLineCheck(Hit, this, Location + FVector(0,0,-1 * (0.5f * CollisionHeight + MaxStepHeight + 4.0)) , Location, TRACE_VisBlocking, 0.5f * GetCylinderExtent());
-					if ( Hit.Time == 1.f )
-						reachFlags = reachFlags | R_JUMP;	
-				}
-				*/
-				if (FootRegion.Zone->bPainZone 
-					&& (FootRegion.Zone->DamageType != ReducedDamageType) ) 
-				{
-					stillmoving = 0;
-					success = 0;
-				}
-				if ( Region.Zone->bWaterZone ) 
-				{
-					//debugf("swim from walk");
-					stillmoving = 0;
-					if (bCanSwim && (!Region.Zone->bPainZone || (Region.Zone->DamageType == ReducedDamageType)) )
-					{
-						reachFlags = swimReachable(Dest, Threshold, reachFlags, GoalActor);
-						success = reachFlags;
-					}
-				}
-			}
-			else
-			{
-				stillmoving = 0;
-				if ( Abs(Zdiff) < MaxZDiff )
-					success = 1;
-				else if ( (Hit.Normal.Z < 0.95) && (Hit.Normal.Z > 0.7) )
-				{
-					// check if above because of slope
-					if ( (Zdiff < 0) 
-						&& (Zdiff * -1 < CollisionHeight + CollisionRadius * appSqrt(1/(Hit.Normal.Z * Hit.Normal.Z) - 1)) )
-						success = 1;
-					else 
-					{
-						// might be below because on slope
-						FLOAT adjRad = 46; //Navigation point default
-						if ( GoalActor )
-							adjRad = GoalActor->CollisionRadius;
-						if ( (CollisionRadius < adjRad) 
-							&& (Zdiff < MaxZDiff + (adjRad + 15 - CollisionRadius) * appSqrt(1/(Hit.Normal.Z * Hit.Normal.Z) - 1)) ) 
-							success = 1;
-					}
-				}
-			}
-			ticks--;
-			if (ticks < 0)
-				stillmoving = 0;
-		}
-	}
-
-	if ( !success && GoalActor && GoalActor->IsA(AWarpZoneMarker::StaticClass()) )
-		success = ( Region.Zone == ((AWarpZoneMarker *)GoalActor)->markedWarpZone );
-
-	GetLevel()->FarMoveActor(this, OriginalPos, 1, 1); //move actor back to starting point
-	Velocity = realVel;
-	if (success)
-		return reachFlags;
-	else
-		return 0;
-	unguard;
+	return hp2_rs_engine_pawn_reach_walk_reachable( &GHp2PawnReachServices, this, &Dest, Threshold, reachFlags, GoalActor );
 }
 
 int APawn::jumpReachable(FVector Dest, FLOAT Threshold, int reachFlags, AActor* GoalActor)
 {
-	guard(APawn::jumpReachable);
-
-	//debugf("Jump reach to %f %f %f from ",Dest.X,Dest.Y,Dest.Z,Location.X,Location.Y, Location.Z);
-	reachFlags = reachFlags | R_JUMP;
-	FVector OriginalPos = Location;
-	FVector Landing;
-	jumpLanding(Velocity, Landing, 1); 
-	if ( Landing == OriginalPos )
-		return 0;
-	int success = walkReachable(Dest, Threshold, reachFlags, GoalActor);
-	GetLevel()->FarMoveActor(this, OriginalPos, 1, 1); //move actor back to starting point
-	return success;
-	unguard;
+	return hp2_rs_engine_pawn_reach_jump_reachable( &GHp2PawnReachServices, this, &Dest, Threshold, reachFlags, GoalActor );
 }
 
 /* jumpLanding()
@@ -2783,120 +1964,17 @@ Assumes near-zero acceleration by pawn during jump (make sure creatures do this 
 */
 void APawn::jumpLanding(FVector testVel, FVector &Landing, int movePawn)
 {
-	guard(APawn::jumpLanding);
-
-
-	FVector OriginalPos = Location;
-	int landed = 0;
-	int ticks = 0;
-	FLOAT tickTime = 0.1f;
-	//debugf("Jump vel %f %f %f", testVel.X, testVel.Y, testVel.Z);
-	while (!landed)
-	{
-		testVel = testVel * (1 - Region.Zone->ZoneFluidFriction * tickTime) + Region.Zone->ZoneGravity * tickTime; 
-		FVector Adjusted = (testVel + Region.Zone->ZoneVelocity) * tickTime;
-		FCheckResult Hit(1.f);
-		GetLevel()->MoveActor(this, Adjusted, Rotation, Hit, 1, 1);
-		if( Region.Zone->bWaterZone ) 
-			landed = 1;
-		else if(Hit.Time < 1.f)
-		{
-			if( Hit.Normal.Z > 0.7f )
-				landed = 1;
-			else
-			{
-				FVector OldHitNormal = Hit.Normal;
-				FVector Delta = (Adjusted - Hit.Normal * (Adjusted | Hit.Normal)) * (1.f - Hit.Time);
-				if( (Delta | Adjusted) >= 0 )
-				{
-					GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-					if (Hit.Time < 1.f) //hit second wall
-					{
-						if (Hit.Normal.Z > 0.7)
-							landed = 1;	
-						FVector DesiredDir = Adjusted.SafeNormal();
-						TwoWallAdjust(DesiredDir, Delta, Hit.Normal, OldHitNormal, Hit.Time);
-						GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-						if (Hit.Normal.Z > 0.7)
-							landed = 1;
-					}
-				}
-			}
-		}
-		ticks++;
-		if ( (Region.ZoneNumber == 0) || (ticks > 35) || (testVel.SizeSquared() > 2500000.f) ) 
-		{
-			GetLevel()->FarMoveActor(this, OriginalPos, 1, 1); //move actor back to starting point
-			landed = 1;
-		}
-	}
-
-	Landing = Location;
-	if (!movePawn)
-		GetLevel()->FarMoveActor(this, OriginalPos, 1, 1); //move actor back to starting point
-
-	unguard;
+	hp2_rs_engine_pawn_reach_jump_landing( &GHp2PawnReachServices, this, &testVel, &Landing, movePawn );
 }
 
 int APawn::FindJumpUp(FVector Dest, FVector vel, FVector &Landing, int moveActor)
 {
-	guard(APawn::FindJumpUp);
-
-	//debugf("Jump up to %f %f %f from %f %f %f",Dest.X,Dest.Y,Dest.Z,Location.X,Location.Y, Location.Z);
-	float realStep = MaxStepHeight;
-	MaxStepHeight = 48; 
-	FVector Direction = vel.SafeNormal();
-	FCheckResult Hit(1.f);
-	int success = walkMove(Direction * realStep, Hit, NULL, 4.1f, 1);
-	if ( success == 5 )
-		success = 1;
-	MaxStepHeight = realStep;
-	return success;
-
-	unguard;
+	return hp2_rs_engine_pawn_reach_find_jump_up( &GHp2PawnReachServices, this, &vel );
 }
 
 void APawn::SuggestJumpVelocity(FVector Dest, FVector &vel)
 {
-	guard(APawn::SuggestJumpVelocity);
-
-	//determine how long I might be in the air 
-	// FIXME - need support for air control
-
-	FLOAT gravZ = Region.Zone->ZoneGravity.Z;
-	if ( gravZ >= 0 ) // negative gravity - pretend its low gravity
-		gravZ = -100.f;
-	FLOAT StartVelZ = vel.Z;
-	FLOAT floor = Dest.Z - Location.Z;
-	FLOAT currentZ = 0.f;
-	FLOAT ticks = 0.f;
-	while ( (currentZ > floor) || (vel.Z > 0.f) )
-	{
-		vel.Z = vel.Z + gravZ * 0.05f;
-		ticks += 0.05f;
-		currentZ = currentZ + vel.Z * 0.05f;
-	}
-	if (Abs(vel.Z) > 1.f)
-		ticks = ticks - (currentZ - floor)/vel.Z; //correct overshoot
-	vel = Dest - Location;
-	vel.Z = 0.f;
-	if(ticks > 0.f)
-	{
-		FLOAT velsize = vel.Size();
-		if ( velsize > 0.f )
-			vel = vel/velsize;
-		velsize = Min(1.f * GroundSpeed, velsize/ticks); //FIXME - longwinded because of compiler bug
-		vel *= velsize;
-	}
-	else
-	{
-		vel = vel.SafeNormal();
-		vel *= GroundSpeed;
-	}
-
-	vel.Z = StartVelZ;
-
-	unguard;
+	hp2_rs_engine_pawn_reach_suggest_jump_velocity( &GHp2PawnReachServices, this, &Dest, &vel );
 }
 
 /* Find best jump from current position toward destination.  Assumes that there is no immediate 
@@ -2904,37 +1982,7 @@ barrier.  Sets vel to the suggested initial velocity, Landing to the expected La
 and moves actor if moveActor is set */
 int APawn::FindBestJump(FVector Dest, FVector vel, FVector &Landing, int movePawn)
 {
-	guard(APawn::FindBestJump);
-
-	FVector realLocation = Location;
-
-	//debugf("Jump best to %f %f %f from %f %f %f",Dest.X,Dest.Y,Dest.Z,Location.X,Location.Y, Location.Z);
-	vel.Z = JumpZ;
-	SuggestJumpVelocity(Dest, vel);
-
-	// Now imagine jump
-	jumpLanding(vel, Landing, 1);
-	FVector olddist = Dest - realLocation;
-	FVector dist = Dest - Location;
-	int success;
-	if (FootRegion.Zone->bPainZone 
-		&& (FootRegion.Zone->DamageType != ReducedDamageType) ) 
-		success = 0;
-	else if (!bCanSwim && Region.Zone->bWaterZone)
-		success = 0;
-	else
-	{
-		FLOAT netchange = olddist.Size();
-		netchange -= dist.Size();
-		success = (netchange > 8.f);
-	}
-	//debugf("New Loc %f %f %f success %d",Location.X, Location.Y, Location.Z, success);
-	// FIXME - if failed, imagine with no jumpZ (step out first)
-	if (!movePawn)
-		GetLevel()->FarMoveActor(this, realLocation, 1, 1); //move actor back to starting point
-	return success;
-
-	unguard;
+	return hp2_rs_engine_pawn_reach_find_best_jump( &GHp2PawnReachServices, this, &Dest, &vel, &Landing, movePawn );
 }
 
 
@@ -2945,148 +1993,17 @@ Move direction must not be adjusted.
 */
 int APawn::walkMove(FVector Delta, FCheckResult& Hit, AActor* GoalActor, FLOAT threshold, int bAdjust)
 {
-	guard(APawn::walkMove);
-
-	FVector StartLocation = Location;
-	Delta.Z = 0.f;
-	//-------------------------------------------------------------------------------------------
-	//Perform the move
-	FVector GravDir = FVector(0,0,-1);
-	if (Region.Zone->ZoneGravity.Z > 0)
-		GravDir.Z = 1; 
-	FVector Down = GravDir * MaxStepHeight;
-	FVector Up = -1 * Down;
-
-	GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-	if ( GoalActor && (Hit.Actor == GoalActor) )
-		return 5; //bumped into goal
-	if(Hit.Time < 1.f) //try to step up
-	{
-		Delta = Delta * (1.f - Hit.Time);
-		GetLevel()->MoveActor(this, Up, Rotation, Hit, 1, 1); 
-		GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-		if ( GoalActor && (Hit.Actor == GoalActor) )
-			return 5; //bumped into goal
-		GetLevel()->MoveActor(this, Down, Rotation, Hit, 1, 1);
-		if ( GoalActor && (Hit.Actor == GoalActor) )
-			return 5; //bumped into goal
-		//Scouts want only good floors, else undo move
-		if ((Hit.Time < 1.f) && (Hit.Normal.Z < 0.7f))
-		{
-			GetLevel()->FarMoveActor(this, StartLocation, 1, 1);
-			return 0;
-		}
-	}
-
-	//drop to floor
-	FVector Loc = Location;
-	Down = GravDir * (MaxStepHeight + 2.f);
-	GetLevel()->MoveActor(this, Down, Rotation, Hit, 1, 1);
-	if (Hit.Time == 1.f) //then falling
-	{
-		if (bAdjust) 
-			GetLevel()->FarMoveActor(this, StartLocation, 1, 1);
-		else
-			GetLevel()->FarMoveActor(this, Loc, 1, 1);
-		return -1;
-	}
-	else if (Hit.Normal.Z < 0.7)
-	{
-		GetLevel()->FarMoveActor(this, StartLocation, 1, 1);
-		return -1;
-	}
-
-	//check if move successful
-	FVector RealMove = Location - StartLocation;
-	if (RealMove.SizeSquared() < threshold * threshold) 
-	{
-		if (bAdjust)
-			GetLevel()->FarMoveActor(this, StartLocation, 1, 1);
-		return 0;
-	}
-
-	return 1;
-	unguard;
+	return hp2_rs_engine_pawn_walk_move( &GHp2PawnServices, this, &Delta, &Hit, GoalActor, threshold, bAdjust );
 }
 
 int APawn::flyMove(FVector Delta, AActor* GoalActor, FLOAT threshold, int bAdjust)
 {
-	guard(APawn::flyMove);
-	int result = 1;
-	FVector StartLocation = Location;
-
-	//-------------------------------------------------------------------------------------------
-	//Perform the move
-	FVector Down = FVector(0,0,-1) * MaxStepHeight;
-	FVector Up = -1 * Down;
-	FCheckResult Hit(1.f);
-
-	GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-	if ( GoalActor && (Hit.Actor == GoalActor) )
-		return 5; //bumped into goal
-	if (Hit.Time < 1.f) //try to step up
-	{
-		Delta = Delta * (1.f - Hit.Time);
-		GetLevel()->MoveActor(this, Up, Rotation, Hit, 1, 1); 
-		GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-		if ( GoalActor && (Hit.Actor == GoalActor) )
-			return 5; //bumped into goal
-		//GetLevel()->MoveActor(this, Down, Rotation, Hit, 1, 1);
-	}
-
-	FVector RealMove = Location - StartLocation;
-	if (RealMove.SizeSquared() < threshold * threshold) 
-	{
-		if (bAdjust)
-			GetLevel()->FarMoveActor(this, StartLocation, 1, 1);
-		result = 0;
-	}
-	return result;
-	unguard;
+	return hp2_rs_engine_pawn_fly_move( &GHp2PawnServices, this, &Delta, GoalActor, threshold, bAdjust );
 }
 
 int APawn::swimMove(FVector Delta, AActor* GoalActor, FLOAT threshold, int bAdjust)
 {
-	guard(APawn::swimMove);
-	int result = 1;
-	FVector StartLocation = Location;
-
-	//-------------------------------------------------------------------------------------------
-	//Perform the move
-	FVector Down = FVector(0,0,-1) * MaxStepHeight;
-	FVector Up = -1 * Down;
-	FCheckResult Hit(1.f);
-
-	GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-	if ( GoalActor && (Hit.Actor == GoalActor) )
-		return 5; //bumped into goal
-	if (!Region.Zone->bWaterZone)
-	{
-		FVector End = Location;
-		findWaterLine(StartLocation, End);
-		if (End != Location)
-			GetLevel()->MoveActor(this, End - Location, Rotation, Hit, 1, 1);
-		return 0;
-	}
-	else if (Hit.Time < 1.f) //try to step up
-	{
-		Delta = Delta * (1.f - Hit.Time);
-		GetLevel()->MoveActor(this, Up, Rotation, Hit, 1, 1); 
-		GetLevel()->MoveActor(this, Delta, Rotation, Hit, 1, 1);
-		if ( GoalActor && (Hit.Actor == GoalActor) )
-			return 5; //bumped into goal
-		//GetLevel()->MoveActor(this, Down, Rotation, Hit, 1, 1);
-	}
-
-	FVector RealMove = Location - StartLocation;
-	if (RealMove.SizeSquared() < threshold * threshold) 
-	{
-		if (bAdjust)
-			GetLevel()->FarMoveActor(this, StartLocation, 1, 1);
-		result = 0;
-	}
-	return result;
-	unguard;
+	return hp2_rs_engine_pawn_swim_move( &GHp2PawnServices, this, &Delta, GoalActor, threshold, bAdjust );
 }
 
 /* PickWallAdjust()
@@ -3098,268 +2015,12 @@ out and floor checks
 */
 int APawn::PickWallAdjust()
 {
-	guard(APawn::PickWallAdjust);
-
-	if ( Physics == PHYS_Falling )
-		return 0;
-
-	// first pick likely dir with traces, then check with testmove
-	FCheckResult Hit(1.f);
-	FVector ViewPoint = Location;
-	ViewPoint.Z += BaseEyeHeight; //look from eyes
-	FVector Dir = Destination - Location;
-	FLOAT zdiff = Dir.Z;
-	FLOAT AdjustDist = CollisionRadius + 16;
-	if ( bIsPlayer ) //bots only, till I test this for all!!! FIXME
-		AdjustDist += 0.5f * CollisionRadius;
-	Dir.Z = 0;
-	int bCheckUp = 0;
-	if ( zdiff < CollisionHeight )
-	{
-		FLOAT DistDiff = (Dir | Dir ) - CollisionRadius * CollisionRadius;
-		if ( DistDiff < 0 )
-			return 0;
-		if ( ((Physics == PHYS_Swimming) || (Physics == PHYS_Flying))
-			&& (Dir.SizeSquared() < 4 * CollisionHeight * CollisionHeight) )
-		{
-			FVector Up = FVector(0,0,CollisionHeight);
-			bCheckUp = 1;
-			if ( Location.Z < Destination.Z )
-			{
-				bCheckUp = -1;
-				Up *= -1;
-			}
-			GetLevel()->SingleLineCheck(Hit, this, Location + Up, Location, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				FVector ShortDir = Dir.SafeNormal();
-				ShortDir *= CollisionRadius;
-				GetLevel()->SingleLineCheck(Hit, this, Location + Up + ShortDir, Location + Up, TRACE_VisBlocking, GetCylinderExtent());
-				if (Hit.Time == 1.f)
-				{
-					Destination = Location + Up;
-					return 1;
-				}
-			}
-		}
-	}
-
-	FLOAT Dist = Dir.Size();
-	if ( Dist == 0.f )
-		return 0;
-	Dir = Dir/Dist;
-	if ( !GetLevel()->Model->FastLineCheck(Destination, ViewPoint) )
-	{
-		if ( (Physics != PHYS_Swimming) && (Physics != PHYS_Flying) )
-		{
-			AdjustDist += CollisionRadius;
-			if ( zdiff > 256 )
-				return 0;
-		}
-		else if (zdiff > 0)
-		{
-			FVector Up = FVector(0,0, CollisionHeight);
-			GetLevel()->SingleLineCheck(Hit, this, Location + 2 * Up, Location, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				Destination = Location + Up;
-				return 1;
-			}
-		}
-	}
-
-	//look left and right
-	FVector Left = FVector(Dir.Y, -1 * Dir.X, 0);
-	INT bCheckRight = 0;
-	FVector CheckLeft = Left * 1.42f * CollisionRadius;
-	GetLevel()->SingleLineCheck(Hit, this, Destination, ViewPoint + CheckLeft, TRACE_VisBlocking); 
-	if (Hit.Time < 1.f) //try right
-	{
-		bCheckRight = 1;
-		Left *= -1;
-		CheckLeft *= -1;
-		GetLevel()->SingleLineCheck(Hit, this, Destination, ViewPoint + CheckLeft, TRACE_VisBlocking); 
-	}
-
-	if (Hit.Time < 1.f) //neither side has visibility
-		return 0;
-
-	FVector Out = 14 * Dir;
-	INT bCheckStepUp = 0;
-	if ( bIsPlayer //&& (Dist < 3 * CollisionRadius) 
-		&& (Physics == PHYS_Walking) && bCanJump ) //FIXME - for all, not just players
-	{
-		// try step up first
-		bCheckStepUp = 1;
-		FVector Up = FVector(0,0,48); 
-		GetLevel()->SingleLineCheck(Hit, this, Location + Up, Location, TRACE_VisBlocking, GetCylinderExtent());
-		if (Hit.Time > 0.5)
-		{
-			GetLevel()->SingleLineCheck(Hit, this, Location + Up * Hit.Time + Out, Location + Up * Hit.Time, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				if ( bIsPlayer && (appFrand() < 0.5) ) //FIXME - pass hitnormal in, & do for all
-				{
-					GetLevel()->SingleLineCheck(Hit, this, Location + Out, Location, TRACE_VisBlocking, GetCylinderExtent());
-					if ( Hit.Time < 1.f )
-						Dir = -1 * Hit.Normal;
-				}
-				Velocity = GroundSpeed * Dir;
-				Acceleration = AccelRate * Dir;
-				Velocity.Z = JumpZ;
-				bJumpOffPawn = true; // don't let script adjust this jump again
-				setPhysics(PHYS_Falling);
-				return 1;
-			}
-		}
-	}
-
-	//try step left or right
-	Left *= AdjustDist;
-	GetLevel()->SingleLineCheck(Hit, this, Location + Left, Location, TRACE_VisBlocking, GetCylinderExtent());
-	if (Hit.Time == 1.f)
-	{
-		GetLevel()->SingleLineCheck(Hit, this, Location + Left + Out, Location + Left, TRACE_VisBlocking, GetCylinderExtent());
-		if (Hit.Time == 1.f)
-		{
-			Destination = Location + Left;
-			return 1;
-		}
-	}
-	
-	if ( !bCheckRight ) // if didn't already try right, now try it
-	{
-		CheckLeft *= -1;
-		GetLevel()->SingleLineCheck(Hit, this, Destination, ViewPoint + CheckLeft, TRACE_VisBlocking); 
-		if ( Hit.Time < 1.f )
-			return 0;
-		Left *= -1;
-		GetLevel()->SingleLineCheck(Hit, this, Location + Left, Location, TRACE_VisBlocking, GetCylinderExtent());
-		if (Hit.Time == 1.f)
-		{
-			GetLevel()->SingleLineCheck(Hit, this, Location + Left + Out, Location + Left, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				Destination = Location + Left;
-				return 1;
-			}
-		}
-	}
-
-	//try jump up if walking, or adjust up or down if swimming
-	if ( Physics == PHYS_Walking )
-	{
-		if ( bCheckStepUp || !bCanJump )
-			return 0;
-		FVector Up;
-		Up = FVector(0,0,48); 
-
-		GetLevel()->SingleLineCheck(Hit, this, Location + Up, Location, TRACE_VisBlocking, GetCylinderExtent());
-		if (Hit.Time == 1.f)
-		{
-			GetLevel()->SingleLineCheck(Hit, this, Location + Up + Out, Location + Up, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				if ( bIsPlayer ) //FIXME - pass hitnormal in, & do for all
-				{
-					GetLevel()->SingleLineCheck(Hit, this, Location + Out, Location, TRACE_VisBlocking, GetCylinderExtent());
-					if ( Hit.Time < 1.f )
-						Dir = -1 * Hit.Normal;
-				}
-				Velocity = GroundSpeed * Dir;
-				Acceleration = AccelRate * Dir;
-				Velocity.Z = JumpZ;
-				bJumpOffPawn = true; // don't let script adjust this jump again
-				setPhysics(PHYS_Falling);
-				return 1;
-			}
-		}
-	}
-	else 
-	{
-		FVector Up = FVector(0,0,CollisionHeight);
-
-		if ( bCheckUp != 1 )
-		{
-			GetLevel()->SingleLineCheck(Hit, this, Location + Up, Location, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				GetLevel()->SingleLineCheck(Hit, this, Location + Up + Out, Location + Up, TRACE_VisBlocking, GetCylinderExtent());
-				if (Hit.Time == 1.f)
-				{
-					Destination = Location + Up;
-					return 1;
-				}
-			}
-		}
-
-		if ( bCheckUp != -1 )
-		{
-			Up *= -1; //try adjusting down
-			GetLevel()->SingleLineCheck(Hit, this, Location + Up, Location, TRACE_VisBlocking, GetCylinderExtent());
-			if (Hit.Time == 1.f)
-			{
-				GetLevel()->SingleLineCheck(Hit, this, Location + Up + Out, Location + Up, TRACE_VisBlocking, GetCylinderExtent());
-				if (Hit.Time == 1.f)
-				{
-					Destination = Location + Up;
-					return 1;
-				}
-			}
-		}
-	}
-
-	return 0;
-	unguard;
+	return hp2_rs_engine_pawn_sense_pick_wall_adjust( &GHp2PawnSenseServices, this );
 }
 
 void APawn::HandleSpecial(AActor *&bestPath)
 {
-	guard(APawn::HandleSpecial);
-
-	AActor * realPath = bestPath;
-	AActor * newPath = bestPath->eventSpecialHandling(this);
-	bestPath = newPath;
-	if ( !newPath)
-		return;
-
-	if ( bestPath && (bestPath != realPath) )
-	{
-		if ( !bCanDoSpecial )
-		{
-			bestPath = NULL;
-			return;
-		}
-		SpecialGoal = bestPath;
-		if ( actorReachable(bestPath) )
-		{
-			if ( bestPath->IsProbing(NAME_SpecialHandling) )
-			{
-				AActor * ReturnedActor = bestPath->eventSpecialHandling(this);
-				if ( !ReturnedActor )
-					bestPath = NULL;
-				else if ( bestPath != ReturnedActor )
-				{
-					if ( (bestPath != realPath) && actorReachable(ReturnedActor) )
-						bestPath = ReturnedActor;
-					else
-						bestPath = NULL;
-				}
-			}
-		}
-		else 
-		{
-			int success = findPathToward(bestPath, 0, newPath, 1);
-			if ( !success || (newPath == realPath) ) 
-				bestPath = NULL;
-			else
-			{
-				SpecialGoal = bestPath; 
-				bestPath = newPath;
-			}
-		}
-	}
-	unguard;
+	hp2_rs_engine_pawn_sense_handle_special( &GHp2PawnSenseServices, this, (void**)&bestPath );
 }
 
 /*-----------------------------------------------------------------------------
@@ -3368,38 +2029,7 @@ void APawn::HandleSpecial(AActor *&bestPath)
 
 FLOAT APawn::GetNetPriority( AActor* Recent, FLOAT Time, FLOAT Lag )
 {
-	guard(APawn::GetNetPriority);
-	if
-	(	bIsPlayer
-	&&	Recent
-	&&	!Recent->bNetOwner
-	&&	Weapon==((APawn*)Recent)->Weapon
-	&&  Recent->bHidden==bHidden
-	&&	Physics==PHYS_Walking )
-	{
-		FLOAT LocationError = ((Recent->Location+(Time+0.5f*Lag)*Recent->Velocity) - (Location+0.5f*Lag*Velocity)).Size();
-		FLOAT MaxVelocity   = GroundSpeed;
-		/*
-		// Note: Lags and surges in position occur for other players because of
-		// ServerMove/ClientAdjustPosition temporal wobble.
-		if( LocationError )
-			debugf
-			(
-				"%f / %f + %f (%f) %f=%f",
-				Time,
-				(Recent->Location+Time*Recent->Velocity - Location).Size(),
-				((0.5*Lag*Recent->Velocity) - (0.5*Lag*Velocity)).Size(),
-				(Recent->Location+Time*Recent->Velocity - Location).Size()/Recent->Velocity.Size(),
-				Velocity.Size(),
-				(Recent->Location-Location).Size()/Time
-			);
-		*/
-		//if( LocationError )
-		//	debugf("%f %f",Time,3.f*LocationError / MaxVelocity);
-		Time = Time*0.5f + 2.f*LocationError / MaxVelocity;
-	}
-	return NetPriority * Time;
-	unguard;
+	return hp2_rs_engine_pawn_sense_get_net_priority( this, Recent, Time, Lag );
 }
 
 /*-----------------------------------------------------------------------------
