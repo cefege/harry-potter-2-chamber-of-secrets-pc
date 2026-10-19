@@ -13,6 +13,7 @@ mod canvas_text;
 mod engine;
 mod engine_actcol;
 mod engine_dynbsp;
+mod engine_gesture;
 mod engine_levact;
 mod engine_mover;
 mod engine_palette;

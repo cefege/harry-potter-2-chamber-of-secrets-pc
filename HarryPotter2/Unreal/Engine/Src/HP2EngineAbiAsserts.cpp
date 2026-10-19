@@ -308,3 +308,5 @@ static_assert(__builtin_offsetof(AWarpZoneMarker, markedWarpZone) == 1284, "hp2-
 static_assert(sizeof(ADecoration) == 948, "hp2-abi engine::ADecoration must match ADecoration size");
 static_assert(__builtin_offsetof(ADecoration, numLandings) == 908, "hp2-abi engine::ADecoration.num_landings must match ADecoration::numLandings offset");
 static_assert(sizeof(ACarcass) == 980, "hp2-abi engine::ACarcass must match ACarcass size");
+static_assert(sizeof(UGesture) == 104, "hp2-abi engine::UGesture must match UGesture size");
+static_assert(__builtin_offsetof(UGesture, Points) == 72, "hp2-abi engine::UGesture.points must match UGesture::Points offset");

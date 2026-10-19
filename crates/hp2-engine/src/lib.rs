@@ -9,6 +9,7 @@ pub mod canvas_text;
 pub mod coords;
 pub mod dynbsp;
 pub mod fpoly;
+pub mod gesture;
 pub mod levact;
 pub mod lodmesh;
 pub mod math;

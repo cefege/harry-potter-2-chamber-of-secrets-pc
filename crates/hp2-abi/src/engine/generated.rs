@@ -1616,6 +1616,19 @@ impl ACarcass {
 const _: () = assert!(size_of::<ACarcass>() == 980);
 const _: () = assert!(std::mem::offset_of!(ACarcass, base) == 0);
 
+/// Layout mirror of C++ `UGesture` (104 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct UGesture {
+    _pad_0: [u8; 72],
+    pub points: TArrayRaw,
+    _pad_88: [u8; 16],
+}
+
+const _: () = assert!(size_of::<UGesture>() == 104);
+const _: () = assert!(std::mem::offset_of!(UGesture, points) == 72);
+
 #[cfg(test)]
 mod layout_tests {
     use super::*;
@@ -1647,5 +1660,6 @@ mod layout_tests {
         assert_eq!(size_of::<AWarpZoneMarker>(), 1308);
         assert_eq!(size_of::<ADecoration>(), 948);
         assert_eq!(size_of::<ACarcass>(), 980);
+        assert_eq!(size_of::<UGesture>(), 104);
     }
 }

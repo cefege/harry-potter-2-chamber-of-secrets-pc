@@ -484,6 +484,7 @@ MIRRORS = [
         base="ADecoration",
         packed=True,
     ),
+    Mirror("UGesture", "UGesture", [("Points", "TArray")], packed=True),
 ]
 
 
