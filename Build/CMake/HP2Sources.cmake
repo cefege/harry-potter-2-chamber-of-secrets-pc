@@ -43,6 +43,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2GeometryServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2CanvasServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ActColServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/Hp2DynBspServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2MoverServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2MeshServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/HP2RouteServices.cpp"

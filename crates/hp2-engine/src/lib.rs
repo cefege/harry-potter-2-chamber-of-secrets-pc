@@ -7,6 +7,7 @@ pub mod actcol;
 pub mod canvas;
 pub mod canvas_text;
 pub mod coords;
+pub mod dynbsp;
 pub mod fpoly;
 pub mod levact;
 pub mod lodmesh;
