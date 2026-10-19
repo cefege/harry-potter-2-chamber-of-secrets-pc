@@ -759,12 +759,296 @@ APlayerPawn* ULevel::SpawnPlayActor( UPlayer* Player, ENetRole RemoteRole, const
 // No suitable location will ever be found if Location is not a valid point inside the level ( and not in 
 // a wall)
 
+/*-----------------------------------------------------------------------------
+	Rust check services (`LevActServices` in crates/hp2-engine/src/levact.rs,
+	same field order). The thunks perform the C++ owner calls.
+-----------------------------------------------------------------------------*/
+
+struct Hp2LevActServices
+{
+	FCheckResult* (*AllocCheckResults)( void* Mem, INT Count );
+	INT (*ModelPointCheck)( void* Level, FCheckResult* Hit, const FVector* Location, const FVector* Extent );
+	INT (*ModelLineCheck)( void* Level, FCheckResult* Hit, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags );
+	FCheckResult* (*HashActorPointCheck)( void* Hash, void* Mem, const FVector* Location, const FVector* Extent, DWORD Flags );
+	FCheckResult* (*HashActorLineCheck)( void* Hash, void* Mem, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags );
+	INT (*ActorIsA)( const void* Actor, INT Kind );
+	INT (*ActorIsOwnedBy)( const void* Actor, const void* Other );
+	INT (*ActorIsBlockedBy)( const void* Actor, const void* Other );
+	void (*MemMarkSave)( void* Mem, void* Buffer );
+	void (*MemMarkPop)( void* Buffer );
+	DWORD (*AppCycles)();
+	INT (*IsEditor)();
+	void (*BumpObserver)( void* Recipient, void* Other );
+	FLOAT (*SinTab)( INT Angle );
+	FLOAT (*CosTab)( INT Angle );
+	void (*ModelPointRegion)( void* Model, void* Zone, const FVector* Location, void* Out );
+	void (*HashAddActor)( void* Hash, void* Actor );
+	void (*HashRemoveActor)( void* Hash, void* Actor );
+	FCheckResult* (*HashActorEncroachmentCheck)( void* Hash, void* Mem, void* Actor, const FVector* Location, const FRotator* Rotation, DWORD Flags );
+	void (*TrackerUpdate)( void* Tracker, void* Actor );
+	void (*ActorBeginTouch)( void* Actor, void* Other );
+	void (*ActorEndTouch)( void* Actor, void* Other, INT NoNotify );
+	INT (*ActorIsOverlapping)( const void* Actor, const void* Other );
+	void (*ActorCollisionBox)( const void* Actor, FVector* Min, FVector* Max );
+	void (*ActorCylinderExtent)( const void* Actor, FVector* Out );
+	void (*ActorSetBase)( void* Actor, void* Base );
+	INT (*ActorMoveSmooth)( void* Actor, const FVector* Delta );
+	void (*EventBump)( void* Recipient, void* Other );
+	INT (*EventEncroachingOn)( void* Actor, void* Other );
+	void (*EventEncroachedBy)( void* Actor, void* Other );
+	void (*EventZoneChange)( void* Actor, void* Zone );
+	void (*ZoneEventActorLeaving)( void* Zone, void* Actor );
+	void (*ZoneEventActorEntered)( void* Zone, void* Actor );
+	void (*PawnEventFootZoneChange)( void* Pawn, void* Zone );
+	void (*PawnEventHeadZoneChange)( void* Pawn, void* Zone );
+	void (*PriSetPlayerZone)( void* Pri, void* Zone );
+	BYTE (*LevelNetMode)( const void* LevelInfo );
+};
+
+static FCheckResult* Hp2LevActAllocCheckResults( void* Mem, INT Count )
+{
+	return new(*(FMemStack*)Mem, Count) FCheckResult;
+}
+
+static INT Hp2LevActModelPointCheck( void* Level, FCheckResult* Hit, const FVector* Location, const FVector* Extent )
+{
+	return ((ALevelInfo*)Level)->GetLevel()->Model->PointCheck( *Hit, NULL, *Location, *Extent, 0 );
+}
+
+static INT Hp2LevActModelLineCheck( void* Level, FCheckResult* Hit, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags )
+{
+	return ((ALevelInfo*)Level)->GetLevel()->Model->LineCheck( *Hit, NULL, *End, *Start, *Extent, (BYTE)Flags );
+}
+
+static FCheckResult* Hp2LevActHashActorPointCheck( void* Hash, void* Mem, const FVector* Location, const FVector* Extent, DWORD Flags )
+{
+	return ((FCollisionHashBase*)Hash)->ActorPointCheck( *(FMemStack*)Mem, *Location, *Extent, Flags );
+}
+
+static FCheckResult* Hp2LevActHashActorLineCheck( void* Hash, void* Mem, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags )
+{
+	return ((FCollisionHashBase*)Hash)->ActorLineCheck( *(FMemStack*)Mem, *End, *Start, *Extent, (BYTE)Flags );
+}
+
+// Kind: 0 = ALevelInfo, 1 = AMover, 2 = AZoneInfo, 3 = ABrush, 4 = APawn, 5 = ADecoration (ACTOR_KIND_* in levact.rs).
+static INT Hp2LevActActorIsA( const void* Actor, INT Kind )
+{
+	AActor* A = (AActor*)Actor;
+	switch( Kind )
+	{
+		case 0: return A->IsA(ALevelInfo::StaticClass());
+		case 1: return A->IsA(AMover::StaticClass());
+		case 2: return A->IsA(AZoneInfo::StaticClass());
+		case 3: return A->IsA(ABrush::StaticClass());
+		case 4: return A->IsA(APawn::StaticClass());
+		case 5: return A->IsA(ADecoration::StaticClass());
+	}
+	return 0;
+}
+
+static INT Hp2LevActActorIsOwnedBy( const void* Actor, const void* Other )
+{
+	return ((AActor*)Actor)->IsOwnedBy( (AActor*)Other );
+}
+
+static INT Hp2LevActActorIsBlockedBy( const void* Actor, const void* Other )
+{
+	return ((AActor*)Actor)->IsBlockedBy( (AActor*)Other );
+}
+
+static void Hp2LevActMemMarkSave( void* Mem, void* Buffer )
+{
+	*(FMemMark*)Buffer = FMemMark( *(FMemStack*)Mem );
+}
+
+static void Hp2LevActMemMarkPop( void* Buffer )
+{
+	((FMemMark*)Buffer)->Pop();
+}
+
+static DWORD Hp2LevActAppCycles()
+{
+	return appCycles();
+}
+
+static INT Hp2LevActIsEditor()
+{
+	return GIsEditor;
+}
+
+static void Hp2LevActBumpObserver( void* Recipient, void* Other )
+{
+	if( GActorMovementObserver )
+		GActorMovementObserver->OnActorBump( (AActor*)Recipient, (AActor*)Other );
+}
+
+static FLOAT Hp2LevActSinTab( INT Angle )
+{
+	return GMath.SinTab( Angle );
+}
+
+static FLOAT Hp2LevActCosTab( INT Angle )
+{
+	return GMath.CosTab( Angle );
+}
+
+static void Hp2LevActModelPointRegion( void* Model, void* Zone, const FVector* Location, void* Out )
+{
+	*(FPointRegion*)Out = ((UModel*)Model)->PointRegion( (AZoneInfo*)Zone, *Location );
+}
+
+static void Hp2LevActHashAddActor( void* Hash, void* Actor )
+{
+	((FCollisionHashBase*)Hash)->AddActor( (AActor*)Actor );
+}
+
+static void Hp2LevActHashRemoveActor( void* Hash, void* Actor )
+{
+	((FCollisionHashBase*)Hash)->RemoveActor( (AActor*)Actor );
+}
+
+static FCheckResult* Hp2LevActHashActorEncroachmentCheck( void* Hash, void* Mem, void* Actor, const FVector* Location, const FRotator* Rotation, DWORD Flags )
+{
+	return ((FCollisionHashBase*)Hash)->ActorEncroachmentCheck( *(FMemStack*)Mem, (AActor*)Actor, *Location, *Rotation, Flags );
+}
+
+static void Hp2LevActTrackerUpdate( void* Tracker, void* Actor )
+{
+	UpdateMovingBrushTracker( (FMovingBrushTrackerBase*)Tracker, (AActor*)Actor );
+}
+
+static void Hp2LevActActorBeginTouch( void* Actor, void* Other )
+{
+	((AActor*)Actor)->BeginTouch( (AActor*)Other );
+}
+
+static void Hp2LevActActorEndTouch( void* Actor, void* Other, INT NoNotify )
+{
+	((AActor*)Actor)->EndTouch( (AActor*)Other, NoNotify );
+}
+
+static INT Hp2LevActActorIsOverlapping( const void* Actor, const void* Other )
+{
+	return ((AActor*)Actor)->IsOverlapping( (AActor*)Other );
+}
+
+static void Hp2LevActActorCollisionBox( const void* Actor, FVector* Min, FVector* Max )
+{
+	FBox Box = ((AActor*)Actor)->GetPrimitive()->GetCollisionBoundingBox( (AActor*)Actor, true );
+	*Min = Box.Min;
+	*Max = Box.Max;
+}
+
+static void Hp2LevActActorCylinderExtent( const void* Actor, FVector* Out )
+{
+	*Out = ((AActor*)Actor)->GetCylinderExtent();
+}
+
+static void Hp2LevActActorSetBase( void* Actor, void* Base )
+{
+	((AActor*)Actor)->SetBase( (AActor*)Base );
+}
+
+static INT Hp2LevActActorMoveSmooth( void* Actor, const FVector* Delta )
+{
+	return ((AActor*)Actor)->moveSmooth( *Delta );
+}
+
+static void Hp2LevActEventBump( void* Recipient, void* Other )
+{
+	((AActor*)Recipient)->eventBump( (AActor*)Other );
+}
+
+static INT Hp2LevActEventEncroachingOn( void* Actor, void* Other )
+{
+	return ((AActor*)Actor)->eventEncroachingOn( (AActor*)Other );
+}
+
+static void Hp2LevActEventEncroachedBy( void* Actor, void* Other )
+{
+	((AActor*)Actor)->eventEncroachedBy( (AActor*)Other );
+}
+
+static void Hp2LevActEventZoneChange( void* Actor, void* Zone )
+{
+	((AActor*)Actor)->eventZoneChange( (AZoneInfo*)Zone );
+}
+
+static void Hp2LevActZoneEventActorLeaving( void* Zone, void* Actor )
+{
+	((AZoneInfo*)Zone)->eventActorLeaving( (AActor*)Actor );
+}
+
+static void Hp2LevActZoneEventActorEntered( void* Zone, void* Actor )
+{
+	((AZoneInfo*)Zone)->eventActorEntered( (AActor*)Actor );
+}
+
+static void Hp2LevActPawnEventFootZoneChange( void* Pawn, void* Zone )
+{
+	((APawn*)Pawn)->eventFootZoneChange( (AZoneInfo*)Zone );
+}
+
+static void Hp2LevActPawnEventHeadZoneChange( void* Pawn, void* Zone )
+{
+	((APawn*)Pawn)->eventHeadZoneChange( (AZoneInfo*)Zone );
+}
+
+static void Hp2LevActPriSetPlayerZone( void* Pri, void* Zone )
+{
+	((APlayerReplicationInfo*)Pri)->PlayerZone = (AZoneInfo*)Zone;
+}
+
+static BYTE Hp2LevActLevelNetMode( const void* LevelInfo )
+{
+	return ((ALevelInfo*)LevelInfo)->NetMode;
+}
+
+static const Hp2LevActServices GHp2LevActServices =
+{
+	Hp2LevActAllocCheckResults,
+	Hp2LevActModelPointCheck,
+	Hp2LevActModelLineCheck,
+	Hp2LevActHashActorPointCheck,
+	Hp2LevActHashActorLineCheck,
+	Hp2LevActActorIsA,
+	Hp2LevActActorIsOwnedBy,
+	Hp2LevActActorIsBlockedBy,
+	Hp2LevActMemMarkSave,
+	Hp2LevActMemMarkPop,
+	Hp2LevActAppCycles,
+	Hp2LevActIsEditor,
+	Hp2LevActBumpObserver,
+	Hp2LevActSinTab,
+	Hp2LevActCosTab,
+	Hp2LevActModelPointRegion,
+	Hp2LevActHashAddActor,
+	Hp2LevActHashRemoveActor,
+	Hp2LevActHashActorEncroachmentCheck,
+	Hp2LevActTrackerUpdate,
+	Hp2LevActActorBeginTouch,
+	Hp2LevActActorEndTouch,
+	Hp2LevActActorIsOverlapping,
+	Hp2LevActActorCollisionBox,
+	Hp2LevActActorCylinderExtent,
+	Hp2LevActActorSetBase,
+	Hp2LevActActorMoveSmooth,
+	Hp2LevActEventBump,
+	Hp2LevActEventEncroachingOn,
+	Hp2LevActEventEncroachedBy,
+	Hp2LevActEventZoneChange,
+	Hp2LevActZoneEventActorLeaving,
+	Hp2LevActZoneEventActorEntered,
+	Hp2LevActPawnEventFootZoneChange,
+	Hp2LevActPawnEventHeadZoneChange,
+	Hp2LevActPriSetPlayerZone,
+	Hp2LevActLevelNetMode,
+};
+
 // AdjustSpot used by FindSpot
 void ULevel::AdjustSpot( FVector& Adjusted, FVector TraceDest, FLOAT TraceLen, FCheckResult& Hit )
 {
-	SingleLineCheck( Hit, NULL, TraceDest, Adjusted, TRACE_VisBlocking );
-	if( Hit.Time < 1.f )
-		Adjusted = Adjusted + Hit.Normal * (1.05f - Hit.Time) * TraceLen;
+	hp2_rs_engine_levact_adjust_spot( &GHp2LevActServices, &GMem, Hash, this, &Adjusted, &TraceDest, TraceLen, &Hit );
 }
 
 UBOOL ULevel::FindSpot
@@ -776,43 +1060,7 @@ UBOOL ULevel::FindSpot
 )
 {
 	guard(ULevel::FindSpot);
-
-	// trace to all corners to find interpenetrating walls
-	FCheckResult Hit(1.f);
-	if( Extent==FVector(0,0,0) )
-		return SinglePointCheck( Hit, Location, Extent, 0, GetLevelInfo(), bCheckActors )==1;
-
-	if( bAssumeFit && SinglePointCheck( Hit,Location, Extent, 0, GetLevelInfo(), bCheckActors )==1 )
-		return 1;
-	FVector Adjusted = Location;
-	FLOAT TraceLen = Extent.Size() + 2.f;
-
-	for (int i=-1;i<2;i+=2)
-	{
-		AdjustSpot(Adjusted, Adjusted + FVector(i * Extent.X,0,0), Extent.X, Hit); 
-		AdjustSpot(Adjusted, Adjusted + FVector(0,i * Extent.Y,0), Extent.Y, Hit); 
-		AdjustSpot(Adjusted, Adjusted + FVector(0,0,i * Extent.Z), Extent.Z, Hit); 
-	}
-	if( SinglePointCheck( Hit, Adjusted, Extent, 0, GetLevelInfo(), bCheckActors )==1 )
-	{
-		Location = Adjusted;
-		return 1;
-	}
-
-	for (int i=-1;i<2;i+=2)
-		for (int j=-1;j<2;j+=2)
-			for (int k=-1;k<2;k+=2)
-				AdjustSpot(Adjusted, Adjusted + FVector(i * Extent.X, j * Extent.Y, k * Extent.Z), TraceLen, Hit); 
-
-	if( (Adjusted - Location).SizeSquared() > 1.5 * Extent.SizeSquared() )
-		return 0;
-
-	if( SinglePointCheck( Hit, Adjusted, Extent, 0, GetLevelInfo(), bCheckActors )==1 )
-	{
-		Location = Adjusted;
-		return 1;
-	}
-	return 0;
+	return hp2_rs_engine_levact_find_spot( &GHp2LevActServices, &GMem, Hash, this, &Extent, &Location, bCheckActors, bAssumeFit );
 	unguard;
 }
 
@@ -833,44 +1081,7 @@ UBOOL ULevel::FarMoveActor( AActor* Actor, FVector DestLocation,  UBOOL test, UB
 {
 	guard(ULevel::FarMoveActor);
 	check(Actor!=NULL);
-	if( (Actor->bStatic || !Actor->bMovable) && !GIsEditor )
-		return 0;
-
-	if( Actor->bCollideActors && Hash ) 
-		Hash->RemoveActor( Actor );
-
-	FVector newLocation = DestLocation;
-	int result = 1;
-	if (!bNoCheck && (Actor->bCollideWorld || (Actor->bCollideWhenPlacing && (GetLevelInfo()->NetMode != NM_Client))) ) 
-		result = FindSpot( Actor->GetCylinderExtent(), newLocation, 0, 0 );
-
-	if (result && !test && !bNoCheck)
-		result = !CheckEncroachment( Actor, newLocation, Actor->Rotation, 1);
-	
-	if( result )
-	{
-		if( !test && (GetLevelInfo()->NetMode != NM_Client) )
-		{
-			if( Actor->StandingCount > 0 )
-				for( INT i=0; i<Actors.Num(); i++ )
-					if( Actors(i) && Actors(i)->Base == Actor ) 
-						Actors(i)->SetBase( NULL );
-			Actor->bJustTeleported = true;
-		}
-		Actor->Location = newLocation;
-		Actor->OldLocation = newLocation; //to zero velocity
-	}
-
-	if( Actor->bCollideActors && Hash )
-		Hash->AddActor( Actor );
-	UpdateMovingBrushTracker( BrushTracker, Actor );
-
-	// Set the zone after moving, so that if a ZoneChange or ActorEntered/ActorEntered message
-	// tries to move the actor, the hashing will be correct.
-	if( result )
-		SetActorZone( Actor, test );
-
-	return result;
+	return hp2_rs_engine_levact_far_move_actor( &GHp2LevActServices, &GMem, Hash, this, Actor, &DestLocation, test, bNoCheck );
 	unguard;
 }
 
@@ -892,12 +1103,6 @@ UBOOL ULevel::DropToFloor( AActor *Actor)
 	return (Hit.Time < 1.f);
 
 	unguard;
-}
-
-UBOOL DoMultiLineCheck(AActor* Actor)
-{
-	const UBOOL bIsMover = Actor->IsA(AMover::StaticClass());
-	return hp2_rs_engine_levact_do_multi_line_check( bIsMover, bIsMover ? ((AMover*)Actor)->MoverEncroachType : 0 );
 }
 
 //
@@ -942,229 +1147,13 @@ UBOOL ULevel::MoveActor
 {
 	guard(ULevel::MoveActor);
 	check(Actor!=NULL);
-	if( (Actor->bStatic || !Actor->bMovable) && !GIsEditor )
-		return 0;
-
-	// Skip if no vector.
-	if( Delta.IsNearlyZero() )
-	{
-		if( NewRotation==Actor->Rotation )
-		{
-			return 1;
-		}
-		else if( !Actor->StandingCount && !Actor->IsMovingBrush() )
-		{
-			Actor->Rotation  = NewRotation;
-			return 1;
-		}
-	}
-
-	// Set up.
-	Hit = FCheckResult(1.f);
-	NumMoves++;
-	clock(MoveCycles);
-	FMemMark Mark(GMem);
-	FLOAT DeltaSize;
-	FVector DeltaDir;
-	if( Delta.IsNearlyZero() )
-	{
-		DeltaSize = 0;
-		DeltaDir = Delta;
-	}
-	else
-	{
-		DeltaSize = Delta.Size();
-		DeltaDir       = Delta/DeltaSize;
-	}
-	FLOAT TestAdjust	   = Actor->IsMovingBrush() ? 0.f : 2.f;
-	FVector TestDelta      = Delta + TestAdjust * DeltaDir;
-
-	INT     MaybeTouched   = 0;
-	FCheckResult* FirstHit = NULL;
-
-	// Perform movement collision checking if needed for this actor.
-	if( (Actor->bCollideActors || Actor->bCollideWorld) && Delta!=FVector(0,0,0) )
-	{
-		// Check collision along the line.
-		FBox Box = Actor->GetPrimitive()->GetCollisionBoundingBox(Actor, true);
-		FVector Location = (Box.Min + Box.Max) * 0.5f;
-		FVector Extent = (Box.Max - Box.Min) * 0.5f;
-
-		// Subtract the trace margin, for flush movement.
-		if( Actor->IsMovingBrush() )
-			Extent -= FVector(0.51f);
-
-		if( DoMultiLineCheck(Actor) )
-		{
-			FirstHit = MultiLineCheck
-			(
-				GMem,
-				Location + TestDelta,
-				Location,
-				Extent,
-				Actor->bCollideActors,
-				Actor->bCollideWorld ? GetLevelInfo() : NULL,
-				0
-			);
-		}
-
-		// Handle first blocking actor.
-		if( Actor->bCollideWorld || Actor->bBlockActors || Actor->bBlockPlayers )
-		{
-			for( FCheckResult* Test=FirstHit; Test; Test=Test->GetNext() )
-			{
-				if
-				(	(!bIgnorePawns || Test->Actor->bStatic || (!Test->Actor->IsA(APawn::StaticClass()) && !Test->Actor->IsA(ADecoration::StaticClass())))
-				&&	(!bIgnoreBases || !Actor->IsBasedOn(Test->Actor))
-				&&	(!Test->Actor->IsBasedOn(Actor)               ) )
-				{
-					MaybeTouched = 1;
-					if( Actor->IsBlockedBy(Test->Actor) )
-					{
-						Hit = *Test;
-						break;
-					}
-				}
-			}
-		}
-	}
-
-	// Attenuate movement.
-	FVector FinalDelta = Delta;
-	if( Hit.Time < 1.f && !bNoFail )
-	{
-		// Fix up delta, given that TestDelta = Delta + TestAdjust.
-		FLOAT FinalDeltaSize = (DeltaSize + TestAdjust) * Hit.Time;
-		Hit.Time = (FinalDeltaSize - TestAdjust) / DeltaSize;
-		if( Hit.Time <= KINDA_SMALL_NUMBER )
-		{
-			Hit.Time = 0;
-			return 0;
-		}
-		FinalDelta = Delta * Hit.Time;
-	}
-
-	// Move the based actors (before encroachment checking).
-	if( Actor->StandingCount && !bTest )
-	{
-		for( int i=0; i<Actors.Num(); i++ )
-		{
-			AActor* Other = Actors(i);
-			if( Other && Other->Base==Actor )
-			{
-				// Move base.
-				FVector   RotMotion( 0, 0, 0 );
-				FRotator DeltaRot ( 0, NewRotation.Yaw - Actor->Rotation.Yaw, 0 );
-				if( NewRotation != Actor->Rotation )
-				{
-					// Handle rotation-induced motion.
-					FRotator ReducedRotation = FRotator( 0, ReduceAngle(NewRotation.Yaw) - ReduceAngle(Actor->Rotation.Yaw), 0 );
-					FVector   Pointer         = Actor->Location - Other->Location;
-					RotMotion                 = Pointer - Pointer.TransformVectorBy( GMath.UnitCoords * ReducedRotation );
-				}
-				FCheckResult Hit(1.f);
-				MoveActor( Other, FinalDelta + RotMotion, Other->Rotation + DeltaRot, Hit, 0, 0, 1 );
-
-				// Update pawn view.
-				if( Other->IsA(APawn::StaticClass()) )
-					((APawn*)Other)->ViewRotation += DeltaRot;
-			}
-		}
-	}
-
-	// Abort if encroachment declined.
-	if( Actor->bCollideActors && Hash )
-		Hash->RemoveActor( Actor );
-	if( !bTest && !bNoFail && !Actor->IsA(APawn::StaticClass()) && CheckEncroachment( Actor, Actor->Location + FinalDelta, NewRotation, 0 ) )
-	{
-		unclock(MoveCycles);
-		if( Actor->bCollideActors && Hash )
-			Hash->AddActor( Actor );
-		return 0;
-	}
-
-	// Update the location.
-	Actor->Location += FinalDelta;
-	Actor->Rotation  = NewRotation;
-	if( Actor->bCollideActors && Hash )
-		Hash->AddActor( Actor );
-	UpdateMovingBrushTracker( BrushTracker, Actor );
-
-	// Handle bump and touch notifications.
-	if( !bTest )
-	{
-		// Notify first bumped actor unless it's the level or the actor's base.
-		if( Hit.Actor && Hit.Actor!=GetLevelInfo() && !Actor->IsBasedOn(Hit.Actor) )
-		{
-			// Notify both actors of the bump.
-			if( GActorMovementObserver )
-				GActorMovementObserver->OnActorBump( Hit.Actor, Actor );
-			Hit.Actor->eventBump(Actor);
-			if( GActorMovementObserver )
-				GActorMovementObserver->OnActorBump( Actor, Hit.Actor );
-			Actor->eventBump(Hit.Actor);
-		}
-
-		// Handle Touch notifications.
-		if( MaybeTouched || !Actor->bBlockActors || !Actor->bBlockPlayers )
-			for( FCheckResult* Test=FirstHit; Test && Test->Time<Hit.Time; Test=Test->GetNext() )
-				if
-				(	(!Test->Actor->IsBasedOn(Actor))
-				&&	(!bIgnoreBases || !Actor->IsBasedOn(Test->Actor))
-				&&	(!Actor->IsBlockedBy(Test->Actor)) )
-					Actor->BeginTouch( Test->Actor );
-
-		// UnTouch notifications.
-		for( int i=0; i<ARRAY_COUNT(Actor->Touching); i++ )
-			if( Actor->Touching[i] && !Actor->IsOverlapping(Actor->Touching[i]) )
-				Actor->EndTouch( Actor->Touching[i], 0 );
-	}
-
-	// Set actor zone.
-	SetActorZone( Actor, bTest );
-	Mark.Pop();
-
-	// Return whether we moved at all.
-	unclock(MoveCycles);
-	return Hit.Time>0.f;
+	return hp2_rs_engine_levact_move_actor( &GHp2LevActServices, &GMem, Hash, this, Actor, &Delta, &NewRotation, &Hit, bTest, bIgnorePawns, bIgnoreBases, bNoFail );
 	unguard;
 }
 
 /*-----------------------------------------------------------------------------
 	Encroachment.
 -----------------------------------------------------------------------------*/
-
-//
-// If it is just rotation (location was not changed), it could cost a problem
-// That is why we calculate so called "Delta from Rotation" as well,
-//
-FVector FindDeltaFromRotationYaw(FVector origin, FVector point, int angle)
-{
-	FVector retVector;
-	hp2_rs_engine_levact_find_delta_from_rotation_yaw( &origin, &point, angle, &retVector );
-	return retVector;
-}
-
-FVector FindDeltaFromRotationRoll(FVector origin, FVector point, int angle)
-{
-	FVector retVector;
-	hp2_rs_engine_levact_find_delta_from_rotation_roll( &origin, &point, angle, &retVector );
-	return retVector;
-}
-
-FVector FindDeltaFromRotationPitch(FVector origin, FVector point, int angle)
-{
-	FVector retVector;
-	hp2_rs_engine_levact_find_delta_from_rotation_pitch( &origin, &point, angle, &retVector );
-	return retVector;
-}
-
-FVector FindDeltaFromRotation(FVector origin, FVector point, int yaw, int roll, int pitch)
-{
-	FVector retVector;
-	hp2_rs_engine_levact_find_delta_from_rotation( &origin, &point, yaw, roll, pitch, &retVector );
-	return retVector;
-}
 
 //
 // Check whether Actor is encroaching other actors after a move, and return
@@ -1180,163 +1169,9 @@ UBOOL ULevel::CheckEncroachment
 {
 	guard(ULevel::CheckEncroachment);
 	check(Actor);
-
-	// If this actor doesn't need encroachment checking, allow the move.
-	if( !Actor->bCollideActors && !Actor->bBlockActors && !Actor->bBlockPlayers && !Actor->IsMovingBrush() )
-		return 0;
-
-	// Query the mover about what he wants to do with the actors he is encroaching.
-	FMemMark Mark(GMem);
-	FCheckResult* FirstHit = Hash ? Hash->ActorEncroachmentCheck( GMem, Actor, TestLocation, TestRotation, 0 ) : NULL;	
-	FCheckResult* Test;
-	for( Test = FirstHit; Test!=NULL; Test=Test->GetNext() )
-	{
-		int noProcess = 0;
-		if
-		(	Test->Actor!=Actor
-		&&	Test->Actor!=GetLevelInfo()
-		&&	Actor->IsBlockedBy( Test->Actor ) )
-		{
-			if ( Actor->IsMovingBrush() && !Test->Actor->IsMovingBrush() ) 
-			{
-				// check if mover can safely push encroached actor
-				//Move test actor away from mover
-				FVector deltaFromRotation = FindDeltaFromRotation(Actor->Location, Test->Actor->Location, 
-					TestRotation.Yaw   - Actor->Rotation.Yaw,
-					TestRotation.Roll  - Actor->Rotation.Roll,
-					TestRotation.Pitch - Actor->Rotation.Pitch);
-
-				FVector MoveDir = TestLocation - Actor->Location + 10 * deltaFromRotation;	// multiply by 10 to make it more visisble
-				FVector OldLoc = Test->Actor->Location;
-				Test->Actor->moveSmooth(MoveDir);
-				// see if mover still encroaches test actor
-				FCheckResult* RecheckHit = Hash->ActorEncroachmentCheck( GMem, Actor, TestLocation, TestRotation, 0 );
-				noProcess = 1;
-				for ( FCheckResult* Recheck = RecheckHit; Recheck!=NULL; Recheck=Recheck->GetNext() )
-					if ( Recheck->Actor == Test->Actor )
-					{
-						noProcess = 0;
-						break;
-					}
-				if ( !noProcess ) //push test actor back toward brush
-				{
-					FVector realLoc = Actor->Location;
-					Actor->Location = TestLocation;
-					Test->Actor->moveSmooth(-1 * MoveDir);
-					Actor->Location = realLoc;
-				}
-			}
-			if ( !noProcess && Actor->eventEncroachingOn(Test->Actor) )
-			{
-				Mark.Pop();
-				return 1;
-			}
-		}
-	}
-
-	// If bTouchNotify, send Touch and UnTouch notifies.
-	if( bTouchNotify )
-	{
-		// UnTouch notifications.
-		for( int i=0; i<ARRAY_COUNT(Actor->Touching); i++ )
-			if( Actor->Touching[i] && !Actor->IsOverlapping(Actor->Touching[i]) )
-				Actor->EndTouch( Actor->Touching[i], 0 );
-	}
-
-	// Notify the encroached actors but not the level.
-	for( Test = FirstHit; Test; Test=Test->GetNext() )
-		if
-		(	Test->Actor!=Actor
-		&&	Test->Actor!=GetLevelInfo() )
-		{ 
-			if( Actor->IsBlockedBy(Test->Actor) ) 
-				Test->Actor->eventEncroachedBy(Actor);
-			else if( bTouchNotify )
-				Actor->BeginTouch( Test->Actor );
-		}
-							
-	Mark.Pop();
-
-
-	// Ok the move.
-	return 0;
+	return hp2_rs_engine_levact_check_encroachment( &GHp2LevActServices, &GMem, Hash, this, Actor, &TestLocation, &TestRotation, bTouchNotify );
 	unguard;
 }
-
-/*-----------------------------------------------------------------------------
-	Rust check services (`LevActServices` in crates/hp2-engine/src/levact.rs,
-	same field order). The thunks perform the C++ owner calls.
------------------------------------------------------------------------------*/
-
-struct Hp2LevActServices
-{
-	FCheckResult* (*AllocCheckResults)( void* Mem, INT Count );
-	INT (*ModelPointCheck)( void* Level, FCheckResult* Hit, const FVector* Location, const FVector* Extent );
-	INT (*ModelLineCheck)( void* Level, FCheckResult* Hit, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags );
-	FCheckResult* (*HashActorPointCheck)( void* Hash, void* Mem, const FVector* Location, const FVector* Extent, DWORD Flags );
-	FCheckResult* (*HashActorLineCheck)( void* Hash, void* Mem, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags );
-	INT (*ActorIsA)( const void* Actor, INT Kind );
-	INT (*ActorIsOwnedBy)( const void* Actor, const void* Other );
-	INT (*ActorIsBlockedBy)( const void* Actor, const void* Other );
-};
-
-static FCheckResult* Hp2LevActAllocCheckResults( void* Mem, INT Count )
-{
-	return new(*(FMemStack*)Mem, Count) FCheckResult;
-}
-
-static INT Hp2LevActModelPointCheck( void* Level, FCheckResult* Hit, const FVector* Location, const FVector* Extent )
-{
-	return ((ALevelInfo*)Level)->GetLevel()->Model->PointCheck( *Hit, NULL, *Location, *Extent, 0 );
-}
-
-static INT Hp2LevActModelLineCheck( void* Level, FCheckResult* Hit, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags )
-{
-	return ((ALevelInfo*)Level)->GetLevel()->Model->LineCheck( *Hit, NULL, *End, *Start, *Extent, (BYTE)Flags );
-}
-
-static FCheckResult* Hp2LevActHashActorPointCheck( void* Hash, void* Mem, const FVector* Location, const FVector* Extent, DWORD Flags )
-{
-	return ((FCollisionHashBase*)Hash)->ActorPointCheck( *(FMemStack*)Mem, *Location, *Extent, Flags );
-}
-
-static FCheckResult* Hp2LevActHashActorLineCheck( void* Hash, void* Mem, const FVector* End, const FVector* Start, const FVector* Extent, DWORD Flags )
-{
-	return ((FCollisionHashBase*)Hash)->ActorLineCheck( *(FMemStack*)Mem, *End, *Start, *Extent, (BYTE)Flags );
-}
-
-// Kind: 0 = ALevelInfo, 1 = AMover, 2 = AZoneInfo (matches ACTOR_KIND_* in levact.rs).
-static INT Hp2LevActActorIsA( const void* Actor, INT Kind )
-{
-	AActor* A = (AActor*)Actor;
-	if( Kind==0 )
-		return A->IsA(ALevelInfo::StaticClass());
-	if( Kind==1 )
-		return A->IsA(AMover::StaticClass());
-	return A->IsA(AZoneInfo::StaticClass());
-}
-
-static INT Hp2LevActActorIsOwnedBy( const void* Actor, const void* Other )
-{
-	return ((AActor*)Actor)->IsOwnedBy( (AActor*)Other );
-}
-
-static INT Hp2LevActActorIsBlockedBy( const void* Actor, const void* Other )
-{
-	return ((AActor*)Actor)->IsBlockedBy( (AActor*)Other );
-}
-
-static const Hp2LevActServices GHp2LevActServices =
-{
-	Hp2LevActAllocCheckResults,
-	Hp2LevActModelPointCheck,
-	Hp2LevActModelLineCheck,
-	Hp2LevActHashActorPointCheck,
-	Hp2LevActHashActorLineCheck,
-	Hp2LevActActorIsA,
-	Hp2LevActActorIsOwnedBy,
-	Hp2LevActActorIsBlockedBy,
-};
 
 /*-----------------------------------------------------------------------------
 	SinglePointCheck.
@@ -1434,65 +1269,7 @@ void ULevel::SetActorZone( AActor* Actor, UBOOL bTest, UBOOL bForceRefresh )
 {
 	guard(ULevel::SetActorZone);
 	check(Actor);
-	if( Actor->bDeleteMe )
-		return;
-
-	// If LevelInfo actor, handle specially.
-	if( Actor == GetLevelInfo() )
-	{
-		Actor->Region = FPointRegion( GetLevelInfo() );
-		return;
-	}
-
-	// See if this is a pawn.
-	APawn* Pawn = Actor->IsA(APawn::StaticClass()) ? (APawn*)Actor : NULL;
-
-	// If refreshing, init the actor's current zone.
-	if( bForceRefresh )
-	{
-		// Init the actor's zone.
-		Actor->Region = FPointRegion(GetLevelInfo());
-		if( Pawn )
-			Pawn->FootRegion = Pawn->HeadRegion = FPointRegion(GetLevelInfo());
-	}
-
-	// Find zone based on actor's location and see if it has changed.
-	FPointRegion NewRegion = Model->PointRegion( Actors.Num() ? GetLevelInfo() : (ALevelInfo*)Actor, Actor->Location );
-	if( NewRegion.Zone!=Actor->Region.Zone )
-	{
-		// Notify old zone info of player leaving.
-		if( !bTest )
-		{
-			Actor->Region.Zone->eventActorLeaving(Actor);
-			Actor->eventZoneChange( NewRegion.Zone );
-		}
-		Actor->Region = NewRegion;
-		if( !bTest )
-		{
-			Actor->Region.Zone->eventActorEntered(Actor);
-		}
-	}
-	else Actor->Region = NewRegion;
-	checkSlow(Actor->Region.Zone!=NULL);
-
-	if( Pawn )
-	{
-		// Update foot region.
-		FPointRegion NewFootRegion = Model->PointRegion( GetLevelInfo(), Pawn->Location - FVector(0,0,Pawn->CollisionHeight) );
-		if( NewFootRegion.Zone!=Pawn->FootRegion.Zone && !bTest )
-			Pawn->eventFootZoneChange(NewFootRegion.Zone);
-		Pawn->FootRegion = NewFootRegion;
-
-		// Update head region.
-		FPointRegion NewHeadRegion = Model->PointRegion( GetLevelInfo(), Pawn->Location + FVector(0,0,Pawn->EyeHeight) );
-		if( NewHeadRegion.Zone!=Pawn->HeadRegion.Zone && !bTest )
-			Pawn->eventHeadZoneChange(NewHeadRegion.Zone);
-		Pawn->HeadRegion = NewHeadRegion;
-
-		// update player replication info
-		if ( (GetLevelInfo()->NetMode != NM_Client) && Pawn->PlayerReplicationInfo )
-			Pawn->PlayerReplicationInfo->PlayerZone = Pawn->Region.Zone;
-	}
+	hp2_rs_engine_levact_set_actor_zone( &GHp2LevActServices, &GMem, Hash, this, Actor, bTest, bForceRefresh );
 	unguard;
 }
 
