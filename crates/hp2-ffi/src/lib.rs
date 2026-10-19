@@ -23,6 +23,7 @@ mod engine_pawn;
 mod engine_pawn_reach;
 mod engine_pawn_sense;
 mod engine_physic;
+mod engine_player;
 mod engine_prim_trace;
 mod engine_route;
 mod engine_tex;

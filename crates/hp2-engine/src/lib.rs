@@ -23,6 +23,7 @@ pub mod pawn;
 pub mod pawn_reach;
 pub mod pawn_sense;
 pub mod physic;
+pub mod player;
 pub mod prim;
 pub mod reach;
 pub mod route;

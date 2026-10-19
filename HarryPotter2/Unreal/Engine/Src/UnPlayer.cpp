@@ -7,6 +7,8 @@
 =============================================================================*/
 
 #include "EnginePrivate.h"
+#include "hp2_rs.h"
+#include "Hp2PlayerServices.h"
 
 /*-----------------------------------------------------------------------------
 	UPlayer object implementation.
@@ -30,46 +32,14 @@ void UPlayer::Serialize( FArchive& Ar )
 void UPlayer::Destroy()
 {
 	guard(UPlayer::Destroy);
-	if( GIsRunning && Actor )
-	{
-		ULevel* Level = Actor->GetLevel();
-		Actor->Player = NULL;
-		Level->DestroyActor( Actor, 1 );
-		Actor = NULL;
-	}
+	hp2_rs_engine_player_destroy( &GHp2PlayerServices, this );
 	Super::Destroy();
 	unguard;
 }
 UBOOL UPlayer::Exec( const TCHAR* Cmd, FOutputDevice& Ar )
 {
 	guard(UPlayer::Exec);
-	if( Actor && Actor->GetLevel()->Exec(Cmd,Ar) )
-	{
-		return 1;
-	}
-	if( Actor && Actor->Level && Actor->Level->Game && Actor->Level->Game->ScriptConsoleExec(Cmd,Ar,Actor) )
-	{
-		return 1;
-	}
-	if( Actor && Actor->myHUD && Actor->myHUD->ScriptConsoleExec(Cmd,Ar,Actor) )
-	{
-		return 1;
-	}
-	if( Actor && Actor->ScriptConsoleExec(Cmd,Ar,Actor) )
-	{
-		return 1;
-	}
-	if( Actor )
-	{
-		for( AInventory* Inv=Actor->Inventory; Inv; Inv=Inv->Inventory )
-			if( Inv->ScriptConsoleExec(Cmd,Ar,Actor) )
-				return 1;
-	}
-	if( Actor && Actor->GetLevel()->Engine->Exec(Cmd,Ar) )
-	{
-		return 1;
-	}
-	else return 0;
+	return hp2_rs_engine_player_exec( &GHp2PlayerServices, this, Cmd, &Ar );
 	unguard;
 }
 IMPLEMENT_CLASS(UPlayer);
