@@ -6,7 +6,7 @@
 
 use std::ffi::c_void;
 
-use crate::{FPlane, FVector};
+use crate::{FCoords, FPlane, FVector};
 
 /// Layout of `TArray<T>` (`UnTemplate.h`): `T* Data; INT ArrayNum; INT ArrayMax;`.
 #[repr(C)]
@@ -15,6 +15,15 @@ pub struct TArrayRaw {
     pub data: *mut c_void,
     pub num: i32,
     pub max: i32,
+}
+
+/// Layout of `TRefArray<T>` (`UnTemplate.h`): `T* Data; INT ArrayNum;`, no max.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TRefArrayRaw {
+    pub data: *mut c_void,
+    pub num: i32,
+    _pad_12: [u8; 4],
 }
 
 /// Layout mirror of C++ `FRotator` (12 bytes). Only the members listed in
@@ -47,7 +56,17 @@ pub struct AActor {
     pub role: u8,
     _pad_82: [u8; 6],
     pub owner: *mut c_void,
-    _pad_96: [u8; 112],
+    _pad_96: [u8; 52],
+    pub anim_sequence: [u8; 4],
+    pub anim_frame: f32,
+    _pad_156: [u8; 4],
+    pub tween_rate: f32,
+    pub tween_alpha: f32,
+    pub anim_bone: u8,
+    _pad_169: [u8; 3],
+    pub skel_anim: *mut c_void,
+    pub aux_anims: TArrayRaw,
+    _pad_196: [u8; 12],
     pub x_level: *mut c_void,
     pub tag: [u8; 4],
     _pad_220: [u8; 12],
@@ -71,18 +90,23 @@ pub struct AActor {
     pub velocity: FVector,
     pub ip_speed: f32,
     pub acceleration: FVector,
-    _pad_472: [u8; 52],
+    _pad_472: [u8; 44],
+    pub mesh: *mut c_void,
     pub brush: *mut c_void,
-    _pad_532: [u8; 16],
+    pub draw_scale: f32,
+    pub pre_pivot: FVector,
     pub saved_pre_pivot_z: f32,
-    _pad_552: [u8; 29],
+    _pad_552: [u8; 19],
+    pub wideness: u8,
+    _pad_572: [u8; 9],
     _bits_581: u8,
     _bits_582: u8,
     _pad_583: [u8; 81],
     pub collision_radius: f32,
     pub collision_width: f32,
     pub collision_height: f32,
-    _pad_676: [u8; 4],
+    pub collide_type: u8,
+    _pad_677: [u8; 3],
     _bits_680: u8,
     _pad_681: [u8; 27],
     _bits_708: u8,
@@ -93,7 +117,8 @@ pub struct AActor {
     pub desired_rotation: FRotator,
     _pad_748: [u8; 8],
     pub pending_touch: *mut c_void,
-    _pad_764: [u8; 24],
+    pub anim_last: f32,
+    _pad_768: [u8; 20],
     pub net_priority: f32,
     _pad_792: [u8; 4],
     _bits_796: u8,
@@ -125,6 +150,42 @@ impl AActor {
         }
     }
 
+    pub fn b_anim_by_owner(&self) -> bool {
+        self._bits_72 & (1 << 7) != 0
+    }
+
+    pub fn set_b_anim_by_owner(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 7;
+        } else {
+            self._bits_72 &= !(1 << 7);
+        }
+    }
+
+    pub fn b_anim_move(&self) -> bool {
+        self._bits_72 & (1 << 5) != 0
+    }
+
+    pub fn set_b_anim_move(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 5;
+        } else {
+            self._bits_72 &= !(1 << 5);
+        }
+    }
+
+    pub fn b_anim_loop(&self) -> bool {
+        self._bits_72 & (1 << 4) != 0
+    }
+
+    pub fn set_b_anim_loop(&mut self, value: bool) {
+        if value {
+            self._bits_72 |= 1 << 4;
+        } else {
+            self._bits_72 &= !(1 << 4);
+        }
+    }
+
     pub fn b_delete_me(&self) -> bool {
         self._bits_73 & (1 << 2) != 0
     }
@@ -134,6 +195,18 @@ impl AActor {
             self._bits_73 |= 1 << 2;
         } else {
             self._bits_73 &= !(1 << 2);
+        }
+    }
+
+    pub fn b_anim_transient(&self) -> bool {
+        self._bits_73 & (1 << 0) != 0
+    }
+
+    pub fn set_b_anim_transient(&mut self, value: bool) {
+        if value {
+            self._bits_73 |= 1 << 0;
+        } else {
+            self._bits_73 &= !(1 << 0);
         }
     }
 
@@ -218,6 +291,18 @@ impl AActor {
             self._bits_680 |= 1 << 3;
         } else {
             self._bits_680 &= !(1 << 3);
+        }
+    }
+
+    pub fn b_align_bottom(&self) -> bool {
+        self._bits_680 & (1 << 6) != 0
+    }
+
+    pub fn set_b_align_bottom(&mut self, value: bool) {
+        if value {
+            self._bits_680 |= 1 << 6;
+        } else {
+            self._bits_680 &= !(1 << 6);
         }
     }
 
@@ -337,6 +422,19 @@ const _: () = assert!(std::mem::offset_of!(AActor, tag) == 216);
 const _: () = assert!(std::mem::offset_of!(AActor, standing_count) == 316);
 const _: () = assert!(std::mem::offset_of!(AActor, touching) == 336);
 const _: () = assert!(std::mem::offset_of!(AActor, role) == 81);
+const _: () = assert!(std::mem::offset_of!(AActor, skel_anim) == 172);
+const _: () = assert!(std::mem::offset_of!(AActor, anim_sequence) == 148);
+const _: () = assert!(std::mem::offset_of!(AActor, anim_frame) == 152);
+const _: () = assert!(std::mem::offset_of!(AActor, anim_last) == 764);
+const _: () = assert!(std::mem::offset_of!(AActor, tween_alpha) == 164);
+const _: () = assert!(std::mem::offset_of!(AActor, tween_rate) == 160);
+const _: () = assert!(std::mem::offset_of!(AActor, anim_bone) == 168);
+const _: () = assert!(std::mem::offset_of!(AActor, mesh) == 516);
+const _: () = assert!(std::mem::offset_of!(AActor, draw_scale) == 532);
+const _: () = assert!(std::mem::offset_of!(AActor, pre_pivot) == 536);
+const _: () = assert!(std::mem::offset_of!(AActor, wideness) == 571);
+const _: () = assert!(std::mem::offset_of!(AActor, collide_type) == 676);
+const _: () = assert!(std::mem::offset_of!(AActor, aux_anims) == 180);
 
 /// Layout mirror of C++ `APawn` (1912 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -1718,6 +1816,311 @@ impl ACarcass {
 const _: () = assert!(size_of::<ACarcass>() == 980);
 const _: () = assert!(std::mem::offset_of!(ACarcass, base) == 0);
 
+/// Layout mirror of C++ `FPlace` (28 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FPlace {
+    pub quat: [f32; 4],
+    pub pos: FVector,
+}
+
+const _: () = assert!(size_of::<FPlace>() == 28);
+const _: () = assert!(std::mem::offset_of!(FPlace, quat) == 0);
+const _: () = assert!(std::mem::offset_of!(FPlace, pos) == 16);
+
+/// Layout mirror of C++ `VJointPos` (44 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VJointPos {
+    pub place: FPlace,
+    pub length: f32,
+    pub x_size: f32,
+    pub y_size: f32,
+    pub z_size: f32,
+}
+
+const _: () = assert!(size_of::<VJointPos>() == 44);
+const _: () = assert!(std::mem::offset_of!(VJointPos, place) == 0);
+const _: () = assert!(std::mem::offset_of!(VJointPos, length) == 28);
+const _: () = assert!(std::mem::offset_of!(VJointPos, x_size) == 32);
+const _: () = assert!(std::mem::offset_of!(VJointPos, y_size) == 36);
+const _: () = assert!(std::mem::offset_of!(VJointPos, z_size) == 40);
+
+/// Layout mirror of C++ `FMeshBone` (64 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FMeshBone {
+    pub name: [u8; 4],
+    pub flags: u32,
+    pub bone_pos: VJointPos,
+    pub parent_index: i32,
+    pub num_children: i32,
+    pub depth: i32,
+}
+
+const _: () = assert!(size_of::<FMeshBone>() == 64);
+const _: () = assert!(std::mem::offset_of!(FMeshBone, name) == 0);
+const _: () = assert!(std::mem::offset_of!(FMeshBone, flags) == 4);
+const _: () = assert!(std::mem::offset_of!(FMeshBone, bone_pos) == 8);
+const _: () = assert!(std::mem::offset_of!(FMeshBone, parent_index) == 52);
+const _: () = assert!(std::mem::offset_of!(FMeshBone, num_children) == 56);
+const _: () = assert!(std::mem::offset_of!(FMeshBone, depth) == 60);
+
+/// Layout mirror of C++ `FNamedBone` (12 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FNamedBone {
+    pub name: [u8; 4],
+    pub flags: u32,
+    pub parent_index: i32,
+}
+
+const _: () = assert!(size_of::<FNamedBone>() == 12);
+const _: () = assert!(std::mem::offset_of!(FNamedBone, name) == 0);
+const _: () = assert!(std::mem::offset_of!(FNamedBone, flags) == 4);
+const _: () = assert!(std::mem::offset_of!(FNamedBone, parent_index) == 8);
+
+/// Layout mirror of C++ `VBoneInfIndex` (8 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VBoneInfIndex {
+    pub weight_index: u16,
+    pub number: u16,
+    pub detail_a: u16,
+    pub detail_b: u16,
+}
+
+const _: () = assert!(size_of::<VBoneInfIndex>() == 8);
+const _: () = assert!(std::mem::offset_of!(VBoneInfIndex, weight_index) == 0);
+const _: () = assert!(std::mem::offset_of!(VBoneInfIndex, number) == 2);
+const _: () = assert!(std::mem::offset_of!(VBoneInfIndex, detail_a) == 4);
+const _: () = assert!(std::mem::offset_of!(VBoneInfIndex, detail_b) == 6);
+
+/// Layout mirror of C++ `VBoneInfluence` (4 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct VBoneInfluence {
+    pub point_index: u16,
+    pub bone_weight: u16,
+}
+
+const _: () = assert!(size_of::<VBoneInfluence>() == 4);
+const _: () = assert!(std::mem::offset_of!(VBoneInfluence, point_index) == 0);
+const _: () = assert!(std::mem::offset_of!(VBoneInfluence, bone_weight) == 2);
+
+/// Layout mirror of C++ `FAnalogTrack` (64 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FAnalogTrack {
+    pub flags: u32,
+    _pad_4: [u8; 4],
+    pub key_quat: TRefArrayRaw,
+    pub key_pos: TRefArrayRaw,
+    pub key_delta: TRefArrayRaw,
+    pub pos_scale: f32,
+    pub time_scale: f32,
+}
+
+const _: () = assert!(size_of::<FAnalogTrack>() == 64);
+const _: () = assert!(std::mem::offset_of!(FAnalogTrack, flags) == 0);
+const _: () = assert!(std::mem::offset_of!(FAnalogTrack, key_quat) == 8);
+const _: () = assert!(std::mem::offset_of!(FAnalogTrack, key_pos) == 24);
+const _: () = assert!(std::mem::offset_of!(FAnalogTrack, key_delta) == 40);
+const _: () = assert!(std::mem::offset_of!(FAnalogTrack, pos_scale) == 56);
+const _: () = assert!(std::mem::offset_of!(FAnalogTrack, time_scale) == 60);
+
+/// Layout mirror of C++ `MotionChunk` (56 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MotionChunk {
+    pub root_speed3_d: FVector,
+    pub track_time: f32,
+    pub start_bone: i32,
+    pub flags: u32,
+    pub bone_indices: TArrayRaw,
+    pub anim_tracks: TArrayRaw,
+}
+
+const _: () = assert!(size_of::<MotionChunk>() == 56);
+const _: () = assert!(std::mem::offset_of!(MotionChunk, root_speed3_d) == 0);
+const _: () = assert!(std::mem::offset_of!(MotionChunk, track_time) == 12);
+const _: () = assert!(std::mem::offset_of!(MotionChunk, start_bone) == 16);
+const _: () = assert!(std::mem::offset_of!(MotionChunk, flags) == 20);
+const _: () = assert!(std::mem::offset_of!(MotionChunk, bone_indices) == 24);
+const _: () = assert!(std::mem::offset_of!(MotionChunk, anim_tracks) == 40);
+
+/// Layout mirror of C++ `FMeshAnimSeq` (40 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FMeshAnimSeq {
+    pub name: [u8; 4],
+    pub group: [u8; 4],
+    pub start_frame: i32,
+    pub num_frames: i32,
+    pub rate: f32,
+    _pad_20: [u8; 4],
+    pub notifys: TArrayRaw,
+}
+
+const _: () = assert!(size_of::<FMeshAnimSeq>() == 40);
+const _: () = assert!(std::mem::offset_of!(FMeshAnimSeq, name) == 0);
+const _: () = assert!(std::mem::offset_of!(FMeshAnimSeq, group) == 4);
+const _: () = assert!(std::mem::offset_of!(FMeshAnimSeq, start_frame) == 8);
+const _: () = assert!(std::mem::offset_of!(FMeshAnimSeq, num_frames) == 12);
+const _: () = assert!(std::mem::offset_of!(FMeshAnimSeq, rate) == 16);
+const _: () = assert!(std::mem::offset_of!(FMeshAnimSeq, notifys) == 24);
+
+/// Layout mirror of C++ `FMeshFace` (8 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FMeshFace {
+    pub i_wedge: [u16; 3],
+    pub material_index: u16,
+}
+
+const _: () = assert!(size_of::<FMeshFace>() == 8);
+const _: () = assert!(std::mem::offset_of!(FMeshFace, i_wedge) == 0);
+const _: () = assert!(std::mem::offset_of!(FMeshFace, material_index) == 6);
+
+/// Layout mirror of C++ `UAnimation` (232 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UAnimation {
+    _pad_0: [u8; 72],
+    pub ref_bones: TArrayRaw,
+    _pad_88: [u8; 48],
+    pub moves: TArrayRaw,
+    pub anim_seqs: TArrayRaw,
+    _pad_168: [u8; 16],
+    pub raw_num_frames: i32,
+    _pad_188: [u8; 36],
+    pub comp_factor: f32,
+    _pad_228: [u8; 4],
+}
+
+const _: () = assert!(size_of::<UAnimation>() == 232);
+const _: () = assert!(std::mem::offset_of!(UAnimation, ref_bones) == 72);
+const _: () = assert!(std::mem::offset_of!(UAnimation, moves) == 136);
+const _: () = assert!(std::mem::offset_of!(UAnimation, anim_seqs) == 152);
+const _: () = assert!(std::mem::offset_of!(UAnimation, raw_num_frames) == 184);
+const _: () = assert!(std::mem::offset_of!(UAnimation, comp_factor) == 224);
+
+/// Layout mirror of C++ `USkeletalMesh` (888 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct USkeletalMesh {
+    _pad_0: [u8; 72],
+    pub bounding_box: FBox,
+    pub bounding_sphere: FPlane,
+    _pad_116: [u8; 140],
+    pub bounding_boxes: TArrayRaw,
+    _pad_272: [u8; 88],
+    pub frame_verts: i32,
+    _pad_364: [u8; 12],
+    pub scale: FVector,
+    pub origin: FVector,
+    pub rot_origin: FRotator,
+    _pad_412: [u8; 44],
+    pub faces: TArrayRaw,
+    _pad_472: [u8; 72],
+    pub mesh_scale_max: f32,
+    _pad_548: [u8; 76],
+    pub ref_skeleton: TArrayRaw,
+    pub bone_weight_idx: TArrayRaw,
+    pub bone_weights: TArrayRaw,
+    pub local_points: TArrayRaw,
+    pub bounding_box_sum: FBox,
+    pub weapon_bone_index: i32,
+    pub weapon_adjust: FCoords,
+    pub skeletal_depth: i32,
+    _pad_772: [u8; 4],
+    pub default_animation: *mut c_void,
+    pub debug_pivots: TArrayRaw,
+    pub debug_parents: TArrayRaw,
+    pub debug_verts: TArrayRaw,
+    pub display_bones: i32,
+    pub display_influences: i32,
+    pub classic_weapon_coords: FCoords,
+}
+
+const _: () = assert!(size_of::<USkeletalMesh>() == 888);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, frame_verts) == 360);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, scale) == 376);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, origin) == 388);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, rot_origin) == 400);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, bounding_boxes) == 256);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, bounding_box) == 72);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, bounding_sphere) == 100);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, faces) == 456);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, mesh_scale_max) == 544);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, ref_skeleton) == 624);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, bone_weight_idx) == 640);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, bone_weights) == 656);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, local_points) == 672);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, bounding_box_sum) == 688);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, weapon_bone_index) == 716);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, weapon_adjust) == 720);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, skeletal_depth) == 768);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, default_animation) == 776);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, debug_pivots) == 784);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, debug_parents) == 800);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, debug_verts) == 816);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, display_bones) == 832);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, display_influences) == 836);
+const _: () = assert!(std::mem::offset_of!(USkeletalMesh, classic_weapon_coords) == 840);
+
+/// Layout mirror of C++ `USkeletalMesh::CFSkelHeader` (168 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CFSkelHeader {
+    pub cached_mesh: *mut c_void,
+    pub cached_anim: *mut c_void,
+    pub cached_frame: f32,
+    pub cached_alpha: f32,
+    pub cached_seq: [u8; 4],
+    pub cache_loaded: i32,
+    pub cached_links: *mut c_void,
+    pub cached_places: *mut c_void,
+    pub mesh_coords: FCoords,
+    pub prev_bound: FBox,
+    pub prev_root: FVector,
+    pub prev_root_frame: f32,
+    pub movement: FVector,
+    pub movement_surplus: FVector,
+    pub b_got_root: u8,
+    _pad_165: [u8; 3],
+}
+
+const _: () = assert!(size_of::<CFSkelHeader>() == 168);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_mesh) == 0);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_anim) == 8);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_frame) == 16);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_alpha) == 20);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_seq) == 24);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cache_loaded) == 28);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_links) == 32);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, cached_places) == 40);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, mesh_coords) == 48);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, prev_bound) == 96);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, prev_root) == 124);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, prev_root_frame) == 136);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, movement) == 140);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, movement_surplus) == 152);
+const _: () = assert!(std::mem::offset_of!(CFSkelHeader, b_got_root) == 164);
+
 /// Layout mirror of C++ `UGesture` (104 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C, packed(4))]
@@ -1863,6 +2266,19 @@ mod layout_tests {
         assert_eq!(size_of::<AWarpZoneMarker>(), 1308);
         assert_eq!(size_of::<ADecoration>(), 948);
         assert_eq!(size_of::<ACarcass>(), 980);
+        assert_eq!(size_of::<FPlace>(), 28);
+        assert_eq!(size_of::<VJointPos>(), 44);
+        assert_eq!(size_of::<FMeshBone>(), 64);
+        assert_eq!(size_of::<FNamedBone>(), 12);
+        assert_eq!(size_of::<VBoneInfIndex>(), 8);
+        assert_eq!(size_of::<VBoneInfluence>(), 4);
+        assert_eq!(size_of::<FAnalogTrack>(), 64);
+        assert_eq!(size_of::<MotionChunk>(), 56);
+        assert_eq!(size_of::<FMeshAnimSeq>(), 40);
+        assert_eq!(size_of::<FMeshFace>(), 8);
+        assert_eq!(size_of::<UAnimation>(), 232);
+        assert_eq!(size_of::<USkeletalMesh>(), 888);
+        assert_eq!(size_of::<CFSkelHeader>(), 168);
         assert_eq!(size_of::<UGesture>(), 104);
         assert_eq!(size_of::<UConsole>(), 2760);
         assert_eq!(size_of::<UInput>(), 5400);

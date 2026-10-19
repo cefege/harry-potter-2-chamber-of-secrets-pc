@@ -421,7 +421,24 @@ class ENGINE_API USkeletalMesh : public ULodMesh
 	int BoneIndex( FName BoneName ) const;
 	FName BoneName( int Index ) const;
 
-	struct CFSkelHeader;
+	struct CFSkelHeader
+	{
+		UMesh	*CachedMesh;
+		UAnimation *CachedAnim;
+		FLOAT	CachedFrame;
+		FLOAT	CachedAlpha;
+		FName	CachedSeq;
+		UBOOL   CacheLoaded;
+		INT*	CachedLinks;
+		FPlace*	CachedPlaces;
+		FCoords	MeshCoords;
+		FBox	PrevBound;
+		FVector PrevRoot;
+		FLOAT	PrevRootFrame;
+		FVector Movement;
+		FVector MovementSurplus;
+		bool	bGotRoot;
+	};
 
 private:
 	void GetBones( TArray<FCoords>& Bones, AActor* Owner ) const;

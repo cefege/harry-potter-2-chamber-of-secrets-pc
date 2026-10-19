@@ -36,6 +36,7 @@ pub mod reach;
 pub mod route;
 pub mod scr_tex;
 pub mod services;
+pub mod skeletal;
 pub mod tex;
 pub mod trace;
 pub mod vec;
