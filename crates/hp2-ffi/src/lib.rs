@@ -22,6 +22,7 @@ mod engine_dynbsp;
 mod engine_gesture;
 mod engine_input;
 mod engine_levact;
+mod engine_level;
 mod engine_mover;
 mod engine_palette;
 mod engine_params;

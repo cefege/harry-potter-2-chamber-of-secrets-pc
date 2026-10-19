@@ -1,0 +1,1127 @@
+case	persist	0	-
+scenario	persist.save_two_persistent
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	actor	1	Actor1	0	1
+input	pa_bytes	0	
+input	file_size	-1
+input	global_time	0
+archive_writer_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Save Persistent Actors for map Test.unr
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	4	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+file_size	Maps\/Test.unr	-1
+archive_serialize_bytes	4	W
+global_time	Maps\/Test.unr
+archive_serialize_bytes	8	W
+archive_serialize_bytes	4	W
+archive_serialize_bytes	4	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	4	W
+actor_serialize_persistence	0
+archive_serialize_bytes	4	W
+archive_seek	64
+archive_serialize_bytes	4	W
+archive_seek	72
+archive_serialize_bytes	4	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	4	W
+actor_serialize_persistence	2
+archive_serialize_bytes	4	W
+archive_seek	90
+archive_serialize_bytes	4	W
+archive_seek	98
+archive_serialize_bytes	4	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+archive_serialize_bytes	2	W
+debugf	log	*** Finished Saving Persistent Actors for map Test.unr
+archive_close	110
+=>	0
+saved_bytes	110
+case	persist	1	-
+scenario	persist.load_roundtrip
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	110	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+file_size	Maps\/Test.unr	-1
+archive_serialize_bytes	8	R
+global_time	Maps\/Test.unr
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	0
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	2
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+debugf	log	*** Finished Loading Persistent Actors for map Test.unr
+=>	0
+case	persist	2	-
+scenario	persist.load_missing_file
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	110	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	1
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Could not load Persistent Actor file Save\/cache/Test_pa.usa (file is probably missing).
+=>	0
+case	persist	3	-
+scenario	persist.load_empty_input
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	0	
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Could not load Persistent Actor file Save\/cache/Test_pa.usa (file is probably missing).
+=>	0
+case	persist	4	-
+scenario	persist.load_bad_identifier
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	110	af004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+debugf	error	ULevelBase::LoadPersistentActors ERROR: Invalid or truncated PA file identifier!
+=>	1
+case	persist	5	-
+scenario	persist.load_map_mismatch
+input	map	Other.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	110	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Other_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Other.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+debugf	error	ULevelBase::LoadPersistentActors ERROR: FinalMapName != Saved map name!
+=>	0
+case	persist	6	-
+scenario	persist.load_size_mismatch
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	110	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	99
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+file_size	Maps\/Test.unr	99
+debugf	error	ULevelBase::LoadPersistentActors ERROR: Loading map FileSize that this PA file is for!
+=>	0
+case	persist	7	-
+scenario	persist.load_missing_actor
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	pa_bytes	110	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+file_size	Maps\/Test.unr	-1
+archive_serialize_bytes	8	R
+global_time	Maps\/Test.unr
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	0
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+debugf	log	*** Actor is NOT in level Test.unr but is in pa file Save\/cache/Test_pa.usa! \n. 
+archive_seek	98
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+debugf	log	*** Finished Loading Persistent Actors for map Test.unr
+=>	0
+case	persist	8	-
+scenario	persist.load_leftover_destroy
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	actor	3	Actor3	1	1
+input	pa_bytes	110	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+file_size	Maps\/Test.unr	-1
+archive_serialize_bytes	8	R
+global_time	Maps\/Test.unr
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	0
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	2
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+level_destroy_actor	3
+debugf	log	*** Finished Loading Persistent Actors for map Test.unr
+=>	0
+case	persist	9	-
+scenario	persist.load_bad_eof
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	106	50004100300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f00
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+file_size	Maps\/Test.unr	-1
+archive_serialize_bytes	8	R
+global_time	Maps\/Test.unr
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	0
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	4	R
+actor_serialize_persistence	2
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+debugf	error	ULevelBase::LoadPersistentActors ERROR: Invalid EOF UTF-16LE string!
+=>	1
+case	persist	10	-
+scenario	persist.load_wire_error
+input	map	Test.unr
+input	actor	0	Actor0	1	1
+input	actor	2	Actor2	1	1
+input	pa_bytes	110	50007f00300000001200000054006500730074002e0075006e0072000000ffffffff0000000000000000020000000e0000004100630074006f0072003000000004000000001000000e0000004100630074006f0072003200000004000000021000000800000045004f0046000000
+input	file_size	-1
+input	global_time	0
+input	reader_null	0
+archive_reader_create	Save\/cache/Test_pa.usa
+debugf	log	*** Starting to Load Persistent Actors for map Test.unr
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+archive_serialize_bytes	2	R
+debugf	error	ULevelBase::LoadPersistentActors ERROR: Invalid or truncated PA file identifier!
+=>	1
+case	core	0	-
+scenario	core.is_server_no_drivers
+=>	1
+case	core	1	-
+scenario	core.is_audible_occlusion_none
+=>	1
+case	core	2	-
+scenario	core.init_stats
+=>	0
+case	core	3	-
+scenario	core.get_stats
+stats	Script=001.0 Actor=02.0 Path=03.0 See=04.0 Spawn=05.0 Audio=06.0 Un=07.0 Move=08.0 (9) Net=10.0
+=>	0
+case	core	4	actors=2 path=save+load
+scenario	core.base_serialize_roundtrip
+uobject_serialize
+archive_serialize_bytes	4	W
+archive_serialize_bytes	4	W
+url_serialize	0
+archive_close	8
+uobject_serialize
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+url_serialize	1
+=>	0
+case	core	5	net=0 demo=0
+scenario	core.base_destroy_no_drivers
+uobject_destroy
+=>	0
+case	core	6	engine=null root_outside=0
+scenario	core.init_level_ctor
+uobject_allocate
+model_construct	0	0
+level_spawn_actor	100
+level_spawn_brush	101
+uobject_allocate
+model_construct	1	1
+=>	0
+case	core	7	engine=null root_outside=1
+scenario	core.init_level_ctor_root
+uobject_allocate
+model_construct	0	1
+level_spawn_actor	100
+level_spawn_brush	101
+uobject_allocate
+model_construct	1	1
+=>	0
+case	core	8	model=1
+scenario	core.shrink_model
+model_shrink_model
+=>	0
+case	core	9	model=1 do_trans=0
+scenario	core.modify_model
+uobject_modify
+model_modify	0
+=>	0
+case	core	10	actors=2 outer=match
+scenario	core.post_load_outer_match
+uobject_post_load
+xlevel	0	1
+xlevel	2	1
+=>	0
+case	core	11	actors=2 outer=mixed
+scenario	core.post_load_outer_mixed
+uobject_post_load
+xlevel	0	1
+xlevel	2	0
+=>	0
+case	core	12	actors=3 hash=none enable=1
+scenario	core.set_collision_enable
+collision_hash_new
+collision_hash_add_actor	0
+collision_hash_add_actor	2
+=>	0
+case	core	13	actors=3 hash=present enable=0
+scenario	core.set_collision_disable
+collision_hash_new
+collision_hash_remove_actor	0	1
+collision_hash_remove_actor	2	1
+collision_hash_destroy
+=>	0
+case	core	14	actors=3 hash=none enable=0
+scenario	core.set_collision_noop
+=>	0
+case	core	15	ver=64 writing=1
+scenario	core.serialize_save_ver64
+uobject_serialize
+archive_serialize_bytes	4	W
+archive_serialize_bytes	4	W
+url_serialize	0
+archive_serialize_bytes	1	W
+archive_serialize_bytes	4	W
+archive_serialize_bytes	1	W
+archive_close	14
+=>	0
+case	core	16	ver=60 writing=1
+scenario	core.serialize_save_ver60
+uobject_serialize
+archive_serialize_bytes	4	W
+archive_serialize_bytes	4	W
+url_serialize	0
+archive_serialize_bytes	1	W
+archive_serialize_bytes	4	W
+archive_close	13
+=>	0
+case	core	17	ver=64 writing=0
+scenario	core.serialize_load_ver64
+uobject_serialize
+archive_serialize_bytes	4	R
+archive_serialize_bytes	4	R
+url_serialize	1
+archive_serialize_bytes	1	R
+archive_serialize_bytes	4	R
+archive_serialize_bytes	1	R
+=>	0
+case	core	18	hash=present
+scenario	core.destroy_hash_present
+collision_hash_new
+collision_hash_destroy
+uobject_destroy
+=>	0
+case	core	19	hash=none
+scenario	core.destroy_hash_none
+uobject_destroy
+=>	0
+case	core	20	info=levelinfo
+scenario	core.update_time
+app_system_time
+level_info_time	2004	5	3	6	14	31	7	250
+=>	0
+case	core	21	zone1=1 zone2=1 distance=0
+scenario	core.radius_multiplier_same_zone
+=>	1
+case	core	22	zone1=1 zone2=2 distance=2
+scenario	core.radius_multiplier_two_zones
+=>	0.522006273
+case	core	23	occlusion=Default model_clear=1
+scenario	core.is_audible_occlusion_default_clear
+model_fast_line_check	1
+=>	1
+case	core	24	occlusion=Default model_clear=0
+scenario	core.is_audible_occlusion_default_blocked
+model_fast_line_check	0
+=>	0
+case	core	25	occlusion=StaticMeshes trace_clear=1
+scenario	core.is_audible_occlusion_static_clear
+level_single_line_check	00000006	-1
+=>	1
+case	core	26	occlusion=StaticMeshes trace_clear=0
+scenario	core.is_audible_occlusion_static_blocked
+level_single_line_check	00000006	-1
+=>	0
+case	core	27	player=0 group=GSTATEMAIN
+scenario	core.screen_actors_by_game_state_no_player
+debugf	log	**** Can't find a valid player!!!! 
+actor_flags	0	0	0
+=>	0
+case	core	28	player_state=NONE group=GSTATEMAIN
+scenario	core.screen_actors_by_game_state_none_state
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	29	player_state=GSTATEFOO master_has=0 group=GSTATEMAIN
+scenario	core.screen_actors_by_game_state_invalid_state
+debugf	log	**** Caution: The player pawn has an Invalid CurrentGameState for this package Load.
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	30	null_slot=1 player_state=GSTATEMAIN group=GSTATEMAIN
+scenario	core.screen_actors_by_game_state_null_slot
+resolve_game_state	1
+actor_flags	1	1	0
+actor_flags	0	0	0
+=>	0
+case	core	31	player_state=GSTATEMAIN exclude=gstatemain group=GSTATEMAIN
+scenario	core.screen_actors_by_game_state_exclude_hit
+resolve_game_state	1
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	32	player_state=GSTATEMAIN exclude=GSTATELOBY group=GSTATEMAIN
+scenario	core.screen_actors_by_game_state_exclude_miss
+resolve_game_state	1
+actor_flags	0	0	0
+actor_flags	1	1	0
+=>	0
+case	core	33	player_state=GSTATEMAIN group=PAWNLIGHT
+scenario	core.screen_actors_by_game_state_no_gstate
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	34	editor=1 player_state=GSTATEMAIN group=GSTATELOBY hidden_ed=1
+scenario	core.screen_actors_by_game_state_editor_hidden
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	35	player_state=GSTATEMAIN group=GSTATEMAIN token_len=10 exclude=-
+scenario	core.screen_actors_by_game_state_match
+resolve_game_state	1
+actor_flags	0	0	0
+actor_flags	1	1	0
+=>	0
+case	core	36	player_state=GSTATEMAIN group=GSTATELOBY,GSTATEMAIN
+scenario	core.screen_actors_by_game_state_multi_token
+resolve_game_state	1
+actor_flags	0	0	0
+actor_flags	1	1	0
+=>	0
+case	core	37	player_state=GSTATEMAIN group=GSTATEX token_len=10
+scenario	core.screen_actors_by_game_state_bad_token_length
+debugf	error	*** GameState ERROR Actor: Actor1 has an invalid GameState Token: GSTATEX!!!
+resolve_game_state	1
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	38	player_state=GSTATEMAIN group=GSTATEXXXX token_len=10
+scenario	core.screen_actors_by_game_state_bad_token_unknown
+debugf	error	*** GameState ERROR Actor: Actor1 has an invalid GameState Token: GSTATEXXXX!!!
+resolve_game_state	1
+actor_flags	0	0	0
+actor_flags	1	0	0
+=>	0
+case	core	39	game=NULL new_detail=1
+scenario	core.detail_change_no_game
+high_detail	1
+=>	0
+case	core	40	game=set new_detail=0 start_high=1
+scenario	core.detail_change_game
+event_detail_change
+high_detail	0
+=>	0
+case	core	41	client=NULL viewports=1 actor=Cam0
+scenario	core.remember_actors_no_client
+viewport_saved	0	0	0	0	0	0
+viewport_actor	1
+=>	0
+case	core	42	client=set viewports=0
+scenario	core.remember_actors_no_viewports
+=>	0
+case	core	43	client=set viewports=1 actor=Cam0
+scenario	core.remember_actors_save_view
+viewport_saved	1.5	90	17	3	4	5
+viewport_actor	-1
+=>	0
+case	core	44	editor=1 viewports=0 actors=null,nonpawn,pawn_player,pawn_free
+scenario	core.reconcile_actors_player_cleared
+pawn_player	2	0
+pawn_player	3	0
+=>	0
+case	core	45	editor=1 viewports=Cam0 cameras=Other,Cam0
+scenario	core.reconcile_actors_match_identical
+debugf	log	Matched Viewport Cam0
+level_destroy_actor	1
+viewport_saved	3.5	70	11	2	6	7
+viewport_actor	2
+view_fields	3.5	70	11	2	6	7
+=>	0
+case	core	46	editor=1 viewports=Cam0 cameras=Other
+scenario	core.reconcile_actors_spawn_unmatched
+level_spawn_view_actor	7
+level_destroy_actor	1
+viewport_saved	3.5	70	11	2	6	7
+viewport_actor	7
+view_fields	3.5	70	11	2	6	7
+=>	0
+case	core	47	editor=0 viewports=0
+scenario	core.reconcile_actors_check_editor
+error	Assertion failed: GIsEditor [File:UnLevel.cpp] [Line: 1102]
+debugf	critical	ULevel::ReconcileActors
+harness_abort	1
+=>	0
+case	core	48	editor=1 viewports=Cam0 viewport_actor=Cam0
+scenario	core.reconcile_actors_check_viewport_actor
+error	Assertion failed: Viewport->Actor==NULL [File:UnLevel.cpp] [Line: 1116]
+debugf	critical	MatchIdentical
+debugf	critical	ULevel::ReconcileActors
+harness_abort	1
+=>	0
+case	core	49	distance=0 source=nonpawn
+scenario	core.trace_visible_no_distance
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	50	distance=100 single_line=clear source=nonpawn
+scenario	core.trace_visible_clear
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	51	distance=100 source=pawn hit=levelinfo item=5 zone=5 visible=5
+scenario	core.trace_visible_levelinfo_visible
+level_single_line_check	00000006	0
+zone_visible	5	1
+hit_time	0.5
+hit_actor	100
+hit_item	5
+=>	0
+case	core	52	distance=100 source=pawn hit=levelinfo item=0
+scenario	core.trace_visible_levelinfo_rock
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	53	distance=100 source=pawn hit=levelinfo item=5 zone=5 visible=3
+scenario	core.trace_visible_levelinfo_hidden
+level_single_line_check	00000006	0
+zone_visible	5	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	54	distance=100 source=pawn hit=Actor1 zone=2 visible=2
+scenario	core.trace_visible_actor_visible
+level_single_line_check	00000006	0
+zone_visible	2	1
+hit_time	0.5
+hit_actor	1
+hit_item	0
+=>	0
+case	core	55	distance=48 source=pawn hit=Actor1 zone=2 visible=3 hit_at_start=1
+scenario	core.trace_visible_actor_hidden_retry
+level_single_line_check	00000006	0
+zone_visible	2	0
+level_single_line_check	00000006	0
+zone_visible	2	0
+level_single_line_check	00000006	0
+zone_visible	2	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	56	distance=100 source=pawn hit=Actor1 owned_by_source=1 zone=2 visible=2
+scenario	core.trace_visible_owned_skip
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	57	distance=100 source=nonpawn hit=levelinfo item=5
+scenario	core.trace_visible_nonplayer_levelinfo
+level_single_line_check	00000006	0
+hit_time	0.5
+hit_actor	100
+hit_item	5
+=>	0
+case	core	58	distance=100 source=nonpawn hit=Actor1 zone=2
+scenario	core.trace_visible_nonplayer_actor
+level_single_line_check	00000006	0
+hit_time	0.5
+hit_actor	1
+hit_item	0
+=>	0
+case	core	59	distance=0 source=nonpawn parent=Actor
+scenario	core.trace_visible_objects_no_distance
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	60	distance=100 single_line=clear source=nonpawn parent=Actor
+scenario	core.trace_visible_objects_clear
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	61	distance=100 source=nonpawn parent=Actor hit=Actor1 class=Actor
+scenario	core.trace_visible_objects_nonplayer_match
+level_single_line_check	00000006	0
+hit_time	0.5
+hit_actor	1
+hit_item	0
+=>	0
+case	core	62	distance=100 source=pawn parent=Actor hit=Actor1 zone=2 visible=2
+scenario	core.trace_visible_objects_player_visible
+level_single_line_check	00000006	0
+zone_visible	2	1
+hit_time	0.5
+hit_actor	1
+hit_item	0
+=>	0
+case	core	63	distance=48 source=pawn parent=Actor hit=Actor1 zone=2 visible=3 hit_at_start=1
+scenario	core.trace_visible_objects_player_hidden_retry
+level_single_line_check	00000006	0
+zone_visible	2	0
+level_single_line_check	00000006	0
+zone_visible	2	0
+level_single_line_check	00000006	0
+zone_visible	2	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	64	distance=100 source=nonpawn parent=APlayerPawn hit=Actor1 class=Actor
+scenario	core.trace_visible_objects_class_mismatch
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	65	distance=100 source=nonpawn parent=Actor hit=Actor1 owned_by_source=1
+scenario	core.trace_visible_objects_owned_skip
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	core	66	distance=47 dir_x=0.97 source=nonpawn parent=APlayerPawn hit=Actor1 class=Actor hit_at_start=1
+scenario	core.trace_visible_objects_loop_band
+level_single_line_check	00000006	0
+level_single_line_check	00000006	0
+level_single_line_check	00000006	0
+level_single_line_check	00000006	0
+hit_time	1
+hit_actor	-1
+hit_item	-1
+=>	0
+case	net	0	-
+scenario	net.notify_sending_file_server
+debugf	dev_net	Client requested file: Allowed
+=>	1
+case	net	1	-
+scenario	net.notify_sending_file_client
+debugf	dev_net	Server requested file: Refused
+=>	0
+case	net	2	-
+scenario	net.accepting_channel_client_refuse
+debugf	dev_net	Client refusing unwanted channel of type 1
+=>	0
+case	net	3	-
+scenario	net.accepting_channel_server_control
+debugf	dev_net	NotifyAcceptingChannel Control 0 server Engine.Level: Accepted
+=>	1
+case	net	4	server=1 type=file
+scenario	net.accepting_channel_server_file
+debugf	dev_net	NotifyAcceptingChannel File 0 server Engine.Level: Accepted
+=>	1
+case	net	5	-
+scenario	net.accepting_channel_server_refuse
+debugf	dev_net	NotifyAcceptingChannel 2 1 server Engine.Level: Refused
+=>	0
+case	net	6	cmd=NETHANDLED driver=net
+scenario	net.exec_net_handled
+net_exec	net	NETHANDLED
+=>	1
+case	net	7	cmd=DEMOHANDLED driver=demo
+scenario	net.exec_demo_handled
+net_exec	demo	DEMOHANDLED
+=>	1
+case	net	8	cmd=FOO driver=net
+scenario	net.exec_unhandled
+net_exec	net	FOO
+=>	0
+case	net	9	cmd=DEMOREC
+scenario	net.exec_demorec_no_filename
+debugf	log	You must specify a filename
+=>	1
+case	net	10	cmd=DEMOREC demo1 init=fail
+scenario	net.exec_demorec_init_fail
+debugf	log	Attempting to record demo demo1.dem
+load_class	ini:Engine.Engine.DemoRecordingDevice
+construct_object	demo
+init_listen	demo	demo1.dem	0
+debugf	log	Demo recording failed: Port busy
+delete_driver	demo
+=>	1
+case	net	11	cmd=DEMOREC demo2.dem init=ok
+scenario	net.exec_demorec_started
+debugf	log	Attempting to record demo demo2.dem
+load_class	ini:Engine.Engine.DemoRecordingDevice
+construct_object	demo
+init_listen	demo	demo2.dem	1
+debugf	log	Demo recording started to demo2.dem
+=>	1
+case	net	12	cmd=DEMOPLAY
+scenario	net.exec_demoplay_no_filename
+debugf	log	You must specify a filename
+=>	1
+case	net	13	net=present net_conn=none demo=none
+scenario	net.is_server_driver_server
+=>	1
+case	net	14	net=present net_conn=set demo=none
+scenario	net.is_server_driver_client
+=>	0
+case	net	15	net=none demo=present demo_conn=set
+scenario	net.is_server_demo_client
+=>	0
+case	net	16	net=present net_conn=none demo=present demo_conn=none
+scenario	net.is_server_demo_present
+=>	1
+case	net	17	net_driver=present
+scenario	net.listen_already_listening
+localize_error	NetAlready
+=>	0
+error_text	Already listening
+net_driver	1
+case	net	18	net_driver=none linker=none
+scenario	net.listen_no_linker
+localize_error	NetListen
+=>	0
+error_text	Listen failed
+net_driver	0
+case	net	19	net_driver=none linker=set init=fail
+scenario	net.listen_init_fail
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	0
+debugf	log	Failed to listen: Port busy
+delete_driver	net
+=>	0
+error_text	Port busy
+net_driver	0
+case	net	20	client=set server_actors=none pause=2.5
+scenario	net.listen_server_ok
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	2.5
+case	net	21	client=none server_actors=none pause=2.5
+scenario	net.listen_dedicated_ok
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+=>	1
+error_text	
+net_driver	1
+net_mode	1
+countdown	2.5
+case	net	22	client=set server_actors=blank
+scenario	net.listen_server_actor_blank
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	0
+case	net	23	client=set server_actors=Engine.Helper_Flag=5 spawn=null
+scenario	net.listen_server_actor_spawn_null
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+debugf	log	Spawning: Engine.Helper
+load_class	Engine.Helper
+spawn_helper	null
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	0
+case	net	24	client=set server_actors=Engine.Helper_Bare spawn=actor
+scenario	net.listen_server_actor_bare_token
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+debugf	log	Spawning: Engine.Helper
+load_class	Engine.Helper
+spawn_helper	actor
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	0
+case	net	25	client=set server_actors=Engine.Helper_Flag=5 spawn=actor prop=Flag:config
+scenario	net.listen_server_actor_config_field
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+debugf	log	Spawning: Engine.Helper
+load_class	Engine.Helper
+spawn_helper	actor
+import_text	Flag	5
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	0
+case	net	26	client=set server_actors=Engine.Helper_Flag=5 spawn=actor prop=Flag:plain
+scenario	net.listen_server_actor_non_config_field
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+debugf	log	Spawning: Engine.Helper
+load_class	Engine.Helper
+spawn_helper	actor
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	0
+case	net	27	client=set server_actors=Engine.Helper_Flag=5 spawn=actor prop=Other:config
+scenario	net.listen_server_actor_name_mismatch
+load_class	ini:Engine.Engine.NetworkDevice
+construct_object	net
+init_listen	net	Entry	1
+build_master_map
+debugf	log	Spawning: Engine.Helper
+load_class	Engine.Helper
+spawn_helper	actor
+=>	1
+error_text	
+net_driver	1
+net_mode	2
+countdown	0
+case	net	28	net=present server_conn=set
+scenario	net.notify_accepting_connection_client
+debugf	dev_net	NotifyAcceptingConnection: Client refused
+=>	0
+case	net	29	net=present server_conn=none next_url=set
+scenario	net.notify_accepting_connection_switching
+debugf	dev_net	NotifyAcceptingConnection: Server Level refused
+=>	2
+case	net	30	net=present server_conn=none next_url=empty
+scenario	net.notify_accepting_connection_accept
+debugf	dev_net	NotifyAcceptingConnection: Server Level accept
+=>	1
+case	net	31	net=present server_conn=none address=fixed timestamp=fixed
+scenario	net.notify_accepted_connection
+debugf	net_come_go	Open  2004.05.06-14.31.07 192.0.2.7:7777
+case	net	32	optional=empty lone=0
+scenario	net.welcome_player_default
+package_map_copy
+send_package_map
+conn_log	WELCOME LEVEL=Level LONE=0
+conn_flush
+case	net	33	optional=set lone=1
+scenario	net.welcome_player_optional
+package_map_copy
+send_package_map
+conn_log	WELCOME LEVEL=Level LONE=1 extra
+conn_flush
+case	net	34	net=none text=USERFLAG_7
+scenario	net.notify_received_text_userflag
+user_flags	7
+case	net	35	net=present server_conn=none text=HELLO
+scenario	net.notify_received_text_server_hello
+debugf	dev_net	Level server received: HELLO MINVER=219 VER=219
+conn_log	UPGRADE MINVER=400 VER=433
+channel_close
+conn_flush
+case	net	36	net=present server_conn=set client=present text=FAILURE
+scenario	net.notify_received_text_client_failure
+debugf	dev_net	Level client received: FAILURE rejected
+client_travel	?failed
+case	net	37	net=present rate=7000 max=5000
+scenario	net.notify_received_text_netspeed_high
+debugf	dev_net	Level server received: NETSPEED 7000
+debugf	log	Client netspeed is 5000
+net_speed	5000
+case	net	38	net=present rate=1000 initial=0
+scenario	net.notify_received_text_netspeed_low
+debugf	dev_net	Level server received: NETSPEED 1000
+debugf	log	Client netspeed is 0
+net_speed	0
+case	net	39	package_map=set list=empty
+scenario	net.notify_received_text_have
+debugf	dev_net	Level server received: HAVE GUID=00000000000000000000000000000000
+case	net	40	package_map=set list=empty
+scenario	net.notify_received_text_skip
+debugf	dev_net	Level server received: SKIP GUID=00000000000000000000000000000000
+case	net	41	net=present response=missing
+scenario	net.notify_received_text_login_missing_response
+debugf	dev_net	Level server received: LOGIN URL=?Name=Guest
+conn_log	FAILURE CHALLENGE
+channel_close
+conn_flush
+case	net	42	net=present challenge_result=1 response=0
+scenario	net.notify_received_text_login_precedence_false
+debugf	dev_net	Level server received: LOGIN RESPONSE=0
+challenge_response	0	1
+conn_log	FAILURE CHALLENGE
+channel_close
+conn_flush
+case	net	43	net=present challenge_result=1 response=1 prelogin=accept
+scenario	net.notify_received_text_login_success
+debugf	dev_net	Level server received: LOGIN RESPONSE=1 URL=?Name=Guest
+challenge_response	0	1
+debugf	dev_net	Login request: ?Name=Guest
+pre_login	?Name=Guest	192.0.2.7:7777
+package_map_copy
+send_package_map
+conn_log	WELCOME LEVEL=Level LONE=0
+conn_flush
+case	net	44	net=present challenge_result=1 response=1 prelogin=reject failcode=Bad
+scenario	net.notify_received_text_login_prelogin_reject
+debugf	dev_net	Level server received: LOGIN RESPONSE=1 URL=?Name=Guest
+challenge_response	0	1
+debugf	dev_net	Login request: ?Name=Guest
+pre_login	?Name=Guest	192.0.2.7:7777
+debugf	dev_net	PreLogin failure: Denied (Bad)
+conn_log	FAILURE Denied
+conn_log	FAILCODE Bad
+channel_close
+conn_flush
+case	net	45	package=0 error=empty skipped=0
+scenario	net.notify_received_file
+error	Level received unexpected file
+debugf	critical	ULevel::NotifyReceivingFile
+=>	0

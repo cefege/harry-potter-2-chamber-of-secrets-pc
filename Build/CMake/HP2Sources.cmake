@@ -65,6 +65,7 @@ set(HP2_ENGINE_SOURCES
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2ScrTexServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2SkeletalServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2UrlServices.cpp"
+    "${HP2_UNREAL_ROOT}/Engine/Src/Hp2LevelServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2UEngineServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2StatLogServices.cpp"
     "${HP2_UNREAL_ROOT}/Engine/Src/Hp2AudioServices.cpp"
