@@ -101,7 +101,7 @@ print(''.join(f'__attribute__((used)) char stub{i}[64] __asm__(\"_{s}\");' + chr
 c++ -c "$WORK/stubs.cpp" -o "$WORK/stubs.o"
 c++ "$WORK/harness.o" "$WORK/UnPhysic.o" "$WORK/OrthoRotation.o" "$WORK/stubs.o" -o "$WORK/physic_harness"
 FIXTURES=$REPO/crates/hp2-engine/tests/fixtures
-for FAM in scripted motion walk fall swim move dispatch interp; do
+for FAM in scripted motion walk fall swim move dispatch interp smooth; do
 	if [ "$FAM" = scripted ]; then OUT=$FIXTURES/physic_scripted.txt; else OUT=$FIXTURES/physic_$FAM.txt; fi
 	TMP_OUT=$OUT.tmp
 	"$WORK/physic_harness" "$FAM" > "$TMP_OUT"

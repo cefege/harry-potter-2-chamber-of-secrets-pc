@@ -154,6 +154,37 @@ pub extern "C" fn hp2_rs_engine_physic_process_hit_wall(
     })
 }
 
+/// `AActor::moveSmooth(Delta)`. Returns the first `MoveActor` result.
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_engine_physic_move_smooth(
+    actor: *mut c_void,
+    delta: *const c_void,
+    svc: *const c_void,
+) -> i32 {
+    guard("hp2_rs_engine_physic_move_smooth", 0, move || {
+        let (Some(delta), Some(svc)) = (unsafe { vec_arg(delta) }, unsafe { services(svc) }) else {
+            return 0;
+        };
+        if actor.is_null() {
+            return 0;
+        }
+        unsafe { physic::move_smooth(actor.cast::<AActor>(), svc, delta) }
+    })
+}
+
+/// Rounds `AActor::Acceleration` in place (`execAutonomousPhysics` prologue).
+#[unsafe(no_mangle)]
+pub extern "C" fn hp2_rs_engine_physic_round_acceleration(actor: *mut c_void) {
+    guard("hp2_rs_engine_physic_round_acceleration", (), move || {
+        if actor.is_null() {
+            return;
+        }
+        unsafe {
+            physic::dispatch::round_acceleration(actor.cast::<AActor>());
+        }
+    })
+}
+
 /// `AActor::processLanded(HitNormal, HitActor, remainingTime, Iterations)`.
 #[unsafe(no_mangle)]
 pub extern "C" fn hp2_rs_engine_physic_process_landed(

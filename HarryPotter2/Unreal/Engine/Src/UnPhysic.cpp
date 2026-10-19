@@ -46,9 +46,7 @@ void AActor::execAutonomousPhysics( FFrame& Stack, RESULT_DECL )
 	P_FINISH;
 
 	// round acceleration to be consistent with replicated acceleration
-	Acceleration.X = 0.1f * appRound(10.f * Acceleration.X);
-	Acceleration.Y = 0.1f * appRound(10.f * Acceleration.Y);
-	Acceleration.Z = 0.1f * appRound(10.f * Acceleration.Z);
+	hp2_rs_engine_physic_round_acceleration( this );
 
 	// Perform physics.
 	if( Physics!=PHYS_None )
@@ -63,32 +61,8 @@ int AActor::moveSmooth(FVector Delta)
 {
 	guard(AActor::moveSmooth);
 
-	FCheckResult Hit(1.f);
-	int didHit = GetLevel()->MoveActor( this, Delta, Rotation, Hit );
-	if (Hit.Time < 1.f)
-	{
-		FVector Adjusted = (Delta - Hit.Normal * (Delta | Hit.Normal)) * (1.f - Hit.Time);
+	return hp2_rs_engine_physic_move_smooth( this, &Delta, &GHp2PhysicServices );
 
-		if( (Delta | Adjusted) >= 0 )
-		{
-			FVector OldHitNormal = Hit.Normal;
-			FVector DesiredDir = Delta.SafeNormal();
-
-			//ft: moved eventHitWall here, so you always get a hitwall when you actually hit a wall.
-			eventHitWall(Hit.Normal, Hit.Actor);
-
-			GetLevel()->MoveActor(this, Adjusted, Rotation, Hit);
-
-			if (Hit.Time < 1.f)
-			{
-				//eventHitWall(Hit.Normal, Hit.Actor);
-				TwoWallAdjust(DesiredDir, Adjusted, Hit.Normal, OldHitNormal, Hit.Time);
-				GetLevel()->MoveActor(this, Adjusted, Rotation, Hit);
-			}
-		}
-	}
-
-	return didHit;
 	unguard;
 }
 

@@ -277,6 +277,19 @@ pub unsafe fn perform_physics_actor(this: *mut AActor, svc: &Hp2PhysicServices, 
     }
 }
 
+/// Rounds `Acceleration` to replicated precision (`execAutonomousPhysics`).
+///
+/// # Safety
+/// `this` must point to a live `AActor`.
+pub unsafe fn round_acceleration(this: *mut AActor) {
+    unsafe {
+        let a = &mut (*this).acceleration;
+        a.x = 0.1_f32 * app_round(10.0_f32 * a.x) as f32;
+        a.y = 0.1_f32 * app_round(10.0_f32 * a.y) as f32;
+        a.z = 0.1_f32 * app_round(10.0_f32 * a.z) as f32;
+    }
+}
+
 /// `StepUpDownStairs(APawn *const ap)`.
 ///
 /// # Safety

@@ -310,10 +310,24 @@ static void* g_mesh_vt[4096];
 static FCoords g_bone_coords;
 
 
+// Scripted AActor::MoveActor results for family "smooth" (g_walk_mode 7).
+struct SmoothStep { int Ret; float Time; FVector Normal; int Actor; };
+static SmoothStep g_smooth_plan[3];
+
 static UBOOL hook_move_actor( ULevel* Self, AActor* Actor, FVector Delta, FRotator NewRot, FCheckResult& Hit, UBOOL Test, UBOOL IgnorePawns, UBOOL bIgnoreBases, UBOOL bNoFail )
 {
 	UBOOL Ret;
-	if( g_walk_mode == 1 || g_walk_mode == 2 )
+	if( g_walk_mode == 7 )
+	{
+		const int Call = g_walk_move_calls++;
+		const SmoothStep P = Call < 3 ? g_smooth_plan[Call] : SmoothStep{ 1, 1.f, FVector( 0.f, 0.f, 0.f ), -1 };
+		Ret = P.Ret;
+		Hit.Time = P.Ret ? 1.f : P.Time;
+		Hit.Normal = P.Ret ? FVector( 0.f, 0.f, 0.f ) : P.Normal;
+		Hit.Location = FVector( 0.f, 0.f, 0.f );
+		Hit.Actor = (P.Ret || P.Actor < 0) ? NULL : g_pool[P.Actor];
+	}
+	else if( g_walk_mode == 1 || g_walk_mode == 2 )
 		Ret = (g_walk_move_calls++ < 2) ? 1 : 0;
 	else if( g_walk_mode == 3 || g_walk_mode == 6 )
 		Ret = (g_walk_move_calls++ < 3) ? 1 : 0;
@@ -352,7 +366,7 @@ static UBOOL hook_move_actor( ULevel* Self, AActor* Actor, FVector Delta, FRotat
 		Hit.Actor = NULL;
 	}
 	lg( "move %08x %08x %08x %d %d %d %d\n", fbits( Delta.X ), fbits( Delta.Y ), fbits( Delta.Z ), NewRot.Pitch, NewRot.Yaw, NewRot.Roll, Ret );
-	if( !Ret && g_walk_mode != 4 )
+	if( !Ret && g_walk_mode != 4 && g_walk_mode != 7 )
 		scripted_hit( Hit );
 	return Ret;
 }
@@ -828,6 +842,7 @@ FGlobalMath GMath;
 #include "physic_fam_move.inc"
 #include "physic_fam_dispatch.inc"
 #include "physic_fam_interp.inc"
+#include "physic_fam_smooth.inc"
 
 static int run_family( const char* Fam )
 {
@@ -838,6 +853,7 @@ static int run_family( const char* Fam )
 	if( !strcmp( Fam, "move" ) ) { fam_move(); return 0; }
 	if( !strcmp( Fam, "dispatch" ) ) { fam_dispatch(); return 0; }
 	if( !strcmp( Fam, "interp" ) ) { fam_interp(); return 0; }
+	if( !strcmp( Fam, "smooth" ) ) { fam_smooth(); return 0; }
 	return 2;
 }
 

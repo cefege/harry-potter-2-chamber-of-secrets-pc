@@ -634,6 +634,50 @@ pub unsafe fn process_hit_wall(
     }
 }
 
+/// `(Delta - Normal * D) * Scale` with `D = Delta|Normal`, the `moveSmooth`
+/// slide. Not contracted: the original emits `fmul` then `fsub` (verified by
+/// objdump of `UnPhysic.o`).
+fn slide_scaled(delta: FVector, normal: FVector, d: f32, scale_by: f32) -> FVector {
+    v3(
+        (delta.x - normal.x * d) * scale_by,
+        (delta.y - normal.y * d) * scale_by,
+        (delta.z - normal.z * d) * scale_by,
+    )
+}
+
+/// `AActor::moveSmooth(Delta)`. Returns the first `MoveActor` result.
+///
+/// # Safety
+/// `this` must point to a live `AActor`.
+pub unsafe fn move_smooth(this: *mut AActor, svc: &Hp2PhysicServices, delta: FVector) -> i32 {
+    unsafe {
+        let this_v = this as *mut c_void;
+        let mut hit = blank_hit(1.0);
+        let did_hit = (svc.move_actor)(this_v, &delta, &(*this).rotation, &mut hit);
+        if hit.time < 1.0 {
+            let mut adjusted =
+                slide_scaled(delta, hit.normal, dot(delta, hit.normal), 1.0 - hit.time);
+            if dot(delta, adjusted) >= 0.0 {
+                let old_hit_normal = hit.normal;
+                let desired_dir = safe_normal(delta);
+                (svc.event_hit_wall)(this_v, &hit.normal, hit.actor);
+                (svc.move_actor)(this_v, &adjusted, &(*this).rotation, &mut hit);
+                if hit.time < 1.0 {
+                    two_wall_adjust(
+                        desired_dir,
+                        &mut adjusted,
+                        hit.normal,
+                        old_hit_normal,
+                        hit.time,
+                    );
+                    (svc.move_actor)(this_v, &adjusted, &(*this).rotation, &mut hit);
+                }
+            }
+        }
+        did_hit
+    }
+}
+
 /// One of the four `SingleLineCheck` probes `processLanded` runs under a
 /// decoration. `signs` is the (x, y) quadrant; `half` is `0.5f*CollisionRadius`.
 unsafe fn landing_quad(
