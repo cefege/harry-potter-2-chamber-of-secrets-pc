@@ -111,7 +111,7 @@ struct Reach<'a> {
 }
 
 impl Reach<'_> {
-    fn level(&self) -> *mut c_void {
+    fn x_level(&self) -> *mut c_void {
         // SAFETY: `pawn` is live (see the entry points' `# Safety`).
         unsafe { (*self.pawn).base.x_level }
     }
@@ -211,7 +211,7 @@ impl Reach<'_> {
         // SAFETY: `dest` lives for the call; `pawn` is live.
         unsafe {
             (self.svc.far_move_actor_flags)(
-                self.level(),
+                self.x_level(),
                 self.pawn.cast(),
                 (&dest as *const FVector).cast(),
                 test,
@@ -225,7 +225,7 @@ impl Reach<'_> {
         // SAFETY: as in [`Self::far_move_flags`].
         unsafe {
             (self.svc.pawn.far_move_actor)(
-                self.level(),
+                self.x_level(),
                 self.pawn.cast(),
                 (&dest as *const FVector).cast(),
             );
@@ -238,7 +238,7 @@ impl Reach<'_> {
         unsafe {
             let rot = &(*self.pawn).base.rotation;
             (self.svc.pawn.move_actor)(
-                self.level(),
+                self.x_level(),
                 self.pawn.cast(),
                 (&delta as *const FVector).cast(),
                 (rot as *const hp2_abi::engine::generated::FRotator).cast(),
@@ -333,7 +333,7 @@ impl Reach<'_> {
                 let mut view = self.loc();
                 view.z += self.base_eye_height(); // look from eyes
                 (self.svc.single_line_check)(
-                    self.level(),
+                    self.x_level(),
                     self.pawn.cast::<c_void>(),
                     (&mut hit as *mut FCheckResult).cast(),
                     (&other_loc as *const FVector).cast(),
@@ -404,7 +404,7 @@ impl Reach<'_> {
         // SAFETY: the out-pointer and `a_point` live for the call.
         unsafe {
             (self.svc.point_region)(
-                self.level(),
+                self.x_level(),
                 self.pawn.cast::<c_void>(),
                 (&a_point as *const FVector).cast(),
                 (&mut new_region as *mut FPointRegion).cast(),
@@ -425,7 +425,7 @@ impl Reach<'_> {
             // SAFETY: both vectors live for the call.
             let visible = unsafe {
                 (self.svc.fast_line_check)(
-                    self.level(),
+                    self.x_level(),
                     (&a_point as *const FVector).cast(),
                     (&view as *const FVector).cast(),
                 )

@@ -42,7 +42,7 @@ struct Mover<'a> {
 }
 
 impl Mover<'_> {
-    unsafe fn level(&self) -> *mut c_void {
+    unsafe fn x_level(&self) -> *mut c_void {
         unsafe { (*self.pawn).base.x_level }
     }
 
@@ -55,7 +55,7 @@ impl Mover<'_> {
         unsafe {
             let rot = &(*self.pawn).base.rotation as *const FRotator;
             (self.svc.move_actor)(
-                self.level(),
+                self.x_level(),
                 self.pawn.cast(),
                 (&delta as *const FVector).cast(),
                 rot.cast(),
@@ -68,7 +68,7 @@ impl Mover<'_> {
     unsafe fn far_move(&self, dest: FVector) {
         unsafe {
             (self.svc.far_move_actor)(
-                self.level(),
+                self.x_level(),
                 self.pawn.cast(),
                 (&dest as *const FVector).cast(),
             );

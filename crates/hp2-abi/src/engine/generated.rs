@@ -66,7 +66,8 @@ pub struct AActor {
     _pad_169: [u8; 3],
     pub skel_anim: *mut c_void,
     pub aux_anims: TArrayRaw,
-    _pad_196: [u8; 12],
+    _pad_196: [u8; 4],
+    pub level: *mut c_void,
     pub x_level: *mut c_void,
     pub tag: [u8; 4],
     _pad_220: [u8; 12],
@@ -90,7 +91,9 @@ pub struct AActor {
     pub velocity: FVector,
     pub ip_speed: f32,
     pub acceleration: FVector,
-    _pad_472: [u8; 44],
+    _pad_472: [u8; 16],
+    pub draw_type: u8,
+    _pad_489: [u8; 27],
     pub mesh: *mut c_void,
     pub brush: *mut c_void,
     pub draw_scale: f32,
@@ -435,6 +438,8 @@ const _: () = assert!(std::mem::offset_of!(AActor, pre_pivot) == 536);
 const _: () = assert!(std::mem::offset_of!(AActor, wideness) == 571);
 const _: () = assert!(std::mem::offset_of!(AActor, collide_type) == 676);
 const _: () = assert!(std::mem::offset_of!(AActor, aux_anims) == 180);
+const _: () = assert!(std::mem::offset_of!(AActor, level) == 200);
+const _: () = assert!(std::mem::offset_of!(AActor, draw_type) == 488);
 
 /// Layout mirror of C++ `APawn` (1912 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
@@ -1425,15 +1430,63 @@ const _: () = assert!(std::mem::offset_of!(UParticle, spin_rate) == 128);
 const _: () = assert!(std::mem::offset_of!(UParticle, id) == 132);
 const _: () = assert!(std::mem::offset_of!(UParticle, priority_tag) == 136);
 
+/// Layout mirror of C++ `FFloatParams` (8 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FFloatParams {
+    pub base: f32,
+    pub rand: f32,
+}
+
+const _: () = assert!(size_of::<FFloatParams>() == 8);
+const _: () = assert!(std::mem::offset_of!(FFloatParams, base) == 0);
+const _: () = assert!(std::mem::offset_of!(FFloatParams, rand) == 4);
+
+/// Layout mirror of C++ `FColorParams` (8 bytes). Only the members listed in
+/// the generator manifest are named; the rest is opaque padding.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FColorParams {
+    pub base: [u8; 4],
+    pub rand: [u8; 4],
+}
+
+const _: () = assert!(size_of::<FColorParams>() == 8);
+const _: () = assert!(std::mem::offset_of!(FColorParams, base) == 0);
+const _: () = assert!(std::mem::offset_of!(FColorParams, rand) == 4);
+
 /// Layout mirror of C++ `AParticleFX` (1288 bytes). Only the members listed in
 /// the generator manifest are named; the rest is opaque padding.
 #[repr(C, packed(4))]
 #[derive(Clone, Copy)]
 pub struct AParticleFX {
     pub base: AActor,
-    _pad_888: [u8; 156],
+    pub particles_per_sec: FFloatParams,
+    pub source_width: FFloatParams,
+    pub source_height: FFloatParams,
+    pub source_depth: FFloatParams,
+    pub period: FFloatParams,
+    pub decay: FFloatParams,
+    pub angular_spread_width: FFloatParams,
+    pub angular_spread_height: FFloatParams,
+    _bits_952: u8,
+    _pad_953: [u8; 3],
+    pub speed: FFloatParams,
+    pub lifetime: FFloatParams,
+    pub color_start: FColorParams,
+    pub color_end: FColorParams,
+    pub alpha_start: FFloatParams,
+    pub alpha_end: FFloatParams,
+    pub size_width: FFloatParams,
+    pub size_length: FFloatParams,
+    pub size_end_scale: FFloatParams,
+    pub spin_rate: FFloatParams,
+    pub drip_time: FFloatParams,
     _bits_1044: u8,
-    _pad_1045: [u8; 11],
+    _pad_1045: [u8; 3],
+    pub parent_blend: f32,
+    pub lod: f32,
     pub alpha_delay: f32,
     pub color_delay: f32,
     pub size_delay: f32,
@@ -1444,20 +1497,60 @@ pub struct AParticleFX {
     pub elasticity: f32,
     pub attraction: FVector,
     pub damping: f32,
-    _pad_1104: [u8; 12],
+    pub distribution: u8,
+    _pad_1105: [u8; 3],
+    pub pattern: *mut c_void,
     pub wind_modifier: f32,
     _bits_1120: u8,
-    _pad_1121: [u8; 67],
+    _pad_1121: [u8; 3],
+    pub gravity_modifier: f32,
+    pub gravity: FVector,
+    pub particles_alive: i32,
+    pub particles_max: i32,
+    _pad_1148: [u8; 40],
     pub color_palette: *mut c_void,
     pub render_primitive: u8,
-    _pad_1197: [u8; 15],
+    _pad_1197: [u8; 3],
+    pub particle_list: *mut c_void,
+    pub emit_delay: f32,
     pub last_update_location: FVector,
-    _pad_1224: [u8; 12],
+    pub last_emit_location: FVector,
     pub last_update_rotation: FRotator,
-    _pad_1248: [u8; 40],
+    pub emission_residue: f32,
+    pub age: f32,
+    pub elapsed_time: f32,
+    pub particles_emitted: i32,
+    _pad_1264: [u8; 16],
+    pub current_priority_tag: i32,
+    _bits_1284: u8,
+    _pad_1285: [u8; 3],
 }
 
 impl AParticleFX {
+    pub fn b_steady_state(&self) -> bool {
+        self._bits_952 & (1 << 0) != 0
+    }
+
+    pub fn set_b_steady_state(&mut self, value: bool) {
+        if value {
+            self._bits_952 |= 1 << 0;
+        } else {
+            self._bits_952 &= !(1 << 0);
+        }
+    }
+
+    pub fn b_prime(&self) -> bool {
+        self._bits_952 & (1 << 1) != 0
+    }
+
+    pub fn set_b_prime(&mut self, value: bool) {
+        if value {
+            self._bits_952 |= 1 << 1;
+        } else {
+            self._bits_952 &= !(1 << 1);
+        }
+    }
+
     pub fn b_update(&self) -> bool {
         self._bits_1044 & (1 << 0) != 0
     }
@@ -1482,6 +1575,18 @@ impl AParticleFX {
         }
     }
 
+    pub fn b_velocity_relative(&self) -> bool {
+        self._bits_1044 & (1 << 1) != 0
+    }
+
+    pub fn set_b_velocity_relative(&mut self, value: bool) {
+        if value {
+            self._bits_1044 |= 1 << 1;
+        } else {
+            self._bits_1044 &= !(1 << 1);
+        }
+    }
+
     pub fn b_wind_per_particle(&self) -> bool {
         self._bits_1120 & (1 << 0) != 0
     }
@@ -1493,13 +1598,60 @@ impl AParticleFX {
             self._bits_1120 &= !(1 << 0);
         }
     }
+
+    pub fn b_emit(&self) -> bool {
+        self._bits_1284 & (1 << 1) != 0
+    }
+
+    pub fn set_b_emit(&mut self, value: bool) {
+        if value {
+            self._bits_1284 |= 1 << 1;
+        } else {
+            self._bits_1284 &= !(1 << 1);
+        }
+    }
+
+    pub fn b_shell_only(&self) -> bool {
+        self._bits_1284 & (1 << 0) != 0
+    }
+
+    pub fn set_b_shell_only(&mut self, value: bool) {
+        if value {
+            self._bits_1284 |= 1 << 0;
+        } else {
+            self._bits_1284 &= !(1 << 0);
+        }
+    }
 }
 
 const _: () = assert!(size_of::<AParticleFX>() == 1288);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, base) == 0);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, particles_per_sec) == 888);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, source_width) == 896);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, source_height) == 904);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, source_depth) == 912);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, period) == 920);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, decay) == 928);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, angular_spread_width) == 936);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, angular_spread_height) == 944);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, speed) == 956);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, lifetime) == 964);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, alpha_start) == 988);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, alpha_end) == 996);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, size_width) == 1004);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, size_length) == 1012);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, size_end_scale) == 1020);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, spin_rate) == 1028);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, drip_time) == 1036);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, color_start) == 972);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, color_end) == 980);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, attraction) == 1088);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, gravity) == 1128);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, damping) == 1100);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, wind_modifier) == 1116);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, gravity_modifier) == 1124);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, parent_blend) == 1048);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, lod) == 1052);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, chaos) == 1076);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, chaos_delay) == 1080);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, elasticity) == 1084);
@@ -1508,7 +1660,19 @@ const _: () = assert!(std::mem::offset_of!(AParticleFX, color_delay) == 1060);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, size_delay) == 1064);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, alpha_grow_period) == 1068);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, size_grow_period) == 1072);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, emit_delay) == 1208);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, emission_residue) == 1248);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, age) == 1252);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, elapsed_time) == 1256);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, last_emit_location) == 1224);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, particles_alive) == 1140);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, particles_max) == 1144);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, particles_emitted) == 1260);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, current_priority_tag) == 1280);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, color_palette) == 1188);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, pattern) == 1108);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, particle_list) == 1200);
+const _: () = assert!(std::mem::offset_of!(AParticleFX, distribution) == 1104);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, render_primitive) == 1196);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, last_update_location) == 1212);
 const _: () = assert!(std::mem::offset_of!(AParticleFX, last_update_rotation) == 1236);
@@ -2470,6 +2634,8 @@ mod layout_tests {
         assert_eq!(size_of::<AInfo>(), 888);
         assert_eq!(size_of::<AKeypoint>(), 888);
         assert_eq!(size_of::<UParticle>(), 140);
+        assert_eq!(size_of::<FFloatParams>(), 8);
+        assert_eq!(size_of::<FColorParams>(), 8);
         assert_eq!(size_of::<AParticleFX>(), 1288);
         assert_eq!(size_of::<AInterpolationPoint>(), 1680);
         assert_eq!(size_of::<AInterpolationManager>(), 1012);

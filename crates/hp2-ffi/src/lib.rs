@@ -23,6 +23,7 @@ mod engine_mover;
 mod engine_palette;
 mod engine_params;
 mod engine_particle;
+mod engine_particle_fx;
 mod engine_pawn;
 mod engine_pawn_native_ai;
 mod engine_pawn_native_files;

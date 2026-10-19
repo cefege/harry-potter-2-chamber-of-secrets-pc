@@ -23,6 +23,7 @@ pub mod mover;
 pub mod palette;
 pub mod params;
 pub mod particle;
+pub mod particle_fx;
 pub mod pawn;
 pub mod pawn_native_ai;
 pub mod pawn_native_files;
