@@ -247,7 +247,12 @@ UBOOL UXOpenGLRenderDevice::UploadTexture(FTextureInfo& Info, FCachedTexture* Bi
 		case TEXF_RGBA7:
 			MinComposeSize = Info.Mips[Bind->BaseMip]->USize * Info.Mips[Bind->BaseMip]->VSize * 4;
 			InternalFormat = GL_RGBA8;
-			SourceFormat = GL_RGBA;
+			// HP2 light and fog maps are stored B,G,R,A, like upstream's TEXF_BGRA8_LM,
+			// and need the same upload. ES has no BGRA upload; DrawComplex swizzles there.
+			if (OpenGLVersion == GL_Core)
+				SourceFormat = GL_BGRA; // Was GL_RGBA;
+			else
+				SourceFormat = GL_RGBA; // ES prefers RGBA...
 			break;
 
 		case TEXF_RGB16:

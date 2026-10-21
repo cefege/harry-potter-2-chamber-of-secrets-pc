@@ -71,6 +71,7 @@
   "modified": true,
   "modification_notes": [
     "Pinned upstream XOpenGLDrv commit 6907839798152fc02090711b260e54a7294eecfc; preserved configured OpenGLVersion outside Emscripten and macOS, added OpenGL ES 3.1 fallback when OpenGL 3.3 core is unavailable, reject ES contexts whose uniform-block budget cannot hold LightInfo, and routed Windows builds through SDL unless explicitly using WGL.",
-    "Moved browser font resolution behind NativeTextFontSeam and added the Windows staged-font resolver; shaping and glyph coverage still use the shared FreeType/HarfBuzz core."
+    "Moved browser font resolution behind NativeTextFontSeam and added the Windows staged-font resolver; shaping and glyph coverage still use the shared FreeType/HarfBuzz core.",
+    "Upload TEXF_RGBA7 light and fog maps as GL_BGRA on core profiles, matching upstream's TEXF_BGRA8_LM handling at the pinned commit; ES keeps GL_RGBA and the existing DrawComplex swizzle."
   ]
 }
