@@ -223,7 +223,7 @@ impl Backend for CoreSpawnPlayBackend<'_> {
             Op::ClassError => {
                 let text=self.access.localize_text(hp2_core::lit!("Errors"),hp2_core::lit!("LoadPlayerClass"),Some(hp2_core::lit!("Engine")),None,false)?;
                 self.error_text(&text)?;
-                0
+                return Err(RuntimeError::from_utf32(text.into_iter().take_while(|unit|*unit!=0).collect()));
             }
             Op::SaveClass => { self.player_class.set(a as *mut UClass); 0 }
             Op::OptionCount => unsafe { (*self.url).op.num.max(0) as usize },
@@ -508,16 +508,10 @@ impl CoreSpawnPlayBackend<'_> {
         if pairs.num<0 || pairs.max<pairs.num || (pairs.num>0&&pairs.data.is_null())
             || map.hash_count<0 || (map.hash_count>0&&map.hash.is_null())
         { return Err(RuntimeError::new("Invalid Level TravelInfo map storage")); }
-        for bucket in 0..map.hash_count {
-            let mut index=unsafe{map.hash.cast::<i32>().add(bucket as usize).read_unaligned()};
-            while index>=0 {
-                if index>=pairs.num { return Err(RuntimeError::new("Invalid Level TravelInfo hash link")); }
-                let pair=unsafe{pairs.data.cast::<hp2_abi::engine::generated::FStringMapPair>().add(index as usize)};
-                self.scratch.borrow_mut().travel_text=unsafe{self.fstring_text(ptr::addr_of!((*pair).value))?};
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        if pairs.num == 0 { return Ok(false); }
+        let pair=unsafe{pairs.data.cast::<hp2_abi::engine::generated::FStringMapPair>()};
+        self.scratch.borrow_mut().travel_text=unsafe{self.fstring_text(ptr::addr_of!((*pair).value))?};
+        Ok(true)
     }
 
     fn clear_travel_info(&self) -> RuntimeResult<()> {
