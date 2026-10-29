@@ -178,7 +178,7 @@ impl CoreSpawnPlayBackend<'_> {
         if unsafe{(*function).parms_size}!=0 || unsafe{(*function).num_parms}!=0 {
             return Err(RuntimeError::new("SpawnPlayActor zero-parameter event metadata is invalid"));
         }
-        unsafe { self.access.execute_event(object,function,ptr::null_mut(),ptr::null_mut())?; }
+        unsafe { crate::actor_owner::process_event(self.access,object.cast::<AActor>(),function,ptr::null_mut(),ptr::null_mut())?; }
         Ok(())
     }
 
@@ -432,7 +432,7 @@ impl CoreSpawnPlayBackend<'_> {
             return Err(RuntimeError::new("SpawnPlayActor event parameter layout does not match metadata"));
         }
         let mut parameter=actor;
-        unsafe{self.access.execute_event(object,function,(&mut parameter as *mut *mut AActor).cast(),ptr::null_mut())?;}
+        unsafe{crate::actor_owner::process_event(self.access,object.cast::<AActor>(),function,(&mut parameter as *mut *mut AActor).cast::<c_void>(),ptr::null_mut())?;}
         Ok(())
     }
     unsafe fn login_event(&self, game:*mut UObject, actor:&mut *mut APlayerPawn)->RuntimeResult<()> {
@@ -457,7 +457,7 @@ impl CoreSpawnPlayBackend<'_> {
                 self.access.assign_fstring(ptr::addr_of_mut!(params.error),&error)?;
             }
             params.spawn_class=self.player_class.get().cast();
-            unsafe{self.access.execute_event(game,function,(&mut params as *mut AGameInfoLoginParams).cast(),ptr::null_mut())?;}
+            unsafe{crate::actor_owner::process_event(self.access,game.cast::<AActor>(),function,(&mut params as *mut AGameInfoLoginParams).cast::<c_void>(),ptr::null_mut())?;}
             let output=unsafe{self.fstring_text(ptr::addr_of!(params.error))?};
             unsafe{self.access.assign_fstring(self.error,&output)?;}
             *actor=params.return_value.cast();
