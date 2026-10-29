@@ -1,6 +1,7 @@
 //! Direct Rust selection and loading for canonical package objects and classes.
 
 use crate::core_access::{CoreAccess, RuntimeError, RuntimeResult};
+use crate::name_owner::FindName;
 use crate::core_loader::{
     self, OwnedLinkerLoad, export_outer_name, linker_for_root, native_name_for,
     find_package_root, package_path, preload, resolve_index,
