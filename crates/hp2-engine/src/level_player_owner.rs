@@ -407,20 +407,27 @@ impl CoreSpawnPlayBackend<'_> {
         let mut s=self.scratch.borrow_mut(); if class{s.class_name=value;}else{s.actor_name=value;} Ok(true)
     }
     fn parse_line(&self) -> RuntimeResult<bool> {
-        let mut s=self.scratch.borrow_mut();
-        let start=s.input_cursor;
-        let mut end=start;
-        while end<s.input.len()&&s.input[end]!=0&&s.input[end]!=u32::from(b'\n'){end+=1;}
-        let mut next=end;
-        if next<s.input.len()&&s.input[next]==u32::from(b'\n'){next+=1;}
-        s.line=s.input[start..end].to_vec();
-        s.line.push(0);
-        s.input_cursor=next;
-        Ok(end>start)
+        let mut scratch=self.scratch.borrow_mut();
+        let current=unsafe{scratch.input.as_ptr().add(scratch.input_cursor)};
+        let mut cursor=current;
+        let mut output=[0u32;256];
+        let has_more=unsafe{hp2_core::tokenize::parse_line(&mut cursor,output.as_mut_ptr(),256,true)};
+        let next=unsafe{cursor.offset_from(scratch.input.as_ptr())};
+        if next<0 || next as usize>scratch.input.len(){return Err(RuntimeError::new("Core ParseLine advanced outside travel input"));}
+        let length=output.iter().position(|unit|*unit==0).unwrap_or(output.len()-1);
+        scratch.line.clear();
+        scratch.line.extend_from_slice(&output[..length]);
+        scratch.line.push(0);
+        scratch.input_cursor=next as usize;
+        Ok(has_more)
     }
     fn atoi(&self, pointer:*const u32)->RuntimeResult<i32>{
-        let text=self.terminated_text(pointer)?; let string=text.iter().copied().take_while(|c|*c!=0).filter_map(char::from_u32).collect::<String>();
-        Ok(string.trim().parse::<i32>().unwrap_or(0))
+        if pointer.is_null(){return Ok(0);}
+        let _text=self.terminated_text(pointer)?;
+        match unsafe{hp2_core::ansi::atoi_checked(pointer)} {
+            Ok(value)=>Ok(value),
+            Err(value)=>Err(RuntimeError::new(&format!("appAtoi integer overflow: {value}"))),
+        }
     }
     fn event_actor(&self, object:*mut UObject, name:&str, actor:*mut AActor)->RuntimeResult<()> {
         if object.is_null(){return Err(RuntimeError::new("SpawnPlayActor event receiver is null"));}
