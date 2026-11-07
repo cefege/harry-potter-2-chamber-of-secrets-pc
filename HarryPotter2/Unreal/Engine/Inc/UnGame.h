@@ -43,6 +43,8 @@ class ENGINE_API UGameEngine : public UEngine
 	static FLOAT GetVendorConsoleUIScale( FLOAT Width );
 	static void GetConsoleUIRect( FLOAT Width, FLOAT Height, FLOAT UserScale, UBOOL VendorBar,
 		FLOAT& UIWidth, FLOAT& UIHeight, FLOAT& OffsetX, FLOAT& OffsetY );
+	static FLOAT GetConsoleRootUIScale( FLOAT ViewWidth, FLOAT ViewHeight,
+		FLOAT RootWidth, FLOAT RootHeight, FLOAT UserScale );
 
 	// UObject interface.
 	void Serialize( FArchive& Ar );

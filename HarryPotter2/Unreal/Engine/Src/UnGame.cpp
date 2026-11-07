@@ -1651,7 +1651,17 @@ static UBOOL IsConsoleVendorBarActive( UConsole* Console )
 		&& (*(DWORD*)((BYTE*)Console + VendorBarProperty->Offset) & VendorBarProperty->BitMask) != 0;
 }
 
-static void ApplyConsoleUIScale( UViewport* Viewport, UBOOL VendorBar, FLOAT UIWidth )
+FLOAT UGameEngine::GetConsoleRootUIScale( FLOAT ViewWidth, FLOAT ViewHeight,
+	FLOAT RootWidth, FLOAT RootHeight, FLOAT UserScale )
+{
+	// A smaller root already has UserScale applied to its dimensions. Using
+	// those dimensions as the input would apply the multiplier a second time.
+	if( UserScale < 1.f && ViewWidth > 0.f && ViewHeight > 0.f )
+		return GetConsoleUIScale( ViewWidth, ViewHeight, UserScale );
+	return GetConsoleUIScale( RootWidth, RootHeight, UserScale );
+}
+
+static void ApplyConsoleUIScale( UViewport* Viewport, UBOOL VendorBar, FLOAT UIWidth, FLOAT ViewWidth, FLOAT ViewHeight )
 {
 	if( !Viewport || !Viewport->Console )
 		return;
@@ -1691,7 +1701,7 @@ static void ApplyConsoleUIScale( UViewport* Viewport, UBOOL VendorBar, FLOAT UIW
 	// renders. Match that scale before the console reads the mouse position;
 	// otherwise hit testing multiplies by a different scale later in the frame.
 	const FLOAT DesiredScale = VendorBar ? UGameEngine::GetVendorConsoleUIScale(UIWidth)
-		: UGameEngine::GetConsoleUIScale(RealWidth,RealHeight,Viewport->GetOuterUClient()->GetUIScale());
+		: UGameEngine::GetConsoleRootUIScale(ViewWidth,ViewHeight,RealWidth,RealHeight,Viewport->GetOuterUClient()->GetUIScale());
 	const FLOAT CurrentScale = *(FLOAT*)((BYTE*)Root + GUIScaleProperty->Offset);
 	if( Abs(CurrentScale - DesiredScale) <= 0.0001f )
 		return;
@@ -1820,7 +1830,7 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 			Canvas->ClipY = UIHeight;
 			Viewport->WindowsMouseX -= OffsetX;
 			Viewport->WindowsMouseY -= OffsetY;
-			ApplyConsoleUIScale( Viewport, VendorBar, UIWidth );
+			ApplyConsoleUIScale( Viewport, VendorBar, UIWidth, SavedClipX, SavedClipY );
 			Viewport->Console->PostRender( Frame );
 			Viewport->Console->eventPostRender( Canvas );
 			Canvas->OrgX = SavedOrgX;
