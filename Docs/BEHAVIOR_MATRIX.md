@@ -72,6 +72,7 @@ partition the suite.
 | `determinism_double_run` | data-prototype | integration | `Tests/DeterminismDoubleRunTests.py` |
 | `dxt1_codec` | data-none | fast | `Tests/Dxt1Tests.cpp` |
 | `eaxa_decoder` | data-none | fast | `Tests/EaxaTests.cpp` |
+| `feedback_context` | data-none | fast | `Tests/FeedbackContextTests.cpp` |
 | `framing_baseline_contract` | data-none | fast | `Tests/FramingBaselineTests.py` |
 | `fstring_archive` | data-none | fast | `Tests/AbiTests.cpp` |
 | `game_test_contract` | data-none | fast | `Tests/GameTestTests.py` |

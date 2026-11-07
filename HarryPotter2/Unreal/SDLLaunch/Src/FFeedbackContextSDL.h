@@ -135,12 +135,13 @@ public:
 			{ SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT|SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 1, "Yes" },
 			{ 0,                                                                                0, "No"  }
 		};
+		const std::string Utf8 = ToUtf8( TempStr );
 		const SDL_MessageBoxData Box =
 		{
 			SDL_MESSAGEBOX_INFORMATION,
 			NULL,
 			"Confirmation",
-			ToUtf8( TempStr ).c_str(),
+			Utf8.c_str(),
 			(int)ARRAY_COUNT(Buttons),
 			Buttons,
 			NULL

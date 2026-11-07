@@ -481,6 +481,13 @@ hp2_add_executable(hp2_config_ini_tests
 )
 target_link_libraries(hp2_config_ini_tests PRIVATE hp2_core)
 
+# Exercise confirmation message ownership at the SDL boundary without opening
+# modal windows in the test runner.
+hp2_add_executable(hp2_feedback_context_tests
+    "${PROJECT_SOURCE_DIR}/Tests/FeedbackContextTests.cpp"
+)
+target_link_libraries(hp2_feedback_context_tests PRIVATE hp2_core SDL2::SDL2-static)
+
 # Replay wire-format contract: links the same dependency-light production
 # operator translation unit as hp2_engine, without pulling UnReplay.cpp's
 # appInit-dependent FURL globals into the oracle process.
@@ -563,6 +570,7 @@ set(HP2_EXECUTABLE_TARGETS
     hp2_launcher_tests
     hp2_data_identity_tests
     hp2_config_ini_tests
+    hp2_feedback_context_tests
     hp2_replay_roundtrip_tests
     hp2_save_wire_oracle
     hp2_input_contract_tests
@@ -724,6 +732,7 @@ add_custom_target(hp2_state
     COMMENT "Validating hp2-state.json drift")
 
 if(NOT EMSCRIPTEN)
+hp2_add_behavior_test(feedback_context hp2_feedback_context_tests)
 hp2_add_behavior_test(abi_widths hp2_abi_tests
     --test=abi_widths
 )
