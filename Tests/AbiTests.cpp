@@ -184,6 +184,35 @@ namespace
 			return Fail("16:9 menu UI did not fit the authored 640x480 height");
 		if (UGameEngine::GetConsoleUIScale(1280.f, 1024.f, 1.f) != 2.f)
 			return Fail("5:4 menu UI did not fit the authored 640x480 width");
+		FLOAT Width, Height, X, Y;
+		UGameEngine::GetConsoleUIRect(1920.f, 1080.f, 1.f, 0, Width, Height, X, Y);
+		if (Width != 1440.f || Height != 1080.f || X != 240.f || Y != 0.f)
+			return Fail("16:9 menu must retain its centered 4:3 UI rectangle");
+		UGameEngine::GetConsoleUIRect(1920.f, 1080.f, 1.f, 1, Width, Height, X, Y);
+		if (Width != 1920.f || Height != 1080.f || X != 0.f || Y != 0.f)
+			return Fail("vendor mouse and HUD must share full-screen coordinates");
+		const FLOAT VendorScale = UGameEngine::GetVendorConsoleUIScale(Width);
+		if (VendorScale != 3.f)
+			return Fail("16:9 vendor scale must match the script's full-width scale");
+		if ((1200.f / VendorScale) * VendorScale != 1200.f || (240.f / VendorScale) * VendorScale != 240.f)
+			return Fail("vendor mouse position must survive GUI scaling");
+		UGameEngine::GetConsoleUIRect(1280.f, 1024.f, 1.f, 0, Width, Height, X, Y);
+		if (Width != 1280.f || Height != 960.f || X != 0.f || Y != 32.f)
+			return Fail("5:4 menu must retain its centered UI rectangle");
+		UGameEngine::GetConsoleUIRect(1280.f, 1024.f, 1.f, 1, Width, Height, X, Y);
+		if (Width != 1280.f || Height != 1024.f || X != 0.f || Y != 0.f)
+			return Fail("vendor coordinates must also align on tall screens");
+		if (UGameEngine::GetVendorConsoleUIScale(Width) != 2.f
+			|| UGameEngine::GetVendorConsoleUIScale(0.f) != 1.f)
+			return Fail("vendor scaling must handle tall and empty viewports");
+		if (UGameEngine::GetConsoleRootUIScale(1920.f, 1080.f, 1080.f, 810.f, 0.75f) != 1.6875f)
+			return Fail("75 percent menu scale must not be applied twice");
+		if (UGameEngine::GetConsoleRootUIScale(1280.f, 720.f, 720.f, 540.f, 0.75f) != 1.125f)
+			return Fail("75 percent windowed menu scale must use the full viewport");
+		if (UGameEngine::GetConsoleRootUIScale(1920.f, 1080.f, 1440.f, 1080.f, 1.f) != 2.25f)
+			return Fail("100 percent menu scale changed");
+		if (UGameEngine::GetConsoleRootUIScale(1920.f, 1080.f, 1920.f, 1080.f, 1.5f) != 3.375f)
+			return Fail("above-100-percent behavior must remain unchanged");
 		return 0;
 	}
 	int TestCommandLineLoad()
