@@ -1621,6 +1621,11 @@ FLOAT UGameEngine::GetConsoleUIScale( FLOAT Width, FLOAT Height, FLOAT UserScale
 	return Min(Width/640.f,Height/480.f) * UserScale;
 }
 
+FLOAT UGameEngine::GetVendorConsoleUIScale( FLOAT Width )
+{
+	return Width > 0.f ? Width / 640.f : 1.f;
+}
+
 void UGameEngine::GetConsoleUIRect( FLOAT Width, FLOAT Height, FLOAT UserScale, UBOOL VendorBar,
 	FLOAT& UIWidth, FLOAT& UIHeight, FLOAT& OffsetX, FLOAT& OffsetY )
 {
@@ -1646,7 +1651,7 @@ static UBOOL IsConsoleVendorBarActive( UConsole* Console )
 		&& (*(DWORD*)((BYTE*)Console + VendorBarProperty->Offset) & VendorBarProperty->BitMask) != 0;
 }
 
-static void ApplyConsoleUIScale( UViewport* Viewport )
+static void ApplyConsoleUIScale( UViewport* Viewport, UBOOL VendorBar, FLOAT UIWidth )
 {
 	if( !Viewport || !Viewport->Console )
 		return;
@@ -1682,8 +1687,11 @@ static void ApplyConsoleUIScale( UViewport* Viewport )
 
 	const FLOAT RealWidth = *(FLOAT*)((BYTE*)Root + RealWidthProperty->Offset);
 	const FLOAT RealHeight = *(FLOAT*)((BYTE*)Root + RealHeightProperty->Offset);
-	const FLOAT DesiredScale = UGameEngine::GetConsoleUIScale(
-		RealWidth,RealHeight,Viewport->GetOuterUClient()->GetUIScale());
+	// Retail vendor UI resets the root scale to full width / 640 while it
+	// renders. Match that scale before the console reads the mouse position;
+	// otherwise hit testing multiplies by a different scale later in the frame.
+	const FLOAT DesiredScale = VendorBar ? UGameEngine::GetVendorConsoleUIScale(UIWidth)
+		: UGameEngine::GetConsoleUIScale(RealWidth,RealHeight,Viewport->GetOuterUClient()->GetUIScale());
 	const FLOAT CurrentScale = *(FLOAT*)((BYTE*)Root + GUIScaleProperty->Offset);
 	if( Abs(CurrentScale - DesiredScale) <= 0.0001f )
 		return;
@@ -1800,8 +1808,9 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 			FLOAT UIWidth, UIHeight, OffsetX, OffsetY;
 			// VendorManager compares console mouse coordinates to the full HUD
 			// canvas, unlike centered UWindow menus. Keep both in the same space.
+			const UBOOL VendorBar = IsConsoleVendorBarActive(Viewport->Console);
 			UGameEngine::GetConsoleUIRect( SavedClipX, SavedClipY,
-				Viewport->GetOuterUClient()->GetUIScale(), IsConsoleVendorBarActive(Viewport->Console),
+				Viewport->GetOuterUClient()->GetUIScale(), VendorBar,
 				UIWidth, UIHeight, OffsetX, OffsetY );
 			Canvas->OrgX += OffsetX;
 			Canvas->OrgY += OffsetY;
@@ -1811,7 +1820,7 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 			Canvas->ClipY = UIHeight;
 			Viewport->WindowsMouseX -= OffsetX;
 			Viewport->WindowsMouseY -= OffsetY;
-			ApplyConsoleUIScale( Viewport );
+			ApplyConsoleUIScale( Viewport, VendorBar, UIWidth );
 			Viewport->Console->PostRender( Frame );
 			Viewport->Console->eventPostRender( Canvas );
 			Canvas->OrgX = SavedOrgX;

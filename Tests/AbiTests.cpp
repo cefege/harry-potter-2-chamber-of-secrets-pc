@@ -191,12 +191,20 @@ namespace
 		UGameEngine::GetConsoleUIRect(1920.f, 1080.f, 1.f, 1, Width, Height, X, Y);
 		if (Width != 1920.f || Height != 1080.f || X != 0.f || Y != 0.f)
 			return Fail("vendor mouse and HUD must share full-screen coordinates");
+		const FLOAT VendorScale = UGameEngine::GetVendorConsoleUIScale(Width);
+		if (VendorScale != 3.f)
+			return Fail("16:9 vendor scale must match the script's full-width scale");
+		if ((1200.f / VendorScale) * VendorScale != 1200.f || (240.f / VendorScale) * VendorScale != 240.f)
+			return Fail("vendor mouse position must survive GUI scaling");
 		UGameEngine::GetConsoleUIRect(1280.f, 1024.f, 1.f, 0, Width, Height, X, Y);
 		if (Width != 1280.f || Height != 960.f || X != 0.f || Y != 32.f)
 			return Fail("5:4 menu must retain its centered UI rectangle");
 		UGameEngine::GetConsoleUIRect(1280.f, 1024.f, 1.f, 1, Width, Height, X, Y);
 		if (Width != 1280.f || Height != 1024.f || X != 0.f || Y != 0.f)
 			return Fail("vendor coordinates must also align on tall screens");
+		if (UGameEngine::GetVendorConsoleUIScale(Width) != 2.f
+			|| UGameEngine::GetVendorConsoleUIScale(0.f) != 1.f)
+			return Fail("vendor scaling must handle tall and empty viewports");
 		return 0;
 	}
 	int TestCommandLineLoad()
