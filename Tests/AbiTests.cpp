@@ -184,6 +184,19 @@ namespace
 			return Fail("16:9 menu UI did not fit the authored 640x480 height");
 		if (UGameEngine::GetConsoleUIScale(1280.f, 1024.f, 1.f) != 2.f)
 			return Fail("5:4 menu UI did not fit the authored 640x480 width");
+		FLOAT Width, Height, X, Y;
+		UGameEngine::GetConsoleUIRect(1920.f, 1080.f, 1.f, 0, Width, Height, X, Y);
+		if (Width != 1440.f || Height != 1080.f || X != 240.f || Y != 0.f)
+			return Fail("16:9 menu must retain its centered 4:3 UI rectangle");
+		UGameEngine::GetConsoleUIRect(1920.f, 1080.f, 1.f, 1, Width, Height, X, Y);
+		if (Width != 1920.f || Height != 1080.f || X != 0.f || Y != 0.f)
+			return Fail("vendor mouse and HUD must share full-screen coordinates");
+		UGameEngine::GetConsoleUIRect(1280.f, 1024.f, 1.f, 0, Width, Height, X, Y);
+		if (Width != 1280.f || Height != 960.f || X != 0.f || Y != 32.f)
+			return Fail("5:4 menu must retain its centered UI rectangle");
+		UGameEngine::GetConsoleUIRect(1280.f, 1024.f, 1.f, 1, Width, Height, X, Y);
+		if (Width != 1280.f || Height != 1024.f || X != 0.f || Y != 0.f)
+			return Fail("vendor coordinates must also align on tall screens");
 		return 0;
 	}
 	int TestCommandLineLoad()

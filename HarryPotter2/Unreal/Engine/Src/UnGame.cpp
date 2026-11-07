@@ -1621,6 +1621,31 @@ FLOAT UGameEngine::GetConsoleUIScale( FLOAT Width, FLOAT Height, FLOAT UserScale
 	return Min(Width/640.f,Height/480.f) * UserScale;
 }
 
+void UGameEngine::GetConsoleUIRect( FLOAT Width, FLOAT Height, FLOAT UserScale, UBOOL VendorBar,
+	FLOAT& UIWidth, FLOAT& UIHeight, FLOAT& OffsetX, FLOAT& OffsetY )
+{
+	const FLOAT Scale = GetConsoleUIScale(Width, Height, UserScale);
+	UIWidth = VendorBar ? Width : Min(Width, 640.f * Scale);
+	UIHeight = VendorBar ? Height : Min(Height, 480.f * Scale);
+	OffsetX = Max(0.f, (Width - UIWidth) * 0.5f);
+	OffsetY = Max(0.f, (Height - UIHeight) * 0.5f);
+}
+
+static UBOOL IsConsoleVendorBarActive( UConsole* Console )
+{
+	if( !Console )
+		return 0;
+	static UClass* CachedClass = NULL;
+	static UBoolProperty* VendorBarProperty = NULL;
+	if( CachedClass != Console->GetClass() )
+	{
+		CachedClass = Console->GetClass();
+		VendorBarProperty = FindField<UBoolProperty>( CachedClass, TEXT("bVendorBar") );
+	}
+	return VendorBarProperty
+		&& (*(DWORD*)((BYTE*)Console + VendorBarProperty->Offset) & VendorBarProperty->BitMask) != 0;
+}
+
 static void ApplyConsoleUIScale( UViewport* Viewport )
 {
 	if( !Viewport || !Viewport->Console )
@@ -1772,12 +1797,12 @@ void UGameEngine::Draw( UViewport* Viewport, UBOOL Blit, BYTE* HitData, INT* Hit
 			const INT SavedSizeX = Canvas->X;
 			const INT SavedSizeY = Canvas->Y;
 			const FLOAT SavedMouseY = Viewport->WindowsMouseY;
-			const FLOAT Scale = UGameEngine::GetConsoleUIScale(
-				SavedClipX,SavedClipY,Viewport->GetOuterUClient()->GetUIScale());
-			const FLOAT UIWidth = Min(SavedClipX,640.f*Scale);
-			const FLOAT UIHeight = Min(SavedClipY,480.f*Scale);
-			const FLOAT OffsetX = Max(0.f,(SavedClipX-UIWidth)*0.5f);
-			const FLOAT OffsetY = Max(0.f,(SavedClipY-UIHeight)*0.5f);
+			FLOAT UIWidth, UIHeight, OffsetX, OffsetY;
+			// VendorManager compares console mouse coordinates to the full HUD
+			// canvas, unlike centered UWindow menus. Keep both in the same space.
+			UGameEngine::GetConsoleUIRect( SavedClipX, SavedClipY,
+				Viewport->GetOuterUClient()->GetUIScale(), IsConsoleVendorBarActive(Viewport->Console),
+				UIWidth, UIHeight, OffsetX, OffsetY );
 			Canvas->OrgX += OffsetX;
 			Canvas->OrgY += OffsetY;
 			Canvas->ClipX = UIWidth;
