@@ -82,25 +82,25 @@ namespace
 		};
 		static const std::uint64_t PredictorHashes[16] =
 		{
-			UINT64_C(0x7f086d5002bdf948), UINT64_C(0xd8d3c849828726ca),
-			UINT64_C(0x44caadc237c42569), UINT64_C(0x07719969bc72deb6),
-			UINT64_C(0x33412b7a85265256), UINT64_C(0xdbb9f34f5d61684e),
-			UINT64_C(0xcd0310db60fa2859), UINT64_C(0x96614d0076b8b1df),
-			UINT64_C(0x1c8ae9c9f9064824), UINT64_C(0x5c177f54e17e425a),
-			UINT64_C(0x4a615f9582bbd96b), UINT64_C(0x282fdf3f5283d59c),
-			UINT64_C(0x7cb382dc3889fdc0), UINT64_C(0x42c69abc34c5eeb0),
-			UINT64_C(0x06e642862df01578), UINT64_C(0x0bcdde5883df3328)
+			UINT64_C(0xb4392c847559eab0), UINT64_C(0xcfcced6922942062),
+			UINT64_C(0x8eb9430a10e4d7ed), UINT64_C(0x70d3f46bd18d4f9a),
+			UINT64_C(0xb4392c847559eab0), UINT64_C(0x667cb725f52b5fa0),
+			UINT64_C(0xeb71899b19bfd825), UINT64_C(0xebc235d01db9bebb),
+			UINT64_C(0x60a3e99686d96303), UINT64_C(0x58fec4079a72a92d),
+			UINT64_C(0x4754b6ea623af48c), UINT64_C(0x650ea94c65b964b7),
+			UINT64_C(0xf0b9ebc3efa33bc7), UINT64_C(0xc25014e615b4b87b),
+			UINT64_C(0x282dc598b6f70193), UINT64_C(0xcc5a4bb1cc87cf0e)
 		};
 		static const std::uint64_t RangeHashes[16] =
 		{
-			UINT64_C(0x24008d8bfa76a702), UINT64_C(0x5b496f03455e289e),
-			UINT64_C(0xf306b510eee84cad), UINT64_C(0xd55aa8c6a0c5307b),
-			UINT64_C(0xbd3cd8fd81e6e714), UINT64_C(0x1bfeb30f52abaef8),
-			UINT64_C(0x34e35e16af45a6ba), UINT64_C(0x44caadc237c42569),
-			UINT64_C(0xe9995113c19309e2), UINT64_C(0x3451f93f91e3fb33),
-			UINT64_C(0x0875316c8af38477), UINT64_C(0xf71e3b82b7b3faa4),
-			UINT64_C(0x45356193c385e75c), UINT64_C(0xc0fc29ea3a6b1bec),
-			UINT64_C(0x544f877b02a3e15b), UINT64_C(0xce17f56323960c72)
+			UINT64_C(0x40257dfe4ebf84af), UINT64_C(0xc97f3a1463e35e11),
+			UINT64_C(0xc0b8598699ca9c53), UINT64_C(0x471bbd65322df58f),
+			UINT64_C(0x959def15d408035c), UINT64_C(0x58ed65b451034be5),
+			UINT64_C(0x4e66574eabc78c88), UINT64_C(0x8eb9430a10e4d7ed),
+			UINT64_C(0x6d4cd8671cef73de), UINT64_C(0x5d928d427a5598d1),
+			UINT64_C(0x941dfec8b7b31fb0), UINT64_C(0x5df22620fcf7a0a3),
+			UINT64_C(0xda3df3b139ecf7cd), UINT64_C(0x0327ac44a6ac36b9),
+			UINT64_C(0x38a8e187596c7596), UINT64_C(0x26d2d1209fc7e9b5)
 		};
 
 		for( INT Predictor=0; Predictor<16; ++Predictor )
@@ -109,7 +109,7 @@ namespace
 			SWORD Output[28];
 			MakeBlock( Block, Predictor, 7, Packed );
 			FEAXABlockDecoder Decoder;
-			Decoder.ResetState( 1234, -2345 );
+			Decoder.ResetState();
 			const std::size_t Before = GAllocationCount;
 			Require( Decoder.Feed(Block, 15, 28) != 0, "predictor Feed rejected" );
 			Require( Decoder.Decode(Output, 28) == 28, "predictor sample count" );
@@ -123,7 +123,7 @@ namespace
 			SWORD Output[28];
 			MakeBlock( Block, 2, Range, Packed );
 			FEAXABlockDecoder Decoder;
-			Decoder.ResetState( 1234, -2345 );
+			Decoder.ResetState();
 			Require( Decoder.Feed(Block, 15, 28) != 0, "range Feed rejected" );
 			Require( Decoder.Decode(Output, 28) == 28, "range sample count" );
 			Require( HashSamples(Output, 28) == RangeHashes[Range], "range vector mismatch" );
@@ -139,8 +139,8 @@ namespace
 		};
 		static const SWORD Expected[28] =
 		{
-			1, -8, -1, 7, -2, 2, 3, -3, -4, 4, 5, -5, -6, 6,
-			-7, -7, -8, 0, 1, -1, 7, 2, 4, -4, -5, 5, -2, -6
+			-8, 1, 7, -1, 2, -2, -3, 3, 4, -4, -5, 5, 6, -6,
+			-7, -7, 0, -8, -1, 1, 2, 7, -4, 4, 5, -5, -6, -2
 		};
 		BYTE Block[15];
 		SWORD Output[28];
@@ -185,8 +185,8 @@ namespace
 		};
 		static const SWORD Expected[28] =
 		{
-			1, -8, -1, 7, -2, 2, 3, -3, -4, 4, 5, -5, -6, 6,
-			-7, -7, -8, 0, 1, -1, 7, 2, 4, -4, -5, 5, -2, -6
+			-8, 1, 7, -1, 2, -2, -3, 3, 4, -4, -5, 5, 6, -6,
+			-7, -7, 0, -8, -1, 1, 2, 7, -4, 4, 5, -5, -6, -2
 		};
 		BYTE Block[15];
 		SWORD Output[30];
@@ -217,7 +217,7 @@ namespace
 		Require( Decoder.Feed(Block, 15, -1) == 0, "negative sample count accepted" );
 		Require( Decoder.Feed(Block, 15, 29) == 0, "insufficient encoded data accepted" );
 		Require( Decoder.Decode(Output, 5) == 5, "rejected Feed changed prior stream" );
-		Require( Output[0] == 1 && Output[1] == 2 && Output[2] == 3 && Output[3] == 4 && Output[4] == 5,
+		Require( Output[0] == 2 && Output[1] == 1 && Output[2] == 4 && Output[3] == 3 && Output[4] == 6,
 			"transactional Feed output mismatch" );
 		Require( Decoder.Feed(NULL, 0, 0) != 0, "empty stream rejected" );
 		Require( Decoder.Decode(Output, 5) == 0, "empty stream produced samples" );
@@ -227,25 +227,32 @@ namespace
 	{
 		static const SWORD Expected[56] =
 		{
-			937, 878, 823, 771, 722, 676, 633, 593, 555, 520, 487, 456, 427, 400,
-			375, 351, 329, 308, 288, 270, 253, 237, 222, 208, 195, 182, 170, 159,
-			149, 139, 130, 121, 113, 105, 98, 91, 85, 79, 74, 69, 64, 60,
-			56, 52, 48, 45, 42, 39, 36, 33, 30, 28, 26, 24, 22, 20
+			1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792,
+			1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792, 1792,
+			1680, 1575, 1477, 1385, 1298, 1217, 1141, 1070, 1003, 940, 881, 826, 774, 726,
+			681, 638, 598, 561, 526, 493, 462, 433, 406, 381, 357, 335, 314, 294
 		};
+		BYTE FirstBlock[15];
+		std::memset( FirstBlock, 0x77, sizeof(FirstBlock) );
+		FirstBlock[0] = 0x04;
 		BYTE Block[15] = { 0x1c, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 		SWORD Output[56];
 		FEAXABlockDecoder Decoder;
-		Decoder.ResetState( 1000, -1000 );
-		Require( Decoder.Feed(Block, 15, 28) != 0, "history first Feed rejected" );
+		Decoder.ResetState();
+		Require( Decoder.Feed(FirstBlock, 15, 28) != 0, "history first Feed rejected" );
 		Require( Decoder.Decode(Output, 28) == 28, "history first count" );
 		Require( Decoder.Feed(Block, 15, 28) != 0, "history refeed rejected" );
 		Require( Decoder.Decode(Output + 28, 28) == 28, "history refeed count" );
 		Require( std::memcmp(Output, Expected, sizeof(Expected)) == 0, "history was not preserved across Feed" );
+		Decoder.ResetState( 1792, 1792 );
+		Require( Decoder.Feed(Block, 15, 28) != 0, "explicit history Feed rejected" );
+		Require( Decoder.Decode(Output, 28) == 28, "explicit history sample count" );
+		Require( std::memcmp(Output, Expected + 28, 28 * sizeof(SWORD)) == 0, "explicit history mismatch" );
 
 		BYTE TwoBlocks[30];
-		std::memcpy( TwoBlocks, Block, 15 );
+		std::memcpy( TwoBlocks, FirstBlock, 15 );
 		std::memcpy( TwoBlocks + 15, Block, 15 );
-		Decoder.ResetState( 1000, -1000 );
+		Decoder.ResetState();
 		Require( Decoder.Feed(TwoBlocks, 30, 56) != 0, "two-block Feed rejected" );
 		Require( Decoder.Decode(Output, 56) == 56, "two-block sample count" );
 		Require( std::memcmp(Output, Expected, sizeof(Expected)) == 0, "history was not preserved between blocks" );

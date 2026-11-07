@@ -1,7 +1,7 @@
 {
  "format": "hp2-eaxa-fixtures",
  "schema_version": 1,
- "provenance": "Vectors lifted verbatim from the minimal-TU ctest eaxa_decoder source Tests/EaxaTests.cpp; never regenerated from an engine implementation.",
+ "provenance": "Synthetic vectors: EA-XA v1 cases sourced from vgmstream r2168; clipping cases remain behavioral checks. See Docs/EAXA_V1_ACCEPTANCE.md.",
  "hash_note": "fnv1a_hashes_hex are FNV-1a 64 over the little-endian byte pair of each i16 sample, low byte first (same byte order as HashSamples in EaxaTests.cpp).",
  "entries": [
   {

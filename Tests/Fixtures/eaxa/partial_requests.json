@@ -1,6 +1,6 @@
 {
  "name": "partial_requests",
- "source": "Tests/EaxaTests.cpp TestPartialRequestsCapAndEof (lifted verbatim); feed promises 19 samples",
+ "source": "vgmstream r2168 synthetic EA-XA v1 oracle; see Docs/EAXA_V1_ACCEPTANCE.md",
  "input_hex": "0c817f2ed34cb56a9908f127c45bae",
  "num_samples": 19,
  "reset_history": [
@@ -8,24 +8,24 @@
   0
  ],
  "expected_pcm": [
+  -8,
   1,
-  -8,
-  -1,
   7,
-  -2,
+  -1,
   2,
-  3,
+  -2,
   -3,
-  -4,
+  3,
   4,
-  5,
+  -4,
   -5,
-  -6,
+  5,
   6,
+  -6,
   -7,
   -7,
-  -8,
   0,
-  1
+  -8,
+  -1
  ]
 }

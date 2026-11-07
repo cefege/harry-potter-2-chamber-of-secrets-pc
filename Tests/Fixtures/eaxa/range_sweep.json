@@ -1,29 +1,29 @@
 {
  "name": "range_sweep",
- "source": "Tests/EaxaTests.cpp TestPredictorsAndRanges range loop (lifted verbatim)",
- "note": "C++ oracle pins FNV-1a sample hashes for each range at predictor 2, history (1234,-2345)",
+ "source": "vgmstream r2168 synthetic EA-XA v1 oracle; see Docs/EAXA_V1_ACCEPTANCE.md",
+ "note": "FNV-1a sample hashes, zero initial history",
  "packed_hex": "817f2ed34cb56a9908f127c45bae",
  "predictor": 2,
  "reset_history": [
-  1234,
-  -2345
+  0,
+  0
  ],
  "fnv1a_hashes_hex": [
-  "24008d8bfa76a702",
-  "5b496f03455e289e",
-  "f306b510eee84cad",
-  "d55aa8c6a0c5307b",
-  "bd3cd8fd81e6e714",
-  "1bfeb30f52abaef8",
-  "34e35e16af45a6ba",
-  "44caadc237c42569",
-  "e9995113c19309e2",
-  "3451f93f91e3fb33",
-  "0875316c8af38477",
-  "f71e3b82b7b3faa4",
-  "45356193c385e75c",
-  "c0fc29ea3a6b1bec",
-  "544f877b02a3e15b",
-  "ce17f56323960c72"
+  "40257dfe4ebf84af",
+  "c97f3a1463e35e11",
+  "c0b8598699ca9c53",
+  "471bbd65322df58f",
+  "959def15d408035c",
+  "58ed65b451034be5",
+  "4e66574eabc78c88",
+  "8eb9430a10e4d7ed",
+  "6d4cd8671cef73de",
+  "5d928d427a5598d1",
+  "941dfec8b7b31fb0",
+  "5df22620fcf7a0a3",
+  "da3df3b139ecf7cd",
+  "0327ac44a6ac36b9",
+  "38a8e187596c7596",
+  "26d2d1209fc7e9b5"
  ]
 }

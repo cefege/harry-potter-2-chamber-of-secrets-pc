@@ -17,6 +17,9 @@ the EA-XA v1 interpretation, not proof that every audio issue is resolved.
 - For the locally owned retail voice, the project decoder and vgmstream
   produced 194,585 samples; 190,143 samples differed. No retail sample or
   decoded copyrighted audio is included in these tests or this repository.
+- After the decoder correction, a local standalone decode of that same sample
+  matched all 194,585 vgmstream PCM samples exactly. This is not an in-game
+  playback test or verification of other retail sounds.
 
 ## Synthetic-vector acceptance
 

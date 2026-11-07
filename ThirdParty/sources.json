@@ -125,11 +125,11 @@
       "url": "https://github.com/vgmstream/vgmstream",
       "commit": "11508e91a069066d0f6526d0096568b46c354014",
       "tree": "4d97b2bc2251ead99ceb51e35f343f3410e8427a",
-      "source_path": "src/coding/xa_decoder.c",
-      "source_blob": "631eac80b9d68e82ae3ce8a166013400bcc71de9",
+      "source_path": "src/coding/ea_xa_decoder.c",
+      "source_blob": "523f3731b868a81252a1158b8bc5d83de45a7354",
       "license": "ISC-style",
       "upstream_license_path": "COPYING",
-      "role": "EA-XA coefficient and arithmetic oracle only"
+      "role": "EA-XA v1 coefficient and arithmetic oracle only; corrects prior CD-XA source attribution"
     },
     {
       "name": "emsdk",

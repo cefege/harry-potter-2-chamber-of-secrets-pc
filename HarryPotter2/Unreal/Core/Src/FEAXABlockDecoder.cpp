@@ -6,33 +6,16 @@
 
 namespace
 {
-	struct FXACoefficients
+	// EA-XA v1 predictor table from vgmstream commit
+	// 11508e91a069066d0f6526d0096568b46c354014, ea_xa_decoder.c.
+	// See ThirdParty/vgmstream/COPYING for the ISC-style notice.
+	static const INT GCoefficients[20] =
 	{
-		INT C0;
-		INT C1;
-	};
-
-	// EA's extended-XA N=8 predictor table from pinned vgmstream commit
-	// 11508e91a069066d0f6526d0096568b46c354014. See
-	// ThirdParty/vgmstream/COPYING for the retained ISC-style notice.
-	static const FXACoefficients GCoefficients[16] =
-	{
-		{   0,    0 },
-		{ 240,    0 },
-		{ 460, -208 },
-		{ 392, -220 },
-		{ 488, -240 },
-		{ 328, -208 },
-		{ 440, -168 },
-		{ 420, -188 },
-		{ 432, -176 },
-		{ 240,  -16 },
-		{ 416, -192 },
-		{ 424, -160 },
-		{ 288,   -8 },
-		{ 436, -188 },
-		{ 224,   -1 },
-		{ 272,  -16 }
+		0, 240, 460, 392,
+		0,   0, -208, -220,
+		0,   1,   3,   4,
+		7,   8,  10,  11,
+		0,  -1,  -3,  -4
 	};
 
 	static INT FloorDivide( INT Value, INT Divisor )
@@ -44,9 +27,9 @@ namespace
 
 	static INT ScaleNibble( INT Nibble, INT Range )
 	{
-		if( Range <= 12 )
-			return Nibble * (1 << (12 - Range));
-		return FloorDivide( Nibble, 1 << (Range - 12) );
+		// Keep eight fractional bits until after the predictor is applied.
+		// Division is explicitly rounded down, including negative samples.
+		return FloorDivide( Nibble * (1 << 28), 1 << (Range + 8) );
 	}
 
 	static SWORD ClampSample( INT Sample )
@@ -118,7 +101,6 @@ INT FEAXABlockDecoder::Decode( SWORD* Dest, INT Samples )
 		const BYTE* Block = EncodedData + EncodedOffset;
 		const INT Predictor = Block[0] >> 4;
 		const INT Range = Block[0] & 15;
-		const FXACoefficients& Coefficients = GCoefficients[Predictor];
 		INT BlockSamples = SamplesRemaining;
 		if( BlockSamples > 28 )
 			BlockSamples = 28;
@@ -126,13 +108,13 @@ INT FEAXABlockDecoder::Decode( SWORD* Dest, INT Samples )
 		for( INT Index=0; Index<BlockSamples; ++Index )
 		{
 			const BYTE Packed = Block[1 + Index / 2];
-			const INT UnsignedNibble = (Index & 1) ? (Packed >> 4) : (Packed & 15);
+			const INT UnsignedNibble = (Index & 1) ? (Packed & 15) : (Packed >> 4);
 			const INT SignedNibble = UnsignedNibble >= 8 ? UnsignedNibble - 16 : UnsignedNibble;
 			const INT Sample = ScaleNibble( SignedNibble, Range );
 			const long long Accumulator =
-				static_cast<long long>(Sample) * 256
-				+ static_cast<long long>(Coefficients.C0) * History1
-				+ static_cast<long long>(Coefficients.C1) * History2;
+				static_cast<long long>(Sample)
+				+ static_cast<long long>(GCoefficients[Predictor]) * History1
+				+ static_cast<long long>(GCoefficients[Predictor + 4]) * History2 + 128;
 			const INT Decoded = Accumulator >= 0
 				? static_cast<INT>(Accumulator / 256)
 				: -static_cast<INT>((-Accumulator + 255) / 256);
