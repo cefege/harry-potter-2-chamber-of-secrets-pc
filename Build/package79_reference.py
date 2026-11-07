@@ -154,10 +154,11 @@ def _decode_dxt1(blocks: bytes, width: int, height: int) -> bytes:
     return bytes(output)
 
 
+# EA-XA v1 table, independently checked against vgmstream r2168. The second
+# coefficient is indexed four entries after the first (including for 4..15).
 _EAXA_COEFFICIENTS = (
-    (0, 0), (240, 0), (460, -208), (392, -220), (488, -240), (328, -208),
-    (440, -168), (420, -188), (432, -176), (240, -16), (416, -192),
-    (424, -160), (288, -8), (436, -188), (224, -1), (272, -16),
+    0, 240, 460, 392, 0, 0, -208, -220, 0, 1,
+    3, 4, 7, 8, 10, 11, 0, -1, -3, -4,
 )
 
 
@@ -169,14 +170,14 @@ def _decode_eaxa(data: bytes) -> bytes:
     for base in range(0, len(data), 15):
         block = data[base : base + 15]
         predictor, shift = block[0] >> 4, block[0] & 15
-        c0, c1 = _EAXA_COEFFICIENTS[predictor]
+        c0, c1 = _EAXA_COEFFICIENTS[predictor], _EAXA_COEFFICIENTS[predictor + 4]
         for index in range(28):
             packed = block[1 + index // 2]
-            nibble = (packed >> 4) if index & 1 else (packed & 15)
+            nibble = (packed & 15) if index & 1 else (packed >> 4)
             if nibble >= 8:
                 nibble -= 16
-            scaled = nibble << (12 - shift) if shift <= 12 else nibble // (1 << (shift - 12))
-            sample = (scaled * 256 + c0 * history1 + c1 * history2) // 256
+            scaled = (nibble * (1 << 20)) // (1 << shift)
+            sample = (scaled + c0 * history1 + c1 * history2 + 128) // 256
             sample = max(-32768, min(32767, sample))
             output.extend(struct.pack("<h", sample))
             history2, history1 = history1, sample

@@ -6,6 +6,11 @@ implementation was audibly crackly. The player confirmed that the same encoded
 bytes decoded by vgmstream r2168 sounded clean. This is evidence for correcting
 the EA-XA v1 interpretation, not proof that every audio issue is resolved.
 
+Acknowledgement: metalnakls independently identified the high-nibble-first
+ordering earlier in upstream PR https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/pull/1,
+which also changes the Python package-audit decoder. Our fix additionally
+matches the v1 predictor arithmetic and rounding against the reference below.
+
 ## Independent reference
 
 - Format: vgmstream `EAXA`, mono, 15 encoded bytes per 28 PCM samples.
