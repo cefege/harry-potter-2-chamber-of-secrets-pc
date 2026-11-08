@@ -146,6 +146,22 @@ unsafe extern "C" fn m_render_dev_flush(rd: *mut c_void, allow: i32) {
     with(|m| m.trace.push(tok));
 }
 
+unsafe extern "C" fn m_client(_client: *mut c_void) -> i32 {
+    0
+}
+unsafe extern "C" fn m_clear_client() -> i32 {
+    0
+}
+unsafe extern "C" fn m_client_value(_client: *mut c_void, _value: i32) -> i32 {
+    0
+}
+unsafe extern "C" fn m_client_engine(_client: *mut c_void, _engine: *mut c_void) -> i32 {
+    0
+}
+unsafe extern "C" fn m_client_archive(_client: *mut c_void, _archive: *mut c_void) -> i32 {
+    0
+}
+
 fn services() -> CamMgrServices {
     CamMgrServices {
         parse_brightness_command: m_parse,
@@ -156,6 +172,13 @@ fn services() -> CamMgrServices {
         client_brightness_message: m_brightness_message,
         client_viewport_render_dev: m_viewport_render_dev,
         render_dev_flush: m_render_dev_flush,
+        client_set_bitmap_client: m_client,
+        client_clear_bitmap_client: m_clear_client,
+        client_set_maintain_vertical_fov: m_client_value,
+        client_set_native_text: m_client_value,
+        client_set_show_fps: m_client_value,
+        client_set_engine: m_client_engine,
+        client_serialize_viewports: m_client_archive,
     }
 }
 

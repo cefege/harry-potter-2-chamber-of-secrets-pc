@@ -1,0 +1,1043 @@
+{
+  "version": 1,
+  "natives": [
+    {
+      "class": "Pawn",
+      "function": "StopWaiting",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "CanSee",
+      "index": "533",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "LineOfSightTo",
+      "index": "514",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PlayerCanSeeMe",
+      "index": "532",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "NavigationPoint",
+      "function": "describeSpec",
+      "index": "519",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PickTarget",
+      "index": "531",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PickAnyTarget",
+      "index": "534",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "AddPawn",
+      "index": "529",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "RemovePawn",
+      "index": "530",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "WaitForLanding",
+      "index": "527",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollWaitForLanding",
+      "index": "native_opcode!(AI_PollWaitForLanding)",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "FindStairRotation",
+      "index": "524",
+      "legacy_file": "engine_natives_pawn_ai.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetNextInt",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetNextIntDesc",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetCacheEntry",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "MoveCacheEntry",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "CheckValidSkinPackage",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "UpdateURL",
+      "index": "546",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "GetDefaultURL",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetURLMap",
+      "index": "547",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetNextSkin",
+      "index": "545",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "GetEntryLevel",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "ResetKeyboard",
+      "index": "544",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "FindBestInventoryPath",
+      "index": "540",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetMapName",
+      "index": "539",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "ConsoleCommand",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "ScreenToWorld",
+      "index": "542",
+      "legacy_file": "engine_natives_pawn_files.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "MoveTo",
+      "index": "500",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollMoveTo",
+      "index": "native_opcode!(AI_PollMoveTo)",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "MoveToward",
+      "index": "502",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollMoveToward",
+      "index": "native_opcode!(AI_PollMoveToward)",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "StrafeTo",
+      "index": "504",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollStrafeTo",
+      "index": "native_opcode!(AI_PollStrafeTo)",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "StrafeFacing",
+      "index": "506",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollStrafeFacing",
+      "index": "native_opcode!(AI_PollStrafeFacing)",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "TurnToward",
+      "index": "510",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollTurnToward",
+      "index": "native_opcode!(AI_PollTurnToward)",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "TurnTo",
+      "index": "508",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PollTurnTo",
+      "index": "native_opcode!(AI_PollTurnTo)",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "MakeNoise",
+      "index": "512",
+      "legacy_file": "engine_natives_pawn_move.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "actorReachable",
+      "index": "520",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "FindPathTo",
+      "index": "518",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "FindPathToward",
+      "index": "517",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "FindRandomDest",
+      "index": "525",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "PickWallAdjust",
+      "index": "526",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "EAdjustJump",
+      "index": "523",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "pointReachable",
+      "index": "521",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "FindPath",
+      "index": "553",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "ClearPaths",
+      "index": "522",
+      "legacy_file": "engine_natives_pawn_paths.rs"
+    },
+    {
+      "class": "Wind",
+      "function": "GetWind",
+      "index": "425",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Gesture",
+      "function": "CompareGesturePoint",
+      "index": "427",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Gesture",
+      "function": "CompareGesture",
+      "index": "426",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Console",
+      "function": "ConsoleCommand",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Console",
+      "function": "SaveTimeDemo",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Console",
+      "function": "CreateNativeFont",
+      "index": "-1",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "StrLen",
+      "index": "464",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawText",
+      "index": "465",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawTile",
+      "index": "466",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawActor",
+      "index": "467",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawClippedActor",
+      "index": "471",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawTileClipped",
+      "index": "468",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawTextClipped",
+      "index": "469",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "TextSize",
+      "index": "470",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Canvas",
+      "function": "DrawPortal",
+      "index": "480",
+      "legacy_file": "engine_natives_render.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetCurrentKeyState",
+      "index": "330",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "TraceTexture",
+      "index": "285",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "MoveSmooth",
+      "index": "3969",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetPhysics",
+      "index": "3970",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "AutonomousPhysics",
+      "index": "3971",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ParticleFX",
+      "function": "NumParticles",
+      "index": "431",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ParticleFX",
+      "function": "AddParticle",
+      "index": "432",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ParticleFX",
+      "function": "GetParticleParams",
+      "index": "433",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ParticleFX",
+      "function": "SetParticleParams",
+      "index": "434",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ParticleFX",
+      "function": "RecomputeDeltas",
+      "index": "435",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ScriptedTexture",
+      "function": "DrawText",
+      "index": "472",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ScriptedTexture",
+      "function": "DrawTile",
+      "index": "473",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ScriptedTexture",
+      "function": "DrawColoredText",
+      "index": "474",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ScriptedTexture",
+      "function": "ReplaceTexture",
+      "index": "475",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "ScriptedTexture",
+      "function": "TextSize",
+      "index": "476",
+      "legacy_file": "engine_natives_render_misc.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Sleep",
+      "index": "256",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "FinishAnim",
+      "index": "261",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "FinishInterpolation",
+      "index": "301",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PollSleep",
+      "index": "native_opcode!(EPOLL_Sleep)",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PollFinishAnim",
+      "index": "native_opcode!(EPOLL_FinishAnim)",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PollFinishInterpolation",
+      "index": "native_opcode!(EPOLL_FinishInterpolation)",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "CreateAnimChannel",
+      "index": "265",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PlayAnim",
+      "index": "259",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "LoopAnim",
+      "index": "260",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "TweenAnim",
+      "index": "294",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "IsAnimating",
+      "index": "282",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetAnimGroup",
+      "index": "293",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "HasAnim",
+      "index": "263",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "BoneNumber",
+      "index": "268",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "BoneName",
+      "index": "269",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "BonePos",
+      "index": "257",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "BoneRot",
+      "index": "328",
+      "legacy_file": "engine_natives_script.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "LinkSkelAnim",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetCollision",
+      "index": "262",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetCollisionSize",
+      "index": "283",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetWorldCollisionBox",
+      "index": "286",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetRenderExtent",
+      "index": "274",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetBase",
+      "index": "298",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "DemoPlaySound",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PlayMusic",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "StopMusic",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "StopAllMusic",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PlaySound",
+      "index": "264",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "PlayOwnedSound",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "GetSoundDuration",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "ModifySound",
+      "index": "567",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "StopSound",
+      "index": "568",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Move",
+      "index": "266",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetLocation",
+      "index": "267",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetRotation",
+      "index": "299",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetOwner",
+      "index": "272",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SaveGameExists",
+      "index": "3972",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Trace",
+      "index": "277",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "FastTrace",
+      "index": "548",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Spawn",
+      "index": "278",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Destroy",
+      "index": "279",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SetTimer",
+      "index": "280",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "WarpZoneInfo",
+      "function": "Warp",
+      "index": "314",
+      "legacy_file": "engine_natives_script_actor.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "ConsoleCommand",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Error",
+      "index": "233",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "ClientTravel",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "GetPlayerNetworkAddress",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "CopyToClipboard",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "PlayerPawn",
+      "function": "PasteFromClipboard",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "LevelInfo",
+      "function": "GetLocalURL",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "LevelInfo",
+      "function": "GetAddressURL",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "Pawn",
+      "function": "ClientHearSound",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_console.rs"
+    },
+    {
+      "class": "WarpZoneInfo",
+      "function": "UnWarp",
+      "index": "315",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "AllActors",
+      "index": "304",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "ChildActors",
+      "index": "305",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "BasedActors",
+      "index": "306",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "TouchingActors",
+      "index": "307",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "TraceActors",
+      "index": "309",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "RadiusActors",
+      "index": "310",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "VisibleActors",
+      "index": "311",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "VisibleCollidingActors",
+      "index": "312",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "ZoneInfo",
+      "function": "ZoneActors",
+      "index": "308",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "GameInfo",
+      "function": "GetNetworkNumber",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "GameInfo",
+      "function": "ParseKillMessage",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Decal",
+      "function": "AttachDecal",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Decal",
+      "function": "DetachDecal",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Multiply_ColorFloat",
+      "index": "552",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Multiply_FloatColor",
+      "index": "550",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Add_ColorColor",
+      "index": "551",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "Subtract_ColorColor",
+      "index": "549",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "CreateTextureFromScreenShot",
+      "index": "322",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "CreateTextureFromBMP",
+      "index": "321",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SaveObjectAsFile",
+      "index": "323",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "LoadObjectAsFile",
+      "index": "324",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "SaveGameSaveInfo",
+      "index": "325",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "LoadGameSaveInfo",
+      "index": "326",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "IsOSVer2kOrXP",
+      "index": "327",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "Actor",
+      "function": "IsSoftwareRendering",
+      "index": "329",
+      "legacy_file": "engine_natives_script_iter.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "ExecuteLocalLogBatcher",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "ExecuteSilentLogBatcher",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "BatchLocal",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "BrowseRelativeLocalURL",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "ExecuteWorldLogBatcher",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "InitialCheck",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "LogMutator",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "GetPlayerChecksum",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "GetGMTRef",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLog",
+      "function": "GetMapFileName",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLogFile",
+      "function": "OpenLog",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLogFile",
+      "function": "CloseLog",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLogFile",
+      "function": "Watermark",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLogFile",
+      "function": "GetChecksum",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLogFile",
+      "function": "FileFlush",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    },
+    {
+      "class": "StatLogFile",
+      "function": "FileLog",
+      "index": "INDEX_NONE",
+      "legacy_file": "engine_natives_statlog.rs"
+    }
+  ]
+}

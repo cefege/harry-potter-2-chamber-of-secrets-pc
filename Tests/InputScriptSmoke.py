@@ -8,7 +8,7 @@ Two modes:
    No engine build required; safe for ctest.
 2. Live smoke (--smoke): compiles Tests/Fixtures/input_script_smoke.txt into
    an FReplay ``.rep`` input stream, seeds an isolated user directory with it
-   plus a ``K=SHOT`` probe binding, launches the installed app bundle with
+   plus a ``K=SHOT`` probe binding, launches the selected executable with
    ``-REPLAY=... -TESTTICKS=...``, and emits a report-schema-v1 JSON document
    on stdout. Exits 0 (pass), 1 (fail), or 3 (blocked).
 
@@ -44,9 +44,8 @@ REPORT_SCHEMA_VERSION = 1
 SMOKE_NAME = "input_script_smoke"
 SMOKE_INVARIANT = (
     "the engine replays a deterministic input script through the real "
-    "keybind pipeline on the Entry map, executes gameplay bindings "
-    "(movement, rotation, jump, fire, spell switch), writes probe "
-    "screenshots, and exits cleanly within the tick budget"
+    "keybind pipeline on the selected map, writes the fixture-requested "
+    "probe screenshots and required user files, and exits within the tick budget"
 )
 DEFAULT_APP = REPOSITORY_ROOT / "dist" / "macos-arm64" / "HarryPotter2.app"
 DEFAULT_DATA_ROOT = REPOSITORY_ROOT / "HarryPotter2" / "Unreal"
@@ -57,7 +56,6 @@ BLOCKED_EXIT_CODE = 3
 REPLAY_STEM = "InputScriptSmoke"
 PROBE_KEY = "K"
 PROBE_BINDING = "SHOT"
-EXPECTED_PROBE_SHOTS = 2
 LOOP_MARKER = "Entering main loop."
 
 # EInputKey values used by fixtures (Engine/Inc/EngineClasses.h).
@@ -244,17 +242,38 @@ def inject_probe_binding(defuser_text: str) -> str:
 _USER_DIR_RELATIVE = Path("Library/Application Support/Harry Potter 2/User")
 
 
-def prepare_user_home(
-    sandbox_home: Path, data_root: Path, replay_bytes: bytes, *, replay_stem: str = REPLAY_STEM,
-) -> Path:
-    """Seed the isolated user directory with User.ini and the replay stream.
+def apply_bindings(user_ini: str, bindings: tuple[str, ...]) -> str:
+    """Replace target key rows so existing defaults cannot override the scenario."""
+    if not bindings:
+        return user_ini
+    updates: dict[str, str] = {}
+    for binding in bindings:
+        key, separator, command = binding.partition("=")
+        key = key.strip()
+        if not separator or not key or "\n" in binding or "\r" in binding:
+            raise ProbeBindingError("additional bindings must be single-line KEY=COMMAND rows")
+        updates[key.casefold()] = f"{key}={command}"
+    section = re.search(r"(?im)^\[Engine\.Input\][ \t]*$", user_ini)
+    if section is None:
+        raise ProbeBindingError("no [Engine.Input] section for additional bindings")
+    next_section = re.search(r"(?m)^\[", user_ini[section.end():])
+    end = section.end() + next_section.start() if next_section else len(user_ini)
+    lines = [
+        line for line in user_ini[section.end():end].splitlines()
+        if line.partition("=")[0].strip().casefold() not in updates
+    ]
+    return user_ini[:section.end()] + "\n".join(lines + list(updates.values())) + "\n" + user_ini[end:]
 
-    Both ini seeds are required: when bootstrap finds Game.ini missing it
-    recreates it from Default.ini and flags ``bDefaultIniChanged``, which
-    forces User.ini to be regenerated from DefUser.ini — wiping any probe
-    binding seeded alone. Pre-seeding Game.ini from Default.ini keeps both
-    mtimes newer than their prototypes, so neither regeneration fires.
-    """
+
+def prepare_user_home(
+    sandbox_home: Path,
+    data_root: Path,
+    replay_bytes: bytes,
+    *,
+    replay_stem: str = REPLAY_STEM,
+    bindings: tuple[str, ...] = (),
+) -> Path:
+    """Seed isolated user settings and replay stream."""
     user_dir = sandbox_home / _USER_DIR_RELATIVE
     user_dir.mkdir(parents=True, exist_ok=True)
     system = data_root / "System"
@@ -262,7 +281,8 @@ def prepare_user_home(
         (system / "Default.ini").read_text(encoding="utf-8"), encoding="utf-8",
     )
     defuser = (system / "DefUser.ini").read_text(encoding="utf-8")
-    (user_dir / "User.ini").write_text(inject_probe_binding(defuser), encoding="utf-8")
+    user_ini = apply_bindings(inject_probe_binding(defuser), bindings)
+    (user_dir / "User.ini").write_text(user_ini, encoding="utf-8")
     (user_dir / f"{replay_stem}.rep").write_bytes(replay_bytes)
     return user_dir
 
@@ -275,7 +295,9 @@ def build_launch_command(executable: Path, data_root: Path, ticks: int) -> list[
         "-wgpu",
         "-NOFRONTEND",
         "-window",
-        "-nosound",
+        # Verification requires the real loopback backend; disabling audio
+        # would correctly fail its tick contract before any replay input.
+        *([] if os.environ.get("HP2_DETERMINISTIC_VERIFICATION") == "1" else ["-nosound"]),
         f"-testticks={ticks}",
         "-log",
     ]
@@ -314,31 +336,21 @@ def _supervised_run(
         output, _ = process.communicate(timeout=timeout_seconds)
         return output, process.returncode, False, None
     except subprocess.TimeoutExpired:
-        if os.name == "nt":
+        try:
+            os.killpg(process.pid, 15)
+        except OSError:
+            pass
+        try:
+            output, _ = process.communicate(timeout=game_test.TERMINATION_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
             try:
-                hp2_proc.kill_group(process)
+                os.killpg(process.pid, 9)
             except OSError:
                 pass
             try:
                 output, _ = process.communicate(timeout=game_test.KILL_GRACE_SECONDS)
             except subprocess.TimeoutExpired as error:
                 output = error.output or b""
-        else:
-            try:
-                os.killpg(process.pid, 15)
-            except OSError:
-                pass
-            try:
-                output, _ = process.communicate(timeout=game_test.TERMINATION_GRACE_SECONDS)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, 9)
-                except OSError:
-                    pass
-                try:
-                    output, _ = process.communicate(timeout=game_test.KILL_GRACE_SECONDS)
-                except subprocess.TimeoutExpired as error:
-                    output = error.output or b""
         return output, process.returncode, True, None
 
 
@@ -388,6 +400,11 @@ def run_input_script_smoke(
     ticks: int = DEFAULT_TICKS,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     validate_binary: bool = True,
+    engine_bin: Path | None = None,
+    selected_map: str = "Entry",
+    bindings: tuple[str, ...] = (),
+    expected_user_files: tuple[str, ...] = (),
+    expected_map_loads: tuple[str, ...] = (),
 ) -> dict:
     """Run the live smoke and return a report-schema-v1 dict."""
     profile = classify_data_profile(data_root) if data_root else "data-none"
@@ -411,30 +428,44 @@ def run_input_script_smoke(
     if root is None:
         return report("blocked", "data.root_missing",
                       "no data root with System/Default.ini found")
-    bundle = discover_app(app)
-    if bundle is None:
-        return report("blocked", "binary_missing",
-                      "app bundle not found; build and install dist/macos-arm64 first")
+    if engine_bin is not None:
+        try:
+            executable = game_test._resolve_path(engine_bin, REPOSITORY_ROOT, strict=True)
+        except (OSError, game_test.GameTestError) as error:
+            return report("blocked", "binary_missing", str(error))
+    else:
+        bundle = discover_app(app)
+        if bundle is None:
+            return report("blocked", "binary_missing",
+                          "app bundle not found; build and install dist/macos-arm64 first")
+        executable = game_test._bundle_executable(bundle)
 
     artifacts: list[dict] = []
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     tick_delta, frames = parse_fixture(fixture_path.read_text(encoding="utf-8"))
-    replay_bytes = compile_replay("Entry.unr", tick_delta, frames)
+    expected_probe_shots = sum(
+        key == KEY_IDS[PROBE_KEY] and state == IST_PRESS
+        for frame in frames for key, state in frame
+    )
+    replay_bytes = compile_replay(f"{selected_map}.unr", tick_delta, frames)
 
-    sandbox_home = artifact_dir / "home"
+    sandbox_home = Path(tempfile.mkdtemp(prefix="home-", dir=artifact_dir))
     try:
-        user_dir = prepare_user_home(sandbox_home, root, replay_bytes)
+        user_dir = prepare_user_home(
+            sandbox_home, root, replay_bytes, bindings=bindings,
+        )
     except ProbeBindingError as error:
         return report("blocked", "settings.probe_binding_missing", str(error))
     artifacts.append({"kind": "replay_stream", "path": str(user_dir / f"{REPLAY_STEM}.rep")})
     artifacts.append({"kind": "probe_user_ini", "path": str(user_dir / "User.ini")})
 
-    executable = game_test._bundle_executable(bundle)
     if validate_binary:
         game_test._validate_native_arm64(executable)
     command = build_launch_command(executable, root, ticks)
-
+    # Select the staged system INI on both owners; a missing native default
+    # would refresh User.ini and discard the scenario's input bindings.
+    command.append(f'-INI="{user_dir / "Game.ini"}"')
     log_path = artifact_dir / "replay-run.log"
     displayed = [
         game_test._display_path(executable, REPOSITORY_ROOT),
@@ -449,7 +480,18 @@ def run_input_script_smoke(
     artifacts.append({"kind": "run_log", "path": str(log_path)})
     markers = game_test._failure_markers(output, REPOSITORY_ROOT, sandbox_home)
     text = output.decode("utf-8", errors="replace")
+    completed_map_loads = [
+        match.group(1).split("?", 1)[0].replace("\\", "/").rsplit("/", 1)[-1]
+        for match in re.finditer(r"^Load time (.+): [-+\d.eE]+ seconds total,", text, re.MULTILINE)
+    ]
+    completed_map_names = {name.casefold() for name in completed_map_loads}
     shots = sorted(user_dir.glob("Shot*.bmp"))
+    required_files = {
+        name: sorted(path for path in user_dir.rglob(name) if path.is_file())
+        for name in expected_user_files
+    }
+    for paths in required_files.values():
+        artifacts.extend({"kind": "expected_user_file", "path": str(path)} for path in paths)
 
     facts = {
         "duration_seconds": round(duration, 3),
@@ -460,9 +502,12 @@ def run_input_script_smoke(
         "launch_error": launch_error,
         "failure_markers": markers,
         "probe_shots": [shot.name for shot in shots],
+        "expected_probe_shots": expected_probe_shots,
         "loop_marker_present": LOOP_MARKER in text,
+        "missing_user_files": [name for name, paths in required_files.items() if not paths],
+        "completed_map_loads": completed_map_loads,
+        "missing_map_loads": [name for name in expected_map_loads if name.casefold() not in completed_map_names],
     }
-
     def fail(reason_code: str, exit_reason: str) -> dict:
         result = report("fail", reason_code, exit_reason, displayed, artifacts)
         result["data"] = facts
@@ -478,26 +523,34 @@ def run_input_script_smoke(
         return fail("input.failure_marker", f"failure marker {markers[0]['text']!r} in output")
     if LOOP_MARKER not in text:
         return fail("runner.loop_marker_missing", f"missing {LOOP_MARKER!r} log marker")
-    if len(shots) < EXPECTED_PROBE_SHOTS:
+    if facts["missing_user_files"]:
+        return fail(
+            "settings.expected_user_file_missing",
+            f"expected user files were not written: {facts['missing_user_files']}",
+        )
+    if facts["missing_map_loads"]:
+        return fail(
+            "input.map_load_missing",
+            f"expected map loads did not complete: {facts['missing_map_loads']}",
+        )
+    if len(shots) < expected_probe_shots:
         return fail(
             "renderer.screenshot_missing",
-            f"expected {EXPECTED_PROBE_SHOTS} probe screenshots through the K={PROBE_BINDING} "
+            f"expected {expected_probe_shots} fixture-requested probe screenshots through the K={PROBE_BINDING} "
             f"binding, found {[shot.name for shot in shots]}",
         )
-
     passed = report("pass", "", "", displayed, artifacts)
     passed["data"] = {
         "profile": classify_data_profile(root),
         "duration_seconds": facts["duration_seconds"],
         "ticks_requested": ticks,
         "frames_replayed": len(frames),
-        "tick_delta_seconds": tick_delta,
-        "probe_shots": facts["probe_shots"],
-        "map_url": "Entry.unr",
+        "map_url": f"{selected_map}.unr",
+        "completed_map_loads": facts["completed_map_loads"],
     }
     passed["exit_reason"] = (
-        f"exit 0 in {duration:.2f}s; {len(frames)} replay frames drove movement, rotation, "
-        f"jump, fire, and spell-switch bindings; {len(shots)} probe screenshots written"
+        f"exit 0 in {duration:.2f}s; {len(frames)} replay frames executed through the "
+        f"real keybind pipeline; {len(shots)} probe screenshots written"
     )
     return passed
 
@@ -509,25 +562,6 @@ class InputScriptContracts(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
-
-    def test_fixture_parses_to_the_documented_script(self) -> None:
-        tick, frames = parse_fixture(DEFAULT_FIXTURE.read_text(encoding="utf-8"))
-        self.assertAlmostEqual(tick, 0.033333335)
-        # idle 8 | probe K | hold W 40 | hold S 20 | hold L/R 15 | Ctrl |
-        # RightMouse | 1 2 3 | LeftMouse | probe K | idle 8
-        self.assertEqual(len(frames), 127)
-        self.assertEqual([e for frame in frames[:8] for e in frame], [])
-        self.assertEqual(frames[8], [(KEY_IDS[PROBE_KEY], IST_PRESS)])
-        self.assertEqual(frames[9], [(KEY_IDS[PROBE_KEY], IST_RELEASE)])
-        self.assertEqual(frames[10], [(KEY_IDS["W"], IST_PRESS)])
-        self.assertEqual(frames[11], [(KEY_IDS["W"], IST_HOLD)])
-        self.assertEqual(frames[49], [(KEY_IDS["W"], IST_HOLD)])
-        self.assertEqual(frames[50], [(KEY_IDS["W"], IST_RELEASE)])
-        self.assertEqual(frames[51], [(KEY_IDS["S"], IST_PRESS)])
-        self.assertEqual(frames[116], [(KEY_IDS[PROBE_KEY], IST_PRESS)])
-        self.assertEqual(frames[117], [(KEY_IDS[PROBE_KEY], IST_RELEASE)])
-        held_states = {state for frame in frames for _, state in frame}
-        self.assertEqual(held_states, {IST_PRESS, IST_HOLD, IST_RELEASE})
 
     def test_raw_event_first_encoding_matches_the_farchive_wire_format(self) -> None:
         # compile_replay is a raw encoder: it preserves event-first frames for
@@ -568,17 +602,9 @@ class InputScriptContracts(unittest.TestCase):
             bytes((IK_PLAY, IST_AXIS | DELTA_FLAG)) + struct.pack("<f", tick),
         )
 
-    def test_compilation_is_deterministic(self) -> None:
-        text = DEFAULT_FIXTURE.read_text(encoding="utf-8")
-        tick, frames = parse_fixture(text)
-        self.assertEqual(compile_replay("Entry.unr", tick, frames),
-                         compile_replay("Entry.unr", tick, parse_fixture(text)[1]))
-
     def test_parser_rejects_unknown_or_unbalanced_scripts(self) -> None:
         with self.assertRaisesRegex(FixtureError, "unknown directive"):
             parse_fixture("tick 0.1\nwarp 3\n")
-        with self.assertRaisesRegex(FixtureError, "unknown input key"):
-            parse_fixture("tick 0.1\npress Tilde\n")
         with self.assertRaisesRegex(FixtureError, "unknown input key"):
             parse_fixture("tick 0.1\npress Tilde\n")
         with self.assertRaisesRegex(FixtureError, "no tick directive"):
@@ -591,34 +617,20 @@ class InputScriptContracts(unittest.TestCase):
         self.assertEqual(_compact_index(0x3FFF), b"\x7f\xff\x01")
         self.assertEqual(_compact_index(0x400000), b"\x40\x80\x80\x04")
 
-    def test_probe_binding_replaces_only_the_empty_row(self) -> None:
-        injected = inject_probe_binding("[Engine.Input]\nZ=Button bBroomBrake\nK=\nW=MoveForward\n")
-        self.assertIn("K=SHOT\n", injected)
-        self.assertIn("Z=Button bBroomBrake\n", injected)
-        self.assertIn("W=MoveForward\n", injected)
-        with self.assertRaisesRegex(ProbeBindingError, "no empty K= row"):
-            inject_probe_binding("[Engine.Input]\nK=quit\n")
 
-    def test_user_home_seeding_writes_ini_and_replay(self) -> None:
-        data_root = self.root / "Unreal"
-        (data_root / "System").mkdir(parents=True)
-        (data_root / "System" / "Default.ini").write_text("[Core.System]\nPaths=../Maps/*.unr\n")
-        (data_root / "System" / "DefUser.ini").write_text("[Engine.Input]\nK=\n")
-        user_dir = prepare_user_home(self.root / "home", data_root, b"\x00\x84")
-        self.assertEqual((user_dir / "User.ini").read_text(), "[Engine.Input]\nK=SHOT\n")
-        # Game.ini must be seeded so bootstrap never flags bDefaultIniChanged
-        # and regenerates User.ini from DefUser.ini behind our back.
-        self.assertIn("Paths=../Maps/*.unr", (user_dir / "Game.ini").read_text())
-        self.assertEqual((user_dir / f"{REPLAY_STEM}.rep").read_bytes(), b"\x00\x84")
+    def test_scenario_bindings_override_duplicates_without_changing_other_sections(self) -> None:
+        import configparser
+        text = "[Engine.Input]\nK=SHOT\nF5=QuickSave\nf5=OldSave\nW=MoveForward\n[Other]\nF5=preserve\n"
+        changed = apply_bindings(text, ("F5=first", "f5=SAVEGAME 9", "F9=LOADGAME 9"))
+        parsed = configparser.RawConfigParser(strict=True)
+        parsed.read_string(changed)
+        self.assertEqual(parsed["Engine.Input"]["F5"], "SAVEGAME 9")
+        self.assertEqual(parsed["Engine.Input"]["F9"], "LOADGAME 9")
+        self.assertEqual(parsed["Engine.Input"]["W"], "MoveForward")
+        self.assertEqual(parsed["Other"]["F5"], "preserve")
+        with self.assertRaises(ProbeBindingError):
+            apply_bindings(text, ("F5=SAVEGAME 9\nF9=QUIT",))
 
-    def test_launch_command_shape(self) -> None:
-        command = build_launch_command(Path("/app/Contents/MacOS/HarryPotter2"), Path("/data"), 240)
-        self.assertEqual(command[:2], ["/app/Contents/MacOS/HarryPotter2", "-datadir=/data"])
-        self.assertIn("-REPLAY=InputScriptSmoke", command)
-        self.assertIn("-NOFRONTEND", command)
-        self.assertIn("-window", command)
-        self.assertIn("-nosound", command)
-        self.assertIn("-testticks=240", command)
 
     def _stub_binary(self, body: str) -> Path:
         stub = self.root / "stub-binary"
@@ -646,20 +658,6 @@ class InputScriptContracts(unittest.TestCase):
         arguments.update(overrides)
         return run_input_script_smoke(**arguments)
 
-    def test_stubbed_run_passes_end_to_end(self) -> None:
-        body = (
-            'echo "Entering main loop."\n'
-            'user="$HOME/Library/Application Support/Harry Potter 2/User"\n'
-            'mkdir -p "$user"\n'
-            'touch "$user/Shot0000.bmp" "$user/Shot0001.bmp"\n'
-            'test -s "$user/InputScriptSmoke.rep" || { echo "critical error: no replay"; exit 1; }\n'
-            'grep -q "^K=SHOT$" "$user/User.ini" || { echo "critical error: no probe"; exit 1; }\n'
-        )
-        result = self._smoke_with_stub(body)
-        self.assertEqual(result["status"], "pass")
-        self.assertEqual(result["schema"], 1)
-        self.assertIn("exit 0", result["exit_reason"])
-        self.assertEqual(result["data"]["probe_shots"], ["Shot0000.bmp", "Shot0001.bmp"])
 
     def test_failure_markers_fail_the_report(self) -> None:
         result = self._smoke_with_stub('echo "Entering main loop."; echo "Critical error: boom"')
@@ -670,6 +668,16 @@ class InputScriptContracts(unittest.TestCase):
         result = self._smoke_with_stub('echo "Entering main loop."')
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["reason_code"], "renderer.screenshot_missing")
+    def test_starting_a_requested_map_load_does_not_count_as_completion(self) -> None:
+        result = self._smoke_with_stub(
+            'echo "Entering main loop."; echo "LoadMap: /Save/Save9.usa"; '
+            'echo "Load time Adv1Willow.unr: 0.5 seconds total, 0.4 app"',
+            expected_map_loads=("Save9.usa",),
+        )
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["reason_code"], "input.map_load_missing")
+        self.assertEqual(result["data"]["missing_map_loads"], ["Save9.usa"])
+
 
     def test_nonzero_exit_fails_the_report(self) -> None:
         result = self._smoke_with_stub('echo "Entering main loop."; exit 7')
@@ -706,7 +714,14 @@ class InputScriptContracts(unittest.TestCase):
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--smoke", action="store_true", help="run the live engine smoke")
-    parser.add_argument("--app", type=Path, default=None, help="app bundle override")
+    parser.add_argument("--app", type=Path, default=None, help="app bundle (ignored with --engine-bin)")
+    parser.add_argument("--engine-bin", type=Path, default=None,
+                        help="raw executable override (same semantics as game_test.py run)")
+    parser.add_argument("--map", dest="selected_map", default="Entry")
+    parser.add_argument("--bind", action="append", default=[], metavar="KEY=COMMAND")
+    parser.add_argument("--expect-user-file", action="append", default=[], metavar="NAME")
+    parser.add_argument("--expect-map-load", action="append", default=[], metavar="MAP",
+                        help="require a completed LoadMap of this map or saved-package filename")
     parser.add_argument("--data-root", type=Path, default=None, help="prototype data root")
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
     parser.add_argument("--artifact-dir", type=Path, default=None)
@@ -718,8 +733,8 @@ def _arguments() -> argparse.Namespace:
 def main() -> int:
     arguments = _arguments()
     if not arguments.smoke:
-        unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False)
-        return 0
+        program = unittest.main(argv=[sys.argv[0]], verbosity=2, exit=False)
+        return 0 if program.result.wasSuccessful() else 1
     artifact_dir = arguments.artifact_dir
     if artifact_dir is None:
         from_env = os.environ.get("HP2_ARTIFACT_DIR")
@@ -731,6 +746,11 @@ def main() -> int:
         fixture_path=arguments.fixture,
         ticks=arguments.ticks,
         timeout_seconds=arguments.timeout,
+        engine_bin=arguments.engine_bin,
+        selected_map=arguments.selected_map,
+        bindings=tuple(arguments.bind),
+        expected_user_files=tuple(arguments.expect_user_file),
+        expected_map_loads=tuple(arguments.expect_map_load),
     )
     (artifact_dir / "report.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8",

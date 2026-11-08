@@ -1,4 +1,7 @@
 //! Bit-exact scripted replay for the ten `pawn_sense` entrypoints.
+#[path = "actor_services/mock.rs"]
+mod actor_services_mock;
+
 use hp2_abi::{
     FVector,
     engine::generated::{AActor, APawn, AZoneInfo, FCheckResult, FRotator},
@@ -84,10 +87,21 @@ fn out(kind: u32, args: &[u32]) -> Vec<u32> {
     take_script(kind, args)
 }
 
-unsafe extern "C" fn fast_line(_l: *mut c_void, a: *const c_void, b: *const c_void) -> i32 {
-    let mut x = vwords(unsafe { &*a.cast::<FVector>() }).to_vec();
-    x.extend(unsafe { vwords(&*b.cast::<FVector>()) });
-    out(1, &x)[0] as i32
+unsafe extern "C" fn fast_line(
+    _l: *mut c_void,
+    a: *const c_void,
+    b: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    let value = (|| {
+        let mut x = vwords(unsafe { &*a.cast::<FVector>() }).to_vec();
+        x.extend(unsafe { vwords(&*b.cast::<FVector>()) });
+        out(1, &x)[0] as i32
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
 unsafe extern "C" fn single_line(
     _l: *mut c_void,
@@ -97,95 +111,117 @@ unsafe extern "C" fn single_line(
     b: *const c_void,
     t: u32,
     x: *const c_void,
-) {
-    let mut a = vec![pid(s)];
-    a.extend(unsafe { vwords(&*e.cast::<FVector>()) });
-    a.extend(unsafe { vwords(&*b.cast::<FVector>()) });
-    a.push(t);
-    a.extend(unsafe { vwords(&*x.cast::<FVector>()) });
-    let o = out(2, &a);
+) -> i32 {
+    (|| {
+        let mut a = vec![pid(s)];
+        a.extend(unsafe { vwords(&*e.cast::<FVector>()) });
+        a.extend(unsafe { vwords(&*b.cast::<FVector>()) });
+        a.push(t);
+        a.extend(unsafe { vwords(&*x.cast::<FVector>()) });
+        let o = out(2, &a);
+        unsafe {
+            let hit = &mut *h.cast::<FCheckResult>();
+            hit.time = f32::from_bits(o[0]);
+            hit.normal = FVector {
+                x: f32::from_bits(o[1]),
+                y: f32::from_bits(o[2]),
+                z: f32::from_bits(o[3]),
+            };
+        }
+    })();
+    0
+}
+unsafe extern "C" fn app_frand(result: *mut f32) -> i32 {
+    let value = (|| f32::from_bits(out(3, &[])[0]))();
     unsafe {
-        let hit = &mut *h.cast::<FCheckResult>();
-        hit.time = f32::from_bits(o[0]);
-        hit.normal = FVector {
-            x: f32::from_bits(o[1]),
-            y: f32::from_bits(o[2]),
-            z: f32::from_bits(o[3]),
+        *result = value;
+    }
+    0
+}
+unsafe extern "C" fn set_physics(a: *mut c_void, p: u8) -> i32 {
+    (|| {
+        assert!(out(4, &[pid(a), p as u32]).is_empty());
+        unsafe { (*a.cast::<AActor>()).physics = p };
+    })();
+    0
+}
+unsafe extern "C" fn probing(a: *mut c_void, name: u32, result: *mut i32) -> i32 {
+    let value = (|| out(6, &[pid(a), name])[0] as i32)();
+    unsafe {
+        *result = value;
+    }
+    0
+}
+unsafe extern "C" fn hear(a: *mut c_void, l: f32, n: *mut c_void) -> i32 {
+    (|| {
+        let args = [pid(a), fw(l), pid(n)];
+        assert!(out(23, &args).is_empty());
+    })();
+    0
+}
+unsafe extern "C" fn not_visible(a: *mut c_void) -> i32 {
+    (|| {
+        let args = [pid(a)];
+        assert!(out(24, &args).is_empty());
+    })();
+    0
+}
+unsafe extern "C" fn touch(a: *mut c_void, b: *mut c_void) -> i32 {
+    (|| {
+        let args = [pid(a), pid(b)];
+        assert!(out(25, &args).is_empty());
+    })();
+    0
+}
+unsafe extern "C" fn safe_normal(v: *const c_void, o: *mut c_void) -> i32 {
+    (|| {
+        let x = out(10, &vwords(unsafe { &*v.cast::<FVector>() }));
+        unsafe {
+            *o.cast::<FVector>() = FVector {
+                x: f32::from_bits(x[0]),
+                y: f32::from_bits(x[1]),
+                z: f32::from_bits(x[2]),
+            }
         };
-    }
+    })();
+    0
 }
-unsafe extern "C" fn app_frand() -> f32 {
-    f32::from_bits(out(3, &[])[0])
-}
-unsafe extern "C" fn set_physics(a: *mut c_void, p: u8) {
-    assert!(out(4, &[pid(a), p as u32]).is_empty());
-    unsafe { (*a.cast::<AActor>()).physics = p };
-}
-unsafe extern "C" fn cylinder(a: *mut c_void, o: *mut c_void) {
-    let x = out(5, &[pid(a)]);
-    unsafe {
-        *o.cast::<FVector>() = FVector {
-            x: f32::from_bits(x[0]),
-            y: f32::from_bits(x[1]),
-            z: f32::from_bits(x[2]),
+unsafe extern "C" fn vector_rotation(v: *const c_void, o: *mut c_void) -> i32 {
+    (|| {
+        let a = vwords(unsafe { &*v.cast::<FVector>() });
+        let x = out(11, &a);
+        unsafe {
+            *o.cast::<FRotator>() = FRotator {
+                pitch: x[0] as i32,
+                yaw: x[1] as i32,
+                roll: x[2] as i32,
+            }
         }
-    }
+    })();
+    0
 }
-unsafe extern "C" fn probing(a: *mut c_void, name: u32) -> i32 {
-    out(6, &[pid(a), name])[0] as i32
-}
-unsafe extern "C" fn hear(a: *mut c_void, l: f32, n: *mut c_void) {
-    let args = [pid(a), fw(l), pid(n)];
-    assert!(out(23, &args).is_empty());
-}
-unsafe extern "C" fn not_visible(a: *mut c_void) {
-    let args = [pid(a)];
-    assert!(out(24, &args).is_empty());
-}
-unsafe extern "C" fn touch(a: *mut c_void, b: *mut c_void) {
-    let args = [pid(a), pid(b)];
-    assert!(out(25, &args).is_empty());
-}
-unsafe extern "C" fn safe_normal(v: *const c_void, o: *mut c_void) {
-    let x = out(10, &vwords(unsafe { &*v.cast::<FVector>() }));
-    unsafe {
-        *o.cast::<FVector>() = FVector {
-            x: f32::from_bits(x[0]),
-            y: f32::from_bits(x[1]),
-            z: f32::from_bits(x[2]),
-        }
-    };
-}
-unsafe extern "C" fn vector_rotation(v: *const c_void, o: *mut c_void) {
-    let a = vwords(unsafe { &*v.cast::<FVector>() });
-    let x = out(11, &a);
-    unsafe {
-        *o.cast::<FRotator>() = FRotator {
-            pitch: x[0] as i32,
-            yaw: x[1] as i32,
-            roll: x[2] as i32,
-        }
-    }
-}
-unsafe extern "C" fn rotation_vector(v: *const c_void, o: *mut c_void) {
-    hit_kind(12);
-    let r = unsafe { &*v.cast::<FRotator>() };
-    let trig = |angle: i32| {
-        let i = angle.wrapping_shr(2) & 16383;
-        let arg = (i as f32) * (2.0 * std::f32::consts::PI / 16384.0);
-        (arg as f64).sin() as f32
-    };
-    let sp = trig(r.pitch);
-    let cp = trig(r.pitch.wrapping_add(16384));
-    let sy = trig(r.yaw);
-    let cy = trig(r.yaw.wrapping_add(16384));
-    unsafe {
-        *o.cast::<FVector>() = FVector {
-            x: cp * cy,
-            y: cp * sy,
-            z: sp,
-        }
-    };
+unsafe extern "C" fn rotation_vector(v: *const c_void, o: *mut c_void) -> i32 {
+    (|| {
+        hit_kind(12);
+        let r = unsafe { &*v.cast::<FRotator>() };
+        let trig = |angle: i32| {
+            let i = angle.wrapping_shr(2) & 16383;
+            let arg = (i as f32) * (2.0 * std::f32::consts::PI / 16384.0);
+            (arg as f64).sin() as f32
+        };
+        let sp = trig(r.pitch);
+        let cp = trig(r.pitch.wrapping_add(16384));
+        let sy = trig(r.yaw);
+        let cy = trig(r.yaw.wrapping_add(16384));
+        unsafe {
+            *o.cast::<FVector>() = FVector {
+                x: cp * cy,
+                y: cp * sy,
+                z: sp,
+            }
+        };
+    })();
+    0
 }
 fn super_class(class: u32) -> Option<u32> {
     match class {
@@ -206,61 +242,107 @@ fn class_is_a(mut class: u32, target: u32) -> bool {
         }
     }
 }
-unsafe extern "C" fn is_a(a: *mut c_void, k: u32) -> i32 {
-    hit_kind(13);
-    let class = REPLAY.with(|r| r.borrow().classes[pid(a) as usize]);
-    let value = class_is_a(class, k) as i32;
-    CLASS_RESULTS.with(|r| r.borrow_mut()[0][usize::from(value != 0)] += 1);
-    value
+unsafe extern "C" fn is_a(a: *mut c_void, k: u32, result: *mut i32) -> i32 {
+    let value = (|| {
+        hit_kind(13);
+        let class = REPLAY.with(|r| r.borrow().classes[pid(a) as usize]);
+        let value = class_is_a(class, k) as i32;
+        CLASS_RESULTS.with(|r| r.borrow_mut()[0][usize::from(value != 0)] += 1);
+        value
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn is_a_class(a: *mut c_void, b: *mut c_void) -> i32 {
-    hit_kind(14);
-    let (object, parent) = REPLAY.with(|r| {
-        let r = r.borrow();
-        (r.classes[pid(a) as usize], r.classes[pid(b) as usize])
-    });
-    let value = class_is_a(object, parent) as i32;
-    CLASS_RESULTS.with(|r| r.borrow_mut()[1][usize::from(value != 0)] += 1);
-    value
+unsafe extern "C" fn is_a_class(a: *mut c_void, b: *mut c_void, result: *mut i32) -> i32 {
+    let value = (|| {
+        hit_kind(14);
+        let (object, parent) = REPLAY.with(|r| {
+            let r = r.borrow();
+            (r.classes[pid(a) as usize], r.classes[pid(b) as usize])
+        });
+        let value = class_is_a(object, parent) as i32;
+        CLASS_RESULTS.with(|r| r.borrow_mut()[1][usize::from(value != 0)] += 1);
+        value
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn pawn_head(a: *mut c_void) -> *mut c_void {
-    hit_kind(15);
-    assert_eq!(pid(a), 4);
-    REPLAY.with(|r| r.borrow().actors[1] as *mut c_void)
+unsafe extern "C" fn pawn_head(a: *mut c_void, result: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        hit_kind(15);
+        assert_eq!(pid(a), 4);
+        REPLAY.with(|r| r.borrow().actors[1] as *mut c_void)
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn team_game(a: *mut c_void) -> i32 {
-    hit_kind(16);
-    assert_eq!(pid(a), 4);
-    REPLAY.with(|r| r.borrow().team_game as i32)
+unsafe extern "C" fn team_game(a: *mut c_void, result: *mut i32) -> i32 {
+    let value = (|| {
+        hit_kind(16);
+        assert_eq!(pid(a), 4);
+        REPLAY.with(|r| r.borrow().team_game as i32)
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn level_time(a: *mut c_void) -> f32 {
-    hit_kind(17);
-    assert_eq!(pid(a), 4);
-    REPLAY.with(|r| f32::from_bits(r.borrow().time))
+unsafe extern "C" fn level_time(a: *mut c_void, result: *mut f32) -> i32 {
+    let value = (|| {
+        hit_kind(17);
+        assert_eq!(pid(a), 4);
+        REPLAY.with(|r| f32::from_bits(r.borrow().time))
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn teams(a: *mut c_void, b: *mut c_void) -> i32 {
-    hit_kind(18);
-    REPLAY.with(|r| {
-        let r = r.borrow();
-        let team = |id: u32| {
-            if id == r.pawn_pri {
-                r.pawn_team
-            } else if id == r.other_pri {
-                r.other_team
-            } else {
-                0
-            }
-        };
-        i32::from(team(pid(a)) != team(pid(b)))
-    })
+unsafe extern "C" fn teams(a: *mut c_void, b: *mut c_void, result: *mut i32) -> i32 {
+    let value = (|| {
+        hit_kind(18);
+        REPLAY.with(|r| {
+            let r = r.borrow();
+            let team = |id: u32| {
+                if id == r.pawn_pri {
+                    r.pawn_team
+                } else if id == r.other_pri {
+                    r.other_team
+                } else {
+                    0
+                }
+            };
+            i32::from(team(pid(a)) != team(pid(b)))
+        })
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn gravity(a: *mut c_void) -> f32 {
-    hit_kind(19);
-    assert_eq!(pid(a), 3);
-    REPLAY.with(|r| f32::from_bits(r.borrow().zone_gravity))
+unsafe extern "C" fn gravity(a: *mut c_void, result: *mut f32) -> i32 {
+    let value = (|| {
+        hit_kind(19);
+        assert_eq!(pid(a), 3);
+        REPLAY.with(|r| f32::from_bits(r.borrow().zone_gravity))
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn reachable(a: *mut c_void, b: *mut c_void, k: i32) -> i32 {
-    out(20, &[pid(a), pid(b), k as u32])[0] as i32
+unsafe extern "C" fn reachable(a: *mut c_void, b: *mut c_void, k: i32, result: *mut i32) -> i32 {
+    let value = (|| out(20, &[pid(a), pid(b), k as u32])[0] as i32)();
+    unsafe {
+        *result = value;
+    }
+    0
 }
 unsafe extern "C" fn find_path(
     a: *mut c_void,
@@ -268,40 +350,92 @@ unsafe extern "C" fn find_path(
     s: i32,
     p: *mut *mut c_void,
     c: i32,
+    result: *mut i32,
 ) -> i32 {
-    let x = out(
-        21,
-        &[pid(a), pid(b), s as u32, pid(unsafe { *p }), c as u32],
-    );
+    let value = (|| {
+        let x = out(
+            21,
+            &[pid(a), pid(b), s as u32, pid(unsafe { *p }), c as u32],
+        );
+        unsafe {
+            *p = REPLAY.with(|r| {
+                if x[1] == 0 {
+                    std::ptr::null_mut()
+                } else {
+                    r.borrow().actors[x[1] as usize] as *mut c_void
+                }
+            })
+        };
+        x[0] as i32
+    })();
     unsafe {
-        *p = REPLAY.with(|r| {
-            if x[1] == 0 {
+        *result = value;
+    }
+    0
+}
+unsafe extern "C" fn special(a: *mut c_void, b: *mut c_void, result: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        let args = [pid(a), pid(b)];
+        let x = out(26, &args)[0] as usize;
+        REPLAY.with(|r| {
+            if x == 0 {
                 std::ptr::null_mut()
             } else {
-                r.borrow().actors[x[1] as usize] as *mut c_void
+                r.borrow().actors[x] as *mut c_void
             }
         })
-    };
-    x[0] as i32
+    })();
+    unsafe {
+        *result = value;
+    }
+    0
 }
-unsafe extern "C" fn special(a: *mut c_void, b: *mut c_void) -> *mut c_void {
-    let args = [pid(a), pid(b)];
-    let x = out(26, &args)[0] as usize;
-    REPLAY.with(|r| {
-        if x == 0 {
-            std::ptr::null_mut()
-        } else {
-            r.borrow().actors[x] as *mut c_void
+unsafe extern "C" fn native_can_hear(
+    p: *mut c_void,
+    loc: *const c_void,
+    loudness: f32,
+    other: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        match can_hear(
+            &services(),
+            p.cast(),
+            *loc.cast::<FVector>(),
+            loudness,
+            other.cast(),
+        ) {
+            Ok(v) => {
+                *out = v;
+                0
+            }
+            Err(e) => e,
         }
-    })
+    }
 }
+unsafe extern "C" fn native_los(
+    p: *mut c_void,
+    other: *mut c_void,
+    show: i32,
+    out: *mut u32,
+) -> i32 {
+    unsafe {
+        match line_of_sight_to(&services(), p.cast(), other.cast(), show) {
+            Ok(v) => {
+                *out = v;
+                0
+            }
+            Err(e) => e,
+        }
+    }
+}
+
 fn services() -> Hp2PawnSenseServices {
     Hp2PawnSenseServices {
         fast_line_check: fast_line,
         single_line_check: single_line,
         app_frand,
         set_physics,
-        get_cylinder_extent: cylinder,
         is_probing: probing,
         event_hear_noise: hear,
         event_enemy_not_visible: not_visible,
@@ -319,6 +453,8 @@ fn services() -> Hp2PawnSenseServices {
         actor_reachable: reachable,
         find_path_toward: find_path,
         event_special_handling: special,
+        can_hear: native_can_hear,
+        line_of_sight_to: native_los,
     }
 }
 
@@ -364,6 +500,7 @@ fn actor(p: &mut APawn, actors: &[usize]) {
 
 #[test]
 fn pawn_sense_fixture_replay_exact() {
+    actor_services_mock::publish();
     let mut fn_counts = [0usize; 10];
     let mut case_sets: Vec<Vec<u32>> = (0..10).map(|_| Vec::new()).collect();
     let mut class_counts = [[0usize; 2]; 2];
@@ -578,7 +715,9 @@ fn pawn_sense_fixture_replay_exact() {
             q += 1;
             let outs = raw[q..q + oc].to_vec();
             q += oc;
-            scripts.push(Script { kind, args, outs });
+            if kind != 5 {
+                scripts.push(Script { kind, args, outs });
+            }
         }
         assert_eq!(q, raw.len(), "trailing record data");
         REPLAY.with(|r| r.borrow_mut().scripts = scripts);
@@ -606,50 +745,58 @@ fn pawn_sense_fixture_replay_exact() {
             },
             "function argument width"
         );
+        let p = p as *mut APawn;
+        let mut hit: FCheckResult = unsafe { std::mem::zeroed() };
+        hit.time = 1.0;
+        hit.item = -1;
         let result = unsafe {
             match fnid {
                 0 => {
-                    set_move_timer(p, f32::from_bits(args[0]));
+                    set_move_timer(p, f32::from_bits(args[0])).unwrap();
                     0
                 }
-                1 => move_toward(&svc, p, read_vec(args, &mut 0)) as u32,
-                2 => rotate_toward(&svc, p, read_vec(args, &mut 0)) as u32,
+                1 => move_toward(&svc, p, &read_vec(args, &mut 0)).unwrap() as u32,
+                2 => rotate_toward(&svc, p, read_vec(args, &mut 0)).unwrap() as u32,
                 3 => line_of_sight_to(
                     &svc,
                     p,
                     ids[args[0] as usize] as *mut AActor,
                     args[1] as i32,
-                ) as u32,
+                )
+                .unwrap() as u32,
                 4 => can_hear(
                     &svc,
                     p,
                     read_vec(args, &mut 0),
                     f32::from_bits(args[3]),
                     ids[args[4] as usize] as *mut APawn,
-                ) as u32,
+                )
+                .unwrap() as u32,
                 5 => {
                     check_noise_hearing(
                         &svc,
                         ids[args[1] as usize] as *mut AActor,
                         f32::from_bits(args[0]),
-                    );
+                    )
+                    .unwrap();
                     0
                 }
                 6 => {
-                    check_enemy_visible(&svc, p);
+                    check_enemy_visible(&svc, p).unwrap();
                     0
                 }
-                7 => pick_wall_adjust(&svc, p) as u32,
+                7 => pick_wall_adjust(&svc, p, &mut hit).unwrap() as u32,
                 8 => get_net_priority(
                     p,
                     ids[args[0] as usize] as *mut AActor,
                     f32::from_bits(args[1]),
                     f32::from_bits(args[2]),
                 )
+                .unwrap()
                 .to_bits(),
                 _ => {
                     best = ids[args[0] as usize] as *mut AActor;
-                    handle_special(&svc, p, &mut best);
+                    handle_special(&svc, p, &mut best).unwrap();
                     0
                 }
             }
@@ -666,6 +813,7 @@ fn pawn_sense_fixture_replay_exact() {
                 "unconsumed callbacks"
             )
         });
+        let p = unsafe { &*p };
         let mut got = Vec::new();
         got.extend(vwords(&p.base.location));
         got.extend(vwords(&p.base.velocity));

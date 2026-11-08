@@ -394,8 +394,14 @@ fn bounds_trace(seed: u64, out: &mut String) {
     let cos = &cos_tab;
     let t = Trig { sin, cos };
     let render = mesh::render_bounding_box(&view, &owner, &t);
-    let cb = mesh::collision_bounding_box(&view, &owner, (seed & 2) != 0, &t);
-    let extent = mesh::collision_extent(&view, &owner, &t);
+    let collision = mesh::CollisionView {
+        bounding_box: view.bounding_box,
+        scale: view.scale,
+        origin: view.origin,
+        rot_origin: view.rot_origin,
+    };
+    let cb = mesh::collision_bounding_box(&collision, &owner.pose, (seed & 2) != 0, &t);
+    let extent = mesh::collision_extent(&collision, &owner.pose, &t);
     let bone = r.ri(0, 3);
     let bone_c = mesh::bone_coords(&view, &owner, &t);
 

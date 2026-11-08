@@ -1,0 +1,2368 @@
+scenario init_basic
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op exit 1
+free CacheItems
+free CacheMemory
+result ok
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_segments
+op init 8192 32 0 2048
+malloc CacheMemory 8192 ok
+malloc CacheItems 1536 ok
+result ok
+state initialized=1 mem_total=8192 items_total=32 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=4 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=2048 time=0 seg=1 extra=0 cost=0 next=2 prev=0 hash=-
+item 2 id=0000000000000000 off=4096 time=0 seg=2 extra=0 cost=0 next=3 prev=1 hash=-
+item 3 id=0000000000000000 off=6144 time=0 seg=3 extra=0 cost=0 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=8192 time=0 seg=4 extra=0 cost=0 next=- prev=3 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+op exit 1
+free CacheItems
+free CacheMemory
+result ok
+state initialized=0 mem_total=8192 items_total=32 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=4 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_partial_segment
+op init 5000 16 0 2048
+malloc CacheMemory 5000 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=5000 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=3 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=2048 time=0 seg=1 extra=0 cost=0 next=2 prev=0 hash=-
+item 2 id=0000000000000000 off=4096 time=0 seg=2 extra=0 cost=0 next=3 prev=1 hash=-
+item 3 id=0000000000000000 off=5000 time=0 seg=3 extra=0 cost=0 next=- prev=2 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+op exit 1
+free CacheItems
+free CacheMemory
+result ok
+state initialized=0 mem_total=5000 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=3 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_start_given
+op init 4096 16 1 0
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op exit 0
+free CacheItems
+result ok
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_cache_memory_fail
+op init 4096 16 0 0
+malloc CacheMemory 4096 fail
+unwind FMemCache::Init
+result err 1
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_cache_items_fail
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 fail
+unwind FMemCache::Init
+result err 1
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=set item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_negative_bytes
+op init -16 16 0 0
+errorf Allocation size exceeds the 32-bit allocator contract
+unwind FMemCache::Init
+result err 1
+state initialized=0 mem_total=-16 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario init_twice
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op init 4096 16 0 0
+fail_assert 31 UnCache.cpp Initialized==0
+unwind FMemCache::Init
+result err 1
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario init_one_item
+op init 4096 1 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 48 ok
+fail_assert 325 UnCache.cpp UnusedItems != NULL
+unwind FMemCache::CreateNewFreeSpace
+unwind FMemCache::Init
+result err 3
+state initialized=0 mem_total=4096 items_total=1 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=- unused_items=- cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario create_basic
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 200 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777416 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=312 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op create 0000000000000003 300 64 8
+app_cycles 1000400
+app_cycles 1000500
+result ok 320 3
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000003 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777416 next=3 prev=0 hash=-
+item 3 id=0000000000000003 off=312 time=0 seg=0 extra=0 cost=16777516 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=620 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+hash 3 3
+scenario create_pad_and_align
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000010 64 256 16
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000010 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000010 off=0 time=0 seg=0 extra=0 cost=16777280 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=64 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 16 0
+op create 0000000000000011 64 256 16
+app_cycles 1000200
+app_cycles 1000300
+result ok 256 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000011 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000010 off=0 time=0 seg=0 extra=0 cost=16777280 next=2 prev=- hash=-
+item 2 id=0000000000000011 off=64 time=0 seg=0 extra=0 cost=16777280 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=320 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 16 0
+hash 17 2
+scenario create_bizarre_alignment
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 50 512 0
+app_cycles 1000200
+errorf Bizarre cache alignment
+unwind FMemCache::Create
+result err 1
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=-1000134 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777266 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=562 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+scenario create_nofit
+op init 1024 8 0 0
+malloc CacheMemory 1024 ok
+malloc CacheItems 384 ok
+result ok
+state initialized=1 mem_total=1024 items_total=8 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7
+op create 0000000000000001 1000 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=1024 items_total=8 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7
+hash 1 0
+op create 0000000000000002 500 16 0
+app_cycles 1000200
+glog
+parse_command 1 DUMPCACHE DUMPCACHE
+logf glog ok 01 [1000]: Locked
+logf glog ok 00 [24]: Empty
+errorf Create 00000000.00000002 failed: Size=500 Pad=0 Align=16 NumLocked=1 BytesLocked=1000/1024
+unwind FMemCache::Create
+result err 1
+state initialized=1 mem_total=1024 items_total=8 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=-1000134 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7
+hash 1 0
+scenario create_nofit_logf_fail
+op init 1024 8 0 0
+malloc CacheMemory 1024 ok
+malloc CacheItems 384 ok
+result ok
+state initialized=1 mem_total=1024 items_total=8 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7
+op create 0000000000000001 1000 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=1024 items_total=8 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7
+hash 1 0
+op create 0000000000000002 500 16 0
+app_cycles 1000200
+glog
+parse_command 1 DUMPCACHE DUMPCACHE
+logf glog fail 01 [1000]: Locked
+unwind FMemCache::Exec
+unwind FMemCache::Create
+result err 4
+state initialized=1 mem_total=1024 items_total=8 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=-1000134 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7
+hash 1 0
+scenario create_zero_id
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000000 100 16 0
+app_cycles 1000000
+fail_assert 454 UnCache.cpp Id != 0
+unwind FMemCache::Create
+result err 1
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=-1000000 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario create_zero_size
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000005 0 16 0
+app_cycles 1000000
+fail_assert 453 UnCache.cpp CreateSize > 0
+unwind FMemCache::Create
+result err 1
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=-1000000 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario create_uninit
+op create 0000000000000005 100 16 0
+app_cycles 1000000
+fail_assert 452 UnCache.cpp Initialized
+unwind FMemCache::Create
+result err 1
+state initialized=0 mem_total=0 items_total=0 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=-1000000 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario create_evict
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 1000 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 1000 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 1008 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=1000 time=0 seg=0 extra=0 cost=16778216 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=2008 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op poke unlock 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=1000 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=1000 time=0 seg=0 extra=0 cost=16778216 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=2008 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op poke unlock 2
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=1000 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=1000 time=0 seg=0 extra=0 cost=1000 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=2008 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op create 0000000000000003 2000 16 0
+app_cycles 1000400
+app_cycles 1000500
+result ok 2016 3
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000003 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=1000 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=1000 time=0 seg=0 extra=0 cost=1000 next=3 prev=0 hash=-
+item 3 id=0000000000000003 off=2008 time=0 seg=0 extra=0 cost=16779216 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=4016 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+hash 3 3
+scenario create_segments
+op init 4096 32 0 1024
+malloc CacheMemory 4096 ok
+malloc CacheItems 1536 ok
+result ok
+state initialized=1 mem_total=4096 items_total=32 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=4 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=2 prev=0 hash=-
+item 2 id=0000000000000000 off=2048 time=0 seg=2 extra=0 cost=0 next=3 prev=1 hash=-
+item 3 id=0000000000000000 off=3072 time=0 seg=3 extra=0 cost=0 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=4096 time=0 seg=4 extra=0 cost=0 next=- prev=3 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+op create 0000000000000001 900 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=32 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=4 unused_items=6 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778116 next=5 prev=- hash=-
+item 5 id=0000000000000000 off=900 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=2 prev=5 hash=-
+item 2 id=0000000000000000 off=2048 time=0 seg=2 extra=0 cost=0 next=3 prev=1 hash=-
+item 3 id=0000000000000000 off=3072 time=0 seg=3 extra=0 cost=0 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=4096 time=0 seg=4 extra=0 cost=0 next=- prev=3 hash=-
+items walked=6
+unused 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 1 0
+op create 0000000000000002 900 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 1024 1
+state initialized=1 mem_total=4096 items_total=32 time=0 mru_id=0000000000000002 mru_item=1 cache_items=0 last_item=4 unused_items=7 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778116 next=5 prev=- hash=-
+item 5 id=0000000000000000 off=900 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000002 off=1024 time=0 seg=1 extra=0 cost=16778116 next=6 prev=5 hash=-
+item 6 id=0000000000000000 off=1924 time=0 seg=1 extra=0 cost=0 next=2 prev=1 hash=-
+item 2 id=0000000000000000 off=2048 time=0 seg=2 extra=0 cost=0 next=3 prev=6 hash=-
+item 3 id=0000000000000000 off=3072 time=0 seg=3 extra=0 cost=0 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=4096 time=0 seg=4 extra=0 cost=0 next=- prev=3 hash=-
+items walked=7
+unused 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 1 0
+hash 2 1
+op create 0000000000000003 1000 16 0
+app_cycles 1000400
+app_cycles 1000500
+result ok 2048 2
+state initialized=1 mem_total=4096 items_total=32 time=0 mru_id=0000000000000003 mru_item=2 cache_items=0 last_item=4 unused_items=8 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778116 next=5 prev=- hash=-
+item 5 id=0000000000000000 off=900 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000002 off=1024 time=0 seg=1 extra=0 cost=16778116 next=6 prev=5 hash=-
+item 6 id=0000000000000000 off=1924 time=0 seg=1 extra=0 cost=0 next=2 prev=1 hash=-
+item 2 id=0000000000000003 off=2048 time=0 seg=2 extra=0 cost=16778216 next=7 prev=6 hash=-
+item 7 id=0000000000000000 off=3048 time=0 seg=2 extra=0 cost=0 next=3 prev=2 hash=-
+item 3 id=0000000000000000 off=3072 time=0 seg=3 extra=0 cost=0 next=4 prev=7 hash=-
+item 4 id=0000000000000000 off=4096 time=0 seg=4 extra=0 cost=0 next=- prev=3 hash=-
+items walked=8
+unused 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 1 0
+hash 2 1
+hash 3 2
+op create 0000000000000004 1000 16 0
+app_cycles 1000600
+app_cycles 1000700
+result ok 3072 3
+state initialized=1 mem_total=4096 items_total=32 time=0 mru_id=0000000000000004 mru_item=3 cache_items=0 last_item=4 unused_items=9 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=4 create_cycles=264 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778116 next=5 prev=- hash=-
+item 5 id=0000000000000000 off=900 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000002 off=1024 time=0 seg=1 extra=0 cost=16778116 next=6 prev=5 hash=-
+item 6 id=0000000000000000 off=1924 time=0 seg=1 extra=0 cost=0 next=2 prev=1 hash=-
+item 2 id=0000000000000003 off=2048 time=0 seg=2 extra=0 cost=16778216 next=7 prev=6 hash=-
+item 7 id=0000000000000000 off=3048 time=0 seg=2 extra=0 cost=0 next=3 prev=2 hash=-
+item 3 id=0000000000000004 off=3072 time=0 seg=3 extra=0 cost=16778216 next=8 prev=7 hash=-
+item 8 id=0000000000000000 off=4072 time=0 seg=3 extra=0 cost=0 next=4 prev=3 hash=-
+item 4 id=0000000000000000 off=4096 time=0 seg=4 extra=0 cost=0 next=- prev=8 hash=-
+items walked=9
+unused 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 1 0
+hash 2 1
+hash 3 2
+hash 4 3
+op create 0000000000000005 1000 16 0
+app_cycles 1000800
+glog
+parse_command 1 DUMPCACHE DUMPCACHE
+logf glog ok 01 [900]: Locked
+logf glog ok 00 [124]: Empty
+logf glog ok 02 [900]: Locked
+logf glog ok 00 [124]: Empty
+logf glog ok 03 [1000]: Locked
+logf glog ok 00 [24]: Empty
+logf glog ok 04 [1000]: Locked
+logf glog ok 00 [24]: Empty
+errorf Create 00000000.00000005 failed: Size=1000 Pad=0 Align=16 NumLocked=4 BytesLocked=3800/4096
+unwind FMemCache::Create
+result err 1
+state initialized=1 mem_total=4096 items_total=32 time=0 mru_id=0000000000000004 mru_item=3 cache_items=0 last_item=4 unused_items=9 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=5 create_cycles=-1000536 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778116 next=5 prev=- hash=-
+item 5 id=0000000000000000 off=900 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000002 off=1024 time=0 seg=1 extra=0 cost=16778116 next=6 prev=5 hash=-
+item 6 id=0000000000000000 off=1924 time=0 seg=1 extra=0 cost=0 next=2 prev=1 hash=-
+item 2 id=0000000000000003 off=2048 time=0 seg=2 extra=0 cost=16778216 next=7 prev=6 hash=-
+item 7 id=0000000000000000 off=3048 time=0 seg=2 extra=0 cost=0 next=3 prev=2 hash=-
+item 3 id=0000000000000004 off=3072 time=0 seg=3 extra=0 cost=16778216 next=8 prev=7 hash=-
+item 8 id=0000000000000000 off=4072 time=0 seg=3 extra=0 cost=0 next=4 prev=3 hash=-
+item 4 id=0000000000000000 off=4096 time=0 seg=4 extra=0 cost=0 next=- prev=8 hash=-
+items walked=9
+unused 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 1 0
+hash 2 1
+hash 3 2
+hash 4 3
+scenario create_many
+op init 1024 32 0 0
+malloc CacheMemory 1024 ok
+malloc CacheItems 1536 ok
+result ok
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+op create 0000000000000101 90 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000101 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=90 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+op create 0000000000000102 90 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 96 2
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000102 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=186 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+op create 0000000000000103 90 16 0
+app_cycles 1000400
+app_cycles 1000500
+result ok 192 3
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000103 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=282 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+op create 0000000000000104 90 16 0
+app_cycles 1000600
+app_cycles 1000700
+result ok 288 4
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000104 mru_item=4 cache_items=0 last_item=1 unused_items=6 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=4 create_cycles=264 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000000 off=378 time=0 seg=0 extra=0 cost=0 next=1 prev=4 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=5 hash=-
+items walked=6
+unused 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+op create 0000000000000105 90 16 0
+app_cycles 1000800
+app_cycles 1000900
+result ok 384 5
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000105 mru_item=5 cache_items=0 last_item=1 unused_items=7 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=5 create_cycles=330 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000105 off=378 time=0 seg=0 extra=0 cost=16777306 next=6 prev=4 hash=-
+item 6 id=0000000000000000 off=474 time=0 seg=0 extra=0 cost=0 next=1 prev=5 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=6 hash=-
+items walked=7
+unused 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+hash 261 5
+op create 0000000000000106 90 16 0
+app_cycles 1001000
+app_cycles 1001100
+result ok 480 6
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000106 mru_item=6 cache_items=0 last_item=1 unused_items=8 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=6 create_cycles=396 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000105 off=378 time=0 seg=0 extra=0 cost=16777306 next=6 prev=4 hash=-
+item 6 id=0000000000000106 off=474 time=0 seg=0 extra=0 cost=16777306 next=7 prev=5 hash=-
+item 7 id=0000000000000000 off=570 time=0 seg=0 extra=0 cost=0 next=1 prev=6 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=7 hash=-
+items walked=8
+unused 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+hash 261 5
+hash 262 6
+op create 0000000000000107 90 16 0
+app_cycles 1001200
+app_cycles 1001300
+result ok 576 7
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000107 mru_item=7 cache_items=0 last_item=1 unused_items=9 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=7 create_cycles=462 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000105 off=378 time=0 seg=0 extra=0 cost=16777306 next=6 prev=4 hash=-
+item 6 id=0000000000000106 off=474 time=0 seg=0 extra=0 cost=16777306 next=7 prev=5 hash=-
+item 7 id=0000000000000107 off=570 time=0 seg=0 extra=0 cost=16777306 next=8 prev=6 hash=-
+item 8 id=0000000000000000 off=666 time=0 seg=0 extra=0 cost=0 next=1 prev=7 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=8 hash=-
+items walked=9
+unused 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+hash 261 5
+hash 262 6
+hash 263 7
+op create 0000000000000108 90 16 0
+app_cycles 1001400
+app_cycles 1001500
+result ok 672 8
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000108 mru_item=8 cache_items=0 last_item=1 unused_items=10 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=8 create_cycles=528 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000105 off=378 time=0 seg=0 extra=0 cost=16777306 next=6 prev=4 hash=-
+item 6 id=0000000000000106 off=474 time=0 seg=0 extra=0 cost=16777306 next=7 prev=5 hash=-
+item 7 id=0000000000000107 off=570 time=0 seg=0 extra=0 cost=16777306 next=8 prev=6 hash=-
+item 8 id=0000000000000108 off=666 time=0 seg=0 extra=0 cost=16777306 next=9 prev=7 hash=-
+item 9 id=0000000000000000 off=762 time=0 seg=0 extra=0 cost=0 next=1 prev=8 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=9 hash=-
+items walked=10
+unused 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+hash 261 5
+hash 262 6
+hash 263 7
+hash 264 8
+op create 0000000000000109 90 16 0
+app_cycles 1001600
+app_cycles 1001700
+result ok 768 9
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=0000000000000109 mru_item=9 cache_items=0 last_item=1 unused_items=11 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=9 create_cycles=594 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000105 off=378 time=0 seg=0 extra=0 cost=16777306 next=6 prev=4 hash=-
+item 6 id=0000000000000106 off=474 time=0 seg=0 extra=0 cost=16777306 next=7 prev=5 hash=-
+item 7 id=0000000000000107 off=570 time=0 seg=0 extra=0 cost=16777306 next=8 prev=6 hash=-
+item 8 id=0000000000000108 off=666 time=0 seg=0 extra=0 cost=16777306 next=9 prev=7 hash=-
+item 9 id=0000000000000109 off=762 time=0 seg=0 extra=0 cost=16777306 next=10 prev=8 hash=-
+item 10 id=0000000000000000 off=858 time=0 seg=0 extra=0 cost=0 next=1 prev=9 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=10 hash=-
+items walked=11
+unused 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+hash 261 5
+hash 262 6
+hash 263 7
+hash 264 8
+hash 265 9
+op create 000000000000010a 90 16 0
+app_cycles 1001800
+app_cycles 1001900
+result ok 864 10
+state initialized=1 mem_total=1024 items_total=32 time=0 mru_id=000000000000010a mru_item=10 cache_items=0 last_item=1 unused_items=12 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=10 create_cycles=660 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000101 off=0 time=0 seg=0 extra=0 cost=16777306 next=2 prev=- hash=-
+item 2 id=0000000000000102 off=90 time=0 seg=0 extra=0 cost=16777306 next=3 prev=0 hash=-
+item 3 id=0000000000000103 off=186 time=0 seg=0 extra=0 cost=16777306 next=4 prev=2 hash=-
+item 4 id=0000000000000104 off=282 time=0 seg=0 extra=0 cost=16777306 next=5 prev=3 hash=-
+item 5 id=0000000000000105 off=378 time=0 seg=0 extra=0 cost=16777306 next=6 prev=4 hash=-
+item 6 id=0000000000000106 off=474 time=0 seg=0 extra=0 cost=16777306 next=7 prev=5 hash=-
+item 7 id=0000000000000107 off=570 time=0 seg=0 extra=0 cost=16777306 next=8 prev=6 hash=-
+item 8 id=0000000000000108 off=666 time=0 seg=0 extra=0 cost=16777306 next=9 prev=7 hash=-
+item 9 id=0000000000000109 off=762 time=0 seg=0 extra=0 cost=16777306 next=10 prev=8 hash=-
+item 10 id=000000000000010a off=858 time=0 seg=0 extra=0 cost=16777306 next=11 prev=9 hash=-
+item 11 id=0000000000000000 off=954 time=0 seg=0 extra=0 cost=0 next=1 prev=10 hash=-
+item 1 id=0000000000000000 off=1024 time=0 seg=1 extra=0 cost=0 next=- prev=11 hash=-
+items walked=12
+unused 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+hash 257 0
+hash 258 2
+hash 259 3
+hash 260 4
+hash 261 5
+hash 262 6
+hash 263 7
+hash 264 8
+hash 265 9
+hash 266 10
+scenario create_after_exit
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op exit 0
+free CacheItems
+result ok
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+fail_assert 452 UnCache.cpp Initialized
+unwind FMemCache::Create
+result err 1
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=-1000000 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario flush_uninit
+op flush 0000000000000001 ffffffff 0
+result ok
+state initialized=0 mem_total=0 items_total=0 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario flush_by_id
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 100 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op poke unlock 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op flush 0000000000000001 ffffffff 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 2 2
+op flush 0000000000000063 ffffffff 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 2 2
+scenario flush_locked
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op flush 0000000000000001 ffffffff 0
+errorf Flushed locked cache object 00000000.00000001
+unwind FMemCache::FlushItem
+unwind FMemCache::Flush
+result err 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario flush_ignore_locked
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op flush 0000000000000001 ffffffff 1
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario flush_wildcard
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 100 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op create 0000000000000003 100 16 0
+app_cycles 1000400
+app_cycles 1000500
+result ok 224 3
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000003 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000003 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+hash 3 3
+op poke unlock 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000003 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000003 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+hash 3 3
+op poke unlock 2
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000003 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=100 next=3 prev=0 hash=-
+item 3 id=0000000000000003 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+hash 3 3
+op poke unlock 4
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000003 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=100 next=3 prev=0 hash=-
+item 3 id=0000000000000003 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=-16777216 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+hash 3 3
+op flush 0000000000000000 00000000 0
+errorf Flushed locked cache object 00000000.00000003
+unwind FMemCache::FlushItem
+unwind FMemCache::Flush
+result err 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=3 prev=- hash=-
+item 3 id=0000000000000003 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=0 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=-16777216 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=4
+unused 2 5 6 7 8 9 10 11 12 13 14 15
+hash 3 3
+scenario flush_wildcard_locked
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 100 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op flush 0000000000000000 00000000 0
+errorf Flushed locked cache object 00000000.00000001
+unwind FMemCache::FlushItem
+unwind FMemCache::Flush
+result err 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+scenario flush_partial_mask
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000010001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000010001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000010001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 17 0
+op create 0000000000020001 100 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000020001 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000010001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000020001 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 17 0
+hash 33 2
+op create 0000000000020002 100 16 0
+app_cycles 1000400
+app_cycles 1000500
+result ok 224 3
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000020002 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000010001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000020001 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000020002 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 17 0
+hash 33 2
+hash 34 3
+op poke unlock 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000020002 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000010001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000020001 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000020002 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 17 0
+hash 33 2
+hash 34 3
+op poke unlock 2
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000020002 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000010001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000020001 off=100 time=0 seg=0 extra=0 cost=100 next=3 prev=0 hash=-
+item 3 id=0000000000020002 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=0 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 17 0
+hash 33 2
+hash 34 3
+op poke unlock 4
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000020002 mru_item=3 cache_items=0 last_item=1 unused_items=5 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000010001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000020001 off=100 time=0 seg=0 extra=0 cost=100 next=3 prev=0 hash=-
+item 3 id=0000000000020002 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=2 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=-16777216 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=5
+unused 5 6 7 8 9 10 11 12 13 14 15
+hash 17 0
+hash 33 2
+hash 34 3
+op flush 0000000000000001 0000ffff 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=3 create_cycles=198 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=3 prev=- hash=-
+item 3 id=0000000000020002 off=212 time=0 seg=0 extra=0 cost=16777316 next=4 prev=0 hash=-
+item 4 id=0000000000000000 off=324 time=0 seg=0 extra=0 cost=-16777216 next=1 prev=3 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=4 hash=-
+items walked=4
+unused 2 5 6 7 8 9 10 11 12 13 14 15
+hash 34 3
+scenario flush_unhash_missing
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 100 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op poke unhash 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 2 2
+op poke unlock 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 2 2
+op flush 0000000000000000 00000000 0
+errorf Unhashed item
+unwind FMemCache::Flush
+result err 1
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=100 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 2 2
+scenario check_clean
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op check
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario check_data_mismatch
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op poke data 0 1
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=1 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op check
+fail_assert 219 UnCache.cpp Item->Data == ExpectedPointer
+unwind 1
+unwind FMemCache::CheckState
+result err 6
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=1 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario check_hash_removed
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op poke unhash 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+op check
+fail_assert 252 UnCache.cpp HashedCount!=0
+unwind 1
+unwind FMemCache::CheckState
+result err 6
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario check_ghash_mismatch
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op poke id 0 0000000000000002
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000002 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op check
+fail_assert 252 UnCache.cpp HashedCount!=0
+unwind 1
+unwind FMemCache::CheckState
+result err 6
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000002 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario check_items_total
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op poke items_total 99
+result ok
+state initialized=1 mem_total=4096 items_total=99 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op check
+fail_assert 266 UnCache.cpp ItemCount+1==ItemsTotal
+unwind FMemCache::CheckState
+result err 5
+state initialized=1 mem_total=4096 items_total=99 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario check_initialized2
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op poke initialized 2
+result ok
+state initialized=2 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op check
+fail_assert 205 UnCache.cpp Initialized == 1
+unwind FMemCache::CheckState
+result err 5
+state initialized=2 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario check_cache_items_null
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op poke cache_items_null
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+items walked=0
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op check
+fail_assert 208 UnCache.cpp CacheItems != NULL
+unwind FMemCache::CheckState
+result err 5
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+items walked=0
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario check_hash_bucket_mismatch
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op poke hash_push 5 1
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 5 1
+op check
+fail_assert 278 UnCache.cpp GHash(Item->Id) == i
+unwind 3
+unwind FMemCache::CheckState
+result err 7
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 5 1
+scenario check_hash_duplicate_id
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 100 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op poke dup_id 1 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000001 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=0
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 1 0
+hash 2 2
+op check
+fail_assert 282 UnCache.cpp Other->Id != Item->Id
+unwind 3
+unwind FMemCache::CheckState
+result err 7
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777316 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=212 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000001 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=0
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 1 0
+hash 2 2
+scenario check_hash_count_mismatch
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op poke hash_push 0 1
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 0 1
+hash 1 0
+op check
+fail_assert 285 UnCache.cpp HashCount == UsedItemCount
+unwind 3
+unwind FMemCache::CheckState
+result err 7
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 0 1
+hash 1 0
+scenario tick_ageing
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 1000 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000200
+app_cycles 1000300
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=1 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=66 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000400
+app_cycles 1000500
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=2 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=132 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16253897 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000600
+app_cycles 1000700
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=3 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=198 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=15745963 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op poke unlock 0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=3 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=198 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=-1031253 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000800
+app_cycles 1000900
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=4 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=264 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=-999026 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1001000
+app_cycles 1001100
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=5 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=330 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=-967806 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario status_after_tick
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 1000 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000200
+app_cycles 1000300
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=1 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=66 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000400
+app_cycles 1000500
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=2 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=132 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16253897 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op status
+seconds_per_cycle 2fe5109f
+status_format 0 0000000000000000 1 3efcd5f9a0000000 0 0 0 3f0cd5f9a0000000 Gets=0000 (00.0) Crts=001 (00.0) Fresh=000K Stale=000K Items=000 Tick=00.0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=2 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16253897 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario status_grouping
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 1000 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000200
+app_cycles 1000300
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=1 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=66 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16778216 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000400
+app_cycles 1000500
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=2 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=132 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16253897 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000600
+app_cycles 1000700
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=3 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=198 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=15745963 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1000800
+app_cycles 1000900
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=4 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=264 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=15253902 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1001000
+app_cycles 1001100
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=5 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=330 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=14777218 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1001200
+app_cycles 1001300
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=6 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=396 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=14315430 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1001400
+app_cycles 1001500
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=7 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=462 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=13868073 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1001600
+app_cycles 1001700
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=8 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=528 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=13434696 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1001800
+app_cycles 1001900
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=9 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=594 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=13014862 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1002000
+app_cycles 1002100
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=10 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=660 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=12608148 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1002200
+app_cycles 1002300
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=11 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=726 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=12214144 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1002400
+app_cycles 1002500
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=12 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=792 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=11832452 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1002600
+app_cycles 1002700
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=13 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=858 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=11462688 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1002800
+app_cycles 1002900
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=14 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=924 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=11104479 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op tick
+app_cycles 1003000
+app_cycles 1003100
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=15 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=990 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=10757465 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op status
+seconds_per_cycle 2fe5109f
+status_format 0 0000000000000000 1 3efcd5f9a0000000 0 0 0 3f3b089a20000000 Gets=0000 (00.0) Crts=001 (00.0) Fresh=000K Stale=000K Items=000 Tick=00.0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=15 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=10757465 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=1000 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario tick_uninit
+op tick
+app_cycles 1000000
+app_cycles 1000100
+result ok
+state initialized=0 mem_total=0 items_total=0 time=1 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=66 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario exec_dumpcache_user
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op create 0000000000000002 200 16 0
+app_cycles 1000200
+app_cycles 1000300
+result ok 112 2
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000002 mru_item=2 cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777416 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=312 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op tick
+app_cycles 1000400
+app_cycles 1000500
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=1 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=66 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777416 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=312 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+op exec DUMPCACHE user
+parse_command 1 DUMPCACHE DUMPCACHE
+logf user ok 01 [100]: Locked
+logf user ok 02 [212]: Locked
+logf user ok 00 [3784]: Empty
+result ok 1
+state initialized=1 mem_total=4096 items_total=16 time=1 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=4 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=2 create_cycles=132 tick_cycles=66 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000002 off=100 time=0 seg=0 extra=0 cost=16777416 next=3 prev=0 hash=-
+item 3 id=0000000000000000 off=312 time=0 seg=0 extra=0 cost=0 next=1 prev=2 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=3 hash=-
+items walked=4
+unused 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+hash 2 2
+scenario exec_unknown
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op exec FOO user
+parse_command 0 DUMPCACHE FOO
+result ok 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op exec DUMPCACHEX user
+parse_command 0 DUMPCACHE DUMPCACHEX
+result ok 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+scenario exec_logf_fail
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op exec DUMPCACHE user
+parse_command 1 DUMPCACHE DUMPCACHE
+logf user fail 01 [100]: Locked
+unwind FMemCache::Exec
+result err 1
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario status_figures
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op status
+seconds_per_cycle 2fe5109f
+status_format 0 0000000000000000 1 3efcd5f9a0000000 0 0 0 0000000000000000 Gets=0000 (00.0) Crts=001 (00.0) Fresh=000K Stale=000K Items=000 Tick=00.0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op status
+seconds_per_cycle 2fe5109f
+status_format 0 0000000000000000 0 0000000000000000 0 0 0 0000000000000000 Gets=0000 (00.0) Crts=000 (00.0) Fresh=000K Stale=000K Items=000 Tick=00.0
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+scenario status_uninit
+op status
+seconds_per_cycle 2fe5109f
+status_format 0 0000000000000000 0 0000000000000000 0 0 0 0000000000000000 Gets=0000 (00.0) Crts=000 (00.0) Fresh=000K Stale=000K Items=000 Tick=00.0
+result ok
+state initialized=0 mem_total=0 items_total=0 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario exit_no_free
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op exit 0
+free CacheItems
+result ok
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario exit_free
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op create 0000000000000001 100 16 0
+app_cycles 1000000
+app_cycles 1000100
+result ok 0 0
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000001 off=0 time=0 seg=0 extra=0 cost=16777316 next=2 prev=- hash=-
+item 2 id=0000000000000000 off=100 time=0 seg=0 extra=0 cost=0 next=1 prev=0 hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=2 hash=-
+items walked=3
+unused 3 4 5 6 7 8 9 10 11 12 13 14 15
+hash 1 0
+op exit 1
+free CacheItems
+free CacheMemory
+result ok
+state initialized=0 mem_total=4096 items_total=16 time=0 mru_id=0000000000000001 mru_item=0 cache_items=0 last_item=1 unused_items=3 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=1 create_cycles=66 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario exit_uninit
+op exit 1
+result ok
+state initialized=0 mem_total=0 items_total=0 time=0 mru_id=0000000000000000 mru_item=- cache_items=- last_item=- unused_items=- cache_memory=- item_memory=-
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+scenario exit_after_corruption
+op init 4096 16 0 0
+malloc CacheMemory 4096 ok
+malloc CacheItems 768 ok
+result ok
+state initialized=1 mem_total=4096 items_total=16 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op poke items_total 99
+result ok
+state initialized=1 mem_total=4096 items_total=99 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+op exit 1
+fail_assert 266 UnCache.cpp ItemCount+1==ItemsTotal
+unwind FMemCache::CheckState
+unwind FMemCache::Exit
+result err 5
+state initialized=1 mem_total=4096 items_total=99 time=0 mru_id=0000000000000000 mru_item=- cache_items=0 last_item=1 unused_items=2 cache_memory=set item_memory=set
+state counters num_gets=0 get_cycles=0 num_creates=0 create_cycles=0 tick_cycles=0 items_fresh=0 items_stale=0 item_gaps=0 mem_fresh=0 mem_stale=0
+item 0 id=0000000000000000 off=0 time=0 seg=0 extra=0 cost=0 next=1 prev=- hash=-
+item 1 id=0000000000000000 off=4096 time=0 seg=1 extra=0 cost=0 next=- prev=0 hash=-
+items walked=2
+unused 2 3 4 5 6 7 8 9 10 11 12 13 14 15

@@ -19,6 +19,31 @@ use crate::mesh::{
 };
 use crate::prim;
 
+/// LOD construction differs from ordinary meshes: defaults precede counts,
+/// and there is no Connects allocation.
+pub fn construct(
+    polys: i32,
+    verts: i32,
+    frames: i32,
+    leaf: &mut impl FnMut(mesh::MeshLifecycleAction, i32, f32) -> mesh::LifecycleResult,
+) -> Result<(), ()> {
+    use mesh::MeshLifecycleAction::*;
+    leaf(LodMinVerts, 10, 0.0)?;
+    leaf(LodStrength, 0, 1.0)?;
+    leaf(LodMorph, 0, 0.30)?;
+    leaf(LodZDisplace, 0, 0.0)?;
+    leaf(LodHysteresis, 0, 0.0)?;
+    mesh::construct(polys, verts, frames, false, leaf)
+}
+
+/// Only the vertex lazy array is used by the LOD frame path.
+pub fn prepare_frame(
+    leaf: &mut impl FnMut(mesh::MeshLifecycleAction, i32, f32) -> mesh::LifecycleResult,
+) -> Result<(), ()> {
+    leaf(mesh::MeshLifecycleAction::LoadVerts, 0, 0.0)?;
+    Ok(())
+}
+
 /// `sizeof(CFLodHeader)`.
 const LOD_HEADER_LEN: usize = 24;
 /// `Align(sizeof(CFLodHeader), 16) - sizeof(CFLodHeader)`.

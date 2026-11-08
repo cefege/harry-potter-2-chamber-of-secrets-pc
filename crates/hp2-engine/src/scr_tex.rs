@@ -148,9 +148,63 @@ pub trait ScrTexHost {
     /// `Stack.Logf(TEXT(...))` for the given log code.
     fn log(&mut self, code: u32);
 }
+/// Small host contract for the five VM execs. It excludes lifecycle-only
+/// PostLoad/Tick services so VM adapters cannot accidentally fake them.
+pub trait ScrTexNativeHost {
+    fn font_chars_per_page(&self, font: ObjPtr) -> i32;
+    fn font_remap_char(&self, font: ObjPtr, ch: i32) -> i32;
+    fn font_page_count(&self, font: ObjPtr) -> i32;
+    fn font_page_texture(&self, font: ObjPtr, page: i32) -> ObjPtr;
+    fn font_page_char_count(&self, font: ObjPtr, page: i32) -> i32;
+    fn font_page_char(&self, font: ObjPtr, page: i32, index: i32) -> Hp2FontChar;
+    fn text_char(&self, text: ObjPtr, index: i32) -> i32;
+    fn tex_usize(&self, tex: ObjPtr) -> i32;
+    fn tex_vsize(&self, tex: ObjPtr) -> i32;
+    fn tex_get_local(&self, tex: ObjPtr) -> ObjPtr;
+    fn tex_lock_local(&mut self, tex: ObjPtr);
+    fn tex_lock_now(&mut self, tex: ObjPtr);
+    fn tex_unlock(&mut self, tex: ObjPtr);
+    fn info_mip0(&self) -> ObjPtr;
+    fn self_usize(&self) -> i32;
+    fn self_vsize(&self) -> i32;
+    fn self_mip0(&self) -> ObjPtr;
+    fn tex_palette_colors(&self, tex: ObjPtr, out: &mut [FColor; NUM_PAL_COLORS]);
+    fn self_palette_colors(&self, out: &mut [FColor; NUM_PAL_COLORS]);
+    fn self_palette_best_match(&self, color: u32) -> u8;
+    fn palette_map_lookup(&self, map: ObjPtr, index: u8) -> u8;
+    fn palette_cache(&mut self) -> &mut PaletteCache;
+    fn log(&mut self, code: u32);
+}
+
+impl<T: ScrTexHost> ScrTexNativeHost for T {
+    fn font_chars_per_page(&self, f: ObjPtr) -> i32 { ScrTexHost::font_chars_per_page(self, f) }
+    fn font_remap_char(&self, f: ObjPtr, c: i32) -> i32 { ScrTexHost::font_remap_char(self, f, c) }
+    fn font_page_count(&self, f: ObjPtr) -> i32 { ScrTexHost::font_page_count(self, f) }
+    fn font_page_texture(&self, f: ObjPtr, p: i32) -> ObjPtr { ScrTexHost::font_page_texture(self, f, p) }
+    fn font_page_char_count(&self, f: ObjPtr, p: i32) -> i32 { ScrTexHost::font_page_char_count(self, f, p) }
+    fn font_page_char(&self, f: ObjPtr, p: i32, i: i32) -> Hp2FontChar { ScrTexHost::font_page_char(self, f, p, i) }
+    fn text_char(&self, t: ObjPtr, i: i32) -> i32 { ScrTexHost::text_char(self, t, i) }
+    fn tex_usize(&self, t: ObjPtr) -> i32 { ScrTexHost::tex_usize(self, t) }
+    fn tex_vsize(&self, t: ObjPtr) -> i32 { ScrTexHost::tex_vsize(self, t) }
+    fn tex_get_local(&self, t: ObjPtr) -> ObjPtr { ScrTexHost::tex_get_local(self, t) }
+    fn tex_lock_local(&mut self, t: ObjPtr) { ScrTexHost::tex_lock_local(self, t) }
+    fn tex_lock_now(&mut self, t: ObjPtr) { ScrTexHost::tex_lock_now(self, t) }
+    fn tex_unlock(&mut self, t: ObjPtr) { ScrTexHost::tex_unlock(self, t) }
+    fn info_mip0(&self) -> ObjPtr { ScrTexHost::info_mip0(self) }
+    fn self_usize(&self) -> i32 { ScrTexHost::self_usize(self) }
+    fn self_vsize(&self) -> i32 { ScrTexHost::self_vsize(self) }
+    fn self_mip0(&self) -> ObjPtr { ScrTexHost::self_mip0(self) }
+    fn tex_palette_colors(&self, t: ObjPtr, o: &mut [FColor; NUM_PAL_COLORS]) { ScrTexHost::tex_palette_colors(self, t, o) }
+    fn self_palette_colors(&self, o: &mut [FColor; NUM_PAL_COLORS]) { ScrTexHost::self_palette_colors(self, o) }
+    fn self_palette_best_match(&self, c: u32) -> u8 { ScrTexHost::self_palette_best_match(self, c) }
+    fn palette_map_lookup(&self, m: ObjPtr, i: u8) -> u8 { ScrTexHost::palette_map_lookup(self, m, i) }
+    fn palette_cache(&mut self) -> &mut PaletteCache { ScrTexHost::palette_cache(self) }
+    fn log(&mut self, c: u32) { ScrTexHost::log(self, c) }
+}
 
 /// C++ `Hp2ScrTexServices` (defined in `Src/Hp2ScrTexServices.cpp`). Field order and
 /// types must match the C++ struct. Every call takes engine pointers only.
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct Hp2ScrTexServices {
     pub font_chars_per_page: unsafe extern "C" fn(font: *mut c_void) -> i32,
@@ -188,6 +242,18 @@ pub struct Hp2ScrTexServices {
     pub self_notify_render: unsafe extern "C" fn(obj: *mut c_void),
     pub palette_map_lookup: unsafe extern "C" fn(map: *mut c_void, index: u8) -> u8,
     pub log: unsafe extern "C" fn(stack: *mut c_void, code: u32),
+    /// `UScriptedTexture::PaletteMap`: the Rust-owned `PaletteCache` from
+    /// `palette_cache_new`. For exec natives that build their own `Hp2ScrTexCtx`
+    /// directly (no live C++ caller supplies one), not part of `ScrTexHost`.
+    pub self_palette_map: unsafe extern "C" fn(obj: *mut c_void) -> *mut c_void,
+    /// Scopes an `FTextureInfo` on the C++ stack for `run`, matching the
+    /// `FTextureInfo Info;` stack local every exec thunk but `execTextSize`
+    /// declared (`UnScrTex.cpp`). `run` returns its own status (0 = no pending
+    /// exception).
+    pub info_scope: unsafe extern "C" fn(
+        context: *mut c_void,
+        run: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+    ) -> i32,
 }
 
 /// Context the C++ shell passes for each call: the services table, the owning
@@ -248,6 +314,21 @@ pub unsafe fn palette_cache_free(cache: *mut PaletteCache) {
         // SAFETY: caller contract.
         drop(unsafe { Box::from_raw(cache) });
     }
+}
+
+static mut SCR_TEX_SERVICES: Option<Hp2ScrTexServices> = None;
+
+/// # Safety
+/// `value` is the real, immutable `GHp2ScrTexServices` table; publication
+/// happens once, before any native dispatch, and invokes no callbacks.
+pub unsafe fn publish_services(value: Hp2ScrTexServices) {
+    unsafe { (&raw mut SCR_TEX_SERVICES).write(Some(value)) }
+}
+
+/// # Safety
+/// Call only after `publish_services` has run.
+pub unsafe fn published_services() -> Result<Hp2ScrTexServices, i32> {
+    unsafe { (&raw const SCR_TEX_SERVICES).read().ok_or(1) }
 }
 
 impl ScrTexHost for ServiceHost {
@@ -364,7 +445,7 @@ impl ScrTexHost for ServiceHost {
 
 /// Font glyph size lookup used by `GetCharSize`. Returns `(USize, VSize)`, or
 /// `(0, 0)` when the glyph is outside the font's pages.
-pub fn char_size<H: ScrTexHost>(h: &H, font: ObjPtr, in_ch: i32) -> (i32, i32) {
+pub fn char_size<H: ScrTexNativeHost>(h: &H, font: ObjPtr, in_ch: i32) -> (i32, i32) {
     let ch = h.font_remap_char(font, in_ch);
     let cpp = h.font_chars_per_page(font);
     let page = ch / cpp;
@@ -380,7 +461,7 @@ pub fn char_size<H: ScrTexHost>(h: &H, font: ObjPtr, in_ch: i32) -> (i32, i32) {
 /// `DrawString`: draws `text` at `(draw_x, draw_y)` one glyph at a time, locking
 /// each font page texture as it is entered. Returns the advanced `LineX`.
 /// `entry` selects the colored (`Some(palette index)`) or textured path.
-pub fn draw_string<H: ScrTexHost>(
+pub fn draw_string<H: ScrTexNativeHost>(
     h: &mut H,
     font: ObjPtr,
     draw_x: i32,
@@ -441,7 +522,7 @@ pub fn draw_string<H: ScrTexHost>(
 
 /// Palette map entry for `tex`, built on first use:
 /// `Palette->BestMatch(Tex->Palette->Colors(i), 0)` for every `i < 256`.
-fn palette_for<H: ScrTexHost>(h: &mut H, tex: ObjPtr) -> [u8; NUM_PAL_COLORS] {
+fn palette_for<H: ScrTexNativeHost>(h: &mut H, tex: ObjPtr) -> [u8; NUM_PAL_COLORS] {
     let key = tex.0 as usize;
     if let Some(entry) = h.palette_cache().get(&key) {
         return **entry;
@@ -464,7 +545,7 @@ fn palette_for<H: ScrTexHost>(h: &mut H, tex: ObjPtr) -> [u8; NUM_PAL_COLORS] {
 /// `use_color && masked` writes `color_index` where the source is nonzero.
 /// `!use_color` maps every source byte (or every nonzero one when `masked`)
 /// through the palette map.
-pub fn draw_tile<H: ScrTexHost>(
+pub fn draw_tile<H: ScrTexNativeHost>(
     h: &mut H,
     rect: TileRect,
     tex: ObjPtr,
@@ -618,7 +699,7 @@ fn read_src(src: *const u8, idx: isize) -> u8 {
 
 /// `execDrawTile` body: locks `Tex->Get(LocalTime)`, draws from the second
 /// `Get` result (as the C++ does), then unlocks the first.
-pub fn exec_draw_tile<H: ScrTexHost>(h: &mut H, rect: TileRect, tex: ObjPtr, masked: bool) {
+pub fn exec_draw_tile<H: ScrTexNativeHost>(h: &mut H, rect: TileRect, tex: ObjPtr, masked: bool) {
     if tex.is_null() {
         h.log(LOG_DRAW_TILE_MISSING_TEXTURE);
         return;
@@ -631,7 +712,7 @@ pub fn exec_draw_tile<H: ScrTexHost>(h: &mut H, rect: TileRect, tex: ObjPtr, mas
 }
 
 /// `execDrawText` body (`DrawString` with the textured path).
-pub fn exec_draw_text<H: ScrTexHost>(h: &mut H, x: f32, y: f32, text: ObjPtr, font: ObjPtr) {
+pub fn exec_draw_text<H: ScrTexNativeHost>(h: &mut H, x: f32, y: f32, text: ObjPtr, font: ObjPtr) {
     if font.is_null() {
         h.log(LOG_DRAW_TEXT_NO_FONT);
         return;
@@ -640,7 +721,7 @@ pub fn exec_draw_text<H: ScrTexHost>(h: &mut H, x: f32, y: f32, text: ObjPtr, fo
 }
 
 /// `execDrawColoredText` body. `color` is the `FColor` packed as `int4`.
-pub fn exec_draw_colored_text<H: ScrTexHost>(
+pub fn exec_draw_colored_text<H: ScrTexNativeHost>(
     h: &mut H,
     x: f32,
     y: f32,
@@ -658,7 +739,7 @@ pub fn exec_draw_colored_text<H: ScrTexHost>(
 
 /// `execReplaceTexture` body: copies `tex`'s mip 0 into the owning texture when
 /// the dimensions match.
-pub fn exec_replace_texture<H: ScrTexHost>(h: &mut H, tex: ObjPtr) {
+pub fn exec_replace_texture<H: ScrTexNativeHost>(h: &mut H, tex: ObjPtr) {
     if tex.is_null() {
         h.log(LOG_REPLACE_MISSING_TEXTURE);
         return;
@@ -681,7 +762,7 @@ pub fn exec_replace_texture<H: ScrTexHost>(h: &mut H, tex: ObjPtr) {
 
 /// `execTextSize` body. Returns `None` when the font is missing (the C++ logs
 /// and leaves `XL`/`YL` untouched).
-pub fn exec_text_size<H: ScrTexHost>(h: &mut H, text: ObjPtr, font: ObjPtr) -> Option<(f32, f32)> {
+pub fn exec_text_size<H: ScrTexNativeHost>(h: &mut H, text: ObjPtr, font: ObjPtr) -> Option<(f32, f32)> {
     if font.is_null() {
         h.log(LOG_TEXT_SIZE_NO_FONT);
         return None;

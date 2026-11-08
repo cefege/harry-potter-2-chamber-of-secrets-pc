@@ -83,7 +83,7 @@ pub(crate) unsafe fn static_load_object(
     name: &[u32],
     flags: u32,
 ) -> RuntimeResult<*mut UObject> {
-    unsafe { static_load_object_with_sandbox(access,class,outer,name,flags,ptr::null_mut()) }
+    unsafe { static_load_object_with_sandbox(access,class,outer,name,flags,None,ptr::null_mut()) }
 }
 
 unsafe fn static_load_object_with_sandbox(
@@ -92,13 +92,40 @@ unsafe fn static_load_object_with_sandbox(
     outer: *mut UObject,
     name: &[u32],
     flags: u32,
+    filename: Option<&[u32]>,
     sandbox: *mut UPackageMap,
 ) -> RuntimeResult<*mut UObject> {
     const LOAD_DISALLOW_FILES: u32 = 0x0040;
-    let text = name.split(|unit| *unit == 0).next().unwrap_or_default();
+    let Some(resolved) = crate::core_reflection::resolve_configured_load_name(access, name)? else {
+        return missing_load(flags, name, "Configured object name was not found");
+    };
+    let text = resolved.as_ref();
     if text.is_empty() { return Err(RuntimeError::new("Object name is empty")); }
     let separator = text.iter().position(|unit| *unit == u32::from('.'));
-    let (mut target_outer, linker) = if let Some(separator) = separator {
+    let (mut target_outer, linker) = if let Some(filename) = filename.filter(|_| flags & LOAD_DISALLOW_FILES == 0) {
+        let mut root = outer;
+        if let Some(dot) = separator {
+            let package_name = &text[..dot];
+            let index = access.intern(package_name, FindName::Add)?;
+            root = find_package_root(access, index)?;
+            if root.is_null() {
+                let package_flags = hp2_abi::engine::generated::CORE_LINKER_CONSTANTS.public_flag;
+                root = unsafe {
+                    access.construct_object(access.native_class("Core.Package")?, ptr::null_mut(), index, package_flags, ptr::null_mut())?
+                };
+            }
+        } else {
+            while !root.is_null() {
+                let parent = unsafe { (*root).outer.cast::<UObject>() };
+                if parent.is_null() { break; }
+                root = parent;
+            }
+        }
+        let path = crate::native_path::path_from_units(filename)?;
+        let linker = unsafe { core_loader::get_package_linker(access, &path, flags, root, None)? };
+        let package = unsafe { (*linker.cast::<OwnedLinkerLoad>()).raw.base.linker_root.cast::<UObject>() };
+        (if separator.is_none() && !outer.is_null() { outer } else { package }, linker)
+    } else if let Some(separator) = separator {
         let package_name = &text[..separator];
         if package_name.is_empty() { return Err(RuntimeError::new("Package name is empty")); }
         let package_name_index = access.intern(package_name, FindName::Add)?;
@@ -109,15 +136,20 @@ unsafe fn static_load_object_with_sandbox(
             } else if flags & LOAD_DISALLOW_FILES != 0 {
                 (root, ptr::null_mut())
             } else {
-                let Some(linker) = load_package_file(access, package_name, flags)? else {
-                    return missing_load(flags, text, "Package was not found");
+                let linker = match get_package_linker_file(access, package_name, flags)? {
+                    Some(linker) => linker,
+                    // GetPackageLinker's LOAD_AllowDll path returns no linker
+                    // when the module is loaded but its package file is absent.
+                    // Never take this branch for an existing or broken file.
+                    None if access.has_loaded_native_module(root) => ptr::null_mut(),
+                    None => return missing_load(flags, text, "Package was not found"),
                 };
                 (root, linker)
             }
         } else if flags & LOAD_DISALLOW_FILES != 0 {
             return missing_load(flags, text, "Package was not found");
         } else {
-            let Some(linker) = load_package_file(access, package_name, flags)? else {
+            let Some(linker) = get_package_linker_file(access, package_name, flags)? else {
                 return missing_load(flags, text, "Package was not found");
             };
             let root = unsafe { (*linker.cast::<OwnedLinkerLoad>()).raw.base.linker_root.cast::<UObject>() };
@@ -147,7 +179,23 @@ unsafe fn static_load_object_with_sandbox(
     let mut segment = segments.next().ok_or_else(|| RuntimeError::new("Object name is empty"))?;
     while segments.peek().is_some() {
         let name_index = access.intern(segment, FindName::Add)?;
-        let found = unsafe { access.find_object(ptr::null_mut(), target_outer, name_index, true) };
+        let mut found = unsafe { access.find_object(ptr::null_mut(), target_outer, name_index, true) };
+        if found.is_null() && !linker.is_null() {
+            let exports = unsafe { (*linker.cast::<OwnedLinkerLoad>()).raw.base.export_map };
+            if exports.num > 0 && exports.data.is_null() {
+                return Err(RuntimeError::new("Export table has no backing storage"));
+            }
+            let outer_name = i32::from_ne_bytes(unsafe { (*target_outer).name });
+            for row in 0..exports.num.max(0) as usize {
+                let export = unsafe { ptr::read_unaligned(exports.data.cast::<FObjectExport>().add(row)) };
+                if i32::from_ne_bytes(export.object_name) == name_index
+                    && export_outer_name(linker, export.package_index)? == outer_name
+                {
+                    found = unsafe { core_loader::create_export(access, linker, row)? };
+                    if !found.is_null() { break; }
+                }
+            }
+        }
         if found.is_null() { return missing_load(flags, text, "Object outer was not found"); }
         target_outer = found;
         segment = segments.next().ok_or_else(|| RuntimeError::new("Object name is empty"))?;
@@ -155,15 +203,20 @@ unsafe fn static_load_object_with_sandbox(
 
     let name_index = access.intern(segment, FindName::Add)?;
     let found = unsafe { access.find_object(class, target_outer, name_index, true) };
-    // A registered native class can exist before its package export is bound.
-    // LinkerCreate precedes FindObject in StaticLoadObject: do not bypass its
-    // reflected properties and defaults merely because registration found it.
+    // Source order: `Linker->Create` precedes `FindObject` in StaticLoadObject.
+    // CreateExport reuses only the current linker's own export object, so a
+    // by-name hit is the cached result only when it belongs to this linker
+    // (or no file is involved); an object whose linker is a different, reset
+    // linker is stale and must be re-created from the export table. A
+    // registered native class found before its export is bound keeps falling
+    // through so LinkerCreate applies its reflected properties and defaults.
+    let found_linker = if found.is_null() { ptr::null_mut() } else { unsafe { (*found)._linker }.cast::<UObject>() };
     if !found.is_null()
         && (linker.is_null()
             || flags & LOAD_DISALLOW_FILES != 0
-            || !unsafe { (*found)._linker }.is_null())
+            || found_linker == linker)
     {
-        if !unsafe { (*found)._linker }.is_null() { unsafe { preload(access, found)?; } }
+        if !found_linker.is_null() { unsafe { preload(access, found)?; } }
         return Ok(found);
     }
     if linker.is_null() { return missing_load(flags, text, "Object was not found"); }
@@ -172,12 +225,10 @@ unsafe fn static_load_object_with_sandbox(
     if exports.num > 0 && exports.data.is_null() {
         return Err(RuntimeError::new("Export table has no backing storage"));
     }
-    let expected_outer_name = i32::from_ne_bytes(unsafe { (*target_outer).name });
+    // ULinkerLoad::Create uses INDEX_NONE: match class/name across package groups.
     for row in 0..exports.num.max(0) as usize {
         let export = unsafe { ptr::read_unaligned(exports.data.cast::<FObjectExport>().add(row)) };
-        if i32::from_ne_bytes(export.object_name) != name_index
-            || export_outer_name(linker, export.package_index)? != expected_outer_name
-        {
+        if i32::from_ne_bytes(export.object_name) != name_index {
             continue;
         }
         let export_class = if export.class_index == 0 {
@@ -200,22 +251,15 @@ unsafe fn static_load_object_with_sandbox(
     missing_load(flags, text, "Object was not found")
 }
 
-fn load_package_file(
+fn get_package_linker_file(
     access: CoreAccess<'_>,
     name: &[u32],
     flags: u32,
 ) -> RuntimeResult<Option<*mut UObject>> {
-    let path = package_path(access.data_root(), Path::new(&native_name_for(name)));
-    match std::fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Ok(None),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => {
-            return Err(RuntimeError::new("Package file could not be accessed")
-                .with_context(&format!("{}: {error}", path.display())));
-        }
-    }
-    let linker = unsafe { access.load_package(&path, flags) }
+    let Some(path) = package_path(access, Path::new(&native_name_for(name)))? else {
+        return Ok(None);
+    };
+    let linker = unsafe { core_loader::get_package_linker(access, &path, flags, ptr::null_mut(), None) }
         .map_err(|error| error.with_context("UObject::GetPackageLinker"))?;
     if linker.is_null() { return Err(RuntimeError::new("Package loader returned a null linker")); }
     Ok(Some(linker))
@@ -245,7 +289,7 @@ unsafe fn static_load_class_with_sandbox(
 ) -> RuntimeResult<*mut UClass> {
     let class_meta = access.native_class("Class")?;
     let class_context = static_class_context(access, class_meta.cast(), outer, name)?;
-    let object = unsafe { static_load_object_with_sandbox(access, class_meta.cast(), outer, name, flags, sandbox) }
+    let object = unsafe { static_load_object_with_sandbox(access, class_meta.cast(), outer, name, flags, None, sandbox) }
         .map_err(|error| error.with_context("UObject::StaticLoadObject").with_context(&class_context).with_context("UObject::StaticLoadClass"))?;
     let class = object.cast::<UClass>();
     if !base.is_null() && !class.is_null() && !unsafe { crate::object_model::is_child_of(class.cast(), base.cast()) } {
@@ -307,6 +351,25 @@ impl CoreAccess<'_> {
     ) -> RuntimeResult<*mut UObject> {
         unsafe { core_loader::with_load_scope(self, || static_load_object(self, class, outer, name, flags)) }
             .map_err(|error| error.with_context("UObject::StaticLoadObject"))
+    }
+
+    /// Loads an object using the explicit source filename independently of its object name.
+    ///
+    /// # Safety
+    /// `class` and `outer` are null or live canonical objects in this Core owner.
+    pub unsafe fn static_load_object_from_file(
+        self,
+        class: *mut UClass,
+        outer: *mut UObject,
+        name: &[u32],
+        filename: &[u32],
+        flags: u32,
+    ) -> RuntimeResult<*mut UObject> {
+        unsafe {
+            core_loader::with_load_scope(self, || {
+                static_load_object_with_sandbox(self, class, outer, name, flags, Some(filename), ptr::null_mut())
+            })
+        }.map_err(|error| error.with_context("UObject::StaticLoadObject"))
     }
 
     /// Loads a class export and verifies that it derives from the requested base.

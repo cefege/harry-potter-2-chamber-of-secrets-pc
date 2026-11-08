@@ -29,9 +29,12 @@ pub const SDL_WINDOW_RESIZABLE: u32 = 0x0000_0020;
 /// sizenwse, sizewe, wait.
 pub const NUM_SYSTEM_CURSORS: i32 = 7;
 
-/// `UpdateMouseScale` (`SDLViewport.cpp:34-41`). `window_x`/`window_y`
-/// are the `SDL_GetWindowSize` results (0 when there is no window).
-/// Returns `(MouseScaleX, MouseScaleY)`.
+/// Mouse-scale ratio recompute, run as an internal step of the `Resize` and
+/// `Open` viewport policy actions (`viewport_policy.rs`'s `mouse_scale`
+/// helper), not a standalone dispatchable action; the original C++ computed
+/// this inline wherever it set `MouseScaleX`/`MouseScaleY` from the window
+/// and surface sizes. `window_x`/`window_y` are the `SDL_GetWindowSize`
+/// results (0 when there is no window). Returns `(MouseScaleX, MouseScaleY)`.
 pub fn mouse_scale(window_x: i32, window_y: i32, size_x: i32, size_y: i32) -> (f32, f32) {
     let scale_x = if window_x > 0 && size_x > 0 {
         size_x as f32 / window_x as f32

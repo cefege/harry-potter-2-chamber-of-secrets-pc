@@ -1,8 +1,7 @@
-//! Port of the non-serialization bodies of `Engine/Src/UnTex.cpp`: palette
-//! and colour helpers (`FGetHSV`, `UPalette::BestMatch`, `FixPalette`),
-//! mip-zero and colour-range reduction, the 8-bit palettized mip downsample
-//! (`UTexture::CreateMips`), the animation timing (`Tick`, `Prime`) and the
-//! RGBA7 max-colour cache (`FTextureInfo::CacheMaxColor`).
+//! Texture arithmetic shared by the SDK header and runtime: colour conversion,
+//! packing, brightness and archive ordering, mip dimensions and clearing,
+//! palette matching/reordering, mip-zero and colour-range reduction, palettized
+//! mip downsampling, animation timing, and the RGBA7 max-colour cache.
 //!
 //! C++ keeps the UObject plumbing: `Lock`/`Unlock`/`Update`/`DefaultLOD`
 //! (render-device and client wiring), `ConstantTimeTick` (virtual pointer
@@ -72,7 +71,7 @@ fn plane_add(a: Plane, b: Plane) -> Plane {
 }
 
 /// `FColor(const FPlane&)`: `Clamp(appFloor(v*256), 0, 255)` per channel.
-fn color_of_plane(p: Plane) -> FColor {
+pub fn color_of_plane(p: Plane) -> FColor {
     let clamp8 = |v: f32| ((v * 256.0).floor() as i32).clamp(0, 255) as u8;
     FColor {
         r: clamp8(p[0]),
@@ -80,6 +79,84 @@ fn color_of_plane(p: Plane) -> FColor {
         b: clamp8(p[2]),
         a: clamp8(p[3]),
     }
+}
+
+pub fn color_equal(left: u32, right: u32) -> bool {
+    left == right
+}
+
+/// Header colour operations read only the channels used by the original body.
+pub fn color_brightness(r: u8, g: u8, b: u8) -> i32 {
+    (2 * i32::from(r) + 3 * i32::from(g) + i32::from(b)) >> 3
+}
+
+pub fn color_fbrightness(r: u8, g: u8, b: u8) -> f32 {
+    (2.0 * f32::from(r) + 3.0 * f32::from(g) + f32::from(b)) / (6.0 * 256.0)
+}
+
+pub fn color_true_color(value: u32) -> u32 {
+    ((value & 0xff) << 16) + (value & 0xff00) + ((value & 0xff0000) >> 16)
+}
+
+pub fn color_hi565(value: u32) -> u16 {
+    (((value & 0xf8) << 8) + ((value & 0xfc00) >> 5) + ((value & 0xf80000) >> 19)) as u16
+}
+
+pub fn color_hi555(value: u32) -> u16 {
+    (((value & 0xf8) << 7) + ((value & 0xf800) >> 6) + ((value & 0xf80000) >> 19)) as u16
+}
+
+/// The SDK returns FVector, discarding the temporary FPlane's alpha.
+pub fn color_plane(r: u8, g: u8, b: u8) -> [f32; 3] {
+    [
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+    ]
+}
+
+pub fn color_brighten(r: u8, g: u8, b: u8, amount: i32) -> FColor {
+    let p = color_plane(r, g, b);
+    let scale = 1.0 - amount as f32 / 24.0;
+    // FVector multiplication followed by FPlane(FVector) supplies W = 0.
+    color_of_plane([p[0] * scale, p[1] * scale, p[2] * scale, 0.0])
+}
+
+pub fn mip_dimension(bits: u8) -> i32 {
+    1i32.wrapping_shl(u32::from(bits))
+}
+
+pub fn mip_size(size_u: i32, size_v: i32) -> i32 {
+    size_u.wrapping_mul(size_v)
+}
+
+pub fn mip_clear(data: &mut [u8]) {
+    data.fill(0);
+}
+
+/// Preserve overload chaining, including a different archive returned by a leaf.
+pub fn serialize_color<A: Copy, E>(
+    archive: A,
+    mut field: impl FnMut(A, u32) -> Result<A, E>,
+) -> Result<A, E> {
+    let mut current = archive;
+    for index in 0..4 {
+        current = field(current, index)?;
+    }
+    Ok(current)
+}
+
+/// DataArray's result is discarded; dimensions restart at the original archive.
+pub fn serialize_mip<A: Copy, E>(
+    archive: A,
+    mut field: impl FnMut(A, u32) -> Result<A, E>,
+) -> Result<A, E> {
+    field(archive, 0)?;
+    let mut current = archive;
+    for index in 1..5 {
+        current = field(current, index)?;
+    }
+    Ok(archive)
 }
 
 /// `FGetHSV(H, S, V)`: byte hue/saturation/brightness to an `FPlane` (W = 0).

@@ -1,0 +1,5353 @@
+table count=261
+table index=0 flags=0x4000400 name=None
+table index=1 flags=0x4000000 name=ByteProperty
+table index=2 flags=0x4000000 name=IntProperty
+table index=3 flags=0x4000000 name=BoolProperty
+table index=4 flags=0x4000000 name=FloatProperty
+table index=5 flags=0x4000000 name=ObjectProperty
+table index=6 flags=0x4000000 name=NameProperty
+table index=7 flags=0x4000000 name=StringProperty
+table index=8 flags=0x4000000 name=ClassProperty
+table index=9 flags=0x4000000 name=ArrayProperty
+table index=10 flags=0x4000000 name=StructProperty
+table index=11 flags=0x4000000 name=VectorProperty
+table index=12 flags=0x4000000 name=RotatorProperty
+table index=13 flags=0x4000000 name=StrProperty
+table index=14 flags=0x4000000 name=MapProperty
+table index=15 flags=0x4000000 name=FixedArrayProperty
+table index=16 flags=0x4000000 name=Core
+table index=17 flags=0x4000000 name=Engine
+table index=18 flags=0x4000000 name=Editor
+table index=19 flags=0x4000000 name=UnrealI
+table index=20 flags=0x4000000 name=UnrealShare
+table index=21 flags=0x4000400 name=Byte
+table index=22 flags=0x4000400 name=Int
+table index=23 flags=0x4000400 name=Bool
+table index=24 flags=0x4000400 name=Float
+table index=25 flags=0x4000400 name=Name
+table index=26 flags=0x4000400 name=String
+table index=27 flags=0x4000400 name=Struct
+table index=28 flags=0x4000400 name=Vector
+table index=29 flags=0x4000400 name=Rotator
+table index=30 flags=0x4000400 name=Color
+table index=31 flags=0x4000400 name=Plane
+table index=32 flags=0x4000000 name=Begin
+table index=33 flags=0x4000400 name=State
+table index=34 flags=0x4000400 name=Function
+table index=35 flags=0x4000400 name=Self
+table index=36 flags=0x4000400 name=True
+table index=37 flags=0x4000400 name=False
+table index=38 flags=0x4000400 name=Transient
+table index=39 flags=0x4000400 name=Enum
+table index=40 flags=0x4000400 name=Replication
+table index=41 flags=0x4000400 name=Reliable
+table index=42 flags=0x4000400 name=Unreliable
+table index=43 flags=0x4000400 name=Always
+table index=44 flags=0x4000000 name=Field
+table index=45 flags=0x4000000 name=Object
+table index=46 flags=0x4000000 name=TextBuffer
+table index=47 flags=0x4000000 name=Linker
+table index=48 flags=0x4000000 name=LinkerLoad
+table index=49 flags=0x4000000 name=LinkerSave
+table index=50 flags=0x4000000 name=Subsystem
+table index=51 flags=0x4000000 name=Factory
+table index=52 flags=0x4000000 name=TextBufferFactory
+table index=53 flags=0x4000000 name=Exporter
+table index=54 flags=0x4000000 name=StackNode
+table index=55 flags=0x4000000 name=Property
+table index=56 flags=0x4000000 name=Camera
+table index=57 flags=0x4000400 name=Vect
+table index=58 flags=0x4000400 name=Rot
+table index=59 flags=0x4000400 name=ArrayCount
+table index=60 flags=0x4000400 name=EnumCount
+table index=61 flags=0x4000400 name=Else
+table index=62 flags=0x4000400 name=If
+table index=63 flags=0x4000400 name=Goto
+table index=64 flags=0x4000400 name=Stop
+table index=65 flags=0x4000400 name=Until
+table index=66 flags=0x4000400 name=While
+table index=67 flags=0x4000400 name=Do
+table index=68 flags=0x4000400 name=Break
+table index=69 flags=0x4000400 name=For
+table index=70 flags=0x4000400 name=ForEach
+table index=71 flags=0x4000400 name=Assert
+table index=72 flags=0x4000400 name=Switch
+table index=73 flags=0x4000400 name=Case
+table index=74 flags=0x4000400 name=Default
+table index=75 flags=0x4000400 name=Continue
+table index=76 flags=0x4000400 name=Private
+table index=77 flags=0x4000400 name=Const
+table index=78 flags=0x4000400 name=Out
+table index=79 flags=0x4000400 name=Export
+table index=80 flags=0x4000400 name=Skip
+table index=81 flags=0x4000400 name=Coerce
+table index=82 flags=0x4000400 name=Optional
+table index=83 flags=0x4000400 name=Input
+table index=84 flags=0x4000400 name=Config
+table index=85 flags=0x4000400 name=Travel
+table index=86 flags=0x4000400 name=EditConst
+table index=87 flags=0x4000400 name=Localized
+table index=88 flags=0x4000400 name=GlobalConfig
+table index=89 flags=0x4000400 name=SafeReplace
+table index=90 flags=0x4000400 name=New
+table index=91 flags=0x4000400 name=Expands
+table index=92 flags=0x4000400 name=Intrinsic
+table index=93 flags=0x4000400 name=Within
+table index=94 flags=0x4000400 name=Abstract
+table index=95 flags=0x4000400 name=Package
+table index=96 flags=0x4000400 name=Guid
+table index=97 flags=0x4000400 name=Parent
+table index=98 flags=0x4000400 name=Class
+table index=99 flags=0x4000400 name=Extends
+table index=100 flags=0x4000400 name=NoExport
+table index=101 flags=0x4000400 name=NoUserCreate
+table index=102 flags=0x4000400 name=PerObjectConfig
+table index=103 flags=0x4000400 name=NativeReplication
+table index=104 flags=0x4000400 name=Auto
+table index=105 flags=0x4000400 name=Ignores
+table index=106 flags=0x4000400 name=Global
+table index=107 flags=0x4000400 name=Super
+table index=108 flags=0x4000400 name=Outer
+table index=109 flags=0x4000400 name=Operator
+table index=110 flags=0x4000400 name=PreOperator
+table index=111 flags=0x4000400 name=PostOperator
+table index=112 flags=0x4000400 name=Final
+table index=113 flags=0x4000400 name=Iterator
+table index=114 flags=0x4000400 name=Latent
+table index=115 flags=0x4000400 name=Return
+table index=116 flags=0x4000400 name=Singular
+table index=117 flags=0x4000400 name=Simulated
+table index=118 flags=0x4000400 name=Exec
+table index=119 flags=0x4000400 name=Event
+table index=120 flags=0x4000400 name=Static
+table index=121 flags=0x4000400 name=Native
+table index=122 flags=0x4000400 name=Invariant
+table index=123 flags=0x4000400 name=Var
+table index=124 flags=0x4000400 name=Local
+table index=125 flags=0x4000400 name=Import
+table index=126 flags=0x4000400 name=From
+table index=127 flags=0x4000400 name=Spawn
+table index=128 flags=0x4000400 name=Array
+table index=129 flags=0x4000400 name=Map
+table index=130 flags=0x4000000 name=Tag
+table index=131 flags=0x4000000 name=Role
+table index=132 flags=0x4000000 name=RemoteRole
+table index=133 flags=0x4000000 name=System
+table index=134 flags=0x4000000 name=User
+table index=135 flags=0x4000000 name=Log
+table index=136 flags=0x4000000 name=Critical
+table index=137 flags=0x4000000 name=Init
+table index=138 flags=0x4000000 name=Exit
+table index=139 flags=0x4000000 name=Cmd
+table index=140 flags=0x4000000 name=Play
+table index=141 flags=0x4000000 name=Console
+table index=142 flags=0x4000000 name=Warning
+table index=143 flags=0x4000000 name=ExecWarning
+table index=144 flags=0x4000000 name=ScriptWarning
+table index=145 flags=0x4000000 name=ScriptLog
+table index=146 flags=0x4000000 name=Dev
+table index=147 flags=0x4000000 name=DevNet
+table index=148 flags=0x4000000 name=DevPath
+table index=149 flags=0x4000000 name=DevNetTraffic
+table index=150 flags=0x4000000 name=DevAudio
+table index=151 flags=0x4000000 name=DevLoad
+table index=152 flags=0x4000000 name=DevSave
+table index=153 flags=0x4000000 name=DevGarbage
+table index=154 flags=0x4000000 name=DevKill
+table index=155 flags=0x4000000 name=DevReplace
+table index=156 flags=0x4000000 name=DevMusic
+table index=157 flags=0x4000000 name=DevSound
+table index=158 flags=0x4000000 name=DevCompile
+table index=159 flags=0x4000000 name=DevBind
+table index=160 flags=0x4000000 name=Localization
+table index=161 flags=0x4000000 name=Compatibility
+table index=162 flags=0x4000000 name=NetComeGo
+table index=163 flags=0x4000000 name=Title
+table index=164 flags=0x4000000 name=Error
+table index=165 flags=0x4000000 name=Heading
+table index=166 flags=0x4000000 name=SubHeading
+table index=167 flags=0x4000000 name=FriendlyError
+table index=168 flags=0x4000000 name=Progress
+table index=169 flags=0x4000000 name=UserPrompt
+table index=170 flags=0x4000000 name=White
+table index=171 flags=0x4000000 name=Black
+table index=172 flags=0x4000000 name=Red
+table index=173 flags=0x4000000 name=Green
+table index=174 flags=0x4000000 name=Blue
+table index=175 flags=0x4000000 name=Cyan
+table index=176 flags=0x4000000 name=Magenta
+table index=177 flags=0x4000000 name=Yellow
+table index=178 flags=0x4000000 name=DefaultColor
+table index=179 flags=0x4000000 name=KeyType
+table index=180 flags=0x4000000 name=KeyEvent
+table index=181 flags=0x4000000 name=Write
+table index=182 flags=0x4000000 name=Message
+table index=183 flags=0x4000000 name=InitialState
+table index=184 flags=0x4000000 name=Texture
+table index=185 flags=0x4000000 name=Sound
+table index=186 flags=0x4000000 name=FireTexture
+table index=187 flags=0x4000000 name=IceTexture
+table index=188 flags=0x4000000 name=WaterTexture
+table index=189 flags=0x4000000 name=WaveTexture
+table index=190 flags=0x4000000 name=WetTexture
+table index=191 flags=0x4000000 name=Main
+table index=192 flags=0x4000000 name=NotifyLevelChange
+table index=193 flags=0x4000000 name=VideoChange
+table index=194 flags=0x4000000 name=SendText
+table index=195 flags=0x4000000 name=SendBinary
+table index=196 flags=0x4000000 name=ConnectFailure
+table index=197 flags=0x4000000 name=Spawned
+table index=198 flags=0x4000000 name=Destroyed
+table index=199 flags=0x4000000 name=GainedChild
+table index=200 flags=0x4000000 name=LostChild
+table index=201 flags=0x4000000 name=Probe4
+table index=202 flags=0x4000000 name=Probe5
+table index=203 flags=0x4000000 name=Trigger
+table index=204 flags=0x4000000 name=UnTrigger
+table index=205 flags=0x4000000 name=Timer
+table index=206 flags=0x4000000 name=HitWall
+table index=207 flags=0x4000000 name=Falling
+table index=208 flags=0x4000000 name=Landed
+table index=209 flags=0x4000000 name=ZoneChange
+table index=210 flags=0x4000000 name=Touch
+table index=211 flags=0x4000000 name=UnTouch
+table index=212 flags=0x4000000 name=Bump
+table index=213 flags=0x4000000 name=BeginState
+table index=214 flags=0x4000000 name=EndState
+table index=215 flags=0x4000000 name=BaseChange
+table index=216 flags=0x4000000 name=Attach
+table index=217 flags=0x4000000 name=Detach
+table index=218 flags=0x4000000 name=ActorEntered
+table index=219 flags=0x4000000 name=ActorLeaving
+table index=220 flags=0x4000000 name=KillCredit
+table index=221 flags=0x4000000 name=AnimEnd
+table index=222 flags=0x4000000 name=EndedRotation
+table index=223 flags=0x4000000 name=InterpolateEnd
+table index=224 flags=0x4000000 name=EncroachingOn
+table index=225 flags=0x4000000 name=EncroachedBy
+table index=226 flags=0x4000000 name=FootZoneChange
+table index=227 flags=0x4000000 name=HeadZoneChange
+table index=228 flags=0x4000000 name=PainTimer
+table index=229 flags=0x4000000 name=SpeechTimer
+table index=230 flags=0x4000000 name=MayFall
+table index=231 flags=0x4000000 name=Probe34
+table index=232 flags=0x4000000 name=Die
+table index=233 flags=0x4000000 name=Tick
+table index=234 flags=0x4000000 name=PlayerTick
+table index=235 flags=0x4000000 name=Expired
+table index=236 flags=0x4000000 name=Probe39
+table index=237 flags=0x4000000 name=SeePlayer
+table index=238 flags=0x4000000 name=EnemyNotVisible
+table index=239 flags=0x4000000 name=HearNoise
+table index=240 flags=0x4000000 name=UpdateEyeHeight
+table index=241 flags=0x4000000 name=SeeMonster
+table index=242 flags=0x4000000 name=SeeFriend
+table index=243 flags=0x4000000 name=SpecialHandling
+table index=244 flags=0x4000000 name=BotDesireability
+table index=245 flags=0x4000000 name=Probe48
+table index=246 flags=0x4000000 name=Probe49
+table index=247 flags=0x4000000 name=Probe50
+table index=248 flags=0x4000000 name=Probe51
+table index=249 flags=0x4000000 name=Probe52
+table index=250 flags=0x4000000 name=Probe53
+table index=251 flags=0x4000000 name=Probe54
+table index=252 flags=0x4000000 name=Probe55
+table index=253 flags=0x4000000 name=Probe56
+table index=254 flags=0x4000000 name=Probe57
+table index=255 flags=0x4000000 name=Probe58
+table index=256 flags=0x4000000 name=Probe59
+table index=257 flags=0x4000000 name=Probe60
+table index=258 flags=0x4000000 name=Probe61
+table index=259 flags=0x4000000 name=Probe62
+table index=260 flags=0x4000000 name=All
+case static_init_exit
+step static_init
+log Init Name subsystem initialized
+result ok
+state after_init initialized=1 names=261 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+step static_exit
+log Exit Name subsystem shut down
+result ok
+state after_exit initialized=0 names=0 available=0
+case ctor_find_add_define
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_add_hello
+alloc size=40 tag=NameEntry
+value index=261
+result ok
+step ctor_find_lower
+value index=261
+result ok
+step ctor_find_missing
+value index=0
+result ok
+step ctor_empty
+value index=0
+result ok
+step define_no_change
+value index=261
+result ok
+step define_uppercase
+value index=261
+result ok
+step ctor_intrinsic
+alloc size=60 tag=NameEntry
+value index=262 flags=0x4000000
+result ok
+state end initialized=1 names=263 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+slot 261 index 261 flags 0x0 name HELLO
+slot 262 index 262 flags 0x4000000 name Intrinsic1
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1378 Intrinsic1@262 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2705 HELLO@261 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case reuse_available
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_alpha
+alloc size=40 tag=NameEntry
+value index=261
+result ok
+step ctor_beta
+alloc size=36 tag=NameEntry
+value index=262
+result ok
+step delete_alpha
+delete size=40
+result ok
+step ctor_reuse
+alloc size=40 tag=NameEntry
+value index=261
+result ok
+state end initialized=1 names=263 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+slot 261 index 261 flags 0x0 name Reuse
+slot 262 index 262 flags 0x0 name Beta
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 133 Beta@262 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2320 Reuse@261 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case delete_failures
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_intrinsic
+alloc size=60 tag=NameEntry
+value index=261
+result ok
+step delete_native
+error Assertion failed: !(NameEntry->Flags & RF_Native) [File:HarryPotter2/Unreal/Core/Src/UnName.cpp] [Line: 213]
+result threw
+step ctor_gone
+alloc size=36 tag=NameEntry
+value index=262
+result ok
+step delete_gone
+delete size=36
+result ok
+step delete_twice
+error Assertion failed: NameEntry [File:HarryPotter2/Unreal/Core/Src/UnName.cpp] [Line: 212]
+result threw
+state end initialized=1 names=263 available=1
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+slot 261 index 261 flags 0x4000000 name Intrinsic2
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3490 Intrinsic2@261 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case unhashed_delete
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_orphan
+alloc size=44 tag=NameEntry
+value index=261
+result ok
+step unhash_orphan
+mutate unhash bin=979
+result ok
+step delete_orphan
+error Unhashed name 'Orphan'
+result threw
+state end initialized=1 names=262 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+slot 261 index 261 flags 0x0 name Orphan
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case hardcode_duplicate
+step static_init
+log Init Name subsystem initialized
+result ok
+step hardcode_dup
+error Hardcoded name 5 was duplicated
+result threw
+state end initialized=1 names=261 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Dup5@5 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case name_too_long
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_too_long
+error Assertion failed: NameLength<NAME_SIZE [File:HarryPotter2/Unreal/Core/Src/UnName.cpp] [Line: 269]
+result threw
+state end initialized=1 names=262 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+slot 261 index 261 flags 0x0 name Orphan
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case ctor_before_init
+step ctor_early
+error FName constructed before FName::StaticInit
+result threw
+state end initialized=0 names=0 available=0
+case static_init_twice
+step static_init
+log Init Name subsystem initialized
+result ok
+step static_init_again
+error Assertion failed: Initialized==0 [File:HarryPotter2/Unreal/Core/Src/UnName.cpp] [Line: 135]
+result threw
+state end initialized=1 names=261 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case static_exit_uninit
+step static_exit
+error Assertion failed: Initialized [File:HarryPotter2/Unreal/Core/Src/UnName.cpp] [Line: 168]
+result threw
+state end initialized=0 names=0 available=0
+case display_hash
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_alpha
+alloc size=40 tag=NameEntry
+value index=261
+result ok
+step ctor_beta
+alloc size=36 tag=NameEntry
+value index=262
+result ok
+step display_hash
+log Log Hash: 263 names, 253/4096 hash bins
+result ok
+state end initialized=1 names=263 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name BoolProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All
+slot 261 index 261 flags 0x0 name Alpha
+slot 262 index 262 flags 0x0 name Beta
+bin 8 User@134 
+bin 15 StackNode@54 
+bin 38 MayFall@230 
+bin 59 Core@16 
+bin 66 DevNet@147 
+bin 74 ActorLeaving@219 
+bin 93 VectorProperty@11 
+bin 101 Event@119 
+bin 133 Beta@262 
+bin 160 ScriptLog@145 
+bin 170 Object@45 
+bin 180 UnTrigger@204 
+bin 199 Heading@165 SafeReplace@89 
+bin 215 Probe48@245 
+bin 235 Super@107 
+bin 249 Until@65 
+bin 265 Probe4@201 
+bin 275 LinkerSave@49 
+bin 290 Out@78 
+bin 307 Probe52@249 
+bin 343 Localization@160 
+bin 365 Operator@109 
+bin 366 Probe54@251 
+bin 380 FixedArrayProperty@15 
+bin 391 Camera@56 
+bin 417 Import@125 
+bin 427 Var@123 
+bin 453 Const@77 
+bin 463 FootZoneChange@226 
+bin 472 Probe59@256 
+bin 487 IceTexture@187 
+bin 490 Tag@130 
+bin 539 Cyan@175 
+bin 556 For@69 
+bin 591 Exporter@53 
+bin 625 IntProperty@2 
+bin 626 State@33 
+bin 648 WaterTexture@188 
+bin 654 Plane@31 
+bin 659 Message@182 
+bin 662 String@26 
+bin 687 PlayerTick@234 
+bin 699 Default@74 
+bin 705 NameProperty@6 
+bin 727 Latent@114 
+bin 739 Simulated@117 
+bin 763 StringProperty@7 
+bin 764 Cmd@139 
+bin 782 SeePlayer@237 EndedRotation@222 
+bin 791 Black@171 
+bin 806 EnumCount@60 
+bin 824 White@170 
+bin 826 FloatProperty@4 
+bin 836 Struct@27 
+bin 862 All@260 
+bin 880 Abstract@94 
+bin 893 Critical@136 
+bin 898 PerObjectConfig@102 
+bin 918 Within@93 
+bin 927 DevKill@154 
+bin 945 Compatibility@161 
+bin 980 Class@98 
+bin 988 Probe62@259 
+bin 1010 Exec@118 
+bin 1019 Continue@75 
+bin 1020 LostChild@200 
+bin 1062 Yellow@177 
+bin 1076 WetTexture@190 
+bin 1099 Error@164 
+bin 1104 UnrealI@19 
+bin 1108 Property@55 
+bin 1131 Name@25 
+bin 1148 Progress@168 
+bin 1163 If@62 
+bin 1166 Tick@233 
+bin 1202 ClassProperty@8 ByteProperty@1 
+bin 1230 DevNetTraffic@149 
+bin 1250 Log@135 
+bin 1253 SendText@194 
+bin 1255 Goto@63 
+bin 1281 Outer@108 
+bin 1302 Assert@71 
+bin 1323 Unreliable@42 
+bin 1381 MapProperty@14 
+bin 1387 ArrayProperty@9 
+bin 1388 Singular@116 
+bin 1413 NotifyLevelChange@192 
+bin 1429 Probe50@247 
+bin 1466 Function@34 
+bin 1479 UnrealShare@20 
+bin 1480 Probe56@253 
+bin 1488 ZoneChange@209 
+bin 1496 RemoteRole@132 
+bin 1515 Config@84 
+bin 1525 Private@76 
+bin 1545 Spawn@127 
+bin 1553 Write@181 
+bin 1570 None@0 
+bin 1579 SeeFriend@242 
+bin 1612 NetComeGo@162 
+bin 1643 Trigger@203 
+bin 1648 StructProperty@10 
+bin 1699 New@90 
+bin 1706 BoolProperty@3 
+bin 1749 PostOperator@111 
+bin 1754 Play@140 
+bin 1824 KillCredit@220 DevSave@152 
+bin 1844 Warning@142 
+bin 1862 Exit@138 
+bin 1866 True@36 
+bin 1890 DevPath@148 
+bin 1891 Static@120 
+bin 1914 Probe60@257 
+bin 1955 Alpha@261 
+bin 1958 DevAudio@150 
+bin 2018 Global@106 
+bin 2027 GlobalConfig@88 
+bin 2035 DevReplace@155 
+bin 2038 BotDesireability@244 
+bin 2046 Float@24 
+bin 2058 Rot@58 
+bin 2105 Expired@235 
+bin 2113 SubHeading@166 
+bin 2138 DevSound@157 
+bin 2154 EndState@214 
+bin 2186 Byte@21 
+bin 2188 Attach@216 
+bin 2195 Invariant@122 
+bin 2204 While@66 
+bin 2218 Dev@146 
+bin 2222 Detach@217 
+bin 2224 Ignores@105 
+bin 2255 Reliable@41 
+bin 2277 Die@232 
+bin 2280 Linker@47 
+bin 2285 EncroachingOn@224 Stop@64 
+bin 2289 Texture@184 
+bin 2293 TextBufferFactory@52 
+bin 2310 ConnectFailure@196 
+bin 2317 Parent@97 
+bin 2332 Do@67 
+bin 2335 Intrinsic@92 
+bin 2373 Else@61 
+bin 2376 EditConst@86 
+bin 2408 BeginState@213 
+bin 2428 DevGarbage@153 
+bin 2442 Factory@51 
+bin 2475 ScriptWarning@144 
+bin 2478 Probe57@254 
+bin 2484 Guid@96 
+bin 2518 NoUserCreate@101 
+bin 2538 Travel@85 
+bin 2547 Probe51@248 
+bin 2554 Switch@72 
+bin 2597 HearNoise@239 
+bin 2607 RotatorProperty@12 
+bin 2612 DevCompile@158 
+bin 2619 ObjectProperty@5 
+bin 2650 Main@191 KeyType@179 
+bin 2679 SpecialHandling@243 
+bin 2694 NativeReplication@103 
+bin 2702 NoExport@100 
+bin 2749 Return@115 
+bin 2785 HitWall@206 
+bin 2808 TextBuffer@46 
+bin 2811 SpeechTimer@229 
+bin 2824 Input@83 
+bin 2835 Title@163 
+bin 2839 Bool@23 
+bin 2844 Probe61@258 
+bin 2858 DefaultColor@178 
+bin 2859 UserPrompt@169 
+bin 2892 Destroyed@198 
+bin 2937 LinkerLoad@48 
+bin 2976 Enum@39 
+bin 2997 Engine@17 
+bin 3013 VideoChange@193 
+bin 3017 Optional@82 
+bin 3021 Expands@91 Always@43 
+bin 3076 From@126 
+bin 3079 Package@95 
+bin 3097 Rotator@29 
+bin 3118 Local@124 
+bin 3137 ExecWarning@143 
+bin 3141 Editor@18 
+bin 3162 GainedChild@199 
+bin 3175 BaseChange@215 
+bin 3180 Final@112 
+bin 3184 Array@128 
+bin 3224 FriendlyError@167 
+bin 3237 Timer@205 
+bin 3249 Probe49@246 
+bin 3255 Coerce@81 
+bin 3281 Localized@87 
+bin 3336 Probe55@252 
+bin 3342 Touch@210 Break@68 
+bin 3366 Export@79 
+bin 3402 DevLoad@151 
+bin 3412 Begin@32 
+bin 3413 Probe53@250 
+bin 3424 Sound@185 
+bin 3439 Probe5@202 
+bin 3446 System@133 
+bin 3460 Role@131 
+bin 3480 PainTimer@228 
+bin 3492 HeadZoneChange@227 
+bin 3509 Green@173 
+bin 3511 ActorEntered@218 
+bin 3518 Probe58@255 
+bin 3519 UpdateEyeHeight@240 SendBinary@195 
+bin 3528 Landed@208 
+bin 3530 AnimEnd@221 
+bin 3532 Init@137 
+bin 3572 Case@73 
+bin 3590 UnTouch@211 
+bin 3596 Field@44 
+bin 3630 Map@129 
+bin 3644 Native@121 
+bin 3648 Int@22 
+bin 3651 Vector@28 
+bin 3671 Extends@99 
+bin 3672 DevBind@159 
+bin 3686 Blue@174 
+bin 3698 Replication@40 
+bin 3744 Bump@212 
+bin 3748 ForEach@70 
+bin 3750 EncroachedBy@225 KeyEvent@180 
+bin 3751 EnemyNotVisible@238 
+bin 3755 Red@172 
+bin 3760 Subsystem@50 
+bin 3764 InterpolateEnd@223 
+bin 3767 InitialState@183 
+bin 3775 FireTexture@186 
+bin 3783 Falling@207 
+bin 3799 Magenta@176 
+bin 3834 WaveTexture@189 
+bin 3881 Skip@80 
+bin 3887 Self@35 
+bin 3891 Auto@104 
+bin 3904 Probe34@231 
+bin 3956 Color@30 
+bin 3968 StrProperty@13 
+bin 3979 PreOperator@110 
+bin 3983 ArrayCount@59 
+bin 3986 Vect@57 
+bin 3990 False@37 
+bin 4007 Spawned@197 
+bin 4027 Iterator@113 
+bin 4045 Transient@38 
+bin 4048 SeeMonster@241 
+bin 4079 DevMusic@156 
+bin 4085 Console@141 
+bin 4086 Probe39@236 
+case serialize_v63_load
+step entry_load_v63
+ar_read_byte value=0x41
+ar_read_byte value=0x62
+ar_read_byte value=0x00
+ar_serialize_flags value=0x12345678
+value name=Ab flags=0x12345678 pos=7
+result ok
+case serialize_v63_save_check
+step entry_save_v63
+error Assertion failed: Ar.IsLoading() [File:HarryPotter2/Unreal/Core/Src/UnName.cpp] [Line: 238]
+result threw
+case serialize_v64_load
+step entry_load_v64
+ar_load_string value=Ab pos=4
+ar_serialize_flags value=0x12345678
+value name=Ab flags=0x12345678 pos=8
+result ok
+case serialize_v64_save
+step entry_save_v64
+ar_save_string value=Hi
+ar_serialize_flags value=0x21
+result ok
+case serialize_v64_long_roundtrip
+step entry_save_long
+ar_save_string value=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv
+ar_serialize_flags value=0x80000001
+result ok
+step entry_load_long
+ar_load_string value=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv pos=103
+ar_serialize_flags value=0x80000001
+value name=abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv flags=0x80000001 pos=107
+result ok
+case static_exit_frees
+step static_init
+log Init Name subsystem initialized
+result ok
+step ctor_free1
+alloc size=40 tag=NameEntry
+value index=261
+result ok
+step ctor_free2
+alloc size=40 tag=NameEntry
+value index=262
+result ok
+step ctor_free3
+alloc size=40 tag=NameEntry
+value index=263
+result ok
+step static_exit
+delete size=40
+delete size=40
+delete size=40
+log Exit Name subsystem shut down
+result ok
+state end initialized=0 names=0 available=0
+case hardcoded_duplicate_name
+mutate hardcoded 3 = hardcoded 4
+step static_init
+error Name 'FloatProperty' was duplicated
+result threw
+state end initialized=0 names=261 available=0
+slot 0 index 0 flags 0x4000400 name None
+slot 1 index 1 flags 0x4000000 name ByteProperty
+slot 2 index 2 flags 0x4000000 name IntProperty
+slot 3 index 3 flags 0x4000000 name FloatProperty
+slot 4 index 4 flags 0x4000000 name FloatProperty
+slot 5 index 5 flags 0x4000000 name ObjectProperty
+slot 6 index 6 flags 0x4000000 name NameProperty
+slot 7 index 7 flags 0x4000000 name StringProperty
+slot 8 index 8 flags 0x4000000 name ClassProperty
+slot 9 index 9 flags 0x4000000 name ArrayProperty
+slot 10 index 10 flags 0x4000000 name StructProperty
+slot 11 index 11 flags 0x4000000 name VectorProperty
+slot 12 index 12 flags 0x4000000 name RotatorProperty
+slot 13 index 13 flags 0x4000000 name StrProperty
+slot 14 index 14 flags 0x4000000 name MapProperty
+slot 15 index 15 flags 0x4000000 name FixedArrayProperty
+slot 16 index 16 flags 0x4000000 name Core
+slot 17 index 17 flags 0x4000000 name Engine
+slot 18 index 18 flags 0x4000000 name Editor
+slot 19 index 19 flags 0x4000000 name UnrealI
+slot 20 index 20 flags 0x4000000 name UnrealShare
+slot 21 index 21 flags 0x4000400 name Byte
+slot 22 index 22 flags 0x4000400 name Int
+slot 23 index 23 flags 0x4000400 name Bool
+slot 24 index 24 flags 0x4000400 name Float
+slot 25 index 25 flags 0x4000400 name Name
+slot 26 index 26 flags 0x4000400 name String
+slot 27 index 27 flags 0x4000400 name Struct
+slot 28 index 28 flags 0x4000400 name Vector
+slot 29 index 29 flags 0x4000400 name Rotator
+slot 30 index 30 flags 0x4000400 name Color
+slot 31 index 31 flags 0x4000400 name Plane
+slot 32 index 32 flags 0x4000000 name Begin
+slot 33 index 33 flags 0x4000400 name State
+slot 34 index 34 flags 0x4000400 name Function
+slot 35 index 35 flags 0x4000400 name Self
+slot 36 index 36 flags 0x4000400 name True
+slot 37 index 37 flags 0x4000400 name False
+slot 38 index 38 flags 0x4000400 name Transient
+slot 39 index 39 flags 0x4000400 name Enum
+slot 40 index 40 flags 0x4000400 name Replication
+slot 41 index 41 flags 0x4000400 name Reliable
+slot 42 index 42 flags 0x4000400 name Unreliable
+slot 43 index 43 flags 0x4000400 name Always
+slot 44 index 44 flags 0x4000000 name Field
+slot 45 index 45 flags 0x4000000 name Object
+slot 46 index 46 flags 0x4000000 name TextBuffer
+slot 47 index 47 flags 0x4000000 name Linker
+slot 48 index 48 flags 0x4000000 name LinkerLoad
+slot 49 index 49 flags 0x4000000 name LinkerSave
+slot 50 index 50 flags 0x4000000 name Subsystem
+slot 51 index 51 flags 0x4000000 name Factory
+slot 52 index 52 flags 0x4000000 name TextBufferFactory
+slot 53 index 53 flags 0x4000000 name Exporter
+slot 54 index 54 flags 0x4000000 name StackNode
+slot 55 index 55 flags 0x4000000 name Property
+slot 56 index 56 flags 0x4000000 name Camera
+slot 57 index 57 flags 0x4000400 name Vect
+slot 58 index 58 flags 0x4000400 name Rot
+slot 59 index 59 flags 0x4000400 name ArrayCount
+slot 60 index 60 flags 0x4000400 name EnumCount
+slot 61 index 61 flags 0x4000400 name Else
+slot 62 index 62 flags 0x4000400 name If
+slot 63 index 63 flags 0x4000400 name Goto
+slot 64 index 64 flags 0x4000400 name Stop
+slot 65 index 65 flags 0x4000400 name Until
+slot 66 index 66 flags 0x4000400 name While
+slot 67 index 67 flags 0x4000400 name Do
+slot 68 index 68 flags 0x4000400 name Break
+slot 69 index 69 flags 0x4000400 name For
+slot 70 index 70 flags 0x4000400 name ForEach
+slot 71 index 71 flags 0x4000400 name Assert
+slot 72 index 72 flags 0x4000400 name Switch
+slot 73 index 73 flags 0x4000400 name Case
+slot 74 index 74 flags 0x4000400 name Default
+slot 75 index 75 flags 0x4000400 name Continue
+slot 76 index 76 flags 0x4000400 name Private
+slot 77 index 77 flags 0x4000400 name Const
+slot 78 index 78 flags 0x4000400 name Out
+slot 79 index 79 flags 0x4000400 name Export
+slot 80 index 80 flags 0x4000400 name Skip
+slot 81 index 81 flags 0x4000400 name Coerce
+slot 82 index 82 flags 0x4000400 name Optional
+slot 83 index 83 flags 0x4000400 name Input
+slot 84 index 84 flags 0x4000400 name Config
+slot 85 index 85 flags 0x4000400 name Travel
+slot 86 index 86 flags 0x4000400 name EditConst
+slot 87 index 87 flags 0x4000400 name Localized
+slot 88 index 88 flags 0x4000400 name GlobalConfig
+slot 89 index 89 flags 0x4000400 name SafeReplace
+slot 90 index 90 flags 0x4000400 name New
+slot 91 index 91 flags 0x4000400 name Expands
+slot 92 index 92 flags 0x4000400 name Intrinsic
+slot 93 index 93 flags 0x4000400 name Within
+slot 94 index 94 flags 0x4000400 name Abstract
+slot 95 index 95 flags 0x4000400 name Package
+slot 96 index 96 flags 0x4000400 name Guid
+slot 97 index 97 flags 0x4000400 name Parent
+slot 98 index 98 flags 0x4000400 name Class
+slot 99 index 99 flags 0x4000400 name Extends
+slot 100 index 100 flags 0x4000400 name NoExport
+slot 101 index 101 flags 0x4000400 name NoUserCreate
+slot 102 index 102 flags 0x4000400 name PerObjectConfig
+slot 103 index 103 flags 0x4000400 name NativeReplication
+slot 104 index 104 flags 0x4000400 name Auto
+slot 105 index 105 flags 0x4000400 name Ignores
+slot 106 index 106 flags 0x4000400 name Global
+slot 107 index 107 flags 0x4000400 name Super
+slot 108 index 108 flags 0x4000400 name Outer
+slot 109 index 109 flags 0x4000400 name Operator
+slot 110 index 110 flags 0x4000400 name PreOperator
+slot 111 index 111 flags 0x4000400 name PostOperator
+slot 112 index 112 flags 0x4000400 name Final
+slot 113 index 113 flags 0x4000400 name Iterator
+slot 114 index 114 flags 0x4000400 name Latent
+slot 115 index 115 flags 0x4000400 name Return
+slot 116 index 116 flags 0x4000400 name Singular
+slot 117 index 117 flags 0x4000400 name Simulated
+slot 118 index 118 flags 0x4000400 name Exec
+slot 119 index 119 flags 0x4000400 name Event
+slot 120 index 120 flags 0x4000400 name Static
+slot 121 index 121 flags 0x4000400 name Native
+slot 122 index 122 flags 0x4000400 name Invariant
+slot 123 index 123 flags 0x4000400 name Var
+slot 124 index 124 flags 0x4000400 name Local
+slot 125 index 125 flags 0x4000400 name Import
+slot 126 index 126 flags 0x4000400 name From
+slot 127 index 127 flags 0x4000400 name Spawn
+slot 128 index 128 flags 0x4000400 name Array
+slot 129 index 129 flags 0x4000400 name Map
+slot 130 index 130 flags 0x4000000 name Tag
+slot 131 index 131 flags 0x4000000 name Role
+slot 132 index 132 flags 0x4000000 name RemoteRole
+slot 133 index 133 flags 0x4000000 name System
+slot 134 index 134 flags 0x4000000 name User
+slot 135 index 135 flags 0x4000000 name Log
+slot 136 index 136 flags 0x4000000 name Critical
+slot 137 index 137 flags 0x4000000 name Init
+slot 138 index 138 flags 0x4000000 name Exit
+slot 139 index 139 flags 0x4000000 name Cmd
+slot 140 index 140 flags 0x4000000 name Play
+slot 141 index 141 flags 0x4000000 name Console
+slot 142 index 142 flags 0x4000000 name Warning
+slot 143 index 143 flags 0x4000000 name ExecWarning
+slot 144 index 144 flags 0x4000000 name ScriptWarning
+slot 145 index 145 flags 0x4000000 name ScriptLog
+slot 146 index 146 flags 0x4000000 name Dev
+slot 147 index 147 flags 0x4000000 name DevNet
+slot 148 index 148 flags 0x4000000 name DevPath
+slot 149 index 149 flags 0x4000000 name DevNetTraffic
+slot 150 index 150 flags 0x4000000 name DevAudio
+slot 151 index 151 flags 0x4000000 name DevLoad
+slot 152 index 152 flags 0x4000000 name DevSave
+slot 153 index 153 flags 0x4000000 name DevGarbage
+slot 154 index 154 flags 0x4000000 name DevKill
+slot 155 index 155 flags 0x4000000 name DevReplace
+slot 156 index 156 flags 0x4000000 name DevMusic
+slot 157 index 157 flags 0x4000000 name DevSound
+slot 158 index 158 flags 0x4000000 name DevCompile
+slot 159 index 159 flags 0x4000000 name DevBind
+slot 160 index 160 flags 0x4000000 name Localization
+slot 161 index 161 flags 0x4000000 name Compatibility
+slot 162 index 162 flags 0x4000000 name NetComeGo
+slot 163 index 163 flags 0x4000000 name Title
+slot 164 index 164 flags 0x4000000 name Error
+slot 165 index 165 flags 0x4000000 name Heading
+slot 166 index 166 flags 0x4000000 name SubHeading
+slot 167 index 167 flags 0x4000000 name FriendlyError
+slot 168 index 168 flags 0x4000000 name Progress
+slot 169 index 169 flags 0x4000000 name UserPrompt
+slot 170 index 170 flags 0x4000000 name White
+slot 171 index 171 flags 0x4000000 name Black
+slot 172 index 172 flags 0x4000000 name Red
+slot 173 index 173 flags 0x4000000 name Green
+slot 174 index 174 flags 0x4000000 name Blue
+slot 175 index 175 flags 0x4000000 name Cyan
+slot 176 index 176 flags 0x4000000 name Magenta
+slot 177 index 177 flags 0x4000000 name Yellow
+slot 178 index 178 flags 0x4000000 name DefaultColor
+slot 179 index 179 flags 0x4000000 name KeyType
+slot 180 index 180 flags 0x4000000 name KeyEvent
+slot 181 index 181 flags 0x4000000 name Write
+slot 182 index 182 flags 0x4000000 name Message
+slot 183 index 183 flags 0x4000000 name InitialState
+slot 184 index 184 flags 0x4000000 name Texture
+slot 185 index 185 flags 0x4000000 name Sound
+slot 186 index 186 flags 0x4000000 name FireTexture
+slot 187 index 187 flags 0x4000000 name IceTexture
+slot 188 index 188 flags 0x4000000 name WaterTexture
+slot 189 index 189 flags 0x4000000 name WaveTexture
+slot 190 index 190 flags 0x4000000 name WetTexture
+slot 191 index 191 flags 0x4000000 name Main
+slot 192 index 192 flags 0x4000000 name NotifyLevelChange
+slot 193 index 193 flags 0x4000000 name VideoChange
+slot 194 index 194 flags 0x4000000 name SendText
+slot 195 index 195 flags 0x4000000 name SendBinary
+slot 196 index 196 flags 0x4000000 name ConnectFailure
+slot 197 index 197 flags 0x4000000 name Spawned
+slot 198 index 198 flags 0x4000000 name Destroyed
+slot 199 index 199 flags 0x4000000 name GainedChild
+slot 200 index 200 flags 0x4000000 name LostChild
+slot 201 index 201 flags 0x4000000 name Probe4
+slot 202 index 202 flags 0x4000000 name Probe5
+slot 203 index 203 flags 0x4000000 name Trigger
+slot 204 index 204 flags 0x4000000 name UnTrigger
+slot 205 index 205 flags 0x4000000 name Timer
+slot 206 index 206 flags 0x4000000 name HitWall
+slot 207 index 207 flags 0x4000000 name Falling
+slot 208 index 208 flags 0x4000000 name Landed
+slot 209 index 209 flags 0x4000000 name ZoneChange
+slot 210 index 210 flags 0x4000000 name Touch
+slot 211 index 211 flags 0x4000000 name UnTouch
+slot 212 index 212 flags 0x4000000 name Bump
+slot 213 index 213 flags 0x4000000 name BeginState
+slot 214 index 214 flags 0x4000000 name EndState
+slot 215 index 215 flags 0x4000000 name BaseChange
+slot 216 index 216 flags 0x4000000 name Attach
+slot 217 index 217 flags 0x4000000 name Detach
+slot 218 index 218 flags 0x4000000 name ActorEntered
+slot 219 index 219 flags 0x4000000 name ActorLeaving
+slot 220 index 220 flags 0x4000000 name KillCredit
+slot 221 index 221 flags 0x4000000 name AnimEnd
+slot 222 index 222 flags 0x4000000 name EndedRotation
+slot 223 index 223 flags 0x4000000 name InterpolateEnd
+slot 224 index 224 flags 0x4000000 name EncroachingOn
+slot 225 index 225 flags 0x4000000 name EncroachedBy
+slot 226 index 226 flags 0x4000000 name FootZoneChange
+slot 227 index 227 flags 0x4000000 name HeadZoneChange
+slot 228 index 228 flags 0x4000000 name PainTimer
+slot 229 index 229 flags 0x4000000 name SpeechTimer
+slot 230 index 230 flags 0x4000000 name MayFall
+slot 231 index 231 flags 0x4000000 name Probe34
+slot 232 index 232 flags 0x4000000 name Die
+slot 233 index 233 flags 0x4000000 name Tick
+slot 234 index 234 flags 0x4000000 name PlayerTick
+slot 235 index 235 flags 0x4000000 name Expired
+slot 236 index 236 flags 0x4000000 name Probe39
+slot 237 index 237 flags 0x4000000 name SeePlayer
+slot 238 index 238 flags 0x4000000 name EnemyNotVisible
+slot 239 index 239 flags 0x4000000 name HearNoise
+slot 240 index 240 flags 0x4000000 name UpdateEyeHeight
+slot 241 index 241 flags 0x4000000 name SeeMonster
+slot 242 index 242 flags 0x4000000 name SeeFriend
+slot 243 index 243 flags 0x4000000 name SpecialHandling
+slot 244 index 244 flags 0x4000000 name BotDesireability
+slot 245 index 245 flags 0x4000000 name Probe48
+slot 246 index 246 flags 0x4000000 name Probe49
+slot 247 index 247 flags 0x4000000 name Probe50
+slot 248 index 248 flags 0x4000000 name Probe51
+slot 249 index 249 flags 0x4000000 name Probe52
+slot 250 index 250 flags 0x4000000 name Probe53
+slot 251 index 251 flags 0x4000000 name Probe54
+slot 252 index 252 flags 0x4000000 name Probe55
+slot 253 index 253 flags 0x4000000 name Probe56
+slot 254 index 254 flags 0x4000000 name Probe57
+slot 255 index 255 flags 0x4000000 name Probe58
+slot 256 index 256 flags 0x4000000 name Probe59
+slot 257 index 257 flags 0x4000000 name Probe60
+slot 258 index 258 flags 0x4000000 name Probe61
+slot 259 index 259 flags 0x4000000 name Probe62
+slot 260 index 260 flags 0x4000000 name All

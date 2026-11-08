@@ -1,6 +1,6 @@
 # Harry Potter and the Chamber of Secrets
 
-Play the 2002 game with a modern launcher on macOS, Windows, Linux, and Raspberry Pi. A browser build is also available for compatible browsers.
+Play the 2002 game with a modern launcher on macOS, Linux, and Raspberry Pi. A browser build is also available for compatible browsers.
 
 **You need your own copy of the original game.** This project does not include the game's maps, sounds, textures, or other copyrighted game data. The first time you launch, the game asks you to import your installed game folder. Nothing is installed from the original CD or installer.
 
@@ -18,17 +18,6 @@ The app also installs through Homebrew:
 brew tap cefege/hp2 https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc
 brew install --cask cefege/hp2/harry-potter-2
 ```
-
-## Windows 10/11 (64-bit)
-
-The published `v0.1.0` release currently has the macOS download only. The Windows ZIP will be added to the next release. After it appears on [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest):
-
-1. Download the **Windows x64 ZIP** and choose **Extract All**. Keep all extracted files together.
-2. Double-click **HarryPotter2.exe**.
-3. Import your installed game folder from **Game Data → Import retail game…**, or choose **Import retail archive…** for a supported archive.
-4. Choose **New Game** or **Continue**.
-
-This is a portable app; there is no installer. Your game data and saves are kept separately under your Windows user profile. The ZIP contains the runtime files it needs, but not the original game data.
 
 ## Linux
 

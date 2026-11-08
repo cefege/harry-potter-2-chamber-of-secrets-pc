@@ -1,21 +1,20 @@
-//! Port of the pure-math part of `Render/Src/UnSoftLn.cpp`: `SolveQuadratic`,
-//! `URender::Project`, `URender::Deproject`.
+//! Live projection and quadratic policy from `Render/Src/UnSoftLn.cpp`.
 //!
-//! Float fidelity: the reference build is clang with `-ffp-contract=on`, so
-//! every `a*b + c` / `a*b - c` the C++ writes as a single expression is fused
-//! into one `fma` (the LHS multiply is the fused one). Each such site is
-//! marked with a `// contract:` comment and uses `f32::mul_add` in the same
-//! operand order.
+//! Native frame reads and output stores are deliberately interleaved: outputs
+//! may alias each other, the input vector, or fields read by a later service.
+//! Only copied arithmetic locals survive callbacks; native owners stay raw.
 
+use crate::softln_services::Native;
 pub use hp2_abi::{FCoords, FVector};
+use hp2_core::math::{vector_sub, vector_transform};
 
 /// `ERendMap` values (`Engine/Inc/UnCamera.h`) handled by Project/Deproject.
 pub const REN_ORTH_XY: i32 = 13;
 pub const REN_ORTH_XZ: i32 = 14;
 pub const REN_ORTH_YZ: i32 = 15;
 
-/// The `FSceneNode` fields `Project`/`Deproject` read, plus the viewport's
-/// `RendMap` (`Frame->Viewport->Actor->RendMap`), passed by value.
+/// Copied frame values for native-independent scene visibility calculations.
+/// Both this value API and live SDK access use the same ordered policy below.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScreenFrame {
     pub rend_map: i32,
@@ -23,44 +22,9 @@ pub struct ScreenFrame {
     pub zoom: f32,
     pub fx2: f32,
     pub fy2: f32,
-    /// `Frame->Proj.Z`.
     pub proj_z: f32,
 }
 
-impl ScreenFrame {
-    /// Builds the frame from `FCoords` flattened to 12 floats (Origin, XAxis,
-    /// YAxis, ZAxis; each X, Y, Z), the layout the FFI passes across.
-    pub fn from_flat(
-        rend_map: i32,
-        c: &[f32; 12],
-        zoom: f32,
-        fx2: f32,
-        fy2: f32,
-        proj_z: f32,
-    ) -> Self {
-        let v = |i: usize| FVector {
-            x: c[i],
-            y: c[i + 1],
-            z: c[i + 2],
-        };
-        Self {
-            rend_map,
-            coords: FCoords {
-                origin: v(0),
-                x_axis: v(3),
-                y_axis: v(6),
-                z_axis: v(9),
-            },
-            zoom,
-            fx2,
-            fy2,
-            proj_z,
-        }
-    }
-}
-
-/// Outputs of `URender::Project`: the `UBOOL` return, `ScreenX`, `ScreenY`,
-/// and `*Scale` (always written here; the C++ writes it only when non-null).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Projection {
     pub visible: bool,
@@ -69,111 +33,232 @@ pub struct Projection {
     pub scale: f32,
 }
 
-/// `FVector::operator|` (active, non-PS2 branch): `X*V.X + Y*V.Y + Z*V.Z`.
-/// Contraction (`fadd(fadd(mul,mul),mul)`, LHS-first fusion):
-/// `fma(Z,V.Z, fma(X,V.X, Y*V.Y))`.
-fn dot(a: FVector, b: FVector) -> f32 {
-    // contract: fma(Z,V.Z, fma(X,V.X, Y*V.Y))
-    a.z.mul_add(b.z, a.x.mul_add(b.x, a.y * b.y))
+trait FrameAccess {
+    type Error;
+    fn rend_map(&self) -> Result<i32, Self::Error>;
+    fn coords(&self) -> Result<FCoords, Self::Error>;
+    fn zoom(&self) -> Result<f32, Self::Error>;
+    fn fx2(&self) -> Result<f32, Self::Error>;
+    fn fy2(&self) -> Result<f32, Self::Error>;
+    fn proj_z(&self) -> Result<f32, Self::Error>;
 }
 
-/// `FVector::TransformVectorBy` (active branch): dot with each axis.
-fn transform_vector_by(v: FVector, coords: &FCoords) -> FVector {
-    FVector {
-        x: dot(v, coords.x_axis),
-        y: dot(v, coords.y_axis),
-        z: dot(v, coords.z_axis),
+impl FrameAccess for Native {
+    type Error = ();
+    fn rend_map(&self) -> Result<i32, ()> {
+        Native::rend_map(self)
+    }
+    fn coords(&self) -> Result<FCoords, ()> {
+        Native::coords(self)
+    }
+    fn zoom(&self) -> Result<f32, ()> {
+        Native::zoom(self)
+    }
+    fn fx2(&self) -> Result<f32, ()> {
+        Native::fx2(self)
+    }
+    fn fy2(&self) -> Result<f32, ()> {
+        Native::fy2(self)
+    }
+    fn proj_z(&self) -> Result<f32, ()> {
+        Native::proj_z(self)
     }
 }
 
-fn sub(a: FVector, b: FVector) -> FVector {
-    FVector {
-        x: a.x - b.x,
-        y: a.y - b.y,
-        z: a.z - b.z,
+impl FrameAccess for ScreenFrame {
+    type Error = core::convert::Infallible;
+    fn rend_map(&self) -> Result<i32, Self::Error> {
+        Ok(self.rend_map)
     }
+    fn coords(&self) -> Result<FCoords, Self::Error> {
+        Ok(self.coords)
+    }
+    fn zoom(&self) -> Result<f32, Self::Error> {
+        Ok(self.zoom)
+    }
+    fn fx2(&self) -> Result<f32, Self::Error> {
+        Ok(self.fx2)
+    }
+    fn fy2(&self) -> Result<f32, Self::Error> {
+        Ok(self.fy2)
+    }
+    fn proj_z(&self) -> Result<f32, Self::Error> {
+        Ok(self.proj_z)
+    }
+}
+
+/// Projects copied values without any native services or live aliases.
+pub fn project(frame: &ScreenFrame, v: FVector) -> Projection {
+    let v = [v.x, v.y, v.z];
+    let mut output = Projection {
+        visible: false,
+        screen_x: 0.0,
+        screen_y: 0.0,
+        scale: 0.0,
+    };
+    let visible = unsafe {
+        project_ordered(
+            frame,
+            v.as_ptr(),
+            &raw mut output.screen_x,
+            &raw mut output.screen_y,
+            &raw mut output.scale,
+        )
+    }
+    .unwrap_or_else(|never| match never {});
+    output.visible = visible != 0;
+    output
+}
+
+/// Deprojects copied values through the same policy as live SDK access.
+pub fn deproject(frame: &ScreenFrame, screen_x: i32, screen_y: i32) -> (bool, FVector) {
+    let mut v = [0.0; 3];
+    let result = unsafe { deproject_ordered(frame, screen_x, screen_y, v.as_mut_ptr()) }
+        .unwrap_or_else(|never| match never {});
+    (
+        result != 0,
+        FVector {
+            x: v[0],
+            y: v[1],
+            z: v[2],
+        },
+    )
 }
 
 /// `URender::Project(Frame, V, ScreenX, ScreenY, Scale)`.
-pub fn project(frame: &ScreenFrame, v: FVector) -> Projection {
-    let temp = sub(v, frame.coords.origin);
-    let zoom = frame.zoom;
-    match frame.rend_map {
-        REN_ORTH_XY => Projection {
-            visible: true,
-            screen_x: temp.x / zoom + frame.fx2,
-            screen_y: temp.y / zoom + frame.fy2,
-            scale: 1.0 / zoom,
-        },
-        REN_ORTH_XZ => Projection {
-            visible: true,
-            screen_x: temp.x / zoom + frame.fx2,
-            screen_y: -temp.z / zoom + frame.fy2,
-            scale: 1.0 / zoom,
-        },
-        REN_ORTH_YZ => Projection {
-            visible: true,
-            screen_x: temp.y / zoom + frame.fx2,
-            screen_y: -temp.z / zoom + frame.fy2,
-            scale: 1.0 / zoom,
-        },
-        _ => {
-            let temp = transform_vector_by(temp, &frame.coords);
-            let mut z = temp.z;
-            if z.abs() < 0.01 {
-                z += 0.02;
-            }
-            let rz = frame.proj_z / z;
-            // contract: Temp.X * RZ + FX2
-            let screen_x = temp.x.mul_add(rz, frame.fx2);
-            // contract: Temp.Y * RZ + FY2
-            let screen_y = temp.y.mul_add(rz, frame.fy2);
-            Projection {
-                visible: z > 1.0,
-                screen_x,
-                screen_y,
-                scale: rz,
-            }
-        }
-    }
+///
+/// # Safety
+/// `v` must point to three readable floats, and the screen outputs must be
+/// writable. `scale` may be null. All pointers may alias native frame fields
+/// and each other, and must remain valid through every service callback.
+pub unsafe fn project_live(
+    native: &Native,
+    v: *const f32,
+    screen_x: *mut f32,
+    screen_y: *mut f32,
+    scale: *mut f32,
+) -> Result<i32, ()> {
+    unsafe { project_ordered(native, v, screen_x, screen_y, scale) }
 }
 
-/// `URender::Deproject(Frame, ScreenX, ScreenY, V)`. Returns the `UBOOL`
-/// result and the written `V` (the C++ writes `V = Origin` in the default
-/// branch).
-pub fn deproject(frame: &ScreenFrame, screen_x: i32, screen_y: i32) -> (bool, FVector) {
-    let origin = frame.coords.origin;
-    let sx = screen_x as f32 - frame.fx2;
-    let sy = screen_y as f32 - frame.fy2;
-    let zoom = frame.zoom;
-    match frame.rend_map {
-        REN_ORTH_XY => (
-            true,
-            FVector {
-                // contract: +SX * Zoom + Origin.X
-                x: sx.mul_add(zoom, origin.x),
-                y: sy.mul_add(zoom, origin.y),
-                z: 0.0,
-            },
-        ),
-        REN_ORTH_XZ => (
-            true,
-            FVector {
-                x: sx.mul_add(zoom, origin.x),
-                y: 0.0,
-                // contract: -SY * Zoom + Origin.Z
-                z: (-sy).mul_add(zoom, origin.z),
-            },
-        ),
-        REN_ORTH_YZ => (
-            true,
-            FVector {
-                x: 0.0,
-                y: sx.mul_add(zoom, origin.y),
-                z: (-sy).mul_add(zoom, origin.z),
-            },
-        ),
-        _ => (false, origin),
+unsafe fn project_ordered<F: FrameAccess>(
+    native: &F,
+    v: *const f32,
+    screen_x: *mut f32,
+    screen_y: *mut f32,
+    scale: *mut f32,
+) -> Result<i32, F::Error> {
+    let origin = native.coords()?.origin;
+    let v = unsafe {
+        FVector {
+            x: v.read(),
+            y: v.add(1).read(),
+            z: v.add(2).read(),
+        }
+    };
+    let temp = vector_sub(v, origin);
+
+    // The source tests RendMap separately in each arm, rather than switching
+    // on a retained frame snapshot.
+    let ortho = if native.rend_map()? == REN_ORTH_XY {
+        Some((temp.x, temp.y))
+    } else if native.rend_map()? == REN_ORTH_XZ {
+        Some((temp.x, -temp.z))
+    } else if native.rend_map()? == REN_ORTH_YZ {
+        Some((temp.y, -temp.z))
+    } else {
+        None
+    };
+    if let Some((x, y)) = ortho {
+        let x = x / native.zoom()? + native.fx2()?;
+        unsafe { screen_x.write(x) };
+        let y = y / native.zoom()? + native.fy2()?;
+        unsafe { screen_y.write(y) };
+        if !scale.is_null() {
+            let value = 1.0_f32 / native.zoom()?;
+            unsafe { scale.write(value) };
+        }
+        return Ok(1);
+    }
+
+    let temp = vector_transform(temp, native.coords()?);
+    let mut z = temp.z;
+    if z.abs() < 0.01_f32 {
+        z += 0.02_f32;
+    }
+    let rz = native.proj_z()? / z;
+    // Match native contraction, but never read FY2 before publishing ScreenX.
+    let x = temp.x.mul_add(rz, native.fx2()?);
+    unsafe { screen_x.write(x) };
+    let y = temp.y.mul_add(rz, native.fy2()?);
+    unsafe { screen_y.write(y) };
+    if !scale.is_null() {
+        unsafe { scale.write(rz) };
+    }
+    Ok(i32::from(z > 1.0_f32))
+}
+
+/// `URender::Deproject(Frame, ScreenX, ScreenY, V)`.
+///
+/// # Safety
+/// `v` must point to three writable floats and remain valid through every
+/// service callback. It may alias native frame fields. No exclusive borrow
+/// of the output or a native owner is retained across a callback.
+pub unsafe fn deproject_live(
+    native: &Native,
+    screen_x: i32,
+    screen_y: i32,
+    v: *mut f32,
+) -> Result<i32, ()> {
+    unsafe { deproject_ordered(native, screen_x, screen_y, v) }
+}
+
+unsafe fn deproject_ordered<F: FrameAccess>(
+    native: &F,
+    screen_x: i32,
+    screen_y: i32,
+    v: *mut f32,
+) -> Result<i32, F::Error> {
+    let origin = native.coords()?.origin;
+    let sx = screen_x as f32 - native.fx2()?;
+    let sy = screen_y as f32 - native.fy2()?;
+    match native.rend_map()? {
+        REN_ORTH_XY => {
+            let x = sx.mul_add(native.zoom()?, origin.x);
+            unsafe { v.write(x) };
+            let y = sy.mul_add(native.zoom()?, origin.y);
+            unsafe {
+                v.add(1).write(y);
+                v.add(2).write(0.0);
+            }
+            Ok(1)
+        }
+        REN_ORTH_XZ => {
+            let x = sx.mul_add(native.zoom()?, origin.x);
+            unsafe {
+                v.write(x);
+                v.add(1).write(0.0);
+            }
+            let z = (-sy).mul_add(native.zoom()?, origin.z);
+            unsafe { v.add(2).write(z) };
+            Ok(1)
+        }
+        REN_ORTH_YZ => {
+            unsafe { v.write(0.0) };
+            let y = sx.mul_add(native.zoom()?, origin.y);
+            unsafe { v.add(1).write(y) };
+            let z = (-sy).mul_add(native.zoom()?, origin.z);
+            unsafe { v.add(2).write(z) };
+            Ok(1)
+        }
+        _ => {
+            unsafe {
+                v.write(origin.x);
+                v.add(1).write(origin.y);
+                v.add(2).write(origin.z);
+            }
+            Ok(0)
+        }
     }
 }
 

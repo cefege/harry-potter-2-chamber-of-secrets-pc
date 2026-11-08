@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "third_party_manifest": "ThirdParty/sources.json",
+    "cargo_lock": "Cargo.lock"
+  },
+  "pinned_source_roots": [
+    {"root": "_deps/hp2_sdl2-src", "source": "SDL2"},
+    {"root": "_deps/hp2_openal_soft-src", "source": "OpenAL Soft"},
+    {"root": "_deps/hp2_ogg-src", "source": "libogg"},
+    {"root": "_deps/hp2_vorbis-src", "source": "libvorbis"},
+    {"root": "_deps/hp2_squish-src", "source": "libSquish"},
+    {"root": "_deps/hp2_zlib-src", "source": "zlib"},
+    {"root": "_deps/hp2_bzip2-src", "source": "bzip2"},
+    {"root": "_deps/hp2_xz-src", "source": "xz"},
+    {"root": "_deps/hp2_libarchive-src", "source": "libarchive"},
+    {"root": "_deps/hp2_imgui-src", "source": "Dear ImGui"},
+    {"root": "_deps/hp2_nativefiledialog-src", "source": "nativefiledialog-extended"}
+  ],
+  "generated_native_headers": [
+    {
+      "target": "zlibstatic",
+      "path": "_deps/hp2_zlib-build/zconf.h",
+      "template_path": "_deps/hp2_zlib-build/zconf.h.cmakein",
+      "template_sha256": "41ccc7a70852bfab4d87766046c399dc5a63c0ab951f78b1946da5b288d52bb4",
+      "source": "zlib",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "zconf.h"
+    },
+    {
+      "target": "OpenAL",
+      "path": "_deps/hp2_openal_soft-build/config.h",
+      "template_path": "_deps/hp2_openal_soft-src/config.h.in",
+      "source": "OpenAL Soft",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "config.h.in"
+    },
+    {
+      "target": "OpenAL",
+      "path": "_deps/hp2_openal_soft-build/config_simd.h",
+      "template_path": "_deps/hp2_openal_soft-src/config_simd.h.in",
+      "source": "OpenAL Soft",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "config_simd.h.in"
+    },
+    {
+      "target": "OpenAL",
+      "path": "_deps/hp2_openal_soft-build/config_backends.h",
+      "template_path": "_deps/hp2_openal_soft-src/config_backends.h.in",
+      "source": "OpenAL Soft",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "config_backends.h.in"
+    },
+    {
+      "target": "OpenAL",
+      "path": "_deps/hp2_openal_soft-build/version.h",
+      "template_path": "_deps/hp2_openal_soft-src/version.h.in",
+      "source": "OpenAL Soft",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "version.h.in"
+    },
+    {
+      "target": "OpenAL",
+      "path": "_deps/hp2_openal_soft-build/default_hrtf.hpp",
+      "template_path": "_deps/hp2_openal_soft-src/cmake/bin2h.script.cmake",
+      "source": "OpenAL Soft",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "hrtf/Default HRTF.mhr"
+    },
+    {
+      "target": "archive_static",
+      "path": "_deps/hp2_libarchive-build/config.h",
+      "template_path": "_deps/hp2_libarchive-src/build/cmake/config.h.in",
+      "source": "libarchive",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "build/cmake/config.h.in"
+    },
+    {
+      "target": "SDL2-static",
+      "path_prefix": "_deps/hp2_sdl2-build/include/SDL2",
+      "input_prefix": "include",
+      "mode": "copy",
+      "source": "SDL2",
+      "producer_cmake": "CMakeLists.txt"
+    },
+    {
+      "target": "SDL2-static",
+      "path": "_deps/hp2_sdl2-build/include-config-release/SDL2/SDL_config.h",
+      "template_path": "_deps/hp2_sdl2-src/include/SDL_config.h.cmake",
+      "source": "SDL2",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "include/SDL_config.h.cmake"
+    },
+    {
+      "target": "SDL2-static",
+      "path": "_deps/hp2_sdl2-build/include/SDL2/SDL_revision.h",
+      "template_path": "_deps/hp2_sdl2-src/include/SDL_revision.h.cmake",
+      "source": "SDL2",
+      "producer_cmake": "CMakeLists.txt",
+      "input": "include/SDL_revision.h.cmake"
+    }
+  ],
+  "cargo_registry_root": "${CARGO_HOME}/registry/src",
+  "sdk_roots": []
+}

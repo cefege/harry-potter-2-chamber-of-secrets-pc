@@ -14,12 +14,14 @@
 //! * `water`: water simulation, drops, water paint.
 //! * `wet`: wet-texture bump mapping.
 //! * `ice`: ice texture blit and panning.
+//! * `lifecycle`: complete fractal UObject lifecycle, source locking and backing ownership policy.
 //! * `wave`: wave bump mapping.
 
 pub mod abi;
 pub mod fire;
 pub mod globals;
 pub mod ice;
+pub mod lifecycle;
 pub mod palette;
 pub mod sparks;
 pub mod tables;

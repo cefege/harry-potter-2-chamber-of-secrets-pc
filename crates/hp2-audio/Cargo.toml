@@ -7,3 +7,16 @@ publish.workspace = true
 
 [lib]
 name = "hp2_audio"
+
+[dependencies]
+hp2-core.workspace = true
+hp2-codecs.workspace = true
+hp2-ffi-support.workspace = true
+
+[features]
+# Links against the pinned OpenAL Soft dylib (built by CMake's FetchContent)
+# for direct al*/alc* FFI calls. Off by default so cargo build/test work
+# standalone with no OpenAL binary to find -- only CMake's build enables
+# this feature. Mirrors crates/hp2-platform's `sdl` feature; see that
+# crate's src/clipboard.rs doc comment for the full reasoning.
+openal = []

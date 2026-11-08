@@ -8,6 +8,10 @@ publish.workspace = true
 [lib]
 name = "hp2_wgpu"
 
+[features]
+default = []
+sdl = []
+
 [dependencies]
 hp2-abi.workspace = true
 wgpu.workspace = true

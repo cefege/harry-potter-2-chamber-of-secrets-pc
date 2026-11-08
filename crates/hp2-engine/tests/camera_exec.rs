@@ -12,7 +12,9 @@ use std::ffi::c_void;
 use std::mem::size_of;
 use std::sync::OnceLock;
 
-use hp2_abi::engine::generated::{APlayerPawn, UViewport};
+use hp2_abi::engine::generated::{
+    APlayerPawn, TArrayRaw, ULevel, UModel, UNetConnection, UNetDriver, URenderDevice, UViewport,
+};
 use hp2_abi::{FColor, FPlane};
 use hp2_engine::camera::CameraServices;
 use hp2_engine::camera_exec::{exec, is_wire, lock, read_input, render_dev_exec, set_drag, unlock};
@@ -33,9 +35,7 @@ const EXPECTED_FAMILIES: [(&str, usize); 6] = [
 static SENT: [u8; 96] = [0; 96];
 const AR_OFF: usize = 0;
 const CONN_OFF: usize = 16;
-const DRIVER_OFF: usize = 32;
 const INPUT_OFF: usize = 48;
-const RD_OFF: usize = 64;
 const HITBUF_OFF: usize = 80;
 
 /// `appUserDir()` as the harness returns it (`UserDir\`, trailing separator included).
@@ -52,10 +52,6 @@ struct World {
     lcg: u32,
     size_x: i32,
     size_y: i32,
-    rd: bool,
-    detail: i32,
-    nodes: i32,
-    conn: i64,
     exist: i64,
     in_ret: i32,
     con_ret: i32,
@@ -463,27 +459,6 @@ unsafe extern "C" fn viewport_player_exec(
     }
 }
 
-/// `Actor->GetLevel()->NetDriver`: present for `conn >= 1`.
-unsafe extern "C" fn viewport_net_driver(_viewport: *mut c_void) -> *mut c_void {
-    if WORLD.with(|w| w.borrow().conn) >= 1 {
-        sentinel(DRIVER_OFF)
-    } else {
-        std::ptr::null_mut()
-    }
-}
-
-unsafe extern "C" fn net_driver_server_connection(_driver: *mut c_void) -> *mut c_void {
-    if WORLD.with(|w| w.borrow().conn) == 2 {
-        sentinel(CONN_OFF)
-    } else {
-        std::ptr::null_mut()
-    }
-}
-
-unsafe extern "C" fn viewport_model_node_count(_viewport: *mut c_void) -> i32 {
-    WORLD.with(|w| w.borrow().nodes)
-}
-
 unsafe extern "C" fn viewport_snap_buff_empty(viewport: *mut c_void) {
     unsafe {
         (*(viewport as *mut UViewport)).snap_buff.num = 0;
@@ -535,7 +510,7 @@ unsafe extern "C" fn render_dev_exec_fake(
     unsafe {
         let svc = SERVICES.with(|c| c.get());
         assert!(!svc.is_null(), "services pointer is set before replay");
-        render_dev_exec(&*svc, rd, cmd, ar)
+        render_dev_exec(&*svc, rd, cmd, ar).expect("checked replay callback")
     }
 }
 
@@ -585,19 +560,14 @@ unsafe extern "C" fn render_dev_unlock(_rd: *mut c_void, blit: i32) {
     emit(format!("  RDUNLOCK blit={blit}"));
 }
 
-unsafe extern "C" fn render_dev_detail_textures(_rd: *mut c_void) -> i32 {
-    WORLD.with(|w| w.borrow().detail)
-}
-
 /// `DetailTextures ^= 1; SaveConfig();`
-unsafe extern "C" fn render_dev_toggle_detail_textures(_rd: *mut c_void) {
-    WORLD.with(|w| {
-        let mut w = w.borrow_mut();
-        w.detail ^= 1;
-    });
+unsafe extern "C" fn render_dev_toggle_detail_textures(rd: *mut c_void) {
+    unsafe {
+        let r = &mut *rd.cast::<URenderDevice>();
+        r.set_detail_textures(!r.detail_textures());
+    }
     emit("  SAVECONFIG flags=16384".to_string());
 }
-
 fn services() -> CameraServices {
     const WORDS: usize = size_of::<CameraServices>() / size_of::<usize>();
     let filler = unexpected_service as unsafe extern "C" fn() as usize;
@@ -605,45 +575,45 @@ fn services() -> CameraServices {
     // SAFETY: every field of `CameraServices` is a function pointer, so the table has the
     // struct's exact layout. Unused entries point at `unexpected_service`.
     let mut svc: CameraServices = unsafe { std::mem::transmute(table) };
-    svc.parse_command = parse_command;
-    svc.parse_token = parse_token;
-    svc.parse_int = parse_int;
-    svc.app_atoi = app_atoi;
-    svc.app_user_dir = app_user_dir;
-    svc.file_size = file_size;
-    svc.create_file_writer = create_file_writer;
-    svc.create_slot_file_writer = create_slot_file_writer;
-    svc.create_user_dir_file_writer = create_user_dir_file_writer;
-    svc.archive_serialize = archive_serialize;
-    svc.archive_delete = archive_delete;
-    svc.log_format = log_format;
-    svc.log_str = log_str;
-    svc.log_int = log_int;
-    svc.connection_logf_format = connection_logf_format;
-    svc.is_running = is_running;
-    svc.viewport_stamp_current_time = viewport_stamp_current_time;
-    svc.viewport_show_all_actors = viewport_show_all_actors;
-    svc.viewport_update_input = viewport_update_input;
-    svc.viewport_script_console_exec = viewport_script_console_exec;
-    svc.viewport_player_exec = viewport_player_exec;
-    svc.viewport_net_driver = viewport_net_driver;
-    svc.net_driver_server_connection = net_driver_server_connection;
-    svc.viewport_model_node_count = viewport_model_node_count;
-    svc.viewport_snap_buff_empty = viewport_snap_buff_empty;
-    svc.viewport_snap_buff_add = viewport_snap_buff_add;
-    svc.input_exec = input_exec;
-    svc.input_read_input = input_read_input;
-    svc.render_dev_exec = render_dev_exec_fake;
-    svc.render_dev_read_pixels = render_dev_read_pixels;
-    svc.render_dev_lock = render_dev_lock;
-    svc.render_dev_unlock = render_dev_unlock;
-    svc.render_dev_detail_textures = render_dev_detail_textures;
-    svc.render_dev_toggle_detail_textures = render_dev_toggle_detail_textures;
+    svc.parse_command = checked_parse_command;
+    svc.parse_token = checked_parse_token;
+    svc.parse_int = checked_parse_int;
+    svc.app_atoi = checked_app_atoi;
+    svc.file_size = checked_file_size;
+    svc.create_file_writer = checked_create_file_writer;
+    svc.create_slot_file_writer = checked_create_slot_file_writer;
+    svc.create_user_dir_file_writer = checked_create_user_dir_file_writer;
+    svc.archive_serialize = checked_archive_serialize;
+    svc.archive_delete = checked_archive_delete;
+    svc.log_format = checked_log_format;
+    svc.log_str = checked_log_str;
+    svc.log_int = checked_log_int;
+    svc.connection_logf_format = checked_connection_logf_format;
+    svc.is_running = checked_is_running;
+    svc.viewport_stamp_current_time = checked_viewport_stamp_current_time;
+    svc.viewport_show_all_actors = checked_viewport_show_all_actors;
+    svc.viewport_update_input = checked_viewport_update_input;
+    svc.viewport_script_console_exec = checked_viewport_script_console_exec;
+    svc.viewport_player_exec = checked_viewport_player_exec;
+    svc.viewport_snap_buff_empty = checked_viewport_snap_buff_empty;
+    svc.viewport_snap_buff_add = checked_viewport_snap_buff_add;
+    svc.input_exec = checked_input_exec;
+    svc.input_read_input = checked_input_read_input;
+    svc.render_dev_exec = checked_render_dev_exec;
+    svc.render_dev_read_pixels = checked_render_dev_read_pixels;
+    svc.render_dev_lock = checked_render_dev_lock;
+    svc.render_dev_unlock = checked_render_dev_unlock;
+    svc.render_dev_toggle_detail_textures = checked_render_dev_toggle_detail_textures;
+    svc.pixel_scope = replay_pixel_scope;
+    svc.pixel_allocate = replay_pixel_allocate;
+    svc.pixel_channels = replay_pixel_channels;
+    svc.shot_path_scope = replay_shot_path;
+    svc.shot_name = replay_shot_name;
     svc
 }
 
 /// Harness `print_state`.
-fn state_line(vp: &UViewport, pawn: &APlayerPawn) -> String {
+fn state_line(vp: &UViewport, pawn: &APlayerPawn, detail: i32) -> String {
     let (show, rend, hidden): (u32, i32, usize) = if vp.actor.is_null() {
         (0, -1, 0)
     } else {
@@ -656,10 +626,6 @@ fn state_line(vp: &UViewport, pawn: &APlayerPawn) -> String {
         });
         (pawn.show_flags as u32, pawn.rend_map, hidden)
     };
-    let detail = WORLD.with(|w| {
-        let w = w.borrow();
-        if w.rd { w.detail } else { -1 }
-    });
     let n = vp.snap_buff.num;
     let fnv = if n > 0 {
         // SAFETY: the snap buffer holds `num` FColor entries backed by `World::snap`.
@@ -723,7 +689,10 @@ fn lock_call(
     } else {
         std::ptr::null_mut()
     };
-    unsafe { lock(svc, vp, &flash, &fog, &clear, flags, hit_data, hit_size) }
+    unsafe {
+        lock(svc, vp, &flash, &fog, &clear, flags, hit_data, hit_size)
+            .expect("checked replay callback")
+    }
 }
 
 /// One parsed fixture record.
@@ -813,10 +782,6 @@ fn replay(case: &Case) -> Vec<String> {
         *w.borrow_mut() = World {
             size_x,
             size_y,
-            rd,
-            detail: case.num("detail") as i32,
-            nodes: case.num("nodes") as i32,
-            conn: case.num("conn"),
             exist: case.num("exist"),
             in_ret: case.num("in") as i32,
             con_ret: case.num("con") as i32,
@@ -838,14 +803,38 @@ fn replay(case: &Case) -> Vec<String> {
     vp.size_x = size_x;
     vp.size_y = size_y;
     vp.dragging = case.num("prevdrag") as i32;
+    let mut level: ULevel = unsafe { std::mem::zeroed() };
+    let mut model: UModel = unsafe { std::mem::zeroed() };
+    let mut net_driver: UNetDriver = unsafe { std::mem::zeroed() };
+    let mut net_conn: UNetConnection = unsafe { std::mem::zeroed() };
     if actor {
+        let conn = case.num("conn");
+        unsafe {
+            std::ptr::addr_of_mut!(model.nodes)
+                .cast::<TArrayRaw>()
+                .write_unaligned(TArrayRaw {
+                    data: std::ptr::null_mut(),
+                    num: case.num("nodes") as i32,
+                    max: 0,
+                });
+        }
+        level.model = (&mut model as *mut UModel).cast();
+        if conn >= 1 {
+            if conn == 2 {
+                net_driver.server_connection = (&mut net_conn as *mut UNetConnection).cast();
+            }
+            level.base.net_driver = (&mut net_driver as *mut UNetDriver).cast();
+        }
+        pawn.base.base.x_level = (&mut level as *mut ULevel).cast();
         vp.actor = &mut pawn as *mut APlayerPawn as *mut c_void;
     }
     if case.num("in") >= 0 {
         vp.input = sentinel(INPUT_OFF);
     }
+    let mut render_dev: URenderDevice = unsafe { std::mem::zeroed() };
     if rd {
-        vp.ren_dev = sentinel(RD_OFF);
+        render_dev.set_detail_textures(case.num("detail") != 0);
+        vp.ren_dev = (&mut render_dev as *mut URenderDevice).cast();
     }
 
     let svc = services();
@@ -885,23 +874,32 @@ fn replay(case: &Case) -> Vec<String> {
                 let r = lock_call(&svc, vp_ptr, 0, false, false);
                 emit(format!("  RET {r}"));
             }
-            unsafe { unlock(&svc, vp_ptr, case.num("blit") as i32) };
+            unsafe {
+                unlock(&svc, vp_ptr, case.num("blit") as i32).expect("checked replay callback")
+            };
         }
         "setdrag" => {
-            let r = unsafe { set_drag(&svc, vp_ptr, case.num("newdrag") as i32) };
+            let r = unsafe {
+                set_drag(&svc, vp_ptr, case.num("newdrag") as i32).expect("checked replay callback")
+            };
             emit(format!("  RET {r}"));
         }
         "iswire" => {
-            let r = unsafe { is_wire(&svc, vp_ptr) };
+            let r = unsafe { is_wire(&svc, vp_ptr).expect("checked replay callback") };
             emit(format!("  RET {r}"));
         }
         "readinput" => {
             let delta = f32::from_bits(case.hex("delta"));
-            unsafe { read_input(&svc, vp_ptr, delta) };
+            unsafe { read_input(&svc, vp_ptr, delta).expect("checked replay callback") };
         }
         other => panic!("unknown camera_exec family {other}"),
     }
-    emit(state_line(&vp, &pawn));
+    let detail = if rd {
+        i32::from(render_dev.detail_textures())
+    } else {
+        -1
+    };
+    emit(state_line(&vp, &pawn, detail));
     WORLD.with(|w| std::mem::take(&mut w.borrow_mut().trace))
 }
 
@@ -928,4 +926,299 @@ fn camera_exec_fixture_replays_bit_exact() {
     assert_eq!(matched, EXPECTED_CASES, "every record matched");
     let expected: BTreeMap<&str, usize> = EXPECTED_FAMILIES.into_iter().collect();
     assert_eq!(per_family, expected, "per-family record counts");
+}
+
+// Checked adapters for the unchanged replay oracle, not native exception proof.
+unsafe extern "C" fn checked_parse_command(
+    cursor: *mut c_void,
+    token: *const c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(parse_command(cursor, token));
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_token(
+    cursor: *mut c_void,
+    buf: *mut c_void,
+    len: i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(parse_token(cursor, buf, len));
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_int(
+    stream: *const c_void,
+    matched: *const c_void,
+    value: *mut i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(parse_int(stream, matched, value));
+    }
+    0
+}
+unsafe extern "C" fn checked_app_atoi(s: *const c_void, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(app_atoi(s));
+    }
+    0
+}
+unsafe extern "C" fn checked_file_size(path: *const c_void, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(file_size(path));
+    }
+    0
+}
+unsafe extern "C" fn checked_create_file_writer(
+    path: *const c_void,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(create_file_writer(path));
+    }
+    0
+}
+unsafe extern "C" fn checked_create_slot_file_writer(
+    file: *const c_void,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(create_slot_file_writer(file));
+    }
+    0
+}
+unsafe extern "C" fn checked_create_user_dir_file_writer(
+    file: *const c_void,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(create_user_dir_file_writer(file));
+    }
+    0
+}
+unsafe extern "C" fn checked_archive_serialize(
+    ar: *mut c_void,
+    data: *const c_void,
+    count: i32,
+) -> i32 {
+    unsafe {
+        archive_serialize(ar, data, count);
+    }
+    0
+}
+unsafe extern "C" fn checked_archive_delete(ar: *mut c_void) -> i32 {
+    unsafe {
+        archive_delete(ar);
+    }
+    0
+}
+unsafe extern "C" fn checked_log_format(ar: *mut c_void, fmt: *const c_void) -> i32 {
+    unsafe {
+        log_format(ar, fmt);
+    }
+    0
+}
+unsafe extern "C" fn checked_log_str(
+    ar: *mut c_void,
+    fmt: *const c_void,
+    arg: *const c_void,
+) -> i32 {
+    unsafe {
+        log_str(ar, fmt, arg);
+    }
+    0
+}
+unsafe extern "C" fn checked_log_int(ar: *mut c_void, fmt: *const c_void, arg: i32) -> i32 {
+    unsafe {
+        log_int(ar, fmt, arg);
+    }
+    0
+}
+unsafe extern "C" fn checked_connection_logf_format(_conn: *mut c_void, fmt: *const c_void) -> i32 {
+    unsafe {
+        connection_logf_format(_conn, fmt);
+    }
+    0
+}
+unsafe extern "C" fn checked_is_running(result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(is_running());
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_stamp_current_time(_viewport: *mut c_void) -> i32 {
+    unsafe {
+        viewport_stamp_current_time(_viewport);
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_show_all_actors(_viewport: *mut c_void) -> i32 {
+    unsafe {
+        viewport_show_all_actors(_viewport);
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_update_input(_viewport: *mut c_void, flags: i32) -> i32 {
+    unsafe {
+        viewport_update_input(_viewport, flags);
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_script_console_exec(
+    _viewport: *mut c_void,
+    cmd: *const c_void,
+    _ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(viewport_script_console_exec(_viewport, cmd, _ar));
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_player_exec(
+    _viewport: *mut c_void,
+    cmd: *const c_void,
+    _ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(viewport_player_exec(_viewport, cmd, _ar));
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_snap_buff_empty(viewport: *mut c_void) -> i32 {
+    unsafe {
+        viewport_snap_buff_empty(viewport);
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_snap_buff_add(viewport: *mut c_void, count: i32) -> i32 {
+    unsafe {
+        viewport_snap_buff_add(viewport, count);
+    }
+    0
+}
+unsafe extern "C" fn checked_input_exec(
+    _input: *mut c_void,
+    cmd: *const c_void,
+    _ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(input_exec(_input, cmd, _ar));
+    }
+    0
+}
+unsafe extern "C" fn checked_input_read_input(_input: *mut c_void, delta: f32) -> i32 {
+    unsafe {
+        input_read_input(_input, delta);
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_exec(
+    rd: *mut c_void,
+    cmd: *const c_void,
+    ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(render_dev_exec_fake(rd, cmd, ar));
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_read_pixels(_rd: *mut c_void, dest: *mut c_void) -> i32 {
+    unsafe {
+        render_dev_read_pixels(_rd, dest);
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_lock(
+    _rd: *mut c_void,
+    flash_scale: *const FPlane,
+    flash_fog: *const FPlane,
+    screen_clear: *const FPlane,
+    flags: u32,
+    hit_data: *mut c_void,
+    hit_size: *mut i32,
+) -> i32 {
+    unsafe {
+        render_dev_lock(
+            _rd,
+            flash_scale,
+            flash_fog,
+            screen_clear,
+            flags,
+            hit_data,
+            hit_size,
+        );
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_unlock(_rd: *mut c_void, blit: i32) -> i32 {
+    unsafe {
+        render_dev_unlock(_rd, blit);
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_toggle_detail_textures(_rd: *mut c_void) -> i32 {
+    unsafe {
+        render_dev_toggle_detail_textures(_rd);
+    }
+    0
+}
+
+thread_local! { static PIXEL_SCOPES: std::cell::RefCell<Vec<Vec<std::mem::MaybeUninit<FColor>>>> = const { std::cell::RefCell::new(Vec::new()) }; }
+unsafe extern "C" fn replay_pixel_scope(
+    _snap: i32,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void) -> i32,
+) -> i32 {
+    PIXEL_SCOPES.with(|s| s.borrow_mut().push(Vec::new()));
+    let status = unsafe { run(context) };
+    PIXEL_SCOPES.with(|s| {
+        s.borrow_mut().pop();
+    });
+    status
+}
+unsafe extern "C" fn replay_pixel_allocate(count: i32, out: *mut *mut c_void) -> i32 {
+    PIXEL_SCOPES.with(|s| {
+        let mut s = s.borrow_mut();
+        let b = s.last_mut().unwrap();
+        b.resize_with(count as usize, std::mem::MaybeUninit::uninit);
+        unsafe {
+            out.write(b.as_mut_ptr().cast());
+        }
+    });
+    0
+}
+unsafe extern "C" fn replay_pixel_channels(pixel: *const c_void, out: *mut i32) -> i32 {
+    unsafe {
+        let p = &*pixel.cast::<FColor>();
+        out.write(i32::from(p.r));
+        out.add(1).write(i32::from(p.g));
+        out.add(2).write(i32::from(p.b));
+        out.add(3).write(i32::from(p.a));
+    }
+    0
+}
+unsafe extern "C" fn replay_shot_path(
+    file: *const c_void,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void, *const c_void) -> i32,
+) -> i32 {
+    let path = tchars(&format!("Slot\\/{}", unsafe { read_str(file) }));
+    unsafe { run(context, path.as_ptr().cast()) }
+}
+unsafe extern "C" fn replay_shot_name(index: i32, out: *mut c_void) -> i32 {
+    let name = tchars(&format!("{}Shot{index:04}.bmp", unsafe {
+        read_str(app_user_dir())
+    }));
+    unsafe {
+        std::ptr::copy_nonoverlapping(name.as_ptr(), out.cast::<TChar>(), name.len());
+    }
+    0
 }

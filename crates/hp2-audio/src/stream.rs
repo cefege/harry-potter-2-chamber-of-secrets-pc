@@ -3,12 +3,10 @@
 //! `UpdateStreamingSounds`) and the `EALStreamBufferState` enum
 //! (`ALAudioSubsystem.h`).
 //!
-//! The OpenAL and `GFileStream` calls are made by the caller through `Host`
-//! (`host.rs`) inside the closures passed to `tick`. Each closure is one C++
-//! call site, invoked in the same order the C++ loop makes them, so the
-//! sequence of side effects is identical. A `check(...)` that fires in C++
-//! becomes `TickError::Stream`; an engine call that throws becomes
-//! `TickError::Host`.
+//! OpenAL and Rust file-stream operations run through `Host` (`host.rs`)
+//! inside the closures passed to `tick`, preserving the original side-effect
+//! order. A former C++ `check(...)` becomes `TickError::Stream`; a fallible
+//! host operation becomes `TickError::Host`.
 
 use crate::host::{HostFailed, HostResult};
 
@@ -68,8 +66,7 @@ pub fn on_unqueued(state: BufferState) -> Result<BufferState, StreamError> {
     }
 }
 
-/// Transition for a chunk `GFileStream` reports as completed
-/// (`:1547-1552`).
+/// Transition for a completed file-stream chunk.
 pub fn on_completed(state: BufferState) -> Result<BufferState, StreamError> {
     match state {
         BufferState::QueuedPending => Ok(BufferState::QueuedReady),
@@ -138,12 +135,11 @@ impl From<HostFailed> for TickError {
 /// - `processed`: the value of `alGetSourcei(AL_BUFFERS_PROCESSED)`.
 /// - `unqueue()`: `alSourceUnqueueBuffers(Source, 1, &b)`, returns `b`.
 ///   Called `processed` times, in order.
-/// - `pop_completed()`: `GFileStream->PopCompletedChunk(Id-1, dest,
-///   terminal)`. Returns `Some((dest, terminal))` until it returns
-///   `None`.
+/// - `pop_completed()`: the next completed stream destination and terminal
+///   flag, or `None` when no completion is ready.
 /// - `queue(buffer_index)`: `alBufferData` followed by
 ///   `alSourceQueueBuffers` for `Buffer[buffer_index]`.
-/// - `request(dest)`: `GFileStream->RequestChunk(Id-1, dest)`.
+/// - `request(dest)`: queues a read into the destination for this stream.
 ///
 /// Stream-level `Alive`, `Reset`, and per-buffer `BufferState` are
 /// updated in place, exactly as the C++ updates them.

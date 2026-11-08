@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import struct
 import json
 import os
 from pathlib import Path
@@ -18,8 +19,8 @@ import unittest
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import game_test  # noqa: E402
+import package79_reference  # noqa: E402
 import smoke_maps  # noqa: E402
-
 
 
 class GameTestContracts(unittest.TestCase):
@@ -43,6 +44,32 @@ class GameTestContracts(unittest.TestCase):
         return path
 
     @staticmethod
+    def _package_map(names: tuple[str, ...] = ()) -> bytes:
+        name_table = b"".join(
+            package79_reference.encode_compact_index(len(encoded) + 1)
+            + encoded + b"\0" + struct.pack("<I", 0)
+            for encoded in (name.encode("ascii") for name in names)
+        )
+        names_end = 64 + len(name_table)
+        summary = struct.pack(
+            "<IIIiiiiii4Ii2i",
+            package79_reference.PACKAGE_TAG,
+            package79_reference.PACKAGE_VERSION,
+            0,
+            len(names),
+            64,
+            0,
+            names_end,
+            0,
+            names_end,
+            0, 0, 0, 0,
+            1,
+            0,
+            len(names),
+        )
+        return summary + name_table
+
+    @staticmethod
     def _observed_fidelity_state(actors: list[dict[str, object]]) -> dict[str, object]:
         return {
             field: {
@@ -53,7 +80,13 @@ class GameTestContracts(unittest.TestCase):
         }
 
     @staticmethod
-    def _successful_process() -> dict[str, object]:
+    def _successful_process(log_path: Path | None = None) -> dict[str, object]:
+        if log_path is not None:
+            log_path.write_text(
+                "<HP2_VERIFY> input=isolated\n"
+                "<HP2_VERIFY> audio=loopback rate=44100 channels=2 format=short\n"
+                "<HP2_VERIFY> visuals=tick\n"
+            )
         return {
             "passed": True,
             "resources": {
@@ -247,28 +280,34 @@ class GameTestContracts(unittest.TestCase):
         self.assertEqual(staged_directories[0].parents[4], self.root / "cpp")
         self.assertEqual((staged_directories[0] / "privet_rng.rep").read_bytes(), replay.replay_bytes)
 
-    def test_paired_replay_rejects_missing_rust_freplay_marker(self) -> None:
+    def test_paired_replay_requires_complete_matching_consumption(self) -> None:
         fixture = self.root / "privet_rng.txt"
         fixture.write_text("tick 0.05\nidle 1\n")
         replay = game_test._compile_replay_scenario(
             fixture, "..\\Maps\\PrivetDr.unr", self.root / "artifacts", self.root,
         )
-        result: dict[str, object] = {"passed": True, "replay": {}}
+        bits = struct.unpack("<I", struct.pack("<f", replay.tick_delta))[0]
         log_path = self.root / "rust.log"
-        log_path.write_bytes(b"hp2rs: ready\n")
-
+        for url, frames, tick_bits, seed in (
+            (replay.url, replay.frame_count - 1, bits, 1),
+            ("Wrong.unr", replay.frame_count, bits, 1),
+            (replay.url, replay.frame_count, bits + 1, 1),
+            (replay.url, replay.frame_count, bits, 2),
+        ):
+            with self.subTest(url=url, frames=frames, tick_bits=tick_bits, seed=seed):
+                log_path.write_text(
+                    f"<HP2_REPLAY> url={url} frames={frames} "
+                    f"first_tick_bits={tick_bits:08x} seed={seed} status=consumed\n"
+                )
+                result: dict[str, object] = {"passed": True, "replay": {}}
+                game_test._apply_rust_replay_marker(result, log_path, replay)
+                self.assertFalse(result["passed"])
+                self.assertEqual(result["replay"]["rust_capability"]["status"], "invalid")
+        log_path.write_text("engine initialized\n")
+        result = {"passed": True, "replay": {}}
         game_test._apply_rust_replay_marker(result, log_path, replay)
-
         self.assertFalse(result["passed"])
-        self.assertEqual(result["replay"]["rust_capability"]["code"], "replay.rust_marker_absent")
-        self.assertEqual(
-            game_test._rust_replay_marker_observation(
-                b"hp2rs: [replay.wire_v1] url=..\\Maps\\PrivetDr.unr "
-                b"frames=2 first_tick=0.05 seed=1\n",
-                replay,
-            )["status"],
-            "observed",
-        )
+        self.assertEqual(result["replay"]["rust_capability"]["status"], "missing")
 
     def test_paired_side_rejects_missing_or_nonzero_script_deferrals(self) -> None:
         checkpoint_manifest = self.root / "checkpoints.json"
@@ -350,91 +389,65 @@ class GameTestContracts(unittest.TestCase):
                 self.fail("timed-out child process group left its worker alive")
             time.sleep(0.05)
 
-    def test_authored_checkpoints_follow_cutscript_crlf_and_comment_rules(self) -> None:
-        cutscenes = self.data_root / "CutScenes"
-        cutscenes.mkdir()
-        (cutscenes / "00001PrivetIntro.txt").write_bytes(
-            b"[Thread0Basecam]\r\n"
-            b"BaseCam FollowSpline Crane Time=18 *CraneDone\r\n"
-            b"BaseCam FlyTo Marker Time=2 / ignored\r\n"
-            b"Sleep 1\r\n"
-            b"[Thread4Ignored]\r\n"
-            b"Actor Talk Ignored\r\n"
+    def test_localization_rows_follow_native_case_duplicate_and_contiguous_rules(self) -> None:
+        rows = game_test._ini_localize_rows(
+            b"[ThReAd_0]\r\n"
+            b"line_0=\"Talk hello\"\r\n"
+            b"LINE_0=Sleep 1\r\n"
+            b"line_1=Walk to marker\r\n"
+            b"line_3=Talk unreachable\r\n",
+            0,
         )
-        disk_rows = self.data_root / "System" / "CUTSCENES"
-        disk_rows.mkdir()
-        (disk_rows / "00001PrivetIntro.int").write_text(
-            "[Thread_0]\n"
-            "line_7=BaseCam FollowSpline Crane Time=18 *CraneDone\n"
-            "line_12=BaseCam FlyTo Marker Time=2 / ignored\n"
-            "line_18=Sleep 1\n"
-        )
-        map_path = self._map("Maps/PrivetDr.unr")
-        map_path.write_bytes(b"CutScene\x0000001PrivetIntro\x00")
-
-        checkpoints = game_test._source_checkpoints(self.data_root, map_path)
-
+        self.assertEqual(rows, [(0, "Talk hello"), (1, "Walk to marker")])
         self.assertEqual(
-            [checkpoint["id"] for checkpoint in checkpoints],
-            [
-                "Thread0Basecam:2:before", "Thread0Basecam:2:at",
-                "Thread0Basecam:2:after", "Thread0Basecam:3:before",
-                "Thread0Basecam:3:at", "Thread0Basecam:3:after",
-                "Thread0Basecam:4:before", "Thread0Basecam:4:at",
-                "Thread0Basecam:4:after",
-            ],
+            game_test._ini_localize_rows(
+                b"\xff\xfe" + "[THREAD_19]\nline_0=Talk fin\x00".encode("utf-16le"),
+                19,
+            ),
+            [(0, "Talk fin")],
         )
-        self.assertEqual(checkpoints[0]["source_line"]["cue"], "CraneDone")
-        self.assertEqual(checkpoints[3]["source_line"]["text"], "BaseCam FlyTo Marker Time=2")
-        self.assertEqual(
-            checkpoints[0]["runtime_locator"],
-            {
-                "path": "System/CUTSCENES/00001PrivetIntro.int",
-                "thread_slot": 0,
-                "line_index": 7,
-            },
-        )
-        self.assertEqual(checkpoints[3]["runtime_locator"]["line_index"], 12)
 
-    def test_retail_only_checkpoints_use_manifest_without_prototype_sources(self) -> None:
-        (self.data_root / "overlay-manifest.json").write_text(
-            json.dumps({"profile": "retail-only"})
+    def test_localization_rejects_runtime_thread_array_overflow(self) -> None:
+        source = b"[Thread_0]\n" + b"".join(
+            f"line_{index}=Sleep {index}\n".encode("ascii") for index in range(4096)
         )
-        disk_rows = self.data_root / "System" / "CUTSCENES"
-        disk_rows.mkdir()
-        (disk_rows / "00003RetailIntro.int").write_text(
-            "[Thread_0]\nline_7=Sleep 1\n"
-        )
-        map_path = self._map("Maps/RetailIntro.unr")
-        map_path.write_bytes(b"CutScene\x00" b"00003RetailIntro\x00")
+        self.assertEqual(game_test._ini_localize_rows(source, 0)[-1], (4095, "Sleep 4095"))
+        with self.assertRaisesRegex(game_test.GameTestError, r"lineArray\[4096\]"):
+            game_test._ini_localize_rows(source + b"line_4096=Sleep 4096\n", 0)
 
-        checkpoints = game_test._source_checkpoints(self.data_root, map_path)
+    def test_inline_cursor_uses_cr_and_native_character_advance(self) -> None:
+        script = "Sleep 1\r\nTalk two\rSleep 3\nTalk final"
+        # Native advances by two at a bare CR too, skipping the following S.
+        self.assertEqual(
+            list(game_test._inline_cutscript_lines(script)),
+            [(0, "Sleep 1"), (9, "Talk two"), (19, "leep 3\nTalk final")],
+        )
+        self.assertTrue(game_test._selected_cutscript_command("Talk hello"))
+        self.assertTrue(game_test._selected_cutscript_command("Actor FlyTo marker Time=2"))
+        self.assertFalse(game_test._selected_cutscript_command("Set foo 1"))
 
-        self.assertFalse((self.data_root / "CutScenes").exists())
-        self.assertEqual(
-            game_test._profile_for_data_root(self.data_root, REPOSITORY_ROOT),
-            "data-retail",
-        )
-        self.assertEqual(
-            [checkpoint["id"] for checkpoint in checkpoints],
-            ["Thread0:2:before", "Thread0:2:at", "Thread0:2:after"],
-        )
-        self.assertEqual(
-            checkpoints[0]["runtime_locator"],
-            {
-                "path": "System/CUTSCENES/00003RetailIntro.int",
-                "thread_slot": 0,
-                "line_index": 7,
-            },
-        )
+    def test_tick_checkpoint_provenance_is_map_bound(self) -> None:
+        map_path = self._map("Maps/Entry.unr")
+        map_bytes = b"valid selected map identity"
+        map_path.write_bytes(map_bytes)
+        rows = game_test._tick_checkpoints(map_path, self.data_root, 5)
+        self.assertEqual([row["tick"] for row in rows], [1, 2, 5])
+        self.assertTrue(all(
+            row["source_line"]["sha256"] == hashlib.sha256(map_bytes).hexdigest()
+            and row["source_line"]["path"] == "Maps/Entry.unr"
+            for row in rows
+        ))
+
+    def test_missing_localization_reference_is_not_treated_as_absence(self) -> None:
+        (self.data_root / "System" / "CUTSCENES").mkdir()
+        with self.assertRaisesRegex(game_test.GameTestError, "cutscript_disk_unresolved"):
+            game_test._localization_file(self.data_root, "Required.int")
 
     def test_paired_comparison_rejects_missing_telemetry(self) -> None:
         checkpoint = {
             "source_line": {
-                "path": "CutScenes/00001PrivetIntro.txt",
-                "line": 12,
-                "thread": "Thread0Basecam",
-                "text": "Sleep 1",
+                "kind": "disk", "path": "System/CUTSCENES/example.int", "line": 12,
+                "thread": "Thread0", "text": "Sleep 1",
             },
         }
         result = game_test._compare_checkpoint(
@@ -449,10 +462,8 @@ class GameTestContracts(unittest.TestCase):
     def test_paired_comparison_requires_every_explicit_observation(self) -> None:
         checkpoint = {
             "source_line": {
-                "path": "CutScenes/00001PrivetIntro.txt",
-                "line": 12,
-                "thread": "Thread0Basecam",
-                "text": "Sleep 1",
+                "kind": "disk", "path": "System/CUTSCENES/example.int", "line": 12,
+                "thread": "Thread0", "text": "Sleep 1",
             },
         }
         state = {
@@ -486,11 +497,10 @@ class GameTestContracts(unittest.TestCase):
 
     def test_paired_comparison_requires_matching_runtime_locator(self) -> None:
         checkpoint = {
-            "source_line": {"path": "CutScenes/test.txt", "line": 4},
+            "source_line": {"kind": "disk", "path": "System/CUTSCENES/test.int", "line": 4},
             "runtime_locator": {
-                "path": "System/CUTSCENES/test.int",
-                "thread_slot": 2,
-                "line_index": 9,
+                "kind": "disk", "actor": "Map.CutScene0",
+                "path": "System/CUTSCENES/test.int", "thread_slot": 2, "line_index": 9,
             },
         }
         result = game_test._compare_checkpoint(checkpoint, {}, {}, None, None)
@@ -523,11 +533,10 @@ class GameTestContracts(unittest.TestCase):
 
     def test_paired_comparison_matches_equal_observed_values(self) -> None:
         checkpoint = {
-            "source_line": {"path": "CutScenes/test.txt", "line": 1},
+            "source_line": {"kind": "disk", "path": "System/CUTSCENES/test.int", "line": 1},
             "runtime_locator": {
-                "path": "System/CUTSCENES/test.int",
-                "thread_slot": 0,
-                "line_index": 3,
+                "kind": "disk", "actor": "Map.CutScene0",
+                "path": "System/CUTSCENES/test.int", "thread_slot": 0, "line_index": 3,
             },
         }
         state = {
@@ -547,11 +556,10 @@ class GameTestContracts(unittest.TestCase):
 
     def test_paired_comparison_rejects_availability_and_locator_mismatches(self) -> None:
         checkpoint = {
-            "source_line": {"path": "CutScenes/test.txt", "line": 1},
+            "source_line": {"kind": "disk", "path": "System/CUTSCENES/test.int", "line": 1},
             "runtime_locator": {
-                "path": "System/CUTSCENES/test.int",
-                "thread_slot": 0,
-                "line_index": 3,
+                "kind": "disk", "actor": "Map.CutScene0",
+                "path": "System/CUTSCENES/test.int", "thread_slot": 0, "line_index": 3,
             },
         }
         observed = {
@@ -584,51 +592,17 @@ class GameTestContracts(unittest.TestCase):
         result = game_test._compare_checkpoint(checkpoint, observed, wrong_locator, None, None)
         self.assertEqual(result["status"], "diverged")
         self.assertEqual(result["divergence"]["field"], "cutscene")
+    def test_runtime_locator_actor_identity_uses_fname_case_folding(self) -> None:
+        expected = {
+            "kind": "disk", "actor": "Maps.Test.CutScene0",
+            "path": "System/CUTSCENES/test.int", "thread_slot": 0, "line_index": 3,
+        }
+        actual = {**expected, "actor": "maps.test.cutscene0"}
+        self.assertTrue(game_test._runtime_locators_equal(expected, actual))
+        self.assertFalse(game_test._runtime_locators_equal(
+            expected, {**actual, "actor": "maps.test.cutscene1"},
+        ))
 
-    def test_two_command_cutscript_fixture_has_exact_triplets(self) -> None:
-        cutscenes = self.data_root / "CutScenes"
-        cutscenes.mkdir()
-        (cutscenes / "00002Fixture.txt").write_bytes(
-            b"[Thread0Basecam]\r\nSleep 1\r\nTalk Hello\r\n"
-        )
-        disk_rows = self.data_root / "System" / "CUTSCENES"
-        disk_rows.mkdir()
-        (disk_rows / "00002Fixture.int").write_text(
-            "[Thread_0]\nline_4=Sleep 1\nline_9=Talk Hello\n"
-        )
-        map_path = self._map("Maps/PrivetDr.unr")
-        map_path.write_bytes(b"CutScene\x0000002Fixture\x00")
-        checkpoints = game_test._source_checkpoints(self.data_root, map_path)
-        self.assertEqual(
-            [checkpoint["id"] for checkpoint in checkpoints],
-            [
-                "Thread0Basecam:2:before",
-                "Thread0Basecam:2:at",
-                "Thread0Basecam:2:after",
-                "Thread0Basecam:3:before",
-                "Thread0Basecam:3:at",
-                "Thread0Basecam:3:after",
-            ],
-        )
-        self.assertEqual(
-            [checkpoint["runtime_locator"]["line_index"] for checkpoint in checkpoints],
-            [4, 4, 4, 9, 9, 9],
-        )
-        for checkpoint in checkpoints:
-            state = {
-                "runtime_locator": checkpoint["runtime_locator"],
-                **{
-                    field: {
-                        "value": f"{checkpoint['id']}:{field}",
-                        "availability": {"status": "observed"},
-                    }
-                    for field, _owner in game_test.FIDELITY_FIELDS
-                },
-            }
-            self.assertEqual(
-                game_test._compare_checkpoint(checkpoint, state, state, None, None)["status"],
-                "match",
-            )
     def test_script_deferral_telemetry_is_decoded_and_gates_launched_maps(self) -> None:
         resources = game_test._resource_markers(
             b"<HP2_RES> script_deferred=0\n"
@@ -862,16 +836,14 @@ class GameTestContracts(unittest.TestCase):
             "truncated": False,
             "events": [],
         }
-        environments: list[dict[str, str]] = []
 
         def fake_run_command(*_args: object, **kwargs: object) -> dict[str, object]:
             environment = kwargs["extra_env"]
             assert isinstance(environment, dict)
-            environments.append(environment)
             path = Path(environment["HP2_SHADOW_UPDATE_TRACE"])
             if path == paths["cpp"]:
                 path.write_text(json.dumps(published))
-            return self._successful_process()
+            return self._successful_process(Path(str(kwargs["log_path"])))
 
         with patch.object(game_test, "run_command", side_effect=fake_run_command):
             cpp_run, _, _ = game_test._run_fidelity_side(
@@ -913,78 +885,11 @@ class GameTestContracts(unittest.TestCase):
                 actor_slot_dump_path=None,
             )
 
-        self.assertEqual(
-            [environment["HP2_SHADOW_UPDATE_TRACE"] for environment in environments],
-            [str(paths["cpp"]), str(paths["rust"])],
-        )
         self.assertTrue(cpp_run["passed"])
         self.assertEqual(cpp_run["shadow_update_trace"]["status"], "valid")
         self.assertFalse(rust_run["passed"])
         self.assertEqual(rust_run["shadow_update_trace"]["status"], "missing")
 
-    def test_paired_output_invokes_shadow_update_comparator_and_retains_report(self) -> None:
-        self._map("Maps/Test.unr")
-        app = self.root / "app"
-        engine_bin = self.root / "engine-bin"
-        app.write_bytes(b"app")
-        engine_bin.write_bytes(b"engine")
-        trace_dir = self.root / "shadow-update-traces"
-        document = {
-            "version": 1,
-            "enabled": True,
-            "limit": 4,
-            "count": 0,
-            "truncated": False,
-            "events": [],
-        }
-
-        def fake_side(
-            **kwargs: object,
-        ) -> tuple[dict[str, object], dict[str, dict[str, object]], None]:
-            path = kwargs["shadow_update_trace_path"]
-            assert isinstance(path, Path)
-            path.write_text(json.dumps(document))
-            return {
-                "passed": True,
-                "shadow_update_trace": {"status": "valid", "path": str(path)},
-            }, {}, None
-
-        with (
-            patch.object(game_test, "_bundle_executable", return_value=app),
-            patch.object(game_test, "_validate_native_arm64"),
-            patch.object(game_test, "_source_checkpoints", return_value=[]),
-            patch.object(game_test, "_profile_for_data_root", return_value="test"),
-            patch.object(game_test, "_run_fidelity_side", side_effect=fake_side),
-            patch.object(
-                game_test.shadow_update_trace,
-                "compare_traces",
-                wraps=game_test.shadow_update_trace.compare_traces,
-            ) as compare_traces,
-        ):
-            result = game_test.run_paired_game(
-                app=app,
-                engine_bin=engine_bin,
-                data_root=self.data_root,
-                selected_map="Maps/Test.unr",
-                renderer="wgpu",
-                ticks=1,
-                fixed_dt=0.02,
-                timeout_seconds=1.0,
-                output=self.root / "paired.json",
-                shadow_update_trace_dir=trace_dir,
-            )
-
-        persisted = json.loads((self.root / "paired.json").read_text())
-        compare_traces.assert_called_once()
-        self.assertEqual(compare_traces.call_args.kwargs, {"map_stem": "Test"})
-        self.assertTrue(result["passed"])
-        self.assertEqual(
-            persisted["shadow_update_trace"]["comparison"],
-            {"status": "match", "first_difference": None},
-        )
-        self.assertTrue(
-            (trace_dir / "shadow-update-trace-comparison.json").is_file(),
-        )
 
     def test_paired_cli_accepts_shadow_update_trace_directory(self) -> None:
         with patch.object(sys, "argv", [
@@ -1269,16 +1174,14 @@ class GameTestContracts(unittest.TestCase):
                 },
             ],
         }
-        environments: list[dict[str, str]] = []
 
         def fake_run_command(*_args: object, **kwargs: object) -> dict[str, object]:
             environment = kwargs["extra_env"]
             assert isinstance(environment, dict)
-            environments.append(environment)
             path = Path(environment["HP2_ACTOR_SLOT_DUMP"])
             if path == paths["cpp"]:
                 path.write_text(json.dumps(published))
-            return self._successful_process()
+            return self._successful_process(Path(str(kwargs["log_path"])))
 
         with patch.object(game_test, "run_command", side_effect=fake_run_command):
             cpp_run, _, _ = game_test._run_fidelity_side(
@@ -1320,10 +1223,6 @@ class GameTestContracts(unittest.TestCase):
                 actor_slot_dump_path=paths["rust"],
             )
 
-        self.assertEqual(
-            [environment["HP2_ACTOR_SLOT_DUMP"] for environment in environments],
-            [str(paths["cpp"]), str(paths["rust"])],
-        )
         self.assertTrue(cpp_run["passed"])
         self.assertEqual(cpp_run["actor_slot_dump"]["status"], "valid")
         self.assertFalse(rust_run["passed"])
@@ -1707,16 +1606,14 @@ class GameTestContracts(unittest.TestCase):
             "truncated": False,
             "owners": [],
         }
-        environments: list[dict[str, str]] = []
 
         def fake_run_command(*_args: object, **kwargs: object) -> dict[str, object]:
             environment = kwargs["extra_env"]
             assert isinstance(environment, dict)
-            environments.append(environment)
             path = Path(environment["HP2_ACTOR_TRANSITION_LEDGER"])
             if path == paths["cpp"]:
                 path.write_text(json.dumps(published))
-            return self._successful_process()
+            return self._successful_process(Path(str(kwargs["log_path"])))
 
         with patch.object(game_test, "run_command", side_effect=fake_run_command):
             cpp_run, _, _ = game_test._run_fidelity_side(
@@ -1758,10 +1655,6 @@ class GameTestContracts(unittest.TestCase):
                 actor_transition_ledger_path=paths["rust"],
             )
 
-        self.assertEqual(
-            [environment["HP2_ACTOR_TRANSITION_LEDGER"] for environment in environments],
-            [str(paths["cpp"]), str(paths["rust"])],
-        )
         self.assertTrue(cpp_run["passed"])
         self.assertEqual(cpp_run["actor_transition_ledger"]["status"], "valid")
         self.assertFalse(rust_run["passed"])

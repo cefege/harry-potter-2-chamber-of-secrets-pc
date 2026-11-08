@@ -1,9 +1,9 @@
 //! `UALAudioSubsystem::Exec` command bodies.
 //!
-//! The C++ shell keeps the engine's `ParseCommand` dispatch, the `ASTAT` /
-//! `WEAPONRADIUS` / `ROLLOFF` handling (`GAudioDefaultRadius` is an engine global and
-//! `RollOff` is a UObject config property), and the `Ar` output device. Rust owns the
-//! command bodies for PAUSESOUNDS, UNPAUSESOUNDS, RESTARTSOUNDS, and PLAYINGSOUNDSTATS.
+//! [`crate::console`] owns command parsing and dispatch. The native shell retains
+//! typed UObject/global writes and the `Ar` output device; this module owns the
+//! backend bodies for PAUSESOUNDS, UNPAUSESOUNDS, RESTARTSOUNDS, and
+//! PLAYINGSOUNDSTATS.
 
 use crate::host::{Host, HostResult};
 

@@ -71,74 +71,100 @@ unsafe extern "C" fn move_actor(
     delta: *const c_void,
     rot: *const c_void,
     hit: *mut c_void,
+    out: *mut i32,
 ) -> i32 {
-    expect_kind(0);
-    assert_eq!(level as usize, LEVEL);
-    let delta = unsafe { *delta.cast::<FVector>() };
-    let rot = unsafe { *rot.cast::<FRotator>() };
-    let hit = hit.cast::<FCheckResult>();
-    let want = bits(delta);
-    for w in want {
-        assert_eq!(next_word(), w, "MoveActor delta bits");
-    }
-    assert_eq!(next_word(), rot.pitch as u32);
-    assert_eq!(next_word(), rot.yaw as u32);
-    assert_eq!(next_word(), rot.roll as u32);
-    // Test=1, IgnorePawns=1, bIgnoreBases=0, bNoFail=0 pinned by the C++ shell.
-    assert_eq!(
-        [next_word(), next_word(), next_word(), next_word()],
-        [1, 1, 0, 0]
-    );
-    let ret = next_word() as i32;
-    let time = next_f();
-    let normal = next_vec();
-    let is_goal = next_word() != 0;
-    let new_loc = next_vec();
-    let a = actor.cast::<AActor>();
-    unsafe {
-        (*a).location = new_loc;
-        (*hit).time = time;
-        (*hit).normal = normal;
-        (*hit).actor = if is_goal {
-            REPLAY.with(|r| r.borrow().goal).cast()
-        } else {
-            OTHER_ACTOR as *mut c_void
-        };
-    }
-    ret
+    let value = (|| {
+        expect_kind(0);
+        assert_eq!(level as usize, LEVEL);
+        let delta = unsafe { *delta.cast::<FVector>() };
+        let rot = unsafe { *rot.cast::<FRotator>() };
+        let hit = hit.cast::<FCheckResult>();
+        let want = bits(delta);
+        for w in want {
+            assert_eq!(next_word(), w, "MoveActor delta bits");
+        }
+        assert_eq!(next_word(), rot.pitch as u32);
+        assert_eq!(next_word(), rot.yaw as u32);
+        assert_eq!(next_word(), rot.roll as u32);
+        // Test=1, IgnorePawns=1, bIgnoreBases=0, bNoFail=0 pinned by the C++ shell.
+        assert_eq!(
+            [next_word(), next_word(), next_word(), next_word()],
+            [1, 1, 0, 0]
+        );
+        let ret = next_word() as i32;
+        let time = next_f();
+        let normal = next_vec();
+        let is_goal = next_word() != 0;
+        let new_loc = next_vec();
+        let a = actor.cast::<AActor>();
+        unsafe {
+            (*a).location = new_loc;
+            (*hit).time = time;
+            (*hit).normal = normal;
+            (*hit).actor = if is_goal {
+                REPLAY.with(|r| r.borrow().goal).cast()
+            } else {
+                OTHER_ACTOR as *mut c_void
+            };
+        }
+        ret
+    })();
+    unsafe { *out = value };
+    0
 }
 
 unsafe extern "C" fn far_move_actor(
     level: *mut c_void,
     actor: *mut c_void,
     dest: *const c_void,
+    out: *mut i32,
 ) -> i32 {
-    expect_kind(1);
-    assert_eq!(level as usize, LEVEL);
-    let dest = unsafe { *dest.cast::<FVector>() };
-    for w in bits(dest) {
-        assert_eq!(next_word(), w, "FarMoveActor dest bits");
-    }
-    // Test=1, noCheck=1 pinned by the C++ shell.
-    assert_eq!([next_word(), next_word()], [1, 1]);
-    let ret = next_word() as i32;
-    unsafe { (*actor.cast::<AActor>()).location = dest };
-    ret
+    let value = (|| {
+        expect_kind(1);
+        assert_eq!(level as usize, LEVEL);
+        let dest = unsafe { *dest.cast::<FVector>() };
+        for w in bits(dest) {
+            assert_eq!(next_word(), w, "FarMoveActor dest bits");
+        }
+        // Test=1, noCheck=1 pinned by the C++ shell.
+        assert_eq!([next_word(), next_word()], [1, 1]);
+        let ret = next_word() as i32;
+        unsafe { (*actor.cast::<AActor>()).location = dest };
+        ret
+    })();
+    unsafe { *out = value };
+    0
 }
 
-unsafe extern "C" fn find_water_line(pawn: *mut c_void, start: *const c_void, end: *mut c_void) {
-    expect_kind(2);
-    let _ = pawn;
-    let start = unsafe { *start.cast::<FVector>() };
-    let end = end.cast::<FVector>();
-    for w in bits(start) {
-        assert_eq!(next_word(), w, "findWaterLine start bits");
-    }
-    let end_in = unsafe { *end };
-    for w in bits(end_in) {
-        assert_eq!(next_word(), w, "findWaterLine end-in bits");
-    }
-    unsafe { *end = next_vec() };
+unsafe extern "C" fn find_water_line(
+    pawn: *mut c_void,
+    start: *const c_void,
+    end: *mut c_void,
+) -> i32 {
+    let value = (|| {
+        expect_kind(2);
+        let _ = pawn;
+        let start = unsafe { *start.cast::<FVector>() };
+        let end = end.cast::<FVector>();
+        for w in bits(start) {
+            assert_eq!(next_word(), w, "findWaterLine start bits");
+        }
+        let end_in = unsafe { *end };
+        for w in bits(end_in) {
+            assert_eq!(next_word(), w, "findWaterLine end-in bits");
+        }
+        unsafe { *end = next_vec() };
+    })();
+    let () = value;
+    0
+}
+
+// Fixture-only replay scope. Production owns an actual native FCheckResult stack.
+unsafe extern "C" fn with_hit(context: *mut c_void, body: hp2_engine::pawn::PawnHitBody) -> i32 {
+    let mut hit: FCheckResult = unsafe { std::mem::zeroed() };
+    hit.time = 1.0;
+    hit.item = -1;
+    unsafe { body(context, (&mut hit as *mut FCheckResult).cast()) }
 }
 
 fn services() -> Hp2PawnServices {
@@ -146,6 +172,7 @@ fn services() -> Hp2PawnServices {
         move_actor,
         far_move_actor,
         find_water_line,
+        with_hit,
     }
 }
 
@@ -221,7 +248,8 @@ fn pawn_move_fixtures_replay_bit_exact() {
                 2 => swim_move(&svc, &mut pawn, delta, goal, thr, adj),
                 _ => panic!("bad fn id {f}"),
             }
-        };
+        }
+        .expect("checked fixture callback");
         let consumed = REPLAY.with(|r| r.borrow().pos);
         assert_eq!(consumed, n, "call count mismatch in case {total}");
         assert_eq!(ret, ret_want, "return value in case {total} (fn {f})");

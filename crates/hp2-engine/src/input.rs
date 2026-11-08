@@ -11,7 +11,8 @@
 //! Engine state and Core text helpers go through [`Hp2InputServices`], filled by
 //! `Hp2InputServices.cpp`. `ParseLine`, `ParseToken`, `ParseCommand`, `Parse`,
 //! `appAtoi`, `appStrlen`, `appSprintf`, `FName`, `FString`, and the `GCache`
-//! calls are all reached through the table.
+//! calls are all reached through the checked table. Native status is propagated
+//! immediately; a successful value is read only after its output slot is written.
 //!
 //! `TCHAR` is `wchar_t` = 4 bytes on this build (`HP2_HOST_WCHAR_TCHAR`), so
 //! text buffers are `u32` units throughout.
@@ -21,7 +22,10 @@ use std::mem::size_of;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use hp2_abi::engine::generated::UInput;
+use crate::camera::{checked_unit, checked_value};
+use hp2_abi::engine::generated::{UInput, UObject, UProperty, UViewport};
+
+type Res<T> = Result<T, i32>;
 
 /// `IK_MAX` (`EngineClasses.h`): number of key codes.
 pub const IK_MAX: i32 = 255;
@@ -33,16 +37,16 @@ const NAME_NONE: i32 = 0;
 const TEXT_BUF_LEN: i32 = 256;
 
 /// `EInputAction` (`EngineClasses.h:391-397`).
-const IST_NONE: i32 = 0;
-const IST_PRESS: i32 = 1;
-const IST_HOLD: i32 = 2;
-const IST_RELEASE: i32 = 3;
-const IST_AXIS: i32 = 4;
+pub(crate) const IST_NONE: i32 = 0;
+pub(crate) const IST_PRESS: i32 = 1;
+pub(crate) const IST_HOLD: i32 = 2;
+pub(crate) const IST_RELEASE: i32 = 3;
+pub(crate) const IST_AXIS: i32 = 4;
 
 /// `CPF_Input` (`UnObjBas.h:97`).
 const CPF_INPUT: u32 = 0x0000_0004;
 
-/// `class_nth_property` kinds: `TFieldIterator<UProperty>`,
+/// Native iterator kinds: `TFieldIterator<UProperty>`,
 /// `TFieldIterator<UByteProperty>`, `TFieldIterator<UFloatProperty>`.
 const KIND_PROPERTY: i32 = 0;
 const KIND_BYTE: i32 = 1;
@@ -50,6 +54,18 @@ const KIND_FLOAT: i32 = 2;
 
 /// `static UBOOL InAlias` inside `UInput::Exec`. Process-wide, as in C++.
 static IN_ALIAS: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn in_alias() -> bool {
+    IN_ALIAS.load(Ordering::Relaxed)
+}
+
+pub(crate) fn with_alias_scope<T, E>(execute: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+    // Match native normal-return-only reset; command failures propagate to the caller.
+    IN_ALIAS.store(true, Ordering::Relaxed);
+    let value = execute()?;
+    IN_ALIAS.store(false, Ordering::Relaxed);
+    Ok(value)
+}
 
 /// Builds a NUL-terminated `TCHAR` (`u32`) array at compile time.
 const fn wide<const N: usize>(s: &str) -> [u32; N] {
@@ -80,98 +96,220 @@ macro_rules! w {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Hp2InputServices {
-    /// `UViewport::Actor`.
-    pub viewport_actor: unsafe extern "C" fn(viewport: *mut c_void) -> *mut c_void,
-    /// `UViewport::Input`.
-    pub viewport_input: unsafe extern "C" fn(viewport: *mut c_void) -> *mut c_void,
     /// `Viewport->UpdateInput(Reset)`.
-    pub viewport_update_input: unsafe extern "C" fn(viewport: *mut c_void, reset: i32),
+    pub viewport_update_input: unsafe extern "C" fn(viewport: *mut c_void, reset: i32) -> i32,
     /// `Viewport->Exec(Cmd, Ar)`; the `UBOOL` result is unused by `UnIn.cpp`.
     pub viewport_exec:
-        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const u32, ar: *mut c_void),
+        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const u32, ar: *mut c_void) -> i32,
     /// `debugf(NAME_Init, "Input system initialized for %s", Viewport->GetName())`.
-    pub log_initialized: unsafe extern "C" fn(viewport: *mut c_void),
+    pub log_initialized: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
     /// `Cast<UViewport>(Cast<APlayerPawn>(actor)->Player)`, or null.
-    pub actor_viewport: unsafe extern "C" fn(actor: *mut c_void) -> *mut c_void,
-    /// `UObject::GetClass()`.
-    pub object_class: unsafe extern "C" fn(obj: *mut c_void) -> *mut c_void,
+    pub actor_viewport: unsafe extern "C" fn(actor: *mut c_void, out: *mut *mut c_void) -> i32,
     /// `GIsRunning`. Returns `UBOOL`.
-    pub is_running: unsafe extern "C" fn() -> i32,
+    pub is_running: unsafe extern "C" fn(out: *mut i32) -> i32,
     /// `GLog`, as `FOutputDevice*`.
-    pub glog: unsafe extern "C" fn() -> *mut c_void,
+    pub glog: unsafe extern "C" fn(out: *mut *mut c_void) -> i32,
     /// `appFailAssert(expr, file, line)` for a failed `check`. The file is the
     /// `UnIn.cpp` path fixed in the adapter.
-    pub check_failed: unsafe extern "C" fn(expr: *const c_char, line: i32),
+    pub check_failed: unsafe extern "C" fn(expr: *const c_char, line: i32) -> i32,
     /// `Ar.Log(text)`.
-    pub output_log: unsafe extern "C" fn(ar: *mut c_void, text: *const u32),
+    pub output_log: unsafe extern "C" fn(ar: *mut c_void, text: *const u32) -> i32,
     /// `Ar.Logf(text)` for literal text with no arguments.
-    pub output_logf: unsafe extern "C" fn(ar: *mut c_void, text: *const u32),
+    pub output_logf: unsafe extern "C" fn(ar: *mut c_void, text: *const u32) -> i32,
     /// `ParseLine(stream, out, max)`. Returns `UBOOL`.
-    pub parse_line: unsafe extern "C" fn(stream: *mut *const u32, out: *mut u32, max: i32) -> i32,
+    pub parse_line: unsafe extern "C" fn(
+        stream: *mut *const u32,
+        out: *mut u32,
+        max: i32,
+        result_out: *mut i32,
+    ) -> i32,
     /// `ParseCommand(stream, match)`. Returns `UBOOL`.
-    pub parse_command: unsafe extern "C" fn(stream: *mut *const u32, m: *const u32) -> i32,
+    pub parse_command:
+        unsafe extern "C" fn(stream: *mut *const u32, m: *const u32, out: *mut i32) -> i32,
     /// `ParseToken(stream, out, max, use_escape)`. Returns `UBOOL`.
     pub parse_token: unsafe extern "C" fn(
         stream: *mut *const u32,
         out: *mut u32,
         max: i32,
         use_escape: i32,
+        result_out: *mut i32,
     ) -> i32,
     /// `Parse(stream, match, FLOAT& out)`. Returns `UBOOL`.
-    pub parse_float: unsafe extern "C" fn(stream: *const u32, m: *const u32, out: *mut f32) -> i32,
+    pub parse_float: unsafe extern "C" fn(
+        stream: *const u32,
+        m: *const u32,
+        out: *mut f32,
+        result_out: *mut i32,
+    ) -> i32,
     /// `appAtoi(s)`.
-    pub app_atoi: unsafe extern "C" fn(s: *const u32) -> i32,
+    pub app_atoi: unsafe extern "C" fn(s: *const u32, out: *mut i32) -> i32,
     /// `appStrlen(s)`.
-    pub app_strlen: unsafe extern "C" fn(s: *const u32) -> i32,
+    pub app_strlen: unsafe extern "C" fn(s: *const u32, out: *mut i32) -> i32,
     /// `appSprintf(dest, TEXT("IK_%s"), name)`.
-    pub app_sprintf_ik: unsafe extern "C" fn(dest: *mut u32, name: *const u32),
+    pub app_sprintf_ik: unsafe extern "C" fn(dest: *mut u32, name: *const u32) -> i32,
     /// `FName(text, FNAME_Find).GetIndex()`. Returns `NAME_None` (0) when absent.
-    pub fname_find: unsafe extern "C" fn(text: *const u32) -> i32,
+    pub fname_find: unsafe extern "C" fn(text: *const u32, out: *mut i32) -> i32,
     /// `Aliases[index].Alias.GetIndex()`.
-    pub alias_name_index: unsafe extern "C" fn(obj: *mut c_void, index: i32) -> i32,
+    pub alias_name_index: unsafe extern "C" fn(obj: *mut c_void, index: i32, out: *mut i32) -> i32,
     /// `*Aliases[index].Command`.
-    pub alias_command: unsafe extern "C" fn(obj: *mut c_void, index: i32) -> *const u32,
+    pub alias_command:
+        unsafe extern "C" fn(obj: *mut c_void, index: i32, out: *mut *const u32) -> i32,
     /// `Bindings[key].Len()`.
-    pub binding_len: unsafe extern "C" fn(obj: *mut c_void, key: i32) -> i32,
+    pub binding_len: unsafe extern "C" fn(obj: *mut c_void, key: i32, out: *mut i32) -> i32,
     /// `*Bindings[key]`.
-    pub binding_chars: unsafe extern "C" fn(obj: *mut c_void, key: i32) -> *const u32,
-    /// `FString::Printf(TEXT("%s Speed=%f"), *Bindings[key], length)` on the heap.
-    /// Released with `fstring_free`.
-    pub direct_axis_command:
-        unsafe extern "C" fn(obj: *mut c_void, key: i32, length: f32) -> *mut c_void,
-    /// `*FString` of a handle from `direct_axis_command`.
-    pub fstring_chars: unsafe extern "C" fn(handle: *mut c_void) -> *const u32,
-    /// Deletes a handle from `direct_axis_command`.
-    pub fstring_free: unsafe extern "C" fn(handle: *mut c_void),
+    pub binding_chars:
+        unsafe extern "C" fn(obj: *mut c_void, key: i32, out: *mut *const u32) -> i32,
+    /// Native FString lifetime spanning the checked Rust axis continuation.
+    pub direct_axis_scope: unsafe extern "C" fn(
+        obj: *mut c_void,
+        key: i32,
+        length: f32,
+        context: *mut c_void,
+        run: unsafe extern "C" fn(*mut c_void, *const u32) -> i32,
+    ) -> i32,
     /// `*InputKeys->Names(key)`.
-    pub key_name_chars: unsafe extern "C" fn(input_keys: *mut c_void, key: i32) -> *const u32,
+    pub key_name_chars:
+        unsafe extern "C" fn(input_keys: *mut c_void, key: i32, out: *mut *const u32) -> i32,
     /// `FName N(text, FNAME_Find); if (N != NAME_None) return InputKeys->Names.FindItem(N, *out); return 0`.
     /// `FName` has no public index constructor, so the lookup stays in the adapter. Returns `UBOOL`.
-    pub key_name_find_item:
-        unsafe extern "C" fn(input_keys: *mut c_void, text: *const u32, out: *mut i32) -> i32,
-    /// `n`-th property of `TFieldIterator<...>(klass)` for `kind`. Null past the end.
-    pub class_nth_property:
-        unsafe extern "C" fn(klass: *mut c_void, kind: i32, n: i32) -> *mut c_void,
-    /// `UProperty::PropertyFlags`.
-    pub property_flags: unsafe extern "C" fn(prop: *mut c_void) -> u32,
-    /// `UProperty::GetFName().GetIndex()`.
-    pub property_fname_index: unsafe extern "C" fn(prop: *mut c_void) -> i32,
-    /// `UProperty::Offset`.
-    pub property_offset: unsafe extern "C" fn(prop: *mut c_void) -> i32,
+    pub key_name_find_item: unsafe extern "C" fn(
+        input_keys: *mut c_void,
+        text: *const u32,
+        out: *mut i32,
+        result_out: *mut i32,
+    ) -> i32,
+    /// Native TFieldIterator lifetime; `run` may reenter the public input API.
+    pub property_scope: unsafe extern "C" fn(
+        klass: *mut c_void,
+        kind: i32,
+        context: *mut c_void,
+        run: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+    ) -> i32,
+    pub property_current: unsafe extern "C" fn(iterator: *mut c_void, out: *mut *mut c_void) -> i32,
+    pub property_next: unsafe extern "C" fn(iterator: *mut c_void) -> i32,
     /// `Cast<UByteProperty>(prop) != NULL`. Returns `UBOOL`.
-    pub property_is_byte: unsafe extern "C" fn(prop: *mut c_void) -> i32,
+    pub property_is_byte: unsafe extern "C" fn(prop: *mut c_void, out: *mut i32) -> i32,
     /// `Cast<UFloatProperty>(prop) != NULL`. Returns `UBOOL`.
-    pub property_is_float: unsafe extern "C" fn(prop: *mut c_void) -> i32,
+    pub property_is_float: unsafe extern "C" fn(prop: *mut c_void, out: *mut i32) -> i32,
     /// `GCache.Get(id(klass), item)`. Returns null on a miss.
-    pub cache_get: unsafe extern "C" fn(klass: *mut c_void, item: *mut *mut c_void) -> *mut c_void,
+    pub cache_get: unsafe extern "C" fn(
+        klass: *mut c_void,
+        item: *mut *mut c_void,
+        out: *mut *mut c_void,
+    ) -> i32,
     /// `GCache.Create(id(klass), item, appCheckedIntSize(size))`. Returns the block.
     pub cache_create: unsafe extern "C" fn(
         klass: *mut c_void,
         item: *mut *mut c_void,
         size: usize,
-    ) -> *mut c_void,
+        out: *mut *mut c_void,
+    ) -> i32,
     /// `item->Unlock()`.
-    pub cache_unlock: unsafe extern "C" fn(item: *mut c_void),
+    pub cache_unlock: unsafe extern "C" fn(item: *mut c_void) -> i32,
+    /// Virtual `UInput::Process`, preserving dispatch to derived input classes.
+    pub input_process: unsafe extern "C" fn(
+        input: *mut c_void,
+        ar: *mut c_void,
+        key: i32,
+        action: i32,
+        delta: f32,
+        out: *mut i32,
+    ) -> i32,
+    pub input_exec: unsafe extern "C" fn(
+        obj: *mut c_void,
+        cmd: *const u32,
+        ar: *mut c_void,
+        out: *mut i32,
+    ) -> i32,
+    pub input_exec_commands:
+        unsafe extern "C" fn(obj: *mut c_void, cmd: *const u32, ar: *mut c_void) -> i32,
+    pub input_reset: unsafe extern "C" fn(obj: *mut c_void) -> i32,
+    pub input_find_button: unsafe extern "C" fn(
+        obj: *mut c_void,
+        actor: *mut c_void,
+        name: *const u32,
+        out: *mut *mut u8,
+    ) -> i32,
+    pub input_find_axis: unsafe extern "C" fn(
+        obj: *mut c_void,
+        actor: *mut c_void,
+        name: *const u32,
+        out: *mut *mut f32,
+    ) -> i32,
+    pub input_key_name:
+        unsafe extern "C" fn(obj: *mut c_void, key: i32, out: *mut *const u32) -> i32,
+    pub input_find_key: unsafe extern "C" fn(
+        obj: *mut c_void,
+        name: *const u32,
+        key: *mut i32,
+        out: *mut i32,
+    ) -> i32,
+    /// The original inner guard(ExecAlias), including the non-restored failure state.
+    pub alias_scope: unsafe extern "C" fn(
+        context: *mut c_void,
+        run: unsafe extern "C" fn(*mut c_void) -> i32,
+    ) -> i32,
+}
+
+static mut INPUT_SERVICES: Option<Hp2InputServices> = None;
+
+/// # Safety
+/// `value` is the real, immutable `GHp2InputServices` table; publication
+/// happens once, before any native dispatch, and invokes no callbacks.
+pub unsafe fn publish_services(value: Hp2InputServices) {
+    unsafe { (&raw mut INPUT_SERVICES).write(Some(value)) }
+}
+
+/// # Safety
+/// Call only after `publish_services` has run.
+pub unsafe fn published_services() -> Res<Hp2InputServices> {
+    unsafe { (&raw const INPUT_SERVICES).read().ok_or(1) }
+}
+
+unsafe fn for_each_property<F: FnMut(*mut c_void) -> Res<()>>(
+    svc: &Hp2InputServices,
+    klass: *mut c_void,
+    kind: i32,
+    mut visit: F,
+) -> Res<()> {
+    struct Context<F> {
+        svc: *const Hp2InputServices,
+        visit: *mut F,
+    }
+    unsafe extern "C" fn run<F: FnMut(*mut c_void) -> Res<()>>(
+        context: *mut c_void,
+        iterator: *mut c_void,
+    ) -> i32 {
+        unsafe {
+            let context = context.cast::<Context<F>>();
+            let svc = &*(*context).svc;
+            let result = (|| -> Res<()> {
+                loop {
+                    let property = checked_value!((svc.property_current)(iterator));
+                    if property.is_null() {
+                        break;
+                    }
+                    (&mut *(*context).visit)(property)?;
+                    checked_unit!((svc.property_next)(iterator));
+                }
+                Ok(())
+            })();
+            result.map_or_else(|status| -status, |()| 0)
+        }
+    }
+    let mut context = Context {
+        svc,
+        visit: &raw mut visit,
+    };
+    unsafe {
+        checked_unit!((svc.property_scope)(
+            klass,
+            kind,
+            (&raw mut context).cast(),
+            run::<F>
+        ));
+    }
+    Ok(())
 }
 
 /// `FInputVarCache` (`UnIn.cpp:15-38`): `INT Count; UProperty* Properties[]`.
@@ -179,9 +317,9 @@ pub struct Hp2InputServices {
 /// size is `size_of::<InputVarCache>()` plus `Count` pointers, matching the C++
 /// `sizeof(FInputVarCache) + Count*sizeof(UProperty*)` (8 + 8*Count on LP64).
 #[repr(C)]
-struct InputVarCache {
-    count: i32,
-    properties: [*mut c_void; 0],
+pub(crate) struct InputVarCache {
+    pub(crate) count: i32,
+    pub(crate) properties: [*mut c_void; 0],
 }
 
 /// `FInputVarCache::Get` (`UnIn.cpp:15-38`). Returns the cache block with
@@ -194,45 +332,35 @@ unsafe fn input_var_cache_get(
     svc: &Hp2InputServices,
     klass: *mut c_void,
     item: *mut *mut c_void,
-) -> *mut InputVarCache {
+) -> Res<*mut InputVarCache> {
     unsafe {
-        let mut result = (svc.cache_get)(klass, item);
+        let mut result = checked_value!((svc.cache_get)(klass, item));
         if result.is_null() {
-            let mut count: usize = 0;
-            let mut n = 0;
-            loop {
-                let prop = (svc.class_nth_property)(klass, KIND_PROPERTY, n);
-                if prop.is_null() {
-                    break;
-                }
-                if (svc.property_flags)(prop) & CPF_INPUT != 0 {
+            let mut count = 0usize;
+            for_each_property(svc, klass, KIND_PROPERTY, |prop| {
+                if (*(prop as *mut UProperty)).property_flags & CPF_INPUT != 0 {
                     count += 1;
                 }
-                n += 1;
-            }
-            result = (svc.cache_create)(
+                Ok(())
+            })?;
+            result = checked_value!((svc.cache_create)(
                 klass,
                 item,
-                size_of::<InputVarCache>() + count * size_of::<*mut c_void>(),
-            );
+                size_of::<InputVarCache>() + count * size_of::<*mut c_void>()
+            ));
             let cache = result.cast::<InputVarCache>();
             (*cache).count = count as i32;
             let props = ptr::addr_of_mut!((*cache).properties).cast::<*mut c_void>();
-            let mut temp = 0usize;
-            n = 0;
-            loop {
-                let prop = (svc.class_nth_property)(klass, KIND_PROPERTY, n);
-                if prop.is_null() {
-                    break;
+            let mut index = 0;
+            for_each_property(svc, klass, KIND_PROPERTY, |prop| {
+                if (*(prop as *mut UProperty)).property_flags & CPF_INPUT != 0 {
+                    props.add(index).write(prop);
+                    index += 1;
                 }
-                if (svc.property_flags)(prop) & CPF_INPUT != 0 {
-                    props.add(temp).write(prop);
-                    temp += 1;
-                }
-                n += 1;
-            }
+                Ok(())
+            })?;
         }
-        result.cast::<InputVarCache>()
+        Ok(result.cast())
     }
 }
 
@@ -257,13 +385,15 @@ unsafe fn cache_property(cache: *mut InputVarCache, i: i32) -> *mut c_void {
     }
 }
 
-/// `check(expr)` (`UnFile.h:170`): reports a failure and continues, as the
-/// original does.
+/// `check(expr)` (`UnFile.h:170`): the native leaf respects DO_CHECK and
+/// captures a thrown assertion before Rust resumes.
 #[inline]
-unsafe fn check(svc: &Hp2InputServices, ok: bool, expr: &CStr, line: i32) {
+unsafe fn check(svc: &Hp2InputServices, ok: bool, expr: &CStr, line: i32) -> Res<()> {
     if !ok {
-        unsafe { (svc.check_failed)(expr.as_ptr(), line) };
+        unsafe { checked_unit!((svc.check_failed)(expr.as_ptr(), line)) };
     }
+
+    Ok(())
 }
 
 /// `SetInputAction(NewAction, NewDelta)` (`UnIn.h`).
@@ -288,33 +418,39 @@ pub unsafe fn find_button_name(
     this: *mut UInput,
     actor: *mut c_void,
     name: *const u32,
-) -> *mut u8 {
-    unsafe {
-        check(svc, !(*this).viewport.is_null(), c"Viewport", 124);
-        check(svc, !actor.is_null(), c"Actor", 125);
-        let button = (svc.fname_find)(name);
+) -> Res<*mut u8> {
+    Ok(unsafe {
+        check(svc, !(*this).viewport.is_null(), c"Viewport", 124)?;
+        check(svc, !actor.is_null(), c"Actor", 125)?;
+        let button = checked_value!((svc.fname_find)(name));
         if button != NAME_NONE {
             let mut item: *mut c_void = ptr::null_mut();
-            let cache = input_var_cache_get(svc, (svc.object_class)(actor), &raw mut item);
+            let cache = input_var_cache_get(
+                svc,
+                (*(actor as *mut UObject)).class,
+                &raw mut item,
+            )?;
             let count = cache_count(cache);
             let mut i = 0;
             while i < count {
                 let prop = cache_property(cache, i);
-                if (svc.property_fname_index)(prop) == button && (svc.property_is_byte)(prop) != 0 {
+                if i32::from_ne_bytes((*(prop as *mut UProperty)).name) == button
+                    && checked_value!((svc.property_is_byte)(prop)) != 0
+                {
                     break;
                 }
                 i += 1;
             }
-            (svc.cache_unlock)(item);
+            checked_unit!((svc.cache_unlock)(item));
             if i < count {
                 let prop = cache_property(cache, i);
-                return actor
-                    .cast::<u8>()
-                    .offset(isize::try_from((svc.property_offset)(prop)).unwrap_or(0));
+                return Ok(actor.cast::<u8>().offset(
+                    isize::try_from((*(prop as *mut UProperty)).offset).unwrap_or(0),
+                ));
             }
         }
         ptr::null_mut()
-    }
+    })
 }
 
 /// `UInput::FindAxisName` (`UnIn.cpp:148-170`). Returns the `FLOAT` property
@@ -327,34 +463,42 @@ pub unsafe fn find_axis_name(
     this: *mut UInput,
     actor: *mut c_void,
     name: *const u32,
-) -> *mut f32 {
-    unsafe {
-        check(svc, !(*this).viewport.is_null(), c"Viewport", 151);
-        check(svc, !actor.is_null(), c"Actor", 152);
-        let axis = (svc.fname_find)(name);
+) -> Res<*mut f32> {
+    Ok(unsafe {
+        check(svc, !(*this).viewport.is_null(), c"Viewport", 151)?;
+        check(svc, !actor.is_null(), c"Actor", 152)?;
+        let axis = checked_value!((svc.fname_find)(name));
         if axis != NAME_NONE {
             let mut item: *mut c_void = ptr::null_mut();
-            let cache = input_var_cache_get(svc, (svc.object_class)(actor), &raw mut item);
+            let cache = input_var_cache_get(
+                svc,
+                (*(actor as *mut UObject)).class,
+                &raw mut item,
+            )?;
             let count = cache_count(cache);
             let mut i = 0;
             while i < count {
                 let prop = cache_property(cache, i);
-                if (svc.property_fname_index)(prop) == axis && (svc.property_is_float)(prop) != 0 {
+                if i32::from_ne_bytes((*(prop as *mut UProperty)).name) == axis
+                    && checked_value!((svc.property_is_float)(prop)) != 0
+                {
                     break;
                 }
                 i += 1;
             }
-            (svc.cache_unlock)(item);
+            checked_unit!((svc.cache_unlock)(item));
             if i < count {
                 let prop = cache_property(cache, i);
-                return actor
+                return Ok(actor
                     .cast::<u8>()
-                    .offset(isize::try_from((svc.property_offset)(prop)).unwrap_or(0))
-                    .cast::<f32>();
+                    .offset(
+                        isize::try_from((*(prop as *mut UProperty)).offset).unwrap_or(0),
+                    )
+                    .cast::<f32>());
             }
         }
         ptr::null_mut()
-    }
+    })
 }
 
 /// `UInput::ExecInputCommands` (`UnIn.cpp:175-188`). Each line is parsed into
@@ -367,43 +511,77 @@ pub unsafe fn find_axis_name(
 pub unsafe fn exec_input_commands(
     svc: &Hp2InputServices,
     this: *mut UInput,
-    mut cmd: *const u32,
+    cmd: *const u32,
     ar: *mut c_void,
-) {
+) -> Res<()> {
     unsafe {
-        let mut line = [0u32; TEXT_BUF_LEN as usize];
-        while (svc.parse_line)(&raw mut cmd, line.as_mut_ptr(), TEXT_BUF_LEN) != 0 {
-            let mut str_ptr: *const u32 = line.as_ptr();
-            let action = (*this).action;
-            if action == IST_PRESS
-                || (action == IST_RELEASE
-                    && (svc.parse_command)(&raw mut str_ptr, w!("OnRelease")) != 0)
-            {
-                (svc.viewport_exec)((*this).viewport, str_ptr, ar);
-            } else {
-                exec(svc, this, str_ptr, ar);
-            }
+        exec_input_commands_with(
+            this,
+            cmd,
+            |cursor, line, len| {
+                Ok(checked_value!((svc.parse_line)(cursor.cast(), line.cast(), len)) != 0)
+            },
+            |cursor, token| {
+                Ok(checked_value!((svc.parse_command)(cursor.cast(), token.cast())) != 0)
+            },
+            |viewport, line| {
+                checked_unit!((svc.viewport_exec)(viewport.cast(), line, ar));
+                Ok(())
+            },
+            |input, line| {
+                let _ = checked_value!((svc.input_exec)(input.cast(), line, ar));
+                Ok(())
+            },
+        )
+    }
+}
+
+/// Shared `ExecInputCommands` algorithm for native and canonical input backends.
+///
+/// # Safety
+/// `this` must be a live `UInput`; `cmd` must be NUL-terminated.
+pub unsafe fn exec_input_commands_with<E>(
+    this: *mut UInput,
+    mut cmd: *const u32,
+    mut parse_line: impl FnMut(*mut *const u32, *mut u32, i32) -> Result<bool, E>,
+    mut parse_command: impl FnMut(*mut *const u32, *const u32) -> Result<bool, E>,
+    mut viewport_exec: impl FnMut(*mut c_void, *const u32) -> Result<(), E>,
+    mut input_exec: impl FnMut(*mut UInput, *const u32) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut line = [0u32; TEXT_BUF_LEN as usize];
+    while parse_line(&mut cmd, line.as_mut_ptr(), TEXT_BUF_LEN)? {
+        let mut cursor = line.as_ptr();
+        let action = unsafe { (*this).action };
+        if action == IST_PRESS
+            || (action == IST_RELEASE && parse_command(&mut cursor, w!("OnRelease"))?)
+        {
+            let viewport = unsafe { (*this).viewport };
+            viewport_exec(viewport, cursor)?;
+        } else {
+            input_exec(this, cursor)?;
         }
     }
+    Ok(())
 }
 
 /// `UInput::Init` (`UnIn.cpp:193-205`).
 ///
 /// # Safety
 /// `this` must be a live `UInput`; `viewport` a live `UViewport`.
-pub unsafe fn init(svc: &Hp2InputServices, this: *mut UInput, viewport: *mut c_void) {
+pub unsafe fn init(svc: &Hp2InputServices, this: *mut UInput, viewport: *mut c_void) -> Res<()> {
     unsafe {
         (*this).viewport = viewport;
-        reset_input(svc, this);
-        (svc.log_initialized)(viewport);
+        checked_unit!((svc.input_reset)(this.cast()));
+        checked_unit!((svc.log_initialized)((*this).viewport));
     }
+
+    Ok(())
 }
 
 /// `UInput::Exec` (`UnIn.cpp:214-330`). Returns `UBOOL`.
 ///
 /// Branch order is BUTTON, PULSE, TOGGLE, AXIS, KEYNAME, KEYBINDING, then the
-/// alias table. The inner `guard(ExecAlias)` label is not reproduced; the
-/// shell's `guard(UInput::Exec)` covers the same failure path.
+/// alias table. The inner native `guard(ExecAlias)` spans a checked continuation.
 ///
 /// # Safety
 /// `this` must be a live `UInput`; `s` a NUL-terminated `TCHAR` string; `ar`
@@ -413,17 +591,21 @@ pub unsafe fn exec(
     this: *mut UInput,
     mut s: *const u32,
     ar: *mut c_void,
-) -> i32 {
-    unsafe {
+) -> Res<i32> {
+    Ok(unsafe {
         let mut temp = [0u32; TEXT_BUF_LEN as usize];
         let temp_ptr = temp.as_mut_ptr();
 
-        if (svc.parse_command)(&raw mut s, w!("BUTTON")) != 0 {
-            let actor = (svc.viewport_actor)((*this).viewport);
-            let found =
-                !actor.is_null() && (svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0) != 0;
+        if checked_value!((svc.parse_command)(&raw mut s, w!("BUTTON"))) != 0 {
+            let actor = (*((*this).viewport as *mut UViewport)).actor;
+            let found = !actor.is_null()
+                && checked_value!((svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0)) != 0;
             let button = if found {
-                find_button_name(svc, this, actor, temp_ptr)
+                checked_value!((svc.input_find_button)(
+                    this.cast(),
+                    (*((*this).viewport as *mut UViewport)).actor,
+                    temp_ptr
+                ))
             } else {
                 ptr::null_mut()
             };
@@ -435,15 +617,19 @@ pub unsafe fn exec(
                     *button = 0;
                 }
             } else {
-                (svc.output_log)(ar, w!("Bad Button command"));
+                checked_unit!((svc.output_log)(ar, w!("Bad Button command")));
             }
-            return 1;
-        } else if (svc.parse_command)(&raw mut s, w!("PULSE")) != 0 {
-            let actor = (svc.viewport_actor)((*this).viewport);
-            let found =
-                !actor.is_null() && (svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0) != 0;
+            return Ok(1);
+        } else if checked_value!((svc.parse_command)(&raw mut s, w!("PULSE"))) != 0 {
+            let actor = (*((*this).viewport as *mut UViewport)).actor;
+            let found = !actor.is_null()
+                && checked_value!((svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0)) != 0;
             let button = if found {
-                find_button_name(svc, this, actor, temp_ptr)
+                checked_value!((svc.input_find_button)(
+                    this.cast(),
+                    (*((*this).viewport as *mut UViewport)).actor,
+                    temp_ptr
+                ))
             } else {
                 ptr::null_mut()
             };
@@ -452,15 +638,19 @@ pub unsafe fn exec(
                     *button = 1;
                 }
             } else {
-                (svc.output_log)(ar, w!("Bad Button command"));
+                checked_unit!((svc.output_log)(ar, w!("Bad Button command")));
             }
-            return 1;
-        } else if (svc.parse_command)(&raw mut s, w!("TOGGLE")) != 0 {
-            let actor = (svc.viewport_actor)((*this).viewport);
-            let found =
-                !actor.is_null() && (svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0) != 0;
+            return Ok(1);
+        } else if checked_value!((svc.parse_command)(&raw mut s, w!("TOGGLE"))) != 0 {
+            let actor = (*((*this).viewport as *mut UViewport)).actor;
+            let found = !actor.is_null()
+                && checked_value!((svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0)) != 0;
             let button = if found {
-                find_button_name(svc, this, actor, temp_ptr)
+                checked_value!((svc.input_find_button)(
+                    this.cast(),
+                    (*((*this).viewport as *mut UViewport)).actor,
+                    temp_ptr
+                ))
             } else {
                 ptr::null_mut()
             };
@@ -469,23 +659,27 @@ pub unsafe fn exec(
                     *button ^= 0x80;
                 }
             } else {
-                (svc.output_log)(ar, w!("Bad Toggle command"));
+                checked_unit!((svc.output_log)(ar, w!("Bad Toggle command")));
             }
-            return 1;
-        } else if (svc.parse_command)(&raw mut s, w!("AXIS")) != 0 {
-            let actor = (svc.viewport_actor)((*this).viewport);
-            let found =
-                !actor.is_null() && (svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0) != 0;
+            return Ok(1);
+        } else if checked_value!((svc.parse_command)(&raw mut s, w!("AXIS"))) != 0 {
+            let actor = (*((*this).viewport as *mut UViewport)).actor;
+            let found = !actor.is_null()
+                && checked_value!((svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0)) != 0;
             let axis = if found {
-                find_axis_name(svc, this, actor, temp_ptr)
+                checked_value!((svc.input_find_axis)(
+                    this.cast(),
+                    (*((*this).viewport as *mut UViewport)).actor,
+                    temp_ptr
+                ))
             } else {
                 ptr::null_mut()
             };
             if found && !axis.is_null() {
                 let mut speed: f32 = 1.0;
                 let mut speed_base: f32 = 0.0;
-                (svc.parse_float)(s, w!("SPEED="), &raw mut speed);
-                (svc.parse_float)(s, w!("SPEEDBASE="), &raw mut speed_base);
+                checked_value!((svc.parse_float)(s, w!("SPEED="), &raw mut speed));
+                checked_value!((svc.parse_float)(s, w!("SPEEDBASE="), &raw mut speed_base));
                 let delta = (*this).delta;
                 if speed_base > 0.0 {
                     // `*Axis += Delta * SpeedBase * Speed` (contracted: fma of Delta*SpeedBase, Speed).
@@ -498,36 +692,80 @@ pub unsafe fn exec(
                     *axis = delta.mul_add(speed, *axis);
                 }
             } else {
-                (svc.output_logf)(ar, w!("Bad Axis command"));
+                checked_unit!((svc.output_logf)(ar, w!("Bad Axis command")));
             }
-            return 1;
-        } else if (svc.parse_command)(&raw mut s, w!("KEYNAME")) != 0 {
-            let key_no = (svc.app_atoi)(s);
-            (svc.output_log)(ar, get_key_name(svc, this, key_no));
-            return 1;
-        } else if (svc.parse_command)(&raw mut s, w!("KEYBINDING")) != 0 {
+            return Ok(1);
+        } else if checked_value!((svc.parse_command)(&raw mut s, w!("KEYNAME"))) != 0 {
+            let key_no = checked_value!((svc.app_atoi)(s));
+            checked_unit!((svc.output_log)(
+                ar,
+                checked_value!((svc.input_key_name)(this.cast(), key_no))
+            ));
+            return Ok(1);
+        } else if checked_value!((svc.parse_command)(&raw mut s, w!("KEYBINDING"))) != 0 {
             let mut i_key: i32 = 0;
-            if find_key_name(svc, this, s, &raw mut i_key) != 0 {
-                (svc.output_log)(ar, (svc.binding_chars)(this.cast(), i_key));
+            if checked_value!((svc.input_find_key)(this.cast(), s, &raw mut i_key)) != 0 {
+                checked_unit!((svc.output_log)(
+                    ar,
+                    checked_value!((svc.binding_chars)(this.cast(), i_key))
+                ));
             }
-            return 1;
-        } else if !IN_ALIAS.load(Ordering::Relaxed)
-            && (svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0) != 0
+            return Ok(1);
+        } else if !in_alias()
+            && checked_value!((svc.parse_token)(&raw mut s, temp_ptr, TEXT_BUF_LEN, 0)) != 0
         {
-            let name = (svc.fname_find)(temp_ptr);
+            let name = checked_value!((svc.fname_find)(temp_ptr));
             if name != NAME_NONE {
                 for i in 0..ALIAS_MAX {
-                    if (svc.alias_name_index)(this.cast(), i) == name {
-                        IN_ALIAS.store(true, Ordering::Relaxed);
-                        exec_input_commands(svc, this, (svc.alias_command)(this.cast(), i), ar);
-                        IN_ALIAS.store(false, Ordering::Relaxed);
-                        return 1;
+                    if checked_value!((svc.alias_name_index)(this.cast(), i)) == name {
+                        exec_alias(svc, this, i, ar)?;
+                        return Ok(1);
                     }
                 }
             }
         }
         0
+    })
+}
+
+unsafe fn exec_alias(
+    svc: &Hp2InputServices,
+    this: *mut UInput,
+    index: i32,
+    ar: *mut c_void,
+) -> Res<()> {
+    struct Context {
+        svc: *const Hp2InputServices,
+        input: *mut UInput,
+        index: i32,
+        ar: *mut c_void,
     }
+    unsafe extern "C" fn run(context: *mut c_void) -> i32 {
+        unsafe {
+            let c = context.cast::<Context>();
+            let svc = &*(*c).svc;
+            let result = with_alias_scope(|| -> Res<()> {
+                let command = checked_value!((svc.alias_command)((*c).input.cast(), (*c).index));
+                checked_unit!((svc.input_exec_commands)(
+                    (*c).input.cast(),
+                    command,
+                    (*c).ar
+                ));
+                Ok(())
+            });
+            result.map_or_else(|status| -status, |()| 0)
+        }
+    }
+    let mut context = Context {
+        svc,
+        input: this,
+        index,
+        ar,
+    };
+    unsafe {
+        checked_unit!((svc.alias_scope)((&raw mut context).cast(), run));
+    }
+    Ok(())
 }
 
 /// `UInput::PreProcess` (`UnIn.cpp:339-358`). Returns `UBOOL`. No services.
@@ -557,6 +795,24 @@ pub unsafe fn pre_process(this: *mut UInput, key: i32, state: i32) -> i32 {
     }
 }
 
+/// Shared `UInput::Process` binding-action sequence for native and Core owners.
+///
+/// # Safety
+/// `this` must be a live `UInput`.
+pub unsafe fn process_binding_with<E>(
+    this: *mut UInput,
+    state: i32,
+    delta: f32,
+    has_binding: bool,
+    execute: impl FnOnce() -> Result<(), E>,
+) -> Result<i32, E> {
+    if !has_binding { return Ok(0); }
+    unsafe { set_input_action(this, state, delta); }
+    execute()?;
+    unsafe { set_input_action(this, IST_NONE, 0.0); }
+    Ok(1)
+}
+
 /// `UInput::Process` (`UnIn.cpp:363-379`). Returns `UBOOL`.
 ///
 /// # Safety
@@ -568,21 +824,23 @@ pub unsafe fn process(
     key: i32,
     state: i32,
     delta: f32,
-) -> i32 {
+) -> Res<i32> {
     unsafe {
-        check(
-            svc,
-            (0..IK_MAX).contains(&key),
-            c"iKey>=0&&iKey<IK_MAX",
-            366,
-        );
-        if (svc.binding_len)(this.cast(), key) != 0 {
-            set_input_action(this, state, delta);
-            exec_input_commands(svc, this, (svc.binding_chars)(this.cast(), key), ar);
-            set_input_action(this, IST_NONE, 0.0);
-            return 1;
-        }
-        0
+        check(svc, (0..IK_MAX).contains(&key), c"iKey>=0&&iKey<IK_MAX", 366)?;
+        process_binding_with(
+            this,
+            state,
+            delta,
+            checked_value!((svc.binding_len)(this.cast(), key)) != 0,
+            || {
+                checked_unit!((svc.input_exec_commands)(
+                    this.cast(),
+                    checked_value!((svc.binding_chars)(this.cast(), key)),
+                    ar
+                ));
+                Ok(())
+            },
+        )
     }
 }
 
@@ -596,36 +854,72 @@ pub unsafe fn direct_axis(
     key: i32,
     length: f32,
     delta: f32,
-) {
-    unsafe {
-        // `FString Command = FString::Printf(...)` comes first in the C++.
-        let command = (svc.direct_axis_command)(this.cast(), key, length);
-        set_input_action(this, IST_HOLD, delta);
-        exec_input_commands(svc, this, (svc.fstring_chars)(command), (svc.glog)());
-        set_input_action(this, IST_NONE, 0.0);
-        (svc.fstring_free)(command);
+) -> Res<()> {
+    struct AxisContext {
+        svc: *const Hp2InputServices,
+        input: *mut UInput,
+        delta: f32,
     }
+    unsafe extern "C" fn run(context: *mut c_void, command: *const u32) -> i32 {
+        unsafe {
+            let context = context.cast::<AxisContext>();
+            let svc = &*(*context).svc;
+            let this = (*context).input;
+            let result = (|| -> Res<()> {
+                set_input_action(this, IST_HOLD, (*context).delta);
+                checked_unit!((svc.input_exec_commands)(
+                    this.cast(),
+                    command,
+                    checked_value!((svc.glog)())
+                ));
+                set_input_action(this, IST_NONE, 0.0);
+                Ok(())
+            })();
+            result.map_or_else(|status| -status, |()| 0)
+        }
+    }
+    let mut context = AxisContext {
+        svc,
+        input: this,
+        delta,
+    };
+    unsafe {
+        checked_unit!((svc.direct_axis_scope)(
+            this.cast(),
+            key,
+            length,
+            (&raw mut context).cast(),
+            run
+        ));
+    }
+    Ok(())
 }
 
 /// `UInput::ReadInput` (`UnIn.cpp:399-424`).
 ///
 /// # Safety
 /// `this` must be a live `UInput` with a live `Viewport` and `Actor`.
-pub unsafe fn read_input(svc: &Hp2InputServices, this: *mut UInput, delta_seconds: f32) {
+pub unsafe fn read_input(svc: &Hp2InputServices, this: *mut UInput, delta_seconds: f32) -> Res<()> {
     unsafe {
-        if (svc.is_running)() == 0 {
-            return;
+        if checked_value!((svc.is_running)()) == 0 {
+            return Ok(());
         }
         let mut item: *mut c_void = ptr::null_mut();
         let cache = input_var_cache_get(
             svc,
-            (svc.object_class)((svc.viewport_actor)((*this).viewport)),
+            (*((*((*this).viewport as *mut UViewport)).actor as *mut UObject)).class,
             &raw mut item,
-        );
+        )?;
         if delta_seconds != -1.0 {
             for i in 0..IK_MAX {
                 if (*this).key_down_table[i as usize] != 0 {
-                    process(svc, this, (svc.glog)(), i, IST_HOLD, delta_seconds);
+                    checked_value!((svc.input_process)(
+                        this.cast(),
+                        checked_value!((svc.glog)()),
+                        i,
+                        IST_HOLD,
+                        delta_seconds
+                    ));
                 }
             }
         }
@@ -637,9 +931,9 @@ pub unsafe fn read_input(svc: &Hp2InputServices, this: *mut UInput, delta_second
         let mut i = 0;
         while i < cache_count(cache) {
             let prop = cache_property(cache, i);
-            if (svc.property_is_float)(prop) != 0 {
-                let offset = (svc.property_offset)(prop);
-                let axis = (svc.viewport_actor)((*this).viewport)
+            if checked_value!((svc.property_is_float)(prop)) != 0 {
+                let offset = (*(prop as *mut UProperty)).offset;
+                let axis = (*((*this).viewport as *mut UViewport)).actor
                     .cast::<u8>()
                     .offset(isize::try_from(offset).unwrap_or(0))
                     .cast::<f32>();
@@ -647,58 +941,65 @@ pub unsafe fn read_input(svc: &Hp2InputServices, this: *mut UInput, delta_second
             }
             i += 1;
         }
-        (svc.cache_unlock)(item);
+        checked_unit!((svc.cache_unlock)(item));
     }
+
+    Ok(())
 }
 
 /// `UInput::ResetInput` (`UnIn.cpp:433-459`).
 ///
 /// # Safety
 /// `this` must be a live `UInput` with a live `Viewport` and `Actor`.
-pub unsafe fn reset_input(svc: &Hp2InputServices, this: *mut UInput) {
+pub unsafe fn reset_input(svc: &Hp2InputServices, this: *mut UInput) -> Res<()> {
     unsafe {
-        let vp = (*this).viewport;
-        check(svc, !vp.is_null(), c"Viewport", 436);
-        (*this).key_down_table.fill(0);
-
-        let klass_b = (svc.object_class)((svc.viewport_actor)(vp));
-        let mut n = 0;
-        loop {
-            let prop = (svc.class_nth_property)(klass_b, KIND_BYTE, n);
-            if prop.is_null() {
-                break;
-            }
-            if (svc.property_flags)(prop) & CPF_INPUT != 0 {
-                let offset = (svc.property_offset)(prop);
-                let p = (svc.viewport_actor)(vp)
-                    .cast::<u8>()
-                    .offset(isize::try_from(offset).unwrap_or(0));
-                *p = 0;
-            }
-            n += 1;
-        }
-
-        let klass_f = (svc.object_class)((svc.viewport_actor)(vp));
-        n = 0;
-        loop {
-            let prop = (svc.class_nth_property)(klass_f, KIND_FLOAT, n);
-            if prop.is_null() {
-                break;
-            }
-            if (svc.property_flags)(prop) & CPF_INPUT != 0 {
-                let offset = (svc.property_offset)(prop);
-                let p = (svc.viewport_actor)(vp)
-                    .cast::<u8>()
-                    .offset(isize::try_from(offset).unwrap_or(0))
-                    .cast::<f32>();
-                *p = 0.0;
-            }
-            n += 1;
-        }
-
-        set_input_action(this, IST_NONE, 0.0);
-        (svc.viewport_update_input)(vp, 1);
+        check(svc, !(*this).viewport.is_null(), c"Viewport", 436)?;
+        reset_input_with(
+            this,
+            |_viewport, actor, kind| {
+                let klass = (*actor.cast::<UObject>()).class;
+                for_each_property(svc, klass, kind, |prop| {
+                    let property = &*prop.cast::<UProperty>();
+                    if property.property_flags & CPF_INPUT != 0 {
+                        let value = actor.cast::<u8>().offset(property.offset as isize);
+                        if kind == KIND_BYTE {
+                            value.write(0);
+                        } else {
+                            value.cast::<f32>().write(0.0);
+                        }
+                    }
+                    Ok(())
+                })?;
+                Ok(())
+            },
+            |viewport, reset| {
+                checked_unit!((svc.viewport_update_input)(viewport, reset));
+                Ok(())
+            },
+        )
     }
+}
+
+/// Shared ordering for canonical and native adapters of `UInput::ResetInput`.
+///
+/// # Safety
+/// `this` must be a live `UInput`; callbacks must access only live objects and
+/// implement property reset and viewport update for that same owner.
+pub unsafe fn reset_input_with<E>(
+    this: *mut UInput,
+    mut reset_properties: impl FnMut(*mut c_void, *mut c_void, i32) -> Result<(), E>,
+    mut update_input: impl FnMut(*mut c_void, i32) -> Result<(), E>,
+) -> Result<(), E> {
+    unsafe {
+        let viewport = (*this).viewport;
+        let actor = (*(viewport.cast::<UViewport>())).actor;
+        (*this).key_down_table.fill(0);
+        reset_properties(viewport, actor, KIND_BYTE)?;
+        reset_properties(viewport, actor, KIND_FLOAT)?;
+        set_input_action(this, IST_NONE, 0.0);
+        update_input(viewport, 1)?;
+    }
+    Ok(())
 }
 
 /// `UInput::GetKeyName` (`UnIn.cpp:492-500`). Returns the name after the
@@ -706,16 +1007,16 @@ pub unsafe fn reset_input(svc: &Hp2InputServices, this: *mut UInput) {
 ///
 /// # Safety
 /// `this` must be a live `UInput`.
-pub unsafe fn get_key_name(svc: &Hp2InputServices, this: *mut UInput, key: i32) -> *const u32 {
-    unsafe {
+pub unsafe fn get_key_name(svc: &Hp2InputServices, this: *mut UInput, key: i32) -> Res<*const u32> {
+    Ok(unsafe {
         if (0..IK_MAX).contains(&key) {
-            let name = (svc.key_name_chars)((*this).input_keys, key);
-            if (svc.app_strlen)(name) > 3 {
-                return name.add(3);
+            let name = checked_value!((svc.key_name_chars)((*this).input_keys, key));
+            if checked_value!((svc.app_strlen)(name)) > 3 {
+                return Ok(name.add(3));
             }
         }
         w!("")
-    }
+    })
 }
 
 /// `UInput::FindKeyName` (`UnIn.cpp:505-515`). Returns `UBOOL`; on success
@@ -732,12 +1033,16 @@ pub unsafe fn find_key_name(
     this: *mut UInput,
     key_name: *const u32,
     i_key: *mut i32,
-) -> i32 {
-    unsafe {
+) -> Res<i32> {
+    Ok(unsafe {
         let mut temp = [0u32; TEXT_BUF_LEN as usize];
-        (svc.app_sprintf_ik)(temp.as_mut_ptr(), key_name);
-        (svc.key_name_find_item)((*this).input_keys, temp.as_ptr(), i_key)
-    }
+        checked_unit!((svc.app_sprintf_ik)(temp.as_mut_ptr(), key_name));
+        checked_value!((svc.key_name_find_item)(
+            (*this).input_keys,
+            temp.as_ptr(),
+            i_key
+        ))
+    })
 }
 
 /// `AActor::execGetCurrentKeyState` body (`UnIn.cpp:465-483`): returns the
@@ -745,19 +1050,23 @@ pub unsafe fn find_key_name(
 ///
 /// # Safety
 /// `actor` must be a live `AActor`.
-pub unsafe fn current_key_state(svc: &Hp2InputServices, actor: *mut c_void, key: u8) -> i32 {
+pub unsafe fn current_key_state(svc: &Hp2InputServices, actor: *mut c_void, key: u8) -> Res<i32> {
+    unsafe { current_key_state_with(key, || Ok(checked_value!((svc.actor_viewport)(actor)).cast())) }
+}
+
+/// Shares the key bound, viewport/input gates and normalized boolean read.
+///
+/// # Safety
+/// The provider returns a live canonical or native viewport for the receiver.
+pub(crate) unsafe fn current_key_state_with<E>(
+    key: u8, viewport: impl FnOnce() -> Result<*mut UViewport, E>,
+) -> Result<i32, E> {
     unsafe {
-        let mut result = 0;
-        if i32::from(key) < IK_MAX {
-            let viewport = (svc.actor_viewport)(actor);
-            if !viewport.is_null() {
-                let input = (svc.viewport_input)(viewport);
-                if !input.is_null() {
-                    result = i32::from(key_down(input.cast::<UInput>(), i32::from(key)) != 0);
-                }
-            }
-        }
-        result
+        if i32::from(key) >= IK_MAX { return Ok(0); }
+        let viewport = viewport()?;
+        if viewport.is_null() { return Ok(0); }
+        let input = (*viewport).input;
+        Ok(if input.is_null() { 0 } else { i32::from(key_down(input.cast(), i32::from(key)) != 0) })
     }
 }
 

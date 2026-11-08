@@ -7,3 +7,6 @@ publish.workspace = true
 
 [lib]
 name = "hp2_fire"
+
+[dependencies]
+hp2-abi.workspace = true

@@ -16,7 +16,6 @@
 
 #![cfg(target_arch = "aarch64")]
 
-use std::ffi::c_void;
 use std::sync::LazyLock;
 
 use hp2_abi::render_particle::FTransTexture;
@@ -95,18 +94,6 @@ unsafe extern "C" fn unused_frand() -> f32 {
     unused_service("frand")
 }
 
-unsafe extern "C" fn unused_mem_push(_mem: *mut c_void, _size: i32, _align: i32) -> *mut u8 {
-    unused_service("mem_push")
-}
-
-unsafe extern "C" fn unused_mem_mark_save(_mem: *mut c_void, _mark: *mut c_void) {
-    unused_service("mem_mark_save")
-}
-
-unsafe extern "C" fn unused_mem_mark_pop(_mark: *mut c_void) {
-    unused_service("mem_mark_pop")
-}
-
 unsafe extern "C" fn unused_log_warning(_text: *const u8, _len: usize) {
     unused_service("log_warning")
 }
@@ -130,9 +117,6 @@ unsafe extern "C" fn unused_gmath_sqrt_approx(_f: f32) -> f32 {
 fn services() -> Hp2RenderServices {
     Hp2RenderServices {
         frand: unused_frand,
-        mem_push: unused_mem_push,
-        mem_mark_save: unused_mem_mark_save,
-        mem_mark_pop: unused_mem_mark_pop,
         log_warning: unused_log_warning,
         sin_tab: replay_sin_tab,
         cos_tab: replay_cos_tab,

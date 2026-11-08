@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Byte-for-byte parity checks between the C++ importer and Python oracle."""
+"""Byte-for-byte parity checks between the importer executable and Python oracle."""
 
 from __future__ import annotations
 

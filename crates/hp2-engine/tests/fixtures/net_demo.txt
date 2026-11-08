@@ -1,0 +1,144 @@
+case receive_file_index0
+receive_file_index0 state index=0 transfered=0 skipped=0 compressed=0 recv=null error='' temp=''
+case receive_data_ok
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=100
+notify_progress str1='Receiving ' str2='4 KB, 2.441406%' seconds=4
+archive_serialize count=50
+notify_progress str1='Receiving ' str2='4 KB, 3.662109%' seconds=4
+receive_data_ok state index=0 transfered=150 skipped=0 compressed=0 recv=set error='' temp='/cache/tmp0001.tmp'
+case receive_data_open_fail
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=null
+receive_data_open_fail state index=0 transfered=0 skipped=0 compressed=0 recv=null error='NetOpen' temp='/cache/tmp0001.tmp'
+case receive_data_write_error
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=10
+notify_progress str1='Receiving ' str2='4 KB, 0.244141%' seconds=4
+archive_serialize count=10
+receive_data_write_error state index=0 transfered=10 skipped=0 compressed=0 recv=set error='NetWrite /cache/tmp0001.tmp' temp='/cache/tmp0001.tmp'
+case try_skip_optional
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=10
+notify_progress str1='Receiving optional ' str2='0 KB, 1.000000%' seconds=4
+try_skip_optional result=1
+try_skip_optional state index=1 transfered=10 skipped=1 compressed=0 recv=set error='' temp='/cache/tmp0001.tmp'
+case try_skip_required
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=10
+notify_progress str1='Receiving ' str2='4 KB, 0.244141%' seconds=4
+try_skip_required result=0
+try_skip_required state index=0 transfered=10 skipped=0 compressed=0 recv=set error='' temp='/cache/tmp0001.tmp'
+case done_skipped
+archive_delete written=10
+logf 'Skipped download of '''
+delete '/cache/tmp0001.tmp'
+notify_progress str1='Success' str2='Skipped ''' seconds=4
+notify_received_file index=1 error='' skipped=1
+done_skipped state index=1 transfered=10 skipped=1 compressed=0 recv=null error='' temp='/cache/tmp0001.tmp'
+case done_refused
+delete ''
+notify_received_file index=0 error='NetRefused ' skipped=0
+done_refused state index=0 transfered=0 skipped=0 compressed=0 recv=null error='NetRefused ' temp=''
+case done_success
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=4096
+notify_progress str1='Receiving ' str2='4 KB, 100.000000%' seconds=4
+archive_delete written=4096
+file_size '/cache/tmp0001.tmp' = 4096
+move dest='/cache/11111111222222223333333344444444.uxx' src='/cache/tmp0001.tmp' result=1
+load_file_to_string '/cache/cache.ini'
+notify_progress str1='Success' str2='Received ''' seconds=4
+notify_received_file index=0 error='' skipped=0
+save_string_to_file '/cache/cache.ini'
+done_success state index=0 transfered=4096 skipped=0 compressed=0 recv=null error='' temp='/cache/tmp0001.tmp'
+case done_size_mismatch
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=4096
+notify_progress str1='Receiving ' str2='4 KB, 100.000000%' seconds=4
+archive_delete written=4096
+file_size '/cache/tmp0001.tmp' = 1
+delete '/cache/tmp0001.tmp'
+notify_received_file index=0 error='NetSize' skipped=0
+done_size_mismatch state index=0 transfered=4096 skipped=0 compressed=0 recv=null error='NetSize' temp='/cache/tmp0001.tmp'
+case done_move_fail
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=4096
+notify_progress str1='Receiving ' str2='4 KB, 100.000000%' seconds=4
+archive_delete written=4096
+file_size '/cache/tmp0001.tmp' = 4096
+move dest='/cache/11111111222222223333333344444444.uxx' src='/cache/tmp0001.tmp' result=0
+delete '/cache/tmp0001.tmp'
+notify_received_file index=0 error='NetMove' skipped=0
+done_move_fail state index=0 transfered=4096 skipped=0 compressed=0 recv=null error='NetMove' temp='/cache/tmp0001.tmp'
+case destroy_with_writer
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=10
+notify_progress str1='Receiving ' str2='4 KB, 0.244141%' seconds=4
+archive_delete written=10
+delete '/cache/tmp0001.tmp'
+destroy_with_writer connection=null download=null
+case chdl_receive_file
+create_channel type=3 local=1 index=-1
+create_channel_slot index=1
+send_bunch merge=0 reliable=1 close=0 bits=128
+chdl_receive_file chdl ch=set
+chdl_receive_file state index=0 transfered=0 skipped=0 compressed=0 recv=null error='' temp=''
+case chdl_no_channel
+create_channel type=3 local=1 index=-1
+delete ''
+notify_received_file index=0 error='ChAllocate' skipped=0
+chdl_no_channel chdl ch=null
+chdl_no_channel state index=0 transfered=0 skipped=0 compressed=0 recv=null error='ChAllocate' temp=''
+case chdl_try_skip
+create_channel type=3 local=1 index=-1
+create_channel_slot index=1
+send_bunch merge=0 reliable=1 close=0 bits=128
+debugf 'Receiving package '''
+make_directory '/cache' tree=0
+temp_filename '/cache/tmp0001.tmp'
+create_writer '/cache/tmp0001.tmp'
+create_writer result=set
+archive_serialize count=10
+notify_progress str1='Receiving optional ' str2='0 KB, 1.000000%' seconds=4
+send_bunch merge=0 reliable=1 close=1 bits=48
+chdl_try_skip result=1
+chdl_try_skip state index=1 transfered=10 skipped=1 compressed=0 recv=set error='' temp='/cache/tmp0001.tmp'
+case chdl_destroy
+chdl_destroy ch=null
+download fixture ends

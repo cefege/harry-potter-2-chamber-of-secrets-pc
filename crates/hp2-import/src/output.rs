@@ -69,12 +69,12 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::classify::is_prohibited;
 use crate::collect::Asset;
-use crate::hash;
 use crate::lower::lower;
 use crate::manifest::checksums;
 use crate::plan::LinkMode;
 use crate::util::{fail, lexically_relative, strerror_of, utf8};
 use hp2_ini::Profile;
+use hp2_file_hash::hash;
 
 fn display(p: &Path) -> String {
     utf8(p).unwrap_or_else(|_| p.display().to_string())
@@ -348,7 +348,7 @@ pub fn validate_output(output: &Path, assets: &[Asset], manifest: &str) -> Resul
         let path = found
             .get(&lower(&asset.path))
             .expect("key presence already checked by the missing/extra pass above");
-        let (size, found_hash) = hash::hash(path)?;
+        let (size, found_hash) = hash(path)?;
         if size != asset.size || found_hash != asset.hash {
             return Err(fail(format!(
                 "output hash mismatch for {}: expected {}/{}, found {}/{}",
@@ -369,9 +369,11 @@ pub fn validate_output(output: &Path, assets: &[Asset], manifest: &str) -> Resul
 /// `#[repr(C)]`: this struct is shared directly across the FFI
 /// boundary with C++'s own `HP2Import::Progress`
 /// (`std::atomic<std::int64_t> filesDone, filesTotal; std::atomic<bool>
-/// cancelRequested;`) via `hp2-ffi`'s `hp2_rs_import_run` (a `void*`
-/// the real C++ caller casts from its own `HP2Import::Progress*`, so
-/// no cross-crate struct needs to appear in the generated header).
+/// cancelRequested;`) via `hp2-launcher`'s `import_session::
+/// run_retail_import` (a `void*` the real C++ caller casts from its
+/// own `HP2Import::Progress*`, supplied through the `import_locals`
+/// service callback, so no cross-crate struct needs to appear in the
+/// generated header).
 /// Confirmed layout-compatible by direct measurement, not just by the
 /// general claim that `AtomicI64`/`AtomicBool` have the same size,
 /// alignment, and bit validity as their underlying integer types and a
@@ -633,11 +635,10 @@ fn lexically_normal(path: &Path) -> PathBuf {
 
 /// Dispatches to the real [`crate::archive::extract`] when the
 /// `archive` Cargo feature is enabled, or fails with the same
-/// user-facing message the real C++ gives its `__EMSCRIPTEN__` build
-/// (generalized: "not compiled into this build" covers both a future
-/// wasm target and simply building without the feature, which is the
-/// only way this branch is reachable today since no wasm target exists
-/// yet for this crate).
+/// user-facing message the real C++ gave when archive support was
+/// compiled out: "not compiled into this build". This crate has no
+/// platform target that lacks the `archive` feature by necessity --
+/// the fallback exists only for builds that opt out of it.
 fn extract_archive(archive_path: &Path, destination: &Path) -> Result<PathBuf, String> {
     #[cfg(feature = "archive")]
     {
@@ -833,6 +834,7 @@ fn run_import_inner(
 mod tests {
     use super::*;
     use crate::util::test_support::{tempdir, write};
+    use hp2_file_hash::hash_bytes;
 
     fn minimal_asset(path: &str, disk: &Path) -> Asset {
         Asset {
@@ -1058,7 +1060,7 @@ mod tests {
         let src = tempdir();
         write(src.path(), "core.u", b"hello world!");
         let stage = tempdir();
-        let (core_size, core_hash) = hash::hash(&src.path().join("core.u")).unwrap();
+        let (core_size, core_hash) = hash(&src.path().join("core.u")).unwrap();
         let generated_content = "generated text";
         let mut assets = vec![
             minimal_asset("System/Core.u", &src.path().join("core.u")),
@@ -1067,7 +1069,7 @@ mod tests {
                 generated: true,
                 content: generated_content.to_string(),
                 size: generated_content.len() as u64,
-                hash: hash::hash_bytes(generated_content.as_bytes()),
+                hash: hash_bytes(generated_content.as_bytes()),
                 ..Asset::default()
             },
         ];
@@ -1123,7 +1125,7 @@ mod tests {
         )
         .unwrap();
         let err = validate_output(stage.path(), &assets, "MANIFEST\n").unwrap_err();
-        let (real_size, real_hash) = hash::hash(&stage.path().join("System/Core.u")).unwrap();
+        let (real_size, real_hash) = hash(&stage.path().join("System/Core.u")).unwrap();
         assert_eq!(
             err,
             format!(

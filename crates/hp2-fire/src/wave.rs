@@ -3,9 +3,10 @@
 //! `BumpMapLight`, `BumpMapAngle`, `PhongRange` and `PhongSize`.
 //! C++ keeps `PostLoad`, `Init`, `Clear`, `ConstantTimeTick` and the palette
 //! setup; `SetWaveLight` is a forwarder to `set_wave_light`.
+use std::ffi::c_void;
 
 use crate::abi::FireTraceHooks;
-use crate::globals;
+use hp2_abi::engine::generated::{UWaterTexture, UWaveTexture};
 
 /// `PI` from `Core/Inc/UnMath.h`.
 const PI: f32 = std::f32::consts::PI;
@@ -19,6 +20,25 @@ pub struct FireWaveLight {
     pub bump_map_angle: u8,
     pub phong_range: u8,
     pub phong_size: u8,
+}
+
+/// Reads the scalar inputs `SetWaveLight` needs from a live `UWaveTexture`.
+/// Replaces the C++ `UWaveTexture::SetWaveLight` field reads.
+///
+/// # Safety
+/// `texture` must be non-null and point to a live `UWaveTexture`.
+pub unsafe fn wave_light_from_texture(texture: *const c_void) -> FireWaveLight {
+    unsafe {
+        let w = texture as *const UWaterTexture;
+        let v = texture as *const UWaveTexture;
+        FireWaveLight {
+            wave_amp: (*w).wave_amp,
+            bump_map_light: (*v).bump_map_light,
+            bump_map_angle: (*v).bump_map_angle,
+            phong_range: (*v).phong_range,
+            phong_size: (*v).phong_size,
+        }
+    }
 }
 
 /// `Abs` template from `Core/Inc/UnTemplate.h`: `(A>=(T)0) ? A : -A`.
@@ -36,8 +56,7 @@ fn fake_atan(x: f32) -> f32 {
 /// `render_table` must hold at least 1024 entries (`RenderTable` is 1028).
 #[allow(clippy::needless_range_loop)] // index loop mirrors the C `for (I...)`
 pub fn set_wave_light(trace: FireTraceHooks, p: &FireWaveLight, render_table: &mut [u8]) {
-    let mut g = globals::lock();
-    g.trace = trace;
+    let _ = trace;
     assert!(
         render_table.len() >= 1024,
         "set_wave_light: need 1024 entries"

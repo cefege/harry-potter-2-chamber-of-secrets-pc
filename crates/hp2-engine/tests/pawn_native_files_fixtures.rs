@@ -9,26 +9,14 @@
 //! mirrored in the replay functions below.
 
 use hp2_abi::FVector;
-use hp2_abi::engine::generated::FRotator;
+use hp2_abi::engine::generated::{APawn, APlayerPawn, FRotator};
 use hp2_engine::pawn_native_files::{self as files, Hp2PawnNativeFilesServices};
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::fmt::Write as _;
 use std::ptr;
-use std::sync::LazyLock;
 
 const FIXTURE: &str = include_str!("fixtures/pawn_native_files.txt");
-const SIN_TABLE_LEN: usize = 16384;
-
-// TrigFLOAT[i] = appSin((FLOAT)i * 2.0f * PI / (FLOAT)NUM_ANGLES) in UnMath.cpp.
-static TRIG: LazyLock<Vec<f32>> = LazyLock::new(|| {
-    (0..SIN_TABLE_LEN)
-        .map(|i| {
-            let angle = i as f32 * 2.0f32 * std::f32::consts::PI / SIN_TABLE_LEN as f32;
-            (angle as f64).sin() as f32
-        })
-        .collect()
-});
 
 /// Harness pointer codes: 0 is null, 1 is `ActorB`, 2 is `Goal`.
 const CODE_ACTOR_B: u8 = 1;
@@ -65,8 +53,6 @@ struct World {
     best: u8,
     best_weight: f32,
     probing: i32,
-    pause: f32,
-    shoot: i32,
     goal: u8,
     url_map: String,
 }
@@ -119,8 +105,6 @@ fn fresh() -> World {
         best: 0,
         best_weight: 0.0,
         probing: 0,
-        pause: 7.5,
-        shoot: 1,
         goal: 0,
         url_map: String::new(),
     }
@@ -195,150 +179,197 @@ fn set_ini(w: &mut World, key: &str, value: &str) {
 
 // ---------------------------------------------------------------- hooks
 
-unsafe extern "C" fn cache_get_string(guid: *const u16) -> *const u16 {
-    // SAFETY: the Rust helpers pass NUL-terminated keys.
-    let key = unsafe { s16(guid) };
-    push(format!("cacheget:{key}"));
-    let found = WORLD.with_borrow(|w| {
-        w.ini
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| v.clone())
-    });
-    match found {
-        Some(value) => keep(&value),
-        None => ptr::null(),
-    }
+unsafe extern "C" fn cache_get_string(context: *mut c_void, result: *mut *const u16) -> i32 {
+    let value = (|| {
+        // The fixture context owns a persistent NUL-terminated GUID.
+        let key = unsafe { s16(context.cast()) };
+        push(format!("cacheget:{key}"));
+        let found = WORLD.with_borrow(|w| {
+            w.ini
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, v)| v.clone())
+        });
+        match found {
+            Some(value) => keep(&value),
+            None => ptr::null(),
+        }
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn cache_clear(guid: *const u16) {
-    // SAFETY: the Rust helpers pass NUL-terminated keys.
-    let key = unsafe { s16(guid) };
+unsafe extern "C" fn cache_clear(context: *mut c_void) -> i32 {
+    // The same fixture context remains alive through the cache session.
+    let key = unsafe { s16(context.cast()) };
     push(format!("cacheset:{key}="));
     WORLD.with_borrow_mut(|w| set_ini(w, &key, ""));
+    0
 }
 
-unsafe extern "C" fn cache_path() -> *const u16 {
-    keep("Cache")
+unsafe extern "C" fn cache_path(result: *mut *const u16) -> i32 {
+    let value = (|| keep("Cache"))();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn cache_ext() -> *const u16 {
-    keep(".tmp")
+unsafe extern "C" fn cache_ext(result: *mut *const u16) -> i32 {
+    let value = (|| keep(".tmp"))();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn path_separator() -> *const u16 {
-    keep("/")
+unsafe extern "C" fn path_separator(result: *mut *const u16) -> i32 {
+    let value = (|| keep("/"))();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn paths_count() -> i32 {
-    WORLD.with_borrow(|w| w.paths.len() as i32)
+unsafe extern "C" fn paths_count(result: *mut i32) -> i32 {
+    let value = (|| WORLD.with_borrow(|w| w.paths.len() as i32))();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn path_at(i: i32) -> *const u16 {
-    let path = WORLD.with_borrow(|w| w.paths[i as usize].clone());
-    keep(&path)
+unsafe extern "C" fn path_at(i: i32, result: *mut *const u16) -> i32 {
+    let value = (|| {
+        let path = WORLD.with_borrow(|w| w.paths[i as usize].clone());
+        keep(&path)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn file_move(dest: *const u16, src: *const u16) -> i32 {
-    // SAFETY: the Rust helpers pass NUL-terminated paths.
-    let (dest, src) = unsafe { (s16(dest), s16(src)) };
-    let ok = WORLD.with_borrow(|w| w.move_ok);
-    push(format!("move:{src}->{dest}={}", i32::from(ok != 0)));
-    ok
+unsafe extern "C" fn file_move(dest: *const u16, src: *const u16, result: *mut i32) -> i32 {
+    let value = (|| {
+        // SAFETY: the Rust helpers pass NUL-terminated paths.
+        let (dest, src) = unsafe { (s16(dest), s16(src)) };
+        let ok = WORLD.with_borrow(|w| w.move_ok);
+        push(format!("move:{src}->{dest}={}", i32::from(ok != 0)));
+        ok
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn log_no_extension(name: *const u16) {
+unsafe extern "C" fn log_no_extension(name: *const u16) -> i32 {
     // SAFETY: the Rust helpers pass a NUL-terminated name.
     let name = unsafe { s16(name) };
     push(format!("log:MoveCacheEntry: No extension: {name}"));
+    0
 }
 
-unsafe extern "C" fn log_move(src: *const u16, dest: *const u16) {
+unsafe extern "C" fn log_move(src: *const u16, dest: *const u16) -> i32 {
     // SAFETY: the Rust helpers pass NUL-terminated paths.
     let (src, dest) = unsafe { (s16(src), s16(dest)) };
     push(format!("log:MoveCacheEntry: {src} -> {dest}"));
+    0
 }
 
-unsafe extern "C" fn url_default_option(option: *const u16) -> *const u16 {
-    // SAFETY: the Rust helpers pass a NUL-terminated option.
-    let opt = unsafe { s16(option) };
-    push("loadcfg:DefaultPlayer/User");
-    push(format!("getopt:{opt}"));
-    let value = WORLD.with_borrow(|w| {
-        w.url_defaults
-            .iter()
-            .find(|(k, _)| format!("{k}=") == opt)
-            .map(|(_, v)| v.clone())
-            .unwrap_or_default()
-    });
-    keep(&value)
+unsafe extern "C" fn url_default_option(option: *const u16, result: *mut *const u16) -> i32 {
+    let value = (|| {
+        // SAFETY: the Rust helpers pass a NUL-terminated option.
+        let opt = unsafe { s16(option) };
+        push("loadcfg:DefaultPlayer/User");
+        push(format!("getopt:{opt}"));
+        let value = WORLD.with_borrow(|w| {
+            w.url_defaults
+                .iter()
+                .find(|(k, _)| format!("{k}=") == opt)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        });
+        keep(&value)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn url_add_option(_this: *mut c_void, text: *const u16) {
+unsafe extern "C" fn url_add_option(_this: *mut c_void, text: *const u16) -> i32 {
     // SAFETY: the Rust helpers pass a NUL-terminated option text.
     let text = unsafe { s16(text) };
     push(format!("addopt:{text}"));
+    0
 }
 
-unsafe extern "C" fn url_save_default(_this: *mut c_void, option: *const u16) {
+unsafe extern "C" fn url_save_default(_this: *mut c_void, option: *const u16) -> i32 {
     // SAFETY: the Rust helpers pass a NUL-terminated option name.
     let option = unsafe { s16(option) };
     push(format!("save:DefaultPlayer/{option}/User"));
+    0
 }
 
-unsafe extern "C" fn server_packages() -> *const u16 {
-    push("findclass:engine.gameengine");
-    if !WORLD.with_borrow(|w| w.has_gameengine) {
-        return ptr::null();
-    }
-    push("findfield:serverpackages");
-    if !WORLD.with_borrow(|w| w.has_serverpkg) {
-        return ptr::null();
-    }
-    let text = WORLD.with_borrow(|w| {
-        if w.defaults_num != 0 {
-            Some(w.export_text.clone())
-        } else {
-            None
+unsafe extern "C" fn server_packages(result: *mut *const u16) -> i32 {
+    let value = (|| {
+        push("findclass:engine.gameengine");
+        if !WORLD.with_borrow(|w| w.has_gameengine) {
+            return ptr::null();
         }
-    });
-    match text {
-        Some(text) => {
-            push("exporttext");
-            keep(&text)
+        push("findfield:serverpackages");
+        if !WORLD.with_borrow(|w| w.has_serverpkg) {
+            return ptr::null();
         }
-        None => keep(""),
-    }
+        let text = WORLD.with_borrow(|w| {
+            if w.defaults_num != 0 {
+                Some(w.export_text.clone())
+            } else {
+                None
+            }
+        });
+        match text {
+            Some(text) => {
+                push("exporttext");
+                keep(&text)
+            }
+            None => keep(""),
+        }
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn find_files(pattern: *const u16) -> i32 {
-    // SAFETY: the Rust helpers pass a NUL-terminated pattern.
-    let pattern = unsafe { s16(pattern) };
-    push(format!("find:{pattern}"));
-    let names = WORLD.with_borrow(|w| {
-        w.files
-            .iter()
-            .find(|(p, _)| *p == pattern)
-            .map(|(_, n)| n.clone())
-            .unwrap_or_default()
-    });
-    let count = names.len() as i32;
-    WORLD.with_borrow_mut(|w| w.found = names);
-    count
+unsafe extern "C" fn find_files(pattern: *const u16, result: *mut i32) -> i32 {
+    let value = (|| {
+        // SAFETY: the Rust helpers pass a NUL-terminated pattern.
+        let pattern = unsafe { s16(pattern) };
+        push(format!("find:{pattern}"));
+        let names = WORLD.with_borrow(|w| {
+            w.files
+                .iter()
+                .find(|(p, _)| *p == pattern)
+                .map(|(_, n)| n.clone())
+                .unwrap_or_default()
+        });
+        let count = names.len() as i32;
+        WORLD.with_borrow_mut(|w| w.found = names);
+        count
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn found_file_at(i: i32) -> *const u16 {
-    let name = WORLD.with_borrow(|w| w.found[i as usize].clone());
-    keep(&name)
+unsafe extern "C" fn found_file_at(i: i32, result: *mut *const u16) -> i32 {
+    let value = (|| {
+        let name = WORLD.with_borrow(|w| w.found[i as usize].clone());
+        keep(&name)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn map_ext() -> *const u16 {
-    keep("unr")
+unsafe extern "C" fn map_ext(result: *mut *const u16) -> i32 {
+    let value = (|| keep("unr"))();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn cd_path() -> *const u16 {
-    let cd = WORLD.with_borrow(|w| w.cd_path.clone());
-    keep(&cd)
+unsafe extern "C" fn cd_path(result: *mut *const u16) -> i32 {
+    let value = (|| {
+        let cd = WORLD.with_borrow(|w| w.cd_path.clone());
+        keep(&cd)
+    })();
+    unsafe { *result = value };
+    0
 }
 
 unsafe extern "C" fn find_path_toward_best(
@@ -346,123 +377,123 @@ unsafe extern "C" fn find_path_toward_best(
     _weight: f32,
     predict: i32,
     new_path: *mut *mut c_void,
-) -> f32 {
-    push(format!(
-        "findpath:clear=1,predict={}",
-        i32::from(predict != 0)
-    ));
-    let (best, best_weight) = WORLD.with_borrow(|w| (w.best, w.best_weight));
-    // SAFETY: the Rust helper passes a valid out slot.
-    unsafe { *new_path = code_ptr(best) };
-    best_weight
+    result: *mut f32,
+) -> i32 {
+    let value = (|| {
+        push(format!(
+            "findpath:clear=1,predict={}",
+            i32::from(predict != 0)
+        ));
+        let (best, best_weight) = WORLD.with_borrow(|w| (w.best, w.best_weight));
+        // SAFETY: the Rust helper passes a valid out slot.
+        unsafe { *new_path = code_ptr(best) };
+        best_weight
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn reset_special_state(_this: *mut c_void) {
-    WORLD.with_borrow_mut(|w| {
-        w.pause = 0.0;
-        w.shoot = 0;
-    });
+unsafe extern "C" fn is_probing_special(_path: *mut c_void, result: *mut i32) -> i32 {
+    let value = (|| {
+        push("probing");
+        WORLD.with_borrow(|w| w.probing)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn is_probing_special(_path: *mut c_void) -> i32 {
-    push("probing");
-    WORLD.with_borrow(|w| w.probing)
-}
-
-unsafe extern "C" fn handle_special(_this: *mut c_void, _path: *mut c_void) {
+unsafe extern "C" fn handle_special(_this: *mut c_void, _path: *mut *mut c_void) -> i32 {
     push("handle");
+    0
 }
 
-unsafe extern "C" fn special_goal(_this: *mut c_void) -> *mut c_void {
-    code_ptr(WORLD.with_borrow(|w| w.goal))
+unsafe extern "C" fn keyboard_config_class(_this: *mut c_void, result: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        push("castviewport");
+        let (vp, input) = WORLD.with_borrow(|w| (w.has_viewport, w.has_input));
+        if vp && input {
+            code_ptr(1)
+        } else {
+            ptr::null_mut()
+        }
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn clear_special_goal(_this: *mut c_void) {
-    WORLD.with_borrow_mut(|w| w.goal = 0);
-}
-
-unsafe extern "C" fn keyboard_config_class(_this: *mut c_void) -> *mut c_void {
-    push("castviewport");
-    let (vp, input) = WORLD.with_borrow(|w| (w.has_viewport, w.has_input));
-    if vp && input {
-        code_ptr(1)
-    } else {
-        ptr::null_mut()
-    }
-}
-
-unsafe extern "C" fn reset_config(_klass: *mut c_void) {
+unsafe extern "C" fn reset_config(_klass: *mut c_void) -> i32 {
     push("reset");
+    0
 }
 
-unsafe extern "C" fn has_player(_this: *mut c_void) -> i32 {
-    i32::from(WORLD.with_borrow(|w| w.has_player))
+
+unsafe extern "C" fn player_exec(
+    _this: *mut c_void,
+    command: *const u16,
+    result: *mut *const u16,
+) -> i32 {
+    let value = (|| {
+        // SAFETY: the Rust helpers pass a NUL-terminated command.
+        let cmd = unsafe { s16(command) };
+        push(format!("exec_player:{cmd}"));
+        let out = WORLD.with_borrow(|w| w.exec_out.clone());
+        keep(&out)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn player_exec(_this: *mut c_void, command: *const u16) -> *const u16 {
-    // SAFETY: the Rust helpers pass a NUL-terminated command.
-    let cmd = unsafe { s16(command) };
-    push(format!("exec_player:{cmd}"));
-    let out = WORLD.with_borrow(|w| w.exec_out.clone());
-    keep(&out)
+unsafe extern "C" fn engine_exec(
+    _this: *mut c_void,
+    command: *const u16,
+    result: *mut *const u16,
+) -> i32 {
+    let value = (|| {
+        // SAFETY: the Rust helpers pass a NUL-terminated command.
+        let cmd = unsafe { s16(command) };
+        push(format!("exec_engine:{cmd}"));
+        let out = WORLD.with_borrow(|w| w.exec_out.clone());
+        keep(&out)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn engine_exec(_this: *mut c_void, command: *const u16) -> *const u16 {
-    // SAFETY: the Rust helpers pass a NUL-terminated command.
-    let cmd = unsafe { s16(command) };
-    push(format!("exec_engine:{cmd}"));
-    let out = WORLD.with_borrow(|w| w.exec_out.clone());
-    keep(&out)
-}
-
-unsafe extern "C" fn viewport_size(_this: *mut c_void, size_x: *mut i32, size_y: *mut i32) {
+unsafe extern "C" fn viewport_size(_this: *mut c_void, size_x: *mut i32, size_y: *mut i32) -> i32 {
     let (x, y) = WORLD.with_borrow(|w| w.vp);
     // SAFETY: the Rust helper passes valid out slots.
     unsafe {
         *size_x = x;
         *size_y = y;
     }
+    0
 }
 
-unsafe extern "C" fn pawn_fov(_this: *mut c_void) -> f32 {
-    WORLD.with_borrow(|w| w.pawn_fov)
+unsafe extern "C" fn maintain_vertical_fov(_this: *mut c_void, result: *mut i32) -> i32 {
+    let value = (|| WORLD.with_borrow(|w| w.maintain))();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn maintain_vertical_fov(_this: *mut c_void) -> i32 {
-    WORLD.with_borrow(|w| w.maintain)
+unsafe extern "C" fn effective_fov(
+    fov: f32,
+    size_x: i32,
+    size_y: i32,
+    maintain: i32,
+    result: *mut f32,
+) -> i32 {
+    let value = (|| {
+        push(format!(
+            "eff:auth={},x={size_x},y={size_y},m={maintain}",
+            hf(fov)
+        ));
+        WORLD.with_borrow(|w| w.eff_fov)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn effective_fov(fov: f32, size_x: i32, size_y: i32, maintain: i32) -> f32 {
-    push(format!(
-        "eff:auth={},x={size_x},y={size_y},m={maintain}",
-        hf(fov)
-    ));
-    WORLD.with_borrow(|w| w.eff_fov)
-}
-
-unsafe extern "C" fn pawn_location(_this: *mut c_void, out: *mut c_void) {
-    // SAFETY: the Rust helper passes a valid FVector slot.
-    unsafe {
-        *out.cast::<FVector>() = FVector {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }
-    };
-}
-
-unsafe extern "C" fn pawn_rotation(_this: *mut c_void, out: *mut c_void) {
-    // SAFETY: the Rust helper passes a valid FRotator slot.
-    unsafe {
-        *out.cast::<FRotator>() = FRotator {
-            pitch: 0,
-            yaw: 0,
-            roll: 0,
-        }
-    };
-}
-
-unsafe extern "C" fn calc_view(_this: *mut c_void, loc: *mut c_void, rot: *mut c_void) {
+unsafe extern "C" fn calc_view(_this: *mut c_void, loc: *mut c_void, rot: *mut c_void) -> i32 {
     push("calcview");
     let (view_loc, view_rot) = WORLD.with_borrow(|w| {
         (
@@ -483,25 +514,100 @@ unsafe extern "C" fn calc_view(_this: *mut c_void, loc: *mut c_void, rot: *mut c
         *loc.cast::<FVector>() = view_loc;
         *rot.cast::<FRotator>() = view_rot;
     }
+    0
 }
 
-unsafe extern "C" fn sin_tab(angle: i32) -> f32 {
-    TRIG[((angle >> 2) & 16383) as usize]
+unsafe extern "C" fn last_url_map(_this: *mut c_void, result: *mut *const u16) -> i32 {
+    let value = (|| {
+        push("lasturl");
+        let map = WORLD.with_borrow(|w| w.url_map.clone());
+        keep(&map)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn cos_tab(angle: i32) -> f32 {
-    TRIG[((angle.wrapping_add(16384) >> 2) & 16383) as usize]
+unsafe extern "C" fn entry_level(_this: *mut c_void, result: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        push("entrylevel");
+        code_ptr(CODE_ENTRY_LEVEL)
+    })();
+    unsafe { *result = value };
+    0
 }
 
-unsafe extern "C" fn last_url_map(_this: *mut c_void) -> *const u16 {
-    push("lasturl");
-    let map = WORLD.with_borrow(|w| w.url_map.clone());
-    keep(&map)
+unsafe extern "C" fn registry_classes(_meta_class_name: *const u16, out: *mut i32) -> i32 {
+    unsafe { *out = 0 };
+    0
 }
 
-unsafe extern "C" fn entry_level(_this: *mut c_void) -> *mut c_void {
-    push("entrylevel");
-    code_ptr(CODE_ENTRY_LEVEL)
+unsafe extern "C" fn registry_textures(out: *mut i32) -> i32 {
+    unsafe { *out = 0 };
+    0
+}
+
+unsafe extern "C" fn registry_object_at(
+    _i: i32,
+    out_object: *mut *const u16,
+    out_description: *mut *const u16,
+) -> i32 {
+    unsafe {
+        *out_object = keep("");
+        *out_description = keep("");
+    }
+    0
+}
+
+unsafe extern "C" fn cache_entries(out: *mut i32) -> i32 {
+    unsafe { *out = 0 };
+    0
+}
+
+unsafe extern "C" fn cache_entry_at(
+    _i: i32,
+    out_key: *mut *const u16,
+    out_value: *mut *const u16,
+) -> i32 {
+    unsafe {
+        *out_key = keep("");
+        *out_value = keep("");
+    }
+    0
+}
+
+unsafe extern "C" fn scope_enter(out: *mut *mut c_void) -> i32 {
+    unsafe { *out = ptr::without_provenance_mut(1) };
+    0
+}
+
+unsafe extern "C" fn scope_exit(_scope: *mut c_void) -> i32 {
+    0
+}
+
+unsafe extern "C" fn str_units(_fstr: *const c_void, out: *mut *const u16) -> i32 {
+    unsafe { *out = keep("") };
+    0
+}
+
+unsafe extern "C" fn str_assign(_fstr: *mut c_void, _units: *const u16) -> i32 {
+    0
+}
+
+unsafe extern "C" fn cache_context_open(_guid: *const u16, out: *mut *mut c_void) -> i32 {
+    unsafe { *out = ptr::without_provenance_mut(1) };
+    0
+}
+
+unsafe extern "C" fn cache_context_close(_context: *mut c_void) -> i32 {
+    0
+}
+
+unsafe extern "C" fn find_path_clock_begin(_this: *mut c_void) -> i32 {
+    0
+}
+
+unsafe extern "C" fn find_path_clock_end(_this: *mut c_void) -> i32 {
+    0
 }
 
 fn services() -> Hp2PawnNativeFilesServices {
@@ -525,27 +631,31 @@ fn services() -> Hp2PawnNativeFilesServices {
         map_ext,
         cd_path,
         find_path_toward_best,
-        reset_special_state,
         is_probing_special,
         handle_special,
-        special_goal,
-        clear_special_goal,
         keyboard_config_class,
         reset_config,
-        has_player,
         player_exec,
         engine_exec,
         viewport_size,
-        pawn_fov,
         maintain_vertical_fov,
         effective_fov,
-        pawn_location,
-        pawn_rotation,
         calc_view,
-        sin_tab,
-        cos_tab,
         last_url_map,
         entry_level,
+        registry_classes,
+        registry_textures,
+        registry_object_at,
+        cache_entries,
+        cache_entry_at,
+        scope_enter,
+        scope_exit,
+        str_units,
+        str_assign,
+        cache_context_open,
+        cache_context_close,
+        find_path_clock_begin,
+        find_path_clock_end,
     }
 }
 
@@ -636,7 +746,11 @@ fn cache_entry(out: &mut Out, case: &str, num: i32) {
 fn move_cache(out: &mut Out, case: &str, guid: &str, new_name: &str) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    let moved = unsafe { files::move_cache_entry(&svc, &wide(guid), &wide(new_name)) };
+    let context = keep(guid).cast_mut().cast();
+    let moved = unsafe {
+        files::move_cache_entry(&svc, context, &wide(guid), &wide(new_name))
+            .expect("native fixture success")
+    };
     rec(
         out,
         "move_cache_entry",
@@ -648,7 +762,10 @@ fn move_cache(out: &mut Out, case: &str, guid: &str, new_name: &str) {
 fn check_valid(out: &mut Out, case: &str, pkg: &str, mesh: &str) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    let valid = unsafe { files::check_valid_skin_package(&svc, &wide(pkg), &wide(mesh)) };
+    let valid = unsafe {
+        files::check_valid_skin_package(&svc, &wide(pkg), &wide(mesh))
+            .expect("native fixture success")
+    };
     rec(
         out,
         "check_valid_skin_package",
@@ -660,14 +777,18 @@ fn check_valid(out: &mut Out, case: &str, pkg: &str, mesh: &str) {
 fn update_url(out: &mut Out, case: &str, option: &str, value: &str, save: bool) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    unsafe { files::update_url(&svc, ptr::null_mut(), &wide(option), &wide(value), save) };
+    unsafe {
+        files::update_url(&svc, ptr::null_mut(), &wide(option), &wide(value), save)
+            .expect("native fixture success")
+    };
     rec(out, "update_url", case, "done=1");
 }
 
 fn get_default_url(out: &mut Out, case: &str, option: &str) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    let value = unsafe { files::get_default_url(&svc, &wide(option)) };
+    let value =
+        unsafe { files::get_default_url(&svc, &wide(option)).expect("native fixture success") };
     rec(
         out,
         "get_default_url",
@@ -696,16 +817,24 @@ fn next_skin(out: &mut Out, case: &str, prefix: &str, current: &str, dir: i32) {
 fn reset_keyboard(out: &mut Out, case: &str) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    unsafe { files::reset_keyboard(&svc, ptr::null_mut()) };
+    unsafe { files::reset_keyboard(&svc, ptr::null_mut()).expect("native fixture success") };
     rec(out, "reset_keyboard", case, "done=1");
 }
 
 fn find_best(out: &mut Out, case: &str, weight: f32, predict: bool) {
     let svc = services();
     let mut weight_out = weight;
-    // SAFETY: the mock services are valid for the call; `weight_out` is a valid slot.
+    let goal_in = WORLD.with_borrow(|w| w.goal);
+    // SAFETY: APawn is repr(C) plain data; all-zero is valid.
+    let mut pawn: Box<APawn> = Box::new(unsafe { std::mem::zeroed() });
+    pawn.special_pause = 7.5;
+    pawn.set_b_shoot_special(true);
+    pawn.special_goal = code_ptr(goal_in);
+    let this = (&mut *pawn as *mut APawn).cast::<c_void>();
+    // SAFETY: `this` backs a real, zeroed APawn; the mock services are valid for the call.
     let result = unsafe {
-        files::find_best_inventory_path(&svc, ptr::null_mut(), weight, predict, &mut weight_out)
+        files::find_best_inventory_path(&svc, this, weight, predict, &mut weight_out)
+            .expect("native fixture success")
     };
     let result_tag = match result as usize {
         0 => "null",
@@ -713,8 +842,9 @@ fn find_best(out: &mut Out, case: &str, weight: f32, predict: bool) {
         2 => "goal",
         _ => "other",
     };
-    let (pause, shoot, goal) = WORLD.with_borrow(|w| (w.pause, w.shoot, w.goal));
-    let goal_tag = match goal {
+    let pause = pawn.special_pause;
+    let shoot = i32::from(pawn.b_shoot_special());
+    let goal_tag = match pawn.special_goal as usize as u8 {
         0 => "null",
         CODE_ACTOR_B => "b",
         CODE_GOAL => "goal",
@@ -735,7 +865,9 @@ fn find_best(out: &mut Out, case: &str, weight: f32, predict: bool) {
 fn get_map_name(out: &mut Out, case: &str, prefix: &str, map: &str, dir: i32) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    let result = unsafe { files::get_map_name(&svc, &wide(prefix), &wide(map), dir) };
+    let result = unsafe {
+        files::get_map_name(&svc, &wide(prefix), &wide(map), dir).expect("native fixture success")
+    };
     rec(
         out,
         "get_map_name",
@@ -746,8 +878,15 @@ fn get_map_name(out: &mut Out, case: &str, prefix: &str, map: &str, dir: i32) {
 
 fn console_command(out: &mut Out, case: &str, command: &str) {
     let svc = services();
-    // SAFETY: the mock services are valid for the call.
-    let result = unsafe { files::console_command(&svc, ptr::null_mut(), &wide(command)) };
+    let has_player = WORLD.with_borrow(|w| w.has_player);
+    // SAFETY: APlayerPawn is repr(C) plain data; all-zero is valid.
+    let mut pawn: Box<APlayerPawn> = Box::new(unsafe { std::mem::zeroed() });
+    pawn.player = if has_player { code_ptr(1) } else { ptr::null_mut() };
+    let this = (&mut *pawn as *mut APlayerPawn).cast::<c_void>();
+    // SAFETY: `this` backs a real, zeroed APlayerPawn; the mock services are valid for the call.
+    let result = unsafe {
+        files::console_command(&svc, this, &wide(command)).expect("native fixture success")
+    };
     rec(
         out,
         "console_command",
@@ -763,11 +902,17 @@ fn screen_to_world(out: &mut Out, case: &str, sx: f32, sy: f32, sz: f32) {
         y: 0.0,
         z: 0.0,
     };
-    // SAFETY: the mock services are valid for the call; `result` is a valid slot.
+    let fov = WORLD.with_borrow(|w| w.pawn_fov);
+    // SAFETY: APawn is repr(C) plain data; all-zero is valid.
+    let mut pawn: Box<APawn> = Box::new(unsafe { std::mem::zeroed() });
+    pawn.fov_angle = fov;
+    let this = (&mut *pawn as *mut APawn).cast::<c_void>();
+    // SAFETY: `this` backs a real, zeroed APawn; the mock services are valid for the call;
+    // `result` is a valid slot.
     unsafe {
         files::screen_to_world(
             &svc,
-            ptr::null_mut(),
+            this,
             FVector {
                 x: sx,
                 y: sy,
@@ -775,6 +920,7 @@ fn screen_to_world(out: &mut Out, case: &str, sx: f32, sy: f32, sz: f32) {
             },
             &mut result,
         )
+        .expect("native fixture success")
     };
     rec(
         out,
@@ -792,7 +938,7 @@ fn screen_to_world(out: &mut Out, case: &str, sx: f32, sy: f32, sz: f32) {
 fn get_url_map(out: &mut Out, case: &str) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    let value = unsafe { files::url_map(&svc, ptr::null_mut()) };
+    let value = unsafe { files::url_map(&svc, ptr::null_mut()).expect("native fixture success") };
     // SAFETY: the mock returns a buffer from `keep`, valid until the next call.
     let map = unsafe { files::units(value) };
     rec(
@@ -806,7 +952,8 @@ fn get_url_map(out: &mut Out, case: &str) {
 fn get_entry_level(out: &mut Out, case: &str) {
     let svc = services();
     // SAFETY: the mock services are valid for the call.
-    let level = unsafe { files::entry_level(&svc, ptr::null_mut()) };
+    let level =
+        unsafe { files::entry_level(&svc, ptr::null_mut()).expect("native fixture success") };
     let tag = if level == code_ptr(CODE_ENTRY_LEVEL) {
         "entry"
     } else {

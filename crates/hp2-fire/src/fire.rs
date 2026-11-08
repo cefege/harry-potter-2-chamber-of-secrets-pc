@@ -7,13 +7,11 @@
 //! The diffusion kernels touch neither the RNG nor the trace hooks, so they
 //! take no `FireTraceHooks`. `speed_rand` is the one entry here that does.
 
-use crate::abi::FireTraceHooks;
+use crate::abi::{FireCallbackError, FireTraceHooks};
 
 /// `SpeedRand()` entry for C++ callers that have not been ported yet.
-pub fn speed_rand(trace: FireTraceHooks) -> u8 {
-    let mut g = crate::globals::lock();
-    g.trace = trace;
-    g.speed_rand()
+pub fn speed_rand(trace: FireTraceHooks) -> Result<u8, FireCallbackError> {
+    crate::globals::FireSession::new(trace).speed_rand()
 }
 
 /// Entry for `InitTables`. The C++ shell has already
@@ -25,23 +23,69 @@ pub fn init_tables(
     rng_seed: &[u8; 512],
     before: u64,
     after: u64,
-) {
-    let mut g = crate::globals::lock();
-    g.trace = trace;
-    crate::tables::init_tables(&mut g, sine, rng_seed, before, after);
+) -> Result<(), FireCallbackError> {
+    let fingerprint = {
+        let mut globals = crate::globals::lock();
+        crate::tables::init_tables(&mut globals, sine, rng_seed)
+    };
+    trace.init_tables(before, after, fingerprint)
 }
 
-/// Copies the phase tables held in `FireGlobals` into arrays the C++ readers
-/// still use (`PhaseTable`, `SignedPhaseTable`, `LightPhaseTable`).
-pub fn read_phase_tables(
-    phase: &mut [u8; 256],
-    signed_phase: &mut [u8; 256],
-    light_phase: &mut [u8; 256],
-) {
-    let g = crate::globals::lock();
-    phase.copy_from_slice(&g.phase_table);
-    signed_phase.copy_from_slice(&g.signed_phase_table);
-    light_phase.copy_from_slice(&g.light_phase_table);
+static INITIALIZED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+
+/// The ordinal is observed on every call, even after initialization, matching
+/// the native entry. The lock protects only the flag, never a native leaf.
+pub fn initialize(services: crate::abi::FireInitServices) -> Result<(), FireCallbackError> {
+    let mut before = 0;
+    crate::abi::checked(services.ordinal.ok_or(FireCallbackError)?(
+        services.context,
+        &mut before,
+    ))?;
+    if *INITIALIZED.lock().unwrap_or_else(|e| e.into_inner()) {
+        return Ok(());
+    }
+    crate::abi::checked(services.scoped.ok_or(FireCallbackError)?(
+        services.context,
+        before,
+    ))?;
+    *INITIALIZED.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    Ok(())
+}
+
+/// Runs inside the native RNG trace phase scope. Native leaves operate only
+/// on individual local outputs; no arena borrow or global lock spans a call.
+pub fn initialize_scoped(
+    services: crate::abi::FireInitServices,
+    before: u64,
+) -> Result<(), FireCallbackError> {
+    let mut sine = [0.0; 256];
+    for (index, value) in sine.iter_mut().enumerate() {
+        let angle = (index as f32 / 256.0) * 6.2831853_f32;
+        crate::abi::checked(services.sine.ok_or(FireCallbackError)?(
+            services.context,
+            angle,
+            value,
+        ))?;
+    }
+    let mut seed = [0; 512];
+    for byte in &mut seed {
+        let mut value = 0;
+        crate::abi::checked(services.random.ok_or(FireCallbackError)?(
+            services.context,
+            &mut value,
+        ))?;
+        *byte = (value & 255) as u8;
+    }
+    let mut after = 0;
+    crate::abi::checked(services.ordinal.ok_or(FireCallbackError)?(
+        services.context,
+        &mut after,
+    ))?;
+    init_tables(services.trace, &sine, &seed, before, after)?;
+    if let Some(publish) = services.publish {
+        crate::abi::checked(publish(services.context))?;
+    }
+    Ok(())
 }
 
 #[inline(always)]

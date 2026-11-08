@@ -1,6 +1,5 @@
 include(GNUInstallDirs)
 
-
 if(APPLE)
 # OpenAL Soft is the sole replaceable runtime dependency in this phase. Give
 # the build dylib its eventual bundle-relative identity so every executable
@@ -11,25 +10,13 @@ set_target_properties(OpenAL PROPERTIES
     MACOSX_RPATH TRUE
 )
 
-install(TARGETS ${HP2_EXECUTABLE_TARGETS}
+install(IMPORTED_RUNTIME_ARTIFACTS hp2_import
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
 install(TARGETS OpenAL
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     RUNTIME DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-)
-
-set_target_properties(${HP2_EXECUTABLE_TARGETS} PROPERTIES
-    INSTALL_RPATH "@loader_path/../${CMAKE_INSTALL_LIBDIR}"
-)
-
-# Keep direct build-tree launches working while ensuring the packaged copy has
-# only the bundle-relative search path. The package target replaces this exact
-# build RPATH after copying the executable.
-set_target_properties(hp2_game PROPERTIES
-    BUILD_RPATH "$<TARGET_FILE_DIR:OpenAL>"
-    INSTALL_RPATH "@executable_path/../Frameworks"
 )
 
 find_program(HP2_INSTALL_NAME_TOOL
@@ -81,7 +68,7 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
         "${HP2_MACOS_FRAMEWORKS_DIR}"
         "${HP2_MACOS_RESOURCES_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy
-        "$<TARGET_FILE:hp2_game>"
+        "$<TARGET_FILE:hp2_game_rust>"
         "${HP2_MACOS_EXECUTABLE}"
     # Ship the dylib under the soname the executable actually resolves
     # (@rpath/libopenal.1.dylib) instead of its versioned build-tree name plus
@@ -112,7 +99,7 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
         --timestamp=none
         "${HP2_MACOS_APP_DIR}"
     DEPENDS
-        hp2_game
+        hp2_game_rust
         OpenAL
     COMMENT "Recreating signed dist/macos-arm64/HarryPotter2.app"
     VERBATIM
@@ -161,10 +148,9 @@ add_custom_target(hp2_macos_dmg
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
-# Linux build and install: copy the executables and OpenAL next to each
-# other with an $ORIGIN-relative RPATH, then assemble a flat dist tree with
-# the shared launcher fonts beside the installed data.
-install(TARGETS ${HP2_EXECUTABLE_TARGETS}
+# Linux build and install: install the OpenAL dependency and assemble a flat
+# dist tree with the shared launcher fonts beside the installed data.
+install(IMPORTED_RUNTIME_ARTIFACTS hp2_import
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 )
 
@@ -172,24 +158,16 @@ install(TARGETS OpenAL
     LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 )
 
-set_target_properties(${HP2_EXECUTABLE_TARGETS} PROPERTIES
-    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-)
-
-set_target_properties(hp2_game PROPERTIES
-    BUILD_RPATH "$<TARGET_FILE_DIR:OpenAL>"
-)
+corrosion_add_target_local_rustflags(hp2_game_rust
+    "-Clink-arg=-Wl,-rpath,\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 
 set(HP2_LINUX_DIST_DIR "${PROJECT_SOURCE_DIR}/dist/linux-${HP2_TARGET_ARCH}")
 
 # A separate "hp2_dist" component scopes cmake --install to exactly the
 # runtime pieces the dist tree ships (the game binary and its OpenAL
-# dependency), never the test suite that also lands in
-# HP2_EXECUTABLE_TARGETS. Routing the copy through cmake --install (rather
-# than a raw file copy) is what lets CMake's own RPATH_CHANGE rewrite
-# hp2_game's BUILD_RPATH to the $ORIGIN-relative INSTALL_RPATH above, so the
-# packaged binary stays runnable after the build tree is removed.
-install(TARGETS hp2_game
+# dependency). The Rust binary records its $ORIGIN-relative rpath via the
+# rustflags above so it stays runnable after the build tree is removed.
+install(IMPORTED_RUNTIME_ARTIFACTS hp2_game_rust
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
     COMPONENT hp2_dist
     EXCLUDE_FROM_ALL
@@ -213,82 +191,9 @@ add_custom_target(hp2_linux_dist ALL
         "${PROJECT_SOURCE_DIR}/ThirdParty/fonts"
         "${HP2_LINUX_DIST_DIR}/share/harry-potter-2/fonts"
     DEPENDS
-        hp2_game
+        hp2_game_rust
         OpenAL
     COMMENT "Recreating dist/linux-${HP2_TARGET_ARCH}/"
-    VERBATIM
-)
-
-elseif(WIN32)
-set(HP2_WINDOWS_DIST_DIR "${PROJECT_SOURCE_DIR}/dist/windows-x64")
-set(HP2_WINDOWS_RUNTIME_DIR "$ENV{LLVM_MINGW_ROOT}/x86_64-w64-mingw32/bin")
-find_program(HP2_LLVM_OBJDUMP NAMES llvm-objdump
-    HINTS "$ENV{LLVM_MINGW_ROOT}/bin" "${HP2_WINDOWS_RUNTIME_DIR}"
-    REQUIRED
-)
-
-install(TARGETS hp2_game
-    RUNTIME DESTINATION "."
-    COMPONENT hp2_windows_dist
-    EXCLUDE_FROM_ALL
-)
-install(TARGETS OpenAL
-    RUNTIME DESTINATION "."
-    COMPONENT hp2_windows_dist
-    EXCLUDE_FROM_ALL
-)
-
-add_custom_target(hp2_windows_dist
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${HP2_WINDOWS_DIST_DIR}"
-    COMMAND "${CMAKE_COMMAND}" --install "${CMAKE_BINARY_DIR}"
-        --prefix "${HP2_WINDOWS_DIST_DIR}" --component hp2_windows_dist
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory
-        "${PROJECT_SOURCE_DIR}/ThirdParty/fonts" "${HP2_WINDOWS_DIST_DIR}/fonts"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${HP2_WINDOWS_DIST_DIR}/licenses"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_sdl2_SOURCE_DIR}/LICENSE.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/SDL2-LICENSE.txt"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_openal_soft_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/OpenAL-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_openal_soft_SOURCE_DIR}/BSD-3Clause" "${HP2_WINDOWS_DIST_DIR}/licenses/OpenAL-BSD-3Clause"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_openal_soft_SOURCE_DIR}/LICENSE-pffft" "${HP2_WINDOWS_DIST_DIR}/licenses/OpenAL-LICENSE-pffft"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_ogg_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/libogg-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_vorbis_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/libvorbis-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_squish_SOURCE_DIR}/LICENSE" "${HP2_WINDOWS_DIST_DIR}/licenses/libSquish-LICENSE"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_imgui_SOURCE_DIR}/LICENSE.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/ImGui-LICENSE.txt"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_nativefiledialog_SOURCE_DIR}/LICENSE" "${HP2_WINDOWS_DIST_DIR}/licenses/nativefiledialog-LICENSE"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_libarchive_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/libarchive-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_zlib_SOURCE_DIR}/LICENSE" "${HP2_WINDOWS_DIST_DIR}/licenses/zlib-LICENSE"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_bzip2_SOURCE_DIR}/LICENSE" "${HP2_WINDOWS_DIST_DIR}/licenses/bzip2-LICENSE"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_xz_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/xz-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_xz_SOURCE_DIR}/COPYING.GPLv2" "${HP2_WINDOWS_DIST_DIR}/licenses/xz-COPYING.GPLv2"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_xz_SOURCE_DIR}/COPYING.0BSD" "${HP2_WINDOWS_DIST_DIR}/licenses/xz-COPYING.0BSD"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_xz_SOURCE_DIR}/COPYING.LGPLv2.1" "${HP2_WINDOWS_DIST_DIR}/licenses/xz-COPYING.LGPLv2.1"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_utf8proc_SOURCE_DIR}/LICENSE.md" "${HP2_WINDOWS_DIST_DIR}/licenses/utf8proc-LICENSE.md"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_freetype_SOURCE_DIR}/LICENSE.TXT" "${HP2_WINDOWS_DIST_DIR}/licenses/FreeType-LICENSE.TXT"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${hp2_harfbuzz_SOURCE_DIR}/COPYING" "${HP2_WINDOWS_DIST_DIR}/licenses/HarfBuzz-COPYING"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${PROJECT_SOURCE_DIR}/ThirdParty/fonts/LICENSE-Liberation.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/Liberation-LICENSE.txt"
-    COMMAND "${CMAKE_COMMAND}" -E copy "${PROJECT_SOURCE_DIR}/ThirdParty/fonts/LICENSE-NotoSansCJK.txt" "${HP2_WINDOWS_DIST_DIR}/licenses/NotoSansCJK-LICENSE.txt"
-    COMMAND "${CMAKE_COMMAND}"
-        "-DHP2_DIST_DIR=${HP2_WINDOWS_DIST_DIR}"
-        "-DHP2_RUNTIME_DLL_DIR=${HP2_WINDOWS_RUNTIME_DIR}"
-        "-DHP2_OBJDUMP=${HP2_LLVM_OBJDUMP}"
-        -P "${CMAKE_CURRENT_LIST_DIR}/CheckWindowsRuntime.cmake"
-    DEPENDS hp2_game OpenAL
-    COMMENT "Assembling dist/windows-x64/"
-    VERBATIM
-)
-
-set(HP2_WINDOWS_ZIP "${HP2_WINDOWS_DIST_DIR}/HarryPotter2-${PROJECT_VERSION}-windows-x64.zip")
-set(HP2_WINDOWS_ZIP_STAGE
-    "${CMAKE_CURRENT_BINARY_DIR}/Packaging/HarryPotter2-${PROJECT_VERSION}-windows-x64")
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Packaging")
-add_custom_target(hp2_windows_zip
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${HP2_WINDOWS_ZIP_STAGE}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Packaging"
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${HP2_WINDOWS_DIST_DIR}" "${HP2_WINDOWS_ZIP_STAGE}"
-    COMMAND "${CMAKE_COMMAND}" -E tar cf "${HP2_WINDOWS_ZIP}" --format=zip
-        "HarryPotter2-${PROJECT_VERSION}-windows-x64"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Packaging"
-    DEPENDS hp2_windows_dist
-    COMMENT "Creating ${HP2_WINDOWS_ZIP}"
     VERBATIM
 )
 endif()

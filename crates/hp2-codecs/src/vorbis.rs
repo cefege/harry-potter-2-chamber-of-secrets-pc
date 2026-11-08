@@ -1,17 +1,13 @@
-//! Replaces the `vorbisfile`/`libvorbis` calls in
-//! `HarryPotter2/Unreal/Core/Src/UnFileStream.cpp` (`ov_open`/`ov_read`/
-//! `ov_pcm_seek`/`ov_clear`) and
-//! `HarryPotter2/Unreal/ALAudio/Src/ALAudioSubsystem.cpp` (`ov_info`/
-//! `ov_pcm_total`/`ov_time_total`) with the pure-Rust `lewton` decoder.
+//! Pure-Rust `lewton` decoder shared by file streaming and OpenAL audio.
+//! Replaces the former native `vorbisfile`/`libvorbis` operations.
 //!
 //! [`Decoder`] keeps the exact two-phase lifecycle `OggVorbis_File` had:
 //! callers allocate an empty decoder ([`Decoder::new`], replacing
 //! `new OggVorbis_File`), then initialize it in place
 //! ([`Decoder::open`], replacing `ov_open(File, Ogg, NULL, 0)`). This
-//! preserves every existing call site's allocate-then-open-then-on-failure-
-//! free pattern without redesigning `FFileStream`'s `CreateStream`
-//! contract (`Stream.TDD` stays caller-allocated for the Ogg stream types,
-//! exactly as it is today).
+//! preserves the allocate-then-open-then-on-failure-free lifecycle. File
+//! streams borrow the caller-owned decoder; destroy the stream before
+//! freeing its decoder handle.
 //!
 //! PCM fidelity: `lewton`'s own `Sample for i16` impl truncates
 //! (`fl as i16`) where `libvorbis`'s `vorbis_ftoi` rounds to nearest
@@ -58,8 +54,8 @@ use std::fs::File;
 use lewton::inside_ogg::OggStreamReader;
 
 /// Matches `libvorbis`'s `vorbis_ftoi`, which is rounding-mode-specific in
-/// `lib/os.h`: x86_64 (CI's `linux-x64`/`windows-x64`, both built with
-/// SSE2 math) takes the `_mm_cvtsd_si32` path, round-to-nearest with ties
+/// `lib/os.h`: x86_64 (CI's `linux-x64`, built with SSE2 math) takes the
+/// `_mm_cvtsd_si32` path, round-to-nearest with ties
 /// to even (MXCSR default). Every other architecture — including aarch64,
 /// which is what this engine ships on for macOS/Linux — falls through to
 /// the generic `(int)floor(f + .5)`, which rounds exact `.5` ties up

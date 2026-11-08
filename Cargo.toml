@@ -1,6 +1,6 @@
 # In-place Rust port of the HP2 engine. Every crate here replaces a C++
-# subsystem inside the shipping hp2_game; hp2-ffi is the single staticlib the
-# CMake build links (see Build/CMake/HP2Targets.cmake).
+# subsystem inside the shipping hp2_game_rust; the CMake build links the
+# Rust products through corrosion (see Build/CMake/HP2Targets.cmake).
 [workspace]
 resolver = "2"
 members = ["crates/*"]
@@ -8,7 +8,7 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.97"
+rust-version = "1.99"
 publish = false
 
 [workspace.dependencies]
@@ -17,6 +17,8 @@ hp2-ini = { path = "crates/hp2-ini" }
 hp2-codecs = { path = "crates/hp2-codecs" }
 hp2-import = { path = "crates/hp2-import" }
 hp2-launcher = { path = "crates/hp2-launcher" }
+hp2-bootstrap-paths = { path = "crates/hp2-bootstrap-paths" }
+hp2-file-hash = { path = "crates/hp2-file-hash" }
 hp2-audio = { path = "crates/hp2-audio" }
 hp2-platform = { path = "crates/hp2-platform" }
 hp2-abi = { path = "crates/hp2-abi" }
@@ -24,6 +26,7 @@ hp2-render = { path = "crates/hp2-render" }
 hp2-wgpu = { path = "crates/hp2-wgpu" }
 hp2-fire = { path = "crates/hp2-fire" }
 hp2-engine = { path = "crates/hp2-engine" }
+hp2-core = { path = "crates/hp2-core" }
 wgpu = "=30.0.1"
 glam = { version = "=0.34.1", features = ["bytemuck"] }
 bytemuck = { version = "=1.25.2", features = ["derive"] }
@@ -31,9 +34,17 @@ naga = "=30.0.1"
 pollster = "=1.0.1"
 raw-window-handle = "=0.6.2"
 sha2 = "=0.10.9"
-cbindgen = { version = "=0.29.4", default-features = false }
 log = "=0.4.34"
 parking_lot = "=0.12.5"
 libc = "=0.2.190"
 lewton = "=0.10.2"
 png = "=0.18.1"
+
+# Crash-report debug mode: keep line tables in release builds so every
+# crash-report.json frame symbolicates to a file and line with
+# `atos -o <image_path> -l <image_base> <frame>`. `strip = "none"`
+# overrides Rust's release default (`strip = "debuginfo"`), which would
+# discard them.
+[profile.release]
+debug = "line-tables-only"
+strip = "none"

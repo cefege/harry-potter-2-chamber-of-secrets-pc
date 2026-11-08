@@ -3,803 +3,80 @@
 # runs can be pointed at an alternate data root without editing this file.
 set(HP2_TEST_DATA_ROOT "${HP2_UNREAL_ROOT}" CACHE PATH
     "Prototype data root passed to behavioral tests via -datadir/--data-root")
+set(HP2_CPP_ORACLE_APP
+    "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app" CACHE PATH
+    "Independent first-party C++ oracle app bundle used by parity tests")
 
-add_library(hp2_compile_policy INTERFACE)
-target_compile_features(hp2_compile_policy INTERFACE cxx_std_17)
-
-target_compile_definitions(hp2_compile_policy INTERFACE
-    ASM=0
-    UNICODE=1
-    _UNICODE=1
-    HP2_HAS_NATIVE_TEXT_BACKEND=$<BOOL:${HP2_HAS_NATIVE_TEXT_BACKEND}>
-)
-if(APPLE)
-    target_compile_definitions(hp2_compile_policy INTERFACE MACOSX=1 __UNIX__=1)
-elseif(WIN32)
-    target_compile_definitions(hp2_compile_policy INTERFACE
-        HP2_WINDOWS=1
-        WIN32_LEAN_AND_MEAN
-        NOMINMAX
-        _WIN32_WINNT=0x0A00
-    )
-else()
-    target_compile_definitions(hp2_compile_policy INTERFACE __UNIX__=1)
-endif()
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "^(AppleClang|Clang)$")
-    target_compile_options(hp2_compile_policy INTERFACE
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-fsigned-char>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wall>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wextra>"
-        # The VC6-era headers intentionally expose empty virtual defaults,
-        # placement-new forms, and null-base reflected offset expressions.
-        # Keep host-width conversions fatal while silencing that known noise.
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-unused-parameter>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-reorder-ctor>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-inline-new-delete>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-implicit-exception-spec-mismatch>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-deprecated-copy>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-exceptions>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-ignored-qualifiers>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-sign-compare>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-overloaded-virtual>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-extra-tokens>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-string-plus-int>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Wno-null-pointer-subtraction>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=shorten-64-to-32>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=pointer-to-int-cast>"
-        "$<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=int-to-pointer-cast>"
-        "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>>:-O3>"
-    )
-endif()
-
-if(HP2_ENABLE_ASAN_UBSAN)
-    target_compile_options(hp2_compile_policy INTERFACE
-        -fsanitize=address,undefined
-        # UE1's GNU ABI deliberately places host-pointer containers on
-        # four-byte package boundaries. Apple arm64 supports those accesses;
-        # retain every other ASan/UBSan check without misdiagnosing that ABI.
-        -fno-sanitize=alignment
-        -fno-omit-frame-pointer
-        -fno-sanitize-recover=all
-    )
-    target_link_options(hp2_compile_policy INTERFACE
-        -fsanitize=address,undefined
-        -fno-omit-frame-pointer
-        -fno-sanitize-recover=all
-    )
-elseif(HP2_ENABLE_TSAN)
-    target_compile_options(hp2_compile_policy INTERFACE
-        -fsanitize=thread
-        -fno-omit-frame-pointer
-    )
-    target_link_options(hp2_compile_policy INTERFACE
-        -fsanitize=thread
-        -fno-omit-frame-pointer
-    )
-endif()
-
-set(HP2_EMPTY_MODULE_API_DEFINITIONS
-    CORE_API=
-    ENGINE_API=
-    RENDER_API=
-    FIRE_API=
-    EDITOR_API=
-    ALAUDIO_API=
-    SDLDRV_API=
-    WGPUDRV_API=
-)
-
-set(HP2_CORE_INCLUDE_DIRS
-    "${HP2_UNREAL_ROOT}/Core/Inc"
-    "${HP2_UNREAL_ROOT}/Core/Src"
-)
-set(HP2_ENGINE_INCLUDE_DIRS
-    ${HP2_CORE_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/Engine/Inc"
-    "${HP2_UNREAL_ROOT}/Engine/Src"
-)
-set(HP2_RENDER_INCLUDE_DIRS
-    ${HP2_ENGINE_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/Render/Inc"
-    "${HP2_UNREAL_ROOT}/Render/Src"
-)
-set(HP2_FIRE_INCLUDE_DIRS
-    ${HP2_ENGINE_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/Fire/Inc"
-    "${HP2_UNREAL_ROOT}/Fire/Src"
-)
-set(HP2_EDITOR_INCLUDE_DIRS
-    ${HP2_ENGINE_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/Editor/Inc"
-    "${HP2_UNREAL_ROOT}/Editor/Src"
-)
-
-set(HP2_ALAUDIO_INCLUDE_DIRS
-    ${HP2_ENGINE_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/ALAudio/Inc"
-    "${HP2_UNREAL_ROOT}/ALAudio/Src"
-)
-set(HP2_SDLDRV_INCLUDE_DIRS
-    ${HP2_ENGINE_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/SDLDrv/Inc"
-)
-set(HP2_NATIVETEXT_INCLUDE_DIRS
-    "${HP2_UNREAL_ROOT}/NativeText/Inc"
-)
-set(HP2_LAUNCH_INCLUDE_DIRS
-    ${HP2_RENDER_INCLUDE_DIRS}
-    ${HP2_FIRE_INCLUDE_DIRS}
-    ${HP2_ALAUDIO_INCLUDE_DIRS}
-    ${HP2_SDLDRV_INCLUDE_DIRS}
-    ${HP2_NATIVETEXT_INCLUDE_DIRS}
-    "${HP2_UNREAL_ROOT}/Launch/Src"
-    "${HP2_UNREAL_ROOT}/UCC/Src"
-    "${HP2_UNREAL_ROOT}/SDLLaunch/Src"
-    "${PROJECT_SOURCE_DIR}/Tests"
-)
-list(REMOVE_DUPLICATES HP2_LAUNCH_INCLUDE_DIRS)
-
-function(hp2_add_engine_object target package_name)
-    add_library("${target}" OBJECT ${ARGN})
-    target_link_libraries("${target}" PRIVATE hp2_compile_policy)
-    target_compile_definitions("${target}" PRIVATE
-        __STATIC_LINK=1
-        ${HP2_EMPTY_MODULE_API_DEFINITIONS}
-        "GPackage=LocalPackageName${package_name}"
-    )
-    set_target_properties("${target}" PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED YES
-        CXX_EXTENSIONS NO
-    )
-endfunction()
-
-# The Rust workspace builds one staticlib, hp2-ffi, which re-exports every
-# port crate's extern "C" API. Its build.rs writes the cbindgen header
-# hp2_rs.h into HP2_RS_INCLUDE_DIR. Linking it through hp2_core reaches
-# hp2_game, hp2_ucc, and every executable that links the Core object library.
-#
-# hp2_rs.h is declared a BYPRODUCT of corrosion's `_cargo-build_hp2_ffi`
-# utility target (below, after HP2_RS_INCLUDE_DIR is set). Without that,
-# nothing told Ninja that this header is generated by the cargo step, so
-# a C++ consumer's freshness was judged against the header's mtime from
-# the start of the invocation: a single `cmake --build` that changed an
-# hp2_rs_* signature relinked already-built consumers against the new
-# libhp2_ffi.a without recompiling them against the regenerated header (a
-# silent extern "C" ABI mismatch), and only the next invocation rebuilt
-# them (observed: ~37 consumers recompiled one invocation late). As a
-# byproduct, the header gets Ninja's restat after the cargo step and every
-# consumer whose depfile lists it is ordered after, and rebuilt by, the same
-# invocation. cbindgen only rewrites the file when its contents change, so
-# an unchanged API rebuilds nothing.
-# Verified (wgpu tree, header-only signature change, one consumer): with the
-# BYPRODUCTS below removed, the single invocation rewrote hp2_rs.h and exited 0
-# without recompiling WgpuDrv.cpp.o (stale). With it present, the same
-# invocation rewrote the header and recompiled WgpuDrv.cpp.o, which then failed
-# against the new declaration. One build is enough; the run-twice step is not
-# needed for this case. Only one consumer was tested, not all ~37.
-#
-# Corrosion copies CMAKE_OSX_DEPLOYMENT_TARGET into MACOSX_DEPLOYMENT_TARGET for
-# every cargo run, host proc-macros included. On macOS 27 with Xcode ld-27037,
-# the host dylib for cbindgen's serde_derive then fails dyld's LINKEDIT check
-# ("mis-aligned LINKEDIT string pool") whenever that variable is set. hp2-ffi
-# has no C sources, so the forwarding does nothing useful for it. Clear it for
-# this import only; the game's own targets keep CMAKE_OSX_DEPLOYMENT_TARGET.
-# Emscripten has no Rust target, so the browser build links no Rust.
-#
-# WgpuDrv is the only render device, built on every non-web platform. The web
-# build links no Rust, so it has no render device there.
-if(NOT EMSCRIPTEN)
-    set(_hp2_saved_osx_deployment_target "${CMAKE_OSX_DEPLOYMENT_TARGET}")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "")
-    corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml" CRATES hp2-ffi)
-    # hp2-import's `archive` Cargo feature links the real pinned
-    # archive_static for its Extract/HP2ImportArchive.cpp replacement
-    # (crates/hp2-import/src/archive.rs) -- off by default so bare
-    # `cargo build`/`cargo test` never need libarchive, enabled here for
-    # the real product build where it's actually needed. See
-    # crates/hp2-import/Cargo.toml's `[features]` doc comment.
-    set(HP2_FFI_FEATURES hp2-import/archive platform-sdl)
-    # renderer-wgpu: the WgpuDrv.WgpuRenderDevice backend. Off by default in
-    # crates/hp2-ffi so bare cargo build/test never needs wgpu's platform backends
-    # (objc2-metal and friends); always on for the real product build.
-    list(APPEND HP2_FFI_FEATURES renderer-wgpu)
-    corrosion_set_features(hp2_ffi FEATURES ${HP2_FFI_FEATURES})
-    # libhp2_ffi.a's compiled code (not just the Import-specific part)
-    # has real, unresolved archive_read_*/archive_entry_*/archive_error_*
-    # symbol references now that the feature above is enabled -- the
-    # Cargo feature is a property of the whole crate, not something
-    # selectable per consumer, so every target linking hp2_ffi (hp2_core
-    # included, transitively reaching nearly every executable in this
-    # project) needs archive_static resolvable at its own final link,
-    # not just hp2_import_core's consumers. Linked on hp2_ffi's own
-    # INTERFACE so it propagates everywhere hp2_ffi already does.
-    #
-    # Same reasoning for SDL2::SDL2-static, enabled by the platform-sdl
-    # feature above (crates/hp2-platform/src/clipboard.rs's doc comment
-    # has the full design and why it is hand-written extern "C"
-    # declarations rather than an `sdl2`/`sdl2-sys` crate dependency --
-    # deliberately so, to avoid the staticlib-bundling duplicate-SDL2
-    # risk a crate-managed static link would have). SDL2::SDL2-static is
-    # the exact same FetchContent-built archive every other SDL2
-    # consumer in this project already links (SDLDrv, SDLLaunch,
-    # HP2LauncherPlatform.cpp) -- this adds no second copy, just one
-    # more consumer of the one archive, resolved once at hp2_game's
-    # final link.
-    target_link_libraries(hp2_ffi INTERFACE archive_static SDL2::SDL2-static)
+# The Rust workspace builds the shipping products through corrosion: hp2_game_rust,
+# hp2_ucc_rust, and the standalone hp2_import importer CLI. Each is imported and
+# configured below; the former native (C++) engine target graph is gone.
+corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml"
+        CRATES hp2-import)
+    corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml"
+        CRATES hp2-ucc hp2-game NO_LINKER_OVERRIDE)
+    set_property(TARGET hp2_ucc_rust PROPERTY HP2_NATIVE_FREE_CARGO_MANIFEST
+        "${PROJECT_SOURCE_DIR}/crates/hp2-ucc/Cargo.toml")
+    set_property(TARGET hp2_game_rust PROPERTY HP2_NATIVE_FREE_CARGO_MANIFEST
+        "${PROJECT_SOURCE_DIR}/crates/hp2-game/Cargo.toml")
+    set_property(TARGET hp2_import PROPERTY HP2_NATIVE_FREE_CARGO_MANIFEST
+        "${PROJECT_SOURCE_DIR}/crates/hp2-import/Cargo.toml")
+    hp2_enable_cargo_provenance(hp2_ucc_rust)
+    hp2_enable_cargo_provenance(hp2_game_rust)
+    option(HP2_EXPERIMENTAL_IN_GAME_OVERLAY "Enable the unverified in-game overlay in hp2_game_rust" OFF)
+    if(HP2_EXPERIMENTAL_IN_GAME_OVERLAY)
+        corrosion_set_features(hp2_game_rust FEATURES hp2-engine/in-game-overlay)
+    endif()
+    hp2_enable_cargo_provenance(hp2_import)
+    corrosion_set_features(hp2_import FEATURES archive)
+    # Corrosion's binary linker does not traverse CMake INTERFACE libraries.
+    # Link the pinned archive and compression targets directly.
+    corrosion_link_libraries(hp2_import
+        archive_static zlibstatic hp2_bzip2 liblzma)
+    corrosion_link_libraries(hp2_game_rust
+        SDL2::SDL2-static OpenAL::OpenAL archive_static nfd::nfd
+        zlibstatic hp2_bzip2 liblzma)
     if(APPLE)
-        # Not guessed: `cargo rustc -p hp2-ffi --lib --crate-type=staticlib
-        # --features=hp2-import/archive,platform-sdl,renderer-wgpu --
-        # --print native-static-libs` printed the authoritative list
-        # libhp2_ffi.a actually needs once renderer-wgpu (wgpu's Metal
-        # backend: objc2-metal, raw-window-metal, ...) is enabled:
-        # QuartzCore, CoreGraphics, Metal, Foundation, CoreFoundation,
-        # objc, iconv (System/c/m already resolve implicitly). The link
-        # succeeded even before this list was added -- AppKit, already
-        # linked unconditionally into hp2_game, pulls some of these in
-        # transitively -- but relying on that would be fragile; this is
-        # the real, verified list, not a guess. Linux's wgpu
-        # backends are not covered here -- wgpu's non-Apple hals load
-        # their native libraries dynamically rather than needing
-        # link-time framework linking, unverified in this project's own
-        # build yet.
-        target_link_libraries(hp2_ffi INTERFACE
-            "-framework QuartzCore" "-framework CoreGraphics" "-framework Metal"
-            "-framework Foundation" "-framework CoreFoundation" objc iconv)
+        # Corrosion does not propagate SDL's framework dependencies either.
+        # Use the configured SDK's flags, shared with the Cargo behavior tests.
+        get_target_property(HP2_SDL_BINARY_DIR SDL2::SDL2-static BINARY_DIR)
+        execute_process(
+            COMMAND sh "${HP2_SDL_BINARY_DIR}/sdl2-config" --static-libs
+            RESULT_VARIABLE HP2_SDL_LINK_STATUS
+            OUTPUT_VARIABLE HP2_SDL_LINK_TEXT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        if(NOT HP2_SDL_LINK_STATUS EQUAL 0)
+            message(FATAL_ERROR "Cannot resolve configured SDL static SDK dependencies")
+        endif()
+        separate_arguments(HP2_SDL_STATIC_LINK_ITEMS UNIX_COMMAND "${HP2_SDL_LINK_TEXT}")
+        foreach(HP2_SDL_LINK_ITEM IN LISTS HP2_SDL_STATIC_LINK_ITEMS)
+            if(HP2_SDL_LINK_ITEM MATCHES "^(-l|-Wl,)" AND NOT HP2_SDL_LINK_ITEM STREQUAL "-lSDL2")
+                corrosion_add_target_local_rustflags(hp2_game_rust "-Clink-arg=${HP2_SDL_LINK_ITEM}")
+            endif()
+        endforeach()
+        set(HP2_NFD_RUST_FRAMEWORK_FLAGS)
+        foreach(HP2_NFD_FRAMEWORK IN ITEMS "${APPKIT_LIBRARY}" "${UNIFORMTYPEIDENTIFIERS_LIBRARY}")
+            if(HP2_NFD_FRAMEWORK)
+                get_filename_component(HP2_NFD_FRAMEWORK_NAME "${HP2_NFD_FRAMEWORK}" NAME_WE)
+                list(APPEND HP2_NFD_RUST_FRAMEWORK_FLAGS "-lframework=${HP2_NFD_FRAMEWORK_NAME}")
+            endif()
+        endforeach()
+        corrosion_add_target_local_rustflags(hp2_game_rust
+            ${HP2_NFD_RUST_FRAMEWORK_FLAGS}
+            "-lframework=QuartzCore" "-lframework=CoreGraphics" "-lframework=Metal"
+            "-lframework=Foundation" "-lframework=CoreFoundation" "-lframework=AppKit"
+            "-lframework=CoreText" "-lobjc" "-liconv"
+            "-Clink-arg=-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+            "-Clink-arg=-Wl,-rpath,$<TARGET_FILE_DIR:OpenAL::OpenAL>")
     endif()
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "${_hp2_saved_osx_deployment_target}")
-    set(HP2_RS_INCLUDE_DIR "${CMAKE_BINARY_DIR}/rust-include")
-    file(MAKE_DIRECTORY "${HP2_RS_INCLUDE_DIR}")
-    corrosion_set_env_vars(hp2_ffi "HP2_RS_INCLUDE_DIR=${HP2_RS_INCLUDE_DIR}")
-    target_include_directories(hp2_ffi INTERFACE "${HP2_RS_INCLUDE_DIR}")
-    # See the hp2_rs.h note above this block. `_cargo-build_<target>` is
-    # corrosion's utility target that runs cargo; its build-event command
-    # joins the existing restat'd byproduct-copy step.
-    add_custom_command(TARGET _cargo-build_hp2_ffi POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E true
-        BYPRODUCTS "${HP2_RS_INCLUDE_DIR}/hp2_rs.h"
-        VERBATIM)
-endif()
-
-hp2_add_engine_object(hp2_core Core ${HP2_CORE_SOURCES})
-target_include_directories(hp2_core PUBLIC ${HP2_CORE_INCLUDE_DIRS})
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_core PUBLIC hp2_ffi)
-endif()
-if(WIN32)
-    target_link_libraries(hp2_core PUBLIC SDL2::SDL2-static ole32 shell32 shlwapi ws2_32)
-endif()
-
-hp2_add_engine_object(hp2_engine Engine ${HP2_ENGINE_SOURCES})
-target_include_directories(hp2_engine PUBLIC ${HP2_ENGINE_INCLUDE_DIRS})
-target_include_directories(hp2_engine PRIVATE ${HP2_NATIVETEXT_INCLUDE_DIRS})
-target_link_libraries(hp2_engine PUBLIC Squish::Squish)
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_engine PRIVATE hp2_ffi)
-endif()
-
-hp2_add_engine_object(hp2_render Render ${HP2_RENDER_SOURCES})
-target_include_directories(hp2_render PUBLIC ${HP2_RENDER_INCLUDE_DIRS})
-target_link_libraries(hp2_render PUBLIC Squish::Squish)
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_render PRIVATE hp2_ffi)
-endif()
-
-hp2_add_engine_object(hp2_fire Fire ${HP2_FIRE_SOURCES})
-target_include_directories(hp2_fire PUBLIC ${HP2_FIRE_INCLUDE_DIRS})
-if(NOT EMSCRIPTEN)
-    # UnFractal.cpp calls hp2_rs_fire_* and includes hp2_rs.h; Core.h does not
-    # carry that include, so the Fire object needs hp2_ffi's include dir here.
-    target_link_libraries(hp2_fire PRIVATE hp2_ffi)
-endif()
-
-hp2_add_engine_object(hp2_editor_runtime Editor ${HP2_EDITOR_RUNTIME_SOURCES})
-target_include_directories(hp2_editor_runtime PRIVATE ${HP2_EDITOR_INCLUDE_DIRS})
-
-hp2_add_engine_object(hp2_alaudio ALAudio ${HP2_ALAUDIO_SOURCES})
-target_include_directories(hp2_alaudio PUBLIC ${HP2_ALAUDIO_INCLUDE_DIRS})
-target_link_libraries(hp2_alaudio PUBLIC OpenAL::OpenAL)
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_alaudio PRIVATE hp2_ffi)
-endif()
-
-hp2_add_engine_object(hp2_sdldrv SDLDrv ${HP2_SDLDRV_SOURCES})
-target_include_directories(hp2_sdldrv PUBLIC ${HP2_SDLDRV_INCLUDE_DIRS})
-target_link_libraries(hp2_sdldrv PUBLIC SDL2::SDL2-static)
-if(NOT EMSCRIPTEN)
-    # SDLClient.cpp calls hp2_rs_platform_get_clipboard_text/
-    # set_clipboard_text (crates/hp2-platform/src/clipboard.rs) directly;
-    # needs hp2_ffi's generated hp2_rs.h on its own account, same as
-    # hp2_core's own `target_link_libraries(hp2_core PUBLIC hp2_ffi)`
-    # above -- hp2_sdldrv is a separate object library that does not
-    # itself link hp2_core, so it does not inherit that propagation.
-    target_link_libraries(hp2_sdldrv PUBLIC hp2_ffi)
-endif()
-
-set(HP2_IMGUI_ROOT "${hp2_imgui_SOURCE_DIR}")
-add_library(hp2_imgui STATIC
-    "${HP2_IMGUI_ROOT}/imgui.cpp"
-    "${HP2_IMGUI_ROOT}/imgui_draw.cpp"
-    "${HP2_IMGUI_ROOT}/imgui_tables.cpp"
-    "${HP2_IMGUI_ROOT}/imgui_widgets.cpp"
-    "${HP2_IMGUI_ROOT}/backends/imgui_impl_sdl2.cpp"
-    "${HP2_IMGUI_ROOT}/backends/imgui_impl_sdlrenderer2.cpp"
-)
-target_include_directories(hp2_imgui PUBLIC "${HP2_IMGUI_ROOT}" "${HP2_IMGUI_ROOT}/backends")
-target_compile_features(hp2_imgui PUBLIC cxx_std_17)
-target_link_libraries(hp2_imgui PUBLIC SDL2::SDL2-static PRIVATE hp2_compile_policy)
-
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    # Selected shaping/rasterization core (NativeTextShared.cpp for CoreText,
-    # NativeTextFreeType.cpp for FreeType) compiled once and consumed as
-    # objects by every render driver with a native text leg, so the provider
-    # link libraries reach both consumers.
-    hp2_add_engine_object(hp2_nativetextcore NativeText
-        ${HP2_TEXT_PROVIDER_SOURCES}
-        "${HP2_UNREAL_ROOT}/NativeText/Src/NativeText.cpp"
-    )
-    target_include_directories(hp2_nativetextcore PUBLIC ${HP2_NATIVETEXT_INCLUDE_DIRS} ${HP2_ENGINE_INCLUDE_DIRS})
-    if(WIN32 OR EMSCRIPTEN)
-        target_compile_definitions(hp2_nativetextcore PRIVATE HP2_NATIVE_TEXT_FONT_SEAM=1)
-    endif()
-    if(WIN32)
-        target_link_libraries(hp2_nativetextcore PUBLIC SDL2::SDL2-static)
-    endif()
-    # Emscripten only builds the FreeType/HarfBuzz ports when asked, and the
-    # headers are part of that, so the compile side needs the flag as well as
-    # the link side. Without it <ft2build.h> is simply absent.
-    if(EMSCRIPTEN)
-        target_compile_options(hp2_nativetextcore PRIVATE -sUSE_FREETYPE=1 -sUSE_HARFBUZZ=1)
-    endif()
-    target_link_libraries(hp2_nativetextcore PUBLIC ${HP2_TEXT_PROVIDER_LINK_LIBS})
-    # Emscripten's FreeType/HarfBuzz are emcc ports, not CMake libraries, so
-    # they are requested as link flags on the final executable instead. Read
-    # here (a global property, since the provider declares them) and applied
-    # to hp2_game further down, where that target exists.
-    get_property(HP2_WEB_FONTLINK_FLAGS GLOBAL PROPERTY HP2_WEB_FONTLINK_FLAGS)
-
-endif()
-
-set(HP2_IMPORT_ROOT "${HP2_UNREAL_ROOT}/Import")
-if(EMSCRIPTEN)
-    # The web build has no Rust at all: HP2Dependencies.cmake excludes
-    # both Corrosion and libarchive entirely under EMSCRIPTEN, and
-    # stable Rust has no wasm64-unknown-emscripten target to begin with
-    # (confirmed directly: `rustc --print target-list` has no such
-    # entry; the one wasm64 target that exists,
-    # wasm64-unknown-unknown, has no prebuilt std on this pinned stable
-    # toolchain -- `rustup target add` reports "no prebuilt artifacts",
-    # requiring nightly + `-Z build-std` -- and still lacks Emscripten's
-    # runtime glue regardless of that). The C++ importer stays for this
-    # one platform until Rust gains a stable wasm64 Emscripten target,
-    # or the project reconsiders wasm64 (`-sMEMORY64=1`, see the
-    # web-wasm64 preset) vs wasm32 for the web build; this is a verified
-    # upstream limitation, not a scope choice -- native (macOS/Linux)
-    # fully replaces this with crates/hp2-import via hp2-ffi, below.
-    add_library(hp2_import_core STATIC
-        "${HP2_IMPORT_ROOT}/Src/HP2ImportInputs.cpp"
-        "${HP2_IMPORT_ROOT}/Src/HP2ImportCollect.cpp"
-        "${HP2_IMPORT_ROOT}/Src/HP2ImportPlan.cpp"
-        "${HP2_IMPORT_ROOT}/Src/HP2ImportManifest.cpp"
-        "${HP2_IMPORT_ROOT}/Src/HP2ImportOutput.cpp"
-    )
-    target_include_directories(hp2_import_core PUBLIC "${HP2_IMPORT_ROOT}/Inc"
-        PRIVATE "${HP2_IMPORT_ROOT}/Src" "${HP2_UNREAL_ROOT}/Core/Inc")
-    target_compile_features(hp2_import_core PUBLIC cxx_std_17)
-    target_link_libraries(hp2_import_core PUBLIC hp2_compile_policy PRIVATE utf8proc::utf8proc)
-else()
-    # Native builds: crates/hp2-import (via hp2-ffi's hp2_rs_import_run)
-    # fully replaces HP2Import{Inputs,Collect,Plan,Manifest,Output,
-    # Archive}.cpp -- none of them compile here. hp2_import_core becomes
-    # an INTERFACE library instead of a static one so every existing
-    # consumer (hp2_import, hp2_game, hp2_launcher_tests) keeps its
-    # unchanged `target_link_libraries(... hp2_import_core ...)` line
-    # and transitively gets hp2_ffi (the real implementation, including
-    # the real archive_static-backed Extract replacement -- see the
-    # corrosion_import_crate block above for where hp2_ffi itself picks
-    # up archive_static on its own INTERFACE, propagating to every
-    # consumer including this one) plus HP2Import.h's public include
-    # dir (Options/Progress/Profile/LinkMode and the RunImport
-    # declaration -- still the real C++ surface HP2DataImport.cpp/
-    # HP2ImportMain.cpp construct and call across the FFI boundary
-    # with).
-    add_library(hp2_import_core INTERFACE)
-    target_include_directories(hp2_import_core INTERFACE "${HP2_IMPORT_ROOT}/Inc")
-    target_link_libraries(hp2_import_core INTERFACE hp2_compile_policy hp2_ffi)
-    if(WIN32)
-        target_link_libraries(hp2_import_core INTERFACE bcrypt)
-    endif()
-    add_executable(hp2_import "${HP2_IMPORT_ROOT}/Src/HP2ImportMain.cpp")
-    target_link_libraries(hp2_import PRIVATE hp2_import_core hp2_compile_policy hp2_ffi)
-endif()
-
-function(hp2_add_executable target)
-    add_executable("${target}" ${ARGN})
-    target_include_directories("${target}" PRIVATE ${HP2_LAUNCH_INCLUDE_DIRS})
-    target_link_libraries("${target}" PRIVATE hp2_compile_policy)
-    if(WIN32)
-        target_link_options("${target}" PRIVATE -mconsole)
-    endif()
-    target_compile_definitions("${target}" PRIVATE
-        __STATIC_LINK=1
-        ${HP2_EMPTY_MODULE_API_DEFINITIONS}
-    )
-    set_target_properties("${target}" PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED YES
-        CXX_EXTENSIONS NO
-    )
-endfunction()
-
-# Linking object-library targets directly preserves every registration object
-# and propagates the required static dependency usage to each executable.
-hp2_add_executable(hp2_game
-    ${HP2_SDL_LAUNCH_SOURCES}
-    ${HP2_STATIC_PACKAGE_SOURCE}
-    ${HP2_PATH_SOURCE}
-)
-target_compile_definitions(hp2_game PRIVATE HP2_WITH_CLIENT_PACKAGES=1)
-if(WIN32)
-    set(HP2_WINDOWS_ICON_PATH "${HP2_UNREAL_ROOT}/SDLLaunch/Res/Game.ico")
-    set(HP2_WINDOWS_MANIFEST_PATH "${HP2_UNREAL_ROOT}/SDLLaunch/Res/HarryPotter2.manifest")
-    set(HP2_WINDOWS_VERSION_RESOURCE "${CMAKE_CURRENT_BINARY_DIR}/HarryPotter2.rc")
-    configure_file(
-        "${HP2_UNREAL_ROOT}/SDLLaunch/Res/HarryPotter2.rc.in"
-        "${HP2_WINDOWS_VERSION_RESOURCE}"
-        @ONLY
-    )
-    target_sources(hp2_game PRIVATE "${HP2_WINDOWS_VERSION_RESOURCE}")
-    set_target_properties(hp2_game PROPERTIES
-        WIN32_EXECUTABLE TRUE
-        OUTPUT_NAME HarryPotter2
-    )
-    target_link_libraries(hp2_game PRIVATE
-        SDL2::SDL2main
-        ole32 shell32 shlwapi ws2_32 winmm imm32 version setupapi
-    )
-endif()
-if(APPLE)
-    set_source_files_properties("${HP2_LAUNCHER_PLATFORM_MAC_SOURCE}" PROPERTIES
-        COMPILE_OPTIONS "-fobjc-arc;-std=c++17"
-    )
-endif()
-target_link_libraries(hp2_game PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_alaudio
-    hp2_sdldrv
-    hp2_import_core
-    hp2_imgui
-)
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_game PRIVATE nfd::nfd)
-endif()
-if(APPLE)
-    target_link_libraries(hp2_game PRIVATE "${HP2_APPKIT_FRAMEWORK}")
-else()
-    find_package(Threads REQUIRED)
-    target_link_libraries(hp2_game PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
-endif()
-
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    # Object libraries do not propagate their objects through other object
-    # libraries: consume the shared native-text core directly here.
-    target_sources(hp2_game PRIVATE $<TARGET_OBJECTS:hp2_nativetextcore>)
-endif()
-
-# ctest cannot execute wasm modules, and the editor/ucc/audit executables exist
-# only for native workflows. The browser build skips these; the shared test
-# helper, hp2_state, and the data-present gate below stay common, and
-# HP2Web.cmake registers the browser smoke tests.
-if(NOT EMSCRIPTEN)
-
-hp2_add_executable(hp2_ucc
-    ${HP2_UCC_SOURCES}
-    ${HP2_STATIC_PACKAGE_SOURCE}
-    ${HP2_PATH_SOURCE}
-)
-target_link_libraries(hp2_ucc PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-)
-
-hp2_add_executable(hp2_package_audit
-    ${HP2_PACKAGE_AUDIT_SOURCE}
-    ${HP2_STATIC_PACKAGE_SOURCE}
-    ${HP2_PATH_SOURCE}
-)
-target_link_libraries(hp2_package_audit PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-)
-
-hp2_add_executable(hp2_spell_runtime_tests
-    ${HP2_SPELL_RUNTIME_TEST_SOURCE}
-    ${HP2_STATIC_PACKAGE_SOURCE}
-    ${HP2_PATH_SOURCE}
-)
-target_link_libraries(hp2_spell_runtime_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-
-hp2_add_executable(hp2_abi_tests
-    ${HP2_ABI_TEST_SOURCE}
-    ${HP2_STATIC_PACKAGE_SOURCE}
-)
-target_link_libraries(hp2_abi_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-if(WIN32)
-    target_link_libraries(hp2_abi_tests PRIVATE SDL2::SDL2main)
-endif()
-
-hp2_add_executable(hp2_dxt1_tests
-    ${HP2_DXT1_TEST_SOURCE}
-    "${HP2_UNREAL_ROOT}/Engine/Src/S3tcCompat.cpp"
-)
-target_include_directories(hp2_dxt1_tests PRIVATE ${HP2_ENGINE_INCLUDE_DIRS})
-target_link_libraries(hp2_dxt1_tests PRIVATE Squish::Squish)
-
-# The decoder test deliberately compiles only the decoder unit rather than the
-# full Core object library.
-hp2_add_executable(hp2_eaxa_tests
-    ${HP2_EAXA_TEST_SOURCE}
-    "${HP2_UNREAL_ROOT}/Core/Src/FEAXABlockDecoder.cpp"
-)
-target_include_directories(hp2_eaxa_tests PRIVATE ${HP2_CORE_INCLUDE_DIRS})
-if(NOT EMSCRIPTEN)
-    target_link_libraries(hp2_dxt1_tests PRIVATE hp2_ffi)
-    target_link_libraries(hp2_eaxa_tests PRIVATE hp2_ffi)
-endif()
-
-hp2_add_executable(hp2_audio_tests
-    ${HP2_AUDIO_TEST_SOURCE}
-)
-target_link_libraries(hp2_audio_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_alaudio
-    # Tests/AudioTests.cpp's DecodeOgg() is an independent reference
-    # decoder using the real libvorbisfile, deliberately kept linked here
-    # (not in hp2_core/hp2_alaudio) so the ±1 LSB tolerance this test
-    # checks against crates/hp2-codecs::vorbis has a ground truth.
-    vorbisfile
-)
-
-hp2_add_executable(hp2_launcher_tests
-    ${HP2_LAUNCHER_CORE_SOURCES}
-    ${HP2_PATH_SOURCE}
-    ${HP2_LAUNCHER_TEST_SOURCE}
-)
-target_compile_definitions(hp2_launcher_tests PRIVATE HP2_LAUNCHER_TESTING=1)
-target_link_libraries(hp2_launcher_tests PRIVATE hp2_core hp2_import_core)
-
-# Data-root identity contracts: the two-mode bootstrap rule and the structured
-# overlay rejection reason codes (data.manifest_missing, data.hash_mismatch,
-# and friends). This executable deliberately does NOT link hp2_core: the test
-# supplies its own Core link seams (GMalloc, appSetBaseDir, appFromUtf8InPlace)
-# so the bootstrap is exercised in isolation, without appInit or the engine.
-hp2_add_executable(hp2_data_identity_tests
-    ${HP2_PATH_SOURCE}
-    ${HP2_DATA_IDENTITY_TEST_SOURCE}
-)
-
-# Config contract: links full hp2_core because FConfigCacheIni behavior lives
-# in CORE_API helpers (appStricmp, codecs), not the header-only container.
-hp2_add_executable(hp2_config_ini_tests
-    ${HP2_CONFIG_INI_TEST_SOURCE}
-)
-target_link_libraries(hp2_config_ini_tests PRIVATE hp2_core)
-
-# Replay wire-format contract: links the same dependency-light production
-# operator translation unit as hp2_engine, without pulling UnReplay.cpp's
-# appInit-dependent FURL globals into the oracle process.
-hp2_add_executable(hp2_replay_roundtrip_tests
-    ${HP2_REPLAY_ROUNDTRIP_TEST_SOURCE}
-    "${HP2_UNREAL_ROOT}/Engine/Src/UnReplayWire.cpp"
-)
-target_link_libraries(hp2_replay_roundtrip_tests PRIVATE hp2_core)
-
-# Production save-wire oracle. This is intentionally not a CTest: fixture
-# generation and acceptance are separate explicit operations.
-hp2_add_executable(hp2_save_wire_oracle
-    ${HP2_SAVE_WIRE_ORACLE_SOURCE}
-)
-target_link_libraries(hp2_save_wire_oracle PRIVATE hp2_core)
-
-# Input freeze + mouse-capture policy + normalization mapping contracts.
-hp2_add_executable(hp2_input_contract_tests
-    ${HP2_INPUT_CONTRACT_TEST_SOURCE}
-    ${HP2_STATIC_PACKAGE_SOURCE}
-    ${HP2_PATH_SOURCE}
-)
-target_link_libraries(hp2_input_contract_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-if(WIN32)
-    target_link_libraries(hp2_input_contract_tests PRIVATE SDL2::SDL2main)
-endif()
-
-# SDL main-thread round trip for hp2_rs_platform_get/set_clipboard_text
-# (crates/hp2-platform/src/clipboard.rs); see the file's own header
-# comment for why this needs a dedicated ctest rather than a Rust-level
-# #[test]. Links the same library set as hp2_input_contract_tests above
-# (SDLClient.cpp/SDLViewport.cpp's own object code needs hp2_core's
-# symbols resolvable, even though this test itself touches no UObject
-# machinery) for a known-working combination rather than a guessed
-# minimal one.
-hp2_add_executable(hp2_platform_clipboard_tests
-    ${HP2_PLATFORM_CLIPBOARD_TEST_SOURCE}
-)
-target_link_libraries(hp2_platform_clipboard_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-if(WIN32)
-    target_link_libraries(hp2_platform_clipboard_tests PRIVATE SDL2::SDL2main)
-endif()
-
-# SDL main-thread checks for hp2_rs_platform_get_viewport_button_flags/
-# get_mouse_state/update_mouse_grab_state (crates/hp2-platform/src/
-# mouse_state.rs); see the file's own header comment for why this needs
-# a dedicated ctest. Same library set as hp2_platform_clipboard_tests
-# above, same reason.
-hp2_add_executable(hp2_platform_mouse_state_tests
-    ${HP2_PLATFORM_MOUSE_STATE_TEST_SOURCE}
-)
-target_link_libraries(hp2_platform_mouse_state_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-if(WIN32)
-    target_link_libraries(hp2_platform_mouse_state_tests PRIVATE SDL2::SDL2main)
-endif()
-
-# SDL main-thread round trip for hp2_rs_platform_update_window_frame/
-# set_title_bar (crates/hp2-platform/src/window_chrome.rs); see the
-# file's own header comment for why this needs a dedicated ctest. Same
-# library set as hp2_platform_clipboard_tests above, same reason.
-hp2_add_executable(hp2_platform_window_chrome_tests
-    ${HP2_PLATFORM_WINDOW_CHROME_TEST_SOURCE}
-)
-target_link_libraries(hp2_platform_window_chrome_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-if(WIN32)
-    target_link_libraries(hp2_platform_window_chrome_tests PRIVATE SDL2::SDL2main)
-endif()
-
-# SDL main-thread checks for hp2_rs_platform_open_joystick/
-# close_joystick (crates/hp2-platform/src/joystick.rs); see the
-# file's own header comment for why this needs a dedicated ctest. Same
-# library set as hp2_platform_clipboard_tests above, same reason.
-hp2_add_executable(hp2_platform_joystick_tests
-    ${HP2_PLATFORM_JOYSTICK_TEST_SOURCE}
-)
-target_link_libraries(hp2_platform_joystick_tests PRIVATE
-    hp2_core
-    hp2_engine
-    hp2_render
-    hp2_fire
-    hp2_editor_runtime
-    hp2_sdldrv
-)
-if(WIN32)
-    target_link_libraries(hp2_platform_joystick_tests PRIVATE SDL2::SDL2main)
-endif()
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    hp2_add_executable(hp2_native_typography_tests
-        ${HP2_NATIVE_TYPOGRAPHY_TEST_SOURCE}
-        ${HP2_PATH_SOURCE}
-    )
-    # hp2_nativetextcore is an OBJECT library: its objects do not survive
-    # transitively through another target, so consume them directly here.
-    target_sources(hp2_native_typography_tests PRIVATE
-        $<TARGET_OBJECTS:hp2_nativetextcore>
-    )
-    target_link_libraries(hp2_native_typography_tests PRIVATE
-        hp2_core
-        hp2_engine
-        hp2_render
-        ${HP2_TEXT_PROVIDER_LINK_LIBS}
-    )
-endif()
-
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    hp2_add_executable(hp2_canvas_compatibility_tests
-        ${HP2_CANVAS_COMPATIBILITY_TEST_SOURCE}
-        ${HP2_PATH_SOURCE}
-    )
-    # Same object-library propagation rule as the typography tests above.
-    target_sources(hp2_canvas_compatibility_tests PRIVATE
-        $<TARGET_OBJECTS:hp2_nativetextcore>
-    )
-    target_link_libraries(hp2_canvas_compatibility_tests PRIVATE
-        hp2_core
-        hp2_engine
-        hp2_render
-        ${HP2_TEXT_PROVIDER_LINK_LIBS}
-    )
-endif()
-
-set(HP2_EXECUTABLE_TARGETS
-    hp2_game
-    hp2_ucc
-    hp2_package_audit
-    hp2_abi_tests
-    hp2_spell_runtime_tests
-    hp2_eaxa_tests
-    hp2_dxt1_tests
-    hp2_audio_tests
-    hp2_launcher_tests
-    hp2_data_identity_tests
-    hp2_config_ini_tests
-    hp2_replay_roundtrip_tests
-    hp2_save_wire_oracle
-    hp2_input_contract_tests
-    hp2_platform_clipboard_tests
-    hp2_platform_mouse_state_tests
-    hp2_platform_window_chrome_tests
-    hp2_platform_joystick_tests
-)
-if(TARGET hp2_import)
-    list(APPEND HP2_EXECUTABLE_TARGETS hp2_import)
-endif()
-
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    list(APPEND HP2_EXECUTABLE_TARGETS hp2_native_typography_tests)
-endif()
-
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    list(APPEND HP2_EXECUTABLE_TARGETS hp2_canvas_compatibility_tests)
-endif()
 
 # Build every executable the behavioral test graph can invoke before CTest
 # starts, so sanitizer/preset runs never register tests that point at missing
 # binaries. Script-backed tests (Python) need no compiled target.
 add_custom_target(hp2_verification_binaries
-    DEPENDS ${HP2_EXECUTABLE_TARGETS}
+    DEPENDS hp2_import hp2_ucc_rust hp2_game_rust
     COMMENT "Building every executable referenced by the HP2 behavioral test graph"
 )
-endif()
 
 # A test that needs game data is only registered when the configured data root
 # actually provides it. Without this guard a fresh clone (no data, by design)
@@ -830,6 +107,34 @@ function(hp2_add_behavior_test test_name target)
     file(MAKE_DIRECTORY "${_hp2_test_home}" "${_hp2_test_tmp}" "${_hp2_test_artifacts}"
         "${_hp2_test_xdg_config}" "${_hp2_test_xdg_cache}" "${_hp2_test_xdg_data}")
 
+    if(UNIX)
+        # Compiler-cache startup sockets must fit sockaddr_un even when the
+        # checkout/artifact path is long. Keep the physical per-test Tmp tree;
+        # expose it through a private, short alias rather than disable caching.
+        if(NOT IS_DIRECTORY "${HP2_TEST_TMP_ALIAS_ROOT}")
+            execute_process(COMMAND mktemp -d /tmp/hp2-tests.XXXXXXXX
+                RESULT_VARIABLE _hp2_tmp_status
+                OUTPUT_VARIABLE _hp2_tmp_root
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+            if(NOT _hp2_tmp_status STREQUAL "0")
+                message(FATAL_ERROR "Cannot create private test temporary alias root")
+            endif()
+            set(HP2_TEST_TMP_ALIAS_ROOT "${_hp2_tmp_root}" CACHE INTERNAL
+                "Private short aliases for per-test Unix temporary directories" FORCE)
+        endif()
+        string(SHA256 _hp2_tmp_id "${_hp2_test_tmp}")
+        string(SUBSTRING "${_hp2_tmp_id}" 0 16 _hp2_tmp_id)
+        set(_hp2_tmp_alias "${HP2_TEST_TMP_ALIAS_ROOT}/${_hp2_tmp_id}")
+        if(NOT IS_SYMLINK "${_hp2_tmp_alias}")
+            file(CREATE_LINK "${_hp2_test_tmp}" "${_hp2_tmp_alias}" SYMBOLIC
+                RESULT _hp2_tmp_status)
+            if(NOT _hp2_tmp_status STREQUAL "0")
+                message(FATAL_ERROR "Cannot link test temporary directory: ${_hp2_tmp_status}")
+            endif()
+        endif()
+        set(_hp2_test_tmp "${_hp2_tmp_alias}")
+    endif()
+
     add_test(NAME "${test_name}" COMMAND "${target}" ${ARGN})
     set(_hp2_test_env
         "HOME=${_hp2_test_home}"
@@ -846,18 +151,6 @@ function(hp2_add_behavior_test test_name target)
         "HP2_TEST_NAME=${test_name}"
         "HP2_ARTIFACT_DIR=${_hp2_test_artifacts}"
     )
-    if(WIN32)
-        set(_hp2_test_appdata "${_hp2_test_home}/AppData/Roaming")
-        set(_hp2_test_localappdata "${_hp2_test_home}/AppData/Local")
-        file(MAKE_DIRECTORY "${_hp2_test_appdata}" "${_hp2_test_localappdata}")
-        list(APPEND _hp2_test_env
-            "APPDATA=${_hp2_test_appdata}"
-            "LOCALAPPDATA=${_hp2_test_localappdata}"
-            "USERPROFILE=${_hp2_test_home}"
-            "TEMP=${_hp2_test_tmp}"
-            "TMP=${_hp2_test_tmp}"
-        )
-    endif()
     if(HP2_ENABLE_ASAN_UBSAN)
         list(APPEND _hp2_test_env
             "HP2_SANITIZER=asan-ubsan"
@@ -899,22 +192,17 @@ function(hp2_add_behavior_test test_name target)
 endfunction()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-if(NOT EMSCRIPTEN)
     hp2_add_behavior_test(importer_parity "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/ImporterParityTests.py"
         "$<TARGET_FILE:hp2_import>"
         "${PROJECT_SOURCE_DIR}/Build/prepare_retail_data.py"
     )
     set_tests_properties(importer_parity PROPERTIES LABELS "fast;data-none")
-    hp2_add_behavior_test(launcher_smoke "${Python3_EXECUTABLE}"
-        "${PROJECT_SOURCE_DIR}/Tests/LauncherSmoke.py"
-        "$<TARGET_FILE:hp2_game>"
+    hp2_add_behavior_test(import_cli_contracts "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/ImportCliTests.py"
+        "--importer" "$<TARGET_FILE:hp2_import>"
     )
-    set_tests_properties(launcher_smoke PROPERTIES
-        LABELS "smoke;data-none"
-        RESOURCE_LOCK hp2_gpu
-    )
-endif()
+    set_tests_properties(import_cli_contracts PROPERTIES LABELS "fast;data-none")
 
 # Deterministic build/observation fingerprint: writes out/<preset>/
 # hp2-state.json at configure time (toolchain, capability gates, data
@@ -935,35 +223,1872 @@ add_custom_target(hp2_state
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "Validating hp2-state.json drift")
 
-if(NOT EMSCRIPTEN)
-hp2_add_behavior_test(abi_widths hp2_abi_tests
-    --test=abi_widths
-)
-hp2_add_behavior_test(render_clip hp2_abi_tests
-    --test=render_clip
-)
-hp2_add_behavior_test(projection_fov hp2_abi_tests
-    --test=projection_fov
-)
-hp2_add_behavior_test(command_line_load hp2_abi_tests
-    --test=command_line_load
-)
-hp2_add_behavior_test(compact_index hp2_abi_tests
-    --test=compact_index
-)
-hp2_add_behavior_test(fstring_archive hp2_abi_tests
-    --test=fstring_archive
+find_program(HP2_CARGO_EXECUTABLE cargo REQUIRED)
+if(DEFINED ENV{CARGO_HOME} AND NOT "$ENV{CARGO_HOME}" STREQUAL "")
+    set(HP2_CARGO_HOME "$ENV{CARGO_HOME}")
+else()
+    set(HP2_CARGO_HOME "$ENV{HOME}/.cargo")
+endif()
+
+hp2_add_behavior_test(core_config_safety "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_config_safety/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=config_safety_contracts
+    --
+    --test-threads=1
 )
 
+hp2_add_behavior_test(engine_settings_launcher_parity "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_settings_launcher_parity/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=settings_launcher_parity
+    --
+    --test-threads=1
+)
+
+hp2_add_behavior_test(engine_settings_config "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_settings_config/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=settings_config_contracts
+    --
+    --test-threads=1
+)
+
+hp2_add_behavior_test(engine_settings_policy "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_settings_policy/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=settings_policy_contracts
+    --
+    --test-threads=1
+)
+
+hp2_add_behavior_test(input_binding_foundation "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=binding_foundation
+    --test=binding_capture_release
+    --test=binding_parser_parity
+)
+set_tests_properties(input_binding_foundation PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(overlay_mouse_capture_arbitration "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/overlay_mouse_capture_arbitration/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform --features=overlay-mouse --lib capture_arbitration::tests
+)
+set_tests_properties(overlay_mouse_capture_arbitration PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(overlay_mouse_focus_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/overlay_mouse_capture_arbitration/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform --features=overlay-mouse --lib focus
+)
+set_tests_properties(overlay_mouse_focus_contracts PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(input_binding_analysis "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --test=binding_analysis
+)
+set_tests_properties(input_binding_analysis PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(input_binding_alias_guard "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib binding_analysis::tests
+)
+set_tests_properties(input_binding_alias_guard PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(input_binding_runtime "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib input_binding_runtime::tests
+    -- --test-threads=1
+)
+set_tests_properties(input_binding_runtime PROPERTIES LABELS "integration;data-prototype")
+
+hp2_add_behavior_test(input_binding_rebind "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib input_binding_runtime::rebind_tests
+    -- --test-threads=1
+)
+set_tests_properties(input_binding_rebind PROPERTIES LABELS "integration;data-prototype")
+
+hp2_add_behavior_test(input_binding_live_analysis "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib binding_live_analysis::tests
+    -- --test-threads=1
+)
+set_tests_properties(input_binding_live_analysis PROPERTIES LABELS "integration;data-prototype")
+
+hp2_add_behavior_test(input_binding_config "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_binding_foundation/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=binding_config
+)
+set_tests_properties(input_binding_config PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(in_game_overlay_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/in_game_overlay_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --features=in-game-overlay
+    --lib
+    overlay
+)
+set_tests_properties(in_game_overlay_contracts PROPERTIES LABELS "unit;data-none")
+
+hp2_add_behavior_test(overlay_settings_integration "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/overlay_settings_integration/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --features=in-game-overlay
+    --lib
+    overlay_settings_integration
+)
+set_tests_properties(overlay_settings_integration PROPERTIES LABELS "integration;data-none")
+
+hp2_add_behavior_test(core_parse_integer "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_parse_integer/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    parse_scalar
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_parse_scalar "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_parse_scalar/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    parse_scalar
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_parse_guid "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_parse_guid/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    guid
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_guid_generation "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_guid_generation/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    guid
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_native_path "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_native_path/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    path
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_parse_object "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_parse_object/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    parse_object
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_pure_ansi "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_pure_ansi/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    ansi
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_trim_spaces "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_trim_spaces/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    ansi
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_memswap "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_memswap/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    mem
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_crc "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_crc/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    crc
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_spc "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_spc/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    spc
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_md5 "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_md5/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    md5
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_ceil_log_two "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_ceil_log_two/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    math
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_app_fext "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_app_fext/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    app_format
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(core_app_path_leaf "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_app_path_leaf/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    app_format
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(command_line_load "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/command_line_load/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    command
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(compact_index "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/compact_index/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    compact_index
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(fstring_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/fstring_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    fstring_archive
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(ftime_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/ftime_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    ftime_archive
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(rng_seed_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/rng_seed_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    rng
+    --
+    --test-threads=1
+)
+
+hp2_add_behavior_test(engine_actor_anim "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_actor_anim/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    actor_anim::
+)
+set_tests_properties(engine_actor_anim PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_inline_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_inline_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    actor_inline_tests::
+)
+set_tests_properties(actor_inline_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(engine_world_collision_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_world_collision_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actcol_fixtures
+    --test=dynbsp_fixtures
+    --test=mover_fixtures
+    --test=mesh_fixtures
+    --test=skeletal_scene
+    --test=level_core_replay
+    --test=uengine_replay
+    --test=actor_unactor
+    --
+    --test-threads=1
+)
+set_tests_properties(engine_world_collision_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(audio_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/audio_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    audio_tests::
+)
+set_tests_properties(audio_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_audio_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_audio_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_audio_contracts
+)
+set_tests_properties(actor_audio_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_spawn_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_spawn_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_spawn_contracts
+)
+set_tests_properties(actor_spawn_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_save_game_exists "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_save_game_exists/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    actor::save_game_exists_tests
+)
+set_tests_properties(actor_save_game_exists PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_iterator_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_iterator_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_iterator_contracts
+)
+set_tests_properties(actor_iterator_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_iterator_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_iterator_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_iterator_owner_contracts
+)
+set_tests_properties(actor_iterator_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(pawn_native_ai_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/pawn_native_ai_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=pawn_native_ai_owner_contracts
+)
+set_tests_properties(pawn_native_ai_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(pawn_reach_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/pawn_reach_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=pawn_reach_owner_contracts
+)
+set_tests_properties(pawn_reach_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_audio_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_audio_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_audio_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(actor_audio_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(pawn_path_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/pawn_path_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=pawn_path_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(pawn_path_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(pawn_native_move_fixtures "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/pawn_native_move_fixtures/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=pawn_native_move_fixtures
+    --
+    --test-threads=1
+)
+set_tests_properties(pawn_native_move_fixtures PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(pawn_move_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/pawn_move_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=pawn_move_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(pawn_move_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_script_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_script_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_script_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(actor_script_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(console_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/console_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=console_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(console_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(scripted_texture_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/scripted_texture_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=scripted_texture_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(scripted_texture_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_file_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_file_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_file_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(actor_file_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_file_transfer_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_file_transfer_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_file_transfer_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(actor_file_transfer_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(decal_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/decal_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=decal_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(decal_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(stat_log_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/stat_log_vm_native_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=stat_log_vm_native_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(stat_log_vm_native_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(editor_transaction_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/editor_transaction_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=editor_transaction_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(editor_transaction_owner_contracts PROPERTIES LABELS "fast;data-none")
+if(APPLE)
+    # Cargo's final executable, like hp2_game, links the one CMake-owned SDL
+    # archive. Read its generated dependency flags rather than pinning a second
+    # list of Apple frameworks in the Rust crate.
+    set(HP2_B5_GPU_RUSTFLAGS "-Clink-arg=$<TARGET_FILE:SDL2::SDL2-static>")
+    foreach(HP2_B5_SDL_LINK_ITEM IN LISTS HP2_SDL_STATIC_LINK_ITEMS)
+        if(HP2_B5_SDL_LINK_ITEM MATCHES "^(-l|-Wl,)")
+            list(APPEND HP2_B5_GPU_RUSTFLAGS "-Clink-arg=${HP2_B5_SDL_LINK_ITEM}")
+        endif()
+    endforeach()
+    string(ASCII 31 HP2_B5_RUSTFLAG_SEPARATOR)
+    list(JOIN HP2_B5_GPU_RUSTFLAGS "${HP2_B5_RUSTFLAG_SEPARATOR}" HP2_B5_GPU_RUSTFLAGS)
+    if(NOT "$ENV{CARGO_ENCODED_RUSTFLAGS}" STREQUAL "")
+        string(PREPEND HP2_B5_GPU_RUSTFLAGS "$ENV{CARGO_ENCODED_RUSTFLAGS}${HP2_B5_RUSTFLAG_SEPARATOR}")
+    elseif(NOT "$ENV{RUSTFLAGS}" STREQUAL "")
+        separate_arguments(HP2_B5_INHERITED_RUSTFLAGS UNIX_COMMAND "$ENV{RUSTFLAGS}")
+        list(JOIN HP2_B5_INHERITED_RUSTFLAGS "${HP2_B5_RUSTFLAG_SEPARATOR}" HP2_B5_INHERITED_RUSTFLAGS)
+        string(PREPEND HP2_B5_GPU_RUSTFLAGS "${HP2_B5_INHERITED_RUSTFLAGS}${HP2_B5_RUSTFLAG_SEPARATOR}")
+    endif()
+    hp2_add_behavior_test(actor_screenshot_vm_native_owner_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_screenshot_vm_native_owner_contracts/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_B5_GPU_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test
+        --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine
+        "--features=sdl,renderer-wgpu"
+        --test=actor_screenshot_vm_native_owner_contracts
+    )
+    set_tests_properties(actor_screenshot_vm_native_owner_contracts PROPERTIES LABELS "runtime;data-none")
+    # Integration tests also build Cargo's game binary: link the same CMake-owned
+    # SDK products and frameworks as the native-free game, not a second SDK build.
+    set(HP2_GAME_TEST_LINK_FLAGS)
+    foreach(HP2_GAME_TEST_LIBRARY IN ITEMS
+            OpenAL::OpenAL archive_static nfd::nfd zlibstatic hp2_bzip2 liblzma)
+        list(APPEND HP2_GAME_TEST_LINK_FLAGS
+            "-Clink-arg=$<TARGET_FILE:${HP2_GAME_TEST_LIBRARY}>")
+    endforeach()
+    list(APPEND HP2_GAME_TEST_LINK_FLAGS
+        ${HP2_NFD_RUST_FRAMEWORK_FLAGS}
+        "-lframework=QuartzCore" "-lframework=CoreGraphics" "-lframework=Metal"
+        "-lframework=Foundation" "-lframework=CoreFoundation" "-lframework=AppKit"
+        "-lframework=CoreText" "-lobjc" "-liconv"
+        "-Clink-arg=-Wl,-rpath,$<TARGET_FILE_DIR:OpenAL::OpenAL>"
+        "-Clink-arg=-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    list(JOIN HP2_GAME_TEST_LINK_FLAGS "${HP2_B5_RUSTFLAG_SEPARATOR}" HP2_GAME_TEST_LINK_FLAGS)
+    set(HP2_GAME_TEST_RUSTFLAGS
+        "${HP2_B5_GPU_RUSTFLAGS}${HP2_B5_RUSTFLAG_SEPARATOR}${HP2_GAME_TEST_LINK_FLAGS}")
+    hp2_add_behavior_test(launcher_ui_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/launcher_ui_contracts/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_GAME_TEST_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test
+        --locked
+        --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-game
+        --test=launcher_ui_contracts
+        --
+        --test-threads=1
+    )
+    set_tests_properties(launcher_ui_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(verification_audio_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/verification_audio_contracts/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_GAME_TEST_RUSTFLAGS}"
+        "HP2_DETERMINISTIC_VERIFICATION=1"
+        "${HP2_CARGO_EXECUTABLE}" test
+        --locked
+        --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-audio
+        --features=openal
+        --lib verification::tests
+        -- --test-threads=1
+    )
+    set_tests_properties(verification_audio_contracts PROPERTIES LABELS "runtime;data-none")
+endif()
+hp2_add_behavior_test(core_unix_file_manager "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_unix_file_manager/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    unix_file_manager_owner::tests
+    --
+    --test-threads=1
+)
+set_tests_properties(core_unix_file_manager PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(core_runtime_paths_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_runtime_paths_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    native_runtime_init::tests
+    --
+    --test-threads=1
+)
+set_tests_properties(core_runtime_paths_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(core_package_file_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_package_file_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    package_file_owner::tests
+    --
+    --test-threads=1
+)
+set_tests_properties(core_package_file_owner_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_color_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_color_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_color_contracts
+)
+set_tests_properties(actor_color_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_file_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_file_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_file_contracts
+)
+set_tests_properties(actor_file_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(package_map_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/package_map_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=package_map_contracts
+)
+set_tests_properties(package_map_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(path_scout_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/path_scout_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=path_scout_contracts
+)
+set_tests_properties(path_scout_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(path_creation_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/path_creation_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=path_creation_contracts
+)
+set_tests_properties(path_creation_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(path_maintenance_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/path_maintenance_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=path_maintenance_contracts
+)
+set_tests_properties(path_maintenance_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(path_build_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/path_build_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=path_build_contracts
+)
+set_tests_properties(path_build_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_lifecycle_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_lifecycle_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_lifecycle_contracts
+)
+set_tests_properties(object_lifecycle_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_gc_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_gc_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_gc_contracts
+)
+set_tests_properties(object_gc_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_storage_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_storage_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_storage_contracts
+)
+set_tests_properties(object_storage_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(bit_archive_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/bit_archive_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=bits_replay
+)
+set_tests_properties(bit_archive_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(level_summary_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/level_summary_owner/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=level_summary_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(level_summary_owner PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(model_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/model_owner/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=model_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(model_owner PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(animation_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/animation_owner/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=animation_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(animation_owner PROPERTIES LABELS "integration;data-none")
+hp2_add_behavior_test(spawn_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/spawn_owner/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=spawn_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(spawn_owner PROPERTIES LABELS "integration;data-none")
+hp2_add_behavior_test(mesh_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/mesh_owner/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    --manifest-path=${CMAKE_SOURCE_DIR}/Cargo.toml
+    --package=hp2-engine
+    --test=mesh_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(mesh_owner PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(skeletal_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/skeletal_owner/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    --manifest-path=${CMAKE_SOURCE_DIR}/Cargo.toml
+    --package=hp2-engine
+    --test=skeletal_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(skeletal_owner PROPERTIES LABELS "integration;data-none")
+hp2_add_behavior_test(palette_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/palette_owner/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    --manifest-path=${CMAKE_SOURCE_DIR}/Cargo.toml
+    --package=hp2-engine
+    --test=palette_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(palette_owner PROPERTIES LABELS "integration;data-none")
+hp2_add_behavior_test(texture_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/texture_owner/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    --manifest-path=${CMAKE_SOURCE_DIR}/Cargo.toml
+    --package=hp2-engine
+    --test=texture_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(texture_owner PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(font_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/font_owner_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=font_owner_contracts
+)
+set_tests_properties(font_owner_contracts PROPERTIES LABELS "integration;data-none")
+hp2_add_behavior_test(sound_owner "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/sound_owner/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    --manifest-path=${CMAKE_SOURCE_DIR}/Cargo.toml
+    --package=hp2-engine
+    --test=sound_owner
+    --
+    --test-threads=1
+)
+set_tests_properties(sound_owner PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(sound_stream_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/sound_stream_owner_contracts/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    --config=profile.test.opt-level=1
+    --manifest-path=${CMAKE_SOURCE_DIR}/Cargo.toml
+    --package=hp2-engine
+    --lib
+    sound_stream_owner_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(sound_stream_owner_contracts PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(rust_core_runtime "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/rust_core_runtime/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    # Full Core.u traverses deeply linked fields; optimize stack slots while retaining test-profile checks.
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=core_runtime
+    --
+    --test-threads=1
+)
+set_tests_properties(rust_core_runtime PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(canonical_engine_package_load "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/canonical_engine_package_load/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=engine_package_load
+    --
+    --test-threads=1
+)
+set_tests_properties(canonical_engine_package_load PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(actor_physics_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_physics_owner_contracts/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --lib
+    actor_physics_owner::tests
+    --
+    --test-threads=1
+)
+set_tests_properties(actor_physics_owner_contracts PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(canvas_native_text_scalar_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/canvas_native_text_scalar_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --lib
+    render_device_owner::canvas_text_tchar_tests
+    --
+    --test-threads=1
+)
+set_tests_properties(canvas_native_text_scalar_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(renderer_light_manager_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_light_manager_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --lib
+    render_owner::light_manager_lifetime_tests
+    --
+    --test-threads=1
+)
+set_tests_properties(renderer_light_manager_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(renderer_host_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_host_contracts/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --features=renderer-wgpu
+    --lib
+    render_host_contracts
+    --
+    --test-threads=1
+)
+set_tests_properties(renderer_host_contracts PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(actor_sprite_hit_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_sprite_hit_owner_contracts/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --features=renderer-wgpu
+    --lib
+    actor_sprite_hit_scopes_preserve_nested_viewport_ownership
+    --
+    --test-threads=1
+)
+set_tests_properties(actor_sprite_hit_owner_contracts PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(fractal_owner_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/fractal_owner_contracts/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --lib
+    fractal_owner::tests
+    --
+    --test-threads=1
+)
+set_tests_properties(fractal_owner_contracts PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(property_link_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_link_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_link_contracts
+)
+set_tests_properties(property_link_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(unix_signal_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/unix_signal_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=unix_signal_contracts
+)
+set_tests_properties(unix_signal_contracts PROPERTIES LABELS "integration;data-none")
+hp2_add_behavior_test(vm_dispatch_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_dispatch_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_dispatch_contracts
+)
+set_tests_properties(vm_dispatch_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_state_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_state_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_state_contracts
+)
+set_tests_properties(vm_state_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(class_metadata_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/class_metadata_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=class_metadata_contracts
+)
+set_tests_properties(class_metadata_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(class_lifecycle_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/class_lifecycle_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=class_lifecycle_contracts
+)
+set_tests_properties(class_lifecycle_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(class_storage_kernel_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/class_storage_kernel_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib class_
+)
+set_tests_properties(class_storage_kernel_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(class_registration_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/class_registration_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=class_registration_contracts
+)
+set_tests_properties(class_registration_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_serialization_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_serialization_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_serialization_contracts
+)
+set_tests_properties(object_serialization_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(property_construction_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_construction_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_construction_contracts
+)
+set_tests_properties(property_construction_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(property_layout_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_layout_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_layout_contracts
+)
+set_tests_properties(property_layout_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(expression_archive_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/expression_archive_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=expression_archive_contracts
+)
+set_tests_properties(expression_archive_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(metadata_script_tail_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/metadata_script_tail_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib core_metadata::tests::native_call_at_script_end_peeks_and_rewinds_without_widening_operand_bounds
+)
+set_tests_properties(metadata_script_tail_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(canonical_property_export_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/canonical_property_export_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib core_property_text::tests::full_export_preserves_default_comparison_and_data_delta_alias
+)
+set_tests_properties(canonical_property_export_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(platform_speech_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/platform_speech_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform
+    --lib speech::tests
+)
+set_tests_properties(platform_speech_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(verification_input_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/verification_input_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform
+    --lib input_pump::tests
+)
+set_tests_properties(verification_input_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(property_archive_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_archive_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_archive_contracts
+)
+set_tests_properties(property_archive_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_scalar_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_scalar_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_scalar_contracts
+)
+set_tests_properties(vm_scalar_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(property_tag_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_tag_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_tag_contracts
+)
+set_tests_properties(property_tag_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(property_value_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_value_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_value_contracts
+)
+set_tests_properties(property_value_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(network_archive_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/network_archive_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=network_archive_contracts
+)
+set_tests_properties(network_archive_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(startup_defaults_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/startup_defaults_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=startup_defaults_contracts
+)
+set_tests_properties(startup_defaults_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(cpp_property_layout_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/cpp_property_layout_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=cpp_property_layout_contracts
+)
+set_tests_properties(cpp_property_layout_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(transaction_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/transaction_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib transaction::tests
+)
+set_tests_properties(transaction_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_vector_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_vector_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_vector_contracts
+)
+set_tests_properties(vm_vector_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(property_text_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/property_text_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=property_text_contracts
+)
+set_tests_properties(property_text_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_convert_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_convert_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_convert_contracts
+)
+set_tests_properties(vm_convert_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_string_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_string_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_string_contracts
+)
+set_tests_properties(vm_string_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_variable_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_variable_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_variable_contracts
+)
+set_tests_properties(vm_variable_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_flow_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_flow_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_flow_contracts
+)
+set_tests_properties(vm_flow_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_call_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_call_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_call_contracts
+)
+set_tests_properties(vm_call_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_object_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_object_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_object_contracts
+)
+set_tests_properties(vm_object_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_registry_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_registry_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_registry_contracts
+)
+set_tests_properties(vm_registry_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_frame_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_frame_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_frame_contracts
+)
+set_tests_properties(vm_frame_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(vm_locals_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/vm_locals_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=vm_locals_contracts
+)
+set_tests_properties(vm_locals_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(array_storage_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/array_storage_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=array_storage_contracts
+)
+set_tests_properties(array_storage_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_collections_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_collections_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_collections_contracts
+)
+set_tests_properties(object_collections_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(string_storage_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/string_storage_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=string_storage_contracts
+)
+set_tests_properties(string_storage_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(map_storage_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/map_storage_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=map_storage_contracts
+)
+set_tests_properties(map_storage_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_properties_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_properties_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_properties_contracts
+)
+set_tests_properties(object_properties_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(object_construction_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_construction_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=object_construction_contracts
+)
+set_tests_properties(object_construction_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(package_file_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/package_file_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=package_file_contracts
+)
+set_tests_properties(package_file_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(file_persistence_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/file_persistence_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=file_persistence_contracts
+)
+set_tests_properties(file_persistence_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(file_stream_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/file_stream_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-audio
+    --lib
+    file_stream::tests
+    --
+    --test-threads=1
+)
+set_tests_properties(file_stream_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(mem_stack_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/mem_stack_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=mem_replay
+    --test=mem_stack_contracts
+)
+set_tests_properties(mem_stack_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(scene_lighting_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/scene_lighting_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    -p hp2-render
+    --test=scene_lighting_reentrancy
+)
+set_tests_properties(scene_lighting_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(linker_runtime_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/linker_runtime_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    linker_runtime::tests
+)
+set_tests_properties(linker_runtime_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(math_inline_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/math_inline_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    math::inline_contract_tests
+)
+set_tests_properties(math_inline_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(array_archive_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/array_archive_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    array_archive::tests
+)
+set_tests_properties(array_archive_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(package_flow_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/package_flow_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    package_flow::tests
+)
+set_tests_properties(package_flow_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(paths_bootstrap_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/paths_bootstrap_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-bootstrap-paths
+    --lib
+)
+set_tests_properties(paths_bootstrap_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(runtime_init_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/runtime_init_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=runtime_init_contracts
+)
+set_tests_properties(runtime_init_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(core_name_replay "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_name_replay/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=name_replay
+)
+set_tests_properties(core_name_replay PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(decal_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/decal_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=decal_contracts
+)
+set_tests_properties(decal_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_process_state_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_process_state_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=process_state_contracts
+)
+set_tests_properties(actor_process_state_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_remote_function_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_remote_function_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_rpc_contracts
+)
+set_tests_properties(actor_remote_function_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_unactor_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_unactor_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=actor_unactor
+)
+set_tests_properties(actor_unactor_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(actor_is_animating "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_is_animating/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    actor::animation_tests
+)
+set_tests_properties(actor_is_animating PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(engine_path_define_paths "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_path_define_paths/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    path::tests::active_define_paths_connects_same_class_nodes_and_excludes_player_starts
+    -- --exact
+)
+set_tests_properties(engine_path_define_paths PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(package_summary_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/package_summary_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    package_summary_archive::tests
+)
+set_tests_properties(package_summary_archive PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(class_dependency_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/class_dependency_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    class_dependency_archive::tests
+)
+set_tests_properties(class_dependency_archive PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(core_net_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_net_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    core_net_archive::tests
+)
+set_tests_properties(core_net_archive PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(linker_name_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/linker_name_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    linker_name_archive::tests
+)
+set_tests_properties(linker_name_archive PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(linker_record_archive "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/linker_record_archive/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    linker_record_archive::tests
+)
+set_tests_properties(linker_record_archive PROPERTIES LABELS "fast;data-none")
+
 if(HP2_TEST_DATA_PRESENT)
-    hp2_add_behavior_test(native_registration hp2_abi_tests
-        --test=native_registration
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
-    hp2_add_behavior_test(package79_manifest hp2_package_audit
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-        "--reference=${CMAKE_BINARY_DIR}/goldens/package79-reference.json"
-    )
     hp2_add_behavior_test(spell_interaction_manifest "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/spell_interaction_audit.py"
         "--repo-root=${PROJECT_SOURCE_DIR}"
@@ -1006,73 +2131,297 @@ else()
         COMMENT "Regenerating machine-local goldens from the configured test data root (no HP1 data root present)")
 endif()
 if(HP2_TEST_DATA_PRESENT)
-    hp2_add_behavior_test(spell_runtime_contracts hp2_spell_runtime_tests
-        "-datadir=${HP2_TEST_DATA_ROOT}"
+    hp2_add_behavior_test(spell_runtime_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/spell_runtime_contracts/Cargo"
+        "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+        "${HP2_CARGO_EXECUTABLE}" test
+        --locked
+        --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine
+        --test
+        spell_runtime_contracts
+        --
+        --test-threads=1
     )
+    set_tests_properties(spell_runtime_contracts PROPERTIES LABELS "integration;data-prototype")
 endif()
-hp2_add_behavior_test(dxt1_codec hp2_dxt1_tests)
-hp2_add_behavior_test(eaxa_decoder hp2_eaxa_tests)
-hp2_add_behavior_test(replay_roundtrip hp2_replay_roundtrip_tests)
-hp2_add_behavior_test(config_ini_parse_semantics hp2_config_ini_tests
-    --test=parse_semantics
+hp2_add_behavior_test(dxt1_codec "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/dxt1_codec/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-codecs
+    dxt1
+    --
+    --test-threads=1
 )
-hp2_add_behavior_test(config_ini_typed_getters hp2_config_ini_tests
-    --test=typed_getters
+hp2_add_behavior_test(eaxa_decoder "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/eaxa_decoder/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-codecs
+    eaxa
+    --
+    --test-threads=1
 )
-hp2_add_behavior_test(config_ini_set_and_write hp2_config_ini_tests
-    --test=set_and_write
+hp2_add_behavior_test(replay_roundtrip "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/replay_roundtrip/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test
+    net_replay
+    --
+    --test-threads=1
 )
-hp2_add_behavior_test(config_ini_rewrite_normalization hp2_config_ini_tests
-    --test=rewrite_normalization
+hp2_add_behavior_test(config_ini_parse_semantics "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/config_ini_parse_semantics/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    parse_semantics
+    --
+    --test-threads=1
 )
-hp2_add_behavior_test(config_ini_cache_filenames hp2_config_ini_tests
-    --test=cache_filenames
+hp2_add_behavior_test(config_ini_typed_getters "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/config_ini_typed_getters/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    typed_getters
+    --
+    --test-threads=1
 )
-hp2_add_behavior_test(config_ini_unicode_roundtrip hp2_config_ini_tests
-    --test=unicode_roundtrip
+hp2_add_behavior_test(config_ini_set_and_write "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/config_ini_set_and_write/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    set_and_write
+    --
+    --test-threads=1
 )
-# Audio lifecycle exercises a prototype music file that ships as untracked
-# local reference data; without it the test cannot exist (configuration gap).
-if(EXISTS "${HP2_UNREAL_ROOT}/Music/sm_bur_PlayfulFail_01.ogg" AND HP2_TEST_DATA_PRESENT)
-    hp2_add_behavior_test(audio_lifecycle hp2_audio_tests)
-    set_tests_properties(audio_lifecycle PROPERTIES
-        DEPENDS "eaxa_decoder;native_registration"
-        LABELS "fast;data-prototype"
-    )
-endif()
-if(HP2_TEST_DATA_PRESENT)
-    hp2_add_behavior_test(input_edge_contracts hp2_input_contract_tests
-        --test=input_edge
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
-    hp2_add_behavior_test(input_axis_order hp2_input_contract_tests
-        --test=input_axis_order
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
-    hp2_add_behavior_test(input_release_all hp2_input_contract_tests
-        --test=input_release_all
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
-endif()
-hp2_add_behavior_test(native_launcher_contract hp2_launcher_tests)
-hp2_add_behavior_test(clipboard_round_trip hp2_platform_clipboard_tests)
-hp2_add_behavior_test(mouse_state_round_trip hp2_platform_mouse_state_tests)
-hp2_add_behavior_test(window_chrome_round_trip hp2_platform_window_chrome_tests)
-hp2_add_behavior_test(joystick_round_trip hp2_platform_joystick_tests)
-hp2_add_behavior_test(data_identity_contracts hp2_data_identity_tests)
+hp2_add_behavior_test(config_ini_rewrite_normalization "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/config_ini_rewrite_normalization/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    rewrite_normalization
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(config_ini_cache_filenames "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/config_ini_cache_filenames/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    cache_filenames
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(config_ini_unicode_roundtrip "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/config_ini_unicode_roundtrip/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --lib
+    unicode_roundtrip
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(audio_lifecycle "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/audio_lifecycle/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-audio
+    --lib
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(input_edge_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_edge_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test
+    input_uncon
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(input_axis_order "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_axis_order/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test
+    input_uncon
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(input_release_all "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/input_release_all/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test
+    input_uncon
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(render_lumos_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/render_lumos_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-render
+    --lib
+    lumos_contract_tests
+    --
+    --test-threads=1
+)
+set_tests_properties(render_lumos_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(render_console_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/render_console_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-render
+    --lib
+    console
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(paused_mouse_history_contract "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/paused_mouse_history_contract/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=lev_tic_level_replay
+    paused_level_clears_mouse_history_before_menu_tick_and_preserves_gameplay
+    --
+    --test-threads=1
+)
+set_tests_properties(paused_mouse_history_contract PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(mouse_state_round_trip "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/mouse_state_round_trip/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform
+    --lib
+    mouse_state
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(window_chrome_round_trip "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/window_chrome_round_trip/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform
+    --lib
+    window_chrome
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(joystick_round_trip "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/joystick_round_trip/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform
+    --lib
+    joystick
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(data_identity_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/data_identity_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-bootstrap-paths
+    --lib
+    --
+    --test-threads=1
+)
 hp2_add_behavior_test(game_test_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/GameTestTests.py"
 )
+hp2_add_behavior_test(port_progress_contract "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/PortProgressTests.py"
+)
+set_tests_properties(port_progress_contract PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(repair_save_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/RepairSaveTests.py"
 )
 hp2_add_behavior_test(ucc_smoke_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
 )
-if(EXISTS "${CMAKE_BINARY_DIR}/hp2_ucc")
+if(EXISTS "${CMAKE_BINARY_DIR}/hp2_ucc_rust")
     hp2_add_behavior_test(ucc_help_smoke "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
-        --smoke "--ucc-binary=${CMAKE_BINARY_DIR}/hp2_ucc"
+        --smoke "--ucc-binary=${CMAKE_BINARY_DIR}/hp2_ucc_rust"
         "--data-root=${HP2_TEST_DATA_ROOT}"
     )
 endif()
@@ -1097,19 +2446,6 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter1/Unreal/System/Default.ini")
         --check
     )
     set_tests_properties(hp1_loader_manifest PROPERTIES LABELS "integration;data-hp1")
-
-    # HP1 class bind: Engine.Music resolves through the native registry
-    # (IMPLEMENT_CLASS(UMusic) + the VerifyImport RF_Native fallback), and a
-    # live hp2_ucc run verifies Engine.u/Editor.u under the HP1 root with zero
-    # unresolved imports. Same data-root gate as hp1_loader_manifest; the
-    # runtime layer needs the already-built ucc binary.
-    hp2_add_behavior_test(hp1_class_bind "${Python3_EXECUTABLE}"
-        "${PROJECT_SOURCE_DIR}/Tests/HP1ClassBindTests.py" -v
-    )
-    set_tests_properties(hp1_class_bind PROPERTIES
-        LABELS "integration;data-hp1"
-        ENVIRONMENT "HP2_UCC_BINARY=${CMAKE_BINARY_DIR}/hp2_ucc"
-    )
 endif()
 hp2_add_behavior_test(save_format_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/SaveFormatTests.py"
@@ -1137,6 +2473,36 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         LABELS "integration;data-prototype"
         RESOURCE_LOCK hp2_gpu
     )
+    hp2_add_behavior_test(canonical_input_script_smoke "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/InputScriptSmoke.py"
+        --smoke
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        --ticks=240
+        --timeout=120
+        "--engine-bin=$<TARGET_FILE:hp2_game_rust>"
+    )
+    set_tests_properties(canonical_input_script_smoke PROPERTIES
+        LABELS "integration;data-prototype"
+        RESOURCE_LOCK hp2_gpu
+    )
+    hp2_add_behavior_test(canonical_save_reload_smoke "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/InputScriptSmoke.py"
+        --smoke
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        --engine-bin=$<TARGET_FILE:hp2_game_rust>
+        --map=Adv1Willow
+        --fixture=Tests/Fixtures/input_script_save_reload.txt
+        --bind "F5=SAVEGAME 9"
+        --bind "F9=LOADGAME 9"
+        --expect-user-file=Save9.usa
+        --expect-map-load=Save9.usa
+        --ticks=300
+        --timeout=180
+    )
+    set_tests_properties(canonical_save_reload_smoke PROPERTIES
+        LABELS "integration;data-prototype"
+        RESOURCE_LOCK hp2_gpu
+    )
 endif()
 hp2_add_behavior_test(framing_baseline_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/FramingBaselineTests.py"
@@ -1147,7 +2513,8 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         AND EXISTS "${HP2_TEST_DATA_ROOT}/System/Default.ini")
     hp2_add_behavior_test(determinism_double_run "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/DeterminismDoubleRunTests.py"
-        --ticks=60
+        --app "${CMAKE_BINARY_DIR}/hp2_game_rust"
+        --ticks=300
     )
     set_tests_properties(determinism_double_run PROPERTIES
         LABELS "integration;data-prototype"
@@ -1156,27 +2523,53 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
 endif()
 
 
-if(HP2_HAS_NATIVE_TEXT_BACKEND AND HP2_TEST_DATA_PRESENT)
-    # Data-backed contracts pass their root explicitly (never CWD discovery),
-    # so a local out/retail-data import can never hijack the fixture path.
-    hp2_add_behavior_test(native_typography_contracts hp2_native_typography_tests
-        "-datadir=${HP2_TEST_DATA_ROOT}"
-    )
-endif()
+hp2_add_behavior_test(native_typography_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/native_typography_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-render
+    --lib
+    native_text_layout
+    --
+    --test-threads=1
+)
+hp2_add_behavior_test(object_registry_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/object_registry_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test
+    class_registration_contracts
+    --
+    --test-threads=1
+)
 
-if(HP2_HAS_NATIVE_TEXT_BACKEND)
-    # The immutability canaries hash three prototype code packages that ship
-    # as untracked local reference data; gate exactly like the data itself.
-    if(EXISTS "${HP2_UNREAL_ROOT}/System/Engine.u"
-            AND EXISTS "${HP2_UNREAL_ROOT}/System/HGame.u"
-            AND EXISTS "${HP2_UNREAL_ROOT}/System/UWindow.u")
-        hp2_add_behavior_test(canvas_compatibility_contracts hp2_canvas_compatibility_tests
-            "-datadir=${HP2_TEST_DATA_ROOT}"
-        )
-        set_tests_properties(canvas_compatibility_contracts
-            PROPERTIES LABELS "integration;data-prototype"
-        )
-    endif()
+if(EXISTS "${HP2_UNREAL_ROOT}/System/Engine.u"
+        AND EXISTS "${HP2_UNREAL_ROOT}/System/HGame.u"
+        AND EXISTS "${HP2_UNREAL_ROOT}/System/UWindow.u")
+    hp2_add_behavior_test(canvas_compatibility_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/canvas_compatibility_contracts/Cargo"
+        "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+        "${HP2_CARGO_EXECUTABLE}" test
+        --locked
+        --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine
+        --test
+        canvas_compatibility_contracts
+        --
+        --test-threads=1
+    )
+    set_tests_properties(canvas_compatibility_contracts
+        PROPERTIES LABELS "integration;data-prototype"
+    )
 endif()
 
 # Deterministic renderer smoke tiers. The commit gate runs a fixed three-map
@@ -1190,7 +2583,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
     hp2_add_behavior_test(renderer_smoke_maps "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
         "--renderer=wgpu"
-        "--app=${CMAKE_BINARY_DIR}/hp2_game"
+        "--app=${CMAKE_BINARY_DIR}/hp2_game_rust"
         "--maps=PrivetDr,Entry,Ch2Skurge"
         "--ticks=120"
         "--timeout=90"
@@ -1201,7 +2594,7 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         hp2_add_behavior_test(renderer_smoke_full "${Python3_EXECUTABLE}"
             "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
             "--renderer=wgpu"
-            "--app=${CMAKE_BINARY_DIR}/hp2_game"
+            "--app=${CMAKE_BINARY_DIR}/hp2_game_rust"
             "--ticks=300"
             "--output=${CMAKE_BINARY_DIR}/Testing/HP2/renderer_smoke_full/smoke-maps.json"
             "--data-root=${HP2_TEST_DATA_ROOT}"
@@ -1214,161 +2607,99 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
     endif()
 endif()
 
-# ABI and registration checks are prerequisites for package/runtime tests.
-# Codec tests are otherwise independent; audio lifecycle additionally requires
-# the decoder and native registration contracts.
-set_tests_properties(compact_index fstring_archive
-    PROPERTIES DEPENDS abi_widths
-)
-if(HP2_TEST_DATA_PRESENT)
-    set_tests_properties(native_registration
-        PROPERTIES DEPENDS abi_widths
+if(HP2_TEST_DATA_PRESENT AND TARGET hp2_game_rust)
+    hp2_add_behavior_test(canonical_game_boot_entry "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
+        "--renderer=wgpu"
+        "--app=$<TARGET_FILE:hp2_game_rust>"
+        "--maps=Entry"
+        "--ticks=120"
+        "--timeout=90"
+        "--output=${CMAKE_BINARY_DIR}/Testing/HP2/canonical_game_boot_entry/Artifacts/smoke-maps.json"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
     )
-    set_tests_properties(package79_manifest PROPERTIES
-        DEPENDS "compact_index;fstring_archive;native_registration"
+    hp2_add_behavior_test(canonical_renderer_smoke_maps "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Build/smoke_maps.py"
+        "--renderer=wgpu"
+        "--app=$<TARGET_FILE:hp2_game_rust>"
+        "--maps=PrivetDr,Entry,Ch2Skurge"
+        "--ticks=120"
+        "--timeout=90"
+        "--output=${CMAKE_BINARY_DIR}/Testing/HP2/canonical_renderer_smoke_maps/Artifacts/smoke-maps.json"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
     )
-    set_tests_properties(spell_runtime_contracts PROPERTIES
-        DEPENDS "native_registration;package79_manifest;spell_interaction_manifest"
+    set_tests_properties(canonical_game_boot_entry canonical_renderer_smoke_maps PROPERTIES
+        LABELS "integration;data-prototype"
+        RESOURCE_LOCK hp2_gpu
+        TIMEOUT 360
     )
 endif()
-set_tests_properties(native_launcher_contract game_test_contract repair_save_contract
-    ucc_smoke_contract prototype_archive_contract
-    PROPERTIES LABELS "fast;data-none"
-)
-set_tests_properties(dxt1_codec eaxa_decoder PROPERTIES DEPENDS abi_widths)
+
+# Full authored-checkpoint parity is intentionally macOS arm64-only: the
+# independent oracle bundle and Rust game target must both be real artifacts.
+if(APPLE
+        AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$"
+        AND HP2_TEST_DATA_PRESENT
+        AND TARGET hp2_game_rust
+        AND EXISTS "${HP2_CPP_ORACLE_APP}")
+    hp2_add_behavior_test(parity_paired_maps "${CMAKE_COMMAND}"
+        "-DHP2_PYTHON=${Python3_EXECUTABLE}"
+        "-DHP2_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DHP2_ORACLE_APP=${HP2_CPP_ORACLE_APP}"
+        "-DHP2_ENGINE_BIN=$<TARGET_FILE:hp2_game_rust>"
+        "-DHP2_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+        "-DHP2_OUTPUT_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/parity_paired_maps/Artifacts"
+        -P "${PROJECT_SOURCE_DIR}/Build/parity_paired_maps.cmake"
+    )
+    set_tests_properties(parity_paired_maps PROPERTIES
+        LABELS "integration;data-prototype;parity-full"
+        RESOURCE_LOCK hp2_gpu
+        TIMEOUT 14400
+    )
+endif()
 
 # Label taxonomy: layer labels (fast|integration|smoke|visual|manual) plus a
 # data-profile label (data-none|data-prototype|data-retail). Smoke tests keep
 # the labels assigned in the smoke block above.
-set_tests_properties(abi_widths render_clip projection_fov command_line_load
-    compact_index fstring_archive dxt1_codec eaxa_decoder
-    native_launcher_contract game_test_contract repair_save_contract
+set_tests_properties(command_line_load
+    compact_index fstring_archive ftime_archive dxt1_codec eaxa_decoder
+    game_test_contract repair_save_contract ucc_smoke_contract prototype_archive_contract
     PROPERTIES LABELS "fast;data-none"
 )
 if(HP2_TEST_DATA_PRESENT)
-    set_tests_properties(native_registration package79_manifest
-        spell_interaction_manifest spell_runtime_contracts
+    set_tests_properties(spell_interaction_manifest spell_runtime_contracts
         PROPERTIES LABELS "integration;data-prototype"
     )
 endif()
-# The typography contracts boot the path bootstrap against real game data, so
-# they are data-backed despite running quickly. Labelling them data-none would
-# put them in a CI selection that has no data root to give them.
-if(HP2_TEST_DATA_PRESENT)
-    set_tests_properties(native_typography_contracts
-        PROPERTIES LABELS "fast;data-prototype"
-    )
-endif()
-endif()
-# ---------------------------------------------------------------------------
-# WgpuDrv: experimental wgpu-backed render device.
-# hp2-ffi's renderer-wgpu feature is enabled by the corrosion_import_crate block
-# above, before this point. One OBJECT library, linked into hp2_game so the engine's
-# static class registry finds WgpuDrv.WgpuRenderDevice at boot.
-# ---------------------------------------------------------------------------
-if(NOT EMSCRIPTEN)
-    set(HP2_WGPUDRV_SOURCES
-        "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Src/WgpuDrv.cpp"
-    )
-    # hp2_add_engine_object (not bare add_library): IMPLEMENT_CLASS
-    # (UnObjBas.h:351-385) references the bare preprocessor token
-    # GPackage directly as the package-name argument to UClass's
-    # constructor. Only this helper's `GPackage=LocalPackageName${name}`
-    # compile definition makes that token resolve to the real symbol
-    # IMPLEMENT_PACKAGE(WgpuDrv) defines (LocalPackageNameWgpuDrv).
-    # Without it (an earlier version of this block used bare
-    # add_library and compiled/linked successfully anyway -- caught on
-    # review, not self-caught: a token with no local #define still
-    # compiles if it accidentally resolves to some other TU's extern
-    # GPackage in scope, it just registers the class under the wrong
-    # package silently, not a build failure), WgpuDrv.WgpuRenderDevice
-    # would not reliably resolve as an ini class name. Also sets
-    # __STATIC_LINK=1 and the HP2_EMPTY_MODULE_API_DEFINITIONS list
-    # (WGPUDRV_API= among them) and C++17, matching every other engine
-    # object library in this file.
-    hp2_add_engine_object(hp2_wgpudrv WgpuDrv ${HP2_WGPUDRV_SOURCES})
-    # PRIVATE hp2_ffi, not just a manual HP2_RS_INCLUDE_DIR include dir:
-    # without this link, ninja has no dependency edge forcing hp2_ffi's
-    # cbindgen-generating custom command to run before WgpuDrv.cpp
-    # compiles -- the real cause of this package's first build attempt
-    # failing with "undeclared hp2_rs_wgpu_create" even though the
-    # header already had the symbol (a prior, separate invocation had
-    # already generated it; the retry only "worked" by accident of
-    # ordering, not because the graph was correct). hp2_ffi's own
-    # INTERFACE include of HP2_RS_INCLUDE_DIR (this file, ~line 227)
-    # propagates automatically through this link, same as hp2_core
-    # gets it via PUBLIC hp2_ffi -- no separate manual include dir
-    # needed or kept here.
-    target_link_libraries(hp2_wgpudrv PRIVATE hp2_ffi)
-    target_include_directories(hp2_wgpudrv PUBLIC
-        ${HP2_RENDER_INCLUDE_DIRS}
-        "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/WgpuDrv/Inc"
-        "${HP2_NATIVETEXT_INCLUDE_DIRS}"
-    )
-
-# Static registration: adding the object to hp2_game puts
-# WgpuDrv.WgpuRenderDevice into the engine class registry; it is the only
-# render device. HP2StaticPackages.cpp's RegisterHP2ClientClasses calls its registrant.
-target_link_libraries(hp2_game PRIVATE hp2_wgpudrv)
-
-    if(APPLE)
-        # hp2_rs_wgpu_lock/hp2_rs_wgpu_create's window-surface path are
-        # only meaningful on macOS (crates/hp2-wgpu/src/lib.rs's
-        # `macos` module) -- gate this test target the same way so a
-        # hypothetical non-Apple build never
-        # tries to compile against a window-surface path that does not
-        # exist there.
-        set(HP2_WGPU_SURFACE_TEST_SOURCE "${PROJECT_SOURCE_DIR}/Tests/WgpuSurfaceTests.cpp")
-        hp2_add_executable(hp2_wgpu_surface_tests
-            ${HP2_WGPU_SURFACE_TEST_SOURCE}
+if(APPLE)
+        hp2_add_behavior_test(wgpu_lumos_readback "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/wgpu_surface_round_trip/Cargo"
+            "${HP2_CARGO_EXECUTABLE}" test
+            --locked --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-wgpu --lib lumos_
+            -- --ignored --test-threads=1
         )
-        target_link_libraries(hp2_wgpu_surface_tests PRIVATE
-            hp2_core
-            hp2_engine
-            hp2_render
-            hp2_fire
-            hp2_editor_runtime
-            hp2_sdldrv
-        )
-        # HP2_EXECUTABLE_TARGETS (the hp2_verification_binaries
-        # dependency list) is finalized at line ~769-805, long before
-        # this WgpuDrv block runs -- adding this target
-        # there would need touching that always-on list. Explicit add_dependencies
-        # instead: without it, the documented `cmake --build ... --
-        # target hp2_verification_binaries && ctest` sequence never
-        # builds this executable in a fresh build directory, and
-        # wgpu_surface_round_trip fails with "executable not found"
-        # (caught on review: an earlier version of this block only
-        # "passed" because the executable had already been built by
-        # name directly, not through the documented sequence).
-        add_dependencies(hp2_verification_binaries hp2_wgpu_surface_tests)
-        # Cannot use the "dummy" SDL video driver (see
-        # Tests/WgpuSurfaceTests.cpp's own header comment): a real
-        # Metal-capable adapter and windowing backend, same
-        # RESOURCE_LOCK as renderer_smoke_wgpu below so the two never
-        # contend for the GPU concurrently.
-        hp2_add_behavior_test(wgpu_surface_round_trip hp2_wgpu_surface_tests)
-        set_tests_properties(wgpu_surface_round_trip PROPERTIES
-            LABELS "smoke;renderer;wgpu"
+        set_tests_properties(wgpu_lumos_readback PROPERTIES
+            LABELS "integration;data-none;renderer;wgpu"
             RESOURCE_LOCK hp2_gpu
-            # Tests/WgpuSurfaceTests.cpp exits 77 only if its
-            # hp2_rs_wgpu_lock check observes a *persistent*
-            # FrameOutcome::Occluded after ~2 seconds of polling, with
-            # several activation/visibility precautions applied (see
-            # that file's own, extensively-commented investigation):
-            # wgpu-hal's Metal backend (wgpu-hal-30.0.1/src/metal/
-            # surface.rs) refuses to even attempt nextDrawable() unless
-            # NSWindow.occlusionState reports the window visible. An
-            # earlier comment here claimed this project's own dev
-            # environment lacks a window compositor entirely -- wrong,
-            # drawn from a `ps aux` grep that does not list every
-            # process; corrected once `pmset -g assertions` showed a
-            # real WindowServer pid directly. Exactly why that bit does
-            # not set without the precautions/polling above was not
-            # isolated (no ablation study was run); stated as not
-            # isolated, not guessed at further. 77 is the long-standing
-            # autotools/CMake skip-exit-code convention.
-            SKIP_RETURN_CODE 77
+            TIMEOUT 600
+        )
+        # The Metal surface round-trip that was Tests/WgpuSurfaceTests.cpp is
+        # exercised by renderer_smoke_wgpu below; the pure-Rust wgpu unit
+        # tests cover the capture/texture/parse contracts.
+        hp2_add_behavior_test(wgpu_surface_round_trip "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/wgpu_surface_round_trip/Cargo"
+            "${HP2_CARGO_EXECUTABLE}" test
+            --locked
+            --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-wgpu
+            --lib
+            --
+            --test-threads=1
         )
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -1382,30 +2713,15 @@ target_link_libraries(hp2_game PRIVATE hp2_wgpudrv)
         "${PROJECT_SOURCE_DIR}/Build/run_wgpu_smoke.py"
         "--build-dir=${CMAKE_BINARY_DIR}"
         "--data-root=${HP2_TEST_DATA_ROOT}"
+        "--ticks=300"
     )
     set_tests_properties(renderer_smoke_wgpu PROPERTIES
         LABELS "smoke;renderer;wgpu"
         RESOURCE_LOCK hp2_gpu
         TIMEOUT 600
-        # No SKIP_RETURN_CODE here, deliberately: run_wgpu_smoke.py's
-        # exit 2 ("blocked") now also covers a real -window run that
-        # boots and ticks cleanly but never actually presents a frame
-        # (data.frame_tally.presented == 0 in its own JSON report,
-        # confirmed on a real run on this project's own dev machine --
-        # WgpuDrv.h's own doc has the detail). Marking that a skip
-        # would hide a real, current gap (no frames ever reach the
-        # screen in this environment today) behind a green ctest
-        # summary -- AGENTS.md's Forbidden Actions rule out exactly
-        # that ("skipping assertions to make a run pass"), and its own
-        # "Data-profile honesty" section treats a missing renderer-
-        # smoke prerequisite as "a configuration gap, not a skip",
-        # which this is closer to than to wgpu_surface_round_trip's
-        # SKIP_RETURN_CODE 77 above (a narrowly-scoped, positively-
-        # observed environment condition on one specific check, not a
-        # blanket cover for the whole smoke test). Left failing on
-        # purpose (an earlier version of this change added
-        # SKIP_RETURN_CODE 2 here specifically to keep this build
-        # dir's ctest count looking stable -- caught on review as the
-        # wrong tradeoff before it was ever committed).
+        # A 60-tick run on the macOS test host produced zero presented frames
+        # and 60 occluded frames; an observed 300-tick run presented 299.
+        # Keep the longer window so SDL/Metal can expose the surface before
+        # judging presentation, but retain the hard requirement: a clean boot
+        # with no presented frames remains blocked, never skipped.
     )
-endif()

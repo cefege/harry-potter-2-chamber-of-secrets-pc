@@ -93,8 +93,7 @@ const _: () = assert!(std::mem::offset_of!(FPlane, w) == 12);
 /// this session, would fail to compile at all before it could ever
 /// reach the big-endian `#else` branch (`A,B,G,R`), so that branch is
 /// unreachable dead code project-wide, on every platform this project
-/// builds for, not probed-and-assumed. `Core/Inc/UnVcWin32.h` (the
-/// MSVC path, `:12`) sets the same define unconditionally too.
+/// builds for, not probed-and-assumed.
 /// Cross-checked against the real build regardless: the macOS probe
 /// (see module doc) reports `R` at offset 0, `A` at offset 3, matching.
 /// `align(4)`: the real C++'s `union { DWORD Int4; struct {...}; }` forces

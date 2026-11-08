@@ -55,7 +55,7 @@ use hp2_ini::Profile;
 
 use crate::classify::is_prohibited;
 use crate::collect::Asset;
-use crate::hash::hash_bytes;
+use hp2_file_hash::hash_bytes;
 use crate::lower::lower;
 use crate::util::{fail, strerror_of, utf8};
 

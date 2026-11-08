@@ -35,15 +35,6 @@ fn run_trailer(seed: u64, w: &[u32]) -> ([u32; OUTPUT_WORDS], String) {
         s.subj = subject_ptr;
         s.subj_class = 0;
         s.pool = [owner_ptr, middle_ptr, other_ptr];
-        s.trailer_prepivot = [f(w[15]), f(w[16]), f(w[17])];
-        s.trailer_mass = f(w[18]);
-        s.trailer_draw_type = if action == 1 { 1 } else { 2 };
-        s.trailer_anim_bone = i32::from(action == 2);
-        s.trailer_flags = match action {
-            1 => 1,
-            4 => 4,
-            _ => 0,
-        };
         s.trailer_bone_coords = bone_coords;
     });
     unsafe {
@@ -56,6 +47,9 @@ fn run_trailer(seed: u64, w: &[u32]) -> ([u32; OUTPUT_WORDS], String) {
             roll: w[5] as i32,
         };
         (*actor).mass = f(w[18]);
+        // Match the native harness's live collision flags, not only its callback snapshot.
+        (*actor).set_b_block_actors(action == 4);
+        (*actor).set_b_collide_world(false);
         (*actor).owner = if action == 0 {
             null_mut()
         } else {
@@ -68,7 +62,18 @@ fn run_trailer(seed: u64, w: &[u32]) -> ([u32; OUTPUT_WORDS], String) {
             yaw: w[13] as i32,
             roll: w[14] as i32,
         };
-        hp2_engine::physic::dispatch::phys_trailer(actor, &SERVICES, 0.0);
+        (*actor).pre_pivot = v3(&w[15..18]);
+        (*actor).draw_type = if action == 1 { 1 } else { 2 };
+        (*actor).anim_bone = u8::from(action == 2);
+        (*actor).set_b_trailer_pre_pivot(action == 1);
+        (*actor).set_b_trailer_same_rotation(false);
+        (*owner).mesh = if action == 2 {
+            owner.cast()
+        } else {
+            null_mut()
+        };
+        hp2_engine::physic::dispatch::phys_trailer(actor, &SERVICES, 0.0)
+            .expect("checked physics fixture");
     }
     let mut out = [0u32; OUTPUT_WORDS];
     unsafe {

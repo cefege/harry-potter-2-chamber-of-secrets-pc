@@ -1,23 +1,25 @@
-//! Rust port of `HarryPotter2/Unreal/SDLLaunch/Src/HP2Launch*.cpp`'s
-//! pure logic (policy, store, model) -- excludes `HP2Launcher.cpp`'s
-//! own SDL/ImGui UI loop, which stays C++ per the plan.
-//!
-//! **Known dead code in the real C++, not ported:**
-//! `HP2LaunchPolicy.h` declares `ParseLauncherAutomationRequest` and
-//! `BuildLauncherAutomationResult` (and the `LauncherAutomationRequest`/
-//! `LauncherAutomationParseResult` types supporting them), but neither
-//! function has a definition anywhere in this repository, and neither
-//! the functions nor the types they use are referenced from any other
-//! `.cpp`/`.mm` file (confirmed via `grep -rln` across the whole repo).
-//! This is vestigial -- declared, never implemented, never called --
-//! not a gap in this port.
+//! Rust launcher policy, model, store, complete pre-launch round, import-session
+//! control, desktop presentation/event policy, and application main-loop policy.
+//! Native code retains typed SDL/ImGui leaves, SDK object storage, OS dialogs,
+//! lexical FTime and guard scopes, and joined worker/resource lifetimes.
 
 pub mod atomic;
+pub mod boot;
+pub mod boot_config;
+pub mod capabilities;
+pub mod command_policy;
+pub mod display_modes;
+pub mod feedback;
+pub mod import_session;
+pub mod launch_round;
+pub mod main_loop;
 pub mod migrate;
 pub mod model;
 pub mod orchestrate;
 pub mod policy;
+pub mod presentation_policy;
 pub mod profile;
+pub mod reporters;
 pub mod saves;
 pub mod store;
 pub mod tree;

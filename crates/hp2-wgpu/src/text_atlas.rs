@@ -14,17 +14,20 @@
 
 use std::collections::HashMap;
 
-/// Atlas page edge length in texels. `NativeTextShared.h` L65 (Apple) / L208 (FreeType).
+/// Atlas page edge length in texels. Mirrors `Hp2NativeText::PageSize`
+/// (`Engine/Inc/UnRenDev.h`).
 pub const PAGE_SIZE: u32 = 1024;
 
-/// Transparent border texels around every glyph. `NativeTextShared.h` L66 (Apple) / L209 (FreeType).
+/// Transparent border texels around every glyph. Mirrors `Hp2NativeText::Padding`
+/// (`Engine/Inc/UnRenDev.h`).
 pub const PADDING: u32 = 1;
 
-/// Maximum number of atlas pages. `NativeText.cpp` L27 (`NativeTextAtlasPageLimit`).
+/// Maximum number of atlas pages (legacy pre-port `NativeTextAtlasPageLimit`,
+/// since removed along with provider-owned NativeText.cpp/NativeTextShared.h).
 pub const PAGE_LIMIT: u32 = 4;
 
-/// Identity of a rasterized glyph. Mirrors `FGlyphKey` (`NativeTextShared.h` L68-84 Apple,
-/// L216-232 FreeType); `FontIdentity` is a `std::string` in both variants.
+/// Identity of a rasterized glyph. Mirrors `Hp2NativeText::FDrawGlyph`
+/// (`Engine/Inc/UnRenDev.h`; `FontIdentity` is a byte span in both variants).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct GlyphKey {
     pub font_identity: String,
@@ -34,8 +37,8 @@ pub struct GlyphKey {
     pub subpixel: bool,
 }
 
-/// Borrowed 8-bit coverage bitmap. Mirrors `FRasterizedGlyph`
-/// (`NativeTextShared.h` L126-131 Apple, L274-279 FreeType); `Alpha` is `width * height` bytes.
+/// Borrowed 8-bit coverage bitmap. Mirrors `Hp2NativeText::FRasterizedGlyph`
+/// (`Engine/Inc/UnRenDev.h`); `Alpha` is `width * height` bytes.
 #[derive(Clone, Copy, Debug)]
 pub struct RasterizedGlyph<'a> {
     pub width: u32,
@@ -43,9 +46,10 @@ pub struct RasterizedGlyph<'a> {
     pub coverage: &'a [u8],
 }
 
-/// Location of a glyph's pixels inside an atlas page, excluding padding.
-/// Mirrors `FAtlasSlot` (`NativeTextShared.h` L133-139) / `FNativeTextAtlasGlyph`
-/// (`NativeText.cpp` L46-53). UVs are taken from `x`/`y` (`DrawAtlasRect`, L700-713).
+/// Location of a glyph's pixels inside an atlas page, excluding padding
+/// (legacy pre-port `FAtlasSlot`/`FNativeTextAtlasGlyph`, since removed along
+/// with provider-owned NativeText.cpp/NativeTextShared.h). UVs are taken from
+/// `x`/`y` (`DrawAtlasRect`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AtlasSlot {
     pub page: u32,

@@ -67,6 +67,7 @@ fn interpolation_pause_and_position_rotations_match_original() {
                         z: 0.0,
                     },
                 )
+                .expect("checked physics fixture")
             } else {
                 get_desired_rotation_at_position(
                     point,
@@ -79,6 +80,7 @@ fn interpolation_pause_and_position_rotations_match_original() {
                         z: 0.0,
                     },
                 )
+                .expect("checked physics fixture")
             };
             assert_eq!(
                 got.pitch as u32,
@@ -133,7 +135,8 @@ fn interpolation_manager_idle_matches_original() {
                 y: -4.0,
                 z: 8.0,
             });
-            hp2_engine::physic::interp::perform_physics(manager, &SERVICES, f(word(input[2])));
+            hp2_engine::physic::interp::perform_physics(manager, &SERVICES, f(word(input[2])))
+                .expect("checked physics fixture");
             let velocity = core::ptr::addr_of!((*owner).velocity).read_unaligned();
             let acceleration = core::ptr::addr_of!((*owner).acceleration).read_unaligned();
             let actual = [
@@ -224,7 +227,8 @@ fn interpolated_position_instant_path_matches_original() {
             },
             f(word(input[2])),
             0,
-        );
+        )
+        .expect("checked physics fixture");
         let actual = [
             got.origin.x,
             got.origin.y,
@@ -315,7 +319,8 @@ fn interpolation_manager_active_step_matches_original() {
             z: 0.0,
         });
         core::ptr::addr_of_mut!((*point).path_dist).write_unaligned(1.0);
-        hp2_engine::physic::interp::perform_physics(manager, &svc, f(word(input[2])));
+        hp2_engine::physic::interp::perform_physics(manager, &svc, f(word(input[2])))
+            .expect("checked physics fixture");
         let alpha = core::ptr::addr_of!((*manager).phys_alpha).read_unaligned();
         let remaining_pause = core::ptr::addr_of!((*manager).remaining_pause).read_unaligned();
         let location = core::ptr::addr_of!((*owner).location).read_unaligned();
@@ -398,7 +403,8 @@ fn interpolation_manager_finished_event_matches_original() {
             y: -4.0,
             z: 8.0,
         });
-        hp2_engine::physic::interp::perform_physics(manager, &SERVICES, f(word(input[2])));
+        hp2_engine::physic::interp::perform_physics(manager, &SERVICES, f(word(input[2])))
+            .expect("checked physics fixture");
         let alpha = core::ptr::addr_of!((*manager).phys_alpha).read_unaligned();
         let remaining_pause = core::ptr::addr_of!((*manager).remaining_pause).read_unaligned();
         let location = core::ptr::addr_of!((*owner).location).read_unaligned();

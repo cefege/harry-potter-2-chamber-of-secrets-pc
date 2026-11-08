@@ -5,14 +5,15 @@
 //! Families: `render_size` (ortho, `RendMap` 13..=15) and `render_size_persp` (non-ortho). The
 //! persp family reaches `UViewport::GetOuterUClient()->MaintainVerticalFOV` and
 //! `UClient::GetEffectiveFovAngle`; its oracle is the pre-port body (`42a1e81^`, UnCamMgr.cpp:37-45)
-//! compiled into the harness, so `viewport_maintain_vertical_fov` is the only extra service.
+//! compiled into the harness. `MaintainVerticalFOV` is read directly from a real `UClient`
+//! backing the viewport's `outer` pointer.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::mem::size_of;
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-use hp2_abi::engine::generated::{APlayerPawn, FSceneNode, UViewport};
+use hp2_abi::engine::generated::{APlayerPawn, FSceneNode, UClient, UViewport};
 use hp2_abi::{FCoords, FVector};
 use hp2_engine::camera::{CameraServices, compute_render_size};
 
@@ -24,19 +25,12 @@ const OUT_WORDS: usize = 46;
 static SET_SCENE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static LAST_RENDER_DEV: AtomicUsize = AtomicUsize::new(0);
 static LAST_FRAME: AtomicUsize = AtomicUsize::new(0);
-/// `UClient::MaintainVerticalFOV` for the case being replayed.
-static MAINTAIN: AtomicI32 = AtomicI32::new(0);
 
 /// `URenderDevice::SetSceneNode(Frame)`: the only services entry the ortho branch reaches.
 unsafe extern "C" fn record_set_scene(render_dev: *mut c_void, frame: *mut c_void) {
     SET_SCENE_CALLS.fetch_add(1, Ordering::SeqCst);
     LAST_RENDER_DEV.store(render_dev as usize, Ordering::SeqCst);
     LAST_FRAME.store(frame as usize, Ordering::SeqCst);
-}
-
-/// `GetOuterUClient()->MaintainVerticalFOV`: the persp branch reads it; the ortho branch never does.
-unsafe extern "C" fn record_maintain(_viewport: *mut c_void) -> i32 {
-    MAINTAIN.load(Ordering::SeqCst)
 }
 
 /// Fail-fast filler for every other services entry; compute_render_size must never reach it.
@@ -46,13 +40,12 @@ unsafe extern "C" fn unexpected_service() {
 
 fn services() -> CameraServices {
     // Every field of `CameraServices` is a function pointer (`camera.rs:36-204`), so a table of
-    // one address has the right size and valid values; only the two entries below are set.
+    // one address has the right size and valid values; only the entry below is set.
     const WORDS: usize = size_of::<CameraServices>() / size_of::<usize>();
     let filler = unexpected_service as unsafe extern "C" fn() as usize;
     let table: [usize; WORDS] = [filler; WORDS];
     let mut svc: CameraServices = unsafe { std::mem::transmute(table) };
-    svc.render_dev_set_scene_node = record_set_scene;
-    svc.viewport_maintain_vertical_fov = record_maintain;
+    svc.render_dev_set_scene_node = checked_render_dev_set_scene_node;
     svc
 }
 
@@ -139,17 +132,18 @@ fn run_case(svc: &CameraServices, c: &Case) -> Vec<u32> {
     let mut render_dev = 0u8;
     vp.actor = (&mut actor as *mut APlayerPawn).cast();
     vp.ren_dev = (&mut render_dev as *mut u8).cast();
+    let mut client: UClient = unsafe { std::mem::zeroed() };
+    client.set_maintain_vertical_fov(c.maintain != 0);
+    vp.outer = (&mut client as *mut UClient).cast();
     let mut node: FSceneNode = unsafe { std::mem::zeroed() };
     node.viewport = (&mut vp as *mut UViewport).cast();
     node.x = c.x;
     node.y = c.y;
     node.coords = fcoords(&c.coords);
     node.uncoords = fcoords(&c.uc);
-
-    MAINTAIN.store(c.maintain, Ordering::SeqCst);
     SET_SCENE_CALLS.store(0, Ordering::SeqCst);
     let frame: *mut FSceneNode = &mut node;
-    unsafe { compute_render_size(svc, frame) };
+    unsafe { compute_render_size(svc, frame).expect("checked replay callback") };
     assert_eq!(SET_SCENE_CALLS.load(Ordering::SeqCst), 1, "case {}", c.idx);
     assert_eq!(
         LAST_RENDER_DEV.load(Ordering::SeqCst),
@@ -217,4 +211,15 @@ fn compute_render_size_matches_original() {
     }
     assert_eq!(ortho, ORTHO_CASES, "ortho case count");
     assert_eq!(persp, PERSP_CASES, "persp case count");
+}
+
+// Checked adapters for the unchanged replay oracle, not native exception proof.
+unsafe extern "C" fn checked_render_dev_set_scene_node(
+    render_dev: *mut c_void,
+    frame: *mut c_void,
+) -> i32 {
+    unsafe {
+        record_set_scene(render_dev, frame);
+    }
+    0
 }

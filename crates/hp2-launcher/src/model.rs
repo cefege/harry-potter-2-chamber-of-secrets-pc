@@ -268,3 +268,75 @@ pub struct LauncherResult {
     pub settings: LauncherSettings,
     pub data_sources: DataSourceConfiguration,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every `LauncherSettings::default()` field against the literal
+    /// `HP2LauncherModel.h` member initializers (`struct LauncherSettings`),
+    /// not merely internal self-consistency with another default-derived
+    /// value.
+    #[test]
+    fn launcher_settings_default_matches_cpp_member_initializers() {
+        let d = LauncherSettings::default();
+        assert_eq!(d.screen_mode, ScreenMode::Windowed);
+        assert_eq!(d.resolution.width, 800);
+        assert_eq!(d.resolution.height, 600);
+        assert_eq!(d.resolution.label, "");
+        assert!(!d.vertical_sync);
+        assert_eq!(d.render_scale, 1.0);
+        assert_eq!(d.ui_scale, 1.0);
+        assert_eq!(d.frame_rate_limit, 144);
+        assert!(!d.show_fps);
+        assert!(d.maintain_vertical_fov);
+        assert!(d.native_text);
+        assert_eq!(d.anti_aliasing_samples, 4);
+        assert_eq!(d.anisotropy, 16);
+        assert_eq!(d.brightness, 0.4);
+        assert_eq!(d.texture_detail, TextureDetail::High);
+        assert_eq!(d.object_detail, ObjectDetail::VeryHigh);
+        assert!(d.sound_enabled);
+        assert_eq!(d.sound_volume, 0.9);
+        assert_eq!(d.music_volume, 0.53);
+        assert_eq!(d.mouse_sensitivity, 3.0);
+        assert!(!d.invert_mouse);
+        assert_eq!(d.control_mode, ControlMode::Classic);
+        assert!(d.auto_center_camera);
+        assert!(d.move_while_casting);
+        assert!(d.auto_quaff);
+        assert!(d.screen_flashes);
+        assert_eq!(d.difficulty, Difficulty::Easy);
+        assert!(d.joystick_enabled);
+    }
+
+    /// `DisplayResolution { int width = 800; int height = 600; }`.
+    #[test]
+    fn display_resolution_default_matches_cpp_member_initializers() {
+        let d = DisplayResolution::default();
+        assert_eq!(d.width, 800);
+        assert_eq!(d.height, 600);
+        assert_eq!(d.label, "");
+    }
+
+    /// `SaveRecord { int slot = -1; }`, the one field C++ defaults away
+    /// from zero.
+    #[test]
+    fn save_record_default_matches_cpp_member_initializers() {
+        let d = SaveRecord::default();
+        assert_eq!(d.slot, -1);
+        assert_eq!(d.save_index, 0);
+        assert!(!d.uses_slot_directory);
+        assert_eq!(d.size, 0);
+        assert_eq!(d.modified_seconds, 0);
+    }
+
+    /// `LaunchSelection`'s hand-written `Default` -- `Quit`, not
+    /// `LaunchAction`'s own bare `#[default]` (`Error`). See the doc
+    /// comment on `impl LaunchSelection` for why this must stay hand-written.
+    #[test]
+    fn launch_selection_default_is_quit_not_launch_actions_own_default() {
+        assert_eq!(LaunchSelection::default().action, LaunchAction::Quit);
+        assert_ne!(LaunchAction::default(), LaunchAction::Quit);
+    }
+}

@@ -1,7 +1,7 @@
 //! Canonical Core ownership of `ULevel::SpawnPlayActor` operations.
 
 use crate::level_spawn_play_actor::{self, Backend, Op};
-use hp2_abi::engine::generated::{AGameInfoLoginParams, AActor, ALevelInfo, APlayerPawn, FURL, TArrayRaw, UClass, ULevel, UNetConnection, UPackageMap, UObject, UProperty};
+use hp2_abi::engine::generated::{AGameInfoLoginParams, AActor, ALevelInfo, APlayerPawn, FURL, TArrayRaw, UClass, ULevel, UNetConnection, UPackageMap, UPlayer, UObject, UProperty};
 use hp2_core::core_access::{CoreAccess, RuntimeError, RuntimeResult};
 use hp2_core::name_owner::FindName;
 use std::{cell::RefCell, ffi::c_void, ptr};
@@ -13,11 +13,15 @@ const SHOW_PLAYER_CTRL: u32 = 0x0000_0800;
 const SHOW_REAL_TIME: u32 = 0x0000_4000;
 const SHOW_BACKDROP: u32 = 0x0000_0004;
 const SHOW_ACTORS: u32 = 0x0000_0008;
-const REND_DYN_LIGHT: u8 = 2;
 const CPF_TRAVEL: u32 = 0x0001_0000;
 const CLASS_BUFFER: usize = 256;
 const DEFAULT_USER: [u32; 27] = [117, 115, 114, 58, 68, 101, 102, 97, 117, 108, 116, 80, 108, 97, 121, 101, 114, 46, 67, 108, 97, 115, 115, 0, 0, 0, 0];
 const DEFAULT_INI: [u32; 14] = [105, 110, 105, 58, 85, 82, 76, 46, 67, 108, 97, 115, 115, 0];
+
+/// `appStricmp` equality for one code unit (`wcsncasecmp` folded per character).
+fn fold_eq(a: u32, b: u32) -> bool {
+    char::from_u32(a).unwrap_or('\0').eq_ignore_ascii_case(&char::from_u32(b).unwrap_or('\0'))
+}
 
 #[derive(Default)]
 struct AcceptedActor {
@@ -36,6 +40,8 @@ struct Scratch {
     actor_name: Vec<u32>,
     input: Vec<u32>,
     input_cursor: usize,
+    line: Vec<u32>,
+    variable: Vec<u32>,
     value: Vec<u32>,
     travel_text: Vec<u32>,
     element: i32,
@@ -51,7 +57,7 @@ struct Scratch {
 struct CoreSpawnPlayBackend<'a> {
     access: CoreAccess<'a>,
     level: *mut ULevel,
-    player: *mut UObject,
+    player: *mut UPlayer,
     role: i32,
     url: *mut FURL,
     error: *mut TArrayRaw,
@@ -93,7 +99,7 @@ impl CoreSpawnPlayBackend<'_> {
         loop {
             match (left.next(),right.next()) {
                 (None,None)=>return true,
-                (Some(a),Some(b)) if char::from_u32(a).unwrap_or('\0').eq_ignore_ascii_case(&char::from_u32(b).unwrap_or('\0'))=>{},
+                (Some(a),Some(b)) if fold_eq(a,b)=>{},
                 _=>return false,
             }
         }
@@ -110,7 +116,7 @@ impl CoreSpawnPlayBackend<'_> {
             let raw = unsafe { options.data.cast::<TArrayRaw>().add(index).read_unaligned() };
             let option = self.fstring_text(&raw)?;
             let text=option.iter().copied().take_while(|unit|*unit!=0).collect::<Vec<_>>();
-            if text.len()<key.len() || !text[..key.len()].iter().zip(&key).all(|(a,b)|a.eq_ignore_ascii_case(b)) { continue; }
+            if text.len()<key.len() || !text[..key.len()].iter().zip(&key).all(|(a,b)|fold_eq(*a,*b)) { continue; }
             if key.last()==Some(&u32::from(b'=')) { let mut value=text[key.len()..].to_vec(); value.push(0); return Ok(value); }
             if text.len()==key.len() { return Ok(vec![0]); }
             if text[key.len()]==u32::from(b'=') { let mut value=text[key.len()+1..].to_vec(); value.push(0); return Ok(value); }
@@ -127,7 +133,7 @@ impl CoreSpawnPlayBackend<'_> {
             let raw=unsafe{options.data.cast::<TArrayRaw>().add(index).read_unaligned()};
             let text=self.fstring_text(&raw)?;
             let text=text.iter().copied().take_while(|unit|*unit!=0).collect::<Vec<_>>();
-            if text.len()>=key.len() && text[..key.len()].iter().zip(&key).all(|(a,b)|a.eq_ignore_ascii_case(b))
+            if text.len()>=key.len() && text[..key.len()].iter().zip(&key).all(|(a,b)|fold_eq(*a,*b))
                 && (text.len()==key.len() || text[key.len()]==u32::from(b'='))
             { return Ok(true); }
         }
@@ -172,8 +178,7 @@ impl CoreSpawnPlayBackend<'_> {
     fn event(&self, object: *mut UObject, name: &str) -> RuntimeResult<()> {
         if object.is_null() { return Err(RuntimeError::new("SpawnPlayActor event receiver is null")); }
         let name=self.access.intern_str(name,FindName::Find)?;
-        let class=self.access.native_class("Function")?;
-        let function=unsafe{self.access.find_field((*object).class.cast(),name,class)}.cast::<hp2_abi::engine::generated::UFunction>();
+        let function=unsafe{self.access.find_object_function_by_name(object,name,false)?};
         if function.is_null(){return Err(RuntimeError::new("SpawnPlayActor reflected event is missing"));}
         if unsafe{(*function).parms_size}!=0 || unsafe{(*function).num_parms}!=0 {
             return Err(RuntimeError::new("SpawnPlayActor zero-parameter event metadata is invalid"));
@@ -192,6 +197,11 @@ impl CoreSpawnPlayBackend<'_> {
             unsafe { self.access.assign_fstring(self.error,&terminated)?; }
         }
         Ok(())
+    }
+
+    fn log(&self, category: &str, message: &[u32]) -> RuntimeResult<()> {
+        let category = self.access.intern_str(category, FindName::Add)?;
+        self.access.emit_log(category, message)
     }
 
     fn load_class(&self, name: &[u32], base: *mut UClass, flags: u32) -> RuntimeResult<*mut UClass> {
@@ -217,7 +227,7 @@ impl Backend for CoreSpawnPlayBackend<'_> {
                 0
             }
             Op::ClassOption => self.option_pointer("CLASS=", 0)?,
-            Op::LoadPlayer => self.load_class(a as *const u32, self.access.native_class("Engine.PlayerPawn")?, LOAD_NO_WARN)? as usize,
+            Op::LoadPlayer => self.load_class(&self.terminated_text(a as *const u32)?, self.access.native_class("Engine.PlayerPawn")?, LOAD_NO_WARN)? as usize,
             Op::DefaultUser => DEFAULT_USER.as_ptr() as usize,
             Op::DefaultIni => DEFAULT_INI.as_ptr() as usize,
             Op::ClassError => {
@@ -227,32 +237,37 @@ impl Backend for CoreSpawnPlayBackend<'_> {
             }
             Op::SaveClass => { self.player_class.set(a as *mut UClass); 0 }
             Op::OptionCount => unsafe { (*self.url).op.num.max(0) as usize },
-            Op::Question => { let mut s=self.scratch.borrow_mut(); if s.options.is_empty(){s.options.push(u32::from(b'?'));} else {s.options.insert(s.options.len()-1,u32::from(b'?'));} 0 }
+            Op::Question => { let mut s=self.scratch.borrow_mut(); if s.options.is_empty(){s.options.push(u32::from(b'?'));} else {let index=s.options.len()-1; s.options.insert(index,u32::from(b'?'));} 0 }
             Op::Option => { let option=self.option_at(a)?; let mut s=self.scratch.borrow_mut(); s.options.pop(); s.options.extend(option.into_iter().take_while(|c|*c!=0)); s.options.push(0); 0 }
             Op::Login => { let game=unsafe{(*self.level_info()?).game}; let mut actor=ptr::null_mut(); unsafe { self.login_event(game.cast(), &mut actor)?; } self.actor.set(actor); actor as usize }
             Op::LoginFailed => { let mut message="Login failed: ".encode_utf16().map(u32::from).collect::<Vec<_>>(); message.extend(self.fstring_text(self.error)?.iter().copied().take_while(|unit|*unit!=0)); self.log("Warning",&message)?; 0 }
             Op::HasLoad => usize::from(self.has_option("load")?),
             Op::LoadValue => self.option_pointer("load=", 1)?,
             Op::SaveLoading => { self.scratch.borrow_mut().loading=a!=0; 0 }
-            Op::ClearTravel => { self.clear_travel_info()?; 0 }
-            Op::SetPlayer => { unsafe { (*self.actor.get()).player=self.player.cast(); } 0 }
-            Op::SetRole => { unsafe { (*self.actor.get()).base.role=ROLE_AUTHORITY; } 0 }
-            Op::SetRemoteRole => { unsafe { (*self.actor.get()).base.remote_role=self.role as u8; } 0 }
+            Op::ClearTravel => { unsafe { crate::level_owner::clear_travel_map(self.access, ptr::addr_of_mut!((*self.level).travel_info)) }?; 0 }
+            Op::SetPlayer => {
+                unsafe { crate::player_owner::set_player(self.access, self.actor.get(), self.player)?; }
+                0
+            }
+            Op::SetRole => { unsafe { (*self.actor.get()).base.base.role=ROLE_AUTHORITY; } 0 }
+            Op::SetRemoteRole => { unsafe { (*self.actor.get()).base.base.remote_role=self.role as u8; } 0 }
             Op::SetShow => { unsafe { (*self.actor.get()).show_flags=(SHOW_BACKDROP|SHOW_ACTORS|SHOW_PLAYER_CTRL|SHOW_REAL_TIME) as i32; } 0 }
-            Op::SetRender => { unsafe { (*self.actor.get()).rend_map=REND_DYN_LIGHT; } 0 }
+            Op::SetRender => { unsafe { (*self.actor.get()).rend_map=hp2_abi::engine::generated::ENGINE_REN_DYN_LIGHT; } 0 }
             Op::AllAdmin => {
                 const ALL_ADMIN: [u32; 9] = [97, 108, 108, 97, 100, 109, 105, 110, 0];
                 usize::from(unsafe{hp2_core::search::parse_param(self.access.command_line().as_ptr().cast(),ALL_ADMIN.as_ptr().cast())})
             }
-            Op::NetDriver => usize::from(!unsafe{(*level).net_driver}.is_null()),
-            Op::SetAdmin => { unsafe { (*self.actor.get()).b_admin=1; } 0 }
+            Op::NetDriver => usize::from(!unsafe{(*level).base.net_driver}.is_null()),
+            Op::SetAdmin => { unsafe { (*self.actor.get()).set_b_admin(true); } 0 }
             Op::PreAccept => { self.event(a_actor.cast(), "TravelPreAccept")?; 0 }
             Op::FindTravel => self.find_travel(a as *const u32)?,
             Op::PlayerName => self.player_name_option()?,
             Op::TravelText => self.travel_value(a as *const u32)?,
             Op::Standalone => usize::from(unsafe{(*self.level_info()?).net_mode}==0),
             Op::SaveStr => { let mut scratch=self.scratch.borrow_mut(); scratch.input=self.terminated_text(a as *const u32)?; scratch.input_cursor=0; scratch.line.clear(); 0 }
-            Op::Str => { let scratch=self.scratch.borrow(); unsafe{scratch.input.as_ptr().add(scratch.input_cursor)} as usize }
+            // Mirrors the original `while( *Str ... )`: true only while the
+            // moving cursor still sees unconsumed travel text.
+            Op::Str => { let scratch=self.scratch.borrow(); usize::from(scratch.input.get(scratch.input_cursor).is_some_and(|&unit| unit!=0)) }
             Op::ParseClass => self.parse_token("CLASS=", true)? as usize,
             Op::ParseName => self.parse_token("NAME=", false)? as usize,
             Op::Incoming => { let mut msg="Incoming travelling actor of class ".encode_utf16().map(u32::from).collect::<Vec<_>>(); msg.extend(self.scratch.borrow().class_name.iter().copied().take_while(|unit|*unit!=0)); self.log("Log",&msg)?; 0 }
@@ -265,18 +280,35 @@ impl Backend for CoreSpawnPlayBackend<'_> {
                 self.log("Log",&message)?;
                 0
             }
+            Op::PlayerClass => {
+                let class = a as *mut UClass;
+                let player_class = self.access.native_class("Engine.PlayerPawn")?;
+                usize::from(unsafe { hp2_core::object_model::is_child_of(class.cast(), player_class.cast()) })
+            }
+            Op::Spawn => {
+                let class = a as *mut UClass;
+                let actor = self.actor.get();
+                let location = unsafe { ptr::addr_of!((*actor).base.base.location).read_unaligned() };
+                let rotation = unsafe { ptr::addr_of!((*actor).base.base.rotation).read_unaligned() };
+                (unsafe {
+                    crate::level_spawn_actor_owner::spawn_actor(
+                        self.access, self.level, class, hp2_abi::engine::generated::FName { index: 0 },
+                        actor.cast(), ptr::null_mut(), location, rotation, ptr::null_mut(), true, false,
+                    )?
+                }) as usize
+            }
             Op::Spawned => { let msg="SpawnPlayActor: Spawned travelling actor".encode_utf16().map(u32::from).collect::<Vec<_>>(); self.log("Log",&msg)?; 0 }
             Op::Accept => { let actor=a_actor; let name=self.scratch.borrow().actor_name.clone(); let mut scratch=self.scratch.borrow_mut(); scratch.accepted.push(AcceptedActor{actor,name,parameters:Vec::new()}); scratch.accepted.len() }
             Op::ParseLine => self.parse_line()? as usize,
-            Op::CompareEndLine => usize::from(self.scratch.borrow().line.as_slice()!=[u32::from(b'}'),0]),
+            Op::CompareEndLine => usize::from(self.scratch.borrow().line.as_slice()!=&[u32::from(b'}'),0][..]),
             Op::SaveLine => { let line=self.scratch.borrow().line.clone(); if let Some(accepted)=self.scratch.borrow_mut().accepted.get_mut(a.saturating_sub(1)){accepted.parameters.push(line);} 0 }
             Op::AcceptedCount => self.scratch.borrow().accepted.len(),
             Op::ParmCount => self.scratch.borrow().accepted.get(a).map_or(0,|x|x.parameters.len()),
             Op::Parm => self.scratch.borrow().accepted.get(a).and_then(|x|x.parameters.get(b)).map_or(0,|x|x.as_ptr() as usize),
             Op::Char => unsafe { if a==0 {0} else {*(a as *const u32) as usize} },
             Op::Advance => unsafe { (a as *const u32).add(b) as usize },
-            Op::Alnum => usize::from(char::from_u32(a as u32).is_some_and(char::is_alphanumeric)),
-            Op::Digit => usize::from(char::from_u32(a as u32).is_some_and(|c| c.is_ascii_digit())),
+            Op::Alnum => usize::from({let c=a as i32; (b'a' as i32..=b'z' as i32).contains(&c) || (b'A' as i32..=b'Z' as i32).contains(&c) || (b'0' as i32..=b'9' as i32).contains(&c)}),
+            Op::Digit => usize::from((b'0' as i32..=b'9' as i32).contains(&(a as i32))),
             Op::VarChar => { let mut s=self.scratch.borrow_mut(); if a>=CLASS_BUFFER{return Err(RuntimeError::new("Travel property name exceeds limit"));} if s.variable.len()<=a{s.variable.resize(a+1,0);} s.variable[a]=b as u32; 0 }
             Op::Atoi => self.atoi(a as *const u32)? as usize,
             Op::SaveValue => { let mut s=self.scratch.borrow_mut(); s.value=self.terminated_text(a as *const u32)?; s.element=b as i32; 0 }
@@ -306,8 +338,13 @@ impl Backend for CoreSpawnPlayBackend<'_> {
                 data as usize
             }
             Op::ObjectProperty => {
+                // Source `Cast<UObjectProperty>(Prop)`: the policy tests the
+                // result for null and reuses it as the property pointer for
+                // ActorReference, so this must yield the property pointer
+                // itself when it is a UObjectProperty, not a boolean.
                 let cls=self.access.native_class("ObjectProperty")?;
-                usize::from(unsafe{hp2_core::object_model::is_a(self.scratch.borrow().property.cast(),cls.cast())})
+                let property=self.scratch.borrow().property;
+                if unsafe{hp2_core::object_model::is_a(property.cast(),cls.cast())} { property as usize } else { 0 }
             }
             Op::ActorReference => {
                 let property=a as *mut hp2_abi::engine::generated::UObjectProperty;
@@ -329,9 +366,9 @@ impl Backend for CoreSpawnPlayBackend<'_> {
             Op::AcceptInventory => { let game=unsafe{(*self.level_info()?).game}; self.event_actor(game.cast(),"AcceptInventory",self.actor.get().cast())?; 0 }
             Op::PostAccept => { self.event(a_actor.cast(), "TravelPostAccept")?; 0 }
             Op::PreviousProperty => {
-                let class=unsafe{(*self.actor.get()).base.base.class.cast::<UClass>()};
+                let class=unsafe{(*self.actor.get().cast::<UObject>()).class}.cast::<UClass>();
                 let name=self.access.intern_str("PreviousLevelName",FindName::Find)?;
-                self.access.find_field(class.cast(),name,self.access.native_class("StrProperty")?) as usize
+                (unsafe { self.access.find_field(class.cast(),name,self.access.native_class("StrProperty")?) }) as usize
             }
             Op::PreviousFlags => unsafe{(*((a as *mut UProperty))).property_flags as usize},
             Op::ClearPrevious => {
@@ -347,7 +384,12 @@ impl Backend for CoreSpawnPlayBackend<'_> {
             Op::FirstValue => self.scratch.borrow().travel_text.as_ptr() as usize,
             Op::PostLogin => { let game=unsafe{(*self.level_info()?).game}; self.event_actor(game.cast(),"PostLogin",self.actor.get().cast())?; 0 }
             Op::Element => self.scratch.borrow().element as usize,
-            Op::Connection => if unsafe{hp2_core::object_model::is_a(self.player,self.access.native_class("Engine.NetConnection")?.cast())} {self.player as usize} else {0},
+            Op::Connection => {
+                let player = self.player.cast::<UObject>();
+                if unsafe { hp2_core::object_model::is_a(player.cast(), self.access.native_class("Engine.NetConnection")?.cast()) } {
+                    self.player.cast::<UNetConnection>() as usize
+                } else { 0 }
+            },
         };
         Ok(result)
     }
@@ -398,9 +440,12 @@ impl CoreSpawnPlayBackend<'_> {
         Ok(scratch.travel_text.as_ptr() as usize)
     }
     fn parse_token(&self, token: &str, class: bool) -> RuntimeResult<bool> {
-        let input=self.scratch.borrow().input.clone();
+        // The original passes the moving `Str` pointer to `Parse`; search only
+        // the unconsumed text from the cursor so consumed actor blocks are
+        // never re-parsed (the accept loop terminates at end of text).
+        let (input,start)={ let scratch=self.scratch.borrow(); (scratch.input.clone(),scratch.input_cursor) };
         let token:Vec<u32>=token.encode_utf16().map(u32::from).collect();
-        let mut i=0; while i+token.len()<=input.len() && !input[i..i+token.len()].iter().zip(&token).all(|(a,b)|a.eq_ignore_ascii_case(b)){i+=1;}
+        let mut i=start; while i+token.len()<=input.len() && !input[i..i+token.len()].iter().zip(&token).all(|(a,b)|fold_eq(*a,*b)){i+=1;}
         if i+token.len()>input.len(){return Ok(false);}
         let mut j=i+token.len(); while j<input.len()&&input[j]!=0&&input[j]!=u32::from(b' '){j+=1;}
         let mut value=input[i+token.len()..j].to_vec(); value.push(0);
@@ -411,7 +456,7 @@ impl CoreSpawnPlayBackend<'_> {
         let current=unsafe{scratch.input.as_ptr().add(scratch.input_cursor)};
         let mut cursor=current;
         let mut output=[0u32;256];
-        let has_more=unsafe{hp2_core::tokenize::parse_line(&mut cursor,output.as_mut_ptr(),256,true)};
+        let has_more=unsafe{hp2_core::tokenize::parse_line((&mut cursor as *mut *const u32).cast(),output.as_mut_ptr().cast(),256,true)};
         let next=unsafe{cursor.offset_from(scratch.input.as_ptr())};
         if next<0 || next as usize>scratch.input.len(){return Err(RuntimeError::new("Core ParseLine advanced outside travel input"));}
         let length=output.iter().position(|unit|*unit==0).unwrap_or(output.len()-1);
@@ -424,7 +469,7 @@ impl CoreSpawnPlayBackend<'_> {
     fn atoi(&self, pointer:*const u32)->RuntimeResult<i32>{
         if pointer.is_null(){return Ok(0);}
         let _text=self.terminated_text(pointer)?;
-        match unsafe{hp2_core::ansi::atoi_checked(pointer)} {
+        match unsafe{hp2_core::ansi::atoi_checked(pointer.cast())} {
             Ok(value)=>Ok(value),
             Err(value)=>Err(RuntimeError::new(&format!("appAtoi integer overflow: {value}"))),
         }
@@ -432,8 +477,7 @@ impl CoreSpawnPlayBackend<'_> {
     fn event_actor(&self, object:*mut UObject, name:&str, actor:*mut AActor)->RuntimeResult<()> {
         if object.is_null(){return Err(RuntimeError::new("SpawnPlayActor event receiver is null"));}
         let name_index=self.access.intern_str(name,FindName::Find)?;
-        let function_class=self.access.native_class("Function")?;
-        let function=unsafe{self.access.find_field((*object).class.cast(),name_index,function_class)}.cast::<hp2_abi::engine::generated::UFunction>();
+        let function=unsafe{self.access.find_object_function_by_name(object,name_index,false)?};
         if function.is_null(){return Err(RuntimeError::new("SpawnPlayActor reflected event is missing"));}
         if unsafe{(*function).parms_size as usize}!=std::mem::size_of::<*mut AActor>() || unsafe{(*function).num_parms}!=1 {
             return Err(RuntimeError::new("SpawnPlayActor event parameter layout does not match metadata"));
@@ -444,8 +488,7 @@ impl CoreSpawnPlayBackend<'_> {
     }
     unsafe fn login_event(&self, game:*mut UObject, actor:&mut *mut APlayerPawn)->RuntimeResult<()> {
         let name=self.access.intern_str("Login",FindName::Find)?;
-        let function_class=self.access.native_class("Function")?;
-        let function=unsafe{self.access.find_field((*game).class.cast(),name,function_class)}.cast::<hp2_abi::engine::generated::UFunction>();
+        let function=unsafe{self.access.find_object_function_by_name(game,name,false)?};
         if function.is_null(){return Err(RuntimeError::new("Game.Login event is missing"));}
         if unsafe{(*function).parms_size as usize}!=std::mem::size_of::<AGameInfoLoginParams>()
             || unsafe{(*function).num_parms}!=5
@@ -521,41 +564,6 @@ impl CoreSpawnPlayBackend<'_> {
         Ok(true)
     }
 
-    fn clear_travel_info(&self) -> RuntimeResult<()> {
-        let map=ptr::addr_of_mut!(unsafe{(*self.level).travel_info});
-        let pairs=unsafe{(*map).pairs};
-        if pairs.num<0 || pairs.max<pairs.num || (pairs.num>0&&pairs.data.is_null()) {
-            return Err(RuntimeError::new("Invalid Level TravelInfo pairs"));
-        }
-        let mut first=None;
-        for index in 0..pairs.num as usize {
-            let pair=unsafe{pairs.data.cast::<hp2_abi::engine::generated::FStringMapPair>().add(index)};
-            for field in [ptr::addr_of_mut!(unsafe{(*pair).key}),ptr::addr_of_mut!(unsafe{(*pair).value})] {
-                if let Err(error)=unsafe{self.access.destroy_owned_fstring(field)} { if first.is_none(){first=Some(error);} }
-            }
-        }
-        let allocator=hp2_core::array_storage::system_allocator();
-        let slots=hp2_core::array_storage::Hp2ArraySlots {
-            data:unsafe{ptr::addr_of_mut!((*map).pairs.data)},
-            num:unsafe{ptr::addr_of_mut!((*map).pairs.num)},
-            max:unsafe{ptr::addr_of_mut!((*map).pairs.max)},
-        };
-        if let Err(code)=unsafe{hp2_core::array_storage::release(slots,allocator)} {
-            if first.is_none(){first=Some(RuntimeError::new(&format!("Unable to release Level TravelInfo pairs ({code})")));}
-        }
-        let old_hash=unsafe{(*map).hash};
-        if !old_hash.is_null() && unsafe{(allocator.free)(allocator.context,old_hash)}!=0 && first.is_none() {
-            first=Some(RuntimeError::new("Unable to release Level TravelInfo hash"));
-        }
-        let mut hash=ptr::null_mut();
-        if unsafe{(allocator.realloc)(allocator.context,ptr::null_mut(),8*std::mem::size_of::<i32>(),ptr::null(),std::mem::size_of::<i32>() as i32,ptr::null(),&mut hash)}!=0 {
-            if first.is_none(){first=Some(RuntimeError::new("Unable to initialize Level TravelInfo hash"));}
-        } else {
-            unsafe{std::slice::from_raw_parts_mut(hash.cast::<i32>(),8).fill(-1);}
-            unsafe{(*map).hash=hash;(*map).hash_count=8;}
-        }
-        first.map_or(Ok(()),Err)
-    }
 }
 
 /// Spawns a player through the Core-owned world and executes login/travel policy in the Core VM.
@@ -568,7 +576,7 @@ impl CoreSpawnPlayBackend<'_> {
 pub unsafe fn spawn_play_actor(
     access: CoreAccess<'_>,
     level: *mut ULevel,
-    connection: *mut UNetConnection,
+    player: *mut UPlayer,
     role: i32,
     url: *mut FURL,
     error: *mut TArrayRaw,
@@ -576,7 +584,18 @@ pub unsafe fn spawn_play_actor(
     if level.is_null() || url.is_null() || error.is_null() {
         return Err(RuntimeError::new("Null SpawnPlayActor input"));
     }
-    let backend=CoreSpawnPlayBackend { access, level, player: connection.cast(), role, url, error, package_map:std::cell::Cell::new(ptr::null_mut()), player_class:std::cell::Cell::new(ptr::null_mut()), actor:std::cell::Cell::new(ptr::null_mut()), scratch:RefCell::new(Scratch::default()) };
-    let result=level_spawn_play_actor::run_with(&backend,0,0)?;
+    let backend = CoreSpawnPlayBackend {
+        access,
+        level,
+        player,
+        role,
+        url,
+        error,
+        package_map: std::cell::Cell::new(ptr::null_mut()),
+        player_class: std::cell::Cell::new(ptr::null_mut()),
+        actor: std::cell::Cell::new(ptr::null_mut()),
+        scratch: RefCell::new(Scratch::default()),
+    };
+    let result = level_spawn_play_actor::run_with(&backend, 0, 0)?;
     Ok(result as *mut AActor)
 }

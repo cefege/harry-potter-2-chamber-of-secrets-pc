@@ -86,7 +86,7 @@ Every fact below is recon-verified; file:line references are in-tree as of
   - Unknown tagged property → warn + skip (`Core/Src/UnClass.cpp:604,648-653`)
     — benign.
 - Cosmetic HP2-isms in code: title string (`Core/Src/UnVcWin32.cpp:736`),
-  crash-reporter paths (`Core/Src/HP2CrashReporter.cpp:274-281`), menu-name
+  crash-reporter paths (`crates/hp2-platform/src/crash_reporter.rs`, `USER_ROOT`), menu-name
   translation `UnrealQuitMenu`/`UnrealYesNoMenu`
   (`Engine/Src/UnEngine.cpp:283-291`).
 

@@ -1,0 +1,260 @@
+case exec 0 open vp=1
+set_client_travel vp0 "Foo.unr?x=1" items=0 travel=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 1 open vp=0 browse=1
+browse "Foo.unr" travel=1 ret=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 2 open vp=0 browse=0 err=Bad
+browse "Foo.unr" travel=1 ret=0
+logf_str "Open failed: %s" "Bad"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 3 open vp=0 browse=0 err=empty
+browse "Foo.unr" travel=1 ret=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 4 start vp=1
+set_client_travel vp0 "Foo.unr" items=0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 5 start vp=0 browse=0 err=Bad
+browse "Foo.unr" travel=0 ret=0
+logf_str "Start failed: %s" "Bad"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 6 servertravel srv=1 cli=0
+server_travel levelinfo "Foo.unr?listen"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 7 servertravel srv=0 cli=0 falls through
+level_exec "SERVERTRAVEL Foo.unr" ret=0
+base_exec "SERVERTRAVEL Foo.unr" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 8 servertravel srv=1 cli=1 falls through
+level_exec "SERVERTRAVEL Foo.unr" ret=0
+base_exec "SERVERTRAVEL Foo.unr" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 9 servertravel client DISCONNECT
+channel_close chan
+connection_flush_net conn
+channel_close chan
+connection_flush_net conn
+set_client_travel vp0 "?failed" items=0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=pending eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=netdrv level.bInSpecialPauseMode=0 pending.NetDriver=pendnetdrv pendnetdrv.ServerConnection=conn conn.Channels0=chan client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 10 servertravel client EXIT
+level_exec "SERVERTRAVEL EXIT" ret=0
+base_exec "SERVERTRAVEL EXIT" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=pending eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=netdrv level.bInSpecialPauseMode=0 pending.NetDriver=pendnetdrv pendnetdrv.ServerConnection=conn conn.Channels0=chan client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 11 say srv=1 cli=0
+broadcast levelinfo "hello there"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 12 say srv=0 cli=0 falls through
+level_exec "SAY hello" ret=0
+base_exec "SAY hello" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 13 disconnect vp=1 net=3
+channel_close chan
+connection_flush_net conn
+set_client_travel vp0 "?failed" items=0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=netdrv level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=chan client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 14 disconnect vp=1 pending=3
+channel_close chan
+connection_flush_net conn
+set_client_travel vp0 "?failed" items=0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=pending eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=pendnetdrv pendnetdrv.ServerConnection=conn conn.Channels0=chan client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 15 disconnect vp=1 none
+set_client_travel vp0 "?failed" items=0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 16 disconnect vp=0 browse=0 err=Disc
+browse "?failed" travel=0 ret=0
+logf_str "Disconnect failed: %s" "Disc"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 17 disconnect vp=0 browse=0 err=empty
+browse "?failed" travel=0 ret=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 18 disconnect vp=1 net=2 no channel
+set_client_travel vp0 "?failed" items=0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=netdrv level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 19 reconnect vp=1
+set_client_travel_last_url vp0 travel=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 20 reconnect vp=0 browse=0 err=Rec
+browse_last_url ret=0
+logf_str "Reconnect failed: %s" "Rec"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 21 reconnect vp=0 browse=1
+browse_last_url ret=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 22 exit net=3 pending=3
+channel_close chan
+connection_flush_net conn
+channel_close chan
+connection_flush_net conn
+log "Closing by request"
+app_request_exit 0
+result 1
+state eng.GLevel=level eng.GPendingLevel=pending eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=netdrv level.bInSpecialPauseMode=0 pending.NetDriver=pendnetdrv pendnetdrv.ServerConnection=conn conn.Channels0=chan client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 23 exit net=2 no channel
+log "Closing by request"
+app_request_exit 0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=netdrv level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=1 client.CaptureMouse=0 vp0.Actor=pawn vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 24 quit none
+log "Closing by request"
+app_request_exit 0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 25 getcurrenttickrate
+logf_float "%f" 41f40000
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 26 getmaxtickrate 60
+get_max_tick_rate 42700000
+logf_float "%f" 42700000
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 27 getmaxtickrate 0.5
+get_max_tick_rate 3f000000
+logf_float "%f" 3f000000
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 28 gspylite
+launch_url "GSpyLite.exe" ""
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 29 objclean lvl=1
+cleanup_destroyed level 1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 30 objclean lvl=0
+result 1
+state eng.GLevel=null eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 31 savegame slot=3
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+save_slot_filename 3 "SaveSlot3.usa"
+debugf_str "Saving game...(before call) Filename: %s" "SaveSlot3.usa"
+save_game 3
+base_exec "RestartSounds" ret=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 32 savegame non-digit
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 33 loadgame slot=2 format=1
+load_persistent_actor_cache
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+debugf_int "Loading game slot %i" 2
+format_load_game_url 2 ret=1
+server_travel levelinfo "Load2.usa"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 34 loadgame slot=2 format=0
+load_persistent_actor_cache
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+debugf_int "Loading game slot %i" 2
+format_load_game_url 2 ret=0
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 35 loadgame nexturl set
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 36 loadgame lvl=0
+result 1
+state eng.GLevel=null eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 37 savepactors lvl=0
+result 0
+state eng.GLevel=null eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 38 savepactors lvl=1
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+save_persistent_actors level "Entry"
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 39 cancel pending=0
+set_progress "" "" 00000000
+cancel_pending
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 40 cancel pending=3 skip=1
+try_skip_file pending ret=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=pending eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=pendnetdrv pendnetdrv.ServerConnection=conn conn.Channels0=chan client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 41 cancel pending=3 skip=0
+try_skip_file pending ret=0
+localize_progress CancelledConnect
+set_progress "Localized" "" 40000000
+cancel_pending
+result 1
+state eng.GLevel=level eng.GPendingLevel=pending eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=pendnetdrv pendnetdrv.ServerConnection=conn conn.Channels0=chan client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 42 level exec ret=1
+level_exec "FOO" ret=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 43 script console exec ret=1
+level_exec "FOO" ret=0
+script_console_exec game "FOO" ret=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 44 base exec ret=1
+level_exec "FOO" ret=0
+script_console_exec game "FOO" ret=0
+base_exec "FOO" ret=1
+result 1
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 45 base exec ret=0 nolevel
+base_exec "FOO" ret=0
+result 0
+state eng.GLevel=null eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 46 set client actor class
+level_exec "SET Pawn bShowMenu 1" ret=0
+parse_token ok=1 "Pawn"
+find_class "Pawn" ret=1
+is_child_of 0 ret=1
+is_child_of 1 ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 47 set client gameinfo class
+level_exec "SET GameInfo Foo 1" ret=0
+parse_token ok=1 "GameInfo"
+find_class "GameInfo" ret=1
+is_child_of 0 ret=1
+is_child_of 1 ret=1
+base_exec "SET GameInfo Foo 1" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 48 set client no class
+level_exec "SET Nothing Foo 1" ret=0
+parse_token ok=1 "Nothing"
+find_class "Nothing" ret=0
+base_exec "SET Nothing Foo 1" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 49 set non-client netmode
+level_exec "SET Pawn bShowMenu 1" ret=0
+base_exec "SET Pawn bShowMenu 1" ret=0
+result 0
+state eng.GLevel=level eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000
+case exec 50 set no level
+base_exec "SET Pawn bShowMenu 1" ret=1
+result 1
+state eng.GLevel=null eng.GPendingLevel=null eng.Client=client eng.GIsDrawing=0 replay.FileAr=null replay.bRecording=0 replay.bInReplay=0 replay.bPaused=0 replay.PauseCount=0 level.NetDriver=null level.bInSpecialPauseMode=0 pending.NetDriver=null pendnetdrv.ServerConnection=null conn.Channels0=null client.Viewports=0 client.CaptureMouse=0 vp0.Actor=null vp0.bShowWindowsMouse=0 vp0.WindowsMouseX=00000000 vp0.WindowsMouseY=00000000 vp1.Actor=null pawn.bShowMenu=0 pawn.FlashFog=3f000000,3e800000,3e000000,3f800000 pawn.Msg0="" pawn.Col0=0,0,0 pawn.Msg1="" pawn.Col1=0,0,0 pawn.ProgressTimeOut=00000000 levelinfo.Pauser="" levelinfo.TimeSeconds=3fa00000

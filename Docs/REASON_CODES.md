@@ -74,8 +74,8 @@ Covered by `data_identity_contracts` (see `Tests/DataIdentityTests.cpp`).
 |---|---|---|
 | capability.compile_time_disabled | feature compiled out | hp2-state / backend status |
 | settings.<transform> | migration journal entries (boolean_spelling, screen_mode_consolidated, viewport_consolidated, range_*, enum_*, ...) | launcher store migrations |
-| crash.signal | fatal signal delivered | HP2CrashReporter |
-| crash.watchdog.timeout | watchdog deadline exceeded | HP2CrashReporter |
+| crash.signal | fatal signal delivered | hp2-platform `crash_reporter` |
+| crash.watchdog.timeout | watchdog deadline exceeded | hp2-platform `crash_reporter` |
 
 ## blocked reasons (status=blocked)
 

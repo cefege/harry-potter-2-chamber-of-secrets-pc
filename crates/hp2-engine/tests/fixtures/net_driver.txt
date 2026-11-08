@@ -1,0 +1,190 @@
+case can_serialize_null
+result=1
+case can_serialize_nonactor
+result=1
+case can_serialize_static
+result=1
+case can_serialize_nodelete
+result=1
+case can_serialize_channel
+result=1
+case can_serialize_no_channel
+result=0
+case load_static_good
+serialize_bits bits=1 value=0 loading=1
+serialize_int max=100 value=5 loading=1
+index_to_object index=5 load=1 -> idx5
+result=1 object=idx5
+case load_static_forged
+serialize_bits bits=1 value=0 loading=1
+serialize_int max=100 value=6 loading=1
+index_to_object index=6 load=1 -> idx6
+full_name obj=idx6 -> Engine.Other idx6
+full_name obj=AActor -> Engine.Class AActor
+logf 'Forged object: got Engine.Other idx6, expecting Engine.Class AActor'
+result=1 object=NULL
+case load_static_error
+serialize_bits bits=1 value=0 loading=1
+serialize_int max=100 value=5 loading=1
+result=1 object=NULL
+case load_static_missing
+serialize_bits bits=1 value=0 loading=1
+serialize_int max=100 value=99 loading=1
+index_to_object index=99 load=1 -> NULL
+result=1 object=NULL
+case load_dynamic_none
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=0 loading=1
+result=1 object=NULL
+case load_dynamic_actor
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=2 loading=1
+result=1 object=actor_ch2
+case load_dynamic_closing
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=3 loading=1
+result=1 object=NULL
+case load_dynamic_nonactor
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=4 loading=1
+result=1 object=NULL
+case load_dynamic_empty
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=5 loading=1
+result=1 object=NULL
+case load_dynamic_range
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=1023 loading=1
+result=1 object=NULL
+case load_dynamic_wrapped
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=4294967295 loading=1
+result=1 object=NULL
+case load_dynamic_error
+serialize_bits bits=1 value=1 loading=1
+serialize_int max=1023 value=2 loading=1
+result=1 object=NULL
+case save_dynamic_open
+serialize_bits bits=1 value=1 loading=0
+serialize_int max=1023 value=7 loading=0
+result=1
+case save_dynamic_pending
+serialize_bits bits=1 value=1 loading=0
+serialize_int max=1023 value=8 loading=0
+result=0
+case save_dynamic_unmapped
+serialize_bits bits=1 value=1 loading=0
+serialize_int max=1023 value=0 loading=0
+result=0
+case save_static_actor_nonindexed
+object_to_index obj=actor_static_save -> -1
+serialize_bits bits=1 value=1 loading=0
+serialize_int max=1023 value=4294967295 loading=0
+result=1
+case save_null
+serialize_bits bits=1 value=1 loading=0
+serialize_int max=1023 value=0 loading=0
+result=1
+case save_nonactor_nonindexed
+object_to_index obj=plain_obj -> -1
+serialize_bits bits=1 value=1 loading=0
+serialize_int max=1023 value=4294967295 loading=0
+result=1
+case save_nonactor_indexed
+object_to_index obj=idx9 -> 9
+serialize_bits bits=1 value=0 loading=0
+serialize_int max=100 value=9 loading=0
+result=1
+case ctor_plain
+find_object_checked class=UProperty name=Role -> Role
+find_object_checked class=UProperty name=RemoteRole -> RemoteRole
+static_allocate class=UPackageMap outer=Transient name=None flags=0
+app_cmdline -> ''
+parse_param key=profilestats -> 0
+role=Role remote=RemoteRole master=set profile=0
+case ctor_profilestats
+find_object_checked class=UProperty name=Role -> Role
+find_object_checked class=UProperty name=RemoteRole -> RemoteRole
+static_allocate class=UPackageMap outer=Transient name=None flags=0
+app_cmdline -> '-profilestats'
+parse_param key=profilestats -> 1
+role=Role remote=RemoteRole master=set profile=1
+case static_ctor
+static_allocate class=UFloatProperty outer=UNetDriver name=ConnectionTimeout flags=4
+static_allocate class=UFloatProperty outer=UNetDriver name=InitialConnectTimeout flags=4
+static_allocate class=UFloatProperty outer=UNetDriver name=KeepAliveTime flags=4
+static_allocate class=UFloatProperty outer=UNetDriver name=RelevantTimeout flags=4
+static_allocate class=UFloatProperty outer=UNetDriver name=SpawnPrioritySeconds flags=4
+static_allocate class=UFloatProperty outer=UNetDriver name=ServerTravelPause flags=4
+static_allocate class=UIntProperty outer=UNetDriver name=MaxClientRate flags=4
+static_allocate class=UIntProperty outer=UNetDriver name=NetServerMaxTickRate flags=4
+static_allocate class=UIntProperty outer=UNetDriver name=LanServerMaxTickRate flags=4
+static_allocate class=UBoolProperty outer=UNetDriver name=AllowDownloads flags=4
+static_allocate class=UIntProperty outer=UNetDriver name=MaxDownloadSize flags=4
+static_allocate class=UArrayProperty outer=UNetDriver name=DownloadManagers flags=4
+static_allocate class=UStrProperty outer=DownloadManagers name=StrProperty0 flags=4
+max_client_rate=25000
+case flush_none
+case flush_server_only
+connection_tick conn=srv
+case flush_clients
+connection_tick conn=cli0
+connection_tick conn=cli1
+case flush_both
+connection_tick conn=srv
+connection_tick conn=cli0
+connection_tick conn=cli1
+case init_connect
+result=1 notify_set=1
+case init_listen
+result=1 notify_set=1
+case dispatch_server_keeps_closed
+send=0 recv=0 clients=1
+case dispatch_delete_closed
+destroy cli_closed2
+connection_destroy conn=cli_closed2
+object_dtor cli_closed2
+destroy cli_closed1
+connection_destroy conn=cli_closed1
+object_dtor cli_closed1
+clients=2
+case driver_serialize
+object_serialize driver
+serialize_bytes len=1 first=1 loading=0
+serialize_object obj=cli0
+serialize_object obj=srv
+serialize_object obj=master_map
+serialize_object obj=Role
+serialize_object obj=RemoteRole
+case driver_destroy
+destroy srv
+connection_destroy conn=srv
+object_dtor srv
+destroy cli0
+connection_destroy conn=cli0
+object_dtor cli0
+destroy cli1
+connection_destroy conn=cli1
+object_dtor cli1
+low_level_destroy driver=driver
+destroy master_map
+package_map_destroy master_map
+object_dtor master_map
+super_destroy driver
+case exec_sockets
+parse_command match=SOCKETS -> 1
+logf 'Connections:'
+connection_low_level_describe conn=srv
+logf '   Server conn'
+channel_describe ch=srv_chan
+logf '      Channel 1: chan'
+connection_low_level_describe conn=cli0
+logf '   Client conn'
+result=1
+case exec_unknown
+parse_command match=SOCKETS -> 0
+result=0
+case notify_no_channel
+case notify_closes_channel
+channel_close ch=chan_live
+driver_fixture end

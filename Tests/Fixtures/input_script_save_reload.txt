@@ -1,0 +1,6 @@
+tick 0.033333335
+idle 90
+press F5
+idle 30
+press F9
+idle 90

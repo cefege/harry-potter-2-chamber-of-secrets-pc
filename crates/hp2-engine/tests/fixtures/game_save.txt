@@ -1,0 +1,215 @@
+case save 0 pos=0 pkg=1 hub=0 exist=0 brush=0 mover=0
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 0 "SaveSlot/Save0.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save0.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save0.usa" ret=1
+format_save_hub_file 0 0 "SaveSlot/Save00.usa"
+file_size "SaveSlot/Save00.usa" ret=0
+actor_is_mover levelinfo ret=0
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 1 pos=1 pkg=1 hub=1 exist=0 brush=0 mover=0
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 1 "SaveSlot/Save1.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save1.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save1.usa" ret=1
+format_game_file 0 "SaveSlot/Game0.usa"
+format_save_hub_file 1 0 "SaveSlot/Save10.usa"
+file_copy "SaveSlot/Game0.usa" "SaveSlot/Save10.usa"
+format_save_hub_file 1 1 "SaveSlot/Save11.usa"
+file_size "SaveSlot/Save11.usa" ret=0
+actor_is_mover levelinfo ret=0
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 2 pos=2 pkg=1 hub=2 exist=2 brush=0 mover=0
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 2 "SaveSlot/Save2.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save2.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save2.usa" ret=1
+format_game_file 0 "SaveSlot/Game0.usa"
+format_save_hub_file 2 0 "SaveSlot/Save20.usa"
+file_copy "SaveSlot/Game0.usa" "SaveSlot/Save20.usa"
+format_game_file 1 "SaveSlot/Game1.usa"
+format_save_hub_file 2 1 "SaveSlot/Save21.usa"
+file_copy "SaveSlot/Game1.usa" "SaveSlot/Save21.usa"
+format_save_hub_file 2 2 "SaveSlot/Save22.usa"
+file_size "SaveSlot/Save22.usa" ret=16
+file_delete "SaveSlot/Save22.usa"
+format_save_hub_file 2 3 "SaveSlot/Save23.usa"
+file_size "SaveSlot/Save23.usa" ret=16
+file_delete "SaveSlot/Save23.usa"
+format_save_hub_file 2 4 "SaveSlot/Save24.usa"
+file_size "SaveSlot/Save24.usa" ret=0
+actor_is_mover levelinfo ret=0
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 3 pos=3 pkg=0 hub=1 exist=1 brush=0 mover=0
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 3 "SaveSlot/Save3.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save3.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save3.usa" ret=0
+actor_is_mover levelinfo ret=0
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 4 pos=4 pkg=1 hub=0 exist=0 brush=1 mover=0
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 4 "SaveSlot/Save4.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save4.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+delete_brush_tracker level
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save4.usa" ret=1
+format_save_hub_file 4 0 "SaveSlot/Save40.usa"
+file_size "SaveSlot/Save40.usa" ret=0
+actor_is_mover levelinfo ret=0
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 5 pos=5 pkg=1 hub=0 exist=0 brush=0 mover=1
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 5 "SaveSlot/Save5.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save5.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save5.usa" ret=1
+format_save_hub_file 5 0 "SaveSlot/Save50.usa"
+file_size "SaveSlot/Save50.usa" ret=0
+actor_is_mover levelinfo ret=0
+actor_is_mover pawn ret=1
+mover_reset_saved_pos pawn
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 6 pos=6 pkg=1 hub=3 exist=1 brush=1 mover=1
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 6 "SaveSlot/Save6.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save6.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+delete_brush_tracker level
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save6.usa" ret=1
+format_game_file 0 "SaveSlot/Game0.usa"
+format_save_hub_file 6 0 "SaveSlot/Save60.usa"
+file_copy "SaveSlot/Game0.usa" "SaveSlot/Save60.usa"
+format_game_file 1 "SaveSlot/Game1.usa"
+format_save_hub_file 6 1 "SaveSlot/Save61.usa"
+file_copy "SaveSlot/Game1.usa" "SaveSlot/Save61.usa"
+format_game_file 2 "SaveSlot/Game2.usa"
+format_save_hub_file 6 2 "SaveSlot/Save62.usa"
+file_copy "SaveSlot/Game2.usa" "SaveSlot/Save62.usa"
+format_save_hub_file 6 3 "SaveSlot/Save63.usa"
+file_size "SaveSlot/Save63.usa" ret=16
+file_delete "SaveSlot/Save63.usa"
+format_save_hub_file 6 4 "SaveSlot/Save64.usa"
+file_size "SaveSlot/Save64.usa" ret=0
+actor_is_mover levelinfo ret=0
+actor_is_mover pawn ret=1
+mover_reset_saved_pos pawn
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 7 pos=7 pkg=0 hub=0 exist=0 brush=1 mover=1
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 7 "SaveSlot/Save7.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save7.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+delete_brush_tracker level
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save7.usa" ret=0
+actor_is_mover levelinfo ret=0
+actor_is_mover pawn ret=1
+mover_reset_saved_pos pawn
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache
+case save 8 pos=8 pkg=1 hub=1 exist=3 brush=0 mover=0
+make_directory "SavePath"
+make_directory "SaveSlotPath"
+format_slot_file 8 "SaveSlot/Save8.usa"
+debugf_str "Saving game... filename: %s" "SaveSlot/Save8.usa"
+level_info_set_action 2
+paint_progress eng
+localize_progress Saving
+begin_slow_task "Localized"
+cleanup_destroyed level 1
+save_package level "SaveSlot/Save8.usa" ret=1
+format_game_file 0 "SaveSlot/Game0.usa"
+format_save_hub_file 8 0 "SaveSlot/Save80.usa"
+file_copy "SaveSlot/Game0.usa" "SaveSlot/Save80.usa"
+format_save_hub_file 8 1 "SaveSlot/Save81.usa"
+file_size "SaveSlot/Save81.usa" ret=16
+file_delete "SaveSlot/Save81.usa"
+format_save_hub_file 8 2 "SaveSlot/Save82.usa"
+file_size "SaveSlot/Save82.usa" ret=16
+file_delete "SaveSlot/Save82.usa"
+format_save_hub_file 8 3 "SaveSlot/Save83.usa"
+file_size "SaveSlot/Save83.usa" ret=16
+file_delete "SaveSlot/Save83.usa"
+format_save_hub_file 8 4 "SaveSlot/Save84.usa"
+file_size "SaveSlot/Save84.usa" ret=0
+actor_is_mover levelinfo ret=0
+new_brush_tracker level
+end_slow_task
+level_info_set_action 0
+gcache_flush
+save_persistent_actor_cache

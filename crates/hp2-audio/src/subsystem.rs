@@ -220,12 +220,11 @@ impl Subsystem {
 
     /// `UALAudioSubsystem::GetFidelityActiveSources`: every started source
     /// that has a sound, as `(sound handle, paused)`, in source order.
-    pub fn fidelity_active_sources(&self) -> Vec<(usize, bool)> {
+    pub fn fidelity_active_sources(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
         self.sources
             .iter()
             .filter(|source| source.sound != 0 && source.started)
             .map(|source| (source.sound, source.paused))
-            .collect()
     }
 
     /// `UALAudioSubsystem::Init`. Returns `Ok(false)` on the original's

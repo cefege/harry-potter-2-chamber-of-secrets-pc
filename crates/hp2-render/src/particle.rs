@@ -1,7 +1,7 @@
 //! Port of the pure helpers in `Render/Src/UnParticleRn.cpp`: `SetUV`,
 //! `SetTrans`, `SetTrans2D`, `ComputeClipCodes2D`, `CombineClipCodes`, and
-//! the `lerp` overloads. C++ keeps the UnrealScript natives, the particle
-//! system/chunk storage, and the GMem-backed clipping code.
+//! the `lerp` overloads. `particle_system` owns the complete render policy;
+//! C++ retains only native object leaves and typed GMem/texture stack scopes.
 //!
 //! Float contraction is replicated through `madd`: `mul_add` on arm64, where the
 //! reference build's `-ffp-contract=on` fuses `a*b + c`, and a plain `a*b + c`

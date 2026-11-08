@@ -7,8 +7,9 @@ use std::ptr;
 use hp2_abi::FVector;
 use hp2_abi::engine::generated::{AActor, APawn, FReachSpec};
 
+use crate::actor;
 use crate::math::app_round;
-use crate::services::Hp2EngineServices;
+use crate::services::{EngineThrown, Hp2EngineServices, checked};
 use crate::vec;
 
 /// `APawn::R_FLY` (`APawn.h`).
@@ -53,9 +54,8 @@ pub unsafe fn bot_only_path(spec: *const FReachSpec) -> i32 {
     unsafe { ((*spec).collision_radius < MINCOMMONRADIUS) as i32 }
 }
 
-/// `FReachSpec::operator+`. The C++ result leaves `Start`, `End` and
-/// `bPruned` uninitialized. This port sets `Start` and `End` to null and
-/// `bPruned` to 0.
+/// `FReachSpec::operator+`. Only the four native assigned fields are written;
+/// `Start`, `End` and `bPruned` retain the destination's uninitialized bytes.
 ///
 /// # Safety
 /// `a`, `b` must point to live `FReachSpec`s. `out` must be writable.
@@ -65,9 +65,6 @@ pub unsafe fn combine(a: *const FReachSpec, b: *const FReachSpec, out: *mut FRea
         (*out).collision_radius = min_i((*a).collision_radius, (*b).collision_radius);
         (*out).collision_height = min_i((*a).collision_height, (*b).collision_height);
         (*out).reach_flags = (*a).reach_flags | (*b).reach_flags;
-        (*out).start = ptr::null_mut();
-        (*out).end = ptr::null_mut();
-        (*out).b_pruned = 0;
     }
 }
 
@@ -107,7 +104,7 @@ pub unsafe fn define_for(
     begin: *mut AActor,
     dest: *mut AActor,
     scout: *mut APawn,
-) -> i32 {
+) -> Result<i32, EngineThrown> {
     unsafe {
         (*spec).start = begin.cast::<c_void>();
         (*spec).end = dest.cast::<c_void>();
@@ -121,13 +118,15 @@ pub unsafe fn define_for(
         (*scout).ground_speed = 320.0;
         (*scout).max_step_height = 25.0;
 
-        find_best_reachable(
-            svc,
-            spec,
-            ptr::addr_of!((*begin).location),
-            ptr::addr_of!((*dest).location),
-            scout,
-        )
+        let mut result = 0;
+        checked((svc.reach_find_best)(
+            spec.cast(),
+            ptr::addr_of!((*(*spec).start.cast::<AActor>()).location).cast(),
+            ptr::addr_of!((*(*spec).end.cast::<AActor>()).location).cast(),
+            scout.cast(),
+            &mut result,
+        ))?;
+        Ok(result)
     }
 }
 
@@ -142,15 +141,16 @@ pub unsafe fn find_best_reachable(
     begin: *const FVector,
     destination: *const FVector,
     scout: *mut APawn,
-) -> i32 {
+) -> Result<i32, EngineThrown> {
     unsafe {
-        let level = (*scout).base.x_level;
         let scout_v = scout.cast::<c_void>();
+        let actor_svc = actor::published_services().map_err(EngineThrown)?;
         let set_size = |radius: f32, height: f32| {
-            (svc.set_collision_size)(scout_v, radius, height);
+            actor::set_collision_size(&actor_svc, scout.cast::<AActor>(), radius, height)
+                .map_err(EngineThrown)
         };
 
-        set_size(HUMANRADIUS as f32, HUMANHEIGHT as f32);
+        set_size(HUMANRADIUS as f32, HUMANHEIGHT as f32)?;
 
         let mut result = 0;
         let mut stepsize: f32 = MAXCOMMONRADIUS as f32 - (*scout).base.collision_radius;
@@ -160,9 +160,19 @@ pub unsafe fn find_best_reachable(
 
         // Find the largest radius that works.
         while stilltrying {
-            let mut success = (svc.far_move_actor)(level, scout_v, begin.cast::<c_void>());
+            let mut success = 0;
+            checked((svc.far_move_actor)(
+                (*scout).base.x_level,
+                scout_v,
+                begin.cast::<c_void>(),
+                &mut success,
+            ))?;
             if success != 0 {
-                success = (svc.point_reachable)(scout_v, destination.cast::<c_void>());
+                checked((svc.point_reachable)(
+                    scout.cast::<c_void>(),
+                    destination.cast::<c_void>(),
+                    &mut success,
+                ))?;
             }
 
             if success != 0 {
@@ -173,7 +183,7 @@ pub unsafe fn find_best_reachable(
                 set_size(
                     (*scout).base.collision_radius + stepsize,
                     MINCOMMONHEIGHT as f32,
-                );
+                )?;
                 stepsize *= 0.5;
                 if stepsize < 2.0 || (*scout).base.collision_radius > MAXCOMMONRADIUS as f32 {
                     stilltrying = false;
@@ -182,7 +192,7 @@ pub unsafe fn find_best_reachable(
                 set_size(
                     (*scout).base.collision_radius - stepsize,
                     (*scout).base.collision_height,
-                );
+                )?;
                 stepsize *= 0.5;
                 if stepsize < 2.0 || (*scout).base.collision_radius < HUMANRADIUS as f32 {
                     stilltrying = false;
@@ -192,14 +202,24 @@ pub unsafe fn find_best_reachable(
 
         if result != 0 {
             // Find the largest height that works at the best radius.
-            set_size(best_radius, (*scout).base.collision_height + 4.0);
+            set_size(best_radius, (*scout).base.collision_height + 4.0)?;
             stilltrying = true;
             stepsize = MAXCOMMONHEIGHT as f32 - (*scout).base.collision_height;
 
             while stilltrying {
-                let mut success = (svc.far_move_actor)(level, scout_v, begin.cast::<c_void>());
+                let mut success = 0;
+                checked((svc.far_move_actor)(
+                    (*scout).base.x_level,
+                    scout_v,
+                    begin.cast::<c_void>(),
+                    &mut success,
+                ))?;
                 if success != 0 {
-                    success = (svc.point_reachable)(scout_v, destination.cast::<c_void>());
+                    checked((svc.point_reachable)(
+                        scout.cast::<c_void>(),
+                        destination.cast::<c_void>(),
+                        &mut success,
+                    ))?;
                 }
 
                 if success != 0 {
@@ -208,7 +228,7 @@ pub unsafe fn find_best_reachable(
                     set_size(
                         (*scout).base.collision_radius,
                         (*scout).base.collision_height + stepsize,
-                    );
+                    )?;
                     stepsize *= 0.5;
                     if stepsize < 1.0 || (*scout).base.collision_height > MAXCOMMONHEIGHT as f32 {
                         stilltrying = false;
@@ -217,7 +237,7 @@ pub unsafe fn find_best_reachable(
                     set_size(
                         (*scout).base.collision_radius,
                         (*scout).base.collision_height - stepsize,
-                    );
+                    )?;
                     stepsize *= 0.5;
                     if stepsize < 1.0 || (*scout).base.collision_height < (HUMANHEIGHT + 1) as f32 {
                         stilltrying = false;
@@ -237,6 +257,6 @@ pub unsafe fn find_best_reachable(
             }
         }
 
-        result
+        Ok(result)
     }
 }

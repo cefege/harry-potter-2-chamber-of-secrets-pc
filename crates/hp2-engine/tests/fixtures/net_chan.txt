@@ -1,0 +1,103 @@
+base_init index=3 local=1 version=7 open_packet=-1 closing=0 maxsend=1189,69,0
+closing before=0 after=1
+known type=-1:0,0:0,1:1,2:1,3:1,7:0,8:0
+out_ctor close=0 error=0 channel=4 type=2 open=0 close=0 reliable=0
+out_ctor close=1 error=0 channel=4 type=2 open=0 close=1 reliable=0
+out_ctor overflow close=0 count=127 error=1
+out_ctor overflow close=1 count=127 error=0
+pm_serialize_object dir=in
+in_object slot=set
+pm_serialize_name dir=in
+pm_serialize_object dir=out
+out_object slot=null
+pm_serialize_name dir=out
+receive_queue seq=3,2,3 reliable=1 queued=2 order=2,3 dispatched=0
+receive_release seq=1 reliable=1 in_reliable=3 queued=0 dispatched=3 order=1,2,3
+send_raw ch=2 seq=1 reliable=1 open=1 close=1 merge=1
+close open closing=1
+close repeat closing=1
+close closed-state closing=0
+send_raw ch=4 seq=1 reliable=1 open=1 close=0 merge=1
+send reliable_open ret=101 open_packet=101 open_temp=0 closing=0
+send_raw ch=5 seq=0 reliable=0 open=1 close=0 merge=1
+send unreliable_open ret=102 open_packet=102 open_temp=1
+send_raw ch=5 seq=0 reliable=0 open=0 close=1 merge=1
+send close_follow ret=103 closing=1
+net_ready saturate=1
+is_net_ready saturate=1 result=1
+net_ready saturate=0
+is_net_ready saturate=0 result=0
+is_net_ready full result=0
+acks remaining=1 seq=3 count=1
+send_raw ch=2 seq=3 reliable=1 open=0 close=0 merge=0
+nak packet=8 done
+send_raw ch=2 seq=4 reliable=1 open=0 close=0 merge=0
+nak packet=9 done
+acks close before
+acks close deleted
+send_raw ch=0 seq=1 reliable=1 open=0 close=0 merge=0
+tick stale done
+tick fresh done
+tick acked done
+string_ser dir=in value=alpha
+notify_text alpha
+string_ser dir=in value=beta
+notify_text beta
+string_ser dir=in error
+control received strings=2
+string_ser dir=out value=hi
+send_raw ch=0 seq=1 reliable=1 open=1 close=0 merge=1
+control serialize done
+control describe=Text State=open
+download_receive n=3 first=7
+file local_receive done
+log NetInvalid
+send_raw ch=2 seq=0 reliable=0 open=0 close=1 merge=1
+file refuse_disabled done
+string_ser dir=in value=SKIP
+log User skipped download of 'Maps/Demo.utx'
+file skip packages=1
+notify_sending_file guid=1,2,3,4 ret=1
+create_reader 'Maps/Demo.utx' result=set
+log NetSend Maps/Demo.utx
+file request accepted sendfile=1 index=0 src=Maps/Demo.utx
+file_size 'Maps/Demo.utx' = 10
+log NetInvalid
+send_raw ch=2 seq=0 reliable=0 open=0 close=1 merge=1
+file request too_large sendfile=0 index=0 src=
+notify_sending_file guid=1,2,3,4 ret=0
+log NetInvalid
+send_raw ch=2 seq=0 reliable=0 open=0 close=1 merge=1
+file request notify_refused sendfile=0 index=0 src=Maps/Demo.utx
+notify_sending_file guid=1,2,3,4 ret=1
+create_reader 'Maps/Demo.utx' result=null
+log NetInvalid
+send_raw ch=2 seq=0 reliable=0 open=0 close=1 merge=1
+file request reader_failed sendfile=0 index=0 src=Maps/Demo.utx
+log NetInvalid
+send_raw ch=2 seq=0 reliable=0 open=0 close=1 merge=1
+file request guid_error sendfile=0 index=0 src=
+net_ready saturate=0
+reader_serialize n=10 first=0
+send_raw ch=2 seq=1 reliable=1 open=0 close=1 merge=1
+flush_net
+reader_delete
+file tick single sent=10 sendfile=0
+net_ready saturate=0
+reader_serialize n=1189 first=0
+send_raw ch=2 seq=2 reliable=1 open=0 close=0 merge=1
+flush_net
+net_ready saturate=0
+reader_serialize n=811 first=165
+send_raw ch=2 seq=3 reliable=1 open=0 close=1 merge=1
+flush_net
+reader_delete
+file tick multi sent=2000 sendfile=0
+reader_delete
+file destroy_send done
+download_done
+download_delete
+file destroy_received done
+file describe_sent=File='Maps/Demo.utx', Sent=512/10 State=open
+file describe_received=File='Temp.tmp', Received=77/10 State=open
+file describe_received_nodl=File='', Received=0/10 State=open

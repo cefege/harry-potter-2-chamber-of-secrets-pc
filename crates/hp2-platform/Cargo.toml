@@ -9,6 +9,8 @@ publish.workspace = true
 name = "hp2_platform"
 
 [features]
+# Experimental capture arbitration; not connected to the game input path.
+overlay-mouse = []
 # Links against the pinned `SDL2::SDL2-static` (built by CMake's
 # FetchContent) for `clipboard`'s real SDL2 FFI calls. Off by default so
 # `cargo build`/`cargo test` work standalone with no SDL2 binary to find
@@ -17,3 +19,15 @@ name = "hp2_platform"
 # feature. See `src/clipboard.rs`'s own doc comment for the full design
 # and why it has no `sdl2`/`sdl2-sys` crate dependency at all.
 sdl = []
+# Opt-in tests using private symbols from the pinned static SDL2 library.
+sdl-internal-tests = ["sdl"]
+# Links against the pinned `nfd::nfd` (NativeFileDialog, built by CMake's
+# FetchContent) for `picker`'s real NFD FFI calls. Off by default for the
+# same reason as `sdl` above -- see `src/picker.rs`'s own doc comment.
+# Depends on `sdl`: the real `HP2LauncherPlatform.cpp` TU this replaces
+# always included `<SDL.h>` alongside `<nfd.h>` for its `SDL_Log` calls,
+# so NFD and the real `SDL_Log` binding always compile together here too.
+nfd = ["sdl"]
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

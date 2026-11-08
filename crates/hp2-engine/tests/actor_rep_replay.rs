@@ -18,7 +18,7 @@ use hp2_abi::engine::generated::{
     APlayerPawn, APlayerReplicationInfo, AWeapon, AZoneInfo,
 };
 use hp2_engine::actor_rep::{
-    Hp2ActorRepServices, Rep, RepCache, actor_get_optimized_rep_list, actor_update_frequency,
+    Hp2ActorRepServices, Rep, actor_get_optimized_rep_list, actor_update_frequency_native,
     ammo_get_optimized_rep_list, game_replication_info_get_optimized_rep_list,
     inventory_get_optimized_rep_list, inventory_no_variables_to_replicate,
     inventory_should_do_script_replication, inventory_update_frequency,
@@ -102,37 +102,70 @@ thread_local! {
 
 // ---- services ------------------------------------------------------------------------------
 
-unsafe extern "C" fn static_class_flags(kind: u32) -> u32 {
-    let native = WORLD.with(|w| w.borrow().native);
-    if (native >> kind) & 1 != 0 {
-        CLASS_NATIVE_REPLICATION
-    } else {
-        0
+unsafe extern "C" fn static_class_flags(kind: u32, out: *mut u32) -> i32 {
+    let value = (|| -> u32 {
+        let native = WORLD.with(|w| w.borrow().native);
+        if (native >> kind) & 1 != 0 {
+            CLASS_NATIVE_REPLICATION
+        } else {
+            0
+        }
+    })();
+    unsafe {
+        out.write(value);
     }
+    0
 }
 
-unsafe extern "C" fn find_rep_index(kind: u32, name: *const c_char) -> u32 {
-    // Mirrors the harness `StaticFindObjectChecked`: FNV-1a over the name, then
-    // `kind * 4096 + hash % 4055 + 1` (per-kind band; the harness asserts no collision).
-    let bytes = unsafe { CStr::from_ptr(name) }.to_bytes();
-    let mut h: u32 = 2_166_136_261;
-    for &b in bytes {
-        h ^= u32::from(b);
-        h = h.wrapping_mul(16_777_619);
+unsafe extern "C" fn find_rep_index(
+    kind: u32,
+    name: *const c_char,
+    _site: u32,
+    out: *mut u32,
+) -> i32 {
+    let value = (|| -> u32 {
+        // Mirrors the harness `StaticFindObjectChecked`: FNV-1a over the name, then
+        // `kind * 4096 + hash % 4055 + 1` (per-kind band; the harness asserts no collision).
+        let bytes = unsafe { CStr::from_ptr(name) }.to_bytes();
+        let mut h: u32 = 2_166_136_261;
+        for &b in bytes {
+            h ^= u32::from(b);
+            h = h.wrapping_mul(16_777_619);
+        }
+        (kind * 4096 + h % 4055 + 1) as u16 as u32
+    })();
+    unsafe {
+        out.write(value);
     }
-    (kind * 4096 + h % 4055 + 1) as u16 as u32
+    0
 }
 
-unsafe extern "C" fn can_serialize_object(_map: *mut c_void, obj: *mut c_void) -> i32 {
-    let reject = WORLD.with(|w| w.borrow().reject);
-    i32::from(obj as usize != reject)
+unsafe extern "C" fn can_serialize_object(
+    _map: *mut c_void,
+    obj: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    let value = (|| -> i32 {
+        let reject = WORLD.with(|w| w.borrow().reject);
+        i32::from(obj as usize != reject)
+    })();
+    unsafe {
+        out.write(value);
+    }
+    0
 }
 
-unsafe extern "C" fn fstring_neq(a: *const c_void, b: *const c_void) -> i32 {
-    // TArrayRaw's data pointer is at +0 and num at +8; `FString::operator*` yields "" when num is 0.
-    let pa = unsafe { fstring_text(a) };
-    let pb = unsafe { fstring_text(b) };
-    i32::from(unsafe { stricmp_differs(pa, pb) })
+unsafe extern "C" fn fstring_neq(a: *const c_void, b: *const c_void, out: *mut i32) -> i32 {
+    let value = (|| -> i32 {
+        // TArrayRaw's data pointer is at +0 and num at +8; `FString::operator*` yields "" when num is 0.
+        let pa = unsafe { fstring_text(a) };
+        let pb = unsafe { fstring_text(b) };
+        i32::from(unsafe { stricmp_differs(pa, pb) })
+    })();
+    unsafe {
+        out.write(value);
+    }
+    0
 }
 
 unsafe fn fstring_text(f: *const c_void) -> *const u32 {
@@ -164,29 +197,71 @@ fn fold_ascii(c: u32) -> u32 {
     }
 }
 
-unsafe extern "C" fn object_is_a(obj: *const c_void, kind: u32) -> i32 {
-    let (off, classes) = WORLD.with(|w| {
-        let w = w.borrow();
-        (w.class_off, w.class_addr)
-    });
-    let cls = unsafe { ptr::read_unaligned(obj.cast::<u8>().add(off).cast::<usize>()) };
-    let Some(mut k) = classes.iter().position(|&c| c == cls) else {
-        return 0;
-    };
-    loop {
-        if k as u32 == kind {
-            return 1;
-        }
-        let parent = K_PARENT[k];
-        if parent < 0 {
+unsafe extern "C" fn object_is_a(obj: *const c_void, kind: u32, out: *mut i32) -> i32 {
+    let value = (|| -> i32 {
+        let (off, classes) = WORLD.with(|w| {
+            let w = w.borrow();
+            (w.class_off, w.class_addr)
+        });
+        let cls = unsafe { ptr::read_unaligned(obj.cast::<u8>().add(off).cast::<usize>()) };
+        let Some(mut k) = classes.iter().position(|&c| c == cls) else {
             return 0;
+        };
+        loop {
+            if k as u32 == kind {
+                return 1;
+            }
+            let parent = K_PARENT[k];
+            if parent < 0 {
+                return 0;
+            }
+            k = parent as usize;
         }
-        k = parent as usize;
+    })();
+    unsafe {
+        out.write(value);
     }
+    0
 }
 
-unsafe extern "C" fn default_actor_of(_actor: *const c_void) -> *const c_void {
-    WORLD.with(|w| w.borrow().defaults) as *const c_void
+unsafe extern "C" fn default_actor_of(_actor: *const c_void, out: *mut *const c_void) -> i32 {
+    let value = (|| -> *const c_void { WORLD.with(|w| w.borrow().defaults) as *const c_void })();
+    unsafe {
+        out.write(value);
+    }
+    0
+}
+
+// Replay-only dispatch for the checked public-native superclass leaf. The real
+// consumer uses qualified SDK methods; this fixture has no native object graph.
+unsafe extern "C" fn base_rep_list(
+    kind: u32,
+    actor: *const c_void,
+    recent: *const c_void,
+    map: *mut c_void,
+    cursor: *mut i32,
+    num: i32,
+    out: *mut *mut i32,
+) -> i32 {
+    unsafe {
+        let svc = services();
+        let mut rep = Rep::new(&svc, map, cursor);
+        let result = match kind {
+            0 => actor_get_optimized_rep_list(&mut rep, actor.cast(), recent.cast()),
+            1 => pawn_get_optimized_rep_list(&mut rep, actor.cast(), recent.cast(), num),
+            4 => zone_info_get_optimized_rep_list(&mut rep, actor.cast(), recent.cast()),
+            8 => inventory_get_optimized_rep_list(&mut rep, actor.cast(), recent.cast(), num),
+            11 => pickup_get_optimized_rep_list(&mut rep, actor.cast(), recent.cast(), num),
+            _ => unreachable!("unsupported superclass"),
+        };
+        match result {
+            Ok(()) => {
+                out.write(rep.finish());
+                0
+            }
+            Err(status) => status,
+        }
+    }
 }
 
 fn services() -> Hp2ActorRepServices {
@@ -197,6 +272,7 @@ fn services() -> Hp2ActorRepServices {
         fstring_neq,
         object_is_a,
         default_actor_of,
+        base_rep_list,
     }
 }
 
@@ -548,16 +624,15 @@ fn set_world(fx: &Fixture, st: &State, ctx: &Ctx) {
     });
 }
 
-/// Views an object image as `T`. The image is at least `size_of::<T>()` bytes, checked by
+/// Addresses an object image as `T` without borrowing or reading its padding. The image is at least `size_of::<T>()` bytes, checked by
 /// `fixture_sizes_match_mirrors`, and 8-byte aligned, which covers the packed(4) mirrors.
-fn obj<'a, T>(p: *const u8) -> &'a T {
-    unsafe { &*p.cast::<T>() }
+fn obj<T>(p: *const u8) -> *const T {
+    p.cast::<T>()
 }
 
 /// Runs a GetOptimizedRepList and returns the written indices.
 fn run_rep(
     svc: &Hp2ActorRepServices,
-    cache: &mut RepCache,
     kind: usize,
     this: *const u8,
     recent: *const u8,
@@ -567,7 +642,7 @@ fn run_rep(
     let map = NonNull::<c_void>::dangling().as_ptr();
     let base = out.as_mut_ptr();
     let end = unsafe {
-        let mut rep = Rep::new(svc, cache, map, base);
+        let mut rep = Rep::new(svc, map, base);
         match kind {
             K_ACTOR => {
                 actor_get_optimized_rep_list(&mut rep, obj::<AActor>(this), obj::<AActor>(recent))
@@ -627,6 +702,7 @@ fn run_rep(
             ),
             other => unreachable!("kind {other} has no rep function"),
         }
+        .expect("checked replication replay");
         rep.finish()
     };
     let n = (end as usize - base as usize) / size_of::<i32>();
@@ -640,56 +716,56 @@ fn run_freq(
     viewer: usize,
     ctx: &Ctx,
 ) -> f32 {
-    let dir = FVector {
-        x: f32::from_bits(ctx.vdir[0]),
-        y: f32::from_bits(ctx.vdir[1]),
-        z: f32::from_bits(ctx.vdir[2]),
-    };
-    let pos = FVector {
-        x: f32::from_bits(ctx.vpos[0]),
-        y: f32::from_bits(ctx.vpos[1]),
-        z: f32::from_bits(ctx.vpos[2]),
-    };
-    match kind {
-        K_ACTOR => actor_update_frequency(svc, obj::<AActor>(this), &dir, &pos),
-        K_INV => inventory_update_frequency(svc, obj::<AInventory>(this), viewer as *const c_void),
-        other => unreachable!("kind {other} has no frequency function"),
+    unsafe {
+        let dir = FVector {
+            x: f32::from_bits(ctx.vdir[0]),
+            y: f32::from_bits(ctx.vdir[1]),
+            z: f32::from_bits(ctx.vdir[2]),
+        };
+        let pos = FVector {
+            x: f32::from_bits(ctx.vpos[0]),
+            y: f32::from_bits(ctx.vpos[1]),
+            z: f32::from_bits(ctx.vpos[2]),
+        };
+        match kind {
+            K_ACTOR => actor_update_frequency_native(svc, obj::<AActor>(this), &dir, &pos),
+            K_INV => {
+                inventory_update_frequency(svc, obj::<AInventory>(this), viewer as *const c_void)
+            }
+            other => unreachable!("kind {other} has no frequency function"),
+        }
+        .expect("checked frequency replay")
     }
 }
 
-fn run_case(
-    svc: &Hp2ActorRepServices,
-    cache: &mut RepCache,
-    kind: usize,
-    mode: Mode,
-    st: &State,
-    ctx: &Ctx,
-) -> String {
-    let this = st.addrs[THIS + 1] as *const u8;
-    let recent = st.addrs[RECENT + 1] as *const u8;
-    match mode {
-        Mode::Rep => {
-            let mut out = [0i32; 256];
-            let idx = run_rep(svc, cache, kind, this, recent, ctx.num, &mut out);
-            let list: Vec<String> = idx.iter().map(i32::to_string).collect();
-            format!("res n={} idx={}", idx.len(), list.join(","))
-        }
-        Mode::Freq => {
-            let f = run_freq(svc, kind, this, st.addrs[ctx.viewer], ctx);
-            format!("res f={:08x}", f.to_bits())
-        }
-        Mode::Script => {
-            let b = inventory_should_do_script_replication(obj::<AInventory>(this));
-            format!("res b={}", i32::from(b))
-        }
-        Mode::Novars => {
-            let old = st.addrs[ctx.old];
-            assert!(old != 0, "old=null cannot be replayed");
-            let b = inventory_no_variables_to_replicate(
-                obj::<AInventory>(this),
-                obj::<AActor>(old as *const u8),
-            );
-            format!("res b={}", i32::from(b))
+fn run_case(svc: &Hp2ActorRepServices, kind: usize, mode: Mode, st: &State, ctx: &Ctx) -> String {
+    unsafe {
+        let this = st.addrs[THIS + 1] as *const u8;
+        let recent = st.addrs[RECENT + 1] as *const u8;
+        match mode {
+            Mode::Rep => {
+                let mut out = [0i32; 256];
+                let idx = run_rep(svc, kind, this, recent, ctx.num, &mut out);
+                let list: Vec<String> = idx.iter().map(i32::to_string).collect();
+                format!("res n={} idx={}", idx.len(), list.join(","))
+            }
+            Mode::Freq => {
+                let f = run_freq(svc, kind, this, st.addrs[ctx.viewer], ctx);
+                format!("res f={:08x}", f.to_bits())
+            }
+            Mode::Script => {
+                let b = inventory_should_do_script_replication(obj::<AInventory>(this));
+                format!("res b={}", i32::from(b))
+            }
+            Mode::Novars => {
+                let old = st.addrs[ctx.old];
+                assert!(old != 0, "old=null cannot be replayed");
+                let b = inventory_no_variables_to_replicate(
+                    obj::<AInventory>(this),
+                    obj::<AActor>(old as *const u8),
+                );
+                format!("res b={}", i32::from(b))
+            }
         }
     }
 }
@@ -697,7 +773,6 @@ fn run_case(
 fn replay_family(family: &str, kind: usize, mode: Mode, expected: usize) {
     let fx = fixture();
     let svc = services();
-    let mut cache = RepCache::default();
     let mut got = String::new();
     let mut count = 0usize;
     for case in fx.cases.iter().filter(|c| c.family == family) {
@@ -710,7 +785,7 @@ fn replay_family(family: &str, kind: usize, mode: Mode, expected: usize) {
         set_world(&fx, &st, &ctx);
         got.push_str(&case_line(case));
         got.push('\n');
-        got.push_str(&run_case(&svc, &mut cache, kind, mode, &st, &ctx));
+        got.push_str(&run_case(&svc, kind, mode, &st, &ctx));
         got.push('\n');
         count += 1;
     }

@@ -108,7 +108,7 @@ pub trait DynBspHost {
 
     fn brush_mover_link(&self, brush: Obj) -> i32;
     fn set_brush_mover_link(&mut self, brush: Obj, v: i32);
-    /// `Brush->Polys->Element` as a raw slice; valid for the whole tracker call.
+    /// `Brush->Polys->Element` as a raw slice; valid for the current operation.
     fn brush_polys(&mut self, brush: Obj) -> &mut [FPoly];
 
     fn debug(&mut self, kind: LogKind, msg: &str);
@@ -182,8 +182,7 @@ fn dot3(a: FVector, b: FVector) -> f32 {
     fpoly::dot(a, b)
 }
 
-pub struct DynBsp<H: DynBspHost> {
-    host: H,
+pub struct DynBsp {
     i_node_rover: i32,
     i_vert_rover: i32,
     i_first_roving_point: i32,
@@ -204,30 +203,25 @@ pub struct DynBsp<H: DynBspHost> {
     vert_pool_owners: Vec<Obj>,
 }
 
-impl<H: DynBspHost> DynBsp<H> {
-    /// `FMovingBrushTracker::FMovingBrushTracker`.
-    pub fn new(host: H) -> Self {
-        let i_original_top_surf = host.num(Pool::Surfs);
-        let i_original_top_vector = host.num(Pool::Vectors);
-        let i_original_top_point = host.num(Pool::Points);
-        let i_original_top_node = host.num(Pool::Nodes);
-        let i_original_top_vert = host.num(Pool::Verts);
-        let mut s = Self {
-            host,
+struct Executor<'a, H: DynBspHost> {
+    state: *mut DynBsp,
+    host: &'a mut H,
+}
+
+
+impl DynBsp {
+    fn empty() -> Self {
+        Self {
             i_node_rover: 0,
             i_vert_rover: 0,
             i_first_roving_point: 0,
-            i_original_top_surf,
-            i_original_top_vector,
-            i_original_top_point,
-            i_original_top_node,
-            i_original_top_vert,
+            i_original_top_surf: 0,
+            i_original_top_vector: 0,
+            i_original_top_point: 0,
+            i_original_top_node: 0,
+            i_original_top_vert: 0,
             add_actor: std::ptr::null_mut(),
-            fpoly_normal: FVector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
+            fpoly_normal: FVector { x: 0.0, y: 0.0, z: 0.0 },
             prev_link: PrevLink::Node(INDEX_NONE),
             group: Vec::new(),
             i_free_points: INDEX_NONE,
@@ -235,148 +229,165 @@ impl<H: DynBspHost> DynBsp<H> {
             point_free_links: Vec::new(),
             node_maps: Vec::new(),
             vert_pool_owners: Vec::new(),
-        };
+        }
+    }
+
+    /// Constructs stable tracker state and initializes it through a temporary host.
+    ///
+    /// # Safety
+    /// The host's model backing storage must outlive the returned tracker and operations.
+    pub unsafe fn new<H: DynBspHost>(host: &mut H) -> Box<Self> {
+        let mut state = Box::new(Self::empty());
+        let state_ptr = Box::as_mut(&mut state) as *mut Self;
+        let mut executor = Executor { state: state_ptr, host };
+        executor.initialize();
+        state
+    }
+
+    pub fn count_bytes(&self) -> [(usize, usize); 4] {
+        let f = |len: usize, cap: usize, elem: usize| (len * elem, cap * elem);
+        [
+            f(self.node_maps.len(), self.node_maps.capacity(), size_of::<FActorIndex>()),
+            f(self.vert_pool_owners.len(), self.vert_pool_owners.capacity(), size_of::<Obj>()),
+            f(self.point_owners.len(), self.point_owners.capacity(), size_of::<Obj>()),
+            f(self.point_free_links.len(), self.point_free_links.capacity(), size_of::<i32>()),
+        ]
+    }
+
+    pub fn surf_is_dynamic(&self, i_surf: i32) -> bool {
+        i_surf >= self.i_original_top_surf
+    }
+
+    /// Updates the tracker using a temporary host for this operation.
+    ///
+    /// # Safety
+    /// `state` must point to the live boxed tracker associated with `host`.
+    /// The caller must prevent concurrent access; host-callback reentry is supported.
+    pub unsafe fn update<H: DynBspHost>(state: *mut Self, host: &mut H, actor: Obj) {
+        let mut executor = Executor { state, host };
+        executor.update(actor);
+    }
+
+    /// Flushes the specified brush using a temporary host.
+    ///
+    /// # Safety
+    /// `state` must point to the live boxed tracker associated with `host`.
+    /// The caller must prevent concurrent access; host-callback reentry is supported.
+    pub unsafe fn flush<H: DynBspHost>(state: *mut Self, host: &mut H, actor: Obj) {
+        let mut executor = Executor { state, host };
+        executor.flush(actor);
+    }
+
+    /// Restores model-array lengths and clears references to removed nodes.
+    ///
+    /// # Safety
+    /// `state` must point to the live boxed tracker associated with `host`.
+    /// The caller must prevent concurrent access; host-callback reentry is supported.
+    pub unsafe fn shutdown<H: DynBspHost>(state: *mut Self, host: &mut H) {
+        let mut executor = Executor { state, host };
+        executor.shutdown();
+    }
+}
+
+macro_rules! state_field {
+    ($executor:ident, $field:ident) => {
+        // SAFETY: the owner keeps the boxed state alive; each projected field
+        // access ends before the executor invokes a host callback.
+        *{
+            let state = $executor.state;
+            unsafe { &mut (*state).$field }
+        }
+    };
+}
+
+impl<H: DynBspHost> Executor<'_, H> {
+    fn initialize(&mut self) {
+        let original_top_surf = self.host.num(Pool::Surfs);
+        state_field!(self, i_original_top_surf) = original_top_surf;
+        let original_top_vector = self.host.num(Pool::Vectors);
+        state_field!(self, i_original_top_vector) = original_top_vector;
+        let original_top_point = self.host.num(Pool::Points);
+        state_field!(self, i_original_top_point) = original_top_point;
+        let original_top_node = self.host.num(Pool::Nodes);
+        state_field!(self, i_original_top_node) = original_top_node;
+        let original_top_vert = self.host.num(Pool::Verts);
+        state_field!(self, i_original_top_vert) = original_top_vert;
 
         // Setup all brushes.
-        for i in 0..s.host.level_actor_count() {
-            let a = s.host.level_actor(i);
-            if !a.is_null() && s.host.is_moving_brush(a) {
-                s.setup_actor_brush(a);
+        for i in 0..self.host.level_actor_count() {
+            let a = self.host.level_actor(i);
+            if !a.is_null() && self.host.is_moving_brush(a) {
+                self.setup_actor_brush(a);
             }
         }
 
-        // Save roving info.
-        s.i_first_roving_point = s.host.num(Pool::Points);
+        let first_roving_point = self.host.num(Pool::Points);
+        state_field!(self, i_first_roving_point) = first_roving_point;
+        self.host.shrink(Pool::Vectors);
+        self.host.shrink(Pool::Surfs);
+        let node_rover = self.expand_db(Pool::Nodes, 512, MAX_NODES);
+        state_field!(self, i_node_rover) = node_rover;
+        let vert_rover = self.expand_db(Pool::Verts, 512, MAXINT);
+        state_field!(self, i_vert_rover) = vert_rover;
+        let node_count = self.host.num(Pool::Nodes) - state_field!(self, i_original_top_node);
+        state_field!(self, node_maps) = vec![FActorIndex::default(); node_count.max(0) as usize];
+        let vert_count = self.host.num(Pool::Verts) - state_field!(self, i_original_top_vert);
+        state_field!(self, vert_pool_owners) = vec![std::ptr::null_mut(); vert_count.max(0) as usize];
+        self.update(std::ptr::null_mut());
 
-        // Shrink tables.
-        s.host.shrink(Pool::Vectors);
-        s.host.shrink(Pool::Surfs);
-
-        // Allocate changing structures.
-        s.i_node_rover = s.expand_db(Pool::Nodes, 512, MAX_NODES);
-        s.i_vert_rover = s.expand_db(Pool::Verts, 512, MAXINT);
-        let node_count = s.host.num(Pool::Nodes) - s.i_original_top_node;
-        s.node_maps = vec![FActorIndex::default(); node_count.max(0) as usize];
-        let vert_count = s.host.num(Pool::Verts) - s.i_original_top_vert;
-        s.vert_pool_owners = vec![std::ptr::null_mut(); vert_count.max(0) as usize];
-
-        // Now setup and update all brushes.
-        s.update(std::ptr::null_mut());
-
-        let name = s.host.level_full_name();
-        s.host.debug(
+        let name = self.host.level_full_name();
+        self.host.debug(
             LogKind::Init,
             &format!("Initialized moving brush tracker for {name}"),
         );
-        s
     }
 
-    /// `~FMovingBrushTracker`. Consumes the tracker and returns the host.
-    pub fn shutdown(mut self) -> H {
-        let h = &mut self.host;
-        h.remove(
-            Pool::Surfs,
-            self.i_original_top_surf,
-            h.num(Pool::Surfs) - self.i_original_top_surf,
-        );
-        h.remove(
-            Pool::Points,
-            self.i_original_top_point,
-            h.num(Pool::Points) - self.i_original_top_point,
-        );
-        h.remove(
-            Pool::Vectors,
-            self.i_original_top_vector,
-            h.num(Pool::Vectors) - self.i_original_top_vector,
-        );
-        h.remove(
-            Pool::Nodes,
-            self.i_original_top_node,
-            h.num(Pool::Nodes) - self.i_original_top_node,
-        );
-        h.remove(
-            Pool::Verts,
-            self.i_original_top_vert,
-            h.num(Pool::Verts) - self.i_original_top_vert,
-        );
-        let num = h.num(Pool::Nodes);
-        for n in h.nodes_mut().iter_mut().take(num as usize) {
-            if n.i_front >= num {
-                n.i_front = INDEX_NONE;
-            }
-            if n.i_back >= num {
-                n.i_back = INDEX_NONE;
-            }
-            if n.i_plane >= num {
-                n.i_plane = INDEX_NONE;
-            }
+    fn shutdown(&mut self) {
+        let surf_count = self.host.num(Pool::Surfs) - state_field!(self, i_original_top_surf);
+        let surf_start = state_field!(self, i_original_top_surf);
+        self.host.remove(Pool::Surfs, surf_start, surf_count);
+
+        let point_count = self.host.num(Pool::Points) - state_field!(self, i_original_top_point);
+        let point_start = state_field!(self, i_original_top_point);
+        self.host.remove(Pool::Points, point_start, point_count);
+
+        let vector_count = self.host.num(Pool::Vectors) - state_field!(self, i_original_top_vector);
+        let vector_start = state_field!(self, i_original_top_vector);
+        self.host.remove(Pool::Vectors, vector_start, vector_count);
+
+        let node_count = self.host.num(Pool::Nodes) - state_field!(self, i_original_top_node);
+        let node_start = state_field!(self, i_original_top_node);
+        self.host.remove(Pool::Nodes, node_start, node_count);
+
+        let vert_count = self.host.num(Pool::Verts) - state_field!(self, i_original_top_vert);
+        let vert_start = state_field!(self, i_original_top_vert);
+        self.host.remove(Pool::Verts, vert_start, vert_count);
+        let num = self.host.num(Pool::Nodes);
+        for n in self.host.nodes_mut().iter_mut().take(num as usize) {
+            if n.i_front >= num { n.i_front = INDEX_NONE; }
+            if n.i_back >= num { n.i_back = INDEX_NONE; }
+            if n.i_plane >= num { n.i_plane = INDEX_NONE; }
         }
         let name = self.host.level_full_name();
         self.host.debug(
             LogKind::Init,
             &format!("Shut down moving brush tracker for {name}"),
         );
-        self.host
     }
 
-    /// `FMovingBrushTracker::CountBytes`. Returns (num_bytes, max_bytes) per array
-    /// in the order NodeMaps, VertPoolOwners, PointOwners, PointFreeLinks.
-    pub fn count_bytes(&self) -> [(usize, usize); 4] {
-        let f = |len: usize, cap: usize, elem: usize| (len * elem, cap * elem);
-        [
-            f(
-                self.node_maps.len(),
-                self.node_maps.capacity(),
-                size_of::<FActorIndex>(),
-            ),
-            f(
-                self.vert_pool_owners.len(),
-                self.vert_pool_owners.capacity(),
-                size_of::<Obj>(),
-            ),
-            f(
-                self.point_owners.len(),
-                self.point_owners.capacity(),
-                size_of::<Obj>(),
-            ),
-            f(
-                self.point_free_links.len(),
-                self.point_free_links.capacity(),
-                size_of::<i32>(),
-            ),
-        ]
-    }
-
-    /// The host the tracker drives (model state, for replay tests and diagnostics).
-    pub fn host(&self) -> &H {
-        &self.host
-    }
-
-    /// Mutable host access (replay tests apply pose and actor writes here).
-    pub fn host_mut(&mut self) -> &mut H {
-        &mut self.host
-    }
-
-    /// `SurfIsDynamic`.
-    pub fn surf_is_dynamic(&self, i_surf: i32) -> bool {
-        i_surf >= self.i_original_top_surf
-    }
-
-    /// `Flush`.
-    pub fn flush(&mut self, actor: Obj) {
+    fn flush(&mut self, actor: Obj) {
         if self.host.is_moving_brush(actor) {
             self.flush_actor_brush(actor);
         }
     }
 
-    /// `Update`. `in_actor` may be null (update every moving brush).
-    pub fn update(&mut self, in_actor: Obj) {
+    fn update(&mut self, in_actor: Obj) {
         let actor = if !in_actor.is_null() && self.host.is_mover(in_actor) {
             in_actor
         } else {
             std::ptr::null_mut()
         };
-        self.group.clear();
+        state_field!(self, group).clear();
         if actor.is_null() {
             // Update all actor brushes.
             for i in 0..self.host.level_actor_count() {
@@ -406,9 +417,9 @@ impl<H: DynBspHost> DynBsp<H> {
 
         // Make a complete list of all actors that need flushing. The C++ walk
         // starts at the list head, so only actors present now are visited.
-        let n = self.group.len();
+        let n = state_field!(self, group).len();
         for idx in (0..n).rev() {
-            let a = self.group[idx];
+            let a = state_field!(self, group)[idx];
             let brush = self.host.brush(a);
             let mut i_node = self.host.brush_mover_link(brush);
             while i_node != INDEX_NONE {
@@ -419,16 +430,16 @@ impl<H: DynBspHost> DynBsp<H> {
         }
 
         // Recursively flush all affected brushes.
-        for idx in (0..self.group.len()).rev() {
-            let a = self.group[idx];
+        for idx in (0..state_field!(self, group).len()).rev() {
+            let a = state_field!(self, group)[idx];
             self.flush_actor_brush(a);
         }
 
         // Add all moving brush sporadic data to the world.
-        for idx in (0..self.group.len()).rev() {
-            let actor = self.group[idx];
+        for idx in (0..state_field!(self, group).len()).rev() {
+            let actor = state_field!(self, group)[idx];
             self.host.set_assimilated(actor, false);
-            self.add_actor = actor;
+            state_field!(self, add_actor) = actor;
             let brush = self.host.brush(actor);
 
             // Build transformed polys.
@@ -449,11 +460,11 @@ impl<H: DynBspHost> DynBsp<H> {
             precompute_sphere_filter(self.host.nodes_mut(), sphere);
 
             // Go through list of all brush FPolys and update their corresponding Bsp surfaces.
-            self.prev_link = PrevLink::Brush(brush);
+            state_field!(self, prev_link) = PrevLink::Brush(brush);
             for poly in transformed.iter() {
                 let i_surf = poly.i_link;
                 let surf = self.surf(i_surf);
-                self.fpoly_normal = poly.normal;
+                state_field!(self, fpoly_normal) = poly.normal;
                 self.set_point(surf.p_base, poly.base);
                 self.set_vector(surf.v_normal, poly.normal);
                 self.set_vector(surf.v_texture_u, poly.texture_u);
@@ -471,7 +482,7 @@ impl<H: DynBspHost> DynBsp<H> {
             let mut i_node = self.host.brush_mover_link(brush);
             while i_node != INDEX_NONE {
                 let mut node = self.node(i_node);
-                let owner = self.node_maps[self.map_index(i_node)].actor;
+                let owner = state_field!(self, node_maps)[self.map_index(i_node)].actor;
                 debug_assert!(owner == actor);
                 node.node_flags &= !NF_IS_NEW;
                 self.set_node(i_node, node);
@@ -491,7 +502,7 @@ impl<H: DynBspHost> DynBsp<H> {
     }
 
     fn map_index(&self, i_node: i32) -> usize {
-        (i_node - self.i_original_top_node) as usize
+        (i_node - state_field!(self, i_original_top_node)) as usize
     }
 
     fn surf(&mut self, i: i32) -> FBspSurf {
@@ -519,7 +530,7 @@ impl<H: DynBspHost> DynBsp<H> {
     }
 
     fn set_prev_link(&mut self, v: i32) {
-        match self.prev_link {
+        match state_field!(self, prev_link) {
             PrevLink::Brush(b) => self.host.set_brush_mover_link(b, v),
             PrevLink::Node(i) => {
                 let mut n = self.node(i);
@@ -545,15 +556,15 @@ impl<H: DynBspHost> DynBsp<H> {
 
     /// `NewThing` for `NodeMaps`.
     fn new_node_index(&mut self, owner: FActorIndex) -> i32 {
-        let num_things = self.i_original_top_node;
+        let num_things = state_field!(self, i_original_top_node);
         let max_things = self.host.num(Pool::Nodes);
-        let start = self.i_node_rover;
-        let mut top = self.i_node_rover;
+        let start = state_field!(self, i_node_rover);
+        let mut top = state_field!(self, i_node_rover);
         while top < max_things {
             let slot = (top - num_things) as usize;
-            if self.node_maps[slot].actor.is_null() {
-                self.node_maps[slot] = owner;
-                self.i_node_rover = top;
+            if state_field!(self, node_maps)[slot].actor.is_null() {
+                state_field!(self, node_maps)[slot] = owner;
+                state_field!(self, i_node_rover) = top;
                 return top;
             }
             top += 1;
@@ -561,86 +572,86 @@ impl<H: DynBspHost> DynBsp<H> {
         top = num_things;
         while top < start {
             let slot = (top - num_things) as usize;
-            if self.node_maps[slot].actor.is_null() {
-                self.node_maps[slot] = owner;
-                self.i_node_rover = top;
+            if state_field!(self, node_maps)[slot].actor.is_null() {
+                state_field!(self, node_maps)[slot] = owner;
+                state_field!(self, i_node_rover) = top;
                 return top;
             }
             top += 1;
         }
-        self.i_node_rover = top;
+        state_field!(self, i_node_rover) = top;
         INDEX_NONE
     }
 
     /// `NewThang` for points.
     fn new_point(&mut self, owner: Obj) -> i32 {
-        let first = self.i_first_roving_point;
-        let index = if self.i_free_points != INDEX_NONE {
-            let index = self.i_free_points;
-            self.i_free_points = self.point_free_links[(index - first) as usize];
+        let first = state_field!(self, i_first_roving_point);
+        let index = if state_field!(self, i_free_points) != INDEX_NONE {
+            let index = state_field!(self, i_free_points);
+            state_field!(self, i_free_points) = state_field!(self, point_free_links)[(index - first) as usize];
             index
         } else {
             let index = self.host.num(Pool::Points);
             self.host.set_num(Pool::Points, index + 1);
-            self.point_owners.push(std::ptr::null_mut());
-            self.point_free_links.push(INDEX_NONE);
+            state_field!(self, point_owners).push(std::ptr::null_mut());
+            state_field!(self, point_free_links).push(INDEX_NONE);
             index
         };
         let hi = (index - first) as usize;
-        self.point_owners[hi] = owner;
-        self.point_free_links[hi] = INDEX_NONE;
+        state_field!(self, point_owners)[hi] = owner;
+        state_field!(self, point_free_links)[hi] = INDEX_NONE;
         index
     }
 
     /// `FreeThang` for points.
     fn free_point(&mut self, index: i32) {
-        let hi = (index - self.i_first_roving_point) as usize;
-        self.point_owners[hi] = std::ptr::null_mut();
-        self.point_free_links[hi] = self.i_free_points;
-        self.i_free_points = index;
+        let hi = (index - state_field!(self, i_first_roving_point)) as usize;
+        state_field!(self, point_owners)[hi] = std::ptr::null_mut();
+        state_field!(self, point_free_links)[hi] = state_field!(self, i_free_points);
+        state_field!(self, i_free_points) = index;
     }
 
     /// `NewVertPoolIndex`.
     fn new_vert_pool_index(&mut self, actor: Obj, num_verts: i32) -> i32 {
-        let i_start = self.i_vert_rover;
+        let i_start = state_field!(self, i_vert_rover);
         let mut num_free = 0;
-        let mut owner_index = self.i_vert_rover - self.i_original_top_vert;
-        while self.i_vert_rover + num_verts < self.host.num(Pool::Verts) {
-            if self.vert_pool_owners[owner_index as usize].is_null() {
+        let mut owner_index = state_field!(self, i_vert_rover) - state_field!(self, i_original_top_vert);
+        while state_field!(self, i_vert_rover) + num_verts < self.host.num(Pool::Verts) {
+            if state_field!(self, vert_pool_owners)[owner_index as usize].is_null() {
                 num_free += 1;
                 if num_free >= num_verts {
                     while num_free > 0 {
-                        self.vert_pool_owners[owner_index as usize] = actor;
+                        state_field!(self, vert_pool_owners)[owner_index as usize] = actor;
                         owner_index -= 1;
                         num_free -= 1;
                     }
-                    return self.i_vert_rover + 1 - num_verts;
+                    return state_field!(self, i_vert_rover) + 1 - num_verts;
                 }
             } else {
                 num_free = 0;
             }
-            self.i_vert_rover += 1;
+            state_field!(self, i_vert_rover) += 1;
             owner_index += 1;
         }
 
-        self.i_vert_rover = self.i_original_top_vert;
+        state_field!(self, i_vert_rover) = state_field!(self, i_original_top_vert);
         num_free = 0;
         owner_index = 0;
-        while self.i_vert_rover + num_verts < i_start {
-            if self.vert_pool_owners[owner_index as usize].is_null() {
+        while state_field!(self, i_vert_rover) + num_verts < i_start {
+            if state_field!(self, vert_pool_owners)[owner_index as usize].is_null() {
                 num_free += 1;
                 if num_free >= num_verts {
                     while num_free > 0 {
-                        self.vert_pool_owners[owner_index as usize] = actor;
+                        state_field!(self, vert_pool_owners)[owner_index as usize] = actor;
                         owner_index -= 1;
                         num_free -= 1;
                     }
-                    return self.i_vert_rover + 1 - num_verts;
+                    return state_field!(self, i_vert_rover) + 1 - num_verts;
                 }
             } else {
                 num_free = 0;
             }
-            self.i_vert_rover += 1;
+            state_field!(self, i_vert_rover) += 1;
             owner_index += 1;
         }
         INDEX_NONE
@@ -649,15 +660,15 @@ impl<H: DynBspHost> DynBsp<H> {
     /// `FreeVertPoolIndex`.
     fn free_vert_pool_index(&mut self, i: i32, num_verts: i32) {
         for j in 0..num_verts {
-            let slot = (j.wrapping_add(i).wrapping_sub(self.i_original_top_vert)) as usize;
-            self.vert_pool_owners[slot] = std::ptr::null_mut();
+            let slot = (j.wrapping_add(i).wrapping_sub(state_field!(self, i_original_top_vert))) as usize;
+            state_field!(self, vert_pool_owners)[slot] = std::ptr::null_mut();
         }
     }
 
     fn mover_drop_warning(&mut self, pool: &str, i_surf: i32) {
         let n = MOVER_DROPPED_POLYS.fetch_add(1, Ordering::Relaxed) + 1;
         if n <= 32 || n % 1024 == 0 {
-            let name = self.host.actor_name(self.add_actor);
+            let name = self.host.actor_name(state_field!(self, add_actor));
             self.host.debug(
                 LogKind::Warning,
                 &format!(
@@ -773,7 +784,7 @@ impl<H: DynBspHost> DynBsp<H> {
 
         // Create a new sporadic node.
         let i_node = self.new_node_index(FActorIndex {
-            actor: self.add_actor,
+            actor: state_field!(self, add_actor),
             index: i_parent,
         });
         if i_node == INDEX_NONE {
@@ -847,19 +858,19 @@ impl<H: DynBspHost> DynBsp<H> {
         self.set_node(i_first_parent, fp);
 
         // Allocate this node's vertex pool and vertices.
-        let i_vert_pool = self.new_vert_pool_index(self.add_actor, ed.num_vertices);
+        let i_vert_pool = self.new_vert_pool_index(state_field!(self, add_actor), ed.num_vertices);
         node.i_vert_pool = i_vert_pool;
         self.set_node(i_node, node);
         if i_vert_pool == INDEX_NONE {
             self.mover_drop_warning("vertex pool", i_add_surf);
             let slot = self.map_index(i_node);
-            self.node_maps[slot] = FActorIndex::default();
+            state_field!(self, node_maps)[slot] = FActorIndex::default();
             return;
         }
 
         // Add vertices.
         for i in 0..ed.num_vertices {
-            let p = self.new_point(self.add_actor);
+            let p = self.new_point(state_field!(self, add_actor));
             if p == INDEX_NONE {
                 self.mover_drop_warning("point pool", i_add_surf);
                 for j in (0..i).rev() {
@@ -867,7 +878,7 @@ impl<H: DynBspHost> DynBsp<H> {
                     self.free_point(pv);
                 }
                 let slot = self.map_index(i_node);
-                self.node_maps[slot] = FActorIndex::default();
+                state_field!(self, node_maps)[slot] = FActorIndex::default();
                 return;
             }
             self.set_vert(
@@ -889,7 +900,7 @@ impl<H: DynBspHost> DynBsp<H> {
         }
         self.set_node(i_parent, parent_node);
         self.set_prev_link(i_node);
-        self.prev_link = PrevLink::Node(i_node);
+        state_field!(self, prev_link) = PrevLink::Node(i_node);
     }
 
     /// `FilterFPoly`.
@@ -929,7 +940,7 @@ impl<H: DynBspHost> DynBsp<H> {
             };
             let at_back = match split {
                 SP_COPLANAR | SP_FRONT => {
-                    if split == SP_COPLANAR && dot3(xyz(node.plane), self.fpoly_normal) >= 0.0 {
+                    if split == SP_COPLANAR && dot3(xyz(node.plane), state_field!(self, fpoly_normal)) >= 0.0 {
                         i_coplanar = i_node;
                     }
                     // Front:
@@ -982,7 +993,7 @@ impl<H: DynBspHost> DynBsp<H> {
     fn add_group_actor(&mut self, actor: Obj) {
         if !self.host.assimilated(actor) {
             self.host.set_assimilated(actor, true);
-            self.group.push(actor);
+            state_field!(self, group).push(actor);
             let loc = self.host.location(actor);
             let rot = self.host.rotation(actor);
             self.host.set_saved_pos(actor, loc);
@@ -1005,7 +1016,7 @@ impl<H: DynBspHost> DynBsp<H> {
             if node.i_plane != INDEX_NONE {
                 self.force_group_flush(node.i_plane);
             }
-            let owner = self.node_maps[self.map_index(i_node)].actor;
+            let owner = state_field!(self, node_maps)[self.map_index(i_node)].actor;
             if !owner.is_null() {
                 self.add_group_actor(owner);
             }
@@ -1018,7 +1029,7 @@ impl<H: DynBspHost> DynBsp<H> {
         let mut i_node = self.host.brush_mover_link(brush);
         while i_node != INDEX_NONE {
             let node = self.node(i_node);
-            let i_parent = self.node_maps[self.map_index(i_node)].index;
+            let i_parent = state_field!(self, node_maps)[self.map_index(i_node)].index;
             let mut parent = self.node(i_parent);
 
             // Remove references to this node from its parents.
@@ -1038,7 +1049,7 @@ impl<H: DynBspHost> DynBsp<H> {
             }
             self.free_vert_pool_index(node.i_vert_pool, node.num_vertices as i32);
             let slot = self.map_index(i_node);
-            self.node_maps[slot] = FActorIndex::default();
+            state_field!(self, node_maps)[slot] = FActorIndex::default();
             i_node = node.i_render_bound;
         }
         self.host.set_brush_mover_link(brush, INDEX_NONE);
@@ -1085,19 +1096,17 @@ pub struct Hp2DynBspServices {
     pub debug: unsafe extern "C" fn(kind: u32, msg: *const c_char),
 }
 
-/// `DynBspHost` backed by the C services table and one `ULevel`/`UModel` pair.
-pub struct CHost {
-    svc: &'static Hp2DynBspServices,
+/// Short-lived `DynBspHost` backed by the C services and a level/model pair.
+pub struct CHost<'a> {
+    svc: &'a Hp2DynBspServices,
     level: *mut c_void,
     model: *mut c_void,
 }
 
-impl CHost {
-    /// # Safety
-    /// `svc` must outlive the tracker (it is a C++ global), and `level`/`model`
-    /// must stay valid for the tracker's lifetime.
+impl<'a> CHost<'a> {
+    /// The services and associated level/model remain live for this operation.
     pub unsafe fn new(
-        svc: &'static Hp2DynBspServices,
+        svc: &'a Hp2DynBspServices,
         level: *mut c_void,
         model: *mut c_void,
     ) -> Self {
@@ -1107,8 +1116,8 @@ impl CHost {
     fn pool_slice<T>(&mut self, pool: Pool) -> &mut [T] {
         let n = self.num(pool).max(0) as usize;
         // SAFETY: the model array holds `num(pool)` live elements of `T`; no
-        // resize happens while this borrow is alive (tracker methods never
-        // hold two pool borrows at once).
+        // resize happens while this borrow is alive. Host slices remain local
+        // to the current executor operation.
         unsafe {
             let p = (self.svc.array_data)(self.model, pool as u32).cast::<T>();
             if n == 0 || p.is_null() {
@@ -1144,9 +1153,9 @@ impl Pool {
 // `Obj` values are opaque C++ handles produced by the host services table, not
 // caller-supplied memory; every dereference happens inside the C++ thunks.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-impl DynBspHost for CHost {
+impl DynBspHost for CHost<'_> {
     fn num(&self, pool: Pool) -> i32 {
-        // SAFETY: services are valid for the tracker's lifetime (see `CHost::new`).
+        // SAFETY: services are valid for the host operation (see `CHost::new`).
         unsafe { (self.svc.array_num)(self.model, pool.id()) }
     }
     fn set_num(&mut self, pool: Pool, n: i32) {
@@ -1301,5 +1310,118 @@ impl DynBspHost for CHost {
         };
         let c = CString::new(msg.replace('\0', "")).unwrap_or_default();
         unsafe { (self.svc.debug)(k, c.as_ptr()) }
+    }
+}
+
+/// Checked native leaves for the `UpdateMovingBrushTracker` wrapper.
+///
+/// The original wrapper's null and moving-brush policy belongs in Rust; C++
+/// retains only virtual dispatch and the exception boundary around each call.
+#[repr(C)]
+pub struct Hp2MovingBrushTrackerServices {
+    pub is_moving_brush: unsafe extern "C" fn(*mut c_void, *mut i32) -> i32,
+    pub update: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+}
+
+/// Applies the source optional-tracker and moving-brush guard before updating.
+///
+/// # Safety
+/// Non-null tracker/actor handles are live for their callbacks.
+pub unsafe fn update_moving_brush_tracker_with<E>(
+    tracker: *mut c_void,
+    actor: *mut c_void,
+    is_moving_brush: impl FnOnce(*mut c_void) -> Result<bool, E>,
+    update: impl FnOnce(*mut c_void, *mut c_void) -> Result<(), E>,
+) -> Result<(), E> {
+    if !tracker.is_null() && !actor.is_null() && is_moving_brush(actor)? {
+        update(tracker, actor)?;
+    }
+    Ok(())
+}
+
+pub unsafe fn update_moving_brush_tracker(
+    svc: &Hp2MovingBrushTrackerServices,
+    tracker: *mut c_void,
+    actor: *mut c_void,
+) -> Result<(), i32> {
+    unsafe {
+        update_moving_brush_tracker_with(tracker, actor, |actor| {
+            let mut moving = 0;
+            let status = (svc.is_moving_brush)(actor, &mut moving);
+            if status != 0 { return Err(status); }
+            Ok(moving != 0)
+        }, |tracker, actor| {
+            let status = (svc.update)(tracker, actor);
+            if status != 0 { return Err(status); }
+            Ok(())
+        })
+    }
+}
+
+#[cfg(test)]
+mod moving_brush_tracker_tests {
+    use super::*;
+
+    struct State {
+        is_moving: i32,
+        is_moving_status: i32,
+        update_status: i32,
+        calls: Vec<&'static str>,
+    }
+
+    unsafe extern "C" fn is_moving(actor: *mut c_void, out: *mut i32) -> i32 {
+        unsafe {
+            let state = &mut *actor.cast::<State>();
+            state.calls.push("is-moving");
+            *out = state.is_moving;
+            state.is_moving_status
+        }
+    }
+
+    unsafe extern "C" fn update(_: *mut c_void, actor: *mut c_void) -> i32 {
+        unsafe {
+            let state = &mut *actor.cast::<State>();
+            state.calls.push("update");
+            state.update_status
+        }
+    }
+
+    fn services() -> Hp2MovingBrushTrackerServices {
+        Hp2MovingBrushTrackerServices {
+            is_moving_brush: is_moving,
+            update,
+        }
+    }
+
+    #[test]
+    fn skips_null_and_nonmoving_inputs() {
+        let mut state = State {
+            is_moving: 0,
+            is_moving_status: 0,
+            update_status: 0,
+            calls: vec![],
+        };
+        let actor = (&mut state as *mut State).cast();
+        unsafe {
+            update_moving_brush_tracker(&services(), std::ptr::null_mut(), actor).unwrap();
+            update_moving_brush_tracker(&services(), actor, actor).unwrap();
+        }
+        assert_eq!(state.calls, ["is-moving"]);
+    }
+
+    #[test]
+    fn updates_only_moving_actors_and_preserves_errors() {
+        let mut state = State {
+            is_moving: 1,
+            is_moving_status: 0,
+            update_status: 9,
+            calls: vec![],
+        };
+        let actor = (&mut state as *mut State).cast();
+        assert_eq!(
+            unsafe { update_moving_brush_tracker(&services(), actor, actor) },
+            Err(9)
+        );
+        assert_eq!(state.calls, ["is-moving", "update"]);
     }
 }

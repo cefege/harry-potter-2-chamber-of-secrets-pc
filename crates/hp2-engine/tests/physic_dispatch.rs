@@ -5,6 +5,7 @@ const DISPATCH_INPUT_WORDS: usize = 67;
 const DISPATCH_OUTPUT_WORDS: usize = 57;
 
 fn run_dispatch(seed: u64, w: &[u32]) -> [u32; DISPATCH_OUTPUT_WORDS] {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     assert_eq!(w.len(), DISPATCH_INPUT_WORDS);
     let action = w[58];
     let mut subj = vec![0u64; 1024];
@@ -84,6 +85,8 @@ fn run_dispatch(seed: u64, w: &[u32]) -> [u32; DISPATCH_OUTPUT_WORDS] {
         (*p).accel_rate = f(w[20]);
         (*p).set_b_is_walking(w[15] != 0);
         (*p).set_b_from_wall(w[16] != 0);
+        (*a).mesh = subj_p as *mut c_void;
+        (*a).collide_type = CT_SHAPE;
     }
     let hit = blank_hit(1.0);
     let mut out = [0u32; DISPATCH_OUTPUT_WORDS];
@@ -91,7 +94,7 @@ fn run_dispatch(seed: u64, w: &[u32]) -> [u32; DISPATCH_OUTPUT_WORDS] {
         let a = subj_p as *mut AActor;
         let p = subj_p as *mut APawn;
         match action {
-            0 => physic::dispatch::find_base(a, &SERVICES),
+            0 => physic::dispatch::find_base(a, &SERVICES).expect("checked physics fixture"),
             1 => physic::dispatch::set_physics(
                 a,
                 &SERVICES,
@@ -101,11 +104,16 @@ fn run_dispatch(seed: u64, w: &[u32]) -> [u32; DISPATCH_OUTPUT_WORDS] {
                 } else {
                     std::ptr::null_mut()
                 },
-            ),
-            2 => physic::dispatch::perform_physics_actor(a, &SERVICES, f(w[56])),
-            3 => physic::dispatch::perform_physics_pawn(p, &SERVICES, f(w[56])),
-            4 => physic::dispatch::physics_rotation_actor(a, &SERVICES, f(w[56])),
-            _ => physic::dispatch::physics_rotation_pawn(p, &SERVICES, f(w[56]), v3(&w[61..64])),
+            )
+            .expect("checked physics fixture"),
+            2 => physic::dispatch::perform_physics_actor(a, &SERVICES, f(w[56]))
+                .expect("checked physics fixture"),
+            3 => physic::dispatch::perform_physics_pawn(p, &SERVICES, f(w[56]))
+                .expect("checked physics fixture"),
+            4 => physic::dispatch::physics_rotation_actor(a, &SERVICES, f(w[56]))
+                .expect("checked physics fixture"),
+            _ => physic::dispatch::physics_rotation_pawn(p, &SERVICES, f(w[56]), v3(&w[61..64]))
+                .expect("checked physics fixture"),
         }
         let a = &*(subj_p as *const AActor);
         let p = &*(subj_p as *const APawn);
@@ -232,14 +240,9 @@ fn physic_dispatch_matches_original() {
     assert!(find_rebase);
 }
 
-unsafe extern "C" fn mutate_physics_on_base(actor: *mut c_void, _base: *mut c_void) {
-    unsafe {
-        (*(actor as *mut AActor)).physics = 2;
-    }
-}
-
 #[test]
 fn set_physics_preserves_motion_after_reentrant_base_callback() {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     let mut actor = unsafe { std::mem::zeroed::<AActor>() };
     actor.physics = 1;
     actor.velocity = FVector {
@@ -253,11 +256,10 @@ fn set_physics_preserves_motion_after_reentrant_base_callback() {
         z: -1.0,
     };
     let floor = Box::into_raw(Box::new(unsafe { std::mem::zeroed::<AActor>() }));
-    let mut svc = unsafe { std::ptr::read(&SERVICES) };
-    svc.set_base = mutate_physics_on_base;
-    unsafe {
-        physic::dispatch::set_physics(&mut actor, &svc, 0, floor);
-    }
+    MUTATE_PHYSICS_ON_BASE_CHANGE.with(|f| f.set(true));
+    let result = unsafe { physic::dispatch::set_physics(&mut actor, &SERVICES, 0, floor) };
+    MUTATE_PHYSICS_ON_BASE_CHANGE.with(|f| f.set(false));
+    result.expect("checked physics fixture");
     assert_eq!(actor.physics, 2);
     assert_eq!(actor.velocity.x, 4.0);
     assert_eq!(actor.acceleration.z, -1.0);

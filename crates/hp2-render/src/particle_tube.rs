@@ -3,13 +3,13 @@
 //! `^`/`|`, `FVector::Rotation`, `FCoords` multiplies by a point, vector, and
 //! rotator, `FVector::DivSizeApprox`, and `FTransform::Project`.
 //!
-//! Trig and reciprocal-sqrt come from `GMath` through `Hp2RenderServices`
-//! (`sin_tab`, `cos_tab`, `div_sqrt_approx`); no table is copied here.
+//! Trig and reciprocal-sqrt come from `GMath` through `RenderMath`
+//! (`sin_tab`, `cos_tab`, `gmath_div_sqrt_approx`); no table is copied here.
 //! Float contraction follows `particle.rs`: each `a*b + c` inside one engine
 //! expression is `madd`, which is one `fma` on arm64 under `-ffp-contract=on`.
 //! Output goes to a caller-owned `FTransTexture` buffer (12 entries for
-//! TriTube, 4 for PolyStrip). The C++ side keeps the previous-particle state and
-//! passes it in.
+//! TriTube, 4 for PolyStrip). `particle_system` owns previous-particle state
+//! and passes it to these shared kernels.
 
 use hp2_abi::render_particle::{FTransTexture, FTransform};
 use hp2_abi::{FCoords, FVector};
@@ -17,7 +17,7 @@ use hp2_abi::{FCoords, FVector};
 use crate::particle::{
     FVF_OUT_ALL, ParticleFrame, combine_clip_codes, compute_outcode, madd, set_uv,
 };
-use crate::services::Hp2RenderServices;
+use crate::particle_shard::RenderMath;
 use crate::sprite::size_squared;
 
 /// `appAtan2`/`appSqrt` operate in double; `PI` is the engine's `FLOAT` constant.
@@ -92,14 +92,13 @@ fn cross(a: FVector, b: FVector) -> FVector {
 
 /// `FVector::DivSizeApprox`: `GMath.DivSqrtApprox(SizeSquared() + 1e-12f)`.
 #[inline]
-fn div_size_approx(svc: &Hp2RenderServices, v: FVector) -> f32 {
-    // SAFETY: the services table is supplied by the C++ side for the call.
-    unsafe { (svc.gmath_div_sqrt_approx)(size_squared(v) + 1e-12_f32) }
+fn div_size_approx(svc: &impl RenderMath, v: FVector) -> f32 {
+    svc.gmath_div_sqrt_approx(size_squared(v) + 1e-12_f32)
 }
 
 /// `V *= V.DivSizeApprox()`: the scale is taken from the value before the multiply.
 #[inline]
-fn scale_div_approx(svc: &Hp2RenderServices, v: FVector) -> FVector {
+fn scale_div_approx(svc: &impl RenderMath, v: FVector) -> FVector {
     scale(v, div_size_approx(svc, v))
 }
 
@@ -162,7 +161,7 @@ fn coords_mul_point(c: &FCoords, p: FVector) -> FCoords {
 /// `FCoords::operator*=(FRotator)`: yaw, then pitch, then roll. Each step is
 /// `*this *= FCoords(0, X, Y, Z)` with the `GMath` trig values, as in `UnMath.h`.
 fn coords_mul_rotator(
-    svc: &Hp2RenderServices,
+    svc: &impl RenderMath,
     c: &FCoords,
     yaw: i32,
     pitch: i32,
@@ -173,9 +172,7 @@ fn coords_mul_rotator(
         y: 0.0,
         z: 0.0,
     };
-    let (sin, cos) = (svc.sin_tab, svc.cos_tab);
-
-    let (sy, cy) = unsafe { (sin(yaw), cos(yaw)) };
+    let (sy, cy) = (svc.sin_tab(yaw), svc.cos_tab(yaw));
     let c = coords_mul_coords(
         c,
         &FCoords {
@@ -198,7 +195,7 @@ fn coords_mul_rotator(
         },
     );
 
-    let (sp, cp) = unsafe { (sin(pitch), cos(pitch)) };
+    let (sp, cp) = (svc.sin_tab(pitch), svc.cos_tab(pitch));
     let c = coords_mul_coords(
         &c,
         &FCoords {
@@ -221,7 +218,7 @@ fn coords_mul_rotator(
         },
     );
 
-    let (sr, cr) = unsafe { (sin(roll), cos(roll)) };
+    let (sr, cr) = (svc.sin_tab(roll), svc.cos_tab(roll));
     coords_mul_coords(
         &c,
         &FCoords {
@@ -303,7 +300,7 @@ fn clip_code(frame: &ParticleFrame, tt: &mut FTransTexture) {
 /// strip vector.
 #[allow(clippy::too_many_arguments)]
 pub fn tritube_setup_verts(
-    svc: &Hp2RenderServices,
+    svc: &impl RenderMath,
     frame: &ParticleFrame,
     frame_coords: &FCoords,
     tex_usize: i32,
@@ -454,7 +451,7 @@ pub fn tritube_setup_verts(
 /// the combined clip byte is returned. Both state vectors are updated.
 #[allow(clippy::too_many_arguments)]
 pub fn poly_strip_setup_verts(
-    svc: &Hp2RenderServices,
+    svc: &impl RenderMath,
     frame: &ParticleFrame,
     frame_coords: &FCoords,
     tex_usize: i32,

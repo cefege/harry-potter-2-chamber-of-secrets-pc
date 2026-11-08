@@ -5,7 +5,10 @@
 // `FindBase` side effects, so every record's output words and log digest must
 // match bit-for-bit.
 
-use std::cell::RefCell;
+#[path = "actor_services/mock.rs"]
+mod actor_services_mock;
+
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::ptr::null_mut;
@@ -14,6 +17,7 @@ use hp2_abi::FVector;
 use hp2_abi::engine::generated::{
     AActor, ACarcass, ADecoration, APawn, AZoneInfo, FCheckResult, FRotator,
 };
+use hp2_engine::actor::CT_SHAPE;
 use hp2_engine::physic::{self, Hp2PhysicServices};
 
 const ARG0: usize = 56;
@@ -36,14 +40,8 @@ struct Scene {
     zone: usize,
     pool: [usize; 3],
     pool_class: [u32; 3],
-    projectile_max_speed: f32,
     motion_action: u32,
     motion_mover_pool: [bool; 3],
-    trailer_prepivot: [f32; 3],
-    trailer_mass: f32,
-    trailer_draw_type: i32,
-    trailer_anim_bone: i32,
-    trailer_flags: u32,
     trailer_bone_coords: [f32; 12],
 }
 
@@ -339,9 +337,41 @@ fn slc_impl(
     ret
 }
 
-// The harness never assigns `Base`, so it stays NULL and every SetBase path runs.
-fn set_base_impl(s: &mut Scene, base: usize) {
-    lg(s, format!("set_base {}\n", pidx(s, base)));
+thread_local! {
+    // Lets `set_physics_preserves_motion_after_reentrant_base_callback`
+    // (physic_dispatch.rs) redirect the shared `t_base_change` hook to a
+    // reentrant physics mutation, instead of the fixture's log-and-reset
+    // behavior, without a second `Hp2ActorServices` publish (the table is
+    // process-global).
+    static MUTATE_PHYSICS_ON_BASE_CHANGE: Cell<bool> = const { Cell::new(false) };
+}
+/// `Hp2ActorServices::actor_event_base_change`: SetBase's notify hook, replaying
+/// the harness's unconditional `set_base <pidx>` log line. `actor::set_base`
+/// writes `Base` before firing this event, so the destination is read back
+/// here, then the field is reset to null — matching the harness's `SetBase`
+/// override, which never writes `Base` at all, so every later production
+/// guard check (`new_base != Base`) sees the same baseline the real engine
+/// would. The one record that needs `Base` non-null going in is `run_case`'s
+/// literal `"mount"` case, whose `hit.actor` is null: without a non-null
+/// `Base` already in place, `mount`'s own `set_base` guard would see
+/// `null != null` and skip the call, dropping the log line the original
+/// engine always emits. `run_case` seeds a local zeroed buffer into the
+/// actor's `Base` for that one record, right before dispatching to `mount`;
+/// every other call site (including the swim/walk chains that reach `mount`
+/// through `step_up`) passes a real non-null target, so the guard already
+/// opens on its own and no seeding is needed there.
+unsafe extern "C" fn t_base_change(actor: *mut c_void) -> i32 {
+    if MUTATE_PHYSICS_ON_BASE_CHANGE.with(Cell::get) {
+        unsafe { (*(actor as *mut AActor)).physics = 2 };
+        return 0;
+    }
+    with(|s| {
+        let a = unsafe { &mut *(actor as *mut AActor) };
+        let new_base = a.base as usize;
+        lg(s, format!("set_base {}\n", pidx(s, new_base)));
+        a.base = null_mut();
+    });
+    0
 }
 
 fn event_mount_impl(s: &mut Scene, dir: FVector) {
@@ -394,9 +424,18 @@ unsafe extern "C" fn m_app_frand() -> f32 {
     with(app_frand_impl)
 }
 
-unsafe extern "C" fn m_cyl(actor: *mut c_void, out: *mut FVector) {
+/// `Hp2ActorServices::mesh_collision_extent`: GetCylinderExtent's shape branch,
+/// replaying the harness's radius/height `cyl_extent` log line. Every subject
+/// actor is forced into the shape branch via a non-null `Mesh` so the
+/// radius/height fallback the harness used is reproduced exactly.
+unsafe extern "C" fn t_mesh_collision_extent(
+    _mesh: *mut c_void,
+    actor: *mut c_void,
+    out: *mut c_void,
+) -> i32 {
     let v = with(|s| unsafe { cyl_impl(s, actor as usize) });
-    unsafe { *out = v };
+    unsafe { *(out as *mut FVector) = v };
+    0
 }
 
 unsafe extern "C" fn m_bsp(_hit: *const FCheckResult, radius: f32) -> i32 {
@@ -452,10 +491,6 @@ unsafe extern "C" fn m_slc_no_source(
 ) -> i32 {
     let (end, start, extent) = unsafe { (*end, *start, *extent) };
     with(|s| slc_impl(s, unsafe { &mut *hit }, end, start, trace, extent, -1, true))
-}
-
-unsafe extern "C" fn m_set_base(_actor: *mut c_void, base: *mut c_void) {
-    with(|s| set_base_impl(s, base as usize));
 }
 
 unsafe extern "C" fn m_event_mount(_actor: *mut c_void, dir: *const FVector) {
@@ -576,17 +611,18 @@ unsafe extern "C" fn m_debugf_fell_out(_actor: *mut c_void) {
     panic!("debugf_fell_out is not scripted for the scripted replay");
 }
 
-unsafe extern "C" fn m_phys_trailer(actor: *mut c_void, delta_time: f32) {
-    if actor.is_null() {
-        return;
-    }
-    unsafe {
-        hp2_engine::physic::dispatch::phys_trailer(actor.cast(), &SERVICES, delta_time);
-    }
+unsafe extern "C" fn m_event_key_frame_reached(_actor: *mut c_void) {
+    panic!("event_key_frame_reached is not scripted for the scripted replay");
 }
 
-unsafe extern "C" fn m_phys_moving_brush(_actor: *mut c_void, _delta_time: f32) {
-    panic!("phys_moving_brush is not scripted for the scripted replay");
+unsafe extern "C" fn m_mover_freeze_log(
+    _actor: *mut c_void,
+    _phys_alpha: f32,
+    _prev_key_num: i32,
+    _key_num: i32,
+    _hit_actor: *mut c_void,
+) {
+    panic!("mover_freeze_log is not scripted for the scripted replay");
 }
 
 unsafe extern "C" fn m_event_post_touch(_touched: *mut c_void, _toucher: *mut c_void) {
@@ -630,9 +666,6 @@ unsafe extern "C" fn m_event_falling(_actor: *mut c_void) {
     with(|s| lg(s, "event_falling\n".to_string()));
 }
 
-unsafe extern "C" fn m_projectile_max_speed(_actor: *mut c_void) -> f32 {
-    with(|s| s.projectile_max_speed)
-}
 unsafe extern "C" fn m_log_fell_out_of_world(_actor: *mut c_void) {
     with(|s| lg(s, "debugf\n".to_string()));
 }
@@ -641,48 +674,6 @@ unsafe extern "C" fn m_event_fell_out_of_world(_actor: *mut c_void) {
     with(|s| lg(s, "event_fell_out_of_world\n".to_string()));
 }
 
-#[repr(C)]
-struct MockTrailerState {
-    owner: *mut c_void,
-    mesh: *mut c_void,
-    pre_pivot: [f32; 3],
-    mass: f32,
-    draw_type: i32,
-    anim_bone: i32,
-    flags: u32,
-}
-
-unsafe extern "C" fn m_trailer_state(actor: *mut c_void, out: *mut c_void) {
-    if actor.is_null() || out.is_null() {
-        return;
-    }
-    let owner = unsafe { (*actor.cast::<AActor>()).owner };
-    let (pre_pivot, mass, draw_type, anim_bone, flags) = with(|s| {
-        (
-            s.trailer_prepivot,
-            s.trailer_mass,
-            s.trailer_draw_type,
-            s.trailer_anim_bone,
-            s.trailer_flags,
-        )
-    });
-    unsafe {
-        out.cast::<MockTrailerState>()
-            .write_unaligned(MockTrailerState {
-                owner: owner.cast(),
-                mesh: if anim_bone != 0 {
-                    std::ptr::dangling_mut::<c_void>()
-                } else {
-                    null_mut()
-                },
-                pre_pivot,
-                mass,
-                draw_type,
-                anim_bone,
-                flags,
-            });
-    }
-}
 
 unsafe extern "C" fn m_mesh_bone_coords(
     _mesh: *mut c_void,
@@ -720,46 +711,68 @@ unsafe extern "C" fn m_mesh_bone_coords(
 }
 
 static SERVICES: Hp2PhysicServices = Hp2PhysicServices {
-    is_a: m_is_a,
-    is_probing_hit_wall: m_is_probing,
-    app_frand: m_app_frand,
-    cylinder_extent: m_cyl,
-    bsp_surf_special: m_bsp,
-    rotation_vector: m_rot,
-    move_actor: m_move,
-    single_line_check: m_slc,
-    set_base: m_set_base,
-    event_mount: m_event_mount,
-    event_hit_wall: m_event_hit_wall,
-    event_landed: m_event_landed,
-    point_region_zone: m_point_region_zone,
-    debugf_flew_out: m_debugf_flew_out,
-    destroy_actor: m_destroy_actor,
-    event_falling: m_event_falling,
-    projectile_max_speed: m_projectile_max_speed,
-    log_fell_out_of_world: m_log_fell_out_of_world,
-    event_fell_out_of_world: m_event_fell_out_of_world,
-    rotation_from_vector: m_rotation_from_vector,
-    find_view_target: m_find_view_target,
-    event_update_camera: m_event_update_camera,
-    event_interpolate_end: m_event_interpolate_end,
-    event_finished_interpolation: m_event_finished_interpolation,
-    phys_trailer: m_phys_trailer,
-    phys_moving_brush: m_phys_moving_brush,
-    event_post_touch: m_event_post_touch,
-    is_probing_ended_rotation: m_is_probing_ended_rotation,
-    event_ended_rotation: m_event_ended_rotation,
+    is_a: m_is_a_checked,
+    is_probing_hit_wall: m_is_probing_checked,
+    app_frand: m_app_frand_checked,
+    bsp_surf_special: m_bsp_checked,
+    rotation_vector: m_rot_checked,
+    move_actor: m_move_checked,
+    single_line_check: m_slc_checked,
+    event_mount: m_event_mount_checked,
+    event_hit_wall: m_event_hit_wall_checked,
+    event_landed: m_event_landed_checked,
+    point_region_zone: m_point_region_zone_checked,
+    debugf_flew_out: m_debugf_flew_out_checked,
+    destroy_actor: m_destroy_actor_checked,
+    event_falling: m_event_falling_checked,
+    log_fell_out_of_world: m_log_fell_out_of_world_checked,
+    event_fell_out_of_world: m_event_fell_out_of_world_checked,
+    rotation_from_vector: m_rotation_from_vector_checked,
+    find_view_target: m_find_view_target_checked,
+    event_update_camera: m_event_update_camera_checked,
+    event_interpolate_end: m_event_interpolate_end_checked,
+    event_finished_interpolation: m_event_finished_interpolation_checked,
+
+    event_key_frame_reached: m_event_key_frame_reached_checked,
+    mover_freeze_log: m_mover_freeze_log_checked,
+    event_post_touch: m_event_post_touch_checked,
+    is_probing_ended_rotation: m_is_probing_ended_rotation_checked,
+    event_ended_rotation: m_event_ended_rotation_checked,
     sin_tab: m_sin_tab,
     cos_tab: m_cos_tab,
-    is_probing_may_fall: m_is_probing_may_fall,
-    event_may_fall: m_event_may_fall,
-    event_do_jump: m_event_do_jump,
-    far_move_actor: m_far_move_actor,
-    debugf_fell_out: m_debugf_fell_out,
-    single_line_check_no_source: m_slc_no_source,
-    trailer_state: m_trailer_state,
-    mesh_bone_coords: m_mesh_bone_coords,
-    trailer_far_move_actor: m_trailer_far_move_actor,
+    is_probing_may_fall: m_is_probing_may_fall_checked,
+    event_may_fall: m_event_may_fall_checked,
+    event_do_jump: m_event_do_jump_checked,
+    far_move_actor: m_far_move_actor_checked,
+    debugf_fell_out: m_debugf_fell_out_checked,
+    single_line_check_no_source: m_slc_no_source_checked,
+    mesh_bone_coords: m_mesh_bone_coords_checked,
+    trailer_far_move_actor: m_trailer_far_move_actor_checked,
+    call_calc_velocity: fixture_call_calc_velocity,
+    call_mount: fixture_call_mount,
+    call_step_up: fixture_call_step_up,
+    call_process_hit_wall: fixture_call_process_hit_wall,
+    call_process_landed: fixture_call_process_landed,
+    call_find_base: fixture_call_find_base,
+    call_phys_trailer: fixture_call_phys_trailer,
+    call_phys_moving_brush: fixture_call_phys_moving_brush,
+    call_physics_rotation_actor: fixture_call_physics_rotation_actor,
+    call_physics_rotation_pawn: fixture_call_physics_rotation_pawn,
+    call_get_desired_rotation_at_pause: fixture_call_get_desired_rotation_at_pause,
+    call_get_desired_rotation_at_position: fixture_call_get_desired_rotation_at_position,
+    call_get_interpolated_position: fixture_call_get_interpolated_position,
+    call_start_swimming: fixture_call_start_swimming,
+    call_phys_flying: fixture_call_phys_flying,
+    call_swim: fixture_call_swim,
+    call_find_water_line: fixture_call_find_water_line,
+    call_phys_swimming: fixture_call_phys_swimming,
+    call_phys_falling: fixture_call_phys_falling,
+    call_phys_projectile: fixture_call_phys_projectile,
+    call_phys_rolling: fixture_call_phys_rolling,
+    call_check_floor: fixture_call_check_floor,
+    call_find_new_floor: fixture_call_find_new_floor,
+    call_phys_spider: fixture_call_phys_spider,
+    call_phys_walking: fixture_call_phys_walking,
 };
 
 fn arg_words(name: &str) -> usize {
@@ -783,10 +796,13 @@ fn pool_or_null(pool: &[usize; 3], idx: u32) -> *mut c_void {
 }
 
 fn run_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     // Zeroed, 8 KiB-equivalent object memory, matching the harness memset.
     let mut subj = vec![0u64; 1024];
     let mut zone = vec![0u64; 1024];
     let mut pool = [vec![0u64; 1024], vec![0u64; 1024], vec![0u64; 1024]];
+    let mut base_sentinel = vec![0u64; 1024];
+    let base_sentinel_p = base_sentinel.as_mut_ptr() as usize;
     let subj_p = subj.as_mut_ptr() as usize;
     let zone_p = zone.as_mut_ptr() as usize;
     let pool_p = [
@@ -845,6 +861,11 @@ fn run_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
         (*(subj_p as *mut ADecoration)).num_landings = w[29] as i32;
         (*(subj_p as *mut ACarcass)).set_b_sliding_carcass(w[30] != 0);
         (*p).base.region.zone = zone_p as *mut c_void;
+        if name == "mount" {
+            (*p).base.base = base_sentinel_p as *mut c_void;
+        }
+        (*p).base.mesh = base_sentinel_p as *mut c_void;
+        (*p).base.collide_type = CT_SHAPE;
     }
 
     let mut hit = FCheckResult {
@@ -871,15 +892,14 @@ fn run_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
                     arg[6] as i32,
                     arg[7] as i32,
                     arg[8] as i32,
-                );
+                )
+                .expect("checked physics fixture");
                 0
             }
-            "mount" => u32::from(physic::mount(
-                subj_apawn,
-                &SERVICES,
-                v3(&arg[0..3]),
-                &mut hit,
-            )),
+            "mount" => u32::from(
+                physic::mount(subj_apawn, &SERVICES, v3(&arg[0..3]), &mut hit)
+                    .expect("checked physics fixture"),
+            ),
             "step_up" => {
                 physic::step_up(
                     subj_apawn,
@@ -888,7 +908,8 @@ fn run_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
                     v3(&arg[3..6]),
                     v3(&arg[6..9]),
                     &mut hit,
-                );
+                )
+                .expect("checked physics fixture");
                 0
             }
             "process_hit_wall" => {
@@ -897,7 +918,8 @@ fn run_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
                     &SERVICES,
                     v3(&arg[0..3]),
                     pool_p[arg[3] as usize] as *mut c_void,
-                );
+                )
+                .expect("checked physics fixture");
                 0
             }
             "process_landed" => {
@@ -908,7 +930,8 @@ fn run_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
                     pool_or_null(&pool_p, arg[3]),
                     f(arg[4]),
                     arg[5] as i32,
-                );
+                )
+                .expect("checked physics fixture");
                 0
             }
             other => panic!("unknown function {other}"),
@@ -1027,4 +1050,688 @@ fn physic_scripted_matches_original() {
     }
     assert!(no_hit > 0, "no-hit (Time == 1) coverage");
     assert!(null_actor > 0, "NULL hit-actor coverage");
+}
+
+unsafe extern "C" fn m_is_a_checked(obj: *mut c_void, class: i32, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_is_a(obj, class));
+    }
+    0
+}
+unsafe extern "C" fn m_is_probing_checked(actor: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_is_probing(actor));
+    }
+    0
+}
+unsafe extern "C" fn m_app_frand_checked(result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_app_frand());
+    }
+    0
+}
+unsafe extern "C" fn m_bsp_checked(
+    hit: *const hp2_abi::engine::generated::FCheckResult,
+    radius: f32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_bsp(hit, radius));
+    }
+    0
+}
+unsafe extern "C" fn m_rot_checked(
+    rot: *const hp2_abi::engine::generated::FRotator,
+    out: *mut FVector,
+) -> i32 {
+    unsafe {
+        m_rot(rot, out);
+    }
+    0
+}
+unsafe extern "C" fn m_move_checked(
+    actor: *mut c_void,
+    delta: *const FVector,
+    rot: *const hp2_abi::engine::generated::FRotator,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_move(actor, delta, rot, hit));
+    }
+    0
+}
+unsafe extern "C" fn m_slc_checked(
+    actor: *mut c_void,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    end: *const FVector,
+    start: *const FVector,
+    trace: i32,
+    extent: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_slc(actor, hit, end, start, trace, extent));
+    }
+    0
+}
+unsafe extern "C" fn m_slc_no_source_checked(
+    actor: *mut c_void,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    end: *const FVector,
+    start: *const FVector,
+    trace: i32,
+    extent: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_slc_no_source(actor, hit, end, start, trace, extent));
+    }
+    0
+}
+unsafe extern "C" fn m_event_mount_checked(actor: *mut c_void, dir: *const FVector) -> i32 {
+    unsafe {
+        m_event_mount(actor, dir);
+    }
+    0
+}
+unsafe extern "C" fn m_event_hit_wall_checked(
+    actor: *mut c_void,
+    normal: *const FVector,
+    hit_actor: *mut c_void,
+) -> i32 {
+    unsafe {
+        m_event_hit_wall(actor, normal, hit_actor);
+    }
+    0
+}
+unsafe extern "C" fn m_event_landed_checked(actor: *mut c_void, normal: *const FVector) -> i32 {
+    unsafe {
+        m_event_landed(actor, normal);
+    }
+    0
+}
+unsafe extern "C" fn m_rotation_from_vector_checked(
+    vector: *const FVector,
+    out: *mut hp2_abi::engine::generated::FRotator,
+) -> i32 {
+    unsafe {
+        m_rotation_from_vector(vector, out);
+    }
+    0
+}
+unsafe extern "C" fn m_find_view_target_checked(
+    actor: *mut c_void,
+    tag: *const [u8; 4],
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result.write(m_find_view_target(actor, tag));
+    }
+    0
+}
+unsafe extern "C" fn m_event_update_camera_checked(manager: *mut c_void, old_alpha: f32) -> i32 {
+    unsafe {
+        m_event_update_camera(manager, old_alpha);
+    }
+    0
+}
+unsafe extern "C" fn m_event_interpolate_end_checked(
+    point: *mut c_void,
+    manager: *mut c_void,
+    forward: i32,
+) -> i32 {
+    unsafe {
+        m_event_interpolate_end(point, manager, forward);
+    }
+    0
+}
+unsafe extern "C" fn m_event_finished_interpolation_checked(manager: *mut c_void) -> i32 {
+    unsafe {
+        m_event_finished_interpolation(manager);
+    }
+    0
+}
+unsafe extern "C" fn m_is_probing_may_fall_checked(actor: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_is_probing_may_fall(actor));
+    }
+    0
+}
+unsafe extern "C" fn m_event_may_fall_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_event_may_fall(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_event_do_jump_checked(actor: *mut c_void, value: f32) -> i32 {
+    unsafe {
+        m_event_do_jump(actor, value);
+    }
+    0
+}
+unsafe extern "C" fn m_far_move_actor_checked(actor: *mut c_void, location: *const FVector) -> i32 {
+    unsafe {
+        m_far_move_actor(actor, location);
+    }
+    0
+}
+unsafe extern "C" fn m_trailer_far_move_actor_checked(
+    actor: *mut c_void,
+    location: *const FVector,
+) -> i32 {
+    unsafe {
+        m_trailer_far_move_actor(actor, location);
+    }
+    0
+}
+unsafe extern "C" fn m_debugf_fell_out_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_debugf_fell_out(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_event_key_frame_reached_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_event_key_frame_reached(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_mover_freeze_log_checked(
+    actor: *mut c_void,
+    phys_alpha: f32,
+    prev_key_num: i32,
+    key_num: i32,
+    hit_actor: *mut c_void,
+) -> i32 {
+    unsafe {
+        m_mover_freeze_log(actor, phys_alpha, prev_key_num, key_num, hit_actor);
+    }
+    0
+}
+unsafe extern "C" fn m_event_post_touch_checked(touched: *mut c_void, toucher: *mut c_void) -> i32 {
+    unsafe {
+        m_event_post_touch(touched, toucher);
+    }
+    0
+}
+unsafe extern "C" fn m_is_probing_ended_rotation_checked(
+    actor: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_is_probing_ended_rotation(actor));
+    }
+    0
+}
+unsafe extern "C" fn m_event_ended_rotation_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_event_ended_rotation(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_point_region_zone_checked(
+    actor: *mut c_void,
+    location: *const FVector,
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result.write(m_point_region_zone(actor, location));
+    }
+    0
+}
+unsafe extern "C" fn m_debugf_flew_out_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_debugf_flew_out(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_destroy_actor_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_destroy_actor(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_event_falling_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_event_falling(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_log_fell_out_of_world_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_log_fell_out_of_world(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_event_fell_out_of_world_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        m_event_fell_out_of_world(actor);
+    }
+    0
+}
+unsafe extern "C" fn m_mesh_bone_coords_checked(
+    mesh: *mut c_void,
+    owner: *mut c_void,
+    bone: i32,
+    out: *mut c_void,
+) -> i32 {
+    unsafe {
+        m_mesh_bone_coords(mesh, owner, bone, out);
+    }
+    0
+}
+
+// Checked native-member routes: scripted replay only, not native boundary evidence.
+unsafe extern "C" fn fixture_call_calc_velocity(
+    pawn: *mut hp2_abi::engine::generated::APawn,
+    accel_dir: *const FVector,
+    delta_time: f32,
+    max_speed: f32,
+    friction: f32,
+    b_fluid: i32,
+    b_brake: i32,
+    b_buoyant: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::calc_velocity(
+            pawn, &*services, *accel_dir, delta_time, max_speed, friction, b_fluid, b_brake,
+            b_buoyant,
+        ) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_mount(
+    pawn: *mut hp2_abi::engine::generated::APawn,
+    mount_dir: *const FVector,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    services: *const Hp2PhysicServices,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::mount(pawn, &*services, *mount_dir, hit) {
+            Ok(value) => {
+                result.write(i32::from(value));
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_step_up(
+    pawn: *mut hp2_abi::engine::generated::APawn,
+    grav_dir: *const FVector,
+    desired_dir: *const FVector,
+    delta: *const FVector,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::step_up(pawn, &*services, *grav_dir, *desired_dir, *delta, hit) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_process_hit_wall(
+    this: *mut hp2_abi::engine::generated::AActor,
+    hit_normal: *const FVector,
+    hit_actor: *mut c_void,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::process_hit_wall(this, &*services, *hit_normal, hit_actor) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_process_landed(
+    this: *mut hp2_abi::engine::generated::AActor,
+    hit_normal: *const FVector,
+    hit_actor: *mut c_void,
+    remaining_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::process_landed(
+            this,
+            &*services,
+            *hit_normal,
+            hit_actor,
+            remaining_time,
+            iterations,
+        ) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_find_base(
+    this: *mut hp2_abi::engine::generated::AActor,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::dispatch::find_base(this, &*services) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_trailer(
+    this: *mut hp2_abi::engine::generated::AActor,
+    _delta_time: f32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::dispatch::phys_trailer(this, &*services, _delta_time) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_moving_brush(
+    this: *mut hp2_abi::engine::generated::AActor,
+    delta_time: f32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::dispatch::phys_moving_brush(this, &*services, delta_time) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_physics_rotation_actor(
+    this: *mut hp2_abi::engine::generated::AActor,
+    delta_time: f32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::dispatch::physics_rotation_actor(this, &*services, delta_time) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_physics_rotation_pawn(
+    this: *mut hp2_abi::engine::generated::APawn,
+    delta_time: f32,
+    old_velocity: *const FVector,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::dispatch::physics_rotation_pawn(
+            this,
+            &*services,
+            delta_time,
+            *old_velocity,
+        ) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_get_desired_rotation_at_pause(
+    this: *mut hp2_abi::engine::generated::AInterpolationPoint,
+    pause_num: i32,
+    new_location: *const FVector,
+    services: *const Hp2PhysicServices,
+    result: *mut hp2_abi::engine::generated::FRotator,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::interp::get_desired_rotation_at_pause(
+            this,
+            &*services,
+            pause_num,
+            *new_location,
+        ) {
+            Ok(value) => {
+                result.write(value);
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_get_desired_rotation_at_position(
+    this: *mut hp2_abi::engine::generated::AInterpolationPoint,
+    pos_offset: i32,
+    pause_num: i32,
+    new_location: *const FVector,
+    services: *const Hp2PhysicServices,
+    result: *mut hp2_abi::engine::generated::FRotator,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::interp::get_desired_rotation_at_position(
+            this,
+            &*services,
+            pos_offset,
+            pause_num,
+            *new_location,
+        ) {
+            Ok(value) => {
+                result.write(value);
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_get_interpolated_position(
+    this: *mut hp2_abi::engine::generated::AInterpolationPoint,
+    old_coords: *const hp2_abi::FCoords,
+    start_control: *const FVector,
+    phys_alpha: f32,
+    pause_num: i32,
+    services: *const Hp2PhysicServices,
+    result: *mut hp2_abi::FCoords,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::interp::get_interpolated_position(
+            this,
+            &*services,
+            *old_coords,
+            *start_control,
+            phys_alpha,
+            pause_num,
+        ) {
+            Ok(value) => {
+                result.write(value);
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_start_swimming(
+    this: *mut hp2_abi::engine::generated::APawn,
+    old_velocity: *const FVector,
+    time_tick: f32,
+    remaining_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::swim::start_swimming(
+            this,
+            &*services,
+            *old_velocity,
+            time_tick,
+            remaining_time,
+            iterations,
+        ) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_flying(
+    this: *mut hp2_abi::engine::generated::APawn,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::swim::phys_flying(this, &*services, delta_time, iterations) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_swim(
+    this: *mut hp2_abi::engine::generated::APawn,
+    delta: *const FVector,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    services: *const Hp2PhysicServices,
+    result: *mut f32,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::swim::swim(this, &*services, *delta, hit) {
+            Ok(value) => {
+                result.write(value);
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_find_water_line(
+    this: *mut hp2_abi::engine::generated::APawn,
+    start: *const FVector,
+    end: *mut FVector,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::swim::find_water_line(this, &*services, *start, end) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_swimming(
+    this: *mut hp2_abi::engine::generated::APawn,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::swim::phys_swimming(this, &*services, delta_time, iterations) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_falling(
+    this: *mut hp2_abi::engine::generated::AActor,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::fall::phys_falling(this, &*services, delta_time, iterations) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_projectile(
+    this: *mut hp2_abi::engine::generated::AActor,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::motion::phys_projectile(this, &*services, delta_time, iterations)
+        {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_rolling(
+    this: *mut hp2_abi::engine::generated::AActor,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::motion::phys_rolling(this, &*services, delta_time, iterations) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_check_floor(
+    this: *mut hp2_abi::engine::generated::APawn,
+    dir: *const FVector,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    services: *const Hp2PhysicServices,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::motion::check_floor(this, &*services, *dir, hit) {
+            Ok(value) => {
+                result.write(value);
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_find_new_floor(
+    this: *mut hp2_abi::engine::generated::APawn,
+    old_location: *const FVector,
+    delta_time: f32,
+    remaining_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::motion::find_new_floor(
+            this,
+            &*services,
+            *old_location,
+            delta_time,
+            remaining_time,
+            iterations,
+        ) {
+            Ok(value) => {
+                result.write(value);
+                0
+            }
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_spider(
+    this: *mut hp2_abi::engine::generated::APawn,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::motion::phys_spider(this, &*services, delta_time, iterations) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
+}
+unsafe extern "C" fn fixture_call_phys_walking(
+    this: *mut hp2_abi::engine::generated::APawn,
+    delta_time: f32,
+    iterations: i32,
+    services: *const Hp2PhysicServices,
+) -> i32 {
+    unsafe {
+        match hp2_engine::physic::walk::phys_walking(this, &*services, delta_time, iterations) {
+            Ok(()) => 0,
+            Err(error) => error.0,
+        }
+    }
 }

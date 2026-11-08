@@ -10,3 +10,32 @@ name = "hp2_engine"
 
 [dependencies]
 hp2-abi.workspace = true
+hp2-core.workspace = true
+hp2-platform.workspace = true
+hp2-audio.workspace = true
+hp2-codecs.workspace = true
+hp2-wgpu = { workspace = true, optional = true }
+hp2-render.workspace = true
+hp2-fire.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+hp2-launcher.workspace = true
+hp2-ini.workspace = true
+
+[features]
+# Experimental local UI shell; no settings provider is connected by default.
+in-game-overlay = []
+# SDK resource owners are built by the CMake host; bare Cargo tests remain
+# native-link-free, just like hp2-platform's feature of the same name.
+sdl = ["hp2-platform/sdl", "hp2-wgpu?/sdl"]
+openal = ["hp2-audio/openal"]
+renderer-wgpu = ["dep:hp2-wgpu"]
+text-coretext = ["hp2-render/coretext"]
+text-freetype = ["hp2-render/freetype"]
+
+[[test]]
+name = "actor_screenshot_vm_native_owner_contracts"
+path = "tests/actor_screenshot_vm_native_owner_contracts.rs"
+harness = false
+required-features = ["sdl", "renderer-wgpu"]

@@ -37,7 +37,7 @@ def main() -> int:
     ap.add_argument("--build-dir", required=True, help="gate-on build dir containing hp2_game")
     ap.add_argument("--data-root", default="HarryPotter2/Unreal")
     ap.add_argument("--map", default="Entry")
-    ap.add_argument("--ticks", type=int, default=60)
+    ap.add_argument("--ticks", type=int, default=300)
     ap.add_argument("--timeout", type=float, default=180)
     ap.add_argument("--name", default="renderer_smoke_wgpu")
     args = ap.parse_args()

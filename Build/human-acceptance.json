@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "items": {
+    "audible_music_and_sfx": false,
+    "physical_keyboard_mouse": false,
+    "visual_review_three_maps": false,
+    "save_quit_relaunch_continue": false,
+    "installed_rust_gameplay": false
+  },
+  "observer": null,
+  "installed_product": null,
+  "date": null
+}

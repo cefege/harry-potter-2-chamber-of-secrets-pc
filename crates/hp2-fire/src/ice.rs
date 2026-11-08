@@ -2,13 +2,16 @@
 //! `BlitTexIce`, `BlitIceTex`, and the `PostLoad` local-source resample loop.
 //! `UIceTexture::RenderIce` stays in C++ and calls the three entries in order.
 //!
-//! The UObject shells stay in C++. The C++ forwarders copy the panning members
-//! into `FireIceState`, pass the pixel buffers as slices, and copy the mutable
-//! fields back.
+//! The UObject shell stays in C++. Each FFI entry reads the live `UIceTexture`'s
+//! scalars directly from its mirror layout into a `FireIceState`, runs the
+//! kernel, and `MoveIcePosition`'s entry writes the mutable fields back; the
+//! resample entry reads `SourceTexture->UBits` through the same mirror.
+
+use std::ffi::c_void;
 
 use crate::abi::FireTraceHooks;
-use crate::globals;
 use crate::tables::app_round;
+use hp2_abi::engine::generated::{UFractalTexture, UIceTexture, UTexture};
 
 /// `PanningType` values from `UnFractal.h`.
 pub const SLIDE_LINEAR: u8 = 0;
@@ -48,6 +51,57 @@ pub struct FireIceState {
     pub v_mask: i32,
 }
 
+/// Reads the scalar state `MoveIcePosition` needs from a live `UIceTexture`.
+/// Replaces the C++ `UIceTexture::MoveIcePosition` field reads.
+///
+/// # Safety
+/// `texture` must be non-null and point to a live `UIceTexture`.
+pub unsafe fn ice_state_from_texture(texture: *const c_void) -> FireIceState {
+    unsafe {
+        let t = texture as *const UTexture;
+        let f = texture as *const UFractalTexture;
+        let i = texture as *const UIceTexture;
+        FireIceState {
+            panning_style: (*i).panning_style,
+            horiz_pan_speed: (*i).horiz_pan_speed,
+            vert_pan_speed: (*i).vert_pan_speed,
+            frequency: (*i).frequency,
+            amplitude: (*i).amplitude,
+            move_ice: (*i).move_ice() as u8,
+            local_source_bitmap: !(*i).local_source_bitmap.is_null() as u8,
+            u_bits: (*t).base.u_bits,
+            force_refresh: (*i).force_refresh,
+            master_count: (*i).master_count,
+            u_displace: (*i).u_displace,
+            v_displace: (*i).v_displace,
+            u_position: (*i).u_position,
+            v_position: (*i).v_position,
+            old_u_disp: (*i).old_u_disp,
+            old_v_disp: (*i).old_v_disp,
+            u_size: (*t).base.u_size,
+            v_size: (*t).base.v_size,
+            u_mask: (*f).u_mask,
+            v_mask: (*f).v_mask,
+        }
+    }
+}
+
+/// Writes back the scalar fields `MoveIcePosition` may change. Replaces the
+/// C++ `UIceTexture::MoveIcePosition` field write-back.
+///
+/// # Safety
+/// `texture` must be non-null and point to a live `UIceTexture`.
+pub unsafe fn store_ice_state_to_texture(texture: *mut c_void, state: &FireIceState) {
+    unsafe {
+        let i = texture as *mut UIceTexture;
+        (*i).master_count = state.master_count;
+        (*i).u_displace = state.u_displace;
+        (*i).v_displace = state.v_displace;
+        (*i).u_position = state.u_position;
+        (*i).v_position = state.v_position;
+    }
+}
+
 /// Parameters for the `PostLoad` local-source resample loop.
 /// `u_scaler`/`v_scaler` are `UBits - SourceTexture->UBits` and the V
 /// equivalent, and `src_u_bits` is `SourceTexture->UBits`.
@@ -59,6 +113,32 @@ pub struct FireIceResample {
     pub u_scaler: i32,
     pub v_scaler: i32,
     pub src_u_bits: u8,
+}
+
+/// Builds the resample params from a live `UIceTexture`'s own dimensions and
+/// `SourceTexture->UBits`. `u_scaler`/`v_scaler` come from the caller (not
+/// texture fields). Replaces the C++ `FractalLeaf_IceResample` field reads.
+///
+/// # Safety
+/// `texture` must be non-null and point to a live `UIceTexture` whose
+/// `SourceTexture` is non-null and points to a live `UTexture`.
+pub unsafe fn ice_resample_params_from_texture(
+    texture: *const c_void,
+    u_scaler: i32,
+    v_scaler: i32,
+) -> FireIceResample {
+    unsafe {
+        let t = texture as *const UTexture;
+        let i = texture as *const UIceTexture;
+        let src = (*i).source_texture as *const UTexture;
+        FireIceResample {
+            u_size: (*t).base.u_size,
+            v_size: (*t).base.v_size,
+            u_scaler,
+            v_scaler,
+            src_u_bits: (*src).base.u_bits,
+        }
+    }
 }
 
 /// A read-only texel buffer for one blit input. `Dest` means the input is the
@@ -221,8 +301,7 @@ fn resample_source_body(p: &FireIceResample, dst: &mut [u8], src: IceRead<'_>) {
 /// Replaces `UIceTexture::MoveIcePosition`'s algorithm. Advances `MasterCount`,
 /// the displacements, and the positions by `delta_time`.
 pub fn move_ice_position(trace: FireTraceHooks, st: &mut FireIceState, delta_time: f32) {
-    let mut g = globals::lock();
-    g.trace = trace;
+    let _ = trace;
     move_ice_position_body(st, delta_time);
 }
 
@@ -235,8 +314,7 @@ pub fn blit_tex_ice(
     tex: IceRead<'_>,
     glass: IceRead<'_>,
 ) {
-    let mut g = globals::lock();
-    g.trace = trace;
+    let _ = trace;
     blit_tex_ice_body(st, dst, tex, glass);
 }
 
@@ -249,8 +327,7 @@ pub fn blit_ice_tex(
     tex: IceRead<'_>,
     glass: IceRead<'_>,
 ) {
-    let mut g = globals::lock();
-    g.trace = trace;
+    let _ = trace;
     blit_ice_tex_body(st, dst, tex, glass);
 }
 
@@ -261,7 +338,6 @@ pub fn resample_source(
     dst: &mut [u8],
     src: IceRead<'_>,
 ) {
-    let mut g = globals::lock();
-    g.trace = trace;
+    let _ = trace;
     resample_source_body(p, dst, src);
 }

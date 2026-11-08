@@ -30,10 +30,13 @@ use std::str::SplitWhitespace;
 
 use hp2_abi::FVector;
 use hp2_abi::engine::generated::{
-    AActor, AInventory, AInventorySpot, AMover, ANavigationPoint, APawn, FReachSpec, TArrayRaw,
-    ULevel,
+    AActor, AInventory, AInventorySpot, AMover, ANavigationPoint, APawn, AZoneInfo, FCheckResult,
+    FReachSpec, TArrayRaw, ULevel,
 };
-use hp2_engine::route::{self, Hp2RouteServices};
+use hp2_engine::route::{self, Hp2RouteServices, Hp2SortedPathList};
+
+#[path = "pawn_moves/publish.rs"]
+mod pawn_moves;
 
 /// Name index the replay assigns to node `i` (`1000 + i`). Index 0 is `FName`
 /// `NAME_None`, which the harness uses for `find <i> -`.
@@ -110,6 +113,7 @@ struct Built {
     _movers: Vec<AMover>,
     _pawn: Option<Box<APawn>>,
     _gpawn: Option<Box<APawn>>,
+    _gzone: Box<AZoneInfo>,
     np: Vec<*mut ANavigationPoint>,
     /// Mover actor per wall index; null for static walls.
     mover_of_wall: Vec<*mut c_void>,
@@ -417,8 +421,14 @@ fn build(w: &mut World) {
     let gpawn_ptr: *mut APawn = gpawn
         .as_deref_mut()
         .map_or(ptr::null_mut(), |p| p as *mut APawn);
+    // Dry, zero-gravity zone for the real `jumpLanding` (see `LANDING`).
+    let mut gzone: Box<AZoneInfo> = Box::new(unsafe { zeroed() });
     if !gpawn_ptr.is_null() {
         w.ents.insert(gpawn_ptr as usize, Ent::GoalPawn);
+        unsafe {
+            (*gpawn_ptr).base.region.zone = (&mut *gzone as *mut AZoneInfo).cast();
+            (*gpawn_ptr).base.region.zone_number = 1;
+        }
     }
 
     w.built = Some(Built {
@@ -430,6 +440,7 @@ fn build(w: &mut World) {
         _movers: movers,
         _pawn: pawn,
         _gpawn: gpawn,
+        _gzone: gzone,
         np,
         mover_of_wall,
         pawn: pawn_ptr,
@@ -464,11 +475,16 @@ fn crosses(w: &WallDef, a: &FVector, b: &FVector) -> bool {
     lo <= w.y1 && hi >= w.y0
 }
 
-unsafe extern "C" fn svc_app_frand() -> f32 {
-    WORLD.with_borrow_mut(|w| {
-        w.seed = w.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-        ((w.seed >> 8) & 0x00FF_FFFF) as f32 / 16_777_216.0
-    })
+unsafe extern "C" fn svc_app_frand(out: *mut f32) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow_mut(|w| {
+                w.seed = w.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                ((w.seed >> 8) & 0x00FF_FFFF) as f32 / 16_777_216.0
+            })
+        })());
+    }
+    0
 }
 
 unsafe extern "C" fn svc_far_move_actor(
@@ -477,40 +493,62 @@ unsafe extern "C" fn svc_far_move_actor(
     dest: *const c_void,
     _test: i32,
     _no_check: i32,
+    out: *mut i32,
 ) -> i32 {
-    let z = unsafe { (*dest.cast::<FVector>()).z };
-    WORLD.with_borrow(|w| i32::from(z < w.farz))
+    unsafe {
+        out.write((|| {
+            let z = unsafe { (*dest.cast::<FVector>()).z };
+            WORLD.with_borrow(|w| i32::from(z < w.farz))
+        })());
+    }
+    0
 }
 
 unsafe extern "C" fn svc_point_reachable(
     _pawn: *mut c_void,
     point: *const c_void,
     _know: i32,
+    out: *mut i32,
 ) -> i32 {
-    let y = unsafe { (*point.cast::<FVector>()).y };
-    WORLD.with_borrow(|w| i32::from(y <= w.reachy))
+    unsafe {
+        out.write((|| {
+            let y = (*point.cast::<FVector>()).y;
+            WORLD.with_borrow(|w| i32::from(y <= w.reachy))
+        })());
+    }
+    0
 }
 
 unsafe extern "C" fn svc_actor_reachable(
     _pawn: *mut c_void,
     other: *mut c_void,
     _know: i32,
+    out: *mut i32,
 ) -> i32 {
-    let y = unsafe { (*other.cast::<AActor>()).location.y };
-    WORLD.with_borrow(|w| i32::from(y <= w.reachy))
-}
-
-unsafe extern "C" fn svc_goal_jump_landing(_goal: *mut c_void, dest: *mut c_void) {
-    unsafe { (*dest.cast::<FVector>()).z -= 16.0 };
+    unsafe {
+        out.write((|| {
+            let y = (*other.cast::<AActor>()).location.y;
+            WORLD.with_borrow(|w| i32::from(y <= w.reachy))
+        })());
+    }
+    0
 }
 
 unsafe extern "C" fn svc_model_fast_line_check(
     _model: *mut c_void,
     end: *const c_void,
     start: *const c_void,
-) -> u8 {
-    let (e, s) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
-    WORLD.with_borrow(|w| u8::from(!w.walls.iter().any(|wd| !wd.mover && crosses(wd, &s, &e))))
+    out: *mut u8,
+) -> i32 {
+    unsafe {
+        out.write((|| {
+            let (e, s) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
+            WORLD.with_borrow(|w| {
+                u8::from(!w.walls.iter().any(|wd| !wd.mover && crosses(wd, &s, &e)))
+            })
+        })());
+    }
+    0
 }
 
 unsafe extern "C" fn svc_single_line_hit_actor(
@@ -518,100 +556,196 @@ unsafe extern "C" fn svc_single_line_hit_actor(
     _source: *mut c_void,
     end: *const c_void,
     start: *const c_void,
-) -> *mut c_void {
-    let (e, s) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
-    WORLD.with_borrow(|w| {
-        let b = w.built.as_ref().expect("world built");
-        w.walls
-            .iter()
-            .position(|wd| crosses(wd, &s, &e))
-            .map_or(ptr::null_mut(), |i| b.mover_of_wall[i])
-    })
+    out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        out.write((|| {
+            let (e, s) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
+            WORLD.with_borrow(|w| {
+                let b = w.built.as_ref().expect("world built");
+                w.walls
+                    .iter()
+                    .position(|wd| crosses(wd, &s, &e))
+                    .map_or(ptr::null_mut(), |i| b.mover_of_wall[i])
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn svc_navigation_point_list(_level: *mut c_void) -> *mut c_void {
-    WORLD.with_borrow(|w| {
-        w.built
-            .as_ref()
-            .and_then(|b| b.np.first().copied())
-            .map_or(ptr::null_mut::<c_void>(), |p| p.cast::<c_void>())
-    })
+unsafe extern "C" fn svc_navigation_point_list(_level: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| {
+                w.built
+                    .as_ref()
+                    .and_then(|b| b.np.first().copied())
+                    .map_or(ptr::null_mut::<c_void>(), |p| p.cast::<c_void>())
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn svc_actor_is_a(actor: *mut c_void, kind: i32) -> i32 {
-    WORLD.with_borrow(|w| {
-        let hit = match w.ents.get(&(actor as usize)) {
-            Some(Ent::Node(i)) => {
-                kind == route::CLASS_NAVIGATION_POINT
-                    || (w.nodes[*i].spot && kind == route::CLASS_INVENTORY_SPOT)
-            }
-            Some(Ent::Pawn | Ent::GoalPawn) => kind == route::CLASS_PAWN,
-            Some(Ent::Mover(_)) => kind == route::CLASS_MOVER,
-            Some(Ent::Item(_)) | None => false,
+unsafe extern "C" fn svc_actor_is_a(actor: *mut c_void, kind: i32, out: *mut i32) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| {
+                let hit = match w.ents.get(&(actor as usize)) {
+                    Some(Ent::Node(i)) => {
+                        kind == route::CLASS_NAVIGATION_POINT
+                            || (w.nodes[*i].spot && kind == route::CLASS_INVENTORY_SPOT)
+                    }
+                    Some(Ent::Pawn | Ent::GoalPawn) => kind == route::CLASS_PAWN,
+                    Some(Ent::Mover(_)) => kind == route::CLASS_MOVER,
+                    Some(Ent::Item(_)) | None => false,
+                };
+                i32::from(hit)
+            })
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_mover_player_only(mover: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| match w.ents.get(&(mover as usize)) {
+                Some(Ent::Mover(i)) => w.walls[*i].po,
+                _ => 0,
+            })
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_event_special_cost(
+    node: *mut c_void,
+    _seeker: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| match w.ents.get(&(node as usize)) {
+                Some(Ent::Node(i)) => w.nodes[*i].scost,
+                _ => 0,
+            })
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_item_is_probing_touch(item: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| match w.ents.get(&(item as usize)) {
+                Some(Ent::Item(i)) => i32::from(w.items[*i].probing != 0),
+                _ => 0,
+            })
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_item_bot_desirability(
+    item: *mut c_void,
+    _bot: *mut c_void,
+    out: *mut f32,
+) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| match w.ents.get(&(item as usize)) {
+                Some(Ent::Item(i)) => w.items[*i].desir,
+                _ => 0.0,
+            })
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_actor_name_index(actor: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        out.write((|| {
+            WORLD.with_borrow(|w| match w.ents.get(&(actor as usize)) {
+                Some(Ent::Node(i)) => NODE_NAME_BASE + *i as i32,
+                _ => -1,
+            })
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_actor_class(actor: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        out.write((|| {
+            // Class identity only: nav 1, spot 2, pawn 3, mover 4, item 5.
+            let code: usize = WORLD.with_borrow(|w| match w.ents.get(&(actor as usize)) {
+                Some(Ent::Node(i)) => {
+                    if w.nodes[*i].spot {
+                        2
+                    } else {
+                        1
+                    }
+                }
+                Some(Ent::Pawn | Ent::GoalPawn) => 3,
+                Some(Ent::Mover(_)) => 4,
+                Some(Ent::Item(_)) => 5,
+                None => 0,
+            });
+            code as *mut c_void
+        })());
+    }
+    0
+}
+
+unsafe extern "C" fn svc_log_actor(kind: i32, actor: *mut c_void) -> i32 {
+    (|| {
+        let name = refname(actor);
+        WORLD.with_borrow_mut(|w| {
+            w.log
+                .push(format!("log {} {name}", LOG_KINDS[kind as usize]))
+        });
+    })();
+    0
+}
+
+// Falling-goal branch (`findPathToward`, goal is a falling pawn): the oracle
+// harness stubbed `APawn::jumpLanding` as `Landing.Z -= 16`. The real Rust
+// `jumpLanding` now runs, so the goal pawn's world is scripted to give the same
+// landing: in its dry zero-gravity zone, the first move drops it 16 units onto a
+// flat floor. `far_move_actor` restores the start (`moveActor = 0`).
+unsafe extern "C" fn land_move_actor(
+    _level: *mut c_void,
+    actor: *mut c_void,
+    _delta: *const c_void,
+    _rotation: *const c_void,
+    hit: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        (*actor.cast::<AActor>()).location.z -= 16.0;
+        let hit = &mut *hit.cast::<FCheckResult>();
+        hit.time = 0.0;
+        hit.normal = FVector {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
         };
-        i32::from(hit)
-    })
+        *out = 1;
+    }
+    0
 }
-
-unsafe extern "C" fn svc_mover_player_only(mover: *mut c_void) -> i32 {
-    WORLD.with_borrow(|w| match w.ents.get(&(mover as usize)) {
-        Some(Ent::Mover(i)) => w.walls[*i].po,
-        _ => 0,
-    })
-}
-
-unsafe extern "C" fn svc_event_special_cost(node: *mut c_void, _seeker: *mut c_void) -> i32 {
-    WORLD.with_borrow(|w| match w.ents.get(&(node as usize)) {
-        Some(Ent::Node(i)) => w.nodes[*i].scost,
-        _ => 0,
-    })
-}
-
-unsafe extern "C" fn svc_item_is_probing_touch(item: *mut c_void) -> i32 {
-    WORLD.with_borrow(|w| match w.ents.get(&(item as usize)) {
-        Some(Ent::Item(i)) => i32::from(w.items[*i].probing != 0),
-        _ => 0,
-    })
-}
-
-unsafe extern "C" fn svc_item_bot_desirability(item: *mut c_void, _bot: *mut c_void) -> f32 {
-    WORLD.with_borrow(|w| match w.ents.get(&(item as usize)) {
-        Some(Ent::Item(i)) => w.items[*i].desir,
-        _ => 0.0,
-    })
-}
-
-unsafe extern "C" fn svc_actor_name_index(actor: *mut c_void) -> i32 {
-    WORLD.with_borrow(|w| match w.ents.get(&(actor as usize)) {
-        Some(Ent::Node(i)) => NODE_NAME_BASE + *i as i32,
-        _ => -1,
-    })
-}
-
-unsafe extern "C" fn svc_actor_class(actor: *mut c_void) -> *mut c_void {
-    // Class identity only: nav 1, spot 2, pawn 3, mover 4, item 5.
-    let code: usize = WORLD.with_borrow(|w| match w.ents.get(&(actor as usize)) {
-        Some(Ent::Node(i)) => {
-            if w.nodes[*i].spot {
-                2
-            } else {
-                1
-            }
-        }
-        Some(Ent::Pawn | Ent::GoalPawn) => 3,
-        Some(Ent::Mover(_)) => 4,
-        Some(Ent::Item(_)) => 5,
-        None => 0,
-    });
-    code as *mut c_void
-}
-
-unsafe extern "C" fn svc_log_actor(kind: i32, actor: *mut c_void) {
-    let name = refname(actor);
-    WORLD.with_borrow_mut(|w| {
-        w.log
-            .push(format!("log {} {name}", LOG_KINDS[kind as usize]))
-    });
+unsafe extern "C" fn land_far_move_actor(
+    _level: *mut c_void,
+    actor: *mut c_void,
+    dest: *const c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        (*actor.cast::<AActor>()).location = *dest.cast::<FVector>();
+        *out = 1;
+    }
+    0
 }
 
 fn services() -> Hp2RouteServices {
@@ -620,7 +754,6 @@ fn services() -> Hp2RouteServices {
         far_move_actor: svc_far_move_actor,
         point_reachable: svc_point_reachable,
         actor_reachable: svc_actor_reachable,
-        goal_jump_landing: svc_goal_jump_landing,
         model_fast_line_check: svc_model_fast_line_check,
         single_line_hit_actor: svc_single_line_hit_actor,
         navigation_point_list: svc_navigation_point_list,
@@ -632,6 +765,7 @@ fn services() -> Hp2RouteServices {
         actor_name_index: svc_actor_name_index,
         actor_class: svc_actor_class,
         log_actor: svc_log_actor,
+        lists: fixture_lists,
     }
 }
 
@@ -642,6 +776,7 @@ fn node_index(tok: &str) -> usize {
 /// Executes one `call` line and appends its observation lines to `out`.
 fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
     let s = services();
+    pawn_moves::publish(land_move_actor, land_far_move_actor);
     let (pawn, gpawn, np) = WORLD.with_borrow(|w| {
         let b = w.built.as_ref().expect("world built");
         (b.pawn, b.gpawn, b.np.clone())
@@ -663,7 +798,8 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                     np[node_index(g)].cast()
                 };
                 let mut bp: *mut AActor = ptr::null_mut();
-                let r = route::find_path_toward(&s, pawn, goal, single, &mut bp, clr);
+                let r = route::find_path_toward(&s, pawn, goal, single, &mut bp, clr)
+                    .expect("fixture route callback");
                 ret = r.to_string();
                 best = refname(bp.cast());
             }
@@ -675,7 +811,8 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                 let clr = num::<i32>(ts);
                 let dest = FVector { x, y, z };
                 let mut bp: *mut AActor = ptr::null_mut();
-                let r = route::find_path_to(&s, pawn, dest, single, &mut bp, clr);
+                let r = route::find_path_to(&s, pawn, dest, single, &mut bp, clr)
+                    .expect("fixture route callback");
                 ret = r.to_string();
                 best = refname(bp.cast());
             }
@@ -686,13 +823,14 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                 let mut bp: *mut AActor = ptr::null_mut();
                 let w = route::find_path_toward_best_inventory(
                     &s, pawn, &mut bp, clr, min_weight, predict,
-                );
+                )
+                .expect("fixture route callback");
                 ret = format!("f:{:08x}", w.to_bits());
                 best = refname(bp.cast());
             }
             "random" => {
                 let mut bp: *mut AActor = ptr::null_mut();
-                let r = route::find_random_dest(&s, pawn, &mut bp);
+                let r = route::find_random_dest(&s, pawn, &mut bp).expect("fixture route callback");
                 ret = r.to_string();
                 best = refname(bp.cast());
             }
@@ -709,7 +847,9 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                 } else {
                     np[node_index(b)].cast()
                 };
-                ret = route::can_move_to(&s, pawn, aa, bb).to_string();
+                ret = route::can_move_to(&s, pawn, aa, bb)
+                    .expect("fixture route callback")
+                    .to_string();
             }
             "prime" => {
                 let i = node_index(next(ts));
@@ -717,13 +857,14 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                 let p = np[i];
                 (*p).visited_weight = d;
             }
-            "clear" => route::clear_paths(&s, pawn),
+            "clear" => route::clear_paths(&s, pawn).expect("fixture route callback"),
             "bpf" => {
                 let i = node_index(next(ts));
                 let single = num::<i32>(ts);
                 let mf = num::<i32>(ts);
                 let mut bp: *mut AActor = ptr::null_mut();
-                let r = route::breadth_path_from(&s, pawn, np[i].cast(), &mut bp, single, mf);
+                let r = route::breadth_path_from(&s, pawn, np[i].cast(), &mut bp, single, mf)
+                    .expect("fixture route callback");
                 ret = r.to_string();
                 best = refname(bp.cast());
             }
@@ -741,7 +882,8 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                     mf,
                     min_weight,
                     predict,
-                );
+                )
+                .expect("fixture route callback");
                 ret = format!("f:{:08x}", w.to_bits());
                 best = refname(bp.cast());
             }
@@ -763,7 +905,8 @@ fn run_call(ts: &mut SplitWhitespace<'_>, out: &mut String) {
                     NODE_NAME_BASE + node_index(d) as i32
                 };
                 let mut nxt: *mut ANavigationPoint = ptr::null_mut();
-                let found = route::find_path(&s, pawn, &mut nxt, np[i].cast(), dest_name);
+                let found = route::find_path(&s, pawn, &mut nxt, np[i].cast(), dest_name)
+                    .expect("fixture route callback");
                 ret = if found { "1" } else { "0" }.into();
                 best = refname(nxt.cast());
             }
@@ -880,4 +1023,22 @@ fn route_grid1089() {
 #[test]
 fn route_tree_fanout() {
     check("route_tree_fanout");
+}
+
+unsafe extern "C" fn fixture_lists(
+    count: i32,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void, *mut Hp2SortedPathList, *mut Hp2SortedPathList) -> i32,
+) -> i32 {
+    unsafe {
+        let mut first = std::mem::MaybeUninit::<Hp2SortedPathList>::uninit();
+        (*first.as_mut_ptr()).num_points = 0;
+        if count == 2 {
+            let mut second = std::mem::MaybeUninit::<Hp2SortedPathList>::uninit();
+            (*second.as_mut_ptr()).num_points = 0;
+            run(context, first.as_mut_ptr(), second.as_mut_ptr())
+        } else {
+            run(context, first.as_mut_ptr(), ptr::null_mut())
+        }
+    }
 }

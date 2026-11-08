@@ -13,6 +13,7 @@
 use hp2_abi::FVector;
 
 use crate::services::Hp2RenderServices;
+use std::ffi::c_char;
 
 #[allow(clippy::approx_constant, clippy::excessive_precision)] // C literal, value kept exact
 pub const PI: f32 = 3.1415926535897932;
@@ -126,38 +127,65 @@ fn sqrt_plain(f: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
-// GMath access through the services table
+// GMath access through native services or canonical Core tables.
 // ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+enum MathSource<'a> {
+    Native(&'a Hp2RenderServices),
+    Canonical,
+}
 
 /// Table-backed GMath accessors (the `GMath.*` members in UnMath.h).
 #[derive(Clone, Copy)]
 pub struct GMath<'a> {
-    services: &'a Hp2RenderServices,
+    source: MathSource<'a>,
 }
 
 impl<'a> GMath<'a> {
     pub fn new(services: &'a Hp2RenderServices) -> Self {
-        Self { services }
+        Self { source: MathSource::Native(services) }
+    }
+
+    /// Uses the same Core tables as the native inline-math exports.
+    pub const fn canonical() -> Self {
+        Self { source: MathSource::Canonical }
     }
 
     /// `GMath.SinTab(i)`.
     pub fn sin_tab(&self, angle: i32) -> f32 {
-        unsafe { (self.services.sin_tab)(angle) }
+        match self.source {
+            MathSource::Native(services) => unsafe { (services.sin_tab)(angle) },
+            MathSource::Canonical => hp2_core::math::sin_tab_inline(angle, hp2_core::math::trig_table()),
+        }
     }
 
     /// `GMath.CosTab(i)`.
     pub fn cos_tab(&self, angle: i32) -> f32 {
-        unsafe { (self.services.cos_tab)(angle) }
+        match self.source {
+            MathSource::Native(services) => unsafe { (services.cos_tab)(angle) },
+            MathSource::Canonical => hp2_core::math::cos_tab_inline(angle, hp2_core::math::trig_table()),
+        }
     }
 
     /// `GMath.SqrtApprox(F)` (table).
     pub fn sqrt_approx(&self, f: f32) -> f32 {
-        unsafe { (self.services.gmath_sqrt_approx)(f) }
+        match self.source {
+            MathSource::Native(services) => unsafe { (services.gmath_sqrt_approx)(f) },
+            MathSource::Canonical => hp2_core::math::sqrt_approx_inline(f, hp2_core::math::sqrt_man_table()),
+        }
     }
 
     /// `GMath.DivSqrtApprox(F)` (table).
     pub fn div_sqrt_approx(&self, f: f32) -> f32 {
-        unsafe { (self.services.gmath_div_sqrt_approx)(f) }
+        match self.source {
+            MathSource::Native(services) => unsafe { (services.gmath_div_sqrt_approx)(f) },
+            MathSource::Canonical => hp2_core::math::power_inline(
+                f,
+                hp2_core::math::div_sqrt_man_table(),
+                hp2_core::math::div_sqrt_exp_table(),
+            ),
+        }
     }
 
     /// `CosFloat(F) = CosTab(appRound((F*65536.f)/(2.f*PI)))`.
@@ -202,7 +230,9 @@ pub fn init_byte_fog(byte_fog: &mut [u8; BYTE_FOG_LEN]) {
 
 /// `FilterTab[i][j]` for `i < 128`, `j < 4`.
 #[allow(clippy::needless_range_loop)] // index loops mirror the C `for (bit...)`
-pub fn init_filter_tab() -> FilterTab {
+pub fn init_filter_tab(
+    check_failed: unsafe extern "C" fn(expr: *const c_char, line: i32),
+) -> FilterTab {
     const FILTER_WEIGHT: [[i32; 8]; 8] = [
         [0, 24, 40, 24, 0, 0, 0, 0],
         [0, 40, 64, 40, 0, 0, 0, 0],
@@ -227,6 +257,12 @@ pub fn init_filter_tab() -> FilterTab {
                     }
                 }
                 let result = ((acc * 255) / filter_sum) as u32;
+                // C++ `check(Result>=0 && Result<=255)` (UnLight.cpp:451). `Result>=0`
+                // always holds for DWORD, so only the upper bound can fail.
+                if !(result <= 255) {
+                    // SAFETY: `check_failed` is the engine callback from `LightServicesTable`.
+                    unsafe { check_failed(c"Result>=0 && Result<=255".as_ptr(), 451) };
+                }
                 *entry = entry.wrapping_add(result << (pack * 8));
             }
         }
@@ -238,9 +274,12 @@ pub fn init_filter_tab() -> FilterTab {
 // Shadow map (FLightManager::ShadowMapGen)
 // ---------------------------------------------------------------------------
 
-/// Convolves the packed shadow bitmask into `dest` (`shadow_mask_u * v_clamp * 2`
-/// DWORDs). `src` is `None` when the light has no shadow bits: `dest` is filled
-/// with 0x7F bytes (`appMemset(Dest1, 127, ...)`).
+/// Convolves the packed shadow bitmask into `dest`. The logical map is
+/// `shadow_mask_u * v_clamp * 2` DWORDs. The original single-row convolution
+/// also writes its third channel into the immediately following row, so its
+/// caller must provide at least `shadow_mask_u * 4` DWORDs in that case.
+/// `src` is `None` when the light has no shadow bits: only the logical map is
+/// filled with 0x7F bytes (`appMemset(Dest1, 127, ...)`).
 pub fn shadow_map_gen(
     filter_tab: &FilterTab,
     shadow_mask_u: usize,
@@ -248,16 +287,26 @@ pub fn shadow_map_gen(
     src: Option<&[u8]>,
     dest: &mut [u32],
 ) {
-    assert_eq!(dest.len(), shadow_mask_u * v_clamp * 2, "shadow dest size");
+    let logical_words = shadow_mask_u * v_clamp * 2;
+    let write_words = if v_clamp == 1 {
+        shadow_mask_u * 4
+    } else {
+        logical_words
+    };
+    assert!(
+        dest.len() >= write_words,
+        "shadow destination lacks original write extent"
+    );
 
     let Some(src) = src else {
-        dest.fill(0x7F7F_7F7F);
+        dest[..logical_words].fill(0x7F7F_7F7F);
         return;
     };
 
+    dest[..logical_words].fill(0);
+
     let u_count = shadow_mask_u;
     let size4 = u_count * 2;
-    dest.fill(0);
 
     // Dests[0] and Dests[1] start at Dest1, Dests[2] at Dest1 + Size4 (DWORD indexes).
     let mut dests = [0usize, 0usize, size4];
@@ -311,13 +360,10 @@ pub fn shadow_map_gen(
     }
 }
 
-/// `*Dest += Value` for one DWORD of the map. Only a single-row map (`v_clamp == 1`)
-/// makes channel 2 reach past the end: the C++ writes that DWORD past the map (UB). It is
-/// dropped here because it lies outside the map and nothing reads it back.
+/// `*Dest += Value` for one DWORD of the map. The caller has established the
+/// full original write extent, including the single-row third-channel spill.
 fn add_word(dest: &mut [u32], idx: usize, value: u32) {
-    if let Some(slot) = dest.get_mut(idx) {
-        *slot = slot.wrapping_add(value);
-    }
+    dest[idx] = dest[idx].wrapping_add(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -421,8 +467,8 @@ pub struct VolumetricParams {
     pub ambient: bool,
 }
 
-/// Volumetric fog contribution at `vertex`. `fog_rejection` is the
-/// function-static `FogRejectionMethod`, carried by the caller.
+/// Volumetric fog contribution at `vertex`. `fog_rejection` is the single shared
+/// fog-rejection state (`LightFogRejectionMethod` in UnLight.cpp), carried by the caller.
 pub fn volumetric(
     g: &GMath<'_>,
     info: &VolumetricParams,
@@ -921,4 +967,218 @@ fn spatial_radial(
         src_pos += uskip + p.shadow_skip as isize;
         dest_pos += uskip;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Per-vertex lighting and fog (FLightManager::LightAndFog)
+// ---------------------------------------------------------------------------
+
+/// `ALO_NotLight`: a light that contributes nothing (`FLightInfo::Opt`).
+pub const ALO_NOT_LIGHT: u32 = 3;
+/// `LD_Plane` and `LD_Ambient`: `AActor::LightSource` values.
+pub const LD_PLANE: u32 = 1;
+pub const LD_AMBIENT: u32 = 2;
+/// `PF_Unlit` and `PF_RenderFog`: poly flags.
+pub const PF_UNLIT: u32 = 0x0040_0000;
+pub const PF_RENDER_FOG: u32 = 0x4000_0000;
+
+/// `FLightManager` state that `LightAndFog` reads. `#[repr(C)]`: the C++ shell
+/// passes it as `void*`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FogParams {
+    /// `AmbientVector` (all four components).
+    pub ambient: [f32; 4],
+    /// `FLightManager::Diffuse`.
+    pub diffuse: f32,
+    /// `FLightManager::Specular`.
+    pub specular: f32,
+    /// `FLightManager::SpecMinCos`.
+    pub spec_min_cos: f32,
+}
+
+/// The fields read for one `FLightInfo` in `FirstLight..LastLight`.
+/// Runtime access is lazy: the leaf accessor fills one record when Rust visits it.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FogLight {
+    /// `FLightInfo::Location`.
+    pub location: FVector,
+    /// `FLightInfo::LightDir`.
+    pub light_dir: FVector,
+    /// `FLightInfo::FloatColor` (`FPlane`, all four components).
+    pub float_color: [f32; 4],
+    /// `FLightInfo::Radius`.
+    pub radius: f32,
+    /// `FLightInfo::RRadiusMult`.
+    pub rradius_mult: f32,
+    /// `FLightInfo::Opt` (`ELightKind`).
+    pub opt: u32,
+    /// `Actor->LightSource`.
+    pub light_source: u32,
+    /// `Actor->bDarkLight` (0 or 1).
+    pub dark_light: u32,
+}
+
+/// The volumetric fields read for one `FLightInfo` in `FirstVtric..LastVtric`.
+/// Runtime access is lazy and does not allocate a per-vertex array.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FogVtric {
+    /// `FLightInfo::Location`.
+    pub location: FVector,
+    /// `FLightInfo::VolRadiusSquared`.
+    pub vol_radius_squared: f32,
+    /// `FLightInfo::RVolRadius`.
+    pub rvol_radius: f32,
+    /// `FLightInfo::RVolRadiusSquared`.
+    pub rvol_radius_squared: f32,
+    /// `FLightInfo::VolBrightness`.
+    pub vol_brightness: f32,
+    /// `FLightInfo::LocationSizeSquared`.
+    pub location_size_squared: f32,
+    /// `FLightInfo::VolInside` (0 or 1).
+    pub vol_inside: u32,
+    /// `VolumetricParams::ambient` (0 or 1).
+    pub ambient: u32,
+    /// `FLightInfo::VolumetricColor` (`FPlane`, all four components).
+    pub color: [f32; 4],
+}
+
+/// The `FTransSample` fields `LightAndFog` reads and writes. `normal` is the
+/// XYZ part of `Normal`; its W is never read. `#[repr(C)]`: passed as `void*`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FogVertex {
+    pub point: FVector,
+    pub normal: FVector,
+    /// `Vert.Light` (`FPlane`).
+    pub light: [f32; 4],
+    /// `Vert.Fog` (`FPlane`).
+    pub fog: [f32; 4],
+}
+
+/// `FLightManager::LightAndFog` (UnLight.cpp:535-655). Fills `vert.light` and
+/// `vert.fog`. Returns `true` when the vertex is lit (`poly_flags` lacks `PF_Unlit`).
+/// The input iterators follow `FirstLight..LastLight` and `FirstVtric..LastVtric`.
+#[allow(clippy::needless_range_loop)] // index loops mirror the C FPlane component code
+pub fn light_and_fog(
+    g: &GMath<'_>,
+    p: &FogParams,
+    vert: &mut FogVertex,
+    poly_flags: u32,
+    lights: impl IntoIterator<Item = FogLight>,
+    vtrics: impl IntoIterator<Item = FogVtric>,
+    fog_rejection: &mut i32,
+) -> bool {
+    vert.light = p.ambient;
+    vert.fog = [0.0; 4];
+    if poly_flags & PF_UNLIT != 0 {
+        return false;
+    }
+
+    let point_squared = size_squared(vert.point);
+    for light in lights {
+        if light.opt == ALO_NOT_LIGHT {
+            continue;
+        }
+        // Diffuse lighting.
+        let mut light_vector = v_sub(light.location, vert.point);
+        let light_squared = size_squared(light_vector);
+        // SqrtApprox(LightSquared) is the libm sqrt, not the table.
+        let light_size = sqrt_plain(light_squared);
+
+        // Compute incidence, based on light directionality.
+        let mut gt = if light.light_source == LD_AMBIENT {
+            // Constant lighting in all directions.
+            light_vector = v_scale(vert.normal, light_size);
+            1.0
+        } else if light.light_source == LD_PLANE {
+            // Planar lighting.
+            let d = dot(light.light_dir, vert.normal);
+            light_vector = v_scale(light.light_dir, light_size);
+            d
+        } else {
+            // Radial lighting.
+            dot(light_vector, vert.normal) / light_size
+        };
+
+        if p.diffuse == 1.4 {
+            // Debug hack old lighting.
+            gt = sq(1.0 + gt) - 1.5;
+        }
+        gt *= p.diffuse;
+        if gt < 0.0 {
+            gt = 0.0;
+        }
+
+        // Specular lighting.
+        if p.specular > 0.0 {
+            // MirrorByVector(N) = *this - N * (2.f * (*this | N)).
+            let mirror = v_sub(
+                light_vector,
+                v_scale(vert.normal, 2.0 * dot(light_vector, vert.normal)),
+            );
+            let mut s = dot(mirror, vert.point);
+            if s > 0.0 {
+                s *= s / (light_squared * point_squared);
+                s -= p.spec_min_cos;
+                if s > 0.0 {
+                    gt = p.specular.mul_add(s, gt);
+                }
+            }
+        }
+
+        // Update result color.
+        if gt > 0.0 {
+            // Radial falloff: G *= Min(1.f, (Radius - LightSize) * RRadiusMult).
+            let falloff = (light.radius - light_size) * light.rradius_mult;
+            gt *= if 1.0 <= falloff { 1.0 } else { falloff };
+            // `Vert.Light += FloatColor * G` on FPlane: all four components.
+            for c in 0..4 {
+                vert.light[c] += light.float_color[c] * gt;
+            }
+            if light.dark_light != 0 {
+                // Account for any negative results.
+                vert.light[0] = max_f(vert.light[0], 0.0);
+                vert.light[1] = max_f(vert.light[1], 0.0);
+                vert.light[2] = max_f(vert.light[2], 0.0);
+            }
+        }
+    }
+
+    vert.light[0] = min_positive(vert.light[0], 1.0);
+    vert.light[1] = min_positive(vert.light[1], 1.0);
+    vert.light[2] = min_positive(vert.light[2], 1.0);
+
+    // Fog if needed.
+    if poly_flags & PF_RENDER_FOG != 0 {
+        // Volumetric fog.
+        for vt in vtrics {
+            let params = VolumetricParams {
+                location: vt.location,
+                vol_radius_squared: vt.vol_radius_squared,
+                rvol_radius: vt.rvol_radius,
+                rvol_radius_squared: vt.rvol_radius_squared,
+                vol_brightness: vt.vol_brightness,
+                location_size_squared: vt.location_size_squared,
+                vol_inside: vt.vol_inside != 0,
+                ambient: vt.ambient != 0,
+            };
+            let volume_value = 2.0 * volumetric(g, &params, vert.point, fog_rejection);
+            // `*(DWORD*)&VolumeValue != 0`: compare the bit pattern.
+            if volume_value.to_bits() != 0 {
+                let a = min_positive(vt.color[3] * volume_value, 1.0);
+                for c in 0..3 {
+                    // VC.c * VolumeValue + Fog.c * (1-A), fused (FMA table, 0x1b2c/0x1b3c-0x1b40).
+                    vert.fog[c] = min_positive(
+                        vt.color[c].mul_add(volume_value, vert.fog[c] * (1.0 - a)),
+                        1.0,
+                    );
+                }
+                vert.fog[3] = min_positive(a + vert.fog[3], 1.0);
+            }
+        }
+    }
+    true
 }

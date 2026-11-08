@@ -297,7 +297,6 @@ fn pi(s: &mut String, v: i64) {
 fn fcol(c: FColor) -> [u8; 4] {
     [c.r, c.g, c.b, c.a]
 }
-
 fn put_particle(s: &mut String, p: &UParticle) {
     pv(s, &p.position);
     pv(s, &p.velocity);
@@ -1102,10 +1101,10 @@ unsafe extern "C" fn m_list_world_box(_list: *mut c_void, out: *mut c_void) {
     *(out as *mut FBox) = env(|e| e.world_box.get());
 }
 
-/// `AParticleFX::EmitParticles` = clock pair around `hp2_rs_engine_particle_fx_emit_particles`.
+/// `AParticleFX::EmitParticles` = clock pair around the checked particle emission policy.
 unsafe fn emit_shell(fx: *mut AParticleFX, tick: f32) -> i32 {
     (svc().stat_clock_update)();
-    let r = particle_fx::emit_particles(fx, tick, svc());
+    let r = particle_fx::emit_particles(fx, tick, svc()).expect("successful fixture callback");
     (svc().stat_unclock_update)();
     r
 }
@@ -1115,7 +1114,8 @@ unsafe extern "C" fn m_emit_particles_shell(fx: *mut c_void, tick: f32) -> i32 {
 }
 
 unsafe extern "C" fn m_update_shell(fx: *mut c_void, step: f32) -> i32 {
-    particle_fx::update(fx as *mut AParticleFX, step, svc()) as i32
+    particle_fx::update(fx as *mut AParticleFX, step, svc()).expect("successful fixture callback")
+        as i32
 }
 
 /// `appRand`-driven probe: 4 raw rand values, then the float helpers, then 1000 `appFrand` samples.
@@ -1233,7 +1233,8 @@ unsafe fn run_bbox_case(t: &mut Toks, name: &str, k: &Knobs, m: &mut Mem, ex: &E
     for exact in 0..2 {
         trace_set(true);
         let mut co: FCoords = std::mem::zeroed();
-        particle_fx::get_render_bounding_box(fx, &mut co, svc());
+        particle_fx::get_render_bounding_box(fx, &mut co, svc())
+            .expect("successful fixture callback");
         trace_set(false);
         let mut s = format!("bbox {name} {exact}");
         pv(&mut s, &co.origin);
@@ -1291,20 +1292,20 @@ unsafe fn run_update_case(t: &mut Toks, name: &str, k: &Knobs, m: &mut Mem, ex: 
         trace_set(true);
         let (op, ret) = match kind {
             0 => {
-                particle_fx::update_particles(fx, arg, svc());
+                particle_fx::update_particles(fx, arg, svc()).expect("successful fixture callback");
                 ("UP", "-")
             }
             1 => {
-                let r = particle_fx::update(fx, arg, svc());
+                let r = particle_fx::update(fx, arg, svc()).expect("successful fixture callback");
                 ("UPD", if r { "1" } else { "0" })
             }
             2 => {
-                particle_fx::init_execution(fx, svc());
+                particle_fx::init_execution(fx, svc()).expect("successful fixture callback");
                 ("INIT", "-")
             }
             _ => {
                 // AActor::Tick fake returns 1, and AParticleFX::Tick returns Super::Tick.
-                particle_fx::tick(fx, arg, tt as i32, svc());
+                particle_fx::tick(fx, arg, tt as i32, svc()).expect("successful fixture callback");
                 ("TICK", "1")
             }
         };
@@ -1328,7 +1329,8 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
             // PM_SYS
             let mut buf: Box<AParticleFX> = Box::new(std::mem::zeroed::<AParticleFX>());
             let bufp: *mut AParticleFX = &mut *buf;
-            let r = particle_fx::get_sys_params(fx, bufp, svc());
+            let r =
+                particle_fx::get_sys_params(fx, bufp, svc()).expect("successful fixture callback");
             trace_set(false);
             let which = if r == fx {
                 0
@@ -1346,7 +1348,7 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         1 => {
             // PM_GP
             let mut p: FParams = std::mem::zeroed();
-            particle_fx::get_params(fx, &mut p, svc());
+            particle_fx::get_params(fx, &mut p, svc()).expect("successful fixture callback");
             trace_set(false);
             let mut s = format!("params {name} GP ");
             put_fparams(&mut s, &p);
@@ -1355,8 +1357,9 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         2 => {
             // PM_ADD
             let mut p: FParams = std::mem::zeroed();
-            particle_fx::get_params(fx, &mut p, svc());
-            let added = particle_fx::add_particle(fx, arg, &pos, &p, svc());
+            particle_fx::get_params(fx, &mut p, svc()).expect("successful fixture callback");
+            let added = particle_fx::add_particle(fx, arg, &pos, &p, svc())
+                .expect("successful fixture callback");
             let list = (*fx).particle_list as *mut ParticleList;
             let size = (*list).size();
             trace_set(false);
@@ -1364,7 +1367,8 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
             put_found(&mut s, last_particle(list));
             rec(s);
             trace_set(true);
-            let rr = particle_fx::recompute_deltas(fx, arg, svc());
+            let rr =
+                particle_fx::recompute_deltas(fx, arg, svc()).expect("successful fixture callback");
             trace_set(false);
             let mut s = format!("params {name} RD {} {arg}", i32::from(rr));
             put_found(&mut s, (*list).get_particle(arg));
@@ -1372,7 +1376,8 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         }
         3 => {
             // PM_ADDNULL
-            let added = particle_fx::add_particle(fx, arg, &pos, std::ptr::null(), svc());
+            let added = particle_fx::add_particle(fx, arg, &pos, std::ptr::null(), svc())
+                .expect("successful fixture callback");
             let list = (*fx).particle_list as *mut ParticleList;
             let size = (*list).size();
             trace_set(false);
@@ -1381,15 +1386,16 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         4 => {
             // PM_RD
             let mut p: FParams = std::mem::zeroed();
-            particle_fx::get_params(fx, &mut p, svc());
-            particle_fx::add_particle(fx, 1, &pos, &p, svc());
+            particle_fx::get_params(fx, &mut p, svc()).expect("successful fixture callback");
+            particle_fx::add_particle(fx, 1, &pos, &p, svc()).expect("successful fixture callback");
             let list = (*fx).particle_list as *mut ParticleList;
             if arg2 != 0 {
                 let p1 = (*list).get_particle(1);
                 assert!(!p1.is_null(), "RD mode needs particle 1");
                 (*p1).age = (*p1).lifetime + 1.0;
             }
-            let rr = particle_fx::recompute_deltas(fx, arg, svc());
+            let rr =
+                particle_fx::recompute_deltas(fx, arg, svc()).expect("successful fixture callback");
             trace_set(false);
             let mut s = format!("params {name} RD {} {arg}", i32::from(rr));
             put_found(&mut s, (*list).get_particle(arg));
@@ -1398,7 +1404,7 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         5 => {
             // PM_LOD
             for fr in [0.0_f32, 0.3, 0.9] {
-                let r = particle_fx::lod(fx, fr, svc());
+                let r = particle_fx::lod(fx, fr, svc()).expect("successful fixture callback");
                 trace_set(false);
                 let mut s = format!("params {name} LOD");
                 pf(&mut s, fr);
@@ -1406,7 +1412,8 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
                 rec(s);
                 trace_set(true);
             }
-            let lp = particle_fx::lod_particles(fx, 0.3, svc());
+            let lp =
+                particle_fx::lod_particles(fx, 0.3, svc()).expect("successful fixture callback");
             trace_set(false);
             let mut s = format!("params {name} LODP");
             pf(&mut s, 0.3);
@@ -1416,13 +1423,15 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         6 => {
             // PM_DENS
             for fr in [0.0_f32, 0.5] {
-                let r = particle_fx::lod_particle_density(fx, &frame, fr, svc());
+                let r = particle_fx::lod_particle_density(fx, &frame, fr, svc())
+                    .expect("successful fixture callback");
                 let mut s = format!("params {name} DENS");
                 pf(&mut s, fr);
                 pf(&mut s, r);
                 rec(s);
             }
-            let lp = particle_fx::lod_particles(fx, 0.5, svc());
+            let lp =
+                particle_fx::lod_particles(fx, 0.5, svc()).expect("successful fixture callback");
             let mut s = format!("params {name} LODP");
             pf(&mut s, 0.5);
             pf(&mut s, lp);
@@ -1431,12 +1440,14 @@ unsafe fn run_param_mode(name: &str, fx: *mut AParticleFX, mode: i64, arg: i32, 
         7 => {
             // PM_DENSNOLIST
             (*fx).particle_list = null_mut();
-            let r = particle_fx::lod_particle_density(fx, &frame, 0.5, svc());
+            let r = particle_fx::lod_particle_density(fx, &frame, 0.5, svc())
+                .expect("successful fixture callback");
             let mut s = format!("params {name} DENS");
             pf(&mut s, 0.5);
             pf(&mut s, r);
             rec(s);
-            let lp = particle_fx::lod_particles(fx, 0.5, svc());
+            let lp =
+                particle_fx::lod_particles(fx, 0.5, svc()).expect("successful fixture callback");
             let mut s = format!("params {name} LODP");
             pf(&mut s, 0.5);
             pf(&mut s, lp);
@@ -1553,53 +1564,59 @@ fn particle_fx_replay_matches_cpp_harness() {
     LazyLock::force(&TABLES);
 
     let pserv = Hp2ParticleServices {
-        app_frand: m_app_frand,
+        app_frand: checked_m_app_frand,
         sin_tab: m_sin_tab,
         cos_tab: m_cos_tab,
-        total_wind: m_total_wind,
-        fast_line_check: m_fast_line_check,
-        system_trace_level_hit: m_system_trace_level_hit,
-        palette_plane: m_palette_plane,
+        total_wind: checked_m_total_wind,
+        fast_line_check: checked_m_fast_line_check,
+        system_trace_level_hit: checked_m_system_trace_level_hit,
+        palette_plane: checked_m_palette_plane,
     };
     let svc = Hp2ParticleFxServices {
+        with_particle: fixture_with_particle,
+        with_mesh_vertices: fixture_with_mesh_vertices,
+        mesh_vertex: fixture_mesh_vertex,
+        update_particles_shell: fixture_update_particles_shell,
+        get_sys_params_shell: fixture_get_sys_params_shell,
+        get_params_shell: fixture_get_params_shell,
+        add_particle_shell: fixture_add_particle_shell,
+
         particle: &pserv,
-        app_frand_range: m_app_frand_range,
-        app_rand_range_int: m_app_rand_range_int,
-        app_exp: m_app_exp,
-        sqrt_approx: m_sqrt_approx,
-        sin_float: m_sin_float,
-        cos_float: m_cos_float,
-        actor_to_local: m_actor_to_local,
-        actor_zone_gravity: m_actor_zone_gravity,
-        actor_lod_bias: m_actor_lod_bias,
-        level_time_seconds: m_level_time_seconds,
-        level_destroy_actor: m_level_destroy_actor,
-        is_editor: m_is_editor,
-        sync_owner_transient: m_sync_owner_transient,
-        parent_defaults: m_parent_defaults,
-        mesh_render_box: m_mesh_render_box,
-        mesh_frame_verts: m_mesh_frame_verts,
-        mesh_get_frame: m_mesh_get_frame,
-        mesh_num_tris: m_mesh_num_tris,
-        mesh_tri_verts: m_mesh_tri_verts,
-        pattern_num_points: m_pattern_num_points,
-        pattern_point: m_pattern_point,
-        palette_color0: m_palette_color0,
-        list_start: m_list_start,
-        list_next: m_list_next,
-        list_add: m_list_add,
-        list_remove_current: m_list_remove_current,
-        list_remove_all: m_list_remove_all,
-        list_remove_from_front: m_list_remove_from_front,
-        list_size: m_list_size,
-        list_get_particle: m_list_get_particle,
-        list_update_box: m_list_update_box,
-        list_world_box: m_list_world_box,
-        emit_particles_shell: m_emit_particles_shell,
-        update_shell: m_update_shell,
-        stat_clock_update: m_stat_clock_update,
-        stat_unclock_update: m_stat_unclock_update,
-        stat_particles_emitted: m_stat_particles_emitted,
+        app_frand_range: checked_m_app_frand_range,
+        app_rand_range_int: checked_m_app_rand_range_int,
+        app_exp: checked_m_app_exp,
+        sqrt_approx: checked_m_sqrt_approx,
+        sin_float: checked_m_sin_float,
+        cos_float: checked_m_cos_float,
+        actor_to_local: checked_m_actor_to_local,
+        actor_zone_gravity: checked_m_actor_zone_gravity,
+        actor_lod_bias: checked_m_actor_lod_bias,
+        level_time_seconds: checked_m_level_time_seconds,
+        level_destroy_actor: checked_m_level_destroy_actor,
+        is_editor: checked_m_is_editor,
+        sync_owner_transient: checked_m_sync_owner_transient,
+        parent_defaults: checked_m_parent_defaults,
+        mesh_render_box: checked_m_mesh_render_box,
+        mesh_num_tris: checked_m_mesh_num_tris,
+        mesh_tri_verts: checked_m_mesh_tri_verts,
+        pattern_num_points: checked_m_pattern_num_points,
+        pattern_point: checked_m_pattern_point,
+        palette_color0: checked_m_palette_color0,
+        list_start: checked_m_list_start,
+        list_next: checked_m_list_next,
+        list_add: checked_m_list_add,
+        list_remove_current: checked_m_list_remove_current,
+        list_remove_all: checked_m_list_remove_all,
+        list_remove_from_front: checked_m_list_remove_from_front,
+        list_size: checked_m_list_size,
+        list_get_particle: checked_m_list_get_particle,
+        list_update_box: checked_m_list_update_box,
+        list_world_box: checked_m_list_world_box,
+        emit_particles_shell: checked_m_emit_particles_shell,
+        update_shell: checked_m_update_shell,
+        stat_clock_update: checked_m_stat_clock_update,
+        stat_unclock_update: checked_m_stat_unclock_update,
+        stat_particles_emitted: checked_m_stat_particles_emitted,
     };
     env(|e| e.svc.set(&svc as *const Hp2ParticleFxServices as usize));
 
@@ -1608,5 +1625,370 @@ fn particle_fx_replay_matches_cpp_harness() {
         check("bbox", BBOX, &run_family("bbox", BBOX));
         check("update", UPDATE, &run_family("update", UPDATE));
         check("params", PARAMS, &run_family("params", PARAMS));
+    }
+}
+
+// Checked adapters retain the original deterministic oracle hook behavior.
+unsafe extern "C" fn checked_m_actor_lod_bias(a0: *mut c_void, result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_actor_lod_bias(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_actor_to_local(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        m_actor_to_local(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_actor_zone_gravity(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        m_actor_zone_gravity(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_app_exp(a0: f64, result: *mut f64) -> i32 {
+    unsafe {
+        result.write(m_app_exp(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_app_frand(result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_app_frand());
+    }
+    0
+}
+unsafe extern "C" fn checked_m_app_frand_range(a0: f32, a1: f32, result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_app_frand_range(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_app_rand_range_int(a0: i32, a1: i32, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_app_rand_range_int(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_cos_float(a0: f32, result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_cos_float(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_emit_particles_shell(
+    a0: *mut c_void,
+    a1: f32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_emit_particles_shell(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_fast_line_check(
+    a0: *mut c_void,
+    a1: *const c_void,
+    a2: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_fast_line_check(a0, a1, a2));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_is_editor(result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_is_editor());
+    }
+    0
+}
+unsafe extern "C" fn checked_m_level_destroy_actor(a0: *mut c_void) -> i32 {
+    unsafe {
+        m_level_destroy_actor(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_level_time_seconds(a0: *mut c_void, result: *mut f64) -> i32 {
+    unsafe {
+        result.write(m_level_time_seconds(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_add(a0: *mut c_void, a1: *const c_void) -> i32 {
+    unsafe {
+        m_list_add(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_get_particle(
+    a0: *mut c_void,
+    a1: i32,
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result.write(m_list_get_particle(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_next(a0: *mut c_void, result: *mut *mut c_void) -> i32 {
+    unsafe {
+        result.write(m_list_next(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_remove_all(a0: *mut c_void) -> i32 {
+    unsafe {
+        m_list_remove_all(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_remove_current(a0: *mut c_void) -> i32 {
+    unsafe {
+        m_list_remove_current(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_remove_from_front(a0: *mut c_void) -> i32 {
+    unsafe {
+        m_list_remove_from_front(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_size(a0: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_list_size(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_start(a0: *mut c_void, result: *mut *mut c_void) -> i32 {
+    unsafe {
+        result.write(m_list_start(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_update_box(a0: *mut c_void) -> i32 {
+    unsafe {
+        m_list_update_box(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_list_world_box(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        m_list_world_box(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_mesh_num_tris(a0: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_mesh_num_tris(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_mesh_render_box(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        m_mesh_render_box(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_mesh_tri_verts(a0: *mut c_void, a1: i32, a2: *mut i32) -> i32 {
+    unsafe {
+        m_mesh_tri_verts(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_palette_color0(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_palette_color0(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_palette_plane(
+    a0: *mut c_void,
+    a1: f32,
+    a2: f32,
+    a3: f32,
+    a4: *mut c_void,
+) -> i32 {
+    unsafe {
+        m_palette_plane(a0, a1, a2, a3, a4);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_parent_defaults(a0: *mut c_void, result: *mut *mut c_void) -> i32 {
+    unsafe {
+        result.write(m_parent_defaults(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_pattern_num_points(a0: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_pattern_num_points(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_pattern_point(a0: *mut c_void, a1: i32, a2: *mut c_void) -> i32 {
+    unsafe {
+        m_pattern_point(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_sin_float(a0: f32, result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_sin_float(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_sqrt_approx(a0: f32, result: *mut f32) -> i32 {
+    unsafe {
+        result.write(m_sqrt_approx(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_stat_clock_update() -> i32 {
+    unsafe {
+        m_stat_clock_update();
+    }
+    0
+}
+unsafe extern "C" fn checked_m_stat_particles_emitted(a0: i32) -> i32 {
+    unsafe {
+        m_stat_particles_emitted(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_stat_unclock_update() -> i32 {
+    unsafe {
+        m_stat_unclock_update();
+    }
+    0
+}
+unsafe extern "C" fn checked_m_sync_owner_transient(a0: *mut c_void) -> i32 {
+    unsafe {
+        m_sync_owner_transient(a0);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_system_trace_level_hit(
+    a0: *mut c_void,
+    a1: *const c_void,
+    a2: *const c_void,
+    a3: *mut c_void,
+    a4: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(m_system_trace_level_hit(a0, a1, a2, a3, a4));
+    }
+    0
+}
+unsafe extern "C" fn checked_m_total_wind(
+    a0: *mut c_void,
+    a1: *const c_void,
+    a2: *mut c_void,
+) -> i32 {
+    unsafe {
+        m_total_wind(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_m_update_shell(a0: *mut c_void, a1: f32, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(m_update_shell(a0, a1));
+    }
+    0
+}
+
+unsafe extern "C" fn fixture_with_particle(
+    position: *const FVector,
+    body: unsafe extern "C" fn(*mut c_void, *mut UParticle) -> i32,
+    context: *mut c_void,
+) -> i32 {
+    // The existing portable oracle explicitly seeds unused fields with zero.
+    // This is fixture INPUT only; production native constructors never normalize bytes.
+    let mut particle: UParticle = unsafe { std::mem::zeroed() };
+    particle.id = -1;
+    if !position.is_null() {
+        particle.position = unsafe { *position };
+    }
+    particle.last_position = particle.position;
+    unsafe { body(context, &mut particle) }
+}
+unsafe extern "C" fn fixture_with_mesh_vertices(
+    fx: *mut AParticleFX,
+    body: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+    context: *mut c_void,
+) -> i32 {
+    let mut vertices: Vec<FVector> = Vec::new();
+    unsafe {
+        let owner = (*fx).base.owner.cast::<AActor>();
+        if (*fx).distribution == 2 && !owner.is_null() && !(*owner).mesh.is_null() {
+            vertices.resize(
+                m_mesh_frame_verts(owner.cast()) as usize,
+                FVector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            );
+            m_mesh_get_frame(owner.cast(), vertices.as_mut_ptr().cast());
+        }
+        body(context, (&mut vertices as *mut Vec<FVector>).cast())
+    }
+}
+unsafe extern "C" fn fixture_mesh_vertex(
+    vertices: *mut c_void,
+    index: i32,
+    result: *mut FVector,
+) -> i32 {
+    unsafe {
+        result.write((&*vertices.cast::<Vec<FVector>>())[index as usize]);
+    }
+    0
+}
+unsafe extern "C" fn fixture_update_particles_shell(fx: *mut c_void, tick: f32) -> i32 {
+    match unsafe { particle_fx::update_particles(fx.cast(), tick, svc()) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
+}
+unsafe extern "C" fn fixture_get_sys_params_shell(
+    fx: *mut c_void,
+    buffer: *mut c_void,
+    result: *mut *mut c_void,
+) -> i32 {
+    match unsafe { particle_fx::get_sys_params(fx.cast(), buffer.cast(), svc()) } {
+        Ok(value) => {
+            unsafe { result.write(value.cast()) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+unsafe extern "C" fn fixture_get_params_shell(fx: *const c_void, params: *mut c_void) -> i32 {
+    match unsafe { particle_fx::get_params(fx.cast(), params.cast(), svc()) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
+}
+unsafe extern "C" fn fixture_add_particle_shell(
+    fx: *mut c_void,
+    id: i32,
+    position: *const c_void,
+    params: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    match unsafe { particle_fx::add_particle(fx.cast(), id, position.cast(), params.cast(), svc()) }
+    {
+        Ok(value) => {
+            unsafe { result.write(i32::from(value)) };
+            0
+        }
+        Err(status) => status,
     }
 }

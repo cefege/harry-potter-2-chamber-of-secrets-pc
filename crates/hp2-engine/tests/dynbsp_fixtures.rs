@@ -633,8 +633,8 @@ fn dynbsp_tracker_matches_oracle() {
         at += 1;
         cases += 1;
 
-        let mut idle: Option<World> = None;
-        let mut tracker: Option<DynBsp<World>> = None;
+        let mut world: Option<World> = None;
+        let mut tracker: Option<Box<DynBsp>> = None;
         loop {
             let line = lines[at];
             at += 1;
@@ -642,11 +642,7 @@ fn dynbsp_tracker_matches_oracle() {
                 break;
             }
             if let Some(rest) = line.strip_prefix("OP POSE ") {
-                let host = match tracker.as_mut() {
-                    Some(t) => t.host_mut(),
-                    None => idle.as_mut().expect("POSE before INIT"),
-                };
-                apply_pose(host, rest);
+                apply_pose(world.as_mut().expect("POSE before INIT"), rest);
                 continue;
             }
             let op_line = line
@@ -669,48 +665,44 @@ fn dynbsp_tracker_matches_oracle() {
                 "INIT" => {
                     let w = parse_world(&block);
                     check(name, op_line, &render(&w, None), &want);
-                    idle = Some(w);
+                    world = Some(w);
                 }
                 "CTOR" => {
-                    let mut w = idle.take().expect("CTOR before INIT");
+                    let w = world.as_mut().expect("CTOR before INIT");
                     w.coords = parse_coords(&block, w.actors.len());
-                    let t = DynBsp::new(w);
-                    let sdyn = |i: i32| t.surf_is_dynamic(i);
-                    check(
-                        name,
-                        op_line,
-                        &render(t.host(), Some(&sdyn as &dyn Fn(i32) -> bool)),
-                        &want,
-                    );
-                    tracker = Some(t);
+                    let state = unsafe { DynBsp::new(w) };
+                    let sdyn = |i: i32| state.surf_is_dynamic(i);
+                    check(name, op_line, &render(w, Some(&sdyn as &dyn Fn(i32) -> bool)), &want);
+                    tracker = Some(state);
                 }
                 "UPDATE" | "FLUSH" => {
-                    let t = tracker.as_mut().expect("operation before CTOR");
-                    let n_actors = t.host().actors.len();
-                    t.host_mut().coords = parse_coords(&block, n_actors);
+                    let state_ptr = tracker
+                        .as_mut()
+                        .expect("operation before CTOR")
+                        .as_mut() as *mut DynBsp;
+                    let w = world.as_mut().expect("operation before INIT");
+                    w.coords = parse_coords(&block, w.actors.len());
                     let k: i32 = tok(arg);
                     let actor = if k < 0 {
                         ptr::null_mut()
                     } else {
-                        t.host().mover_obj(k as usize)
+                        w.mover_obj(k as usize)
                     };
                     if op == "UPDATE" {
-                        t.update(actor);
+                        unsafe { DynBsp::update(state_ptr, w, actor) };
                     } else {
-                        t.flush(actor);
+                        unsafe { DynBsp::flush(state_ptr, w, actor) };
                     }
-                    let sdyn = |i: i32| t.surf_is_dynamic(i);
-                    check(
-                        name,
-                        op_line,
-                        &render(t.host(), Some(&sdyn as &dyn Fn(i32) -> bool)),
-                        &want,
-                    );
+                    let state = tracker.as_ref().expect("operation before CTOR");
+                    let sdyn = |i: i32| state.surf_is_dynamic(i);
+                    check(name, op_line, &render(w, Some(&sdyn as &dyn Fn(i32) -> bool)), &want);
                 }
                 "DTOR" => {
-                    let t = tracker.take().expect("DTOR before CTOR");
-                    let w = t.shutdown();
-                    check(name, op_line, &render(&w, None), &want);
+                    let state = tracker.take().expect("DTOR before CTOR");
+                    let state_ptr = state.as_ref() as *const DynBsp as *mut DynBsp;
+                    let w = world.as_mut().expect("DTOR before INIT");
+                    unsafe { DynBsp::shutdown(state_ptr, w) };
+                    check(name, op_line, &render(w, None), &want);
                 }
                 other => panic!("unknown oracle op {other}"),
             }

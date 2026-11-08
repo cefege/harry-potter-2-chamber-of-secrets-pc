@@ -147,6 +147,12 @@ pub struct Hp2AudioServices {
     pub archive_count_bytes: unsafe extern "C" fn(ar: *mut c_void, num: i32, max: i32),
     /// `Super::Serialize(Ar)` for `USound`.
     pub sound_super_serialize: unsafe extern "C" fn(sound: *mut c_void, ar: *mut c_void),
+    /// `USound::Audio`.
+    pub sound_audio: unsafe extern "C" fn() -> *mut c_void,
+    /// `Audio->UnregisterSound(sound)`, contained by `Hp2FfiCall`.
+    pub audio_unregister_sound: unsafe extern "C" fn(audio: *mut c_void, sound: *mut c_void) -> i32,
+    /// `USound::UObject::Destroy()`, contained by `Hp2FfiCall`.
+    pub sound_super_destroy: unsafe extern "C" fn(sound: *mut c_void) -> i32,
 }
 
 // ---------------------------------------------------------------------------
@@ -742,12 +748,47 @@ unsafe fn force_wave_conversion(data: *mut SoundDataRaw, svc: &Hp2AudioServices)
 /// # Safety
 /// As for [`sound_data_load`].
 pub unsafe fn sound_data_get_period(data: *mut SoundDataRaw, svc: &Hp2AudioServices) -> f32 {
+    let mut ops = NativeSoundDurationOps(svc);
+    match unsafe { sound_data_get_period_with_ops(data, &mut ops) } {
+        Ok(period) => period,
+        Err(never) => match never {},
+    }
+}
+
+/// Input operations for the shared `FSoundData::GetPeriod` algorithm.
+pub(crate) trait SoundDurationOps {
+    type Error;
+    unsafe fn load(&mut self, data: *mut SoundDataRaw) -> Result<(), Self::Error>;
+    unsafe fn is_ps2(&mut self, sound: *mut USound) -> Result<bool, Self::Error>;
+}
+
+struct NativeSoundDurationOps<'a>(&'a Hp2AudioServices);
+
+impl SoundDurationOps for NativeSoundDurationOps<'_> {
+    type Error = std::convert::Infallible;
+    unsafe fn load(&mut self, data: *mut SoundDataRaw) -> Result<(), Self::Error> {
+        unsafe { (self.0.lazy_load)(data.cast()) };
+        Ok(())
+    }
+    unsafe fn is_ps2(&mut self, sound: *mut USound) -> Result<bool, Self::Error> {
+        Ok(unsafe { (self.0.file_type_is_ps2)(sound.cast()) != 0 })
+    }
+}
+
+/// Executes the shared period parser with owner-provided lazy materialization and file-type reads.
+///
+/// # Safety
+/// `data` and its owner remain live through both owner operations and wave parsing.
+pub(crate) unsafe fn sound_data_get_period_with_ops<O: SoundDurationOps>(
+    data: *mut SoundDataRaw,
+    ops: &mut O,
+) -> Result<f32, O::Error> {
     unsafe {
         let owner = (*data).owner;
-        (svc.lazy_load)(data.cast());
+        ops.load(data)?;
         let arr = lazy_array(addr_of_mut!((*data).lazy));
-        if (svc.file_type_is_ps2)(owner.cast()) != 0 {
-            return ld::<f32>(arr_base(arr) + 4);
+        if ops.is_ps2(owner)? {
+            return Ok(ld::<f32>(arr_base(arr) + 4));
         }
         let mut w = wave_mod_info_new();
         let mut period = 0.0f32;
@@ -759,7 +800,7 @@ pub unsafe fn sound_data_get_period(data: *mut SoundDataRaw, svc: &Hp2AudioServi
                 period = ld::<u32>(w.p_wave_data_size as usize) as f32 * 8.0 / (dur_div as f32);
             }
         }
-        period
+        Ok(period)
     }
 }
 
@@ -839,6 +880,27 @@ pub unsafe fn lip_mouth_pos(lip: *mut LipSyncDataRaw, t: f32) -> f32 {
     }
 }
 
+/// Finishes `FLipSyncData` initialization after C++ has initialized the ABI
+/// owner pointer in its constructor initializer list.
+///
+/// # Safety
+/// `lip` must point to a live `FLipSyncData` layout.
+pub unsafe fn lip_data_init(lip: *mut LipSyncDataRaw) {
+    unsafe {
+        (*lip).max_amplitude = -1;
+    }
+}
+
+/// `UI3DL2Listener::PostEditChange` state update after native base dispatch.
+///
+/// # Safety
+/// `updated` must point to the listener's live `UBOOL` storage.
+pub unsafe fn listener_post_edit_change(updated: *mut i32) {
+    unsafe {
+        *updated = 1;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // USound
 // ---------------------------------------------------------------------------
@@ -854,17 +916,17 @@ pub unsafe fn usound_serialize(sound: *mut USound, ar: *mut c_void, svc: &Hp2Aud
         (svc.archive_serialize_i32)(ar, addr_of_mut!((*sound).core_flags).cast());
         (svc.archive_serialize_f32)(ar, addr_of_mut!((*sound).duration).cast());
 
-        let ver = (svc.archive_ver)(ar);
-        if ver > 76 {
-            (svc.archive_serialize_i32)(ar, addr_of_mut!((*sound).raw_num_samples).cast());
-        }
-        if ver > 77 {
-            (svc.archive_serialize_i32)(ar, addr_of_mut!((*sound).raw_bits_per_sample).cast());
-            (svc.archive_serialize_i32)(ar, addr_of_mut!((*sound).raw_num_channels).cast());
-        }
-        if ver > 78 {
-            (svc.archive_serialize_i32)(ar, addr_of_mut!((*sound).raw_sample_rate).cast());
-        }
+        let _ = sound_serialize_raw_fields((svc.archive_ver)(ar), |field| {
+            let value = match field {
+                SoundRawField::NumSamples => addr_of_mut!((*sound).raw_num_samples),
+                SoundRawField::BitsPerSample => addr_of_mut!((*sound).raw_bits_per_sample),
+                SoundRawField::NumChannels => addr_of_mut!((*sound).raw_num_channels),
+                SoundRawField::SampleRate => addr_of_mut!((*sound).raw_sample_rate),
+            };
+            (svc.archive_serialize_i32)(ar, value.cast());
+            Ok::<(), ()>(())
+        });
+
 
         if (svc.archive_is_loading)(ar) != 0 || (svc.archive_is_saving)(ar) != 0 {
             (svc.archive_serialize_sound_data)(ar, sound_data_of(sound).cast());
@@ -875,6 +937,87 @@ pub unsafe fn usound_serialize(sound: *mut USound, ar: *mut c_void, svc: &Hp2Aud
             (svc.archive_count_bytes)(ar, (*sound).original_size, (*sound).original_size);
         }
     }
+}
+#[derive(Clone, Copy)]
+pub(crate) enum SoundRawField {
+    NumSamples,
+    BitsPerSample,
+    NumChannels,
+    SampleRate,
+}
+
+/// Walks USound's versioned raw-wave fields in their native archive order.
+pub(crate) fn sound_serialize_raw_fields<E>(
+    version: i32,
+    mut serialize: impl FnMut(SoundRawField) -> Result<(), E>,
+) -> Result<(), E> {
+    if version > 76 {
+        serialize(SoundRawField::NumSamples)?;
+    }
+    if version > 77 {
+        serialize(SoundRawField::BitsPerSample)?;
+        serialize(SoundRawField::NumChannels)?;
+    }
+    if version > 78 {
+        serialize(SoundRawField::SampleRate)?;
+    }
+    Ok(())
+}
+
+/// `USound::Destroy`: unregister first when an audio subsystem is live, then
+/// invoke the qualified UObject destruction leaf.
+///
+/// # Safety
+/// `sound` and the service table must remain live for both callbacks.
+pub unsafe fn usound_destroy(sound: *mut USound, svc: &Hp2AudioServices) -> Result<(), i32> {
+    unsafe {
+        usound_destroy_with(
+            sound.cast(),
+            || (svc.sound_audio)(),
+            |audio, value| (svc.audio_unregister_sound)(audio, value),
+            |value| (svc.sound_super_destroy)(value),
+        )
+    }
+}
+
+unsafe fn usound_destroy_with(
+    sound: *mut c_void,
+    sound_audio: impl FnOnce() -> *mut c_void,
+    unregister: impl FnOnce(*mut c_void, *mut c_void) -> i32,
+    super_destroy: impl FnOnce(*mut c_void) -> i32,
+) -> Result<(), i32> {
+    usound_destroy_policy(
+        || {
+            let audio = sound_audio();
+            if audio.is_null() {
+                Ok(())
+            } else {
+                let result = unregister(audio, sound);
+                if result == 0 { Ok(()) } else { Err(result) }
+            }
+        },
+        || {
+            let result = super_destroy(sound);
+            if result == 0 { Ok(()) } else { Err(result) }
+        },
+    )
+}
+
+/// Runs the explicit USound::Destroy unregister and qualified UObject call.
+///
+/// Automatic sound members remain live for the canonical final-member phase.
+/// Qualified UObject destruction runs only when unregister succeeds.
+pub(crate) fn usound_destroy_policy<E>(
+    unregister: impl FnOnce() -> Result<(), E>,
+    super_destroy: impl FnOnce() -> Result<(), E>,
+) -> Result<(), E> {
+    let unregister_result = unregister();
+    let super_result = if unregister_result.is_ok() {
+        Some(super_destroy())
+    } else {
+        None
+    };
+    unregister_result.and(super_result.unwrap_or(Ok(())))
 }
 
 /// `USound::ImportPostProcess`.
@@ -1119,5 +1262,28 @@ pub unsafe fn usound_get_handle(sound: *mut USound, id: i32, svc: &Hp2AudioServi
         } else {
             (*sound).handle
         }
+    }
+}
+
+#[cfg(test)]
+mod audio_tests {
+    use super::*;
+
+    #[test]
+    fn lip_data_init_sets_the_negative_maximum_sentinel() {
+        let mut lip: LipSyncDataRaw = unsafe { std::mem::zeroed() };
+        unsafe {
+            lip_data_init(&mut lip);
+        }
+        assert_eq!(lip.max_amplitude, -1);
+    }
+
+    #[test]
+    fn listener_edit_marks_updated() {
+        let mut updated = 0;
+        unsafe {
+            listener_post_edit_change(&mut updated);
+        }
+        assert_eq!(updated, 1);
     }
 }

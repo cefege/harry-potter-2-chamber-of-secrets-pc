@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::ffi::{c_char, c_void};
 use std::sync::LazyLock;
 
-use hp2_abi::engine::generated::UInput;
+use hp2_abi::engine::generated::{UInput, UObject, UProperty, UViewport};
 use hp2_engine::input::{self, Hp2InputServices};
 
 const EXPECTED: &str = include_str!("fixtures/input_oracle.txt");
@@ -28,10 +28,8 @@ const KIND_PROPERTY: i32 = 0;
 const KIND_BYTE: i32 = 1;
 const KIND_FLOAT: i32 = 2;
 
-const VP: usize = 0x1000;
 const CLS_A: usize = 0x2000;
 const CLS_B: usize = 0x3000;
-const PROP_BASE: usize = 0x4000;
 const GLOG: usize = 0x5000;
 static ITEM: u64 = 0;
 
@@ -69,6 +67,30 @@ const PROPS: [(i32, i32, i32, usize, u32); 9] = [
     (2, 8, KIND_BYTE, 20, 4),
     (2, 3, KIND_FLOAT, 24, 0),
 ];
+
+// Real `UProperty`-shaped backing memory for the properties in `PROPS`, so
+// the converted `property_flags`/`property_fname_index`/`property_offset`
+// mirror reads in `input.rs` land on real fields rather than a bare
+// sentinel. `UProperty` holds raw pointers (`!Sync`), so this lives in a
+// `thread_local!` rather than a `static`; its storage address is stable for
+// the life of the thread, same as the other `thread_local!` tables below.
+thread_local! {
+    static PROPS_MEM: Box<[UProperty]> = PROPS
+        .iter()
+        .map(|&(_, name, _, offset, flags)| {
+            // SAFETY: UProperty is repr(C) plain data; all-zero is valid.
+            let mut p: UProperty = unsafe { std::mem::zeroed() };
+            p.name = name.to_ne_bytes();
+            p.property_flags = flags;
+            p.offset = (K_BASE + offset) as i32;
+            p
+        })
+        .collect();
+}
+
+fn props_mem_ptr() -> *const UProperty {
+    PROPS_MEM.with(|v| v.as_ptr())
+}
 
 struct Tables {
     key_chars: Vec<Vec<u32>>,
@@ -277,6 +299,7 @@ struct Env {
     input: bool,
     uin: usize,
     actor_mem: usize,
+    viewport_mem: usize,
     caches: Vec<(usize, Box<[u64]>)>,
 }
 
@@ -297,27 +320,6 @@ fn env<R>(f: impl FnOnce(&mut Env) -> R) -> R {
 }
 
 // ---- mock services -------------------------------------------------------
-
-unsafe extern "C" fn m_viewport_actor(vp: *mut c_void) -> *mut c_void {
-    let _ = vp;
-    let (a, m) = env(|e| (e.actor, e.actor_mem));
-    if a {
-        m as *mut c_void
-    } else {
-        std::ptr::null_mut()
-    }
-}
-
-unsafe extern "C" fn m_viewport_input(vp: *mut c_void) -> *mut c_void {
-    let _ = vp;
-    let (i, u) = env(|e| (e.input, e.uin));
-    if i {
-        u as *mut c_void
-    } else {
-        std::ptr::null_mut()
-    }
-}
-
 unsafe extern "C" fn m_viewport_update_input(vp: *mut c_void, reset: i32) {
     let _ = vp;
     emit(format!("event\tviewport_update\t{reset}"));
@@ -335,20 +337,11 @@ unsafe extern "C" fn m_log_initialized(vp: *mut c_void) {
 
 unsafe extern "C" fn m_actor_viewport(actor: *mut c_void) -> *mut c_void {
     let _ = actor;
-    let (p, pl) = env(|e| (e.pawn, e.player));
+    let (p, pl, vp) = env(|e| (e.pawn, e.player, e.viewport_mem));
     if p && pl == 1 {
-        VP as *mut c_void
+        vp as *mut c_void
     } else {
         std::ptr::null_mut()
-    }
-}
-
-unsafe extern "C" fn m_object_class(obj: *mut c_void) -> *mut c_void {
-    let _ = obj;
-    match env(|e| e.cls) {
-        1 => CLS_A as *mut c_void,
-        2 => CLS_B as *mut c_void,
-        _ => std::ptr::null_mut(),
     }
 }
 
@@ -572,24 +565,6 @@ unsafe extern "C" fn m_binding_chars(obj: *mut c_void, key: i32) -> *const u32 {
 }
 
 /// Handle to a heap `FString` built like `"%s Speed=%f"`.
-unsafe extern "C" fn m_direct_axis_command(obj: *mut c_void, key: i32, length: f32) -> *mut c_void {
-    let _ = obj;
-    let binding = BINDINGS
-        .get(key as usize)
-        .filter(|_| key < 12)
-        .copied()
-        .unwrap_or("");
-    let text = format!("{binding} Speed={length:.6}");
-    Box::into_raw(Box::new(wz(&text))) as *mut c_void
-}
-
-unsafe extern "C" fn m_fstring_chars(handle: *mut c_void) -> *const u32 {
-    unsafe { (*(handle as *const Vec<u32>)).as_ptr() }
-}
-
-unsafe extern "C" fn m_fstring_free(handle: *mut c_void) {
-    unsafe { drop(Box::from_raw(handle as *mut Vec<u32>)) };
-}
 
 unsafe extern "C" fn m_key_name_chars(input_keys: *mut c_void, key: i32) -> *const u32 {
     let _ = input_keys;
@@ -617,7 +592,7 @@ unsafe extern "C" fn m_key_name_find_item(
 }
 
 fn prop_index(p: *mut c_void) -> usize {
-    (p as usize - PROP_BASE) / 16
+    (p as usize - props_mem_ptr() as usize) / size_of::<UProperty>()
 }
 
 fn class_id(klass: *mut c_void) -> i32 {
@@ -639,23 +614,11 @@ unsafe extern "C" fn m_class_nth_property(klass: *mut c_void, kind: i32, n: i32)
             continue;
         }
         if seen == n {
-            return (PROP_BASE + i * 16) as *mut c_void;
+            return props_mem_ptr().wrapping_add(i).cast::<c_void>().cast_mut();
         }
         seen += 1;
     }
     std::ptr::null_mut()
-}
-
-unsafe extern "C" fn m_property_flags(prop: *mut c_void) -> u32 {
-    PROPS[prop_index(prop)].4
-}
-
-unsafe extern "C" fn m_property_fname_index(prop: *mut c_void) -> i32 {
-    PROPS[prop_index(prop)].1
-}
-
-unsafe extern "C" fn m_property_offset(prop: *mut c_void) -> i32 {
-    (K_BASE + PROPS[prop_index(prop)].3) as i32
 }
 
 unsafe extern "C" fn m_property_is_byte(prop: *mut c_void) -> i32 {
@@ -697,45 +660,61 @@ unsafe extern "C" fn m_cache_unlock(item: *mut c_void) {
     let _ = item;
 }
 
+unsafe extern "C" fn m_input_process(
+    input: *mut c_void,
+    ar: *mut c_void,
+    key: i32,
+    action: i32,
+    delta: f32,
+) -> i32 {
+    unsafe {
+        input::process(&SVC, input.cast(), ar, key, action, delta).expect("checked replay callback")
+    }
+}
+
 static SVC: Hp2InputServices = Hp2InputServices {
-    viewport_actor: m_viewport_actor,
-    viewport_input: m_viewport_input,
-    viewport_update_input: m_viewport_update_input,
-    viewport_exec: m_viewport_exec,
-    log_initialized: m_log_initialized,
-    actor_viewport: m_actor_viewport,
-    object_class: m_object_class,
-    is_running: m_is_running,
-    glog: m_glog,
-    check_failed: m_check_failed,
-    output_log: m_output_log,
-    output_logf: m_output_logf,
-    parse_line: m_parse_line,
-    parse_command: m_parse_command,
-    parse_token: m_parse_token,
-    parse_float: m_parse_float,
-    app_atoi: m_app_atoi,
-    app_strlen: m_app_strlen,
-    app_sprintf_ik: m_app_sprintf_ik,
-    fname_find: m_fname_find,
-    alias_name_index: m_alias_name_index,
-    alias_command: m_alias_command,
-    binding_len: m_binding_len,
-    binding_chars: m_binding_chars,
-    direct_axis_command: m_direct_axis_command,
-    fstring_chars: m_fstring_chars,
-    fstring_free: m_fstring_free,
-    key_name_chars: m_key_name_chars,
-    key_name_find_item: m_key_name_find_item,
-    class_nth_property: m_class_nth_property,
-    property_flags: m_property_flags,
-    property_fname_index: m_property_fname_index,
-    property_offset: m_property_offset,
-    property_is_byte: m_property_is_byte,
-    property_is_float: m_property_is_float,
-    cache_get: m_cache_get,
-    cache_create: m_cache_create,
-    cache_unlock: m_cache_unlock,
+    direct_axis_scope: replay_axis_scope,
+    property_scope: replay_property_scope,
+    property_current: replay_property_current,
+    property_next: replay_property_next,
+    alias_scope: replay_alias_scope,
+    input_exec: replay_input_exec,
+    input_exec_commands: replay_input_exec_commands,
+    input_reset: replay_input_reset,
+    input_find_button: replay_input_find_button,
+    input_find_axis: replay_input_find_axis,
+    input_key_name: replay_input_key_name,
+    input_find_key: replay_input_find_key,
+
+    viewport_update_input: checked_viewport_update_input,
+    viewport_exec: checked_viewport_exec,
+    log_initialized: checked_log_initialized,
+    actor_viewport: checked_actor_viewport,
+    is_running: checked_is_running,
+    glog: checked_glog,
+    check_failed: checked_check_failed,
+    output_log: checked_output_log,
+    output_logf: checked_output_logf,
+    parse_line: checked_parse_line,
+    parse_command: checked_parse_command,
+    parse_token: checked_parse_token,
+    parse_float: checked_parse_float,
+    app_atoi: checked_app_atoi,
+    app_strlen: checked_app_strlen,
+    app_sprintf_ik: checked_app_sprintf_ik,
+    fname_find: checked_fname_find,
+    alias_name_index: checked_alias_name_index,
+    alias_command: checked_alias_command,
+    binding_len: checked_binding_len,
+    binding_chars: checked_binding_chars,
+    key_name_chars: checked_key_name_chars,
+    key_name_find_item: checked_key_name_find_item,
+    property_is_byte: checked_property_is_byte,
+    property_is_float: checked_property_is_float,
+    cache_get: checked_cache_get,
+    cache_create: checked_cache_create,
+    cache_unlock: checked_cache_unlock,
+    input_process: checked_input_process,
 };
 
 // ---- replay driver -------------------------------------------------------
@@ -744,19 +723,27 @@ struct Replay {
     uin: Box<UInput>,
     mem: Box<[u64]>,
     actor: *mut c_void,
+    viewport: Box<UViewport>,
 }
 
 impl Replay {
     fn new() -> Self {
-        // SAFETY: UInput is repr(C) plain data; all-zero is a valid value.
+        // SAFETY: UInput/UViewport are repr(C) plain data; all-zero is valid.
         let mut uin: Box<UInput> = Box::new(unsafe { std::mem::zeroed() });
+        let mut viewport: Box<UViewport> = Box::new(unsafe { std::mem::zeroed() });
         let mut mem = vec![0u64; MEM_LEN.div_ceil(8)].into_boxed_slice();
         let actor = mem.as_mut_ptr() as *mut c_void;
         env(|e| {
             e.uin = &mut *uin as *mut UInput as usize;
             e.actor_mem = actor as usize;
+            e.viewport_mem = &mut *viewport as *mut UViewport as usize;
         });
-        Replay { uin, mem, actor }
+        Replay {
+            uin,
+            mem,
+            actor,
+            viewport,
+        }
     }
 
     fn uin_ptr(&mut self) -> *mut UInput {
@@ -783,13 +770,32 @@ impl Replay {
             e.input = s.input != 0;
         });
         self.bytes_mut()[K_BASE..K_BASE + 32].copy_from_slice(&s.mem);
-        let uin = self.uin_ptr();
-        // SAFETY: `uin` points to the live boxed UInput.
+        let actor = self.actor;
+        let viewport_ptr: *mut UViewport = &mut *self.viewport;
+        let uin_ptr = self.uin_ptr();
+        // SAFETY: `actor` is MEM_LEN live bytes (room for UObject::class at
+        // offset 64); `viewport_ptr`/`uin_ptr` point to the live boxed
+        // UViewport/UInput.
         unsafe {
-            (*uin).viewport = VP as *mut c_void;
-            (*uin).action = s.act;
-            (*uin).delta = s.delta;
-            (*uin).key_down_table = s.keys;
+            (*actor.cast::<UObject>()).class = match s.cls {
+                1 => CLS_A as *mut c_void,
+                2 => CLS_B as *mut c_void,
+                _ => std::ptr::null_mut(),
+            };
+            (*viewport_ptr).actor = if s.actor != 0 {
+                actor
+            } else {
+                std::ptr::null_mut()
+            };
+            (*viewport_ptr).input = if s.input != 0 {
+                uin_ptr.cast()
+            } else {
+                std::ptr::null_mut()
+            };
+            (*uin_ptr).viewport = viewport_ptr.cast();
+            (*uin_ptr).action = s.act;
+            (*uin_ptr).delta = s.delta;
+            (*uin_ptr).key_down_table = s.keys;
         }
     }
 
@@ -841,7 +847,10 @@ impl Replay {
         self.begin("exec", &format!("\tcmd={cmd}"), s);
         let w = wz(cmd);
         let uin = self.uin_ptr();
-        let r = unsafe { input::exec(&SVC, uin, w.as_ptr(), GLOG as *mut c_void) };
+        let r = unsafe {
+            input::exec(&SVC, uin, w.as_ptr(), GLOG as *mut c_void)
+                .expect("checked replay callback")
+        };
         self.finish(r.to_string());
     }
 
@@ -849,7 +858,10 @@ impl Replay {
         self.begin("exec_commands", &format!("\tcmd={cmd}"), s);
         let w = wz(cmd);
         let uin = self.uin_ptr();
-        unsafe { input::exec_input_commands(&SVC, uin, w.as_ptr(), GLOG as *mut c_void) };
+        unsafe {
+            input::exec_input_commands(&SVC, uin, w.as_ptr(), GLOG as *mut c_void)
+                .expect("checked replay callback")
+        };
         self.finish("-".to_string());
     }
 
@@ -857,7 +869,10 @@ impl Replay {
         let args = format!("\tkey={key}\tact={act}\tdelta={}", delta.to_bits());
         self.begin("process", &args, s);
         let uin = self.uin_ptr();
-        let r = unsafe { input::process(&SVC, uin, GLOG as *mut c_void, key, act, delta) };
+        let r = unsafe {
+            input::process(&SVC, uin, GLOG as *mut c_void, key, act, delta)
+                .expect("checked replay callback")
+        };
         self.finish(r.to_string());
     }
 
@@ -877,35 +892,38 @@ impl Replay {
         );
         self.begin("direct_axis", &args, s);
         let uin = self.uin_ptr();
-        unsafe { input::direct_axis(&SVC, uin, key, length, delta) };
+        unsafe {
+            input::direct_axis(&SVC, uin, key, length, delta).expect("checked replay callback")
+        };
         self.finish("-".to_string());
     }
 
     fn read_input(&mut self, s: &St, delta: f32) {
         self.begin("read_input", &format!("\tdelta={}", delta.to_bits()), s);
         let uin = self.uin_ptr();
-        unsafe { input::read_input(&SVC, uin, delta) };
+        unsafe { input::read_input(&SVC, uin, delta).expect("checked replay callback") };
         self.finish("-".to_string());
     }
 
     fn reset_input(&mut self, s: &St) {
         self.begin("reset_input", "", s);
         let uin = self.uin_ptr();
-        unsafe { input::reset_input(&SVC, uin) };
+        unsafe { input::reset_input(&SVC, uin).expect("checked replay callback") };
         self.finish("-".to_string());
     }
 
     fn init(&mut self, s: &St) {
         self.begin("init", "", s);
         let uin = self.uin_ptr();
-        unsafe { input::init(&SVC, uin, VP as *mut c_void) };
+        let viewport: *mut c_void = (&mut *self.viewport as *mut UViewport).cast();
+        unsafe { input::init(&SVC, uin, viewport).expect("checked replay callback") };
         self.finish("-".to_string());
     }
 
     fn get_key_name(&mut self, s: &St, key: i32) {
         self.begin("get_key_name", &format!("\tkey={key}"), s);
         let uin = self.uin_ptr();
-        let t = unsafe { input::get_key_name(&SVC, uin, key) };
+        let t = unsafe { input::get_key_name(&SVC, uin, key).expect("checked replay callback") };
         self.finish(format!("text={}", unsafe { wtext(t) }));
     }
 
@@ -914,7 +932,9 @@ impl Replay {
         let w = wz(name);
         let mut k: i32 = -1;
         let uin = self.uin_ptr();
-        let r = unsafe { input::find_key_name(&SVC, uin, w.as_ptr(), &mut k) };
+        let r = unsafe {
+            input::find_key_name(&SVC, uin, w.as_ptr(), &mut k).expect("checked replay callback")
+        };
         self.finish(if r != 0 {
             format!("1\tkey={k}")
         } else {
@@ -926,7 +946,10 @@ impl Replay {
         self.begin("find_button", &format!("\tname={name}"), s);
         let w = wz(name);
         let uin = self.uin_ptr();
-        let p = unsafe { input::find_button_name(&SVC, uin, self.actor, w.as_ptr()) };
+        let p = unsafe {
+            input::find_button_name(&SVC, uin, self.actor, w.as_ptr())
+                .expect("checked replay callback")
+        };
         self.finish(offset_ret(p as usize, self.actor as usize));
     }
 
@@ -934,7 +957,10 @@ impl Replay {
         self.begin("find_axis", &format!("\tname={name}"), s);
         let w = wz(name);
         let uin = self.uin_ptr();
-        let p = unsafe { input::find_axis_name(&SVC, uin, self.actor, w.as_ptr()) };
+        let p = unsafe {
+            input::find_axis_name(&SVC, uin, self.actor, w.as_ptr())
+                .expect("checked replay callback")
+        };
         self.finish(offset_ret(p as usize, self.actor as usize));
     }
 
@@ -944,7 +970,9 @@ impl Replay {
             s.pawn, s.player, s.input
         );
         self.begin("key_state", &args, s);
-        let r = unsafe { input::current_key_state(&SVC, self.actor, key) };
+        let r = unsafe {
+            input::current_key_state(&SVC, self.actor, key).expect("checked replay callback")
+        };
         self.finish(r.to_string());
     }
 }
@@ -1361,4 +1389,382 @@ fn input_axis_branches_have_fused_vs_unfused_difference() {
     assert!(seen[0], "SpeedBase branch: no fused/unfused difference");
     assert!(seen[1], "IST_Axis branch: no fused/unfused difference");
     assert!(seen[2], "IST_Hold branch: no fused/unfused difference");
+}
+
+// Checked adapters for the unchanged replay oracle, not native exception proof.
+unsafe extern "C" fn checked_viewport_update_input(vp: *mut c_void, reset: i32) -> i32 {
+    unsafe {
+        m_viewport_update_input(vp, reset);
+    }
+    0
+}
+unsafe extern "C" fn checked_viewport_exec(
+    vp: *mut c_void,
+    cmd: *const u32,
+    ar: *mut c_void,
+) -> i32 {
+    unsafe {
+        m_viewport_exec(vp, cmd, ar);
+    }
+    0
+}
+unsafe extern "C" fn checked_log_initialized(vp: *mut c_void) -> i32 {
+    unsafe {
+        m_log_initialized(vp);
+    }
+    0
+}
+unsafe extern "C" fn checked_actor_viewport(
+    actor: *mut c_void,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(m_actor_viewport(actor));
+    }
+    0
+}
+unsafe extern "C" fn checked_is_running(result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_is_running());
+    }
+    0
+}
+unsafe extern "C" fn checked_glog(result_out: *mut *mut c_void) -> i32 {
+    unsafe {
+        result_out.write(m_glog());
+    }
+    0
+}
+unsafe extern "C" fn checked_check_failed(expr: *const c_char, line: i32) -> i32 {
+    unsafe {
+        m_check_failed(expr, line);
+    }
+    0
+}
+unsafe extern "C" fn checked_output_log(ar: *mut c_void, text: *const u32) -> i32 {
+    unsafe {
+        m_output_log(ar, text);
+    }
+    0
+}
+unsafe extern "C" fn checked_output_logf(ar: *mut c_void, text: *const u32) -> i32 {
+    unsafe {
+        m_output_logf(ar, text);
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_line(
+    stream: *mut *const u32,
+    out: *mut u32,
+    max: i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_parse_line(stream, out, max));
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_command(
+    stream: *mut *const u32,
+    m: *const u32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_parse_command(stream, m));
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_token(
+    stream: *mut *const u32,
+    out: *mut u32,
+    max: i32,
+    use_escape: i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_parse_token(stream, out, max, use_escape));
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_float(
+    stream: *const u32,
+    m: *const u32,
+    out: *mut f32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_parse_float(stream, m, out));
+    }
+    0
+}
+unsafe extern "C" fn checked_app_atoi(s: *const u32, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_app_atoi(s));
+    }
+    0
+}
+unsafe extern "C" fn checked_app_strlen(s: *const u32, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_app_strlen(s));
+    }
+    0
+}
+unsafe extern "C" fn checked_app_sprintf_ik(dest: *mut u32, name: *const u32) -> i32 {
+    unsafe {
+        m_app_sprintf_ik(dest, name);
+    }
+    0
+}
+unsafe extern "C" fn checked_fname_find(text: *const u32, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_fname_find(text));
+    }
+    0
+}
+unsafe extern "C" fn checked_alias_name_index(
+    obj: *mut c_void,
+    index: i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_alias_name_index(obj, index));
+    }
+    0
+}
+unsafe extern "C" fn checked_alias_command(
+    obj: *mut c_void,
+    index: i32,
+    result_out: *mut *const u32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_alias_command(obj, index));
+    }
+    0
+}
+unsafe extern "C" fn checked_binding_len(obj: *mut c_void, key: i32, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_binding_len(obj, key));
+    }
+    0
+}
+unsafe extern "C" fn checked_binding_chars(
+    obj: *mut c_void,
+    key: i32,
+    result_out: *mut *const u32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_binding_chars(obj, key));
+    }
+    0
+}
+unsafe extern "C" fn checked_key_name_chars(
+    input_keys: *mut c_void,
+    key: i32,
+    result_out: *mut *const u32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_key_name_chars(input_keys, key));
+    }
+    0
+}
+unsafe extern "C" fn checked_key_name_find_item(
+    input_keys: *mut c_void,
+    text: *const u32,
+    out: *mut i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_key_name_find_item(input_keys, text, out));
+    }
+    0
+}
+unsafe extern "C" fn checked_property_is_byte(prop: *mut c_void, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_property_is_byte(prop));
+    }
+    0
+}
+unsafe extern "C" fn checked_property_is_float(prop: *mut c_void, result_out: *mut i32) -> i32 {
+    unsafe {
+        result_out.write(m_property_is_float(prop));
+    }
+    0
+}
+unsafe extern "C" fn checked_cache_get(
+    klass: *mut c_void,
+    item: *mut *mut c_void,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(m_cache_get(klass, item));
+    }
+    0
+}
+unsafe extern "C" fn checked_cache_create(
+    klass: *mut c_void,
+    item: *mut *mut c_void,
+    size: usize,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(m_cache_create(klass, item, size));
+    }
+    0
+}
+unsafe extern "C" fn checked_cache_unlock(item: *mut c_void) -> i32 {
+    unsafe {
+        m_cache_unlock(item);
+    }
+    0
+}
+unsafe extern "C" fn checked_input_process(
+    input: *mut c_void,
+    ar: *mut c_void,
+    key: i32,
+    action: i32,
+    delta: f32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(m_input_process(input, ar, key, action, delta));
+    }
+    0
+}
+
+unsafe extern "C" fn replay_axis_scope(
+    _obj: *mut c_void,
+    key: i32,
+    length: f32,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void, *const u32) -> i32,
+) -> i32 {
+    let binding = BINDINGS
+        .get(key as usize)
+        .filter(|_| key < 12)
+        .copied()
+        .unwrap_or("");
+    let command = wz(&format!("{binding} Speed={length:.6}"));
+    unsafe { run(context, command.as_ptr()) }
+}
+struct ReplayIterator {
+    klass: *mut c_void,
+    kind: i32,
+    index: i32,
+}
+unsafe extern "C" fn replay_property_scope(
+    klass: *mut c_void,
+    kind: i32,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32,
+) -> i32 {
+    let mut iterator = ReplayIterator {
+        klass,
+        kind,
+        index: 0,
+    };
+    unsafe { run(context, (&raw mut iterator).cast()) }
+}
+unsafe extern "C" fn replay_property_current(iterator: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        let i = &*iterator.cast::<ReplayIterator>();
+        out.write(m_class_nth_property(i.klass, i.kind, i.index));
+    }
+    0
+}
+unsafe extern "C" fn replay_property_next(iterator: *mut c_void) -> i32 {
+    unsafe {
+        (*iterator.cast::<ReplayIterator>()).index += 1;
+    }
+    0
+}
+unsafe extern "C" fn replay_alias_scope(
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void) -> i32,
+) -> i32 {
+    unsafe { run(context) }
+}
+unsafe extern "C" fn replay_input_exec(
+    obj: *mut c_void,
+    cmd: *const u32,
+    ar: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    match unsafe { input::exec(&SVC, obj.cast(), cmd, ar) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(status) => -status,
+    }
+}
+unsafe extern "C" fn replay_input_exec_commands(
+    obj: *mut c_void,
+    cmd: *const u32,
+    ar: *mut c_void,
+) -> i32 {
+    match unsafe { input::exec_input_commands(&SVC, obj.cast(), cmd, ar) } {
+        Ok(()) => 0,
+        Err(status) => -status,
+    }
+}
+unsafe extern "C" fn replay_input_reset(obj: *mut c_void) -> i32 {
+    match unsafe { input::reset_input(&SVC, obj.cast()) } {
+        Ok(()) => 0,
+        Err(status) => -status,
+    }
+}
+unsafe extern "C" fn replay_input_find_button(
+    obj: *mut c_void,
+    actor: *mut c_void,
+    name: *const u32,
+    out: *mut *mut u8,
+) -> i32 {
+    match unsafe { input::find_button_name(&SVC, obj.cast(), actor, name) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(status) => -status,
+    }
+}
+unsafe extern "C" fn replay_input_find_axis(
+    obj: *mut c_void,
+    actor: *mut c_void,
+    name: *const u32,
+    out: *mut *mut f32,
+) -> i32 {
+    match unsafe { input::find_axis_name(&SVC, obj.cast(), actor, name) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(status) => -status,
+    }
+}
+unsafe extern "C" fn replay_input_key_name(
+    obj: *mut c_void,
+    key: i32,
+    out: *mut *const u32,
+) -> i32 {
+    match unsafe { input::get_key_name(&SVC, obj.cast(), key) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(status) => -status,
+    }
+}
+unsafe extern "C" fn replay_input_find_key(
+    obj: *mut c_void,
+    name: *const u32,
+    key: *mut i32,
+    out: *mut i32,
+) -> i32 {
+    match unsafe { input::find_key_name(&SVC, obj.cast(), name, key) } {
+        Ok(value) => {
+            unsafe { out.write(value) };
+            0
+        }
+        Err(status) => -status,
+    }
 }

@@ -1,0 +1,255 @@
+// Included by net_demo.rs: every callback below implements one service leaf.
+unsafe fn text(ptr: *const c_void) -> String {
+    assert!(!ptr.is_null());
+    let mut p = ptr.cast::<u32>();
+    let mut s = String::new();
+    unsafe { while *p != 0 { s.push(char::from_u32(*p).unwrap()); p = p.add(1); } }
+    s
+}
+fn wide(s: &str) -> Vec<u32> { s.chars().map(u32::from).chain([0]).collect() }
+fn string_ptr(s: &str) -> *mut c_void {
+    with_mock(|m| {
+        m.strings.push(wide(s).into_boxed_slice());
+        m.strings.last_mut().unwrap().as_mut_ptr().cast()
+    })
+}
+fn event(s: impl Into<String>) { with_mock(|m| m.events.push(s.into())); }
+unsafe extern "C" fn mock_info_package_flags(info: *mut c_void, out: *mut u32) -> i32 {
+    unsafe { *out = PKG_FLAGS[pkg_index(info)]; } 0
+}
+unsafe extern "C" fn mock_info_file_size(info: *mut c_void, out: *mut i32) -> i32 {
+    unsafe { *out = PKG_SIZE[pkg_index(info)]; } 0
+}
+unsafe extern "C" fn mock_info_parent_name(info: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe { pkg_index(info); *out = string_ptr(&with_mock(|m| m.parent.clone())); } 0
+}
+unsafe extern "C" fn mock_info_url_chars(info: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe { pkg_index(info); *out = string_ptr(&with_mock(|m| m.url.clone())); } 0
+}
+unsafe extern "C" fn mock_info_guid_string(info: *mut c_void, dst: *mut c_void) -> i32 {
+    unsafe { *dst.cast::<String>() = DEST[pkg_index(info)].trim_start_matches("/cache/").trim_end_matches(".uxx").into(); } 0
+}
+unsafe extern "C" fn mock_dl_resolve_info(conn: *mut c_void, pi: i32, out: *mut *mut c_void) -> i32 {
+    assert!(!conn.is_null()); assert!((0..2).contains(&pi));
+    unsafe { *out = INFO_TAGS.as_ptr().add(pi as usize).cast_mut().cast(); } 0
+}
+unsafe extern "C" fn mock_app_strcpy(dst: *mut c_void, src: *const c_void) -> i32 {
+    let s = unsafe { text(src) }; let w = wide(&s);
+    unsafe { std::ptr::copy_nonoverlapping(w.as_ptr(), dst.cast::<u32>(), w.len()); } 0
+}
+unsafe extern "C" fn mock_fstring_new(out: *mut *mut c_void) -> i32 {
+    event("string_new"); unsafe { *out = Box::into_raw(Box::new(String::new())).cast(); } 0
+}
+unsafe extern "C" fn mock_fstring_delete(s: *mut c_void) -> i32 {
+    event("string_delete"); unsafe { drop(Box::from_raw(s.cast::<String>())); } 0
+}
+unsafe extern "C" fn mock_fstring_chars(s: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe { *out = string_ptr(&*s.cast::<String>()); } 0
+}
+unsafe extern "C" fn mock_fstring_assign(s: *mut c_void, value: *const c_void) -> i32 {
+    unsafe { *s.cast::<String>() = text(value); } 0
+}
+fn localized(key: &str) -> String {
+    with_mock(|m| m.localization.get(key).cloned()).unwrap_or_else(|| match key {
+        "NetWrite" => "NetWrite %s", "NetRefused" => "NetRefused %s",
+        "ReceiveFile" => "Receiving %s", "ReceiveOptionalFile" => "Receiving optional %s",
+        "ReceiveSize" => "%d KB, %f%%", "Skipped" => "Skipped '%s'", "Received" => "Received '%s'",
+        other => other,
+    }.into())
+}
+unsafe extern "C" fn mock_localize_error_ansi(key: *const std::ffi::c_char, out: *mut *mut c_void) -> i32 {
+    let key = unsafe { std::ffi::CStr::from_ptr(key) }.to_str().unwrap();
+    event(format!("localize:{key}")); unsafe { *out = string_ptr(&localized(key)); } 0
+}
+unsafe extern "C" fn mock_localize_error_wide(key: *const c_void, out: *mut *mut c_void) -> i32 {
+    let key = unsafe { text(key) }; event(format!("localize:{key}"));
+    unsafe { *out = string_ptr(&localized(&key)); } 0
+}
+unsafe extern "C" fn mock_debugf_text(value: *const c_void) -> i32 {
+    emit(format!("logf '{}'", unsafe { text(value) })); 0
+}
+unsafe extern "C" fn mock_debugf_devnet_text(value: *const c_void) -> i32 {
+    emit(format!("debugf '{}'", unsafe { text(value) })); 0
+}
+unsafe extern "C" fn mock_sys_cache_path(out: *mut *mut c_void) -> i32 {
+    unsafe { *out = string_ptr("/cache"); } 0
+}
+unsafe extern "C" fn mock_app_create_temp_filename(cache: *const c_void, dst: *mut c_void) -> i32 {
+    assert_eq!(unsafe { text(cache) }, "/cache");
+    let name = with_mock(|m| { m.temp_count += 1; format!("/cache/tmp{:04}.tmp", m.temp_count) });
+    let w = wide(&name); unsafe { std::ptr::copy_nonoverlapping(w.as_ptr(), dst.cast::<u32>(), w.len()); }
+    emit(format!("temp_filename '{name}'")); 0
+}
+unsafe extern "C" fn mock_fm_create_writer(path: *const c_void, out: *mut *mut c_void) -> i32 {
+    emit(format!("create_writer '{}'", unsafe { text(path) }));
+    if with_mock(|m| m.create_writer_fails) { emit("create_writer result=null"); unsafe { *out = null_mut(); } }
+    else { emit("create_writer result=set"); with_mock(|m| m.serialize_calls = 0);
+        unsafe { *out = Box::into_raw(Box::new(Writer { ar: zeroed(), written: 0 })).cast(); } }
+    0
+}
+unsafe extern "C" fn mock_fm_create_reader(path: *const c_void, out: *mut *mut c_void) -> i32 {
+    event(format!("reader:{}", unsafe { text(path) }));
+    unsafe { *out = if with_mock(|m| m.reader_fails) { null_mut() } else {
+        Box::into_raw(Box::new(Writer { ar: zeroed(), written: -1 })).cast()
+    }; } 0
+}
+unsafe extern "C" fn mock_fm_make_directory(path: *const c_void) -> i32 {
+    emit(format!("make_directory '{}' tree=0", unsafe { text(path) })); 0
+}
+unsafe extern "C" fn mock_fm_file_size(path: *const c_void, out: *mut i32) -> i32 {
+    let size = with_mock(|m| m.file_size);
+    emit(format!("file_size '{}' = {size}", unsafe { text(path) })); unsafe { *out = size; } 0
+}
+unsafe extern "C" fn mock_fm_delete(path: *const c_void) -> i32 {
+    let path = unsafe { text(path) }; event(format!("delete:{path}")); emit(format!("delete '{path}'")); 0
+}
+unsafe extern "C" fn mock_fm_move(dst: *const c_void, src: *const c_void, out: *mut i32) -> i32 {
+    let ok = with_mock(|m| m.move_ok);
+    emit(format!("move dest='{}' src='{}' result={ok}", unsafe { text(dst) }, unsafe { text(src) }));
+    unsafe { *out = ok; } 0
+}
+unsafe extern "C" fn mock_conn_download(conn: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe { *out = (*conn.cast::<UNetConnection>()).download; } 0
+}
+unsafe extern "C" fn mock_conn_set_download(conn: *mut c_void, dl: *mut c_void) -> i32 {
+    unsafe { (*conn.cast::<UNetConnection>()).download = dl; } 0
+}
+unsafe extern "C" fn mock_conn_notify_progress(_conn: *mut c_void, a: *const c_void, b: *const c_void, seconds: f32) -> i32 {
+    emit(format!("notify_progress str1='{}' str2='{}' seconds={seconds}", unsafe { text(a) }, unsafe { text(b) })); 0
+}
+unsafe extern "C" fn mock_conn_notify_received_file(_conn: *mut c_void, index: i32, error: *const c_void, skipped: i32) -> i32 {
+    event("received"); emit(format!("notify_received_file index={index} error='{}' skipped={skipped}", unsafe { text(error) })); 0
+}
+unsafe extern "C" fn mock_cache_ini_new(out: *mut *mut c_void) -> i32 {
+    unsafe { *out = Box::into_raw(Box::new(String::new())).cast(); } event("ini_new"); 0
+}
+unsafe extern "C" fn mock_cache_ini_set_string(ini: *mut c_void, section: *const c_void, key: *const c_void, value: *const c_void, file: *const c_void) -> i32 {
+    assert_eq!(unsafe { text(section) }, "Cache");
+    event(format!("ini:{}={}", unsafe { text(key) }, unsafe { text(value) }));
+    unsafe { *ini.cast::<String>() = text(file); } emit(format!("load_file_to_string '{}'", unsafe { text(file) })); 0
+}
+unsafe extern "C" fn mock_cache_ini_delete(ini: *mut c_void) -> i32 {
+    event("ini_delete"); let path = unsafe { Box::from_raw(ini.cast::<String>()) };
+    emit(format!("save_string_to_file '{path}'")); 0
+}
+unsafe extern "C" fn mock_dl_error_virtual(this: *mut c_void, msg: *const c_void) -> i32 {
+    event(format!("error_virtual:{}", unsafe { text(msg) }));
+    if with_mock(|m| m.virtual_error_fails) { return 1; }
+    if with_mock(|m| m.override_error) { unsafe { set_error(this, "overridden"); } return 0; }
+    match unsafe { hp2_engine::net_download::download_error(&SVC, this, msg) } { Ok(()) => 0, Err(_) => 1 }
+}
+unsafe extern "C" fn mock_dl_done_virtual(this: *mut c_void) -> i32 {
+    event("done_virtual"); if with_mock(|m| m.override_done) { return 0; }
+    match unsafe { download_done(&SVC, this) } { Ok(()) => 0, Err(_) => 1 }
+}
+type Channel = UFileChannel;
+unsafe extern "C" fn mock_chdl_ch_download(ch: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe { *out = (*ch.cast::<Channel>()).download; } 0
+}
+unsafe extern "C" fn mock_chdl_set_ch_download(ch: *mut c_void, dl: *mut c_void) -> i32 {
+    unsafe { (*ch.cast::<Channel>()).download = dl; } 0
+}
+unsafe extern "C" fn mock_chdl_set_package_index(ch: *mut c_void, index: i32) -> i32 {
+    unsafe { (*ch.cast::<Channel>()).package_index = index; } 0
+}
+unsafe extern "C" fn mock_app_fail_assert(expr: *const std::ffi::c_char, _file: *const std::ffi::c_char, _line: i32) -> i32 {
+    event(format!("assert:{}", unsafe { std::ffi::CStr::from_ptr(expr) }.to_str().unwrap())); 1
+}
+unsafe extern "C" fn mock_bunch_construct(bunch: *mut FOutBunch) -> i32 {
+    event("bunch_construct");
+    // SAFETY: initialize only the named archive/empty buffer fields read by Rust.
+    unsafe {
+        let writer = bunch.cast::<FBitWriter>();
+        (*writer).buffer.data = null_mut();
+        (*writer).buffer.num = 0;
+        (*writer).buffer.max = 0;
+        (*writer).ar_ver = 0;
+        (*writer).ar_net_ver = 0;
+        (*writer).ar_licensee_ver = 0;
+        (*writer).ar_is_loading = 0;
+        (*writer).ar_is_saving = 0;
+        (*writer).ar_is_trans = 0;
+        (*writer).ar_is_persistent = 0;
+        (*writer).ar_for_edit = 0;
+        (*writer).ar_for_client = 0;
+        (*writer).ar_for_server = 0;
+        (*writer).ar_is_error = 0;
+    }
+    0
+}
+unsafe extern "C" fn mock_bunch_destruct(bunch: *mut FOutBunch) -> i32 {
+    event("bunch_destruct");
+    // The native writer destructor retires its published-allocator buffer.
+    i32::from(unsafe {
+        hp2_engine::net_bunch::release_buffer(&raw mut (*bunch.cast::<FBitWriter>()).buffer)
+    }.is_err())
+}
+unsafe extern "C" fn mock_in_construct(_: *mut FInBunch) -> i32 { unreachable!() }
+unsafe extern "C" fn mock_in_destruct(_: *mut FInBunch) -> i32 { unreachable!() }
+unsafe fn append_bunch(bunch: *mut c_void, bytes: &[u8]) {
+    // SAFETY: initialized generated writer with enough capacity for these fixture payloads.
+    unsafe {
+        let writer = bunch.cast::<FBitWriter>();
+        let offset = (*writer).num as usize / 8;
+        assert!(offset + bytes.len() <= (*writer).buffer.num as usize);
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), (*writer).buffer.data.cast::<u8>().add(offset), bytes.len());
+        (*writer).num += (bytes.len() * 8) as i32;
+    }
+}
+unsafe extern "C" fn mock_bunch_write_guid(bunch: *mut c_void, info: *mut c_void) -> i32 {
+    let i = unsafe { pkg_index(info) };
+    let guid = [[0x11111111u32,0x22222222,0x33333333,0x44444444], [0x55555555,0x66666666,0x77777777,0x88888888]][i];
+    for word in guid { unsafe { append_bunch(bunch, &word.to_le_bytes()); } } 0
+}
+unsafe extern "C" fn mock_bunch_write_text(bunch: *mut c_void, value: *const c_void) -> i32 {
+    let value = unsafe { text(value) }; assert_eq!(value, "SKIP");
+    unsafe {
+        append_bunch(bunch, &[(value.len() + 1).try_into().unwrap()]);
+        append_bunch(bunch, value.as_bytes());
+        append_bunch(bunch, &[0]);
+    } 0
+}
+unsafe extern "C" fn mock_bunch_set_reliable(bunch: *mut c_void) -> i32 { unsafe { (*bunch.cast::<FOutBunch>()).b_reliable = 1; } 0 }
+unsafe extern "C" fn mock_bunch_is_error(_bunch: *mut c_void, out: *mut i32) -> i32 {
+    event("bunch_is_error"); unsafe { *out = with_mock(|m| i32::from(m.bunch_error)); } 0
+}
+unsafe extern "C" fn mock_bunch_send(_ch: *mut c_void, bunch: *mut c_void) -> i32 {
+    let (payload, reliable, close, bits) = unsafe {
+        let writer = bunch.cast::<FBitWriter>();
+        let b = bunch.cast::<FOutBunch>();
+        (std::slice::from_raw_parts((*writer).buffer.data.cast::<u8>(), (*writer).num as usize / 8).to_vec(), (*b).b_reliable, (*b).b_close, (*writer).num)
+    };
+    with_mock(|m| m.payloads.push(payload)); event("bunch_send");
+    emit(format!("send_bunch merge=0 reliable={reliable} close={close} bits={bits}")); 0
+}
+unsafe extern "C" {
+    #[link_name = "realloc"] fn native_realloc(data: *mut c_void, bytes: usize) -> *mut c_void;
+    #[link_name = "free"] fn native_free(data: *mut c_void);
+}
+fn publish_bunch_allocator() {
+    use hp2_core::array_storage::{Hp2ArrayServices, publish_allocator};
+    unsafe extern "C" fn realloc(_: *mut c_void, data: *mut c_void, bytes: usize, _: *const i32, _: i32, _: *const c_void, out: *mut *mut c_void) -> i32 {
+        unsafe { *out = native_realloc(data, bytes); i32::from((*out).is_null() && bytes != 0) }
+    }
+    unsafe extern "C" fn checked(_: *mut c_void, bytes: usize, out: *mut i32) -> i32 {
+        match i32::try_from(bytes) { Ok(value) => { unsafe { *out = value; } 0 }, Err(_) => 1 }
+    }
+    unsafe extern "C" fn free(_: *mut c_void, data: *mut c_void) -> i32 { unsafe { native_free(data); } 0 }
+    // SAFETY: process-lifetime native-compatible callbacks, published once by SVC.
+    unsafe { publish_allocator(Hp2ArrayServices { context: null_mut(), realloc, checked_int_size: checked, free }); }
+}
+unsafe extern "C" fn mock_ar_read_u32(_ar: *mut c_void, out: *mut u32) -> i32 { event("signature"); unsafe { *out = with_mock(|m| m.signature); } 0 }
+unsafe extern "C" fn mock_ar_read_i32(ar: *mut c_void, out: *mut i32) -> i32 { unsafe { mock_ar_read_u32(ar, out.cast()) } }
+unsafe extern "C" fn mock_ar_read_fstring_discard(_ar: *mut c_void) -> i32 { event("original_filename"); 0 }
+unsafe extern "C" fn mock_codec_new(out: *mut *mut c_void) -> i32 { event("codec_new"); unsafe { *out = Box::into_raw(Box::new(Vec::<&'static str>::new())).cast(); } 0 }
+macro_rules! codec_leaf { ($name:ident, $label:literal) => { unsafe extern "C" fn $name(codec: *mut c_void) -> i32 {
+    event($label); unsafe { (*codec.cast::<Vec<&'static str>>()).push($label); } 0
+} }; }
+codec_leaf!(mock_codec_add_rle, "rle"); codec_leaf!(mock_codec_add_bwt, "bwt"); codec_leaf!(mock_codec_add_mtf, "mtf"); codec_leaf!(mock_codec_add_huffman, "huffman");
+unsafe extern "C" fn mock_codec_decode(codec: *mut c_void, reader: *mut c_void, writer: *mut c_void) -> i32 {
+    assert!(!reader.is_null()); assert!(!writer.is_null());
+    let stages = unsafe { &*codec.cast::<Vec<&'static str>>() };
+    let expected = if with_mock(|m| m.signature) == 5678 { vec!["rle","bwt","mtf","rle","huffman"] } else { vec!["rle","bwt","mtf","huffman"] };
+    assert_eq!(*stages, expected); event("decode"); 0
+}
+unsafe extern "C" fn mock_codec_delete(codec: *mut c_void) -> i32 { event("codec_delete"); unsafe { drop(Box::from_raw(codec.cast::<Vec<&'static str>>())); } 0 }

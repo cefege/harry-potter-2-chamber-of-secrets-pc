@@ -4,6 +4,8 @@
 //! driver with the same services, seeds and call order as this file.
 //! Floats are printed as IEEE bit patterns, so any difference in rounding,
 //! operation order or RNG draws fails the comparison.
+#[path = "actor_services/mock.rs"]
+mod actor_services_mock;
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -28,38 +30,45 @@ fn next_rng() -> u32 {
     s
 }
 
-unsafe extern "C" fn app_frand() -> f32 {
-    ((next_rng() >> 8) & 0x00FF_FFFF) as f32 / 16_777_216.0
+unsafe extern "C" fn app_frand(out: *mut f32) -> i32 {
+    unsafe {
+        *out = ((next_rng() >> 8) & 0x00FF_FFFF) as f32 / 16_777_216.0;
+    }
+    0
 }
 
-unsafe extern "C" fn app_rand() -> i32 {
-    ((next_rng() >> 16) & 0x7fff) as i32
+unsafe extern "C" fn app_rand(out: *mut i32) -> i32 {
+    unsafe {
+        *out = ((next_rng() >> 16) & 0x7fff) as i32;
+    }
+    0
 }
 
 unsafe extern "C" fn far_move_actor(
     _level: *mut c_void,
     actor: *mut c_void,
     dest: *const c_void,
+    out: *mut i32,
 ) -> i32 {
     unsafe {
         (*(actor as *mut AActor)).location = *(dest as *const FVector);
+        *out = 1;
     }
-    1
+    0
 }
 
-unsafe extern "C" fn point_reachable(pawn: *mut c_void, point: *const c_void) -> i32 {
+unsafe extern "C" fn point_reachable(
+    pawn: *mut c_void,
+    point: *const c_void,
+    out: *mut i32,
+) -> i32 {
     // Mirrors driver.cpp: `aPoint.X + aPoint.Y + (CollisionRadius - CollisionHeight) > 0.f`.
     let p = unsafe { *(point as *const FVector) };
     let a = unsafe { &*(pawn as *const AActor) };
-    (p.x + p.y + (a.collision_radius - a.collision_height) > 0.0) as i32
-}
-
-unsafe extern "C" fn set_collision_size(actor: *mut c_void, radius: f32, height: f32) {
     unsafe {
-        let a = &mut *(actor as *mut AActor);
-        a.collision_radius = radius;
-        a.collision_height = height;
+        *out = (p.x + p.y + (a.collision_radius - a.collision_height) > 0.0) as i32;
     }
+    0
 }
 
 unsafe extern "C" fn model_fast_line_check(
@@ -85,14 +94,68 @@ unsafe extern "C" fn rotator_vector(rot: *const c_void, out: *mut c_void) {
     }
 }
 
+thread_local! {
+    static WINDS: std::cell::RefCell<Vec<*mut AWind>> = const { std::cell::RefCell::new(Vec::new()) };
+    static RANDOM: std::cell::UnsafeCell<wind::IntRandom> = const { std::cell::UnsafeCell::new(wind::IntRandom::new()) };
+}
+unsafe extern "C" fn wind_count() -> i32 {
+    WINDS.with(|w| w.borrow().len() as i32)
+}
+unsafe extern "C" fn wind_at(i: i32) -> *mut c_void {
+    WINDS.with(|w| w.borrow()[i as usize].cast())
+}
+unsafe extern "C" fn wind_random() -> *mut c_void {
+    RANDOM.with(|r| r.get().cast())
+}
+unsafe extern "C" fn reach_define(
+    spec: *mut c_void,
+    begin: *mut c_void,
+    dest: *mut c_void,
+    scout: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    match unsafe { reach::define_for(&SVC, spec.cast(), begin.cast(), dest.cast(), scout.cast()) } {
+        Ok(value) => {
+            unsafe {
+                *out = value;
+            }
+            0
+        }
+        Err(error) => error.0,
+    }
+}
+unsafe extern "C" fn reach_best(
+    spec: *mut c_void,
+    begin: *const c_void,
+    dest: *const c_void,
+    scout: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    match unsafe {
+        reach::find_best_reachable(&SVC, spec.cast(), begin.cast(), dest.cast(), scout.cast())
+    } {
+        Ok(value) => {
+            unsafe {
+                *out = value;
+            }
+            0
+        }
+        Err(error) => error.0,
+    }
+}
+
 static SVC: Hp2EngineServices = Hp2EngineServices {
     app_frand,
     app_rand,
     far_move_actor,
     point_reachable,
-    set_collision_size,
     model_fast_line_check,
     rotator_vector,
+    wind_count,
+    wind_at,
+    wind_random,
+    reach_define_for: reach_define,
+    reach_find_best: reach_best,
 };
 
 // ---- output helpers (match the driver's printf formats) ----
@@ -223,7 +286,7 @@ fn run_reach(out: &mut String, acts: &[*mut AActor; 4], scout: *mut APawn) {
                         out.push_str(&fb(scout_hgt[si]));
                         out.push_str(&spec_out(&s, acts));
                         out.push_str(" =>");
-                        let ret = reach::define_for(&SVC, &mut s, acts[0], acts[1], scout);
+                        let ret = reach::define_for(&SVC, &mut s, acts[0], acts[1], scout).unwrap();
                         out.push_str(&format!(" {ret}"));
                         out.push_str(&spec_out(&s, acts));
                         out.push_str(&fb((*scout).base.collision_radius));
@@ -242,7 +305,8 @@ fn run_reach(out: &mut String, acts: &[*mut AActor; 4], scout: *mut APawn) {
                         out.push_str(&fb(scout_hgt[si]));
                         out.push_str(&spec_out(&t, acts));
                         out.push_str(" =>");
-                        let ret = reach::find_best_reachable(&SVC, &mut t, &begin, &dest, scout);
+                        let ret =
+                            reach::find_best_reachable(&SVC, &mut t, &begin, &dest, scout).unwrap();
                         out.push_str(&format!(" {ret}"));
                         out.push_str(&spec_out(&t, acts));
                         out.push_str(&fb((*scout).base.collision_radius));
@@ -329,7 +393,7 @@ impl WindRig {
         w.set_b_permeating(perm != 0);
         w.fluc = fluc;
         w.fluc_vel = flucvel;
-        wind::register(&mut *w as *mut AWind);
+        WINDS.with(|registry| registry.borrow_mut().push(&mut *w));
         let idx = self.winds.len();
         self.winds.push(w);
         self.levels.push(level);
@@ -370,21 +434,25 @@ impl WindRig {
             grid.push(vec3(-60.0, -40.0, -20.0));
         }
         for g in grid {
-            let r = unsafe { wind::get_wind_shared(&SVC, w, g) };
+            let r = unsafe { wind::get_wind_shared(&SVC, w, &g).unwrap() };
             out.push_str(&format!("WGET{} =>{}\n", vb(g), vb(r)));
         }
     }
 
     fn tick(&mut self, i: usize, dt: f32, out: &mut String) {
         let w = self.ptr(i);
-        unsafe { wind::tick(&SVC, w, dt) };
+        unsafe { wind::tick(&SVC, w, dt).unwrap() };
         let (f, fv) = unsafe { ((*w).fluc, (*w).fluc_vel) };
         out.push_str(&format!("WTICK{} =>{}{}\n", fb(dt), vb(f), vb(fv)));
     }
 
     fn end(&mut self, out: &mut String) {
         for w in &mut self.winds {
-            wind::unregister(&mut **w as *mut AWind);
+            WINDS.with(|registry| {
+                registry
+                    .borrow_mut()
+                    .retain(|&p| p != &mut **w as *mut AWind)
+            });
         }
         self.winds.clear();
         self.levels.clear();
@@ -512,7 +580,7 @@ fn run_wind(out: &mut String) {
         vec3(200.0, 200.0, 200.0),
     ];
     for g in grid {
-        let t = unsafe { wind::get_total_wind(&SVC, g) };
+        let t = unsafe { wind::get_total_wind(&SVC, &g).unwrap() };
         out.push_str(&format!("WTOTAL{} =>{}\n", vb(g), vb(t)));
     }
     rig.end(out);
@@ -520,6 +588,7 @@ fn run_wind(out: &mut String) {
 
 #[test]
 fn reach_and_wind_match_original_fixture() {
+    actor_services_mock::publish();
     // Reach objects: four actors, one scout pawn on its own level.
     let mut actors: Vec<Box<AActor>> = (0..4)
         .map(|_| Box::new(unsafe { std::mem::zeroed::<AActor>() }))

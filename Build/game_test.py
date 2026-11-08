@@ -40,6 +40,7 @@ import global_tick_trace
 import shadow_admission_trace
 import shadow_update_trace
 import startup_rng_phase_trace
+import package79_reference
 
 ARM64_CPU_TYPE = 0x0100000C
 TERMINATION_GRACE_SECONDS = 5.0
@@ -87,11 +88,11 @@ _REPLAY_USER_DIRECTORY = (
     else Path(".local/share/harry-potter-2/User")
 )
 REPLAY_STEM_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
-RUST_REPLAY_MARKER_PREFIX = "hp2rs: [replay.wire_v1]"
-RUST_REPLAY_MARKER = re.compile(
-    r"^hp2rs: \[replay\.wire_v1\] url=(?P<url>\S+) frames=(?P<frames>\d+) "
-    r"first_tick=(?P<first_tick>[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?) "
-    r"seed=(?P<seed>\d+)\s*$", re.MULTILINE,
+REPLAY_CONSUMPTION_MARKER_PREFIX = "<HP2_REPLAY>"
+REPLAY_CONSUMPTION_MARKER = re.compile(
+    r"^<HP2_REPLAY> url=(?P<url>\S+) frames=(?P<frames>\d+) "
+    r"first_tick_bits=(?P<first_tick_bits>[0-9a-f]{8}) "
+    r"seed=(?P<seed>\d+) status=consumed\s*$", re.MULTILINE,
 )
 
 # ScriptWarning is deliberately fatal: UE1 reports Accessed None through it.
@@ -685,39 +686,26 @@ def run_command(
             except subprocess.TimeoutExpired as error:
                 timed_out = True
                 partial_output = error.output or b""
-                if os.name == "nt":
+                cleanup_action = "sigterm"
+                cleanup_error = _signal_group(process.pid, signal.SIGTERM)
+                try:
+                    output, _ = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
+                except subprocess.TimeoutExpired as term_error:
+                    partial_output = term_error.output or partial_output
                     cleanup_action = "sigkill"
-                    try:
-                        hp2_proc.kill_group(process)
-                    except OSError as kill_error:
-                        cleanup_error = f"cannot terminate process tree: {kill_error}"
+                    kill_error = _signal_group(process.pid, signal.SIGKILL)
+                    if kill_error:
+                        cleanup_error = "; ".join(item for item in (cleanup_error, kill_error) if item)
                     try:
                         output, _ = process.communicate(timeout=KILL_GRACE_SECONDS)
                     except subprocess.TimeoutExpired as kill_error:
                         output = kill_error.output or partial_output
                         cleanup_action = "failed"
-                        cleanup_error = "; ".join(item for item in (cleanup_error, "app did not exit after taskkill") if item)
-                else:
-                    cleanup_action = "sigterm"
-                    cleanup_error = _signal_group(process.pid, signal.SIGTERM)
-                    try:
-                        output, _ = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
-                    except subprocess.TimeoutExpired as term_error:
-                        partial_output = term_error.output or partial_output
-                        cleanup_action = "sigkill"
-                        kill_error = _signal_group(process.pid, signal.SIGKILL)
-                        if kill_error:
-                            cleanup_error = "; ".join(item for item in (cleanup_error, kill_error) if item)
-                        try:
-                            output, _ = process.communicate(timeout=KILL_GRACE_SECONDS)
-                        except subprocess.TimeoutExpired as kill_error:
-                            output = kill_error.output or partial_output
-                            cleanup_action = "failed"
-                            cleanup_error = "; ".join(item for item in (cleanup_error, "app did not exit after process-group SIGKILL") if item)
+                        cleanup_error = "; ".join(item for item in (cleanup_error, "app did not exit after process-group SIGKILL") if item)
                 if not output:
                     output = partial_output
             exit_status = process.returncode
-            if os.name != "nt" and _group_exists(process.pid):
+            if _group_exists(process.pid):
                 orphaned_process_group = not timed_out
                 remaining_action, remaining_error = _stop_remaining_group(process.pid)
                 if remaining_action != "none":
@@ -730,42 +718,28 @@ def run_command(
         finally:
             if process is not None and process.poll() is None:
                 orphaned_process_group = True
-                if os.name == "nt":
+                cleanup_action = "sigterm"
+                final_error = _signal_group(process.pid, signal.SIGTERM)
+                if final_error:
+                    cleanup_error = "; ".join(item for item in (cleanup_error, final_error) if item)
+                try:
+                    final_output, _ = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
+                    output = final_output or output
+                except subprocess.TimeoutExpired as error:
                     cleanup_action = "sigkill"
-                    try:
-                        hp2_proc.kill_group(process)
-                    except OSError as kill_error:
-                        cleanup_error = f"cannot terminate process tree: {kill_error}"
+                    partial_output = error.output or output
+                    kill_error = _signal_group(process.pid, signal.SIGKILL)
+                    if kill_error:
+                        cleanup_error = "; ".join(item for item in (cleanup_error, kill_error) if item)
                     try:
                         final_output, _ = process.communicate(timeout=KILL_GRACE_SECONDS)
-                        output = final_output or output
+                        output = final_output or partial_output
                     except subprocess.TimeoutExpired as kill_error:
-                        output = kill_error.output or output
+                        output = kill_error.output or partial_output
                         cleanup_action = "failed"
-                        cleanup_error = "; ".join(item for item in (cleanup_error, "app could not be reaped after taskkill") if item)
-                else:
-                    cleanup_action = "sigterm"
-                    final_error = _signal_group(process.pid, signal.SIGTERM)
-                    if final_error:
-                        cleanup_error = "; ".join(item for item in (cleanup_error, final_error) if item)
-                    try:
-                        final_output, _ = process.communicate(timeout=TERMINATION_GRACE_SECONDS)
-                        output = final_output or output
-                    except subprocess.TimeoutExpired as error:
-                        cleanup_action = "sigkill"
-                        partial_output = error.output or output
-                        kill_error = _signal_group(process.pid, signal.SIGKILL)
-                        if kill_error:
-                            cleanup_error = "; ".join(item for item in (cleanup_error, kill_error) if item)
-                        try:
-                            final_output, _ = process.communicate(timeout=KILL_GRACE_SECONDS)
-                            output = final_output or partial_output
-                        except subprocess.TimeoutExpired as kill_error:
-                            output = kill_error.output or partial_output
-                            cleanup_action = "failed"
-                            cleanup_error = "; ".join(item for item in (cleanup_error, "app could not be reaped after SIGKILL") if item)
+                        cleanup_error = "; ".join(item for item in (cleanup_error, "app could not be reaped after SIGKILL") if item)
                 exit_status = process.returncode
-                if os.name != "nt" and _group_exists(process.pid):
+                if _group_exists(process.pid):
                     remaining_action, remaining_error = _stop_remaining_group(process.pid)
                     if remaining_action != "none":
                         cleanup_action = remaining_action
@@ -794,6 +768,7 @@ def run_game(
     extra_env: dict[str, str] | None = None,
     ini_file: Path | None = None,
     engine_bin: Path | None = None,
+    fixed_dt: float | None = None,
 ) -> dict[str, object]:
     """Validate an app bundle or override engine binary, then launch one map."""
     repo_root = _repo_root()
@@ -815,7 +790,7 @@ def run_game(
         )
     command = build_launch_command(
         executable, data_root, map_token, renderer, ticks,
-        no_sound=no_sound, ini_file=ini_file,
+        no_sound=no_sound, ini_file=ini_file, fixed_dt=fixed_dt,
     )
     displayed_command = [
         _display_path(executable, repo_root), f"-datadir={_display_path(data_root, repo_root)}",
@@ -901,25 +876,25 @@ def _stage_replay_home(home: Path, data_root: Path, replay: ReplayScenario) -> P
 
 
 def _rust_replay_marker_observation(output: bytes, replay: ReplayScenario) -> dict[str, object]:
-    matches = list(RUST_REPLAY_MARKER.finditer(output.decode("utf-8", errors="replace")))
+    matches = list(REPLAY_CONSUMPTION_MARKER.finditer(output.decode("utf-8", errors="replace")))
     if not matches:
         return {
-            "status": "missing", "code": "replay.rust_marker_absent",
-            "detail": f"Rust log did not publish {RUST_REPLAY_MARKER_PREFIX}",
+            "status": "missing", "code": "replay.consumption_not_observed",
+            "detail": f"Canonical replay did not publish completed consumption: {REPLAY_CONSUMPTION_MARKER_PREFIX}",
         }
     match = matches[-1]
     observed = {
         "url": match.group("url"), "frames": int(match.group("frames")),
-        "first_tick": float(match.group("first_tick")), "seed": int(match.group("seed")),
+        "first_tick_bits": int(match.group("first_tick_bits"), 16), "seed": int(match.group("seed")),
     }
     expected = {
         "url": replay.url, "frames": replay.frame_count,
-        "first_tick": replay.tick_delta, "seed": 1,
+        "first_tick_bits": struct.unpack("<I", struct.pack("<f", replay.tick_delta))[0], "seed": 1,
     }
     if observed != expected:
         return {
-            "status": "invalid", "code": "replay.rust_marker_mismatch",
-            "detail": "Rust replay capability marker does not match the staged replay",
+            "status": "invalid", "code": "replay.consumption_mismatch",
+            "detail": "Canonical consumed replay does not match the staged scenario",
             "expected": expected, "observed": observed,
         }
     return {"status": "observed", **observed}
@@ -1000,7 +975,7 @@ def _validate_rng_trace(document: object) -> dict[str, str] | None:
         if not isinstance(boundary, dict) or not _json_integer(boundary.get("index")) or boundary["index"] < 0 or not isinstance(boundary.get("phase"), str) or not boundary["phase"]:
             return _rng_trace_problem("rng_trace.boundary_invalid", f"tick boundary {index} is malformed")
     consumer_fields = ("kind", "actor", "class", "function", "native", "native_slot", "callsite_offset")
-    for index, (output, sample) in enumerate(zip(outputs, samples, strict=True)):
+    for index, (output, sample) in enumerate(zip(outputs, samples)):
         if not isinstance(output, dict) or not _json_integer(output.get("ordinal")) or not _json_integer(output.get("raw")) or output["ordinal"] != index or not 0 <= output["raw"] <= document["rand_max"]:
             return _rng_trace_problem("rng_trace.output_invalid", f"output {index} is malformed")
         if not isinstance(sample, dict):
@@ -1382,10 +1357,27 @@ def _profile_for_data_root(data_root: Path, repo_root: Path) -> str:
     return "data-retail" if document.get("profile") == "retail-only" else "data-custom"
 
 
-def _cutscript_lines(data: bytes) -> Iterator[tuple[int, str]]:
-    for line_number, line in enumerate(re.split(b"\r\n|\r|\n", data), start=1):
-        if line_number == 1 or line or line_number <= len(data.splitlines()):
-            yield line_number, line.decode("cp1252", errors="replace")
+class _AuthoredCheckpointsAbsent(Exception):
+    """Raised only when a successful active-actor census finds no commands."""
+
+
+def _tick_checkpoints(map_path: Path, data_root: Path, ticks: int) -> list[dict[str, object]]:
+    try:
+        map_bytes = map_path.read_bytes()
+    except OSError as error:
+        raise GameTestError(f"cannot read map for tick checkpoint provenance: {error}") from error
+    map_relative = map_path.relative_to(data_root).as_posix()
+    source_line = {
+        "kind": "runtime_tick", "path": map_relative, "sha256": hashlib.sha256(map_bytes).hexdigest(),
+    }
+    selected_ticks = sorted({1, max(1, ticks // 2), ticks})
+    return [
+        {
+            "id": f"tick:{tick}", "position": "tick", "tick": tick,
+            "source_line": {**source_line, "tick": tick},
+        }
+        for tick in selected_ticks
+    ]
 
 
 def _cutscript_command(line: str) -> str:
@@ -1393,160 +1385,241 @@ def _cutscript_command(line: str) -> str:
     return line[:min(comments)].rstrip() if comments else line.rstrip()
 
 
-def _thread_slot(thread: str) -> int:
-    match = re.fullmatch(r"thread_?(\d+).*", thread, flags=re.IGNORECASE)
-    if match is None:
-        raise GameTestError(f"fidelity.cutscript_thread_unresolved: unsupported thread name {thread}")
-    return int(match.group(1))
-
-
-def _cutscene_script(data_root: Path, map_path: Path) -> Path:
-    try:
-        raw_map = map_path.read_bytes()
-    except OSError as error:
-        raise GameTestError(f"cannot read map for CutScriptDisk.Script: {error}") from error
-    candidates: set[Path] = set()
-    for match in re.findall(rb"(?<![A-Za-z0-9_])[A-Za-z0-9_-]{3,}(?![A-Za-z0-9_])", raw_map):
-        path = data_root / "CutScenes" / f"{match.decode('ascii', errors='ignore')}.txt"
-        if path.is_file():
-            candidates.add(path.resolve())
-    if len(candidates) != 1:
-        names = ", ".join(sorted(str(path) for path in candidates)) or "none"
-        raise GameTestError(f"fidelity.cutscript_unresolved: expected one committed CutScriptDisk.Script source in {map_path}, found {names}")
-    return candidates.pop()
-
-
-def _cutscript_disk_locators(data_root: Path, script_path: Path) -> dict[tuple[int, str], list[int]]:
-    disk_path = data_root / "System" / "CUTSCENES" / f"{script_path.stem}.int"
-    try:
-        disk = disk_path.read_text(encoding="cp1252")
-    except OSError as error:
-        raise GameTestError(f"fidelity.cutscript_disk_unresolved: cannot read CutScriptDisk rows {disk_path}: {error}") from error
-    active_thread: int | None = None
-    locators: dict[tuple[int, str], list[int]] = {}
-    for line in disk.splitlines():
-        section = re.fullmatch(r"\s*\[thread_(\d+)\]\s*", line, flags=re.IGNORECASE)
-        if section:
-            active_thread = int(section.group(1))
-            continue
-        entry = re.fullmatch(r"line_(\d+)=(.*)", line, flags=re.IGNORECASE)
-        if active_thread is None or entry is None:
-            continue
-        command = _cutscript_command(entry.group(2))
-        locators.setdefault((active_thread, " ".join(command.split()).casefold()), []).append(int(entry.group(1)))
-    return locators
-
-
 def _selected_cutscript_command(command: str) -> bool:
     words = {word.casefold() for word in command.split()}
     return bool(words & _CUTSCRIPT_COMMANDS or words & {"followspline", "flyto"} or re.search(r"(?:^|\s)time\s*=", command.casefold()))
 
 
-def _retail_source_checkpoints(data_root: Path, map_path: Path) -> list[dict[str, object]]:
+def _semantic_cutscene_actors(
+    data_root: Path, map_path: Path,
+) -> tuple[bytes, dict[str, object], list[dict[str, object]], Any]:
+    import smoke_maps
+    import spell_interaction_audit as audit
+
     try:
-        raw_map = map_path.read_bytes()
-    except OSError as error:
-        raise GameTestError(f"cannot read map for retail CutScript census: {error}") from error
+        map_bytes, package = smoke_maps._read_package(map_path, map_path.relative_to(data_root).as_posix())
+        catalog = audit.Catalog(data_root)
+        for class_export in package["exports"]:
+            if str(class_export["class_path"]).casefold() == "core.class":
+                path = str(class_export["object_path"])
+                catalog.entries[path] = (map_bytes, package, str(package["path"]), class_export)
+                catalog.supers[path] = class_export["super_path"]
+        # Runtime packages can define subclasses in packages other than Core,
+        # Engine and HGame. Load their Class exports into the same defaults reader.
+        for package_path in sorted((data_root / "System").glob("*.u")):
+            relative = package_path.relative_to(data_root).as_posix()
+            data, external = smoke_maps._read_package(package_path, relative)
+            for class_export in external["exports"]:
+                if str(class_export["class_path"]).casefold() == "core.class":
+                    path = str(class_export["object_path"])
+                    catalog.entries[path] = (data, external, relative, class_export)
+                    catalog.supers[path] = class_export["super_path"]
+        aliases = {path.casefold(): path for path in catalog.entries}
+        unresolved_supers = {
+            path for path, parent in catalog.supers.items()
+            if parent is not None and str(parent).casefold() not in aliases
+        }
+        catalog.supers = {
+            path: aliases.get(str(parent).casefold()) if parent is not None else None
+            for path, parent in catalog.supers.items()
+        }
+        level_rows = [e for e in package["exports"] if str(e["class_path"]).casefold() == "engine.level"]
+        if len(level_rows) != 1 or level_rows[0]["serial"] is None:
+            raise GameTestError(f"fidelity.package_metadata_invalid: expected one serialized Level in {map_path}")
+        level = level_rows[0]
+        payload = map_bytes[level["serial"]["offset"]:level["serial"]["end"]]
+        _, end = smoke_maps._tagged_properties(payload, package["names"], str(package["path"]), "Level")
+        cursor = package79_reference.Cursor(payload, str(package["path"]), end, "Level actor array")
+        count, capacity = cursor.i32(), cursor.i32()
+        if count < 0 or capacity < count:
+            raise GameTestError(f"fidelity.package_metadata_invalid: invalid Level actor array {count}/{capacity}")
+        actors = []
+        for _ in range(count):
+            ref = cursor.compact_index()
+            if ref == 0:
+                continue
+            if ref < 0 or ref > len(package["exports"]):
+                raise GameTestError("fidelity.package_metadata_invalid: invalid active actor reference")
+            actor = package["exports"][ref - 1]
+            class_path = str(actor["class_path"] or "")
+            current = aliases.get(class_path.casefold())
+            if current is None:
+                raise GameTestError(f"fidelity.cutscript_class_unresolved: cannot resolve active actor class {class_path}")
+            seen: set[str] = set()
+            is_cutscene = False
+            while current and current.casefold() not in seen:
+                seen.add(current.casefold())
+                if current.casefold() == "hgame.cutscene":
+                    is_cutscene = True
+                    break
+                if current in unresolved_supers:
+                    raise GameTestError(f"fidelity.cutscript_class_unresolved: unresolved superclass for {current}")
+                current = catalog.supers.get(current)
+            if is_cutscene:
+                actors.append(actor)
+        return map_bytes, package, actors, catalog
+    except (OSError, package79_reference.PackageFormatError, audit.AuditError) as error:
+        raise GameTestError(f"fidelity.package_metadata_invalid: {error}") from error
+
+
+def _localization_file(data_root: Path, filename: str) -> Path:
     directory = data_root / "System" / "CUTSCENES"
     try:
-        candidates = [
-            path for path in directory.iterdir()
-            if path.is_file() and path.suffix.casefold() == ".int"
-            and path.stem.encode("ascii", errors="ignore") in raw_map
-        ]
+        matches = [p for p in directory.iterdir() if p.is_file() and p.name.casefold() == filename.casefold()]
     except OSError as error:
         raise GameTestError(f"fidelity.cutscript_disk_unresolved: cannot enumerate {directory}: {error}") from error
-    candidates.sort(key=lambda path: os.fsencode(path.name))
-    if len(candidates) != 1:
-        raise GameTestError(
-            "fidelity.cutscript_unresolved: retail-only profile requires exactly "
-            f"one referenced System/CUTSCENES locator file, found {len(candidates)}"
-        )
-    script_path = candidates[0]
-    source = script_path.read_bytes()
-    source_hash = hashlib.sha256(source).hexdigest()
-    active_slot: int | None = None
-    checkpoints: list[dict[str, object]] = []
-    for physical_line, line in enumerate(source.decode("cp1252").splitlines(), start=1):
-        section = re.fullmatch(r"\s*\[thread_(\d+)\]\s*", line, flags=re.IGNORECASE)
-        if section:
-            active_slot = int(section.group(1))
-            continue
-        entry = re.fullmatch(r"line_(\d+)=(.*)", line, flags=re.IGNORECASE)
-        if active_slot is None or active_slot > 3 or entry is None:
-            continue
-        command = _cutscript_command(entry.group(2))
-        if not command or not _selected_cutscript_command(command):
-            continue
-        thread = f"Thread{active_slot}"
-        source_line: dict[str, object] = {
-            "path": _display_path(script_path, _repo_root()), "line": physical_line,
-            "thread": thread, "text": command, "sha256": source_hash,
-        }
-        cue = re.search(r"\*([^\s]+)", command)
-        if cue:
-            source_line["cue"] = cue.group(1)
-        locator = {
-            "path": f"System/CUTSCENES/{script_path.name}",
-            "thread_slot": active_slot, "line_index": int(entry.group(1)),
-        }
-        for position in ("before", "at", "after"):
-            checkpoints.append({
-                "id": f"{thread}:{physical_line}:{position}", "position": position,
-                "runtime_locator": locator, "source_line": source_line,
-            })
-    if not checkpoints:
-        raise GameTestError("fidelity.checkpoints_empty: profile-selected locator census is empty")
-    return checkpoints
+    if len(matches) != 1:
+        raise GameTestError(f"fidelity.cutscript_disk_unresolved: expected {filename}, found {len(matches)}")
+    return matches[0]
 
+
+def _ini_localize_rows(source: bytes, thread: int) -> list[tuple[int, str]]:
+    try:
+        if source.startswith(b"\xff\xfe"):
+            if (len(source) - 2) % 2:
+                raise GameTestError("fidelity.cutscript_disk_unresolved: odd UTF-16LE localization byte count")
+            text = source[2:].decode("utf-16le")
+        elif source.startswith(b"\xfe\xff"):
+            if (len(source) - 2) % 2:
+                raise GameTestError("fidelity.cutscript_disk_unresolved: odd UTF-16BE localization byte count")
+            text = source[2:].decode("utf-16be")
+        else:
+            text = source.decode("latin-1")
+    except UnicodeError as error:
+        raise GameTestError(f"fidelity.cutscript_disk_unresolved: malformed localization encoding: {error}") from error
+    # FConfigFile reads a NUL-terminated TCHAR buffer.
+    text = text.split("\0", 1)[0]
+    section = f"Thread_{thread}".casefold()
+    current: str | None = None
+    values: dict[str, str] = {}
+    for raw_line in re.split(r"\r\n|\r|\n", text):
+        if raw_line.startswith("[") and raw_line.endswith("]"):
+            current = raw_line[1:-1].casefold()
+            continue
+        if current != section or not raw_line or "=" not in raw_line:
+            continue
+        key, value = raw_line.split("=", 1)
+        key = key.casefold()
+        if key not in values:
+            if value.startswith('"') and value.endswith('"'):
+                value = value[1:-1]
+            values[key] = value
+    rows = []
+    for index in range(9999):
+        value = values.get(f"line_{index}", "")
+        if not value or "<?" in value:
+            break
+        if index >= 4096:
+            raise GameTestError(
+                f"fidelity.cutscript_disk_unresolved: Thread_{thread} exceeds CutScriptDisk.lineArray[4096]"
+            )
+        rows.append((index, value))
+    return rows
+
+
+def _inline_cutscript_lines(script: str) -> Iterator[tuple[int, str]]:
+    cursor = 0
+    while cursor < len(script):
+        end = script.find("\r", cursor)
+        text_end = len(script) if end < 0 else end
+        yield cursor, script[cursor:text_end]
+        if end < 0:
+            return
+        cursor += text_end - cursor + 2
 
 def _source_checkpoints(data_root: Path, map_path: Path) -> list[dict[str, object]]:
-    profile = _profile_for_data_root(data_root, _repo_root())
-    if profile == "data-retail":
-        return _retail_source_checkpoints(data_root, map_path)
-    if profile == "data-custom" and not (data_root / "CutScenes").is_dir():
-        raise GameTestError(
-            "fidelity.data_profile_unsupported: locator extraction requires "
-            "repository prototype data or a retail-only overlay manifest"
-        )
-    script_path = _cutscene_script(data_root, map_path)
-    try:
-        source = script_path.read_bytes()
-    except OSError as error:
-        raise GameTestError(f"cannot read CutScriptDisk.Script {script_path}: {error}") from error
-    locators = _cutscript_disk_locators(data_root, script_path)
-    active_thread: str | None = None
-    rows: list[tuple[str, int, str, int]] = []
-    for line_number, line in _cutscript_lines(source):
-        section = re.fullmatch(r"\s*\[([^\]]+)\]\s*", line)
-        if section:
-            active_thread = section.group(1)
-            continue
-        command = _cutscript_command(line)
-        if active_thread is None or active_thread.casefold() not in {"thread0basecam", "thread1harry", "thread2narrator", "thread3dobby"} or not command or not _selected_cutscript_command(command):
-            continue
-        key = (_thread_slot(active_thread), " ".join(command.split()).casefold())
-        line_indices = locators.get(key)
-        if not line_indices:
-            raise GameTestError(f"fidelity.cutscript_disk_locator_missing: no CutScriptDisk row for {active_thread}:{line_number} {command}")
-        rows.append((active_thread, line_number, command, line_indices.pop(0)))
+    import spell_interaction_audit as audit
+
+    map_bytes, package, actors, catalog = _semantic_cutscene_actors(data_root, map_path)
+    aliases = {path.casefold(): path for path in catalog.entries}
+    map_hash = hashlib.sha256(map_bytes).hexdigest()
     checkpoints: list[dict[str, object]] = []
-    source_hash = hashlib.sha256(source).hexdigest()
-    for thread, line_number, command, line_index in rows:
-        source_line: dict[str, object] = {
-            "path": _display_path(script_path, _repo_root()), "line": line_number,
-            "thread": thread, "text": command, "sha256": source_hash,
-        }
-        cue = re.search(r"\*([^\s]+)", command)
-        if cue:
-            source_line["cue"] = cue.group(1)
-        locator = {"path": f"System/CUTSCENES/{script_path.stem}.int", "thread_slot": _thread_slot(thread), "line_index": line_index}
-        for position in ("before", "at", "after"):
-            checkpoints.append({"id": f"{thread}:{line_number}:{position}", "position": position, "runtime_locator": locator, "source_line": source_line})
+    for actor in actors:
+        cls = aliases.get(str(actor["class_path"]).casefold())
+        if cls is None:
+            raise GameTestError(f"fidelity.cutscript_class_unresolved: {actor['class_path']}")
+        try:
+            properties = catalog.properties(cls)
+            properties.update(audit.overrides(map_bytes, package, str(package["path"]), actor))
+            properties = {(name.casefold(), index): value for (name, index), value in properties.items()}
+        except (audit.AuditError, package79_reference.PackageFormatError, ValueError, IndexError, KeyError, TypeError) as error:
+            raise GameTestError(f"fidelity.cutscript_properties_unresolved: {error}") from error
+        actor_path = str(actor["object_path"])
+        file_name = properties.get(("filename", 0), "")
+        if not isinstance(file_name, str):
+            raise GameTestError(f"fidelity.cutscript_properties_unresolved: {actor_path}.FileName is not a string")
+        if file_name:
+            disk_path = _localization_file(data_root, f"{file_name}.int")
+            try:
+                source = disk_path.read_bytes()
+            except OSError as error:
+                raise GameTestError(f"fidelity.cutscript_disk_unresolved: cannot read {disk_path}: {error}") from error
+            digest = hashlib.sha256(source).hexdigest()
+            for slot in range(20):
+                for line_index, text in _ini_localize_rows(source, slot):
+                    command = _cutscript_command(text)
+                    if not command or not _selected_cutscript_command(command):
+                        continue
+                    source_line: dict[str, object] = {
+                        "kind": "disk", "path": disk_path.relative_to(data_root).as_posix(),
+                        "sha256": digest, "thread": f"Thread{slot}", "line": line_index,
+                        "text": command,
+                    }
+                    cue = re.search(r"\*([^\s]+)", command)
+                    if cue:
+                        source_line["cue"] = cue.group(1)
+                    locator = {
+                        "kind": "disk", "actor": actor_path,
+                        "path": disk_path.relative_to(data_root).as_posix(),
+                        "thread_slot": slot, "line_index": line_index,
+                    }
+                    for position in ("before", "at", "after"):
+                        checkpoints.append({
+                            "id": f"{actor_path}:Thread{slot}:{line_index}:{position}",
+                            "position": position, "runtime_locator": locator, "source_line": source_line,
+                        })
+        else:
+            for slot in range(20):
+                script = properties.get(("athreadscripts", slot), "")
+                if not isinstance(script, str):
+                    raise GameTestError(f"fidelity.cutscript_properties_unresolved: {actor_path}.aThreadScripts[{slot}] is not a string")
+                if not script:
+                    continue
+                for cursor, text in _inline_cutscript_lines(script):
+                    command = _cutscript_command(text)
+                    if not command or not _selected_cutscript_command(command):
+                        continue
+                    source_line = {
+                        "kind": "inline", "path": map_path.relative_to(data_root).as_posix(),
+                        "sha256": map_hash, "thread": f"Thread{slot}",
+                        "actor": actor_path, "property": "aThreadScripts", "array_index": slot,
+                        "character_offset": cursor, "text": command,
+                    }
+                    locator = {
+                        "kind": "inline", "actor": actor_path,
+                        "thread_slot": slot, "character_offset": cursor,
+                    }
+                    for position in ("before", "at", "after"):
+                        checkpoints.append({
+                            "id": f"{actor_path}:Thread{slot}:{cursor}:{position}",
+                            "position": position, "runtime_locator": locator, "source_line": source_line,
+                        })
     if not checkpoints:
-        raise GameTestError(f"fidelity.checkpoints_empty: no authored CutScript checkpoints in {script_path}")
+        raise _AuthoredCheckpointsAbsent
     return checkpoints
 
+
+def _selected_checkpoints(
+    data_root: Path, map_path: Path, ticks: int, selector: str,
+) -> tuple[list[dict[str, object]], str]:
+    try:
+        return _source_checkpoints(data_root, map_path), "authored"
+    except _AuthoredCheckpointsAbsent as error:
+        if selector == "authored":
+            raise GameTestError("fidelity.checkpoints_empty: no authored CutScript checkpoints") from error
+        if selector != "authored-or-tick":
+            raise GameTestError(f"unsupported checkpoint source: {selector}")
+        return _tick_checkpoints(map_path, data_root, ticks), "tick"
 
 def _read_fidelity_state(path: Path) -> tuple[dict[str, dict[str, object]], dict[str, object] | None]:
     if not path.is_file():
@@ -1594,6 +1667,23 @@ def _field_observation(state: dict[str, object] | None, field: str, run_diagnost
     return None, {"code": "fidelity.availability_invalid", "field": field}
 
 
+def _runtime_locators_equal(expected: object, actual: object) -> bool:
+    if not isinstance(expected, dict) or not isinstance(actual, dict):
+        return expected == actual
+    if expected.keys() != actual.keys():
+        return False
+    for key, expected_value in expected.items():
+        actual_value = actual[key]
+        if key == "actor":
+            if not isinstance(expected_value, str) or not isinstance(actual_value, str):
+                return False
+            if expected_value.casefold() != actual_value.casefold():
+                return False
+        elif expected_value != actual_value:
+            return False
+    return True
+
+
 def _locator_observation(checkpoint: dict[str, object], state: dict[str, object] | None, run_diagnostic: dict[str, object] | None) -> tuple[object | None, dict[str, object]]:
     expected = checkpoint.get("runtime_locator")
     if expected is None:
@@ -1603,7 +1693,7 @@ def _locator_observation(checkpoint: dict[str, object], state: dict[str, object]
     if "runtime_locator" not in state:
         return None, {"code": "fidelity.runtime_locator_missing"}
     actual = state["runtime_locator"]
-    return (actual, {"status": "observed"}) if actual == expected else (actual, {"code": "fidelity.runtime_locator_mismatch", "expected": expected})
+    return (actual, {"status": "observed"}) if _runtime_locators_equal(expected, actual) else (actual, {"code": "fidelity.runtime_locator_mismatch", "expected": expected})
 
 
 def _side_checkpoint(state: dict[str, object] | None, diagnostic: dict[str, object] | None) -> dict[str, object]:
@@ -1749,6 +1839,7 @@ def _run_fidelity_side(
         "HP2_ARTIFACT_DIR": str(side_root),
         "HP2_FIDELITY_REPORT": str(report_path),
         "HP2_FIDELITY_CHECKPOINTS": str(checkpoint_manifest),
+        "HP2_DETERMINISTIC_VERIFICATION": "1",
     }
     requested = (
         ("HP2_RNG_TRACE", rng_trace_path),
@@ -1773,6 +1864,23 @@ def _run_fidelity_side(
         log_path=log_path, displayed_command=displayed, extra_env=extra_env,
         start_gate=start_gate, home_parent=side_root, prepare_home=prepare_home,
     )
+    log_text = log_path.read_text(encoding="utf-8", errors="replace") if log_path.is_file() else ""
+    input_isolated = "<HP2_VERIFY> input=isolated" in log_text
+    audio_loopback = "<HP2_VERIFY> audio=loopback" in log_text
+    visual_tick_clock = "<HP2_VERIFY> visuals=tick" in log_text
+    result["verification"] = {
+        "requested_mode": "deterministic",
+        "input_isolated": input_isolated,
+        "audio_loopback": audio_loopback,
+        "visual_tick_clock": visual_tick_clock,
+        "status": "observed" if input_isolated and audio_loopback and visual_tick_clock else "unavailable",
+    }
+    if not input_isolated or not audio_loopback or not visual_tick_clock:
+        result["passed"] = False
+        result["verification_violation"] = {
+            "code": "verification.mode_not_observed",
+            "detail": "Isolated physical input, real loopback audio and tick-driven visual timestamps are required",
+        }
     resources = result.get("resources")
     deferral_violation = _script_deferral_violation(
         resources if isinstance(resources, dict) else {}
@@ -1868,10 +1976,10 @@ def run_paired_game(
         rng_seed = _rng_seed_value(rng_seed)
         if replay_fixture is not None:
             raise GameTestError("--rng-seed is available only for map paired runs; -REPLAY retains its fixed seed")
-    if checkpoints != "authored":
+    if checkpoints not in {"authored", "authored-or-tick"}:
         raise GameTestError(f"unsupported checkpoint source: {checkpoints}")
     map_path, map_token = _resolve_map(data_root, selected_map)
-    derived = _source_checkpoints(data_root, map_path)
+    derived, checkpoint_kind = _selected_checkpoints(data_root, map_path, ticks, checkpoints)
     artifact_root = output.parent / f"{output.stem}-artifacts"
     artifact_root.mkdir(parents=True, exist_ok=True)
     prepare_functions = {
@@ -1941,6 +2049,8 @@ def run_paired_game(
     report: dict[str, object] = {
         "version": FIDELITY_FORMAT_VERSION, "runs": {"cpp": cpp_run, "rust": rust_run},
         "reports": records,
+        "checkpoint_selection": {"mode": checkpoints, "selected": checkpoint_kind},
+        "verification_mode": "deterministic",
     }
     if rng_seed is not None:
         expected = {"seed": _effective_rng_seed(rng_seed), "start_reason": "diagnostic"}
@@ -2052,7 +2162,7 @@ def _arguments() -> argparse.Namespace:
     run.add_argument("--log", required=True, type=Path)
     run.add_argument("--no-sound", action="store_true")
     run.add_argument("--engine-bin", type=Path, default=None)
-    paired = subcommands.add_parser("paired", help="launch the C++ oracle and hp2rs with identical inputs")
+    paired = subcommands.add_parser("paired", help="launch the C++ oracle and canonical Rust engine with identical inputs")
     paired.add_argument("--app", required=True, type=Path)
     paired.add_argument("--engine-bin", required=True, type=Path)
     paired.add_argument("--data-root", required=True, type=Path)
@@ -2074,7 +2184,7 @@ def _arguments() -> argparse.Namespace:
     paired.add_argument("--startup-rng-phase-trace-dir", type=Path, default=None)
     paired.add_argument("--fire-texture-trace-dir", type=Path, default=None)
     paired.add_argument("--actor-slot-dump-dir", type=Path, default=None)
-    paired.add_argument("--checkpoints", required=True, choices=("authored",))
+    paired.add_argument("--checkpoints", required=True, choices=("authored", "authored-or-tick"))
     paired.add_argument("--timeout", type=_argument_positive_float, default=120.0)
     paired.add_argument("--output", required=True, type=Path)
     return parser.parse_args()

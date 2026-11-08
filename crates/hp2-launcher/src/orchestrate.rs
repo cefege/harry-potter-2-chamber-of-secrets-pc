@@ -137,6 +137,17 @@ fn select_document(
     user_name: &str,
     default_name: &str,
 ) -> Result<(Document, bool, u32), String> {
+    // No data source is selected yet, so there is no shipped `Default.ini`/
+    // `DefUser.ini` to inherit from. Start from an empty document (which
+    // `load_settings` reads as all-defaults) rather than failing on the
+    // absent system default and surfacing a raw "Unable to inspect Default.ini".
+    let system_default = || -> Result<(Document, u32), String> {
+        if paths.system_root.is_empty() {
+            Ok((Document::new(), 0o600))
+        } else {
+            load_document(&join(&paths.system_root, default_name))
+        }
+    };
     let user_path = join(&paths.user_root, user_name);
     match fs::symlink_metadata(&user_path) {
         Ok(_) => {
@@ -144,11 +155,11 @@ fn select_document(
             if let Ok(doc) = Document::decode(&bytes) {
                 return Ok((doc, true, mode));
             }
-            let (doc, _mode) = load_document(&join(&paths.system_root, default_name))?;
+            let (doc, _mode) = system_default()?;
             Ok((doc, true, mode))
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let (doc, _mode) = load_document(&join(&paths.system_root, default_name))?;
+            let (doc, _mode) = system_default()?;
             Ok((doc, false, 0o600))
         }
         Err(e) => Err(error_at("Unable to inspect", &user_path, &e)),
@@ -578,6 +589,31 @@ mod tests {
         assert_eq!(state.settings.screen_mode, ScreenMode::Windowed);
         assert_eq!(state.settings.render_scale, 1.0);
         assert!(state.saves.is_empty());
+    }
+
+    #[test]
+    fn launcher_state_without_a_data_source_is_graceful_and_all_defaults() {
+        let dir = tempdir();
+        let user = dir.path().join("user");
+        fs::create_dir_all(&user).unwrap();
+        let paths = LauncherPaths {
+            user_root: user.to_str().unwrap().to_string(),
+            system_root: String::new(),
+        };
+        // No data source selected yet: must not surface "Unable to inspect
+        // Default.ini". Settings load all-default, and committing them does
+        // not crash either.
+        let state = load_launcher_state(&paths).unwrap();
+        assert_eq!(state.settings.screen_mode, ScreenMode::Windowed);
+        assert!(state.saves.is_empty());
+
+        let settings = LauncherSettings {
+            screen_mode: ScreenMode::Fullscreen,
+            ..Default::default()
+        };
+        commit_launcher_settings(&paths, &settings).unwrap();
+        let state = load_launcher_state(&paths).unwrap();
+        assert_eq!(state.settings.screen_mode, ScreenMode::Fullscreen);
     }
 
     #[test]

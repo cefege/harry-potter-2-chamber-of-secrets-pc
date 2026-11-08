@@ -13,13 +13,15 @@
 //! Floats and ints are hex bit patterns, so every comparison is bit-exact.
 //! Actor fields in check records are pool indices (`-1` NULL).
 
-use std::cell::RefCell;
-use std::ffi::c_void;
+#[path = "actor_services/mock.rs"]
+mod actor_services_mock;
+use std::cell::{Cell, RefCell};
+use std::ffi::{c_char, c_void};
 use std::ptr;
 
 use hp2_abi::FVector;
 use hp2_abi::engine::generated::{
-    AActor, APawn, FCheckResult, FPointRegion, FRotator, TArrayRaw, ULevel,
+    AActor, APawn, FCheckResult, FMemStack, FPointRegion, FRotator, TArrayRaw, ULevel,
 };
 use hp2_engine::levact::{self, LevActServices, LevelCtx, LineQuery};
 
@@ -99,7 +101,6 @@ const POOL_LEVEL: usize = 5;
 /// context is slot 7. Only the addresses matter; nothing is read through them.
 static TOKENS: [u8; 8] = [0; 8];
 const HASH_SLOT: usize = 6;
-const GMEM_SLOT: usize = 7;
 
 fn token(slot: usize) -> *mut c_void {
     TOKENS.as_ptr().wrapping_add(slot).cast_mut().cast()
@@ -354,8 +355,6 @@ unsafe extern "C" fn svc_blocked(actor: *const c_void, other: *const c_void) -> 
     })
 }
 
-unsafe extern "C" fn svc_mem_save(_mem: *mut c_void, _buffer: *mut c_void) {}
-unsafe extern "C" fn svc_mem_pop(_buffer: *mut c_void) {}
 unsafe extern "C" fn svc_cycles() -> u32 {
     100
 }
@@ -415,18 +414,6 @@ unsafe extern "C" fn svc_collision_box(_actor: *mut c_void, min: *mut FVector, m
         });
     }
 }
-unsafe extern "C" fn svc_cylinder_extent(_actor: *mut c_void, out: *mut FVector) {
-    unsafe {
-        out.write(FVector {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        })
-    }
-}
-unsafe extern "C" fn svc_set_base(actor: *mut c_void, base: *mut c_void) {
-    unsafe { ptr::addr_of_mut!((*actor.cast::<AActor>()).base).write_unaligned(base) }
-}
 unsafe extern "C" fn svc_move_smooth(_actor: *mut c_void, _delta: *const FVector) -> i32 {
     0
 }
@@ -444,45 +431,326 @@ unsafe extern "C" fn svc_overlap(_actor: *mut c_void, _other: *mut c_void) -> i3
     1
 }
 
+// The `svc`/`gmem` the currently running test's top-level `levact::X(ctx,
+// ..)` call used. Set at each record's `LevelCtx` construction (not once
+// per test, since `levact_actor_ops_fixtures_bit_exact` rebuilds `gmem`
+// from a fresh per-record `FMemStack` local); read back by the
+// `stock_virtual_*` thunks below so they can call back into the same hub a
+// stock (non-overridden) `ULevel::X` reaches in production, instead of the
+// dangling pointer a fresh, unrelated `LevActServices` would be.
+thread_local! {
+    static ACTIVE_LEVACT: Cell<(*const LevActServices, *mut c_void)> =
+        const { Cell::new((ptr::null(), ptr::null_mut())) };
+}
+
+fn set_active_levact(svc: &LevActServices, gmem: *mut c_void) {
+    ACTIVE_LEVACT.with(|cell| cell.set((svc as *const LevActServices, gmem)));
+}
+
+/// # Safety
+/// `level` must be a live `ULevel*` and `set_active_levact` must have been
+/// called with a `svc` that outlives this call.
+unsafe fn active_ctx(level: *mut c_void) -> LevelCtx<'static> {
+    let (svc_ptr, gmem) = ACTIVE_LEVACT.with(|cell| cell.get());
+    LevelCtx {
+        svc: unsafe { &*svc_ptr },
+        gmem,
+        ulevel: level.cast(),
+    }
+}
+
+/// Virtual-dispatch leaf mocks: each mimics a stock (non-overridden)
+/// `ULevel::X` by calling straight back into the same Rust hub, matching
+/// what the real `Hp2LevActVirtualX` C++ leaf reaches via `((ULevel*)Level)
+/// ->X(...)` when nothing overrides it.
+unsafe extern "C" fn stock_virtual_set_actor_zone(
+    level: *mut c_void,
+    actor: *mut c_void,
+    test: i32,
+    force_refresh: i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe { levact::set_actor_zone(ctx, actor, test != 0, force_refresh != 0) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_multi_line_check(
+    level: *mut c_void,
+    mem: *mut c_void,
+    end: *const FVector,
+    start: *const FVector,
+    extent: *const FVector,
+    check_actors: i32,
+    level_info: *mut c_void,
+    extra_node_flags: u8,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    let seg = LineQuery {
+        end: unsafe { *end },
+        start: unsafe { *start },
+        extent: unsafe { *extent },
+    };
+    match unsafe {
+        levact::multi_line_check(
+            ctx,
+            mem,
+            level_info,
+            seg,
+            check_actors != 0,
+            u32::from(extra_node_flags),
+        )
+    } {
+        Ok(v) => {
+            unsafe { *result = v };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_multi_point_check(
+    level: *mut c_void,
+    mem: *mut c_void,
+    location: *const FVector,
+    extent: *const FVector,
+    extra_node_flags: u32,
+    level_info: *mut c_void,
+    check_actors: i32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe {
+        levact::multi_point_check(
+            ctx,
+            mem,
+            level_info,
+            *location,
+            *extent,
+            extra_node_flags,
+            check_actors != 0,
+        )
+    } {
+        Ok(v) => {
+            unsafe { *result = v };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_single_line_check(
+    level: *mut c_void,
+    hit: *mut FCheckResult,
+    source: *mut c_void,
+    end: *const FVector,
+    start: *const FVector,
+    trace_flags: u32,
+    extent: *const FVector,
+    extra_node_flags: u8,
+    result: *mut i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    let seg = LineQuery {
+        end: unsafe { *end },
+        start: unsafe { *start },
+        extent: unsafe { *extent },
+    };
+    match unsafe { levact::single_line_check(ctx, hit, source, seg, trace_flags, extra_node_flags) } {
+        Ok(v) => {
+            unsafe { *result = i32::from(v) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_single_point_check(
+    level: *mut c_void,
+    hit: *mut FCheckResult,
+    location: *const FVector,
+    extent: *const FVector,
+    extra_node_flags: u32,
+    level_info: *mut c_void,
+    check_actors: i32,
+    result: *mut i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe {
+        levact::single_point_check(
+            ctx,
+            hit,
+            level_info,
+            *location,
+            *extent,
+            extra_node_flags,
+            check_actors != 0,
+        )
+    } {
+        Ok(v) => {
+            unsafe { *result = i32::from(v) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_check_encroachment(
+    level: *mut c_void,
+    actor: *mut c_void,
+    test_location: *const FVector,
+    test_rotation: *const FRotator,
+    touch_notify: i32,
+    result: *mut i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe {
+        levact::check_encroachment(ctx, actor, *test_location, *test_rotation, touch_notify != 0)
+    } {
+        Ok(v) => {
+            unsafe { *result = i32::from(v) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_move_actor(
+    level: *mut c_void,
+    actor: *mut c_void,
+    delta: *const FVector,
+    new_rotation: *const FRotator,
+    hit: *mut FCheckResult,
+    test: i32,
+    ignore_pawns: i32,
+    ignore_bases: i32,
+    no_fail: i32,
+    result: *mut i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe {
+        levact::move_actor(
+            ctx,
+            actor,
+            *delta,
+            *new_rotation,
+            hit,
+            test != 0,
+            ignore_pawns != 0,
+            ignore_bases != 0,
+            no_fail != 0,
+        )
+    } {
+        Ok(v) => {
+            unsafe { *result = i32::from(v) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_far_move_actor(
+    level: *mut c_void,
+    actor: *mut c_void,
+    destination: *const FVector,
+    test: i32,
+    no_check: i32,
+    result: *mut i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe { levact::far_move_actor(ctx, actor, *destination, test != 0, no_check != 0) } {
+        Ok(v) => {
+            unsafe { *result = i32::from(v) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_find_spot(
+    level: *mut c_void,
+    extent: *const FVector,
+    location: *mut FVector,
+    check_actors: i32,
+    assume_fit: i32,
+    result: *mut i32,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe { levact::find_spot(ctx, *extent, location, check_actors != 0, assume_fit != 0) } {
+        Ok(v) => {
+            unsafe { *result = i32::from(v) };
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+unsafe extern "C" fn stock_virtual_adjust_spot(
+    level: *mut c_void,
+    adjusted: *mut FVector,
+    trace_dest: *const FVector,
+    trace_len: f32,
+    hit: *mut FCheckResult,
+) -> i32 {
+    let ctx = unsafe { active_ctx(level) };
+    match unsafe { levact::adjust_spot(ctx, adjusted, *trace_dest, trace_len, hit) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
+}
+
 fn services() -> LevActServices {
+    actor_services_mock::publish();
     LevActServices {
-        alloc_check_results: svc_alloc,
-        model_point_check: svc_model_point,
-        model_line_check: svc_model_line,
-        hash_actor_point_check: svc_hash_point,
-        hash_actor_line_check: svc_hash_line,
-        actor_is_a: svc_is_a,
-        actor_is_owned_by: svc_owned,
-        actor_is_blocked_by: svc_blocked,
-        mem_mark_save: svc_mem_save,
-        mem_mark_pop: svc_mem_pop,
-        app_cycles: svc_cycles,
-        is_editor: svc_editor,
-        bump_observer: svc_void_pair,
+        check_failed: checked_svc_check_failed,
+
+        alloc_check_results: checked_svc_alloc,
+        model_point_check: checked_svc_model_point,
+        model_line_check: checked_svc_model_line,
+        hash_actor_point_check: checked_svc_hash_point,
+        hash_actor_line_check: checked_svc_hash_line,
+        actor_is_a: checked_svc_is_a,
+        actor_is_owned_by: checked_svc_owned,
+        actor_is_blocked_by: checked_svc_blocked,
+
+        app_cycles: checked_svc_cycles,
+        is_editor: checked_svc_editor,
+        bump_observer: checked_svc_void_pair,
         sin_tab: svc_sin_tab,
         cos_tab: svc_cos_tab,
-        model_point_region: svc_point_region,
-        hash_add_actor: svc_void_pair,
-        hash_remove_actor: svc_void_pair,
-        hash_actor_encroachment_check: svc_encroachment,
-        tracker_update: svc_tracker,
-        actor_begin_touch: svc_void_pair,
-        actor_end_touch: svc_touch_end,
-        actor_is_overlapping: svc_overlap,
-        actor_collision_box: svc_collision_box,
-        actor_cylinder_extent: svc_cylinder_extent,
-        actor_set_base: svc_set_base,
-        actor_move_smooth: svc_move_smooth,
-        event_bump: svc_void_pair,
-        event_encroaching_on: svc_event_encroaching,
-        event_encroached_by: svc_void_pair,
-        event_zone_change: svc_zone_event,
-        zone_event_actor_leaving: svc_zone_leaving,
-        zone_event_actor_entered: svc_zone_leaving,
-        pawn_event_foot_zone_change: svc_zone_event,
-        pawn_event_head_zone_change: svc_zone_event,
-        pri_set_player_zone: svc_zone_event,
-        level_net_mode: svc_net_mode,
+        model_point_region: checked_svc_point_region,
+        hash_add_actor: checked_svc_void_pair,
+        hash_remove_actor: checked_svc_void_pair,
+        hash_actor_encroachment_check: checked_svc_encroachment,
+        tracker_update: checked_svc_tracker,
+        actor_begin_touch: checked_svc_void_pair,
+        actor_end_touch: checked_svc_touch_end,
+        actor_is_overlapping: checked_svc_overlap,
+        actor_collision_box: checked_svc_collision_box,
+        actor_move_smooth: checked_svc_move_smooth,
+        event_bump: checked_svc_void_pair,
+        event_encroaching_on: checked_svc_event_encroaching,
+        event_encroached_by: checked_svc_void_pair,
+        event_zone_change: checked_svc_zone_event,
+        zone_event_actor_leaving: checked_svc_zone_leaving,
+        zone_event_actor_entered: checked_svc_zone_leaving,
+        pawn_event_foot_zone_change: checked_svc_zone_event,
+        pawn_event_head_zone_change: checked_svc_zone_event,
+        pri_set_player_zone: checked_svc_zone_event,
+        level_net_mode: checked_svc_net_mode,
+
+        virtual_set_actor_zone: stock_virtual_set_actor_zone,
+        virtual_multi_line_check: stock_virtual_multi_line_check,
+        virtual_multi_point_check: stock_virtual_multi_point_check,
+        virtual_single_line_check: stock_virtual_single_line_check,
+        virtual_single_point_check: stock_virtual_single_point_check,
+        virtual_check_encroachment: stock_virtual_check_encroachment,
+        virtual_move_actor: stock_virtual_move_actor,
+        virtual_far_move_actor: stock_virtual_far_move_actor,
+        virtual_find_spot: stock_virtual_find_spot,
+        virtual_adjust_spot: stock_virtual_adjust_spot,
     }
 }
 
@@ -566,12 +834,24 @@ fn levact_check_fixtures_bit_exact() {
         let blocks: [bool; 5] = std::array::from_fn(|k| t[23 + k] == "1");
         reset_world(owner, blocks);
         let mut ulevel: ULevel = unsafe { std::mem::zeroed() };
+        ulevel.hash = token(HASH_SLOT);
+        let mut level_actors = [token(POOL_LEVEL)];
+        unsafe {
+            ptr::addr_of_mut!(ulevel.base.actors)
+                .cast::<TArrayRaw>()
+                .write_unaligned(TArrayRaw {
+                    data: level_actors.as_mut_ptr().cast(),
+                    num: level_actors.len() as i32,
+                    max: level_actors.len() as i32,
+                });
+        }
+        let mut mem_stack: FMemStack = unsafe { std::mem::zeroed() };
         let ctx = LevelCtx {
             svc: &svc,
-            gmem: token(GMEM_SLOT),
-            hash: token(HASH_SLOT),
+            gmem: (&mut mem_stack as *mut FMemStack).cast(),
             ulevel: &mut ulevel,
         };
+        set_active_levact(&svc, ctx.gmem);
         let level = if with_level {
             token(POOL_LEVEL)
         } else {
@@ -584,6 +864,7 @@ fn levact_check_fixtures_bit_exact() {
                 let mut hit = sentinel_hit();
                 let ret = unsafe {
                     levact::single_point_check(ctx, &mut hit, level, loc, ext, flags, check_actors)
+                        .expect("successful fixture callback")
                 };
                 assert_eq!(
                     i32::from(ret),
@@ -595,6 +876,7 @@ fn levact_check_fixtures_bit_exact() {
             1 => {
                 let head = unsafe {
                     levact::multi_point_check(ctx, ctx.gmem, level, loc, ext, flags, check_actors)
+                        .expect("successful fixture callback")
                 };
                 expect_list(head, out, line);
             }
@@ -612,15 +894,8 @@ fn levact_check_fixtures_bit_exact() {
                     extent: ext,
                 };
                 let ret = unsafe {
-                    levact::single_line_check(
-                        ctx,
-                        &mut hit,
-                        source,
-                        token(POOL_LEVEL),
-                        seg,
-                        flags,
-                        node as u8,
-                    )
+                    levact::single_line_check(ctx, &mut hit, source, seg, flags, node as u8)
+                        .expect("successful fixture callback")
                 };
                 assert_eq!(
                     i32::from(ret),
@@ -637,6 +912,7 @@ fn levact_check_fixtures_bit_exact() {
                 };
                 let head = unsafe {
                     levact::multi_line_check(ctx, ctx.gmem, level, seg, check_actors, node)
+                        .expect("successful fixture callback")
                 };
                 expect_list(head, out, line);
             }
@@ -1278,45 +1554,30 @@ unsafe extern "C" fn op_hash_remove(hash: *mut c_void, actor: *mut c_void) {
     assert_eq!(row.len(), 3, "HR row arity");
 }
 
-/// `AActor::GetCylinderExtent` for the harness actors: their storage is zeroed, so
-/// `CollideType == CT_AlignedCylinder` with no Mesh, giving `(Radius, Radius, Height)`.
-unsafe extern "C" fn op_cylinder_extent(actor: *mut c_void, out: *mut FVector) {
-    let a = actor.cast::<AActor>();
-    unsafe {
-        let radius = ptr::addr_of!((*a).collision_radius).read_unaligned();
-        let height = ptr::addr_of!((*a).collision_height).read_unaligned();
-        out.write(FVector {
-            x: radius,
-            y: radius,
-            z: height,
-        });
-    }
-}
 
 fn actor_op_services() -> LevActServices {
     let mut svc = services();
-    svc.model_point_check = op_model_point;
-    svc.actor_cylinder_extent = op_cylinder_extent;
-    svc.model_line_check = op_model_line;
-    svc.hash_actor_point_check = op_hash_point;
-    svc.hash_actor_line_check = op_hash_line;
-    svc.actor_is_a = op_is_a;
-    svc.actor_is_owned_by = op_owned;
-    svc.actor_is_blocked_by = op_blocked;
-    svc.model_point_region = op_model_region;
-    svc.hash_actor_encroachment_check = op_hash_encroachment;
-    svc.hash_add_actor = op_hash_add;
-    svc.hash_remove_actor = op_hash_remove;
-    svc.actor_begin_touch = op_begin_touch;
-    svc.actor_end_touch = op_end_touch;
-    svc.actor_collision_box = op_collision_box;
-    svc.actor_move_smooth = op_move_smooth;
-    svc.event_encroaching_on = op_encroaching;
-    svc.event_zone_change = op_zone_change;
-    svc.zone_event_actor_leaving = op_zone_leaving;
-    svc.zone_event_actor_entered = op_zone_entered;
-    svc.pawn_event_foot_zone_change = op_foot_zone;
-    svc.pawn_event_head_zone_change = op_head_zone;
+    svc.model_point_check = checked_op_model_point;
+    svc.model_line_check = checked_op_model_line;
+    svc.hash_actor_point_check = checked_op_hash_point;
+    svc.hash_actor_line_check = checked_op_hash_line;
+    svc.actor_is_a = checked_op_is_a;
+    svc.actor_is_owned_by = checked_op_owned;
+    svc.actor_is_blocked_by = checked_op_blocked;
+    svc.model_point_region = checked_op_model_region;
+    svc.hash_actor_encroachment_check = checked_op_hash_encroachment;
+    svc.hash_add_actor = checked_op_hash_add;
+    svc.hash_remove_actor = checked_op_hash_remove;
+    svc.actor_begin_touch = checked_op_begin_touch;
+    svc.actor_end_touch = checked_op_end_touch;
+    svc.actor_collision_box = checked_op_collision_box;
+    svc.actor_move_smooth = checked_op_move_smooth;
+    svc.event_encroaching_on = checked_op_encroaching;
+    svc.event_zone_change = checked_op_zone_change;
+    svc.zone_event_actor_leaving = checked_op_zone_leaving;
+    svc.zone_event_actor_entered = checked_op_zone_entered;
+    svc.pawn_event_foot_zone_change = checked_op_foot_zone;
+    svc.pawn_event_head_zone_change = checked_op_head_zone;
     svc
 }
 
@@ -1445,8 +1706,9 @@ fn levact_actor_ops_fixtures_bit_exact() {
             .map(|index| actor_handle(&actor_ptrs, *index))
             .collect();
         let mut ulevel: ULevel = unsafe { std::mem::zeroed() };
+        ulevel.hash = token(HASH_SLOT);
         unsafe {
-            ptr::addr_of_mut!(ulevel.actors)
+            ptr::addr_of_mut!(ulevel.base.actors)
                 .cast::<TArrayRaw>()
                 .write_unaligned(TArrayRaw {
                     data: level_actors.as_mut_ptr().cast(),
@@ -1456,12 +1718,13 @@ fn levact_actor_ops_fixtures_bit_exact() {
         }
         ulevel.model = token(2);
         ulevel.brush_tracker = token(3);
+        let mut mem_stack: FMemStack = unsafe { std::mem::zeroed() };
         let ctx = LevelCtx {
             svc: &svc,
-            gmem: token(GMEM_SLOT),
-            hash: token(HASH_SLOT),
+            gmem: (&mut mem_stack as *mut FMemStack).cast(),
             ulevel: &mut ulevel,
         };
+        set_active_levact(&svc, ctx.gmem);
         let mut final_hit = sentinel_hit();
         match op {
             "move_actor" => {
@@ -1496,6 +1759,7 @@ fn levact_actor_ops_fixtures_bit_exact() {
                         ignore_bases,
                         no_fail,
                     )
+                    .expect("successful fixture callback")
                 };
                 final_hit = hit;
                 assert_eq!(
@@ -1527,6 +1791,7 @@ fn levact_actor_ops_fixtures_bit_exact() {
                         rotation,
                         touch_notify,
                     )
+                    .expect("successful fixture callback")
                 };
                 assert_eq!(
                     encroached,
@@ -1541,6 +1806,7 @@ fn levact_actor_ops_fixtures_bit_exact() {
                 let assume_fit = op_inputs[7] == "1";
                 let found = unsafe {
                     levact::find_spot(ctx, extent, &mut location, check_actors, assume_fit)
+                        .expect("successful fixture callback")
                 };
                 assert_eq!(
                     found,
@@ -1573,6 +1839,7 @@ fn levact_actor_ops_fixtures_bit_exact() {
                         op_inputs[1] == "1",
                         op_inputs[2] == "1",
                     )
+                    .expect("successful fixture callback")
                 };
                 assert_eq!(t[result_at], "-", "SetActorZone result: {line}");
             }
@@ -1590,6 +1857,7 @@ fn levact_actor_ops_fixtures_bit_exact() {
                         test,
                         no_check,
                     )
+                    .expect("successful fixture callback")
                 };
                 assert_eq!(
                     moved_ok,
@@ -1705,4 +1973,400 @@ fn levact_actor_ops_fixtures_bit_exact() {
             "expected exactly one record for branch {branch}; observed {branch_counts:?}"
         );
     }
+}
+
+// Checked adapters retain the original deterministic oracle hook behavior.
+unsafe extern "C" fn checked_op_begin_touch(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_begin_touch(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_blocked(
+    a0: *const c_void,
+    a1: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(op_blocked(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_collision_box(
+    a0: *mut c_void,
+    a1: *mut FVector,
+    a2: *mut FVector,
+) -> i32 {
+    unsafe {
+        op_collision_box(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_encroaching(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(op_encroaching(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_end_touch(a0: *mut c_void, a1: *mut c_void, a2: i32) -> i32 {
+    unsafe {
+        op_end_touch(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_foot_zone(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_foot_zone(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_hash_add(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_hash_add(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_hash_encroachment(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *mut c_void,
+    a3: *const FVector,
+    a4: *const FRotator,
+    a5: u32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(op_hash_encroachment(a0, a1, a2, a3, a4, a5));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_hash_line(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *const FVector,
+    a3: *const FVector,
+    a4: *const FVector,
+    a5: u32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(op_hash_line(a0, a1, a2, a3, a4, a5));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_hash_point(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *const FVector,
+    a3: *const FVector,
+    a4: u32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(op_hash_point(a0, a1, a2, a3, a4));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_hash_remove(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_hash_remove(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_head_zone(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_head_zone(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_is_a(a0: *const c_void, a1: i32, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(op_is_a(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_model_line(
+    a0: *mut c_void,
+    a1: *mut FCheckResult,
+    a2: *const FVector,
+    a3: *const FVector,
+    a4: *const FVector,
+    a5: u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(op_model_line(a0, a1, a2, a3, a4, a5));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_model_point(
+    a0: *mut c_void,
+    a1: *mut FCheckResult,
+    a2: *const FVector,
+    a3: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(op_model_point(a0, a1, a2, a3));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_model_region(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *const FVector,
+    a3: *mut FPointRegion,
+) -> i32 {
+    unsafe {
+        op_model_region(a0, a1, a2, a3);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_move_smooth(
+    a0: *mut c_void,
+    a1: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(op_move_smooth(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_owned(
+    a0: *const c_void,
+    a1: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(op_owned(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_op_zone_change(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_zone_change(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_zone_entered(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_zone_entered(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_op_zone_leaving(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        op_zone_leaving(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_alloc(
+    a0: *mut c_void,
+    a1: i32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(svc_alloc(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_blocked(
+    a0: *const c_void,
+    a1: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_blocked(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_collision_box(
+    a0: *mut c_void,
+    a1: *mut FVector,
+    a2: *mut FVector,
+) -> i32 {
+    unsafe {
+        svc_collision_box(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_check_failed(expr: *const c_char, line: i32) -> i32 {
+    let expr = unsafe { std::ffi::CStr::from_ptr(expr) }.to_string_lossy();
+    panic!("levact fixture: check failed `{expr}` at UnLevAct.cpp:{line}");
+}
+unsafe extern "C" fn checked_svc_cycles(result: *mut u32) -> i32 {
+    unsafe {
+        result.write(svc_cycles());
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_editor(result: *mut i32) -> i32 {
+    unsafe {
+        result.write(svc_editor());
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_encroachment(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *mut c_void,
+    a3: *const FVector,
+    a4: *const FRotator,
+    a5: u32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(svc_encroachment(a0, a1, a2, a3, a4, a5));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_event_encroaching(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_event_encroaching(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_hash_line(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *const FVector,
+    a3: *const FVector,
+    a4: *const FVector,
+    a5: u32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(svc_hash_line(a0, a1, a2, a3, a4, a5));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_hash_point(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *const FVector,
+    a3: *const FVector,
+    a4: u32,
+    result: *mut *mut FCheckResult,
+) -> i32 {
+    unsafe {
+        result.write(svc_hash_point(a0, a1, a2, a3, a4));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_is_a(a0: *const c_void, a1: i32, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(svc_is_a(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_model_line(
+    a0: *mut c_void,
+    a1: *mut FCheckResult,
+    a2: *const FVector,
+    a3: *const FVector,
+    a4: *const FVector,
+    a5: u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_model_line(a0, a1, a2, a3, a4, a5));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_model_point(
+    a0: *mut c_void,
+    a1: *mut FCheckResult,
+    a2: *const FVector,
+    a3: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_model_point(a0, a1, a2, a3));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_move_smooth(
+    a0: *mut c_void,
+    a1: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_move_smooth(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_net_mode(a0: *mut c_void, result: *mut u8) -> i32 {
+    unsafe {
+        result.write(svc_net_mode(a0));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_overlap(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_overlap(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_owned(
+    a0: *const c_void,
+    a1: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(svc_owned(a0, a1));
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_point_region(
+    a0: *mut c_void,
+    a1: *mut c_void,
+    a2: *const FVector,
+    a3: *mut FPointRegion,
+) -> i32 {
+    unsafe {
+        svc_point_region(a0, a1, a2, a3);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_touch_end(a0: *mut c_void, a1: *mut c_void, a2: i32) -> i32 {
+    unsafe {
+        svc_touch_end(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_tracker(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        svc_tracker(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_void_pair(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        svc_void_pair(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_zone_event(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        svc_zone_event(a0, a1);
+    }
+    0
+}
+unsafe extern "C" fn checked_svc_zone_leaving(a0: *mut c_void, a1: *mut c_void) -> i32 {
+    unsafe {
+        svc_zone_leaving(a0, a1);
+    }
+    0
 }

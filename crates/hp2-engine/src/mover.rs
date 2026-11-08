@@ -26,6 +26,185 @@ const BITFIELD_SIZE: i32 = 4;
 /// `ARRAY_COUNT(KeyPos)`.
 const KEY_COUNT: i32 = 8;
 
+use hp2_core::core_class_specs::{
+    StartupProperty, StartupPropertyKind, StartupScalarKind, StartupStructField,
+};
+
+const VECTOR_FIELDS: &[StartupStructField] = &[
+    StartupStructField { name: "X", kind: StartupScalarKind::Float, offset: offset_of!(FVector, x) },
+    StartupStructField { name: "Y", kind: StartupScalarKind::Float, offset: offset_of!(FVector, y) },
+    StartupStructField { name: "Z", kind: StartupScalarKind::Float, offset: offset_of!(FVector, z) },
+];
+const ROTATOR_FIELDS: &[StartupStructField] = &[
+    StartupStructField { name: "Pitch", kind: StartupScalarKind::Int, offset: offset_of!(FRotator, pitch) },
+    StartupStructField { name: "Yaw", kind: StartupScalarKind::Int, offset: offset_of!(FRotator, yaw) },
+    StartupStructField { name: "Roll", kind: StartupScalarKind::Int, offset: offset_of!(FRotator, roll) },
+];
+const ENCROACH_VALUES: &[&str] = &[
+    "ME_StopWhenEncroach", "ME_ReturnWhenEncroach", "ME_CrushWhenEncroach",
+    "ME_IgnoreWhenEncroach", "ME_ReallyStopWhenEncroach", "ME_ReallyReturnWhenEncroach",
+    "ME_ReallyCrushWhenEncroach", "ME_ReallyIgnoreWhenEncroach",
+];
+const GLIDE_VALUES: &[&str] = &["MV_MoveByTime", "MV_GlideByTime", "MV_SpringByTime"];
+const BUMP_VALUES: &[&str] = &["BT_PlayerBump", "BT_PawnBump", "BT_AnyBump"];
+
+const fn mover_property(name: &'static str, kind: StartupPropertyKind, offset: usize, array_dim: usize) -> StartupProperty {
+    StartupProperty {
+        name, kind, category: "Mover", property_flags: 0, object_flags: 4,
+        inner_name: None, offset, array_dim,
+    }
+}
+
+/// The single declarative property source consumed by canonical metadata and
+/// the legacy StaticConstructor adapter.
+pub(crate) const MOVER_PROPERTIES: &[StartupProperty] = &[
+    mover_property("MoverEncroachType", StartupPropertyKind::ByteEnum { name: "EMoverEncroachType", values: ENCROACH_VALUES }, offset_of!(AMover, mover_encroach_type), 1),
+    mover_property("MoverGlideType", StartupPropertyKind::ByteEnum { name: "EMoverGlideType", values: GLIDE_VALUES }, offset_of!(AMover, mover_glide_type), 1),
+    mover_property("BumpType", StartupPropertyKind::ByteEnum { name: "EBumpType", values: BUMP_VALUES }, offset_of!(AMover, bump_type), 1),
+    mover_property("KeyNum", StartupPropertyKind::Byte, offset_of!(AMover, key_num), 1),
+    mover_property("PrevKeyNum", StartupPropertyKind::Byte, offset_of!(AMover, prev_key_num), 1),
+    mover_property("NumKeys", StartupPropertyKind::Byte, offset_of!(AMover, num_keys), 1),
+    mover_property("WorldRaytraceKey", StartupPropertyKind::Byte, offset_of!(AMover, world_raytrace_key), 1),
+    mover_property("BrushRaytraceKey", StartupPropertyKind::Byte, offset_of!(AMover, brush_raytrace_key), 1),
+    mover_property("MoveTimes", StartupPropertyKind::Float, offset_of!(AMover, move_times), 8),
+    mover_property("MoveTime", StartupPropertyKind::Float, offset_of!(AMover, move_time), 1),
+    mover_property("StayOpenTime", StartupPropertyKind::Float, offset_of!(AMover, stay_open_time), 1),
+    mover_property("OtherTime", StartupPropertyKind::Float, offset_of!(AMover, other_time), 1),
+    mover_property("EncroachDamage", StartupPropertyKind::Int, offset_of!(AMover, encroach_damage), 1),
+    mover_property("bKeepRotationDirection", StartupPropertyKind::Bool { bit_mask: 1 }, offset_of!(AMover, player_bump_event) - 4, 1),
+    mover_property("bTriggerOnceOnly", StartupPropertyKind::Bool { bit_mask: 2 }, offset_of!(AMover, player_bump_event) - 4, 1),
+    mover_property("bSlave", StartupPropertyKind::Bool { bit_mask: 4 }, offset_of!(AMover, player_bump_event) - 4, 1),
+    mover_property("bUseTriggered", StartupPropertyKind::Bool { bit_mask: 8 }, offset_of!(AMover, player_bump_event) - 4, 1),
+    mover_property("bDamageTriggered", StartupPropertyKind::Bool { bit_mask: 16 }, offset_of!(AMover, player_bump_event) - 4, 1),
+    mover_property("bDynamicLightMover", StartupPropertyKind::Bool { bit_mask: 32 }, offset_of!(AMover, player_bump_event) - 4, 1),
+    mover_property("PlayerBumpEvent", StartupPropertyKind::Name, offset_of!(AMover, player_bump_event), 1),
+    mover_property("BumpEvent", StartupPropertyKind::Name, offset_of!(AMover, bump_event), 1),
+    mover_property("SavedTrigger", StartupPropertyKind::Object { class: "Engine.Actor" }, offset_of!(AMover, saved_trigger), 1),
+    mover_property("DamageThreshold", StartupPropertyKind::Float, offset_of!(AMover, damage_threshold), 1),
+    mover_property("numTriggerEvents", StartupPropertyKind::Int, offset_of!(AMover, num_trigger_events), 1),
+    mover_property("Leader", StartupPropertyKind::Object { class: "Engine.Mover" }, offset_of!(AMover, leader), 1),
+    mover_property("Follower", StartupPropertyKind::Object { class: "Engine.Mover" }, offset_of!(AMover, follower), 1),
+    mover_property("ReturnGroup", StartupPropertyKind::Name, offset_of!(AMover, return_group), 1),
+    mover_property("DelayTime", StartupPropertyKind::Float, offset_of!(AMover, delay_time), 1),
+    mover_property("AttachTag", StartupPropertyKind::Name, offset_of!(AMover, attach_tag), 1),
+    mover_property("OpeningSound", StartupPropertyKind::Object { class: "Engine.Sound" }, offset_of!(AMover, opening_sound), 1),
+    mover_property("OpenedSound", StartupPropertyKind::Object { class: "Engine.Sound" }, offset_of!(AMover, opened_sound), 1),
+    mover_property("ClosingSound", StartupPropertyKind::Object { class: "Engine.Sound" }, offset_of!(AMover, closing_sound), 1),
+    mover_property("ClosedSound", StartupPropertyKind::Object { class: "Engine.Sound" }, offset_of!(AMover, closed_sound), 1),
+    mover_property("MoveAmbientSound", StartupPropertyKind::Object { class: "Engine.Sound" }, offset_of!(AMover, move_ambient_sound), 1),
+    mover_property("FailSound", StartupPropertyKind::Object { class: "Engine.Sound" }, offset_of!(AMover, fail_sound), 1),
+    mover_property("MoverRadius", StartupPropertyKind::Float, offset_of!(AMover, mover_radius), 1),
+    mover_property("MoverVolume", StartupPropertyKind::Byte, offset_of!(AMover, mover_volume), 1),
+    mover_property("MoverPitch", StartupPropertyKind::Byte, offset_of!(AMover, mover_pitch), 1),
+    mover_property("KeyPos", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, key_pos), 8),
+    mover_property("KeyRot", StartupPropertyKind::Struct { name: "Rotator", fields: ROTATOR_FIELDS }, offset_of!(AMover, key_rot), 8),
+    mover_property("BasePos", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, base_pos), 1),
+    mover_property("OldPos", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, old_pos), 1),
+    mover_property("OldPrePivot", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, old_pre_pivot), 1),
+    mover_property("SavedPos", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, saved_pos), 1),
+    mover_property("BaseRot", StartupPropertyKind::Struct { name: "Rotator", fields: ROTATOR_FIELDS }, offset_of!(AMover, base_rot), 1),
+    mover_property("OldRot", StartupPropertyKind::Struct { name: "Rotator", fields: ROTATOR_FIELDS }, offset_of!(AMover, old_rot), 1),
+    mover_property("SavedRot", StartupPropertyKind::Struct { name: "Rotator", fields: ROTATOR_FIELDS }, offset_of!(AMover, saved_rot), 1),
+    mover_property("PhysAlpha", StartupPropertyKind::Float, offset_of!(AMover, phys_alpha), 1),
+    mover_property("PhysRate", StartupPropertyKind::Float, offset_of!(AMover, phys_rate), 1),
+    mover_property("MyMarker", StartupPropertyKind::Object { class: "Engine.NavigationPoint" }, offset_of!(AMover, my_marker), 1),
+    mover_property("TriggerActor", StartupPropertyKind::Object { class: "Engine.Actor" }, offset_of!(AMover, trigger_actor), 1),
+    mover_property("TriggerActor2", StartupPropertyKind::Object { class: "Engine.Actor" }, offset_of!(AMover, trigger_actor2), 1),
+    mover_property("WaitingPawn", StartupPropertyKind::Object { class: "Engine.Pawn" }, offset_of!(AMover, waiting_pawn), 1),
+    mover_property("bOpening", StartupPropertyKind::Bool { bit_mask: 1 }, offset_of!(AMover, recommended_trigger) - 4, 1),
+    mover_property("bDelaying", StartupPropertyKind::Bool { bit_mask: 2 }, offset_of!(AMover, recommended_trigger) - 4, 1),
+    mover_property("bClientPause", StartupPropertyKind::Bool { bit_mask: 4 }, offset_of!(AMover, recommended_trigger) - 4, 1),
+    mover_property("bPlayerOnly", StartupPropertyKind::Bool { bit_mask: 8 }, offset_of!(AMover, recommended_trigger) - 4, 1),
+    mover_property("RecommendedTrigger", StartupPropertyKind::Object { class: "Engine.Trigger" }, offset_of!(AMover, recommended_trigger), 1),
+    mover_property("SimOldPos", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, sim_old_pos), 1),
+    mover_property("SimOldRotPitch", StartupPropertyKind::Int, offset_of!(AMover, sim_old_rot_pitch), 1),
+    mover_property("SimOldRotYaw", StartupPropertyKind::Int, offset_of!(AMover, sim_old_rot_yaw), 1),
+    mover_property("SimOldRotRoll", StartupPropertyKind::Int, offset_of!(AMover, sim_old_rot_roll), 1),
+    mover_property("SimInterpolate", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, sim_interpolate), 1),
+    mover_property("RealPosition", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, real_position), 1),
+    mover_property("RealRotation", StartupPropertyKind::Struct { name: "Rotator", fields: ROTATOR_FIELDS }, offset_of!(AMover, real_rotation), 1),
+    mover_property("ClientUpdate", StartupPropertyKind::Int, offset_of!(AMover, client_update), 1),
+    mover_property("bCorralMover", StartupPropertyKind::Bool { bit_mask: 1 }, offset_of!(AMover, mover_spring_time) - 4, 1),
+    mover_property("bCorraledFlag", StartupPropertyKind::Bool { bit_mask: 2 }, offset_of!(AMover, mover_spring_time) - 4, 1),
+    mover_property("MoverSpringTime", StartupPropertyKind::Float, offset_of!(AMover, mover_spring_time), 1),
+    mover_property("MoverMaxAmplitude", StartupPropertyKind::Float, offset_of!(AMover, mover_max_amplitude), 1),
+    mover_property("MoverFluctuations", StartupPropertyKind::Byte, offset_of!(AMover, mover_fluctuations), 1),
+    mover_property("HitPosition", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, hit_position), 1),
+    mover_property("HitNormal", StartupPropertyKind::Struct { name: "Vector", fields: VECTOR_FIELDS }, offset_of!(AMover, hit_normal), 1),
+];
+
+
+/// Context-dependent engine effects used by shared Mover policy.
+pub(crate) trait MoverOps {
+    fn hash_remove(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()>;
+    fn hash_add(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()>;
+    fn tracker_update(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()>;
+    fn tracker_flush(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()>;
+    fn renumber_brush_polys(&mut self, brush: *mut c_void) -> hp2_core::core_access::RuntimeResult<()>;
+}
+
+/// Runs post-load reset policy and its injected native polygon repair.
+///
+/// # Safety
+/// `mover` must be a live canonical `AMover`; the ops implementation must
+/// validate any external objects before dereferencing them.
+pub(crate) unsafe fn post_load_with_ops(
+    mover: *mut AMover, ops: &mut impl MoverOps,
+) -> hp2_core::core_access::RuntimeResult<()> {
+    if mover.is_null() { return Err(hp2_core::core_access::RuntimeError::new("Null Mover in PostLoad")); }
+    unsafe { reset_after_post_load(&mut *mover); }
+    let brush = unsafe { (*mover).base.brush };
+    ops.renumber_brush_polys(brush)
+}
+
+/// Runs world-raytrace policy without holding a Rust object borrow over callbacks.
+///
+/// # Safety
+/// `mover` is a live canonical record for the duration of synchronous callbacks.
+pub(crate) unsafe fn set_world_raytrace_key_with_ops(
+    mover: *mut AMover, ops: &mut impl MoverOps,
+) -> hp2_core::core_access::RuntimeResult<()> {
+    if mover.is_null() { return Err(hp2_core::core_access::RuntimeError::new("Null Mover in SetWorldRaytraceKey")); }
+    if !clamp_world_raytrace_key(unsafe { &mut *mover }) {
+        return ops.tracker_flush(mover);
+    }
+    let collides = unsafe { (*mover).base.b_collide_actors() };
+    if collides { ops.hash_remove(mover)?; }
+    apply_world_raytrace_pose(unsafe { &mut *mover });
+    if collides { ops.hash_add(mover)?; }
+    ops.tracker_update(mover)
+}
+
+/// Runs brush-raytrace policy without holding a Rust object borrow over callbacks.
+///
+/// # Safety
+/// `mover` is a live canonical record for the duration of synchronous callbacks.
+pub(crate) unsafe fn set_brush_raytrace_key_with_ops(
+    mover: *mut AMover, ops: &mut impl MoverOps,
+) -> hp2_core::core_access::RuntimeResult<()> {
+    if mover.is_null() { return Err(hp2_core::core_access::RuntimeError::new("Null Mover in SetBrushRaytraceKey")); }
+    let collides = unsafe { (*mover).base.b_collide_actors() };
+    if collides { ops.hash_remove(mover)?; }
+    apply_brush_raytrace_pose(unsafe { &mut *mover });
+    if collides { ops.hash_add(mover)?; }
+    ops.tracker_update(mover)
+}
+
+/// Runs post-raytrace restoration using injected hash and tracker operations.
+///
+/// # Safety
+/// `mover` is a live canonical record for the duration of synchronous callbacks.
+pub(crate) unsafe fn post_raytrace_with_ops(
+    mover: *mut AMover, ops: &mut impl MoverOps,
+) -> hp2_core::core_access::RuntimeResult<()> {
+    if mover.is_null() { return Err(hp2_core::core_access::RuntimeError::new("Null Mover in PostRaytrace")); }
+    let collides = unsafe { (*mover).base.b_collide_actors() };
+    if collides { ops.hash_remove(mover)?; }
+    restore_raytrace_pose(unsafe { &mut *mover });
+    if collides { ops.hash_add(mover)?; }
+    clear_raytrace_transform(unsafe { &mut *mover });
+    ops.tracker_update(mover)
+}
 const CAT_MOVER: &CStr = c"Mover";
 const CAT_EMPTY: &CStr = c"";
 
@@ -189,642 +368,67 @@ unsafe fn bool_prop(
 /// Must be called from `AMover::StaticConstructor` with a valid services table.
 pub unsafe fn static_constructor(s: &Hp2MoverServices) {
     unsafe {
-        let vector = sub_struct(
-            s,
-            c"Vector",
-            size_of::<FVector>(),
-            &[
-                (c"X", offset_of!(FVector, x) as i32),
-                (c"Y", offset_of!(FVector, y) as i32),
-                (c"Z", offset_of!(FVector, z) as i32),
-            ],
-            PropKind::Float,
-        );
-        let rotator = sub_struct(
-            s,
-            c"Rotator",
-            size_of::<FRotator>(),
-            &[
-                (c"Pitch", offset_of!(FRotator, pitch) as i32),
-                (c"Yaw", offset_of!(FRotator, yaw) as i32),
-                (c"Roll", offset_of!(FRotator, roll) as i32),
-            ],
-            PropKind::Int,
-        );
-
-        let encroach = new_enum(
-            s,
-            c"EMoverEncroachType",
-            &[
-                c"ME_StopWhenEncroach",
-                c"ME_ReturnWhenEncroach",
-                c"ME_CrushWhenEncroach",
-                c"ME_IgnoreWhenEncroach",
-                c"ME_ReallyStopWhenEncroach",
-                c"ME_ReallyReturnWhenEncroach",
-                c"ME_ReallyCrushWhenEncroach",
-                c"ME_ReallyIgnoreWhenEncroach",
-            ],
-        );
-        let glide = new_enum(
-            s,
-            c"EMoverGlideType",
-            &[c"MV_MoveByTime", c"MV_GlideByTime", c"MV_SpringByTime"],
-        );
-        let bump = new_enum(
-            s,
-            c"EBumpType",
-            &[c"BT_PlayerBump", c"BT_PawnBump", c"BT_AnyBump"],
-        );
-
+        const VECTOR_FIELDS: &[(&CStr, i32)] = &[
+            (c"X", offset_of!(FVector, x) as i32),
+            (c"Y", offset_of!(FVector, y) as i32),
+            (c"Z", offset_of!(FVector, z) as i32),
+        ];
+        const ROTATOR_FIELDS: &[(&CStr, i32)] = &[
+            (c"Pitch", offset_of!(FRotator, pitch) as i32),
+            (c"Yaw", offset_of!(FRotator, yaw) as i32),
+            (c"Roll", offset_of!(FRotator, roll) as i32),
+        ];
+        let vector = sub_struct(s, c"Vector", size_of::<FVector>(), VECTOR_FIELDS, PropKind::Float);
+        let rotator = sub_struct(s, c"Rotator", size_of::<FRotator>(), ROTATOR_FIELDS, PropKind::Int);
+        let encroach = new_enum(s, c"EMoverEncroachType", &[
+            c"ME_StopWhenEncroach", c"ME_ReturnWhenEncroach", c"ME_CrushWhenEncroach",
+            c"ME_IgnoreWhenEncroach", c"ME_ReallyStopWhenEncroach", c"ME_ReallyReturnWhenEncroach",
+            c"ME_ReallyCrushWhenEncroach", c"ME_ReallyIgnoreWhenEncroach",
+        ]);
+        let glide = new_enum(s, c"EMoverGlideType", &[c"MV_MoveByTime", c"MV_GlideByTime", c"MV_SpringByTime"]);
+        let bump = new_enum(s, c"EBumpType", &[c"BT_PlayerBump", c"BT_PawnBump", c"BT_AnyBump"]);
         let class = (s.class_ref)(ClassRef::Mover as i32);
         let actor = (s.class_ref)(ClassRef::Actor as i32);
         let sound = (s.class_ref)(ClassRef::Sound as i32);
         let nav = (s.class_ref)(ClassRef::NavigationPoint as i32);
         let pawn = (s.class_ref)(ClassRef::Pawn as i32);
         let trigger = (s.class_ref)(ClassRef::Trigger as i32);
-
-        // Enum-typed bytes. The explicit names are the C++ member names (no `#M` form).
-        (s.add_property)(
-            class,
-            PropKind::Byte as i32,
-            c"MoverEncroachType".as_ptr(),
-            CAT_MOVER.as_ptr(),
-            offset_of!(AMover, mover_encroach_type) as i32,
-            1,
-            0,
-            encroach,
-        );
-        (s.add_property)(
-            class,
-            PropKind::Byte as i32,
-            c"MoverGlideType".as_ptr(),
-            CAT_MOVER.as_ptr(),
-            offset_of!(AMover, mover_glide_type) as i32,
-            1,
-            0,
-            glide,
-        );
-        (s.add_property)(
-            class,
-            PropKind::Byte as i32,
-            c"BumpType".as_ptr(),
-            CAT_MOVER.as_ptr(),
-            offset_of!(AMover, bump_type) as i32,
-            1,
-            0,
-            bump,
-        );
-
-        let null = ptr::null_mut();
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"KeyNum",
-            offset_of!(AMover, key_num) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"PrevKeyNum",
-            offset_of!(AMover, prev_key_num) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"NumKeys",
-            offset_of!(AMover, num_keys) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"WorldRaytraceKey",
-            offset_of!(AMover, world_raytrace_key) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"BrushRaytraceKey",
-            offset_of!(AMover, brush_raytrace_key) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"MoveTimes",
-            offset_of!(AMover, move_times) as i32,
-            8,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"MoveTime",
-            offset_of!(AMover, move_time) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"StayOpenTime",
-            offset_of!(AMover, stay_open_time) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"OtherTime",
-            offset_of!(AMover, other_time) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Int,
-            c"EncroachDamage",
-            offset_of!(AMover, encroach_damage) as i32,
-            1,
-            null,
-        );
-
-        // Bool storage is the dword in front of PlayerBumpEvent (sizeof(BITFIELD) below it).
-        let state_bool = offset_of!(AMover, player_bump_event) as i32 - BITFIELD_SIZE;
-        bool_prop(s, class, c"bKeepRotationDirection", state_bool, 1);
-        bool_prop(s, class, c"bTriggerOnceOnly", state_bool, 2);
-        bool_prop(s, class, c"bSlave", state_bool, 4);
-        bool_prop(s, class, c"bUseTriggered", state_bool, 8);
-        bool_prop(s, class, c"bDamageTriggered", state_bool, 16);
-        bool_prop(s, class, c"bDynamicLightMover", state_bool, 32);
-
-        prop(
-            s,
-            class,
-            PropKind::Name,
-            c"PlayerBumpEvent",
-            offset_of!(AMover, player_bump_event) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Name,
-            c"BumpEvent",
-            offset_of!(AMover, bump_event) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"SavedTrigger",
-            offset_of!(AMover, saved_trigger) as i32,
-            1,
-            actor,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"DamageThreshold",
-            offset_of!(AMover, damage_threshold) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Int,
-            c"numTriggerEvents",
-            offset_of!(AMover, num_trigger_events) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"Leader",
-            offset_of!(AMover, leader) as i32,
-            1,
-            class,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"Follower",
-            offset_of!(AMover, follower) as i32,
-            1,
-            class,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Name,
-            c"ReturnGroup",
-            offset_of!(AMover, return_group) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"DelayTime",
-            offset_of!(AMover, delay_time) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Name,
-            c"AttachTag",
-            offset_of!(AMover, attach_tag) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"OpeningSound",
-            offset_of!(AMover, opening_sound) as i32,
-            1,
-            sound,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"OpenedSound",
-            offset_of!(AMover, opened_sound) as i32,
-            1,
-            sound,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"ClosingSound",
-            offset_of!(AMover, closing_sound) as i32,
-            1,
-            sound,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"ClosedSound",
-            offset_of!(AMover, closed_sound) as i32,
-            1,
-            sound,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"MoveAmbientSound",
-            offset_of!(AMover, move_ambient_sound) as i32,
-            1,
-            sound,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"FailSound",
-            offset_of!(AMover, fail_sound) as i32,
-            1,
-            sound,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"MoverRadius",
-            offset_of!(AMover, mover_radius) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"MoverVolume",
-            offset_of!(AMover, mover_volume) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"MoverPitch",
-            offset_of!(AMover, mover_pitch) as i32,
-            1,
-            null,
-        );
-
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"KeyPos",
-            offset_of!(AMover, key_pos) as i32,
-            KEY_COUNT,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"KeyRot",
-            offset_of!(AMover, key_rot) as i32,
-            KEY_COUNT,
-            rotator,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"BasePos",
-            offset_of!(AMover, base_pos) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"OldPos",
-            offset_of!(AMover, old_pos) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"OldPrePivot",
-            offset_of!(AMover, old_pre_pivot) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"SavedPos",
-            offset_of!(AMover, saved_pos) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"BaseRot",
-            offset_of!(AMover, base_rot) as i32,
-            1,
-            rotator,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"OldRot",
-            offset_of!(AMover, old_rot) as i32,
-            1,
-            rotator,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"SavedRot",
-            offset_of!(AMover, saved_rot) as i32,
-            1,
-            rotator,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"PhysAlpha",
-            offset_of!(AMover, phys_alpha) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"PhysRate",
-            offset_of!(AMover, phys_rate) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"MyMarker",
-            offset_of!(AMover, my_marker) as i32,
-            1,
-            nav,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"TriggerActor",
-            offset_of!(AMover, trigger_actor) as i32,
-            1,
-            actor,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"TriggerActor2",
-            offset_of!(AMover, trigger_actor2) as i32,
-            1,
-            actor,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"WaitingPawn",
-            offset_of!(AMover, waiting_pawn) as i32,
-            1,
-            pawn,
-        );
-
-        // Motion bools sit in front of RecommendedTrigger.
-        let motion_bool = offset_of!(AMover, recommended_trigger) as i32 - BITFIELD_SIZE;
-        bool_prop(s, class, c"bOpening", motion_bool, 1);
-        bool_prop(s, class, c"bDelaying", motion_bool, 2);
-        bool_prop(s, class, c"bClientPause", motion_bool, 4);
-        bool_prop(s, class, c"bPlayerOnly", motion_bool, 8);
-
-        prop(
-            s,
-            class,
-            PropKind::Object,
-            c"RecommendedTrigger",
-            offset_of!(AMover, recommended_trigger) as i32,
-            1,
-            trigger,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"SimOldPos",
-            offset_of!(AMover, sim_old_pos) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Int,
-            c"SimOldRotPitch",
-            offset_of!(AMover, sim_old_rot_pitch) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Int,
-            c"SimOldRotYaw",
-            offset_of!(AMover, sim_old_rot_yaw) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Int,
-            c"SimOldRotRoll",
-            offset_of!(AMover, sim_old_rot_roll) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"SimInterpolate",
-            offset_of!(AMover, sim_interpolate) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"RealPosition",
-            offset_of!(AMover, real_position) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"RealRotation",
-            offset_of!(AMover, real_rotation) as i32,
-            1,
-            rotator,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Int,
-            c"ClientUpdate",
-            offset_of!(AMover, client_update) as i32,
-            1,
-            null,
-        );
-
-        // Corral bools sit in front of MoverSpringTime.
-        let corral_bool = offset_of!(AMover, mover_spring_time) as i32 - BITFIELD_SIZE;
-        bool_prop(s, class, c"bCorralMover", corral_bool, 1);
-        bool_prop(s, class, c"bCorraledFlag", corral_bool, 2);
-
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"MoverSpringTime",
-            offset_of!(AMover, mover_spring_time) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Float,
-            c"MoverMaxAmplitude",
-            offset_of!(AMover, mover_max_amplitude) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Byte,
-            c"MoverFluctuations",
-            offset_of!(AMover, mover_fluctuations) as i32,
-            1,
-            null,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"HitPosition",
-            offset_of!(AMover, hit_position) as i32,
-            1,
-            vector,
-        );
-        prop(
-            s,
-            class,
-            PropKind::Struct,
-            c"HitNormal",
-            offset_of!(AMover, hit_normal) as i32,
-            1,
-            vector,
-        );
+        for descriptor in MOVER_PROPERTIES {
+            let mut name_storage = [0u8; 64];
+            let name = stack_cstr(descriptor.name, &mut name_storage);
+            let (kind, reference) = match descriptor.kind {
+                StartupPropertyKind::Byte => (PropKind::Byte, ptr::null_mut()),
+                StartupPropertyKind::ByteEnum { name: "EMoverEncroachType", .. } => (PropKind::Byte, encroach),
+                StartupPropertyKind::ByteEnum { name: "EMoverGlideType", .. } => (PropKind::Byte, glide),
+                StartupPropertyKind::ByteEnum { name: "EBumpType", .. } => (PropKind::Byte, bump),
+                StartupPropertyKind::Int => (PropKind::Int, ptr::null_mut()),
+                StartupPropertyKind::Float => (PropKind::Float, ptr::null_mut()),
+                StartupPropertyKind::Bool { .. } => (PropKind::Bool, ptr::null_mut()),
+                StartupPropertyKind::Name => (PropKind::Name, ptr::null_mut()),
+                StartupPropertyKind::Object { class: "Engine.Actor" } => (PropKind::Object, actor),
+                StartupPropertyKind::Object { class: "Engine.Mover" } => (PropKind::Object, class),
+                StartupPropertyKind::Object { class: "Engine.Sound" } => (PropKind::Object, sound),
+                StartupPropertyKind::Object { class: "Engine.NavigationPoint" } => (PropKind::Object, nav),
+                StartupPropertyKind::Object { class: "Engine.Pawn" } => (PropKind::Object, pawn),
+                StartupPropertyKind::Object { class: "Engine.Trigger" } => (PropKind::Object, trigger),
+                StartupPropertyKind::Struct { name: "Vector", .. } => (PropKind::Struct, vector),
+                StartupPropertyKind::Struct { name: "Rotator", .. } => (PropKind::Struct, rotator),
+                _ => panic!("unsupported Mover startup property descriptor"),
+            };
+            if let StartupPropertyKind::Bool { bit_mask } = descriptor.kind {
+                bool_prop(s, class, name, descriptor.offset as i32, bit_mask);
+            } else {
+                prop(s, class, kind, name, descriptor.offset as i32, descriptor.array_dim as i32, reference);
+            }
+        }
     }
+}
+
+fn stack_cstr<'a>(text: &str, storage: &'a mut [u8; 64]) -> &'a CStr {
+    assert!(text.len() < storage.len(), "Mover property name exceeds stack C string buffer");
+    storage[..text.len()].copy_from_slice(text.as_bytes());
+    storage[text.len()] = 0;
+    unsafe { CStr::from_bytes_with_nul_unchecked(&storage[..=text.len()]) }
 }
 
 /// `Clamp((INT)Key, (INT)0, (INT)ARRAY_COUNT(KeyPos)-1)` (UnCore `Clamp`: `X<Min?Min:X<Max?X:Max`).
@@ -872,47 +476,54 @@ fn r_sub(a: FRotator, b: FRotator) -> FRotator {
     }
 }
 
-/// `GetLevel()` is `XLevel`.
-fn level(mv: &AMover) -> *mut ULevel {
-    let lvl = mv.base.x_level as *mut ULevel;
-    assert!(!lvl.is_null(), "AMover::GetLevel() is null");
-    lvl
-}
+struct LegacyMoverOps<'a>(&'a Hp2MoverServices);
 
-fn as_actor(mv: &AMover) -> *mut c_void {
-    ptr::from_ref(mv).cast_mut().cast()
-}
-
-/// `if( bCollideActors && GetLevel()->Hash ) GetLevel()->Hash->RemoveActor( this );`
-unsafe fn unhash(mv: &AMover, s: &Hp2MoverServices) {
-    unsafe {
-        let lvl = level(mv);
-        if mv.base.b_collide_actors() && !(*lvl).hash.is_null() {
-            (s.hash_remove)((*lvl).hash, as_actor(mv));
+impl MoverOps for LegacyMoverOps<'_> {
+    fn hash_remove(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()> {
+        unsafe {
+            let level = (*mover).base.x_level.cast::<ULevel>();
+            if level.is_null() { return Err(hp2_core::core_access::RuntimeError::new("AMover::GetLevel() is null")); }
+            let hash = (*level).hash;
+            if !hash.is_null() { (self.0.hash_remove)(hash, mover.cast()); }
         }
+        Ok(())
+    }
+
+    fn hash_add(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()> {
+        unsafe {
+            let level = (*mover).base.x_level.cast::<ULevel>();
+            if level.is_null() { return Err(hp2_core::core_access::RuntimeError::new("AMover::GetLevel() is null")); }
+            let hash = (*level).hash;
+            if !hash.is_null() { (self.0.hash_add)(hash, mover.cast()); }
+        }
+        Ok(())
+    }
+
+    fn tracker_update(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()> {
+        unsafe {
+            let level = (*mover).base.x_level.cast::<ULevel>();
+            if level.is_null() { return Err(hp2_core::core_access::RuntimeError::new("AMover::GetLevel() is null")); }
+            let tracker = (*level).brush_tracker;
+            if !tracker.is_null() { (self.0.brush_tracker_update)(tracker, mover.cast()); }
+        }
+        Ok(())
+    }
+
+    fn tracker_flush(&mut self, mover: *mut AMover) -> hp2_core::core_access::RuntimeResult<()> {
+        unsafe {
+            let level = (*mover).base.x_level.cast::<ULevel>();
+            if level.is_null() { return Err(hp2_core::core_access::RuntimeError::new("AMover::GetLevel() is null")); }
+            let tracker = (*level).brush_tracker;
+            if !tracker.is_null() { (self.0.brush_tracker_flush)(tracker, mover.cast()); }
+        }
+        Ok(())
+    }
+
+    fn renumber_brush_polys(&mut self, brush: *mut c_void) -> hp2_core::core_access::RuntimeResult<()> {
+        unsafe { (self.0.renumber_brush_polys)(brush); }
+        Ok(())
     }
 }
-
-/// `if( bCollideActors && GetLevel()->Hash ) GetLevel()->Hash->AddActor( this );`
-unsafe fn rehash(mv: &AMover, s: &Hp2MoverServices) {
-    unsafe {
-        let lvl = level(mv);
-        if mv.base.b_collide_actors() && !(*lvl).hash.is_null() {
-            (s.hash_add)((*lvl).hash, as_actor(mv));
-        }
-    }
-}
-
-/// `if( GetLevel()->BrushTracker ) GetLevel()->BrushTracker->Update( this );`
-unsafe fn tracker_update(mv: &AMover, s: &Hp2MoverServices) {
-    unsafe {
-        let tracker = (*level(mv)).brush_tracker;
-        if !tracker.is_null() {
-            (s.brush_tracker_update)(tracker, as_actor(mv));
-        }
-    }
-}
-
 /// `AMover::Spawned()` body (after `ABrush::Spawned()`).
 pub fn spawned(mv: &mut AMover) {
     mv.base_pos = mv.base.location;
@@ -923,22 +534,15 @@ pub fn spawned(mv: &mut AMover) {
 ///
 /// # Safety
 /// `mv` must be a live `AMover` whose `XLevel` (if any) is valid.
+pub(crate) fn reset_after_post_load(mv: &mut AMover) {
+    mv.saved_pos = FVector { x: -12345.0, y: -12345.0, z: -12345.0 };
+    mv.saved_rot = FRotator { pitch: 123, yaw: 456, roll: 789 };
+}
+
 pub unsafe fn post_load(mv: &mut AMover, s: &Hp2MoverServices) {
-    unsafe {
-        // For refresh.
-        mv.saved_pos = FVector {
-            x: -12345.0,
-            y: -12345.0,
-            z: -12345.0,
-        };
-        mv.saved_rot = FRotator {
-            pitch: 123,
-            yaw: 456,
-            roll: 789,
-        };
-        // Fix brush poly iLinks which were broken.
-        (s.renumber_brush_polys)(mv.base.brush);
-    }
+    let mut ops = LegacyMoverOps(s);
+    unsafe { post_load_with_ops(ptr::from_mut(mv), &mut ops) }
+        .expect("legacy mover post-load has a valid brush object");
 }
 
 /// `AMover::PostEditMove()` body (after `ABrush::PostEditMove()`).
@@ -994,27 +598,49 @@ pub fn pre_raytrace(mv: &mut AMover) {
     };
 }
 
+/// Clamps the world raytrace key; `false` means the tracker must be flushed.
+pub(crate) fn clamp_world_raytrace_key(mv: &mut AMover) -> bool {
+    if mv.world_raytrace_key == 255 { return false; }
+    mv.world_raytrace_key = clamp_key(mv.world_raytrace_key);
+    true
+}
+
+/// Applies the already-clamped world raytrace pose.
+pub(crate) fn apply_world_raytrace_pose(mv: &mut AMover) {
+    let k = mv.world_raytrace_key as usize;
+    mv.base.location = v_add(mv.base_pos, mv.key_pos[k]);
+    mv.base.rotation = r_add(mv.base_rot, mv.key_rot[k]);
+}
+
+/// Applies the pure keyed brush-raytrace pose.
+pub(crate) fn apply_brush_raytrace_pose(mv: &mut AMover) {
+    mv.brush_raytrace_key = clamp_key(mv.brush_raytrace_key);
+    let k = mv.brush_raytrace_key as usize;
+    mv.base.location = v_add(mv.base_pos, mv.key_pos[k]);
+    mv.base.rotation = r_add(mv.base_rot, mv.key_rot[k]);
+}
+
+/// Restores the mover's current key pose before collision re-insertion.
+pub(crate) fn restore_raytrace_pose(mv: &mut AMover) {
+    let k = mv.key_num as usize;
+    mv.base.location = v_add(mv.base_pos, mv.key_pos[k]);
+    mv.base.rotation = r_add(mv.base_rot, mv.key_rot[k]);
+}
+
+/// Clears the temporary raytrace transform after hash re-insertion.
+pub(crate) fn clear_raytrace_transform(mv: &mut AMover) {
+    mv.saved_pos = FVector { x: 0.0, y: 0.0, z: 0.0 };
+    mv.saved_rot = FRotator { pitch: 0, yaw: 0, roll: 0 };
+}
+
 /// `AMover::SetWorldRaytraceKey()` body.
 ///
 /// # Safety
 /// `mv`'s `XLevel` must be valid and its hash/tracker pointers must be live when non-null.
 pub unsafe fn set_world_raytrace_key(mv: &mut AMover, s: &Hp2MoverServices) {
-    unsafe {
-        if mv.world_raytrace_key != 255 {
-            mv.world_raytrace_key = clamp_key(mv.world_raytrace_key);
-            unhash(mv, s);
-            let k = mv.world_raytrace_key as usize;
-            mv.base.location = v_add(mv.base_pos, mv.key_pos[k]);
-            mv.base.rotation = r_add(mv.base_rot, mv.key_rot[k]);
-            rehash(mv, s);
-            tracker_update(mv, s);
-        } else {
-            let tracker = (*level(mv)).brush_tracker;
-            if !tracker.is_null() {
-                (s.brush_tracker_flush)(tracker, as_actor(mv));
-            }
-        }
-    }
+    let mut ops = LegacyMoverOps(s);
+    unsafe { set_world_raytrace_key_with_ops(ptr::from_mut(mv), &mut ops) }
+        .expect("legacy mover has a valid level for world raytracing");
 }
 
 /// `AMover::SetBrushRaytraceKey()` body.
@@ -1022,15 +648,9 @@ pub unsafe fn set_world_raytrace_key(mv: &mut AMover, s: &Hp2MoverServices) {
 /// # Safety
 /// Same contract as [`set_world_raytrace_key`].
 pub unsafe fn set_brush_raytrace_key(mv: &mut AMover, s: &Hp2MoverServices) {
-    unsafe {
-        mv.brush_raytrace_key = clamp_key(mv.brush_raytrace_key);
-        unhash(mv, s);
-        let k = mv.brush_raytrace_key as usize;
-        mv.base.location = v_add(mv.base_pos, mv.key_pos[k]);
-        mv.base.rotation = r_add(mv.base_rot, mv.key_rot[k]);
-        rehash(mv, s);
-        tracker_update(mv, s);
-    }
+    let mut ops = LegacyMoverOps(s);
+    unsafe { set_brush_raytrace_key_with_ops(ptr::from_mut(mv), &mut ops) }
+        .expect("legacy mover has a valid level for brush raytracing");
 }
 
 /// `AMover::PostRaytrace()` body (after `ABrush::PostRaytrace()`).
@@ -1038,22 +658,7 @@ pub unsafe fn set_brush_raytrace_key(mv: &mut AMover, s: &Hp2MoverServices) {
 /// # Safety
 /// Same contract as [`set_world_raytrace_key`].
 pub unsafe fn post_raytrace(mv: &mut AMover, s: &Hp2MoverServices) {
-    unsafe {
-        unhash(mv, s);
-        let k = mv.key_num as usize;
-        mv.base.location = v_add(mv.base_pos, mv.key_pos[k]);
-        mv.base.rotation = r_add(mv.base_rot, mv.key_rot[k]);
-        rehash(mv, s);
-        mv.saved_pos = FVector {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        };
-        mv.saved_rot = FRotator {
-            pitch: 0,
-            yaw: 0,
-            roll: 0,
-        };
-        tracker_update(mv, s);
-    }
+    let mut ops = LegacyMoverOps(s);
+    unsafe { post_raytrace_with_ops(ptr::from_mut(mv), &mut ops) }
+        .expect("legacy mover has a valid level after raytracing");
 }

@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "data_profile": "data-none",
+  "approval": "User selected Add the extra C++ comparison; repair native harness and separately accept real captured results.",
+  "command": "env HP2_ARTIFACT_DIR=/Users/mike/Code/hp2/out/macos-arm64/Testing/HP2/pawn_native_move_oracle/Artifacts KEEP_WORK=1 sh Build/pawn_native_move_fixture_harness/gen_pawn_native_move.sh out/macos-arm64",
+  "observed_result": "exit 0; two independent executable runs compared byte-identical with cmp; wrote 576 records; 32 records per entry",
+  "rust_replay_command": "env HP2_ARTIFACT_DIR=/Users/mike/Code/hp2/out/macos-arm64/Testing/HP2/pawn_native_move_oracle/Artifacts /Users/mike/.cargo/bin/cargo test --locked --offline -p hp2-engine --test pawn_native_move_fixtures -- --test-threads=1",
+  "rust_replay_observed_result": "exit 0; 1 test passed; all 576 composed-state records matched byte-for-byte",
+  "source_revisions": {
+    "movement_reach_sense": "32dcfda13bcb51dc8ceb9a84e260172ead3a470d",
+    "routing": "8e34caab47bc4e512a67e4d7716dfbd3bd9217fd"
+  },
+  "independence": "Original C++ UnPawn.cpp and pre-port UnRoute.cpp compiled with UnMath.cpp and controlled-world harness. No Rust library is linked. Unexpected reached external functions abort rather than supply fake policy results.",
+  "world_contract": "Four fixed-role actor slots (Pawn, NavigationPoint, InventorySpot, Pawn-or-Inventory), two authored directed reachspecs, uniform level-info zone, horizontal floor collision, explicit script events. 32 cases vary physics, net mode, water zone, authored route edges and actor targets. Eighteen movement/path entries run sequentially per case.",
+  "fixture": "crates/hp2-engine/tests/fixtures/pawn_native_move.txt",
+  "sha256": "704070303a77565583a2ac0fae81fdebc495e1b8fd6d0eeeba084bf835d1eda0",
+  "records_per_entry": {
+    "actorReachable": 32,
+    "findPathTo": 32,
+    "findPathToward": 32,
+    "findRandomDest": 32,
+    "makeNoise": 32,
+    "moveTo": 32,
+    "moveToward": 32,
+    "pollMoveTo": 32,
+    "pollMoveToward": 32,
+    "pollStrafeFacing": 32,
+    "pollStrafeTo": 32,
+    "pollTurnTo": 32,
+    "pollTurnToward": 32,
+    "showSelf": 32,
+    "strafeFacing": 32,
+    "strafeTo": 32,
+    "turnTo": 32,
+    "turnToward": 32
+  },
+  "harness_sha256": "5050b33ea49b02cafb5d3e5e8bf8f9485899ccdc0586c2e6552902461f85ed1f",
+  "generator_sha256": "896ea0f0d3017012adba05e1144934e54b534710d18b8ac00274afec1bddefcf"
+}

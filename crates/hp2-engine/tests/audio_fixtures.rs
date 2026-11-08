@@ -174,6 +174,9 @@ fn update_services() -> Hp2AudioServices {
         archive_serialize_lip_sync: unused(),
         archive_count_bytes: unused(),
         sound_super_serialize: unused(),
+        sound_audio: unused(),
+        audio_unregister_sound: unused(),
+        sound_super_destroy: unused(),
     }
 }
 

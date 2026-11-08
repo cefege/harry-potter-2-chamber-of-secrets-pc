@@ -1,9 +1,8 @@
 //! Port of the `UMesh` non-serialization code in `Engine/Src/UnMesh.cpp`:
 //! bounds (`GetRenderBoundingBox`, `GetCollisionBoundingBox`,
 //! `GetCollisionExtent`, `GetBoneCoords`), the `GetAnimSeq` lookup, and the
-//! generic `GetFrame` (`UnMesh.cpp:498-619`). The C++ shell keeps the
-//! constructors, `Serialize`, and the `TLazyArray::Load()` calls, and passes
-//! the loaded arrays in as slices.
+//! generic `GetFrame`, explicit construction and lazy frame preparation.
+//! C++ retains serialization and typed storage/archive leaves.
 //!
 //! Cache layout: this module owns the `GCache` block it creates. Header
 //! (16 bytes): `CachedMesh` (u64 key) at 0, `CachedFrame` (f32) at 8,
@@ -21,6 +20,71 @@ use hp2_abi::{FCoords, FVector};
 use crate::coords::{self, FRotator, FScale, SHEER_NONE, Trig, mul_comp};
 use crate::math::app_floor;
 use crate::prim::{self, Aabb};
+
+/// Typed native lifecycle leaves; policy and ordering are owned here.
+/// cbindgen:prefix-with-name
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub enum MeshLifecycleAction {
+    FrameVerts,
+    AnimFrames,
+    AddTris,
+    AddVerts,
+    AddConnects,
+    AddBoundingBoxes,
+    AddBoundingSpheres,
+    TextureCount,
+    ClearTexture,
+    LodMinVerts,
+    LodStrength,
+    LodMorph,
+    LodZDisplace,
+    LodHysteresis,
+    LoadVerts,
+    LoadTris,
+    LoadConnects,
+    LoadVertLinks,
+}
+
+pub type LifecycleResult = Result<i32, ()>;
+
+/// Explicit constructor after native base/member construction. Array elements
+/// deliberately remain uninitialized, just as with native `Add`.
+pub fn construct(
+    polys: i32,
+    verts: i32,
+    frames: i32,
+    connects: bool,
+    leaf: &mut impl FnMut(MeshLifecycleAction, i32, f32) -> LifecycleResult,
+) -> Result<(), ()> {
+    use MeshLifecycleAction::*;
+    leaf(FrameVerts, verts, 0.0)?;
+    leaf(AnimFrames, frames, 0.0)?;
+    leaf(AddTris, polys, 0.0)?;
+    leaf(AddVerts, verts.wrapping_mul(frames), 0.0)?;
+    if connects {
+        leaf(AddConnects, verts, 0.0)?;
+    }
+    leaf(AddBoundingBoxes, frames, 0.0)?;
+    leaf(AddBoundingSpheres, frames, 0.0)?;
+    let mut i = 0;
+    while i < leaf(TextureCount, 0, 0.0)? {
+        leaf(ClearTexture, i, 0.0)?;
+        i += 1;
+    }
+    Ok(())
+}
+
+/// All four loads precede any mesh, owner, or cache-key snapshot.
+pub fn prepare_frame(
+    leaf: &mut impl FnMut(MeshLifecycleAction, i32, f32) -> LifecycleResult,
+) -> Result<(), ()> {
+    use MeshLifecycleAction::*;
+    for action in [LoadVerts, LoadTris, LoadConnects, LoadVertLinks] {
+        leaf(action, 0, 0.0)?;
+    }
+    Ok(())
+}
 
 /// `NAME_None`.
 pub const NAME_NONE: i32 = 0;
@@ -117,6 +181,14 @@ pub struct MeshView<'a> {
     pub rot_origin: FRotator,
 }
 
+/// Static mesh fields used by collision bounds; no vertex or animation load is required.
+pub struct CollisionView {
+    pub bounding_box: FBoxRaw,
+    pub scale: FVector,
+    pub origin: FVector,
+    pub rot_origin: FRotator,
+}
+
 /// One `GCache` block, as returned by the C++ cache services. `ptr` addresses
 /// `len` writable bytes until `unlock` is called.
 #[derive(Clone, Copy)]
@@ -199,12 +271,12 @@ pub fn render_bounding_box(mesh: &MeshView, owner: &OwnerView, trig: &Trig) -> F
 
 /// `UMesh::GetCollisionBoundingBox` (`UnMesh.cpp:104`).
 pub fn collision_bounding_box(
-    mesh: &MeshView,
-    owner: &OwnerView,
+    mesh: &CollisionView,
+    pose: &ActorPose,
     world: bool,
     trig: &Trig,
 ) -> Aabb {
-    let box_scale = prim::scale(mesh.scale, owner.pose.draw_scale);
+    let box_scale = prim::scale(mesh.scale, pose.draw_scale);
     let bb = mesh.bounding_box;
     let bound = Aabb::from_min_max(
         mul_comp(box_scale, prim::sub(bb.min, mesh.origin)),
@@ -216,14 +288,14 @@ pub fn collision_bounding_box(
     // GMath.UnitCoords / RotOrigin / Owner->Rotation, then the actor location.
     let mut c = coords::unit_coords();
     coords::div_rot(&mut c, mesh.rot_origin, trig);
-    coords::div_rot(&mut c, owner.pose.rotation, trig);
-    c.origin = prim::add(owner.pose.location, owner.pose.pre_pivot);
+    coords::div_rot(&mut c, pose.rotation, trig);
+    c.origin = prim::add(pose.location, pose.pre_pivot);
     bound.transform_by(&prim::transpose(&c))
 }
 
 /// `UMesh::GetCollisionExtent` (`UnMesh.cpp:126`).
-pub fn collision_extent(mesh: &MeshView, owner: &OwnerView, trig: &Trig) -> FVector {
-    let b = collision_bounding_box(mesh, owner, false, trig);
+pub fn collision_extent(mesh: &CollisionView, pose: &ActorPose, trig: &Trig) -> FVector {
+    let b = collision_bounding_box(mesh, pose, false, trig);
     prim::v3(
         prim::max_f(-b.min.x, b.max.x),
         prim::max_f(-b.min.y, b.max.y),

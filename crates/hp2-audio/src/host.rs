@@ -1,10 +1,10 @@
 //! The engine and OpenAL surface that the Rust ALAudio subsystem calls through.
 //!
-//! Everything the subsystem needs from UE1 objects (`USound`, `AActor`,
-//! `ULevel`, `UViewport`, `UAnimChannel`, `GFileStream`, the vorbis decoder,
-//! the debug log, `appSeconds`) and from OpenAL/ALC is reached through this
-//! trait. The C++ shell implements it by calling the engine directly, behind
-//! `extern "C"` trampolines that catch C++ exceptions and report them as
+//! UE1 object access (`USound`, `AActor`, `ULevel`, `UViewport`,
+//! `UAnimChannel`), logging, timing, OpenAL, Rust file streaming and the Vorbis
+//! decoder are reached through this trait. Integration uses direct Rust
+//! resource operations and typed native object leaves. Native engine calls
+//! use `extern "C"` trampolines that catch C++ exceptions and report them as
 //! `HostFailed`. Rust never swallows that error: every method that can throw
 //! returns `HostResult`, and the subsystem stops at the first `Err` so no
 //! further engine call runs after a throw, matching the unwinding of the
@@ -158,12 +158,12 @@ pub trait Host {
     /// Returns 0 when allocation fails.
     fn music_sound_new(&mut self, filename: &str) -> HostResult<usize>;
 
-    // GFileStream and the ogg decoder.
+    // Rust file-stream manager and Ogg decoder.
     fn vorbis_new(&mut self) -> HostResult<usize>;
     fn vorbis_free(&mut self, decoder: usize) -> HostResult<()>;
     fn vorbis_info(&mut self, decoder: usize) -> HostResult<VorbisInfo>;
-    /// `CreateStream(*Sound->Filename, chunk, num, prime, type, decoder)`.
-    /// `looping` selects `ST_OggLooping` over `ST_Ogg`. Returns the stream id
+    /// Creates a file-backed Ogg stream from the sound filename.
+    /// `looping` selects looped decoding. Returns the stream id
     /// (negative on failure).
     fn gfile_create_ogg_stream(
         &mut self,

@@ -236,13 +236,13 @@ unsafe extern "C" fn mock_palette_plane(
 }
 
 static SERVICES: Hp2ParticleServices = Hp2ParticleServices {
-    app_frand: mock_frand,
+    app_frand: checked_mock_frand,
     sin_tab: mock_sin,
     cos_tab: mock_cos,
-    total_wind: mock_total_wind,
-    fast_line_check: mock_fast_line_check,
-    system_trace_level_hit: mock_trace_level_hit,
-    palette_plane: mock_palette_plane,
+    total_wind: checked_mock_total_wind,
+    fast_line_check: checked_mock_fast_line_check,
+    system_trace_level_hit: checked_mock_trace_level_hit,
+    palette_plane: checked_mock_palette_plane,
 };
 
 #[test]
@@ -304,6 +304,7 @@ fn particle_update_fixtures_bit_exact() {
                 ptr::from_mut(&mut sys).cast::<c_void>(),
                 &SERVICES,
             )
+            .expect("successful fixture callback")
         };
 
         assert_eq!(ret, ret_expect, "return value: {line}");
@@ -327,4 +328,109 @@ fn particle_update_fixtures_bit_exact() {
         palette_modes.iter().all(|&n| n > 0),
         "every palette mode covered"
     );
+}
+
+// Checked adapters retain the original deterministic oracle hook behavior.
+unsafe extern "C" fn checked_mock_fast_line_check(
+    a0: *mut c_void,
+    a1: *const c_void,
+    a2: *const c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(mock_fast_line_check(a0, a1, a2));
+    }
+    0
+}
+unsafe extern "C" fn checked_mock_frand(result: *mut f32) -> i32 {
+    unsafe {
+        result.write(mock_frand());
+    }
+    0
+}
+unsafe extern "C" fn checked_mock_palette_plane(
+    a0: *mut c_void,
+    a1: f32,
+    a2: f32,
+    a3: f32,
+    a4: *mut c_void,
+) -> i32 {
+    unsafe {
+        mock_palette_plane(a0, a1, a2, a3, a4);
+    }
+    0
+}
+unsafe extern "C" fn checked_mock_total_wind(
+    a0: *mut c_void,
+    a1: *const c_void,
+    a2: *mut c_void,
+) -> i32 {
+    unsafe {
+        mock_total_wind(a0, a1, a2);
+    }
+    0
+}
+unsafe extern "C" fn checked_mock_trace_level_hit(
+    a0: *mut c_void,
+    a1: *const c_void,
+    a2: *const c_void,
+    a3: *mut c_void,
+    a4: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(mock_trace_level_hit(a0, a1, a2, a3, a4));
+    }
+    0
+}
+
+static FAILING_RNG_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+unsafe extern "C" fn fail_rng(_result: *mut f32) -> i32 {
+    FAILING_RNG_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    91
+}
+#[test]
+fn first_checked_rng_error_preserves_partial_particle_state() {
+    let services = Hp2ParticleServices {
+        app_frand: fail_rng,
+        sin_tab: mock_sin,
+        cos_tab: mock_cos,
+        total_wind: checked_mock_total_wind,
+        fast_line_check: checked_mock_fast_line_check,
+        system_trace_level_hit: checked_mock_trace_level_hit,
+        palette_plane: checked_mock_palette_plane,
+    };
+    let mut sys: AParticleFX = unsafe { std::mem::zeroed() };
+    let mut particle: UParticle = unsafe { std::mem::zeroed() };
+    sys.chaos = 1.0;
+    particle.velocity.x = 2.0;
+    particle.lifetime = 10.0;
+    FAILING_RNG_CALLS.store(0, std::sync::atomic::Ordering::Relaxed);
+    let result = unsafe {
+        particle::update(
+            &mut particle,
+            FVector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            1.0,
+            FVector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            ptr::null_mut(),
+            0.25,
+            ptr::from_mut(&mut sys).cast(),
+            &services,
+        )
+    };
+    assert_eq!(result, Err(91));
+    assert_eq!(
+        FAILING_RNG_CALLS.load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+    assert_eq!(particle.position.x.to_bits(), 0.5_f32.to_bits());
+    assert_eq!(particle.age.to_bits(), 0.0_f32.to_bits());
 }

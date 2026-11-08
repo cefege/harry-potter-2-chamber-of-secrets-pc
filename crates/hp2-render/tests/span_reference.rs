@@ -32,12 +32,12 @@ struct Arena {
 }
 
 impl SpanAlloc for Arena {
-    unsafe fn push(&self, _mem: *mut c_void, size: usize, align: usize) -> *mut u8 {
+    unsafe fn push(&self, _mem: *mut c_void, size: usize, align: usize) -> Result<*mut u8, i32> {
         assert!(align <= 16);
         let mut chunk = vec![Chunk([0; 16]); size.div_ceil(16).max(1)].into_boxed_slice();
         let p = chunk.as_mut_ptr() as *mut u8;
         self.chunks.borrow_mut().push(chunk);
-        p
+        Ok(p)
     }
     unsafe fn mark_save(&self, _mem: *mut c_void, mark: *mut FMemMark) {
         ptr::write(
@@ -136,11 +136,11 @@ unsafe fn build_from_lines(
         (end_y - start_y) as usize,
         "line count vs header"
     );
-    alloc_index(a, b, start_y, end_y, ptr::null_mut());
+    alloc_index(a, b, start_y, end_y, ptr::null_mut()).unwrap();
     for (i, spans) in lines.iter().enumerate() {
         let mut prev = b.index.add(i);
         for &(s, e) in spans {
-            let node = a.push(ptr::null_mut(), size_of::<FSpan>(), 4) as *mut FSpan;
+            let node = a.push(ptr::null_mut(), size_of::<FSpan>(), 4).unwrap() as *mut FSpan;
             (*node).start = s;
             (*node).end = e;
             *prev = node;
@@ -206,12 +206,13 @@ unsafe fn replay_raster(a: &Arena, name: &str, secs: &[Section], out: &mut Vec<S
     }
 
     let mut dest = empty_buffer();
-    alloc_index(a, &mut dest, rs, re, ptr::null_mut());
+    alloc_index(a, &mut dest, rs, re, ptr::null_mut()).unwrap();
     let ret = if name == "update" {
         copy_from_raster_update(a, &mut dest, &mut screen, rs, re, raster.as_ptr())
     } else {
         copy_from_raster(a, &mut dest, &screen, rs, re, raster.as_ptr())
-    };
+    }
+    .unwrap();
     out.push(format!("RET {ret}"));
 
     dump_buffer(out, "OUT dest", &dest, true);
@@ -246,7 +247,7 @@ unsafe fn replay_merge(a: &Arena, secs: &[Section], out: &mut Vec<String>) {
     let other = load(a, find(secs, &["IN", "other"]), 2, 3);
     dump_buffer(out, "IN other", &other, true);
 
-    merge_with(a, &mut this, &other);
+    merge_with(a, &mut this, &other).unwrap();
     dump_buffer(out, "OUT this", &this, true);
     let (r0, r1) = get_valid_range(&this);
     dump_range(out, r0, r1);
@@ -257,7 +258,7 @@ unsafe fn replay_copyindex(a: &Arena, secs: &[Section], out: &mut Vec<String>) {
     dump_buffer(out, "IN source", &source, true);
 
     let mut this = empty_buffer();
-    copy_index_from(a, &mut this, &source, ptr::null_mut());
+    copy_index_from(a, &mut this, &source, ptr::null_mut()).unwrap();
     dump_buffer(out, "OUT this", &this, false);
 }
 
@@ -282,7 +283,7 @@ fn alloc_index_for_screen_builds_full_width_lines() {
     let a = Arena::default();
     let mut b = empty_buffer();
     unsafe {
-        alloc_index_for_screen(&a, &mut b, 9, 3, ptr::null_mut());
+        alloc_index_for_screen(&a, &mut b, 9, 3, ptr::null_mut()).unwrap();
         assert_eq!((b.start_y, b.end_y, b.valid_lines), (0, 3, 3));
         for i in 0..3 {
             let span = *b.index.add(i);
@@ -317,4 +318,143 @@ fn replays_original_unspan_cpp_through_rust_port() {
     for (idx, (got, want)) in actual.iter().zip(lines.iter()).enumerate() {
         assert_eq!(got, want, "first mismatch at fixture line {}", idx + 1);
     }
+}
+
+/// Fail a selected allocation without replacing the allocator's original status.
+struct FailingArena {
+    arena: Arena,
+    remaining: std::cell::Cell<usize>,
+    marks: std::cell::Cell<usize>,
+}
+
+impl SpanAlloc for FailingArena {
+    unsafe fn push(&self, mem: *mut c_void, size: usize, align: usize) -> Result<*mut u8, i32> {
+        let remaining = self.remaining.get();
+        if remaining == 0 {
+            return Err(2);
+        }
+        self.remaining.set(remaining - 1);
+        self.arena.push(mem, size, align)
+    }
+
+    unsafe fn mark_save(&self, mem: *mut c_void, mark: *mut FMemMark) {
+        self.marks.set(self.marks.get() + 1);
+        self.arena.mark_save(mem, mark);
+    }
+
+    unsafe fn mark_pop(&self, mark: *mut FMemMark) {
+        self.arena.mark_pop(mark);
+    }
+
+    fn warn(&self, text: &str) {
+        self.arena.warn(text);
+    }
+}
+
+#[test]
+fn allocation_failure_preserves_status_and_stops_before_mark_capture() {
+    let a = FailingArena {
+        arena: Arena::default(),
+        remaining: std::cell::Cell::new(0),
+        marks: std::cell::Cell::new(0),
+    };
+    let mut b = empty_buffer();
+    // SAFETY: failure happens before the test's opaque stack pointer is used.
+    let result = unsafe { alloc_index(&a, &mut b, 2, 4, ptr::null_mut()) };
+    assert_eq!(result, Err(2));
+    assert_eq!((b.start_y, b.end_y, b.valid_lines), (2, 4, 0));
+    assert_eq!(a.marks.get(), 0);
+    assert!(b.index.is_null());
+}
+
+#[test]
+fn raster_split_failure_keeps_first_output_and_unmodified_screen() {
+    let arena = Arena::default();
+    let mut screen = empty_buffer();
+    let mut dest = empty_buffer();
+    let a = FailingArena {
+        arena: Arena::default(),
+        remaining: std::cell::Cell::new(1),
+        marks: std::cell::Cell::new(0),
+    };
+    // SAFETY: both arenas retain every node/index allocation until after the walk.
+    unsafe {
+        alloc_index_for_screen(&arena, &mut screen, 10, 1, ptr::null_mut()).unwrap();
+        alloc_index(&arena, &mut dest, 0, 1, ptr::null_mut()).unwrap();
+        let raster = [FRasterSpan { x: [2, 8] }];
+        assert_eq!(
+            copy_from_raster_update(&a, &mut dest, &mut screen, 0, 1, raster.as_ptr()),
+            Err(2),
+        );
+        assert_eq!(dest.valid_lines, 1);
+        let output = *dest.index;
+        assert_eq!(((*output).start, (*output).end), (2, 8));
+        let original = *screen.index;
+        assert_eq!(((*original).start, (*original).end), (0, 10));
+        assert!((*original).next.is_null());
+        assert_eq!(screen.valid_lines, 1);
+    }
+}
+
+#[test]
+fn clone_overflow_uses_native_contract_diagnostic_and_placement_frame() {
+    use hp2_core::mem::{self, Hp2MemServices};
+    use hp2_render::span::{Hp2SpanServices, clone_buffer};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static DIAGNOSTIC_MATCHED: AtomicBool = AtomicBool::new(false);
+    static ALLOCATION_REACHED: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" fn malloc(_: u32, _: *const c_void, _: *mut *mut c_void) -> i32 {
+        ALLOCATION_REACHED.store(true, Ordering::Relaxed);
+        1
+    }
+    unsafe extern "C" fn free(_: *mut c_void) {}
+    unsafe extern "C" fn errorf(message: *const c_void) -> i32 {
+        let expected = mem::wide_z("Size exceeds the signed 32-bit API contract");
+        // SAFETY: core supplies a NUL-terminated TCHAR diagnostic for this call.
+        let actual = unsafe {
+            std::slice::from_raw_parts(message.cast::<hp2_core::ansi::Tchar>(), expected.len())
+        };
+        DIAGNOSTIC_MATCHED.store(actual == expected, Ordering::Relaxed);
+        1
+    }
+    unsafe extern "C" fn fail_assert(
+        _: *const std::ffi::c_char,
+        _: *const std::ffi::c_char,
+        _: i32,
+    ) -> i32 {
+        1
+    }
+    unsafe extern "C" fn warning(_: *const u8, _: usize) {}
+
+    let memory = Hp2MemServices {
+        malloc,
+        free,
+        errorf,
+        fail_assert,
+    };
+    let services = Hp2SpanServices {
+        memory: &memory,
+        slow_checks: 0,
+        log_warning: warning,
+    };
+    let mut source = empty_buffer();
+    source.start_y = 1;
+    source.end_y = 0;
+    source.valid_lines = 7;
+    let mut dest = empty_buffer();
+    // SAFETY: both headers are live. The oversized index fails conversion before
+    // reading the opaque stack or the source's absent index.
+    let result = unsafe { clone_buffer(&services, &mut dest, &source, ptr::null_mut()) };
+    assert_eq!(
+        result,
+        Err(3),
+        "overflow belongs to placement-new, not PushBytes"
+    );
+    assert!(DIAGNOSTIC_MATCHED.load(Ordering::Relaxed));
+    assert!(!ALLOCATION_REACHED.load(Ordering::Relaxed));
+    assert_eq!((dest.start_y, dest.end_y, dest.valid_lines), (1, 0, 7));
+    assert!(dest.index.is_null());
+    assert!(dest.mem.is_null());
 }

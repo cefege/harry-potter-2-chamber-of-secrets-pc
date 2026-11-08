@@ -10,3 +10,15 @@ name = "hp2_render"
 
 [dependencies]
 hp2-abi.workspace = true
+hp2-core.workspace = true
+
+[features]
+# Gates `freetype_sys`'s hand-written `FT_*` extern "C" declarations off by
+# default, the same way `hp2-platform`'s `sdl` feature gates its SDL2 extern
+# declarations: bare `cargo build`/`cargo test` need no native FreeType
+# linkage, which only CMake's final `hp2_game` executable link provides.
+freetype = []
+# Gates `coretext_sys`'s hand-written CoreText/CoreFoundation/CoreGraphics
+# extern "C" declarations off by default; only CMake's final `hp2_game`
+# executable link needs them on macOS (via `HP2_TEXT_PROVIDER_LINK_LIBS`).
+coretext = []

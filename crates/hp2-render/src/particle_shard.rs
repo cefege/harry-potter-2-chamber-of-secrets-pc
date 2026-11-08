@@ -241,14 +241,47 @@ fn coords_mul_rotator<M: RenderMath>(
     coords_mul_coords(&c, &roll_coords)
 }
 
-/// `FTransform::Project(Frame)`: sets `RZ`, `ScreenX`, `ScreenY`, `IntY`.
-/// `IntY` is `appFloor` as a truncating `static_cast<INT>`.
+/// Writes projection fields to a plain transform record without creating a
+/// reference to its possibly uninitialized, source-placement storage.
+///
+/// # Safety
+/// `output` points to writable FTransform storage and `point` is the value being projected.
+#[inline]
+pub unsafe fn project_raw(output: *mut FTransform, point: hp2_abi::FVector, frame: &ParticleFrame) {
+    unsafe {
+        let rz = frame.proj_z / point.z;
+        std::ptr::addr_of_mut!((*output).rz).write(rz);
+        std::ptr::addr_of_mut!((*output).screen_x).write(madd(point.x, rz, frame.fx15));
+        let y = madd(point.y, rz, frame.fy15);
+        std::ptr::addr_of_mut!((*output).screen_y).write(y);
+        std::ptr::addr_of_mut!((*output).int_y).write(y as i32);
+    }
+}
+
 #[inline]
 pub fn project(t: &mut FTransform, frame: &ParticleFrame) {
-    t.rz = frame.proj_z / t.point.z;
-    t.screen_x = madd(t.point.x, t.rz, frame.fx15);
-    t.screen_y = madd(t.point.y, t.rz, frame.fy15);
-    t.int_y = t.screen_y as i32;
+    // SAFETY: a mutable reference proves writable storage and Point is initialized.
+    unsafe { project_raw(t, t.point, frame) };
+}
+
+/// Projects a source vertex directly into uninitialized placement storage.
+///
+/// # Safety
+/// `output` is writable FTransform storage; `frame` is a live canonical frame.
+pub unsafe fn pipe_raw(output: *mut FTransform, frame: &hp2_abi::render_scene::FSceneNode, input: hp2_abi::FVector) {
+    unsafe {
+        let point = hp2_core::math::vector_transform_point(input, frame.coords);
+        std::ptr::addr_of_mut!((*output).point).write(point);
+        let particle_frame = ParticleFrame {
+            proj_z: frame.proj.z, rproj_z: frame.r_proj.z,
+            fx15: frame.fx15, fy15: frame.fy15,
+            prjxm: frame.prj_xm, prjxp: frame.prj_xp,
+            prjym: frame.prj_ym, prjyp: frame.prj_yp,
+        };
+        let flags = compute_outcode(&particle_frame, &point);
+        std::ptr::addr_of_mut!((*output).flags).write(flags);
+        if flags == 0 { project_raw(output, point, &particle_frame); }
+    }
 }
 
 /// A zeroed `FTransform`. The C++ `Tail`/`Tip` locals are only read after

@@ -8,6 +8,7 @@ const FALL_INPUT_WORDS: usize = 66;
 const FALL_OUTPUT_WORDS: usize = 56;
 
 fn run_fall(seed: u64, w: &[u32]) -> [u32; FALL_OUTPUT_WORDS] {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     assert_eq!(w.len(), FALL_INPUT_WORDS);
     let mut subj = vec![0u64; 1024];
     let mut zone = vec![0u64; 1024];
@@ -78,6 +79,8 @@ fn run_fall(seed: u64, w: &[u32]) -> [u32; FALL_OUTPUT_WORDS] {
         (*p).base.role = w[59] as u8;
         (*p).foot_region.zone = foot_zone_p as *mut c_void;
         (*p).base.set_b_bounce(w[65] != 0);
+        (*p).base.mesh = subj_p as *mut c_void;
+        (*p).base.collide_type = CT_SHAPE;
     }
     let hit = FCheckResult {
         next: null_mut(),
@@ -94,7 +97,8 @@ fn run_fall(seed: u64, w: &[u32]) -> [u32; FALL_OUTPUT_WORDS] {
             &SERVICES,
             f(w[56]),
             w[57] as i32,
-        );
+        )
+        .expect("checked physics fixture");
     }
     let mut out = [0u32; FALL_OUTPUT_WORDS];
     unsafe {

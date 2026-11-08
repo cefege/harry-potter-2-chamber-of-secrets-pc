@@ -217,51 +217,74 @@ unsafe extern "C" fn walk_do_jump(_actor: *mut c_void, value: f32) {
 }
 
 static WALK_SERVICES: Hp2PhysicServices = Hp2PhysicServices {
-    is_a: m_is_a,
-    is_probing_hit_wall: m_is_probing,
-    app_frand: m_app_frand,
-    cylinder_extent: m_cyl,
-    bsp_surf_special: m_bsp,
-    rotation_vector: m_rot,
-    move_actor: walk_move,
-    single_line_check: walk_slc,
-    set_base: m_set_base,
-    event_mount: m_event_mount,
-    event_hit_wall: m_event_hit_wall,
-    event_landed: m_event_landed,
-    point_region_zone: m_point_region_zone,
-    debugf_flew_out: m_debugf_flew_out,
-    destroy_actor: m_destroy_actor,
-    event_falling: m_event_falling,
-    projectile_max_speed: m_projectile_max_speed,
-    log_fell_out_of_world: m_log_fell_out_of_world,
-    event_fell_out_of_world: m_event_fell_out_of_world,
-    rotation_from_vector: m_rotation_from_vector,
-    find_view_target: m_find_view_target,
-    event_update_camera: m_event_update_camera,
-    event_interpolate_end: m_event_interpolate_end,
-    event_finished_interpolation: m_event_finished_interpolation,
-    phys_trailer: m_phys_trailer,
-    phys_moving_brush: m_phys_moving_brush,
-    event_post_touch: m_event_post_touch,
-    is_probing_ended_rotation: m_is_probing_ended_rotation,
-    event_ended_rotation: m_event_ended_rotation,
+    is_a: m_is_a_checked,
+    is_probing_hit_wall: m_is_probing_checked,
+    app_frand: m_app_frand_checked,
+    bsp_surf_special: m_bsp_checked,
+    rotation_vector: m_rot_checked,
+    move_actor: walk_move_checked,
+    single_line_check: walk_slc_checked,
+    event_mount: m_event_mount_checked,
+    event_hit_wall: m_event_hit_wall_checked,
+    event_landed: m_event_landed_checked,
+    point_region_zone: m_point_region_zone_checked,
+    debugf_flew_out: m_debugf_flew_out_checked,
+    destroy_actor: m_destroy_actor_checked,
+    event_falling: m_event_falling_checked,
+    log_fell_out_of_world: m_log_fell_out_of_world_checked,
+    event_fell_out_of_world: m_event_fell_out_of_world_checked,
+    rotation_from_vector: m_rotation_from_vector_checked,
+    find_view_target: m_find_view_target_checked,
+    event_update_camera: m_event_update_camera_checked,
+    event_interpolate_end: m_event_interpolate_end_checked,
+    event_finished_interpolation: m_event_finished_interpolation_checked,
+
+    event_key_frame_reached: m_event_key_frame_reached_checked,
+    mover_freeze_log: m_mover_freeze_log_checked,
+    event_post_touch: m_event_post_touch_checked,
+    is_probing_ended_rotation: m_is_probing_ended_rotation_checked,
+    event_ended_rotation: m_event_ended_rotation_checked,
     sin_tab: m_sin_tab,
     cos_tab: m_cos_tab,
-    is_probing_may_fall: walk_is_probing_may_fall,
-    event_may_fall: walk_event,
-    event_do_jump: walk_do_jump,
-    far_move_actor: m_far_move_actor,
-    debugf_fell_out: walk_debug_fell_out,
-    single_line_check_no_source: walk_slc_no_source,
-    trailer_state: m_trailer_state,
-    mesh_bone_coords: m_mesh_bone_coords,
-    trailer_far_move_actor: m_trailer_far_move_actor,
+    is_probing_may_fall: walk_is_probing_may_fall_checked,
+    event_may_fall: walk_event_checked,
+    event_do_jump: walk_do_jump_checked,
+    far_move_actor: m_far_move_actor_checked,
+    debugf_fell_out: walk_debug_fell_out_checked,
+    single_line_check_no_source: walk_slc_no_source_checked,
+    mesh_bone_coords: m_mesh_bone_coords_checked,
+    trailer_far_move_actor: m_trailer_far_move_actor_checked,
+    call_calc_velocity: fixture_call_calc_velocity,
+    call_mount: fixture_call_mount,
+    call_step_up: fixture_call_step_up,
+    call_process_hit_wall: fixture_call_process_hit_wall,
+    call_process_landed: fixture_call_process_landed,
+    call_find_base: fixture_call_find_base,
+    call_phys_trailer: fixture_call_phys_trailer,
+    call_phys_moving_brush: fixture_call_phys_moving_brush,
+    call_physics_rotation_actor: fixture_call_physics_rotation_actor,
+    call_physics_rotation_pawn: fixture_call_physics_rotation_pawn,
+    call_get_desired_rotation_at_pause: fixture_call_get_desired_rotation_at_pause,
+    call_get_desired_rotation_at_position: fixture_call_get_desired_rotation_at_position,
+    call_get_interpolated_position: fixture_call_get_interpolated_position,
+    call_start_swimming: fixture_call_start_swimming,
+    call_phys_flying: fixture_call_phys_flying,
+    call_swim: fixture_call_swim,
+    call_find_water_line: fixture_call_find_water_line,
+    call_phys_swimming: fixture_call_phys_swimming,
+    call_phys_falling: fixture_call_phys_falling,
+    call_phys_projectile: fixture_call_phys_projectile,
+    call_phys_rolling: fixture_call_phys_rolling,
+    call_check_floor: fixture_call_check_floor,
+    call_find_new_floor: fixture_call_find_new_floor,
+    call_phys_spider: fixture_call_phys_spider,
+    call_phys_walking: fixture_call_phys_walking,
 };
 
 const WALK_INPUT_WORDS: usize = 59;
 
 fn run_walk(seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     assert_eq!(w.len(), WALK_INPUT_WORDS);
     let mut subj = vec![0u64; 1024];
     let mut zone = vec![0u64; 1024];
@@ -331,6 +354,8 @@ fn run_walk(seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
         (*p).base.region.zone = zone_p as *mut c_void;
         (*p).base.region.zone_number = 1;
         (*p).base.role = 1;
+        (*p).base.mesh = subj_p as *mut c_void;
+        (*p).base.collide_type = CT_SHAPE;
     }
     let hit = FCheckResult {
         next: null_mut(),
@@ -348,7 +373,8 @@ fn run_walk(seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
             &WALK_SERVICES,
             f(w[56]),
             w[57] as i32,
-        );
+        )
+        .expect("checked physics fixture");
     }
     // The ordered hook trace (digest words 48..50) pins the original's call sequence.
     let (_, _, _, source_null) = WALK_SCRIPT.with(|s| *s.borrow());
@@ -445,4 +471,69 @@ fn physic_walk_matches_original() {
         [172, 172, 172, 171, 171, 171, 171],
         "walk mode coverage"
     );
+}
+
+unsafe extern "C" fn walk_move_checked(
+    actor: *mut c_void,
+    delta: *const FVector,
+    rot: *const hp2_abi::engine::generated::FRotator,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(walk_move(actor, delta, rot, hit));
+    }
+    0
+}
+unsafe extern "C" fn walk_slc_checked(
+    actor: *mut c_void,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    end: *const FVector,
+    start: *const FVector,
+    trace: i32,
+    extent: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(walk_slc(actor, hit, end, start, trace, extent));
+    }
+    0
+}
+unsafe extern "C" fn walk_slc_no_source_checked(
+    actor: *mut c_void,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    end: *const FVector,
+    start: *const FVector,
+    trace: i32,
+    extent: *const FVector,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(walk_slc_no_source(actor, hit, end, start, trace, extent));
+    }
+    0
+}
+unsafe extern "C" fn walk_is_probing_may_fall_checked(actor: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        result.write(walk_is_probing_may_fall(actor));
+    }
+    0
+}
+unsafe extern "C" fn walk_event_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        walk_event(actor);
+    }
+    0
+}
+unsafe extern "C" fn walk_debug_fell_out_checked(actor: *mut c_void) -> i32 {
+    unsafe {
+        walk_debug_fell_out(actor);
+    }
+    0
+}
+unsafe extern "C" fn walk_do_jump_checked(actor: *mut c_void, value: f32) -> i32 {
+    unsafe {
+        walk_do_jump(actor, value);
+    }
+    0
 }

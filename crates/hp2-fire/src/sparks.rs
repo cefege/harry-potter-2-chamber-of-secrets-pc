@@ -3,14 +3,24 @@
 //! and `RedrawSparks` (in `sparks/redraw.rs`).
 //!
 //! `Sparks` is a `TArray<FSpark>` whose length is `Sparks.Num() == SparksLimit`.
-//! The texture scalars travel in [`FireSparkState`]. The editor statics
-//! (`LightPinX/Y`, `LastMouseX/Y`, `LastLeftButton`, `LastRightButton`) live in
-//! [`EDITOR`]. Lock order: globals first, then `EDITOR`.
+//! Each FFI entry reads the texture scalars into a [`FireSparkState`] from the
+//! live `UFireTexture` at entry, and on success writes them back; `Sparks` is
+//! passed as a [`FireArena`] descriptor on each call rather than cached. The
+//! editor statics (`LightPinX/Y`, `LastMouseX/Y`, `LastLeftButton`,
+//! `LastRightButton`) live in [`EDITOR`], locked only for individual field
+//! accesses.
+//!
+//! # Safety
+//! `texture` and the `Sparks` descriptor must stay valid for the whole call.
+//! The trace hooks are plain Rust and never call back into native code, so
+//! nothing reenters mid-call. Concurrent mutation is unsupported.
 
+use std::ffi::c_void;
 use std::sync::{Mutex, MutexGuard};
 
-use crate::abi::{FireSpark, FireTraceHooks};
-use crate::globals::{self, FireGlobals};
+use crate::abi::{FireArena, FireCallbackError, FireSpark, FireTraceHooks};
+use crate::globals::FireSession;
+use hp2_abi::engine::generated::{UFireTexture, UFractalTexture, UTexture};
 
 mod redraw;
 
@@ -118,6 +128,64 @@ pub struct FireSparkState {
     pub fx_vert_speed: u8,
 }
 
+/// Reads the `UFireTexture`/`UFractalTexture`/`UTexture` scalar fields the spark
+/// routines consume. Replaces the C++ `FillSparkState` (`UnFractal.cpp`).
+///
+/// # Safety
+/// `texture` must be non-null and point to a live `UFireTexture`.
+pub unsafe fn spark_state_from_texture(texture: *const c_void) -> FireSparkState {
+    unsafe {
+        let t = texture as *const UTexture;
+        let f = texture as *const UFractalTexture;
+        let x = texture as *const UFireTexture;
+        FireSparkState {
+            texture: texture as usize,
+            u_size: (*t).base.u_size,
+            v_size: (*t).base.v_size,
+            u_bits: (*t).base.u_bits,
+            u_mask: (*f).u_mask,
+            v_mask: (*f).v_mask,
+            global_phase: (*f).global_phase,
+            draw_phase: (*f).draw_phase,
+            aux_phase: (*f).aux_phase,
+            spark_type: (*x).spark_type,
+            draw_mode: (*x).draw_mode,
+            sparks_limit: (*x).sparks_limit,
+            active_spark_num: (*x).active_spark_num,
+            star_status: (*x).star_status,
+            pen_down_x: (*x).pen_down_x,
+            pen_down_y: (*x).pen_down_y,
+            fx_heat: (*x).fx_heat,
+            fx_size: (*x).fx_size,
+            fx_aux_size: (*x).fx_aux_size,
+            fx_area: (*x).fx_area,
+            fx_frequency: (*x).fx_frequency,
+            fx_phase: (*x).fx_phase,
+            fx_horiz_speed: (*x).fx_horiz_speed,
+            fx_vert_speed: (*x).fx_vert_speed,
+        }
+    }
+}
+
+/// Writes back the scalar fields the spark routines may change. Replaces the
+/// C++ `StoreSparkState` (`UnFractal.cpp`).
+///
+/// # Safety
+/// `texture` must be non-null and point to a live `UFireTexture`.
+pub unsafe fn store_spark_state_to_texture(texture: *mut c_void, state: &FireSparkState) {
+    unsafe {
+        let f = texture as *mut UFractalTexture;
+        let x = texture as *mut UFireTexture;
+        (*x).active_spark_num = state.active_spark_num;
+        (*f).global_phase = state.global_phase;
+        (*f).draw_phase = state.draw_phase;
+        (*f).aux_phase = state.aux_phase;
+        (*x).star_status = state.star_status;
+        (*x).pen_down_x = state.pen_down_x;
+        (*x).pen_down_y = state.pen_down_y;
+    }
+}
+
 /// Editor-time statics from `AddSpark`, `CloseSpark` (none), and `FirePaint`.
 struct EditorState {
     light_pin_x: i32,
@@ -137,11 +205,26 @@ static EDITOR: Mutex<EditorState> = Mutex::new(EditorState {
     last_right_button: 0,
 });
 
-/// Locks the editor statics. A poisoned lock is recovered, as in `globals::lock`.
+/// Locks one editor field access; never retain this guard across a kernel call.
 fn editor() -> MutexGuard<'static, EditorState> {
     EDITOR
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Resolve an element against the current allocation, never a pre-callback base.
+unsafe fn spark_at(arena: *const FireArena<FireSpark>, index: usize) -> *mut FireSpark {
+    unsafe {
+        assert!(index < (*arena).len && !(*arena).data.is_null());
+        (*arena).data.add(index)
+    }
+}
+
+unsafe fn pixel_at(arena: *const FireArena<u8>, index: usize) -> *mut u8 {
+    unsafe {
+        assert!(index < (*arena).len && !(*arena).data.is_null());
+        (*arena).data.add(index)
+    }
 }
 
 /// `(DWORD)(lo + (hi << UBits))`: the texel index of a spark or a masked position.
@@ -150,595 +233,646 @@ fn texel(lo: i32, hi: i32, ubits: u8) -> usize {
 }
 
 /// `(GlobalPhase * FX_Frequency + FX_Phase) & 255`, the start phase of a twister spark.
-fn start_phase(st: &FireSparkState) -> u8 {
-    (st.global_phase
-        .wrapping_mul(st.fx_frequency as i32)
-        .wrapping_add(st.fx_phase as i32)
-        & 255) as u8
+unsafe fn start_phase(st: *mut FireSparkState) -> u8 {
+    unsafe {
+        ((*st)
+            .global_phase
+            .wrapping_mul((*st).fx_frequency as i32)
+            .wrapping_add((*st).fx_phase as i32)
+            & 255) as u8
+    }
 }
 
-/// `UFireTexture::AddSpark`, body only. The caller holds the locks.
-fn add_spark_inner(
-    g: &mut FireGlobals,
-    ed: &mut EditorState,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+/// `UFireTexture::AddSpark`, body only.
+unsafe fn add_spark_inner(
+    g: &mut FireSession,
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     mouse_x: i32,
     mouse_y: i32,
-) {
-    // Return if out of bounds or out of sparks.
-    if mouse_x < 0
-        || mouse_y < 0
-        || mouse_x >= st.u_size
-        || mouse_y >= st.v_size
-        || st.active_spark_num >= st.sparks_limit
-    {
-        return;
-    }
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        // Return if out of bounds or out of sparks.
+        if mouse_x < 0
+            || mouse_y < 0
+            || mouse_x >= (*st).u_size
+            || mouse_y >= (*st).v_size
+            || (*st).active_spark_num >= (*st).sparks_limit
+        {
+            return Ok(());
+        }
 
-    // Make new spark. ->Sparks[0] is the first one.
-    let s = st.active_spark_num;
-    st.active_spark_num += 1;
-    let si = s as usize;
+        // Make new spark. ->Sparks[0] is the first one.
+        let s = (*st).active_spark_num;
+        (*st).active_spark_num += 1;
+        let si = s as usize;
 
-    // General new spark initialization.
-    sparks[si].ty = st.spark_type;
-    sparks[si].x = mouse_x as u8;
-    sparks[si].y = mouse_y as u8;
-    sparks[si].heat = st.fx_heat;
+        // General new spark initialization.
+        (*spark_at(sparks, si)).ty = (*st).spark_type;
+        (*spark_at(sparks, si)).x = mouse_x as u8;
+        (*spark_at(sparks, si)).y = mouse_y as u8;
+        (*spark_at(sparks, si)).heat = (*st).fx_heat;
 
-    // Spark-type specific assignments.
-    match st.spark_type {
-        SPARK_SPARKLE => {
-            sparks[si].byte_a = st.fx_size;
-            sparks[si].byte_b = st.fx_aux_size;
-        }
-        SPARK_PULSE => {
-            sparks[si].heat = st.draw_phase.wrapping_add(st.aux_phase);
-            st.draw_phase = st.draw_phase.wrapping_add(st.fx_phase);
-            sparks[si].byte_d = st.fx_frequency; // Improve useful range.
-        }
-        SPARK_SIGNAL => {
-            sparks[si].heat = g.speed_rand();
-            sparks[si].byte_d = st.fx_frequency; // Improve useful range.
-            sparks[si].byte_c = 255u8.wrapping_sub(st.fx_heat); // 255 - FX_Heat
-        }
-        SPARK_STARS => {
-            // Stars, FieldA for this type holds (negative) start Intensity.
-            sparks[si].byte_a = st.fx_heat;
-            st.star_status = 1; // At least one star..
-        }
-        SPARK_ORGANIC => {
-            sparks[si].byte_c = st.fx_area;
-        }
-        SPARK_EELS | SPARK_BLAZE_LEFT | SPARK_BLAZE_RIGHT => {
-            sparks[si].byte_c = st.fx_size;
-        }
-        SPARK_OZ_HAS_SPOKEN => {}
-        SPARK_EMIT | SPARK_FOUNTAIN => {
-            // Spawn at angle, lifetime, linear movers (Fountain adds gravity later).
-            sparks[si].byte_a = st.fx_horiz_speed.wrapping_sub(128);
-            sparks[si].byte_b = 127 ^ st.fx_vert_speed;
-            sparks[si].byte_d = (255 / (st.fx_size as i32 + 1)) as u8;
-        }
-        SPARK_CYLINDER | SPARK_CYLINDER3D => {
-            // Twister (X=sin()) movement.
-            let mut temp_size = st.fx_size as i32;
-            let mut temp_speed = st.fx_horiz_speed as i32 - 128;
-            let this_idx = si;
-            let axis2 = st.pen_down_x as i32 * 2 + st.fx_size as i32;
+        // Spark-type specific assignments.
+        match (*st).spark_type {
+            SPARK_SPARKLE => {
+                (*spark_at(sparks, si)).byte_a = (*st).fx_size;
+                (*spark_at(sparks, si)).byte_b = (*st).fx_aux_size;
+            }
+            SPARK_PULSE => {
+                (*spark_at(sparks, si)).heat = (*st).draw_phase.wrapping_add((*st).aux_phase);
+                (*st).draw_phase = (*st).draw_phase.wrapping_add((*st).fx_phase);
+                (*spark_at(sparks, si)).byte_d = (*st).fx_frequency; // Improve useful range.
+            }
+            SPARK_SIGNAL => {
+                (*spark_at(sparks, si)).heat = g.speed_rand()?;
+                (*spark_at(sparks, si)).byte_d = (*st).fx_frequency; // Improve useful range.
+                (*spark_at(sparks, si)).byte_c = 255u8.wrapping_sub((*st).fx_heat); // 255 - FX_Heat
+            }
+            SPARK_STARS => {
+                // Stars, FieldA for this type holds (negative) start Intensity.
+                (*spark_at(sparks, si)).byte_a = (*st).fx_heat;
+                (*st).star_status = 1; // At least one star..
+            }
+            SPARK_ORGANIC => {
+                (*spark_at(sparks, si)).byte_c = (*st).fx_area;
+            }
+            SPARK_EELS | SPARK_BLAZE_LEFT | SPARK_BLAZE_RIGHT => {
+                (*spark_at(sparks, si)).byte_c = (*st).fx_size;
+            }
+            SPARK_OZ_HAS_SPOKEN => {}
+            SPARK_EMIT | SPARK_FOUNTAIN => {
+                // Spawn at angle, lifetime, linear movers (Fountain adds gravity later).
+                (*spark_at(sparks, si)).byte_a = (*st).fx_horiz_speed.wrapping_sub(128);
+                (*spark_at(sparks, si)).byte_b = 127 ^ (*st).fx_vert_speed;
+                (*spark_at(sparks, si)).byte_d = (255 / ((*st).fx_size as i32 + 1)) as u8;
+            }
+            SPARK_CYLINDER | SPARK_CYLINDER3D => {
+                // Twister (X=sin()) movement.
+                let mut temp_size = (*st).fx_size as i32;
+                let mut temp_speed = (*st).fx_horiz_speed as i32 - 128;
+                let this_idx = si;
+                let axis2 = (*st).pen_down_x as i32 * 2 + (*st).fx_size as i32;
 
-            // Scale to imaginary axis while mousebutton remains down.
-            if st.draw_mode > DRAW_NORMAL && st.pen_down_x != 0 {
-                temp_size = axis2 - mouse_x * 2;
+                // Scale to imaginary axis while mousebutton remains down.
+                if (*st).draw_mode > DRAW_NORMAL && (*st).pen_down_x != 0 {
+                    temp_size = axis2 - mouse_x * 2;
 
-                // Axis = at PenDownX + 0.5 * FX_Size.
-                if temp_size < 0 {
-                    // Crossed the axis.
-                    temp_size = mouse_x * 2 - axis2;
-                    sparks[si].x = (mouse_x - temp_size) as u8; // Minus total diameter.
-                    temp_speed = (256 - temp_speed) & 255;
+                    // Axis = at PenDownX + 0.5 * FX_Size.
+                    if temp_size < 0 {
+                        // Crossed the axis.
+                        temp_size = mouse_x * 2 - axis2;
+                        (*spark_at(sparks, si)).x = (mouse_x - temp_size) as u8; // Minus total diameter.
+                        temp_speed = (256 - temp_speed) & 255;
+                    }
                 }
-            }
 
-            sparks[si].byte_a = start_phase(st);
-            sparks[si].byte_b = temp_size as u8; // Size.
-            sparks[si].byte_d = temp_speed as u8;
+                (*spark_at(sparks, si)).byte_a = start_phase(st);
+                (*spark_at(sparks, si)).byte_b = temp_size as u8; // Size.
+                (*spark_at(sparks, si)).byte_d = temp_speed as u8;
 
-            // Draw second spark at +0.5 phase.
-            if st.draw_mode == DRAW_LATHE_2 && st.active_spark_num < st.sparks_limit {
-                let n = spawn_index(st);
-                sparks[n].ty = st.spark_type;
-                sparks[n].x = sparks[this_idx].x;
-                sparks[n].y = mouse_y as u8;
-                sparks[n].heat = st.fx_heat;
-                sparks[n].byte_a = sparks[this_idx].byte_a.wrapping_add(128);
-                sparks[n].byte_b = temp_size as u8; // size
-                sparks[n].byte_d = temp_speed as u8;
-            }
-
-            // Draw 2 more sparks at +.33/.67 phases.
-            if st.draw_mode == DRAW_LATHE_3 && st.active_spark_num + 2 <= st.sparks_limit {
-                for t in 1..3i32 {
+                // Draw second spark at +0.5 phase.
+                if (*st).draw_mode == DRAW_LATHE_2 && (*st).active_spark_num < (*st).sparks_limit {
                     let n = spawn_index(st);
-                    sparks[n].ty = st.spark_type;
-                    sparks[n].x = sparks[this_idx].x;
-                    sparks[n].y = mouse_y as u8;
-                    sparks[n].heat = st.fx_heat;
-                    // `256/3` is 85 in C integer arithmetic.
-                    sparks[n].byte_a = sparks[this_idx].byte_a.wrapping_add((t * (256 / 3)) as u8);
-                    sparks[n].byte_b = temp_size as u8; // Size.
-                    sparks[n].byte_d = temp_speed as u8;
+                    (*spark_at(sparks, n)).ty = (*st).spark_type;
+                    (*spark_at(sparks, n)).x = (*spark_at(sparks, this_idx)).x;
+                    (*spark_at(sparks, n)).y = mouse_y as u8;
+                    (*spark_at(sparks, n)).heat = (*st).fx_heat;
+                    (*spark_at(sparks, n)).byte_a =
+                        (*spark_at(sparks, this_idx)).byte_a.wrapping_add(128);
+                    (*spark_at(sparks, n)).byte_b = temp_size as u8; // size
+                    (*spark_at(sparks, n)).byte_d = temp_speed as u8;
+                }
+
+                // Draw 2 more sparks at +.33/.67 phases.
+                if (*st).draw_mode == DRAW_LATHE_3
+                    && (*st).active_spark_num + 2 <= (*st).sparks_limit
+                {
+                    for t in 1..3i32 {
+                        let n = spawn_index(st);
+                        (*spark_at(sparks, n)).ty = (*st).spark_type;
+                        (*spark_at(sparks, n)).x = (*spark_at(sparks, this_idx)).x;
+                        (*spark_at(sparks, n)).y = mouse_y as u8;
+                        (*spark_at(sparks, n)).heat = (*st).fx_heat;
+                        // `256/3` is 85 in C integer arithmetic.
+                        (*spark_at(sparks, n)).byte_a = (*spark_at(sparks, this_idx))
+                            .byte_a
+                            .wrapping_add((t * (256 / 3)) as u8);
+                        (*spark_at(sparks, n)).byte_b = temp_size as u8; // Size.
+                        (*spark_at(sparks, n)).byte_d = temp_speed as u8;
+                    }
+                }
+
+                // Draw 3 more sparks at +.25/.5/.75 phases.
+                if (*st).draw_mode == DRAW_LATHE_4
+                    && (*st).active_spark_num + 3 <= (*st).sparks_limit
+                {
+                    for t in 1..4i32 {
+                        let n = spawn_index(st);
+                        (*spark_at(sparks, n)).ty = (*st).spark_type;
+                        (*spark_at(sparks, n)).x = (*spark_at(sparks, this_idx)).x;
+                        (*spark_at(sparks, n)).y = mouse_y as u8;
+                        (*spark_at(sparks, n)).heat = (*st).fx_heat;
+                        (*spark_at(sparks, n)).byte_a = (*spark_at(sparks, this_idx))
+                            .byte_a
+                            .wrapping_add((t * 64) as u8);
+                        (*spark_at(sparks, n)).byte_b = temp_size as u8; // Size.
+                        (*spark_at(sparks, n)).byte_d = temp_speed as u8;
+                    }
                 }
             }
-
-            // Draw 3 more sparks at +.25/.5/.75 phases.
-            if st.draw_mode == DRAW_LATHE_4 && st.active_spark_num + 3 <= st.sparks_limit {
-                for t in 1..4i32 {
-                    let n = spawn_index(st);
-                    sparks[n].ty = st.spark_type;
-                    sparks[n].x = sparks[this_idx].x;
-                    sparks[n].y = mouse_y as u8;
-                    sparks[n].heat = st.fx_heat;
-                    sparks[n].byte_a = sparks[this_idx].byte_a.wrapping_add((t * 64) as u8);
-                    sparks[n].byte_b = temp_size as u8; // Size.
-                    sparks[n].byte_d = temp_speed as u8;
+            SPARK_JUGGLERS => {
+                // Twister (X=sin()) movement.
+                (*spark_at(sparks, si)).byte_a = start_phase(st);
+                (*spark_at(sparks, si)).byte_b = (*st).fx_size; // size
+                (*spark_at(sparks, si)).byte_d = (*st).fx_horiz_speed.wrapping_sub(128);
+            }
+            SPARK_LISSAJOUS => {
+                (*spark_at(sparks, si)).heat = (*st).fx_size; // size
+                (*spark_at(sparks, si)).byte_a = (*st).fx_phase; // phase u
+                (*spark_at(sparks, si)).byte_b = (*st).fx_frequency; // phase v
+                (*spark_at(sparks, si)).byte_c = (*st).fx_horiz_speed.wrapping_sub(128);
+                (*spark_at(sparks, si)).byte_d = (*st).fx_vert_speed.wrapping_sub(128);
+                // Special-cases redirected to more efficient setters.
+                if (*spark_at(sparks, si)).byte_c == 0 {
+                    (*spark_at(sparks, si)).ty = SPARK_LISSAJY;
+                }
+                if (*spark_at(sparks, si)).byte_d == 0 {
+                    (*spark_at(sparks, si)).ty = SPARK_LISSAJX;
                 }
             }
-        }
-        SPARK_JUGGLERS => {
-            // Twister (X=sin()) movement.
-            sparks[si].byte_a = start_phase(st);
-            sparks[si].byte_b = st.fx_size; // size
-            sparks[si].byte_d = st.fx_horiz_speed.wrapping_sub(128);
-        }
-        SPARK_LISSAJOUS => {
-            sparks[si].heat = st.fx_size; // size
-            sparks[si].byte_a = st.fx_phase; // phase u
-            sparks[si].byte_b = st.fx_frequency; // phase v
-            sparks[si].byte_c = st.fx_horiz_speed.wrapping_sub(128);
-            sparks[si].byte_d = st.fx_vert_speed.wrapping_sub(128);
-            // Special-cases redirected to more efficient setters.
-            if sparks[si].byte_c == 0 {
-                sparks[si].ty = SPARK_LISSAJY;
-            }
-            if sparks[si].byte_d == 0 {
-                sparks[si].ty = SPARK_LISSAJX;
-            }
-        }
-        SPARK_SPHERE_LIGHTNING => {
-            // Spherical lightning.
-            sparks[si].heat = st.fx_heat; // heat
-            sparks[si].byte_c = st.fx_size; // radius
-            // minimal 8 (=radius 4)
-            if sparks[si].byte_c < 8 {
-                sparks[si].byte_c = 8;
-            }
-            sparks[si].byte_d = 96; // Hardcoded chance.
-        }
-        SPARK_FLOCKS => {
-            sparks[si].byte_a = 128;
-            sparks[si].byte_b = st.fx_size; // Lifetime
-            sparks[si].byte_c = 128;
-            sparks[si].byte_d = 255u8.wrapping_sub(st.fx_area); // spawn direction delta
-        }
-        SPARK_WHEEL => {
-            // Swirly emitter.
-            sparks[si].byte_a = st.fx_phase; // Initial spawn dir.
-            sparks[si].byte_b = st.fx_size; // Lifetime
-            sparks[si].byte_c = st.fx_frequency;
-            sparks[si].byte_d = 255u8.wrapping_sub(st.fx_area); // spawn direction delta
-        }
-        SPARK_SPRINKLER => {
-            sparks[si].byte_a = st.fx_phase; // Initial spawn dir.
-            sparks[si].byte_b = 128; // (BYTE)-128
-            sparks[si].byte_c = 128; // lifetime
-            sparks[si].byte_d = st.fx_frequency;
-        }
-        SPARK_GAMETES => {
-            sparks[si].byte_c = st.fx_size; // Lifetime of spawned spermatozoids.
-        }
-        SPARK_LOCAL_CLOUD => {
-            sparks[si].byte_c = st.fx_area;
-            sparks[si].byte_a = st.fx_horiz_speed.wrapping_sub(128);
-            sparks[si].byte_b = (255 ^ st.fx_vert_speed).wrapping_sub(128);
-            sparks[si].byte_d = 255u8.wrapping_sub(st.fx_size);
-        }
-        SPARK_CUSTOM_CLOUD => {
-            sparks[si].byte_a = st.fx_horiz_speed.wrapping_sub(128);
-            sparks[si].byte_b = (255 ^ st.fx_vert_speed).wrapping_sub(128);
-            sparks[si].byte_d = 255u8.wrapping_sub(st.fx_size);
-        }
-        SPARK_LINE_LIGHTNING | SPARK_RAMP_LIGHTNING => {
-            // We have a new spark if no other was an 'open' one.
-            // Not always the last one since short-lived sparks may shuffle the spark
-            // order at any moment.
-            let mut open = s;
-            loop {
-                open -= 1;
-                if open < 0 {
-                    break;
+            SPARK_SPHERE_LIGHTNING => {
+                // Spherical lightning.
+                (*spark_at(sparks, si)).heat = (*st).fx_heat; // heat
+                (*spark_at(sparks, si)).byte_c = (*st).fx_size; // radius
+                // minimal 8 (=radius 4)
+                if (*spark_at(sparks, si)).byte_c < 8 {
+                    (*spark_at(sparks, si)).byte_c = 8;
                 }
-                let o = &sparks[open as usize];
-                if o.ty == st.spark_type && o.byte_d == 0 {
-                    break;
-                }
+                (*spark_at(sparks, si)).byte_d = 96; // Hardcoded chance.
             }
+            SPARK_FLOCKS => {
+                (*spark_at(sparks, si)).byte_a = 128;
+                (*spark_at(sparks, si)).byte_b = (*st).fx_size; // Lifetime
+                (*spark_at(sparks, si)).byte_c = 128;
+                (*spark_at(sparks, si)).byte_d = 255u8.wrapping_sub((*st).fx_area); // spawn direction delta
+            }
+            SPARK_WHEEL => {
+                // Swirly emitter.
+                (*spark_at(sparks, si)).byte_a = (*st).fx_phase; // Initial spawn dir.
+                (*spark_at(sparks, si)).byte_b = (*st).fx_size; // Lifetime
+                (*spark_at(sparks, si)).byte_c = (*st).fx_frequency;
+                (*spark_at(sparks, si)).byte_d = 255u8.wrapping_sub((*st).fx_area); // spawn direction delta
+            }
+            SPARK_SPRINKLER => {
+                (*spark_at(sparks, si)).byte_a = (*st).fx_phase; // Initial spawn dir.
+                (*spark_at(sparks, si)).byte_b = 128; // (BYTE)-128
+                (*spark_at(sparks, si)).byte_c = 128; // lifetime
+                (*spark_at(sparks, si)).byte_d = (*st).fx_frequency;
+            }
+            SPARK_GAMETES => {
+                (*spark_at(sparks, si)).byte_c = (*st).fx_size; // Lifetime of spawned spermatozoids.
+            }
+            SPARK_LOCAL_CLOUD => {
+                (*spark_at(sparks, si)).byte_c = (*st).fx_area;
+                (*spark_at(sparks, si)).byte_a = (*st).fx_horiz_speed.wrapping_sub(128);
+                (*spark_at(sparks, si)).byte_b = (255 ^ (*st).fx_vert_speed).wrapping_sub(128);
+                (*spark_at(sparks, si)).byte_d = 255u8.wrapping_sub((*st).fx_size);
+            }
+            SPARK_CUSTOM_CLOUD => {
+                (*spark_at(sparks, si)).byte_a = (*st).fx_horiz_speed.wrapping_sub(128);
+                (*spark_at(sparks, si)).byte_b = (255 ^ (*st).fx_vert_speed).wrapping_sub(128);
+                (*spark_at(sparks, si)).byte_d = 255u8.wrapping_sub((*st).fx_size);
+            }
+            SPARK_LINE_LIGHTNING | SPARK_RAMP_LIGHTNING => {
+                // We have a new spark if no other was an 'open' one.
+                // Not always the last one since short-lived sparks may shuffle the spark
+                // order at any moment.
+                let mut open = s;
+                loop {
+                    open -= 1;
+                    if open < 0 {
+                        break;
+                    }
+                    let o = spark_at(sparks, open as usize);
+                    if (*o).ty == (*st).spark_type && (*o).byte_d == 0 {
+                        break;
+                    }
+                }
 
-            if open >= 0 {
-                // Open point found, draw it while being stretched.
-                st.active_spark_num -= 1; // so don't allocate 'current' spark
-                let o = open as usize;
+                if open >= 0 {
+                    // Open point found, draw it while being stretched.
+                    (*st).active_spark_num -= 1; // so don't allocate 'current' spark
+                    let o = open as usize;
 
-                // Refresh to 'starting' point.
-                sparks[o].x = ed.light_pin_x as u8;
-                sparks[o].y = ed.light_pin_y as u8;
+                    // Refresh to 'starting' point.
+                    (*spark_at(sparks, o)).x = editor().light_pin_x as u8;
+                    (*spark_at(sparks, o)).y = editor().light_pin_y as u8;
 
-                // Dragging the lightning: Must have a heat value.
-                // Close it by setting ByteD = heat ?
-                // To nonzero, eventually.
-                sparks[o].heat = 3 | st.fx_heat; // Brightness.
+                    // Dragging the lightning: Must have a heat value.
+                    // Close it by setting ByteD = heat ?
+                    // To nonzero, eventually.
+                    (*spark_at(sparks, o)).heat = 3 | (*st).fx_heat; // Brightness.
 
-                let mut len_x = mouse_x - sparks[o].x as i32;
-                let mut len_y = mouse_y - sparks[o].y as i32;
+                    let mut len_x = mouse_x - (*spark_at(sparks, o)).x as i32;
+                    let mut len_y = mouse_y - (*spark_at(sparks, o)).y as i32;
 
-                if len_x < 0 {
-                    len_x = len_x.wrapping_neg() | 1;
+                    if len_x < 0 {
+                        len_x = len_x.wrapping_neg() | 1;
+                    } else {
+                        len_x &= -2; // 0xFFFFFFFE
+                    }
+                    if len_y < 0 {
+                        len_y = len_y.wrapping_neg() | 1;
+                    } else {
+                        len_y &= -2; // 0xFFFFFFFE
+                    }
+
+                    if len_x == 0 && len_y == 0 {
+                        (*spark_at(sparks, o)).heat = 0; // too short!
+                    }
+
+                    (*spark_at(sparks, o)).byte_a = len_x as u8;
+                    (*spark_at(sparks, o)).byte_b = len_y as u8;
+                    // ByteD Stays 0 while drawing to indicate open bolt.
                 } else {
-                    len_x &= -2; // 0xFFFFFFFE
+                    // No open point found: new lightning thing.
+                    let n = ((*st).active_spark_num - 1) as usize;
+                    (*spark_at(sparks, n)).byte_d = 0; // Signify open bolt.
+                    (*spark_at(sparks, n)).heat = 0;
+                    editor().light_pin_x = mouse_x;
+                    editor().light_pin_y = mouse_y;
                 }
-                if len_y < 0 {
-                    len_y = len_y.wrapping_neg() | 1;
-                } else {
-                    len_y &= -2; // 0xFFFFFFFE
-                }
-
-                if len_x == 0 && len_y == 0 {
-                    sparks[o].heat = 0; // too short!
-                }
-
-                sparks[o].byte_a = len_x as u8;
-                sparks[o].byte_b = len_y as u8;
-                // ByteD Stays 0 while drawing to indicate open bolt.
-            } else {
-                // No open point found: new lightning thing.
-                let n = (st.active_spark_num - 1) as usize;
-                sparks[n].byte_d = 0; // Signify open bolt.
-                sparks[n].heat = 0;
-                ed.light_pin_x = mouse_x;
-                ed.light_pin_y = mouse_y;
             }
+            _ => {}
         }
-        _ => {}
+        Ok(())
     }
 }
 
 /// `UFireTexture::CloseSpark`, body only. The mouse position is unused in C.
-fn close_spark_inner(st: &FireSparkState, sparks: &mut [FireSpark]) {
-    // Sparks[S=0] is only one if ActiveSparkNum = 1.
-    let mut s = st.active_spark_num;
+unsafe fn close_spark_inner(
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        // Sparks[S=0] is only one if ActiveSparkNum = 1.
+        let mut s = (*st).active_spark_num;
 
-    // Warning: extremely kludgy.
-    // Find ANY old spark of type 23/24 which has an 'open' end.
-    loop {
-        s -= 1;
-        if s < 0 {
-            break;
+        // Warning: extremely kludgy.
+        // Find ANY old spark of type 23/24 which has an 'open' end.
+        loop {
+            s -= 1;
+            if s < 0 {
+                break;
+            }
+            let sp = spark_at(sparks, s as usize);
+            if ((*sp).ty == SPARK_LINE_LIGHTNING || (*sp).ty == SPARK_RAMP_LIGHTNING)
+                && (*sp).byte_d == 0
+            {
+                break;
+            }
         }
-        let sp = &sparks[s as usize];
-        if (sp.ty == SPARK_LINE_LIGHTNING || sp.ty == SPARK_RAMP_LIGHTNING) && sp.byte_d == 0 {
-            break;
-        }
-    }
 
-    if s >= 0 {
-        // Open point found, closin' it.
-        // ByteD, minimally 1...
-        let sp = &mut sparks[s as usize];
-        sp.byte_d = st.fx_frequency;
-        if sp.byte_d == 0 {
-            sp.byte_d = 1; // Ensure != 0.
+        if s >= 0 {
+            // Open point found, closin' it.
+            // ByteD, minimally 1...
+            let sp = spark_at(sparks, s as usize);
+            (*sp).byte_d = (*st).fx_frequency;
+            if (*sp).byte_d == 0 {
+                (*sp).byte_d = 1; // Ensure != 0.
+            }
         }
+        Ok(())
     }
 }
 
 /// `UFireTexture::DeleteSparks`, body only. Each deleted spark is replaced by the last one,
 /// and the moved spark is not re-tested.
-fn delete_sparks_inner(
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+unsafe fn delete_sparks_inner(
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     spark_x: i32,
     spark_y: i32,
     area_width: i32,
-) {
-    if st.active_spark_num > 0 {
-        let mut s: i32 = 0;
-        while s < st.active_spark_num {
-            let sp = sparks[s as usize];
-            // Diamond-shaped eraser.
-            if area_width
-                >= (spark_x - sp.x as i32).wrapping_abs() + (spark_y - sp.y as i32).wrapping_abs()
-            {
-                // Delete spark by replacing it with last one (+ delete last one).
-                st.active_spark_num -= 1;
-                let last = st.active_spark_num as usize;
-                sparks[s as usize] = sparks[last];
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        if (*st).active_spark_num > 0 {
+            let mut s: i32 = 0;
+            while s < (*st).active_spark_num {
+                let sp = spark_at(sparks, s as usize);
+                // Diamond-shaped eraser.
+                if area_width
+                    >= (spark_x - (*sp).x as i32).wrapping_abs()
+                        + (spark_y - (*sp).y as i32).wrapping_abs()
+                {
+                    // Delete spark by replacing it with last one (+ delete last one).
+                    (*st).active_spark_num -= 1;
+                    let last = (*st).active_spark_num as usize;
+                    (*spark_at(sparks, s as usize)) = (*spark_at(sparks, last));
+                }
+                s += 1;
             }
-            s += 1;
         }
+        Ok(())
     }
 }
 
 /// `UFireTexture::DrawSparkLine`, body only. The C++ `Density` argument is unused.
 #[allow(clippy::too_many_arguments)]
-fn draw_spark_line_inner(
-    g: &mut FireGlobals,
-    ed: &mut EditorState,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+unsafe fn draw_spark_line_inner(
+    g: &mut FireSession,
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     start_x: i32,
     start_y: i32,
     dest_x: i32,
     dest_y: i32,
-) {
-    let mut div_x = dest_x - start_x;
-    let mut div_y = dest_y - start_y;
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        let mut div_x = dest_x - start_x;
+        let mut div_y = dest_y - start_y;
 
-    if div_x == 0 && div_y == 0 {
-        return;
-    }
-
-    let xinc: i32 = if div_x < 0 {
-        -1
-    } else if div_x > 0 {
-        1
-    } else {
-        0
-    };
-    let yinc: i32 = if div_y < 0 {
-        -1
-    } else if div_y > 0 {
-        1
-    } else {
-        0
-    };
-
-    div_x = div_x.wrapping_abs();
-    div_y = div_y.wrapping_abs();
-
-    let mut xpoint = start_x;
-    let mut ypoint = start_y;
-
-    if div_x >= div_y {
-        // Draw line based on X loop.
-        let div_y2 = div_y + div_y;
-        let mut diff = div_y2 - div_x;
-        let div_xy2 = div_y2 - div_x - div_x;
-
-        for _ in 1..=div_x {
-            add_spark_inner(g, ed, st, sparks, xpoint, ypoint);
-
-            if diff < 0 {
-                diff += div_y2;
-            } else {
-                diff += div_xy2;
-                ypoint += yinc;
-            }
-            xpoint += xinc;
+        if div_x == 0 && div_y == 0 {
+            return Ok(());
         }
-    } else {
-        // Draw line based on Y loop.
-        let div_x2 = div_x + div_x;
-        let mut diff = div_x2 - div_y;
-        let div_xy2 = div_x2 - div_y - div_y;
 
-        for _ in 1..=div_y {
-            add_spark_inner(g, ed, st, sparks, xpoint, ypoint);
+        let xinc: i32 = if div_x < 0 {
+            -1
+        } else if div_x > 0 {
+            1
+        } else {
+            0
+        };
+        let yinc: i32 = if div_y < 0 {
+            -1
+        } else if div_y > 0 {
+            1
+        } else {
+            0
+        };
 
-            if diff < 0 {
-                diff += div_x2;
-            } else {
-                diff += div_xy2;
+        div_x = div_x.wrapping_abs();
+        div_y = div_y.wrapping_abs();
+
+        let mut xpoint = start_x;
+        let mut ypoint = start_y;
+
+        if div_x >= div_y {
+            // Draw line based on X loop.
+            let div_y2 = div_y + div_y;
+            let mut diff = div_y2 - div_x;
+            let div_xy2 = div_y2 - div_x - div_x;
+
+            for _ in 1..=div_x {
+                add_spark_inner(g, st, sparks, xpoint, ypoint)?;
+
+                if diff < 0 {
+                    diff += div_y2;
+                } else {
+                    diff += div_xy2;
+                    ypoint += yinc;
+                }
                 xpoint += xinc;
             }
-            ypoint += yinc;
+        } else {
+            // Draw line based on Y loop.
+            let div_x2 = div_x + div_x;
+            let mut diff = div_x2 - div_y;
+            let div_xy2 = div_x2 - div_y - div_y;
+
+            for _ in 1..=div_y {
+                add_spark_inner(g, st, sparks, xpoint, ypoint)?;
+
+                if diff < 0 {
+                    diff += div_x2;
+                } else {
+                    diff += div_xy2;
+                    xpoint += xinc;
+                }
+                ypoint += yinc;
+            }
         }
+        Ok(())
     }
 }
 
-/// `UFireTexture::FirePaint`, body only. The caller holds the locks.
-fn fire_paint_inner(
-    g: &mut FireGlobals,
-    ed: &mut EditorState,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+/// `UFireTexture::FirePaint`, body only.
+unsafe fn fire_paint_inner(
+    g: &mut FireSession,
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     mouse_x: i32,
     mouse_y: i32,
     buttons: u32,
-) {
-    // Raw masked values, as in C: `UBOOL RightButton = (Buttons & MOUSE_Right)`.
-    let right_button = (buttons & MOUSE_RIGHT) as i32;
-    let left_button = (buttons & MOUSE_LEFT) as i32;
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        // Raw masked values, as in C: `UBOOL RightButton = (Buttons & MOUSE_Right)`.
+        let right_button = (buttons & MOUSE_RIGHT) as i32;
+        let left_button = (buttons & MOUSE_LEFT) as i32;
 
-    // Perform painting.
-    let last_mouse_x = ed.last_mouse_x;
-    let last_mouse_y = ed.last_mouse_y;
-    let pos_changed = last_mouse_x != mouse_x || last_mouse_y != mouse_y;
-    let right_changed = ed.last_right_button != right_button;
-    let left_changed = ed.last_left_button != left_button;
+        // Perform painting.
+        let last_mouse_x = editor().last_mouse_x;
+        let last_mouse_y = editor().last_mouse_y;
+        let pos_changed = last_mouse_x != mouse_x || last_mouse_y != mouse_y;
+        let right_changed = editor().last_right_button != right_button;
+        let left_changed = editor().last_left_button != left_button;
 
-    if left_changed && left_button != 0 {
-        st.pen_down_x = mouse_x as u8;
-        st.pen_down_y = mouse_y as u8;
-    }
-    if left_changed && left_button == 0 {
-        st.pen_down_x = 0;
-        st.pen_down_y = 0;
-    }
-
-    // Draws the kind of spark/linetype currently selected.
-    if left_button != 0 {
-        if !left_changed && pos_changed && st.spark_type < 4 {
-            draw_spark_line_inner(
-                g,
-                ed,
-                st,
-                sparks,
-                last_mouse_x,
-                last_mouse_y,
-                mouse_x,
-                mouse_y,
-            );
+        if left_changed && left_button != 0 {
+            (*st).pen_down_x = mouse_x as u8;
+            (*st).pen_down_y = mouse_y as u8;
+        }
+        if left_changed && left_button == 0 {
+            (*st).pen_down_x = 0;
+            (*st).pen_down_y = 0;
         }
 
-        if left_changed || (pos_changed && st.spark_type >= 4) {
-            add_spark_inner(g, ed, st, sparks, mouse_x, mouse_y);
+        // Draws the kind of spark/linetype currently selected.
+        if left_button != 0 {
+            if !left_changed && pos_changed && (*st).spark_type < 4 {
+                draw_spark_line_inner(g, st, sparks, last_mouse_x, last_mouse_y, mouse_x, mouse_y)?;
+            }
+
+            if left_changed || (pos_changed && (*st).spark_type >= 4) {
+                add_spark_inner(g, st, sparks, mouse_x, mouse_y)?;
+            }
+        } else {
+            // LeftButton == 0. Lightning bolt close on release + movement.
+            if left_changed || pos_changed {
+                close_spark_inner(st, sparks)?;
+            }
         }
-    } else {
-        // LeftButton == 0. Lightning bolt close on release + movement.
-        if left_changed || pos_changed {
-            close_spark_inner(st, sparks);
+
+        // Lightning bolt close on non-moving re-clicking.
+        if !left_changed && !pos_changed && left_button != 0 {
+            close_spark_inner(st, sparks)?;
         }
-    }
 
-    // Lightning bolt close on non-moving re-clicking.
-    if !left_changed && !pos_changed && left_button != 0 {
-        close_spark_inner(st, sparks);
-    }
+        // Delete any sparks within certain range of mouse cursor.
+        if right_button != 0 && (pos_changed || right_changed) {
+            delete_sparks_inner(st, sparks, mouse_x, mouse_y, DEL_RANGE)?;
+        }
 
-    // Delete any sparks within certain range of mouse cursor.
-    if right_button != 0 && (pos_changed || right_changed) {
-        delete_sparks_inner(st, sparks, mouse_x, mouse_y, DEL_RANGE);
+        // Remember.
+        editor().last_mouse_x = mouse_x;
+        editor().last_mouse_y = mouse_y;
+        editor().last_left_button = left_button;
+        editor().last_right_button = right_button;
+        Ok(())
     }
-
-    // Remember.
-    ed.last_mouse_x = mouse_x;
-    ed.last_mouse_y = mouse_y;
-    ed.last_left_button = left_button;
-    ed.last_right_button = right_button;
 }
 
 /// `spawn_index`: `INT NS = ActiveSparkNum++;`.
-fn spawn_index(st: &mut FireSparkState) -> usize {
-    let n = st.active_spark_num as usize;
-    st.active_spark_num += 1;
-    n
+unsafe fn spawn_index(st: *mut FireSparkState) -> usize {
+    unsafe {
+        let n = (*st).active_spark_num as usize;
+        (*st).active_spark_num += 1;
+        n
+    }
 }
 
-/// Caps `SparksLimit` at `Sparks.Num()`. C writes past the array when the limit is larger (UB);
-/// here the spawn guards stop at the slice length. Only this local copy changes.
-fn clamp_sparks_limit(st: &mut FireSparkState, sparks: &[FireSpark]) {
-    st.sparks_limit = st.sparks_limit.min(sparks.len() as i32);
+/// Cap the spawn limit against the currently published arena length.
+unsafe fn clamp_sparks_limit(st: *mut FireSparkState, sparks: *const FireArena<FireSpark>) {
+    unsafe {
+        (*st).sparks_limit = (*st)
+            .sparks_limit
+            .min((*sparks).len.min(i32::MAX as usize) as i32);
+    }
 }
 
 /// `UFireTexture::AddSpark`: spawns one spark of `spark_type` at the mouse position.
-pub fn add_spark(
+///
+/// # Safety
+/// The state and descriptors must satisfy the module's native reentry contract.
+pub unsafe fn add_spark(
     trace: FireTraceHooks,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     mouse_x: i32,
     mouse_y: i32,
-) {
-    let mut g = globals::lock();
-    g.trace = trace;
-    clamp_sparks_limit(st, sparks);
-    let mut ed = editor();
-    add_spark_inner(&mut g, &mut ed, st, sparks, mouse_x, mouse_y);
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        let mut g = FireSession::new(trace);
+
+        clamp_sparks_limit(st, sparks);
+
+        add_spark_inner(&mut g, st, sparks, mouse_x, mouse_y)?;
+        Ok(())
+    }
 }
 
 /// `UFireTexture::CloseSpark`: closes the most recent open lightning bolt.
-pub fn close_spark(trace: FireTraceHooks, st: &mut FireSparkState, sparks: &mut [FireSpark]) {
-    let mut g = globals::lock();
-    g.trace = trace;
-    close_spark_inner(st, sparks);
+///
+/// # Safety
+/// State and descriptor storage must be valid and exclusively accessed for this call.
+pub unsafe fn close_spark(
+    _trace: FireTraceHooks,
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
+) -> Result<(), FireCallbackError> {
+    unsafe { close_spark_inner(st, sparks) }
 }
 
 /// `UFireTexture::DeleteSparks`: removes sparks inside a diamond around the cursor.
-pub fn delete_sparks(
-    trace: FireTraceHooks,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+///
+/// # Safety
+/// State and descriptor storage must be valid and exclusively accessed for this call.
+pub unsafe fn delete_sparks(
+    _trace: FireTraceHooks,
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     spark_x: i32,
     spark_y: i32,
     area_width: i32,
-) {
-    let mut g = globals::lock();
-    g.trace = trace;
-    delete_sparks_inner(st, sparks, spark_x, spark_y, area_width);
+) -> Result<(), FireCallbackError> {
+    unsafe { delete_sparks_inner(st, sparks, spark_x, spark_y, area_width) }
 }
 
 /// `UFireTexture::DrawSparkLine`: Bresenham line of sparks between two points.
-pub fn draw_spark_line(
+///
+/// # Safety
+/// The state and descriptors must satisfy the module's native reentry contract.
+pub unsafe fn draw_spark_line(
     trace: FireTraceHooks,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     start_x: i32,
     start_y: i32,
     dest_x: i32,
     dest_y: i32,
-) {
-    let mut g = globals::lock();
-    g.trace = trace;
-    clamp_sparks_limit(st, sparks);
-    let mut ed = editor();
-    draw_spark_line_inner(
-        &mut g, &mut ed, st, sparks, start_x, start_y, dest_x, dest_y,
-    );
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        let mut g = FireSession::new(trace);
+
+        clamp_sparks_limit(st, sparks);
+
+        draw_spark_line_inner(&mut g, st, sparks, start_x, start_y, dest_x, dest_y)?;
+        Ok(())
+    }
 }
 
 /// `UFireTexture::FirePaint`: the fire-specific editor mouse handler.
-pub fn fire_paint(
+///
+/// # Safety
+/// The state and descriptors must satisfy the module's native reentry contract.
+pub unsafe fn fire_paint(
     trace: FireTraceHooks,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
     mouse_x: i32,
     mouse_y: i32,
     buttons: u32,
-) {
-    let mut g = globals::lock();
-    g.trace = trace;
-    clamp_sparks_limit(st, sparks);
-    let mut ed = editor();
-    fire_paint_inner(&mut g, &mut ed, st, sparks, mouse_x, mouse_y, buttons);
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        let mut g = FireSession::new(trace);
+
+        clamp_sparks_limit(st, sparks);
+
+        fire_paint_inner(&mut g, st, sparks, mouse_x, mouse_y, buttons)?;
+        Ok(())
+    }
 }
 
 /// `UFireTexture::PostDrawSparks`: restores each fixed star's pixel after the update.
-pub fn post_draw_sparks(
-    trace: FireTraceHooks,
-    st: &mut FireSparkState,
-    sparks: &mut [FireSpark],
-    mips0: &mut [u8],
-) {
-    let mut g = globals::lock();
-    g.trace = trace;
+///
+/// # Safety
+/// State and descriptor storage must be valid and exclusively accessed for this call.
+pub unsafe fn post_draw_sparks(
+    _trace: FireTraceHooks,
+    st: *mut FireSparkState,
+    sparks: *const FireArena<FireSpark>,
+    mips0: *const FireArena<u8>,
+) -> Result<(), FireCallbackError> {
+    unsafe {
+        // No stars so don't search the array.
+        if (*st).star_status == 0 {
+            return Ok(());
+        }
 
-    // No stars so don't search the array.
-    if st.star_status == 0 {
-        return;
-    }
+        let mut found_star: u8 = 0;
+        for s in 0..(*st).active_spark_num {
+            let sp = spark_at(sparks, s as usize);
+            if (*sp).ty == SPARK_STARS {
+                found_star = 1;
+                // Fixed stars disappear depending to fire Intensity.
+                // called here after the update: so restore the original star.
+                // ByteA has the star itself, ByteB the saved bckgrnd.
+                let dest = texel((*sp).x as i32, (*sp).y as i32, (*st).u_bits);
 
-    let mut found_star: u8 = 0;
-    for s in 0..st.active_spark_num {
-        let sp = &mut sparks[s as usize];
-        if sp.ty == SPARK_STARS {
-            found_star = 1;
-            // Fixed stars disappear depending to fire Intensity.
-            // called here after the update: so restore the original star.
-            // ByteA has the star itself, ByteB the saved bckgrnd.
-            let dest = texel(sp.x as i32, sp.y as i32, st.u_bits);
+                // Save real sky value.
+                let dim_star = (*pixel_at(mips0, dest));
+                (*sp).byte_b = dim_star;
 
-            // Save real sky value.
-            let dim_star = mips0[dest];
-            sp.byte_b = dim_star;
-
-            // Put in the star if under cutoff.
-            if dim_star < STAR_CUTOFF {
-                mips0[dest] = sp.byte_a;
+                // Put in the star if under cutoff.
+                if dim_star < STAR_CUTOFF {
+                    (*pixel_at(mips0, dest)) = (*sp).byte_a;
+                }
             }
         }
-    }
 
-    if found_star == 0 {
-        st.star_status = 0;
+        if found_star == 0 {
+            (*st).star_status = 0;
+        }
+        Ok(())
     }
 }

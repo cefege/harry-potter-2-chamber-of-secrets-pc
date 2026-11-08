@@ -463,7 +463,9 @@ fn canvas_draw_calls_match_original_trace() {
                     flags: int(t[8]) as u32,
                 };
                 assert_eq!(lines[i + 2], "res", "icn res line {}", i + 2);
-                draw_icon(&mut fake, &cv, &args);
+                let size = fake.texture_size(Texture(args.tex));
+                let draw = draw_icon(&args, size);
+                fake.draw_tile_texture(&cv, &draw);
                 i = check_dev(&lines, i + 3, &fake.dev, line);
             }
             "clp" => {

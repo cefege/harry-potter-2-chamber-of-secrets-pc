@@ -98,101 +98,179 @@ fn cstr(p: *const c_char) -> &'static str {
 }
 
 // Hooks mirroring the PawnInput* functions of the harness.
-unsafe extern "C" fn find_bool(klass: *mut c_void, name: *const c_char) -> *mut c_void {
-    let klass = klass as usize;
-    if klass != HARRY && klass != HARRY2 {
-        return std::ptr::null_mut();
+unsafe extern "C" fn find_bool(
+    klass: *mut c_void,
+    name: *const c_char,
+    out: *mut *mut c_void,
+) -> i32 {
+    let value = (|| {
+        let klass = klass as usize;
+        if klass != HARRY && klass != HARRY2 {
+            return std::ptr::null_mut();
+        }
+        let name = cstr(name);
+        let idx = BOOL_NAMES
+            .iter()
+            .position(|&n| n == name)
+            .unwrap_or_else(|| panic!("unknown bool property {name}"));
+        let missing = with(|w| klass == HARRY2 && (w.missing_mask >> idx) & 1 != 0);
+        if missing {
+            std::ptr::null_mut()
+        } else {
+            (PROP_BASE + idx) as *mut c_void
+        }
+    })();
+    unsafe {
+        *out = value;
     }
-    let name = cstr(name);
-    let idx = BOOL_NAMES
-        .iter()
-        .position(|&n| n == name)
-        .unwrap_or_else(|| panic!("unknown bool property {name}"));
-    let missing = with(|w| klass == HARRY2 && (w.missing_mask >> idx) & 1 != 0);
-    if missing {
-        std::ptr::null_mut()
-    } else {
-        (PROP_BASE + idx) as *mut c_void
+    0
+}
+
+unsafe extern "C" fn find_object(
+    klass: *mut c_void,
+    name: *const c_char,
+    out: *mut *mut c_void,
+) -> i32 {
+    let value = (|| {
+        let klass = klass as usize;
+        if klass != HARRY && klass != HARRY2 {
+            return std::ptr::null_mut();
+        }
+        assert_eq!(cstr(name), "BossTarget");
+        (PROP_BASE + BOSS_IDX) as *mut c_void
+    })();
+    unsafe {
+        *out = value;
     }
+    0
 }
 
-unsafe extern "C" fn find_object(klass: *mut c_void, name: *const c_char) -> *mut c_void {
-    let klass = klass as usize;
-    if klass != HARRY && klass != HARRY2 {
-        return std::ptr::null_mut();
+unsafe extern "C" fn property_offset(prop: *mut c_void, out: *mut i32) -> i32 {
+    let value = (|| {
+        let idx = prop as usize - PROP_BASE;
+        (std::mem::size_of::<APlayerPawn>() + BOOL_STRIDE * idx) as i32
+    })();
+    unsafe {
+        *out = value;
     }
-    assert_eq!(cstr(name), "BossTarget");
-    (PROP_BASE + BOSS_IDX) as *mut c_void
+    0
 }
 
-unsafe extern "C" fn property_offset(prop: *mut c_void) -> i32 {
-    let idx = prop as usize - PROP_BASE;
-    (std::mem::size_of::<APlayerPawn>() + BOOL_STRIDE * idx) as i32
+unsafe extern "C" fn bool_property_mask(_prop: *mut c_void, out: *mut u32) -> i32 {
+    let value = (|| 1)();
+    unsafe {
+        *out = value;
+    }
+    0
 }
 
-unsafe extern "C" fn bool_property_mask(_prop: *mut c_void) -> u32 {
-    1
+unsafe extern "C" fn object_class(_obj: *mut c_void, out: *mut *mut c_void) -> i32 {
+    let value = (|| with(|w| w.obj_class) as *mut c_void)();
+    unsafe {
+        *out = value;
+    }
+    0
 }
 
-unsafe extern "C" fn object_class(_obj: *mut c_void) -> *mut c_void {
-    with(|w| w.obj_class) as *mut c_void
+unsafe extern "C" fn class_super(klass: *mut c_void, out: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        with(|w| {
+            if klass as usize == BASE {
+                w.base_super
+            } else {
+                0
+            }
+        }) as *mut c_void
+    })();
+    unsafe {
+        *out = value;
+    }
+    0
 }
 
-unsafe extern "C" fn class_super(klass: *mut c_void) -> *mut c_void {
-    with(|w| {
-        if klass as usize == BASE {
-            w.base_super
+unsafe extern "C" fn is_a(_obj: *mut c_void, klass: *mut c_void, out: *mut i32) -> i32 {
+    let value = (|| with(|w| (klass as usize == w.obj_class) as i32))();
+    unsafe {
+        *out = value;
+    }
+    0
+}
+
+unsafe extern "C" fn class_path_equals(
+    klass: *mut c_void,
+    path: *const c_char,
+    out: *mut i32,
+) -> i32 {
+    let value = (|| {
+        let klass = klass as usize;
+        ((klass == HARRY || klass == HARRY2) && cstr(path) == "HGame.Harry") as i32
+    })();
+    unsafe {
+        *out = value;
+    }
+    0
+}
+
+unsafe extern "C" fn state_node(obj: *mut c_void, out: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        with(|w| {
+            let obj = obj as usize;
+            if obj == w.pawn {
+                if w.walk { STATE_WALK } else { 0 }
+            } else if obj == w.view {
+                if w.cam { STATE_CAM } else { 0 }
+            } else {
+                0
+            }
+        }) as *mut c_void
+    })();
+    unsafe {
+        *out = value;
+    }
+    0
+}
+
+unsafe extern "C" fn state_super(state: *mut c_void, out: *mut *mut c_void) -> i32 {
+    let value = (|| {
+        (if state as usize == STATE_WALK {
+            STATE_BASE
         } else {
             0
-        }
-    }) as *mut c_void
+        }) as *mut c_void
+    })();
+    unsafe {
+        *out = value;
+    }
+    0
 }
 
-unsafe extern "C" fn is_a(_obj: *mut c_void, klass: *mut c_void) -> i32 {
-    with(|w| (klass as usize == w.obj_class) as i32)
+unsafe extern "C" fn state_name_equals(
+    state: *mut c_void,
+    name: *const c_char,
+    out: *mut i32,
+) -> i32 {
+    let value = (|| {
+        let expected = match state as usize {
+            STATE_WALK => "PlayerWalking",
+            STATE_BASE => "PlayerPawnBase",
+            STATE_CAM => "StateStandardCam",
+            _ => return 0,
+        };
+        (cstr(name) == expected) as i32
+    })();
+    unsafe {
+        *out = value;
+    }
+    0
 }
 
-unsafe extern "C" fn class_path_equals(klass: *mut c_void, path: *const c_char) -> i32 {
-    let klass = klass as usize;
-    ((klass == HARRY || klass == HARRY2) && cstr(path) == "HGame.Harry") as i32
-}
-
-unsafe extern "C" fn state_node(obj: *mut c_void) -> *mut c_void {
-    with(|w| {
-        let obj = obj as usize;
-        if obj == w.pawn {
-            if w.walk { STATE_WALK } else { 0 }
-        } else if obj == w.view {
-            if w.cam { STATE_CAM } else { 0 }
-        } else {
-            0
-        }
-    }) as *mut c_void
-}
-
-unsafe extern "C" fn state_super(state: *mut c_void) -> *mut c_void {
-    (if state as usize == STATE_WALK {
-        STATE_BASE
-    } else {
-        0
-    }) as *mut c_void
-}
-
-unsafe extern "C" fn state_name_equals(state: *mut c_void, name: *const c_char) -> i32 {
-    let expected = match state as usize {
-        STATE_WALK => "PlayerWalking",
-        STATE_BASE => "PlayerPawnBase",
-        STATE_CAM => "StateStandardCam",
-        _ => return 0,
-    };
-    (cstr(name) == expected) as i32
-}
-
-unsafe extern "C" fn log_missing_property(name: *const c_char) {
+unsafe extern "C" fn log_missing_property(name: *const c_char) -> i32 {
     with(|w| {
         w.logs += 1;
         w.last_log = cstr(name).to_string();
     });
+
+    0
 }
 
 unsafe extern "C" fn sin_tab(angle: i32) -> f32 {
@@ -345,7 +423,17 @@ fn pawn_native_input_replay() {
         let mut raw = [7.0f32, 7.5, 8.0, 8.5];
         let before = with(|w| w.logs);
         // SAFETY: rig.pawn is a live APlayerPawn; svc matches the mock hooks.
-        let ret = unsafe { begin_modern_third_person_input(&svc, rig.pawn, &mut raw) };
+        let ret = unsafe {
+            begin_modern_third_person_input(
+                &svc,
+                rig.pawn,
+                raw.as_mut_ptr(),
+                raw.as_mut_ptr().add(1),
+                raw.as_mut_ptr().add(2),
+                raw.as_mut_ptr().add(3),
+            )
+            .unwrap()
+        };
         let dlogs = with(|w| w.logs) - before;
         let p = rig.pawn;
         // SAFETY: as above.
@@ -399,7 +487,8 @@ fn pawn_native_input_replay() {
                     row[3],
                     row[4],
                     row[5],
-                );
+                )
+                .unwrap();
             }
             let dlogs = with(|w| w.logs) - before;
             let p = rig.pawn;
@@ -458,7 +547,7 @@ fn pawn_native_input_replay() {
         }
         let before = with(|w| w.logs);
         // SAFETY: rig.pawn is a live APlayerPawn; svc matches the mock hooks.
-        unsafe { apply_modern_third_person_movement(&svc, rig.pawn) };
+        unsafe { apply_modern_third_person_movement(&svc, rig.pawn).unwrap() };
         let dlogs = with(|w| w.logs) - before;
         let p = rig.pawn;
         // SAFETY: as above.

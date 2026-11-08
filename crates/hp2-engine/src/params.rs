@@ -26,10 +26,6 @@ use hp2_abi::engine::generated::FRotator;
 use crate::math::app_round;
 
 /// `TCHAR` as the C++ side sees it (`wchar_t` under `UNICODE=1`).
-#[cfg(windows)]
-pub type TChar = u16;
-/// `TCHAR` as the C++ side sees it (`wchar_t` under `UNICODE=1`).
-#[cfg(not(windows))]
 pub type TChar = i32;
 
 /// C++ services (`Hp2ParamsServices` in `Hp2ParamsServices.cpp`), same field order.

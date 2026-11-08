@@ -1,9 +1,10 @@
 //! OpenAL and ALC constants used by the subsystem, plus the port of
 //! `UALAudioSubsystem::alError`.
 //!
-//! The values are the ones in `HarryPotter2/Unreal/OpenAL/Inc/al.h` and
-//! `alctypes.h`. The C++ shell `static_assert`s each of them against the
-//! header, so a drifted constant fails the C++ build.
+//! The values are the ones in the pinned OpenAL Soft header (see
+//! `Build/CMake/HP2Dependencies.cmake`'s `openal-soft` `FetchContent`), the
+//! same header `crates/hp2-audio/src/openal.rs`'s `al*`/`alc*` FFI
+//! declarations target.
 
 use crate::host::{Host, HostResult};
 

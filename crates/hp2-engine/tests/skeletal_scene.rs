@@ -17,7 +17,7 @@
 //!   filled as UnSkeletalMesh.cpp:789-800 does. `DisplayInfluences`: `DebugVerts`
 //!   sized to `FrameVerts` (UnSkeletalMesh.cpp:803-805). Only the counts and the
 //!   pivot/parent values are compared (the harness prints nothing else).
-//! - `debugf` (missing-link warning) is discarded; `check()` failures panic.
+//! - `debugf` (missing-link warning) is discarded; `check()` failures return a checked status.
 //!   Field mismatches are collected per family and reported together at the end of
 //!   each test (case number and field, got/want bits, ULP distance); structural
 //!   errors (missing or trailing tokens) panic at once.
@@ -38,11 +38,12 @@ use std::mem::zeroed;
 use std::ptr::{copy, null_mut};
 
 use hp2_abi::engine::generated::{
-    AActor, FAnalogTrack, FBox, FMeshAnimSeq, FMeshBone, FMeshFace, FNamedBone, FPlace,
-    MotionChunk, TArrayRaw, TRefArrayRaw, UAnimation, USkeletalMesh, VBoneInfIndex, VBoneInfluence,
+    AActor, CFSkelHeader, FAnalogTrack, FBox, FMeshAnimSeq, FMeshBone, FMeshFace, FNamedBone,
+    FPlace, MotionChunk, TArrayRaw, TRefArrayRaw, UAnimation, USkeletalMesh, VBoneInfIndex,
+    VBoneInfluence,
 };
 use hp2_abi::{FCoords, FPlane, FVector};
-use hp2_engine::skeletal::{self, AnimVec, SkelHost};
+use hp2_engine::skeletal::{self, AnimVec, SkelError, SkelHost, SkelResult};
 
 const APPLY: &str = include_str!("fixtures/skeletal_apply_anim.txt");
 const FRAME: &str = include_str!("fixtures/skeletal_frame.txt");
@@ -302,33 +303,43 @@ impl SkelHost for Host<'_> {
         self.trig[(shifted & (TRIG_ENTRIES as i32 - 1)) as usize]
     }
 
-    fn cache_get(&self, owner: *const AActor, item: &mut *mut c_void) -> *mut u8 {
+    fn cache_get(&self, owner: *const AActor, item: &mut *mut c_void) -> SkelResult<*mut u8> {
         match self.blocks.borrow().get(&(owner as usize)) {
             Some(&block) => {
                 *item = block.cast();
-                block
+                Ok(block)
             }
-            None => null_mut(),
+            None => Ok(null_mut()),
         }
     }
 
-    fn cache_create(&self, owner: *const AActor, bytes: usize, item: &mut *mut c_void) -> *mut u8 {
+    fn cache_create(
+        &self,
+        owner: *const AActor,
+        bytes: usize,
+        item: &mut *mut c_void,
+    ) -> SkelResult<*mut u8> {
         let words = bytes.div_ceil(8).max(1);
         let block = Box::leak(vec![0u64; words].into_boxed_slice()).as_mut_ptr() as *mut u8;
         *item = block.cast();
         self.blocks.borrow_mut().insert(owner as usize, block);
-        block
+        Ok(block)
     }
 
-    fn cache_flush(&self, owner: *const AActor) {
+    fn cache_flush(&self, owner: *const AActor) -> SkelResult<()> {
         self.blocks.borrow_mut().remove(&(owner as usize));
+        Ok(())
     }
 
-    fn cache_unlock(&self, _item: *mut c_void) {}
+    fn cache_unlock(&self, _item: *mut c_void) -> SkelResult<()> {
+        Ok(())
+    }
 
-    fn warn_missing_link(&self, _mesh: *const USkeletalMesh, _bone: usize) {}
+    fn warn_missing_link(&self, _mesh: *const USkeletalMesh, _bone: usize) -> SkelResult<()> {
+        Ok(())
+    }
 
-    fn remove_aux(&self, owner: *mut AActor, index: usize) {
+    fn remove_aux(&self, owner: *mut AActor, index: usize, channel: *mut AActor) -> SkelResult<()> {
         // SAFETY: the port passes a live owner whose AuxAnims holds `index`.
         unsafe {
             // AActor is packed: read and write the TArray by value, never by reference.
@@ -336,7 +347,7 @@ impl SkelHost for Host<'_> {
             let mut arr = std::ptr::read_unaligned(field);
             let base = arr.data.cast::<*mut AActor>();
             assert!(index < arr.num as usize, "remove_aux index out of range");
-            self.destroyed.borrow_mut().push(*base.add(index) as usize);
+            self.destroyed.borrow_mut().push(channel as usize);
             copy(
                 base.add(index + 1),
                 base.add(index),
@@ -345,9 +356,16 @@ impl SkelHost for Host<'_> {
             arr.num -= 1;
             std::ptr::write_unaligned(field, arr);
         }
+        Ok(())
     }
 
-    fn debug_pivots(&self, mesh: *mut USkeletalMesh, bases: &[FCoords]) {
+    fn debug_pivots(
+        &self,
+        mesh: *mut USkeletalMesh,
+        bases: *const FCoords,
+        num: usize,
+    ) -> SkelResult<()> {
+        let bases = unsafe { std::slice::from_raw_parts(bases, num) };
         // UnSkeletalMesh.cpp:791-798: DebugPivots/DebugParents sized to SpaceBases.Num().
         // SAFETY: `mesh` is a live USkeletalMesh with a RefSkeleton of at least `bases.len()`.
         unsafe {
@@ -357,19 +375,81 @@ impl SkelHost for Host<'_> {
             (*mesh).debug_pivots = self.array(pivots);
             (*mesh).debug_parents = self.array(parents);
         }
+        Ok(())
     }
 
-    fn debug_influences(&self, mesh: *mut USkeletalMesh) {
+    fn debug_influences(&self, mesh: *mut USkeletalMesh) -> SkelResult<()> {
         // UnSkeletalMesh.cpp:804: DebugVerts.Add(FrameVerts). Values are not compared.
         // SAFETY: `mesh` is a live USkeletalMesh.
         unsafe {
             let n = (*mesh).frame_verts.max(0) as usize;
             (*mesh).debug_verts = self.array(vec![0i32; n]);
         }
+        Ok(())
     }
 
-    fn fail_check(&self, expr: &CStr) {
-        panic!("skeletal check() failed: {}", expr.to_string_lossy());
+    fn fail_check(&self, _expr: &CStr) -> SkelResult<()> {
+        Err(SkelError(1))
+    }
+    fn with_cache<R>(
+        &self,
+        owner: *const AActor,
+        body: impl FnOnce(*mut CFSkelHeader) -> SkelResult<R>,
+    ) -> SkelResult<R> {
+        let mut item = null_mut();
+        let mem = self.cache_get(owner, &mut item)?;
+        let result = body(mem.cast());
+        let cleanup = self.cache_unlock(item);
+        match result {
+            Err(e) => Err(e),
+            Ok(v) => cleanup.map(|()| v),
+        }
+    }
+    fn with_linkup<R>(&self, body: impl FnOnce() -> SkelResult<R>) -> SkelResult<R> {
+        body()
+    }
+    fn with_bases<R>(
+        &self,
+        num: usize,
+        body: impl FnOnce(*mut FCoords) -> SkelResult<R>,
+    ) -> SkelResult<R> {
+        let mut data = Vec::<std::mem::MaybeUninit<FCoords>>::with_capacity(num);
+        unsafe {
+            data.set_len(num);
+        }
+        body(data.as_mut_ptr().cast())
+    }
+    fn with_vertices<R>(
+        &self,
+        num: usize,
+        body: impl FnOnce(*mut FVector) -> SkelResult<R>,
+    ) -> SkelResult<R> {
+        let mut data = vec![zero::<FVector>(); num];
+        body(data.as_mut_ptr())
+    }
+    fn animation_sequence(
+        &self,
+        anim: *mut UAnimation,
+        name: [u8; 4],
+    ) -> SkelResult<*const FMeshAnimSeq> {
+        let seqs = unsafe { elems::<FMeshAnimSeq>((*anim).anim_seqs.data, (*anim).anim_seqs.num) };
+        Ok(seqs
+            .iter()
+            .find(|s| s.name == name)
+            .map_or(std::ptr::null(), std::ptr::from_ref))
+    }
+    fn animation_movement(
+        &self,
+        anim: *mut UAnimation,
+        name: [u8; 4],
+    ) -> SkelResult<*const MotionChunk> {
+        let seqs = unsafe { elems::<FMeshAnimSeq>((*anim).anim_seqs.data, (*anim).anim_seqs.num) };
+        Ok(seqs
+            .iter()
+            .position(|s| s.name == name)
+            .map_or(std::ptr::null(), |i| unsafe {
+                (*anim).moves.data.cast::<MotionChunk>().add(i)
+            }))
     }
 }
 
@@ -641,7 +721,7 @@ fn replay_apply(text: &str, host: &Host) -> Vec<String> {
         }
         (*o).aux_anims = host.array(aux.clone());
         let root_only = l.int() != 0;
-        skeletal::apply_anim(host, m, o, null_mut(), root_only);
+        skeletal::apply_anim(host, m, o, null_mut(), root_only).unwrap();
 
         l.expect_bits("AnimFrame", (*o).anim_frame);
         l.expect_bits("AnimLast", (*o).anim_last);
@@ -654,7 +734,7 @@ fn replay_apply(text: &str, host: &Host) -> Vec<String> {
         }
         let nb = (*m).ref_skeleton.num;
         for b in 0..nb {
-            let c = skeletal::get_bone_coords(host, m, o, b);
+            let c = skeletal::get_bone_coords(host, m, o, b).unwrap();
             l.expect_coords(&format!("bone[{b}]"), c);
         }
         l.end()
@@ -686,7 +766,7 @@ fn replay_frame(text: &str, host: &Host) -> Vec<String> {
                 buf[at..at + 4].copy_from_slice(&0x7FC0_BEEFu32.to_le_bytes());
             }
         }
-        skeletal::get_frame(host, m, buf.as_mut_ptr(), stride, c, o, &mut lod);
+        skeletal::get_frame(host, m, buf.as_mut_ptr(), stride, c, o, &mut lod).unwrap();
         l.expect_int("Lod", lod as i64);
 
         for v in 0..nv {
@@ -734,12 +814,12 @@ fn replay_root(text: &str, host: &Host) -> Vec<String> {
         let o = read_actor(&mut l, host, anim, null_mut(), m);
         let adj = l.vec();
 
-        let r1 = skeletal::get_root_movement(host, m, o);
+        let r1 = skeletal::get_root_movement(host, m, o).unwrap();
         l.expect_vec("RootMovement", r1);
-        skeletal::adjust_root_movement(host, o, adj);
-        let r2 = skeletal::get_root_movement(host, m, o);
+        skeletal::adjust_root_movement(host, o, adj).unwrap();
+        let r2 = skeletal::get_root_movement(host, m, o).unwrap();
         l.expect_vec("RootMovement.adjusted", r2);
-        let cyc = skeletal::anim_cycle_movement(host, m, o);
+        let cyc = skeletal::anim_cycle_movement(host, m, o).unwrap();
         l.expect_vec("AnimCycleMovement", cyc);
         l.end()
     }
@@ -761,7 +841,7 @@ fn replay_bounds(text: &str, host: &Host) -> Vec<String> {
         let new_scale = l.vec();
         let want = l.int();
 
-        let render = skeletal::get_render_bounding_box(host, m, o);
+        let render = skeletal::get_render_bounding_box(host, m, o).unwrap();
         l.expect_coords("RenderBox", render);
         let collision = skeletal::get_collision_bounding_box(host, m, o, world);
         l.expect_box(

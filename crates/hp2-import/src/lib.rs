@@ -65,7 +65,83 @@ pub mod classify;
 pub mod collect;
 pub mod files;
 mod fold_table;
-pub mod hash;
+#[cfg(test)]
+mod hash_tests {
+    use hp2_file_hash::{hash, hash_bytes};
+    use sha2::{Digest, Sha256};
+    use std::path::Path;
+    use crate::util::test_support::{TempDir, tempdir, write};
+
+    /// Returns the owning `TempDir` alongside the file path: the caller
+    /// must keep it alive for the duration of the test (just bind it to
+    /// a variable) so `Drop` removes the scratch directory automatically
+    /// at the end, including if an assertion panics first -- unlike the
+    /// previous version of this helper, which required the caller to
+    /// remember a manual `fs::remove_file` and would leak the file on an
+    /// early panic.
+    fn write_temp(name: &str, content: &[u8]) -> (TempDir, std::path::PathBuf) {
+        let dir = tempdir();
+        write(dir.path(), name, content);
+        let path = dir.path().join(name);
+        (dir, path)
+    }
+
+    /// Ground truth from a throwaway probe linked against the real macOS
+    /// CommonCrypto branch of HP2PortableSha256.h.
+    #[test]
+    fn matches_commoncrypto_reference_vectors() {
+        let cases: &[(&str, &[u8], &str)] = &[
+            (
+                "empty",
+                b"",
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                "a",
+                b"a",
+                "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+            ),
+            (
+                "pangram",
+                b"The quick brown fox jumps over the lazy dog",
+                "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592",
+            ),
+            (
+                "hp2",
+                b"hp2",
+                "fd37fed028b7eec670fbe8b261c9a49a9945279bbb72c228f6bb5ba570af2ab6",
+            ),
+        ];
+        for (name, content, expected_hex) in cases {
+            let (_dir, path) = write_temp(name, content);
+            let (size, hex) = hash(&path).unwrap();
+            assert_eq!(size, content.len() as u64, "size for {name}");
+            assert_eq!(&hex, expected_hex, "digest for {name}");
+            assert_eq!(&hash_bytes(content), expected_hex, "hash_bytes for {name}");
+        }
+    }
+
+
+    #[test]
+    fn spans_multiple_io_copy_buffer_boundaries() {
+        // io::copy's internal buffer is a few KB; this exercises several
+        // reads regardless of its exact size.
+        let content = vec![0xABu8; 1024 * 1024 * 2 + 17];
+        let (_dir, path) = write_temp("multi-chunk", &content);
+        let (size, hex) = hash(&path).unwrap();
+        assert_eq!(size, content.len() as u64);
+        // Cross-check against a single-shot sha2 digest of the same bytes.
+        let mut hasher = Sha256::new();
+        hasher.update(&content);
+        let expected: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(hex, expected);
+    }
+
+}
 pub mod lower;
 pub mod manifest;
 pub mod output;

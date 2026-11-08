@@ -18,7 +18,7 @@ one change, and the C++ it replaces is deleted in that same change.
 |Engine|`HarryPotter2/Unreal/Engine/`|Game loop, `UEngine::InputEvent` dispatch, level flow|
 |Render|`HarryPotter2/Unreal/Render/`|Scene rendering shared by driver backends|
 |WgpuDrv|`HarryPotter2/Unreal/WgpuDrv/`|Sole render device: C++ driver shell over the Rust `hp2-wgpu` crate (FFI via `hp2-ffi`, feature `renderer-wgpu`)|
-|NativeText|`HarryPotter2/Unreal/NativeText/`|Provider-neutral native text seam (`FCanvasTextRequest`, `NativeText.h`): CoreText on macOS, FreeType on Linux. Bitmap fonts stay reachable via `[Display] NativeText=False`|
+|NativeText|`HarryPotter2/Unreal/NativeText/`|Provider-neutral native text seam (`FCanvasTextRequest`, `Hp2NativeText::` in `Engine/Inc/UnRenDev.h`): CoreText on macOS, FreeType on Linux. Bitmap fonts stay reachable via `[Display] NativeText=False`|
 |SDLDrv|`HarryPotter2/Unreal/SDLDrv/`|SDL2 window/input (`USDLViewport` → `CauseInputEvent`)|
 |SDLLaunch|`HarryPotter2/Unreal/SDLLaunch/`|Launch policy/store, desktop shell integration (`HP2ShellLauncher`), `HP2MacLauncher.mm`|
 |Launcher|`HarryPotter2/Unreal/Launch/`|Bootstrap paths, static packages, editor runtime entry, platform path resolution (`HP2Paths.cpp`)|

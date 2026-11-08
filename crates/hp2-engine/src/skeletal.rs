@@ -53,75 +53,68 @@ const ZERO_V: FVector = FVector {
     z: 0.0,
 };
 
-/// Engine services the skeletal code needs and cannot express as mirrors.
+/// First checked native failure. The native boundary retains the exception.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SkelError(pub i32);
+pub type SkelResult<T> = Result<T, SkelError>;
+
+/// Pure GMath leaves stay direct; every potentially throwing service is checked.
 pub trait SkelHost {
-    /// `GMath.SinTab(index)`.
     fn sin_tab(&self, index: i32) -> f32;
-    /// `GMath.CosTab(index)`.
     fn cos_tab(&self, index: i32) -> f32;
-    /// `GCache.Get(MakeCacheID(CID_SkeletalData, owner, NULL), item)`.
-    /// Returns the block (null on miss) and sets `item` only on a hit.
-    fn cache_get(&self, owner: *const AActor, item: &mut *mut c_void) -> *mut u8;
-    /// `GCache.Create(CacheID, item, appCheckedIntSize(bytes))`; sets `item`.
-    fn cache_create(&self, owner: *const AActor, bytes: usize, item: &mut *mut c_void) -> *mut u8;
-    /// `GCache.Flush(CacheID)`.
-    fn cache_flush(&self, owner: *const AActor);
-    /// `Item->Unlock()`; null-safe.
-    fn cache_unlock(&self, item: *mut c_void);
-    /// `debugf("Warning: missing bone/animation link for %s  index %i", ...)`.
-    fn warn_missing_link(&self, mesh: *const USkeletalMesh, bone: usize);
-    /// `Owner->GetLevel()->DestroyActor(AuxAnims(index))` followed by `AuxAnims.Remove(index)`.
-    fn remove_aux(&self, owner: *mut AActor, index: usize);
-    /// `DisplayBones` debug output; the host fills `DebugPivots` from `bases`.
-    fn debug_pivots(&self, mesh: *mut USkeletalMesh, bases: &[FCoords]);
-    /// `DisplayInfluences` debug output (`DebugVerts` / `VertInfluences`).
-    fn debug_influences(&self, mesh: *mut USkeletalMesh);
-    /// `check()` failure (`appFailAssert`). The caller aborts afterwards.
-    fn fail_check(&self, expr: &CStr);
+    fn cache_get(&self, owner: *const AActor, item: &mut *mut c_void) -> SkelResult<*mut u8>;
+    fn cache_create(
+        &self,
+        owner: *const AActor,
+        bytes: usize,
+        item: &mut *mut c_void,
+    ) -> SkelResult<*mut u8>;
+    fn cache_flush(&self, owner: *const AActor) -> SkelResult<()>;
+    fn cache_unlock(&self, item: *mut c_void) -> SkelResult<()>;
+    fn warn_missing_link(&self, mesh: *const USkeletalMesh, bone: usize) -> SkelResult<()>;
+    fn remove_aux(&self, owner: *mut AActor, index: usize, channel: *mut AActor) -> SkelResult<()>;
+    fn debug_pivots(
+        &self,
+        mesh: *mut USkeletalMesh,
+        bases: *const FCoords,
+        num: usize,
+    ) -> SkelResult<()>;
+    fn debug_influences(&self, mesh: *mut USkeletalMesh) -> SkelResult<()>;
+    fn fail_check(&self, expr: &CStr) -> SkelResult<()>;
+    fn animation_sequence(
+        &self,
+        anim: *mut UAnimation,
+        name: [u8; 4],
+    ) -> SkelResult<*const FMeshAnimSeq>;
+    fn animation_movement(
+        &self,
+        anim: *mut UAnimation,
+        name: [u8; 4],
+    ) -> SkelResult<*const MotionChunk>;
+    /// Native TCacheItem lifetime, including unlock during exception propagation.
+    fn with_cache<R>(
+        &self,
+        owner: *const AActor,
+        body: impl FnOnce(*mut CFSkelHeader) -> SkelResult<R>,
+    ) -> SkelResult<R>;
+    /// Original SkLinkup guard surrounds the Rust link-up policy.
+    fn with_linkup<R>(&self, body: impl FnOnce() -> SkelResult<R>) -> SkelResult<R>;
+    /// Native TArray<FCoords>, constructed only after the cache lookup and check.
+    fn with_bases<R>(
+        &self,
+        num: usize,
+        body: impl FnOnce(*mut FCoords) -> SkelResult<R>,
+    ) -> SkelResult<R>;
+    /// Native AddZeroed TArray<FVector>, only on the multi-bone path.
+    fn with_vertices<R>(
+        &self,
+        num: usize,
+        body: impl FnOnce(*mut FVector) -> SkelResult<R>,
+    ) -> SkelResult<R>;
 }
 
-/// Aborts after reporting a failed `check()`.
-fn check_failed<H: SkelHost>(host: &H, expr: &CStr) -> ! {
-    host.fail_check(expr);
-    std::process::abort()
-}
-
-/// `TCacheItem<CFSkelHeader>`: holds the GCache lock for the scope and unlocks on drop.
-pub struct SkelCache<'h, H: SkelHost> {
-    host: &'h H,
-    item: *mut c_void,
-    hdr: *mut CFSkelHeader,
-}
-
-impl<'h, H: SkelHost> SkelCache<'h, H> {
-    /// `FSkelCache(Owner)`. No Rust-side cache: this reads the same GCache entry the
-    /// original reads (in-game `SkelCacheGet` = `MakeCacheID(CID_SkeletalData, Owner, NULL)`,
-    /// keyed by the owner's object index). Stale pool memory the original would see
-    /// (e.g. `bGotRoot`/`PrevRootFrame` on a reused entry) is therefore seen identically
-    /// in-game, so replay parity implies in-game parity. The replay harness zeroes the
-    /// pool per case (`flush_case`) only so fixtures do not depend on earlier cases.
-    pub fn new(host: &'h H, owner: *const AActor) -> Self {
-        let mut item: *mut c_void = null_mut();
-        let mem = host.cache_get(owner, &mut item);
-        SkelCache {
-            host,
-            item,
-            hdr: mem.cast::<CFSkelHeader>(),
-        }
-    }
-
-    /// Cache header, or null on a miss.
-    pub fn hdr(&self) -> *mut CFSkelHeader {
-        self.hdr
-    }
-}
-
-impl<H: SkelHost> Drop for SkelCache<'_, H> {
-    fn drop(&mut self) {
-        if !self.item.is_null() {
-            self.host.cache_unlock(self.item);
-        }
-    }
+fn check_failed<H: SkelHost>(host: &H, expr: &CStr) -> SkelResult<()> {
+    host.fail_check(expr)
 }
 
 /// Runs `f` with `Trig` views over the host's sine and cosine tables.
@@ -457,14 +450,16 @@ pub fn box_from_raw(b: &FBoxRaw) -> Aabb {
     }
 }
 
-/// `Aabb` to mirror `FBox`.
-pub fn box_to_raw(b: Aabb) -> FBoxRaw {
-    // SAFETY: FBox is plain old data; its padding is zero.
-    let mut r: FBoxRaw = unsafe { std::mem::zeroed() };
-    r.min = b.min;
-    r.max = b.max;
-    r.is_valid = u8::from(b.valid);
-    r
+/// Store only native FBox members; do not initialize its untouched padding.
+///
+/// # Safety
+/// `target` must point to writable native FBox storage.
+pub unsafe fn write_box(target: *mut FBoxRaw, b: Aabb) {
+    unsafe {
+        (*target).min = b.min;
+        (*target).max = b.max;
+        (*target).is_valid = u8::from(b.valid);
+    }
 }
 
 /// `FBox(const FCoords&)` (UnMath.cpp 212–228).
@@ -716,31 +711,6 @@ unsafe fn get_place(mv: &MotionChunk, t: usize, frame_time: f32) -> Place {
     }
 }
 
-/// `UAnimation::GetAnimSeq(name)`.
-///
-/// # Safety
-/// `anim` must point to a live `UAnimation`.
-unsafe fn find_anim_seq<'a>(anim: *const UAnimation, name: [u8; 4]) -> Option<&'a FMeshAnimSeq> {
-    unsafe {
-        tarr::<FMeshAnimSeq>(&(*anim).anim_seqs)
-            .iter()
-            .find(|s| s.name == name)
-    }
-}
-
-/// `UAnimation::GetMovement(name)`: the motion at the index of the matching sequence.
-///
-/// # Safety
-/// `anim` must point to a live `UAnimation`.
-unsafe fn find_movement<'a>(anim: *const UAnimation, name: [u8; 4]) -> Option<&'a MotionChunk> {
-    unsafe {
-        let i = tarr::<FMeshAnimSeq>(&(*anim).anim_seqs)
-            .iter()
-            .position(|s| s.name == name)?;
-        tarr::<MotionChunk>(&(*anim).moves).get(i)
-    }
-}
-
 /// `USkeletalMesh::GetMeshCoords(Owner)`.
 ///
 /// # Safety
@@ -749,6 +719,18 @@ pub unsafe fn get_mesh_coords<H: SkelHost>(
     host: &H,
     owner: *const AActor,
     mesh: *const USkeletalMesh,
+) -> FCoords {
+    with_trig(host, |trig| unsafe { get_mesh_coords_with_trig(owner, mesh, trig) })
+}
+
+/// Native skeletal collision transform using the caller's actual math tables.
+///
+/// # Safety
+/// Owner and mesh are live generated canonical or native records.
+pub unsafe fn get_mesh_coords_with_trig(
+    owner: *const AActor,
+    mesh: *const USkeletalMesh,
+    trig: &Trig,
 ) -> FCoords {
     unsafe {
         let o = &*owner;
@@ -766,12 +748,10 @@ pub unsafe fn get_mesh_coords<H: SkelHost>(
             prim::v3(0.0, 0.0, o.saved_pre_pivot_z),
         );
         let mut c = coords_times_scale(coords::coords_from_origin(prim::neg(m.origin)), &ss);
-        with_trig(host, |t| {
-            coords::div_rot(&mut c, m.rot_origin, t);
-            coords::div_vec(&mut c, pivot);
-            coords::div_rot(&mut c, o.rotation, t);
-            coords::div_vec(&mut c, o.location);
-        });
+        coords::div_rot(&mut c, m.rot_origin, trig);
+        coords::div_vec(&mut c, pivot);
+        coords::div_rot(&mut c, o.rotation, trig);
+        coords::div_vec(&mut c, o.location);
         c
     }
 }
@@ -855,15 +835,14 @@ pub unsafe fn bone_name(mesh: *const USkeletalMesh, index: i32) -> [u8; 4] {
 ///
 /// # Safety
 /// `owner` must point to a live actor.
-pub unsafe fn anim_box<H: SkelHost>(host: &H, owner: *const AActor) -> Aabb {
+pub unsafe fn anim_box<H: SkelHost>(host: &H, owner: *const AActor) -> SkelResult<Aabb> {
     unsafe {
-        let o = &*owner;
         let mut bound = zero_box();
-        let skel_anim = o.skel_anim.cast::<UAnimation>();
-        if !skel_anim.is_null() && o.anim_sequence != NAME_NONE {
-            let mesh = o.mesh.cast::<USkeletalMesh>();
+        let skel_anim = (*owner).skel_anim.cast::<UAnimation>();
+        if !skel_anim.is_null() && (*owner).anim_sequence != NAME_NONE {
+            let mesh = (*owner).mesh.cast::<USkeletalMesh>();
             let seqs = tarr::<FMeshAnimSeq>(&(*skel_anim).anim_seqs);
-            if let Some(s) = seqs.iter().position(|s| s.name == o.anim_sequence) {
+            if let Some(s) = seqs.iter().position(|s| s.name == (*owner).anim_sequence) {
                 let raw = if mesh.is_null() {
                     None
                 } else {
@@ -872,19 +851,21 @@ pub unsafe fn anim_box<H: SkelHost>(host: &H, owner: *const AActor) -> Aabb {
                 bound = raw.map_or_else(zero_box, box_from_raw);
             }
         }
-        let skel = SkelCache::new(host, owner);
-        let hdr = skel.hdr();
-        if !hdr.is_null() {
-            if o.tween_alpha != 1.0 {
-                box_add_box(&mut bound, box_from_raw(&(*hdr).prev_bound));
+        host.with_cache(owner, |hdr| {
+            if !hdr.is_null() {
+                if (*owner).tween_alpha != 1.0 {
+                    box_add_box(&mut bound, box_from_raw(&(*hdr).prev_bound));
+                }
+                write_box(&raw mut (*hdr).prev_bound, bound);
             }
-            (*hdr).prev_bound = box_to_raw(bound);
-        }
-        let aux = o.aux_anims;
-        for &chan in tarr::<*mut AActor>(&aux) {
-            box_add_box(&mut bound, anim_box(host, chan.cast_const()));
-        }
-        bound
+            let mut a = 0;
+            while a < (*owner).aux_anims.num as usize {
+                let chan = *(*owner).aux_anims.data.cast::<*mut AActor>().add(a);
+                box_add_box(&mut bound, anim_box(host, chan.cast_const())?);
+                a += 1;
+            }
+            Ok(bound)
+        })
     }
 }
 
@@ -902,24 +883,23 @@ pub unsafe fn apply_anim<H: SkelHost>(
     owner: *mut AActor,
     parent_hdr: *mut CFSkelHeader,
     root_only: bool,
-) {
+) -> SkelResult<()> {
     unsafe {
-        let skel = ref_skel(this);
-        let n = skel.len();
         let aux = (*owner).anim_bone > 0 && (*owner).physics != PHYS_TRAILER;
         let mut item: *mut c_void = null_mut();
-        let mut mem = host.cache_get(owner.cast_const(), &mut item);
+        let mut mem = host.cache_get(owner.cast_const(), &mut item)?;
         if mem.is_null() || (*mem.cast::<CFSkelHeader>()).cached_mesh != this.cast() {
             if !mem.is_null() {
-                host.cache_unlock(item);
-                host.cache_flush(owner.cast_const());
+                host.cache_unlock(item)?;
+                host.cache_flush(owner.cast_const())?;
             }
+            let n = (*this).ref_skeleton.num as usize;
             mem = host.cache_create(
                 owner.cast_const(),
                 CFSKEL_HEADER_SIZE + CACHE_BYTES_PER_BONE * n,
                 &mut item,
-            );
-            init_cache(mem, this, n);
+            )?;
+            init_cache(mem, this, (*this).ref_skeleton.num as usize);
         }
         let frame = mem.cast::<CFSkelHeader>();
         let anim_seq = (*owner).anim_sequence;
@@ -940,46 +920,53 @@ pub unsafe fn apply_anim<H: SkelHost>(
                 (*owner).skel_anim = (*this).default_animation;
             }
             let skel_anim = (*owner).skel_anim.cast::<UAnimation>();
-            let seq = if skel_anim.is_null() {
-                None
+            let (seq, this_move) = if skel_anim.is_null() {
+                (std::ptr::null(), std::ptr::null())
             } else {
-                find_anim_seq(skel_anim, anim_seq)
+                let seq = host.animation_sequence(skel_anim, (*owner).anim_sequence)?;
+                let movement = host.animation_movement(skel_anim, (*owner).anim_sequence)?;
+                (seq, movement)
             };
-            let this_move = if skel_anim.is_null() {
-                None
-            } else {
-                find_movement(skel_anim, anim_seq)
-            };
-            if seq.is_none() && aux {
-                host.cache_unlock(item);
-                return;
+            if seq.is_null() && aux {
+                return host.cache_unlock(item);
             }
 
-            // Skeleton-to-animation link-up.
-            if let Some(mv) = this_move
-                .filter(|_| !skel_anim.is_null() && (*frame).cached_anim != skel_anim.cast())
-            {
-                let links = cached_links(frame, n);
-                let tracks = tarr::<FAnalogTrack>(&mv.anim_tracks);
-                let named = tarr::<FNamedBone>(&(*skel_anim).ref_bones);
-                let ab = i64::from((*owner).anim_bone);
-                let last = skel
-                    .get(usize::from((*owner).anim_bone))
-                    .map_or(ab, |b| ab + i64::from(b.num_children));
-                for (p, bone) in skel.iter().enumerate() {
-                    links[p] = -1;
-                    if aux && ((p as i64) < ab || (p as i64) > last) {
-                        continue;
+            host.with_linkup(|| {
+                if !this_move.is_null()
+                    && !skel_anim.is_null()
+                    && (*frame).cached_anim != skel_anim.cast()
+                {
+                    let mv = this_move;
+                    let mut p = 0usize;
+                    while p < (*this).ref_skeleton.num as usize {
+                        *(*frame).cached_links.cast::<i32>().add(p) = -1;
+                        let ab = (*owner).anim_bone as usize;
+                        if !aux || (p >= ab && p <= ab + ref_skel(this)[ab].num_children as usize) {
+                            let mut b = 0usize;
+                            while b < (*mv).anim_tracks.num as usize {
+                                if ref_skel(this)[p].name
+                                    == tarr::<FNamedBone>(&(*skel_anim).ref_bones)[b].name
+                                {
+                                    *(*frame).cached_links.cast::<i32>().add(p) = b as i32;
+                                    break;
+                                }
+                                b += 1;
+                            }
+                            if *(*frame).cached_links.cast::<i32>().add(p) == -1 {
+                                host.warn_missing_link(this.cast_const(), p)?;
+                            }
+                        }
+                        p += 1;
                     }
-                    let found = (0..tracks.len())
-                        .find(|&b| named.get(b).is_some_and(|r| r.name == bone.name));
-                    match found {
-                        Some(b) => links[p] = b as i32,
-                        None => host.warn_missing_link(this.cast_const(), p),
-                    }
+                    (*frame).cached_anim = skel_anim.cast();
                 }
-                (*frame).cached_anim = skel_anim.cast();
-            }
+                Ok(())
+            })?;
+            let skel = ref_skel(this);
+            let n = skel.len();
+            let anim_seq = (*owner).anim_sequence;
+            let af = (*owner).anim_frame;
+            let tween_alpha = (*owner).tween_alpha;
 
             let parent = if parent_hdr.is_null() {
                 frame
@@ -988,7 +975,7 @@ pub unsafe fn apply_anim<H: SkelHost>(
             };
             let num_bones = if root_only { n.min(1) } else { n };
 
-            if skel_anim.is_null() || seq.is_none() {
+            if skel_anim.is_null() || seq.is_null() {
                 // Reference pose.
                 for (b, bone) in skel.iter().take(num_bones).enumerate() {
                     let place = bone.bone_pos.place;
@@ -1000,9 +987,8 @@ pub unsafe fn apply_anim<H: SkelHost>(
                 if !root_only {
                     (*frame).cached_anim = null_mut();
                 }
-            } else if let Some(mv) =
-                this_move.filter(|mv| !tarr::<FAnalogTrack>(&mv.anim_tracks).is_empty())
-            {
+            } else if !this_move.is_null() && (*this_move).anim_tracks.num != 0 {
+                let mv = &*this_move;
                 let frame_time = prim::min_f(1.0, af) * mv.track_time;
                 let alpha = if (*frame).cache_loaded != 0 && (*owner).tween_rate != 0.0 {
                     1.0 - tween_alpha
@@ -1092,25 +1078,27 @@ pub unsafe fn apply_anim<H: SkelHost>(
 
         if !root_only {
             (*frame).cache_loaded = 1;
-            (*frame).cached_seq = anim_seq;
-            (*frame).cached_frame = af;
-            (*frame).cached_alpha = tween_alpha;
+            (*frame).cached_seq = (*owner).anim_sequence;
+            (*frame).cached_frame = (*owner).anim_frame;
+            (*frame).cached_alpha = (*owner).tween_alpha;
             let mut a = 0usize;
             loop {
                 let aux = (*owner).aux_anims;
                 let Some(&chan) = tarr::<*mut AActor>(&aux).get(a) else {
                     break;
                 };
-                apply_anim(host, this, chan, frame, false);
-                let c = &*chan;
-                if c.b_anim_transient() && !c.b_anim_loop() && c.anim_frame >= c.anim_last {
-                    host.remove_aux(owner, a);
+                apply_anim(host, this, chan, frame, false)?;
+                if (*chan).b_anim_transient()
+                    && !(*chan).b_anim_loop()
+                    && (*chan).anim_frame >= (*chan).anim_last
+                {
+                    host.remove_aux(owner, a, chan)?;
                 } else {
                     a += 1;
                 }
             }
         }
-        host.cache_unlock(item);
+        host.cache_unlock(item)
     }
 }
 
@@ -1132,7 +1120,7 @@ unsafe fn init_cache(mem: *mut u8, this: *mut USkeletalMesh, n: usize) {
         (*h).cached_seq = NAME_NONE;
         (*h).cached_frame = -1.0;
         (*h).cached_alpha = -1.0;
-        (*h).prev_bound = box_to_raw(zero_box());
+        write_box(&raw mut (*h).prev_bound, zero_box());
     }
 }
 
@@ -1169,8 +1157,8 @@ pub unsafe fn get_frame<H: SkelHost>(
     size: i32,
     coords: FCoords,
     owner: *mut AActor,
-    lod: &mut i32,
-) {
+    lod: *mut i32,
+) -> SkelResult<()> {
     unsafe {
         let anim_owner = if (*owner).b_anim_by_owner() && !(*owner).owner.is_null() {
             (*owner).owner.cast::<AActor>()
@@ -1178,100 +1166,102 @@ pub unsafe fn get_frame<H: SkelHost>(
             owner
         };
         let vertex_num = (*lod).min((*this).frame_verts);
-        apply_anim(host, this, anim_owner, null_mut(), false);
-        let skel_cache = SkelCache::new(host, anim_owner.cast_const());
-        let frame = skel_cache.hdr();
-        if frame.is_null() {
-            check_failed(host, c"FrameHdr");
-        }
-        let mut mesh_coords = (*frame).mesh_coords;
-        coords::div_coords(&mut mesh_coords, &inverse(&coords));
-
-        let stride = usize::try_from(size).unwrap_or(0);
-        let vcount = usize::try_from(vertex_num).unwrap_or(0);
-        let bones = ref_skel(this);
-        let n = bones.len();
-
-        // SpaceBases: bone-space to mesh-space coords, parents before children.
-        let mut bases = vec![coords::unit_coords(); n];
-        if n > 0 {
-            let mut c = coords_from_place(place_of(&*cached_place(frame, 0)));
-            coords::div_coords(&mut c, &mesh_coords);
-            bases[0] = c;
-        }
-        for (s, bone) in bones.iter().enumerate().skip(1) {
-            let parent = bone.parent_index;
-            if parent == s as i32 {
-                check_failed(host, c"Parent != s");
+        apply_anim(host, this, anim_owner, null_mut(), false)?;
+        host.with_cache(anim_owner.cast_const(), |frame| {
+            if frame.is_null() {
+                check_failed(host, c"FrameHdr")?;
             }
-            let pb = usize::try_from(parent)
-                .ok()
-                .and_then(|p| bases.get(p).copied())
-                .unwrap_or_else(coords::unit_coords);
-            let mut c = coords_from_place(place_of(&*cached_place(frame, s)));
-            coords::div_coords(&mut c, &pb);
-            bases[s] = c;
-        }
+            let mut mesh_coords = (*frame).mesh_coords;
+            coords::div_coords(&mut mesh_coords, &inverse(&coords));
 
-        if (*this).display_bones != 0 {
-            host.debug_pivots(this, &bases);
-        }
-        if (*this).display_influences != 0 && (*this).debug_verts.num == 0 {
-            host.debug_influences(this);
-        }
+            let stride = usize::try_from(size).unwrap_or(0);
+            let vcount = usize::try_from(vertex_num).unwrap_or(0);
+            let n = (*this).ref_skeleton.num as usize;
 
-        let base0 = bases.first().copied().unwrap_or_else(coords::unit_coords);
-        let bw_idx = tarr::<VBoneInfIndex>(&(*this).bone_weight_idx);
-        let bone_weights = tarr::<VBoneInfluence>(&(*this).bone_weights);
-        let local_points = tarr::<FVector>(&(*this).local_points);
-        if bw_idx.len() == 1 {
-            let number = usize::try_from(vertex_num.min(i32::from(bw_idx[0].number))).unwrap_or(0);
-            for (b, lp) in local_points.iter().take(number).enumerate() {
-                write_vert(result, b, stride, coords::vec_times_coords(*lp, &base0));
-            }
-        } else {
-            let mut out = vec![ZERO_V; vcount];
-            for (w, idx) in bw_idx.iter().enumerate() {
-                let base_w = bases.get(w).copied().unwrap_or_else(coords::unit_coords);
-                let first = usize::from(idx.weight_index);
-                let count = usize::from(idx.number);
-                for b in first..first + count {
-                    let (Some(bw), Some(lp)) = (bone_weights.get(b), local_points.get(b)) else {
-                        break;
-                    };
-                    let vi = i32::from(bw.point_index);
-                    if vi >= vertex_num {
-                        break;
-                    }
-                    let weight = f32::from(bw.bone_weight) * (1.0_f32 / 65535.0_f32);
-                    let v = coords::vec_times_coords(*lp, &base_w);
-                    if let Some(o) = out.get_mut(vi as usize) {
-                        *o = prim::add(*o, prim::scale(v, weight));
-                    }
+            // SpaceBases: bone-space to mesh-space coords, parents before children.
+            host.with_bases(n, |bases| {
+                if n > 0 {
+                    let mut c = coords_from_place(place_of(&*cached_place(frame, 0)));
+                    coords::div_coords(&mut c, &mesh_coords);
+                    bases.write(c);
                 }
-            }
-            for (v, p) in out.iter().enumerate() {
-                write_vert(result, v, stride, *p);
-            }
-        }
-        *lod = vertex_num;
+                for s in 1..n {
+                    let parent = ref_skel(this)[s].parent_index;
+                    if parent == s as i32 {
+                        check_failed(host, c"Parent != s")?;
+                    }
+                    let pb = bases.offset(parent as isize).read();
+                    let mut c = coords_from_place(place_of(&*cached_place(frame, s)));
+                    coords::div_coords(&mut c, &pb);
+                    bases.add(s).write(c);
+                }
 
-        let wbi = (*this).weapon_bone_index;
-        if wbi >= 0 {
-            let wb = bases
-                .get(wbi as usize)
-                .copied()
-                .unwrap_or_else(coords::unit_coords);
-            let mut orient = (*this).weapon_adjust;
-            coords::div_coords(&mut orient, &wb);
-            orient.x_axis = prim::safe_normal(orient.x_axis);
-            orient.y_axis = prim::safe_normal(cross_fused(orient.x_axis, orient.z_axis));
-            orient.z_axis = cross_fused(orient.x_axis, orient.y_axis);
-            orient.y_axis = prim::neg(orient.y_axis);
-            let mut u = coords::unit_coords();
-            coords::mul_coords(&mut u, &orient);
-            (*this).classic_weapon_coords = u;
-        }
+                if (*this).display_bones != 0 {
+                    host.debug_pivots(this, bases, n)?;
+                }
+                if (*this).display_influences != 0 && (*this).debug_verts.num == 0 {
+                    host.debug_influences(this)?;
+                }
+
+                let base0 = bases.read();
+                let bw_idx = tarr::<VBoneInfIndex>(&(*this).bone_weight_idx);
+                // No native array borrow is retained across the allocation continuation.
+                let local_points = tarr::<FVector>(&(*this).local_points);
+                if bw_idx.len() == 1 {
+                    let number =
+                        usize::try_from(vertex_num.min(i32::from(bw_idx[0].number))).unwrap_or(0);
+                    for (b, lp) in local_points.iter().take(number).enumerate() {
+                        write_vert(result, b, stride, coords::vec_times_coords(*lp, &base0));
+                    }
+                } else {
+                    host.with_vertices(vcount, |out| {
+                        let bw_idx = tarr::<VBoneInfIndex>(&(*this).bone_weight_idx);
+                        let bone_weights = tarr::<VBoneInfluence>(&(*this).bone_weights);
+                        let local_points = tarr::<FVector>(&(*this).local_points);
+                        for (w, idx) in bw_idx.iter().enumerate() {
+                            let base_w = bases.add(w).read();
+                            let first = usize::from(idx.weight_index);
+                            let count = usize::from(idx.number);
+                            for b in first..first + count {
+                                let (Some(bw), Some(lp)) =
+                                    (bone_weights.get(b), local_points.get(b))
+                                else {
+                                    break;
+                                };
+                                let vi = i32::from(bw.point_index);
+                                if vi >= vertex_num {
+                                    break;
+                                }
+                                let weight = f32::from(bw.bone_weight) * (1.0_f32 / 65535.0_f32);
+                                let v = coords::vec_times_coords(*lp, &base_w);
+                                let o = out.add(vi as usize);
+                                o.write(prim::add(o.read(), prim::scale(v, weight)));
+                            }
+                        }
+                        for v in 0..vcount {
+                            write_vert(result, v, stride, out.add(v).read());
+                        }
+                        Ok(())
+                    })?;
+                }
+                *lod = vertex_num;
+
+                let wbi = (*this).weapon_bone_index;
+                if wbi >= 0 {
+                    let wb = bases.add(wbi as usize).read();
+                    let mut orient = (*this).weapon_adjust;
+                    coords::div_coords(&mut orient, &wb);
+                    orient.x_axis = prim::safe_normal(orient.x_axis);
+                    orient.y_axis = prim::safe_normal(cross_fused(orient.x_axis, orient.z_axis));
+                    orient.z_axis = cross_fused(orient.x_axis, orient.y_axis);
+                    orient.y_axis = prim::neg(orient.y_axis);
+                    let mut u = coords::unit_coords();
+                    coords::mul_coords(&mut u, &orient);
+                    (*this).classic_weapon_coords = u;
+                }
+                Ok(())
+            })
+        })
     }
 }
 
@@ -1291,19 +1281,19 @@ pub unsafe fn get_root_movement<H: SkelHost>(
     host: &H,
     this: *mut USkeletalMesh,
     owner: *mut AActor,
-) -> FVector {
+) -> SkelResult<FVector> {
     unsafe {
-        apply_anim(host, this, owner, null_mut(), true);
-        let skel = SkelCache::new(host, owner.cast_const());
-        let hdr = skel.hdr();
-        if hdr.is_null() {
-            return ZERO_V;
-        }
-        let mut vc = (*hdr).mesh_coords;
-        vc.origin = ZERO_V;
-        let mv = coords::vec_times_coords((*hdr).movement, &vc);
-        (*hdr).movement = ZERO_V;
-        mv
+        apply_anim(host, this, owner, null_mut(), true)?;
+        host.with_cache(owner.cast_const(), |hdr| {
+            if hdr.is_null() {
+                return Ok(ZERO_V);
+            }
+            let mut vc = (*hdr).mesh_coords;
+            vc.origin = ZERO_V;
+            let mv = coords::vec_times_coords((*hdr).movement, &vc);
+            (*hdr).movement = ZERO_V;
+            Ok(mv)
+        })
     }
 }
 
@@ -1311,19 +1301,24 @@ pub unsafe fn get_root_movement<H: SkelHost>(
 ///
 /// # Safety
 /// `owner` must point to a live actor.
-pub unsafe fn adjust_root_movement<H: SkelHost>(host: &H, owner: *mut AActor, adjust: FVector) {
+pub unsafe fn adjust_root_movement<H: SkelHost>(
+    host: &H,
+    owner: *mut AActor,
+    adjust: FVector,
+) -> SkelResult<()> {
     unsafe {
         if is_zero(adjust) {
-            return;
+            return Ok(());
         }
-        let skel = SkelCache::new(host, owner.cast_const());
-        let hdr = skel.hdr();
-        if !hdr.is_null() {
-            (*hdr).movement_surplus = prim::add(
-                (*hdr).movement_surplus,
-                prim::transform_vector(adjust, &(*hdr).mesh_coords),
-            );
-        }
+        host.with_cache(owner.cast_const(), |hdr| {
+            if !hdr.is_null() {
+                (*hdr).movement_surplus = prim::add(
+                    (*hdr).movement_surplus,
+                    prim::transform_vector(adjust, &(*hdr).mesh_coords),
+                );
+            }
+            Ok(())
+        })
     }
 }
 
@@ -1335,35 +1330,37 @@ pub unsafe fn anim_cycle_movement<H: SkelHost>(
     host: &H,
     this: *mut USkeletalMesh,
     owner: *mut AActor,
-) -> FVector {
+) -> SkelResult<FVector> {
     unsafe {
-        apply_anim(host, this, owner, null_mut(), true);
-        let skel = SkelCache::new(host, owner.cast_const());
-        let hdr = skel.hdr();
-        let n = ref_skel(this).len();
-        if hdr.is_null() || n == 0 {
-            return ZERO_V;
-        }
-        let link0 = cached_links(hdr, n)[0];
-        if link0 < 0 {
-            return ZERO_V;
-        }
-        let anim = (*owner).skel_anim.cast::<UAnimation>();
-        if anim.is_null() {
-            return ZERO_V;
-        }
-        let Some(mv) = find_movement(anim, (*owner).anim_sequence) else {
-            return ZERO_V;
-        };
-        let tracks = tarr::<FAnalogTrack>(&mv.anim_tracks);
-        if tracks.is_empty() {
-            return ZERO_V;
-        }
-        let Some(track) = tracks.get(link0 as usize) else {
-            return ZERO_V;
-        };
-        let last = key_pos_len(track) as i32 - 1;
-        prim::sub(key_pos(track, last), key_pos(track, 0))
+        apply_anim(host, this, owner, null_mut(), true)?;
+        host.with_cache(owner.cast_const(), |hdr| {
+            let n = ref_skel(this).len();
+            if hdr.is_null() || n == 0 {
+                return Ok(ZERO_V);
+            }
+            let link0 = *(*hdr).cached_links.cast::<i32>();
+            if link0 < 0 {
+                return Ok(ZERO_V);
+            }
+            let anim = (*owner).skel_anim.cast::<UAnimation>();
+            if anim.is_null() {
+                return Ok(ZERO_V);
+            }
+            let mv = host.animation_movement(anim, (*owner).anim_sequence)?;
+            if mv.is_null() {
+                return Ok(ZERO_V);
+            }
+            let mv = &*mv;
+            let tracks = tarr::<FAnalogTrack>(&mv.anim_tracks);
+            if tracks.is_empty() {
+                return Ok(ZERO_V);
+            }
+            let Some(track) = tracks.get(*(*hdr).cached_links.cast::<i32>() as usize) else {
+                return Ok(ZERO_V);
+            };
+            let last = key_pos_len(track) as i32 - 1;
+            Ok(prim::sub(key_pos(track, last), key_pos(track, 0)))
+        })
     }
 }
 
@@ -1376,31 +1373,31 @@ pub unsafe fn get_bone_coords<H: SkelHost>(
     this: *mut USkeletalMesh,
     owner: *mut AActor,
     bone: i32,
-) -> FCoords {
+) -> SkelResult<FCoords> {
     unsafe {
         // UnSkeletalMesh.cpp:966: `ApplyAnim( Owner, NULL, Bone==0 )`.
-        apply_anim(host, this, owner, null_mut(), bone == 0);
-        let skel = SkelCache::new(host, owner.cast_const());
-        let hdr = skel.hdr();
-        let refs = ref_skel(this);
-        let n = refs.len();
-        if !hdr.is_null()
-            && let Some(mut b) = usize::try_from(bone).ok().filter(|&b| b < n)
-        {
-            let mut c = coords_from_place(place_of(&*cached_place(hdr, b)));
-            while b != 0 {
-                let parent = refs[b].parent_index;
-                if parent < 0 || parent as usize >= n {
-                    break;
+        apply_anim(host, this, owner, null_mut(), bone == 0)?;
+        host.with_cache(owner.cast_const(), |hdr| {
+            let refs = ref_skel(this);
+            let n = refs.len();
+            if !hdr.is_null()
+                && let Some(mut b) = usize::try_from(bone).ok().filter(|&b| b < n)
+            {
+                let mut c = coords_from_place(place_of(&*cached_place(hdr, b)));
+                while b != 0 {
+                    let parent = refs[b].parent_index;
+                    if parent < 0 || parent as usize >= n {
+                        break;
+                    }
+                    b = parent as usize;
+                    let step = coords_from_place(place_of(&*cached_place(hdr, b)));
+                    coords::div_coords(&mut c, &step);
                 }
-                b = parent as usize;
-                let step = coords_from_place(place_of(&*cached_place(hdr, b)));
-                coords::div_coords(&mut c, &step);
+                coords::div_coords(&mut c, &(*hdr).mesh_coords);
+                return Ok(c);
             }
-            coords::div_coords(&mut c, &(*hdr).mesh_coords);
-            return c;
-        }
-        get_mesh_coords(host, owner.cast_const(), this.cast_const())
+            Ok(get_mesh_coords(host, owner.cast_const(), this.cast_const()))
+        })
     }
 }
 
@@ -1412,24 +1409,24 @@ pub unsafe fn get_render_bounding_box<H: SkelHost>(
     host: &H,
     this: *mut USkeletalMesh,
     owner: *mut AActor,
-) -> FCoords {
+) -> SkelResult<FCoords> {
     unsafe {
-        apply_anim(host, this, owner, null_mut(), true);
-        let skel = SkelCache::new(host, owner.cast_const());
-        let hdr = skel.hdr();
-        let bound = anim_box(host, owner.cast_const());
-        if hdr.is_null() {
-            // Unreachable: `apply_anim` always creates the cache (UnSkeletalMesh.cpp:480-499).
-            check_failed(host, c"FrameHdr");
-        }
-        let mc = (*hdr).mesh_coords;
-        let bb = box_from_raw(&(*this).bounding_box);
-        if !bound.valid {
-            return coords::box_times_coords(&bb, &mc);
-        }
-        let mut c0 = coords_from_place(place_of(&*cached_place(hdr, 0)));
-        coords::div_coords(&mut c0, &mc);
-        coords::box_times_coords(&bound, &c0)
+        apply_anim(host, this, owner, null_mut(), true)?;
+        host.with_cache(owner.cast_const(), |hdr| {
+            let bound = anim_box(host, owner.cast_const())?;
+            if hdr.is_null() {
+                // Unreachable: `apply_anim` always creates the cache (UnSkeletalMesh.cpp:480-499).
+                check_failed(host, c"FrameHdr")?;
+            }
+            let mc = (*hdr).mesh_coords;
+            let bb = box_from_raw(&(*this).bounding_box);
+            if !bound.valid {
+                return Ok(coords::box_times_coords(&bb, &mc));
+            }
+            let mut c0 = coords_from_place(place_of(&*cached_place(hdr, 0)));
+            coords::div_coords(&mut c0, &mc);
+            Ok(coords::box_times_coords(&bound, &c0))
+        })
     }
 }
 
@@ -1443,10 +1440,23 @@ pub unsafe fn get_collision_bounding_box<H: SkelHost>(
     owner: *const AActor,
     world: bool,
 ) -> Aabb {
+    with_trig(host, |trig| unsafe { get_collision_bounding_box_with_trig(this, owner, world, trig) })
+}
+
+/// Native skeletal bounds without borrowing a native services object.
+///
+/// # Safety
+/// Mesh and Owner remain live generated records for the synchronous calculation.
+pub unsafe fn get_collision_bounding_box_with_trig(
+    this: *const USkeletalMesh,
+    owner: *const AActor,
+    world: bool,
+    trig: &Trig,
+) -> Aabb {
     unsafe {
         let m = &*this;
         if world {
-            let mc = get_mesh_coords(host, owner, this);
+            let mc = get_mesh_coords_with_trig(owner, this, trig);
             return box_from_coords(&coords::box_times_coords(
                 &box_from_raw(&m.bounding_box),
                 &mc,

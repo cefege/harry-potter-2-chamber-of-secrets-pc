@@ -31,68 +31,7 @@ env:
   HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/release-artifacts
 
 jobs:
-  windows:
-    runs-on: windows-2025
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Resolve version
-        id: version
-        shell: pwsh
-        run: |
-          $tag = "${{ github.event.inputs.tag || github.ref_name }}"
-          $tagVersion = $tag -replace '^v', ''
-          $projectVersion = (Select-String -Path CMakeLists.txt -Pattern '^ *VERSION ([0-9.]+)$').Matches[0].Groups[1].Value
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "version=$tagVersion" >> $env:GITHUB_OUTPUT
-          "project_version=$projectVersion" >> $env:GITHUB_OUTPUT
-          if ($tagVersion -ne $projectVersion) {
-            Write-Error "tag $tag does not match CMakeLists.txt VERSION $projectVersion"
-            exit 1
-          }
-
-      - name: Install pinned llvm-mingw UCRT
-        shell: pwsh
-        run: |
-          $source = (Get-Content ThirdParty/sources.json -Raw | ConvertFrom-Json).sources | Where-Object name -eq "llvm-mingw"
-          if (!$source) { throw "ThirdParty/sources.json has no llvm-mingw pin" }
-          $tag = $source.tag
-          $archive = "llvm-mingw-$tag-ucrt-x86_64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$tag/$archive"
-          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\$archive"
-          Expand-Archive -Path "$env:RUNNER_TEMP\$archive" -DestinationPath "$env:RUNNER_TEMP\llvm-mingw"
-          "LLVM_MINGW_ROOT=$env:RUNNER_TEMP\llvm-mingw\llvm-mingw-$tag-ucrt-x86_64" >> $env:GITHUB_ENV
-
-      - name: Configure
-        run: cmake --preset windows-x64
-
-      - name: Build Windows ZIP
-        run: cmake --build --preset windows-x64 --target hp2_windows_zip
-
-      - name: Stage checksum
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $zip = "dist/windows-x64/HarryPotter2-$version-windows-x64.zip"
-          if (!(Test-Path $zip)) { throw "Missing Windows ZIP: $zip" }
-          $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-          "$hash  HarryPotter2-$version-windows-x64.zip" | Set-Content -NoNewline "$zip.sha256"
-
-      - name: Upload Windows release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: hp2-windows-${{ steps.version.outputs.version }}
-          path: |
-            dist/windows-x64/HarryPotter2-${{ steps.version.outputs.version }}-windows-x64.zip
-            dist/windows-x64/HarryPotter2-${{ steps.version.outputs.version }}-windows-x64.zip.sha256
-          if-no-files-found: error
-
   publish:
-    needs: windows
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -113,12 +52,6 @@ jobs:
             echo "::error::tag ${tag} does not match CMakeLists.txt VERSION ${project_version}"
             exit 1
           fi
-
-      - name: Download Windows release artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: hp2-windows-${{ needs.windows.outputs.version }}
-          path: ${{ env.HP2_ARTIFACT_DIR }}
 
       - name: Configure
         run: cmake --preset macos-arm64
@@ -171,21 +104,19 @@ jobs:
           version="${{ steps.version.outputs.version }}"
           tag="${{ steps.version.outputs.tag }}"
           dmg="${HP2_ARTIFACT_DIR}/HarryPotter2-${version}-macos-arm64.dmg"
-          zip="${HP2_ARTIFACT_DIR}/HarryPotter2-${version}-windows-x64.zip"
-          notes="macOS 15+ on Apple silicon. Download the .dmg, drag the app to Applications, then import your own retail copy of the game. Windows 10/11 x64: download the .zip, extract, run HarryPotter2.exe. Full instructions: https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc#readme"
+          notes="macOS 15+ on Apple silicon. Download the .dmg, drag the app to Applications, then import your own retail copy of the game. Full instructions: https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc#readme"
 
           test -f "${dmg}"
-          test -f "${zip}"
           # Re-runnable. A retag (fix pushed after a first attempt) or a manual
           # re-dispatch finds the release already published, and a bare
           # `gh release create` would abort the run before the cask checksum is
           # ever stamped. Replace the assets instead of failing.
           if gh release view "${tag}" > /dev/null 2>&1; then
             echo "release ${tag} already exists; replacing its assets"
-            gh release upload "${tag}" "${dmg}" "${zip}" --clobber
+            gh release upload "${tag}" "${dmg}" --clobber
             gh release edit "${tag}" --title "Harry Potter 2 ${version}" --notes "${notes}"
           else
-            gh release create "${tag}" "${dmg}" "${zip}" \
+            gh release create "${tag}" "${dmg}" \
               --title "Harry Potter 2 ${version}" \
               --notes "${notes}"
           fi

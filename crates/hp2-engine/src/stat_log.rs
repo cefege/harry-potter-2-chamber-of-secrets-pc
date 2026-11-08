@@ -2,11 +2,13 @@
 //! `AStatLog` and `AStatLogFile` natives, `appMD5UpdateStringUtf16LE`, and
 //! `UCheckSumCommandlet::Main`.
 //!
-//! Every engine object access goes through [`StatLogServices`], filled in by
-//! `Hp2StatLogServices.cpp`. Those thunks are the C++ member reads, global lookups,
-//! virtual calls, and engine free functions that the port cannot own. The
-//! `IMPLEMENT_CLASS` lines, native tables, `P_GET_*`/`P_FINISH` unpacking, and
-//! `guard`/`unguard` stay in the C++ shells.
+//! Every engine object access goes through [`StatLogServices`]. The shipping C++
+//! oracle supplies its table through `Hp2StatLogServices.cpp`; the Rust-owned
+//! graph supplies it through `stat_log_owner.rs`, with IO/MD5 leaves in
+//! `stat_log_io_owner.rs`. The shared policy accepts the table per call so it is
+//! reentrant and does not depend on a published native global.
+//! `P_GET_*`/`P_FINISH` decoding is owned by the respective legacy and canonical
+//! VM adapters; this module contains only the shared operation policy.
 //!
 //! Errors: each native returns [`StatLogResult`]. The C++ shell maps an error to the
 //! original `check`, `appErrorf`, or `appFailAssert` call. The Rust side never unwinds
@@ -33,15 +35,27 @@
 //! - FMA: the object's 128 fused ops (112 `fmadd`, 16 `fmsub`) all sit in unreferenced
 //!   `FCoords` operators from `UnMath.h`. No AStatLog native fuses. The port has no `mul_add`.
 //! - Libm: none. The module makes no libm calls.
+//! - Null-deref defects in the original, fixed per lead policy (`BD/reports/StatLog.md`,
+//!   `BD/reports/LeadFindings.md`): UE1 dereferenced `Level->Game` unconditionally in
+//!   `ExecuteLocalLogBatcher`/`ExecuteSilentLogBatcher` (unlike `ExecuteWorldLogBatcher`,
+//!   which already had `check(Level->Game)`), and dereferenced `game`/`mutator`/`pawn`
+//!   unconditionally in `InitialCheck`/`LogMutator`/`GetPlayerChecksum`. The port adds a
+//!   `Level->Game` `CheckFailed` guard to the first two (matching
+//!   `ExecuteWorldLogBatcher`'s existing one) and a null skip/empty-input branch to the
+//!   other three, instead of reproducing the crash. `GetPlayerChecksum` and a pawn without
+//!   `PlayerReplicationInfo` hashes an empty name the same way (`Hp2StatLogPlayerName`
+//!   returns NULL there by design).
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::params::TChar;
+use hp2_core::ansi_math;
 
 /// C++ services (`Hp2StatLogServices` in `Hp2StatLogServices.h`), same field order.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct StatLogServices {
     /// `AActor::Level` (ALevelInfo*).
     pub actor_level: unsafe extern "C" fn(actor: *mut c_void) -> *mut c_void,
@@ -85,7 +99,8 @@ pub struct StatLogServices {
     pub stat_log_file_name: unsafe extern "C" fn(this: *mut c_void) -> *mut c_void,
     /// `AStatLogFile::StatLogFinal` (FString*).
     pub stat_log_file_final: unsafe extern "C" fn(this: *mut c_void) -> *mut c_void,
-    /// `APlayerPawn::PlayerReplicationInfo->PlayerName` (FString*).
+    /// `APlayerPawn::PlayerReplicationInfo->PlayerName` (FString*), or null when the
+    /// pawn has no `PlayerReplicationInfo`.
     pub stat_log_player_name: unsafe extern "C" fn(pawn: *mut c_void) -> *mut c_void,
     /// `APlayerPawn::ngWorldSecret` (FString*).
     pub stat_log_player_secret: unsafe extern "C" fn(pawn: *mut c_void) -> *mut c_void,
@@ -137,7 +152,7 @@ pub struct StatLogServices {
     pub debugf_text: unsafe extern "C" fn(text: *const TChar),
     /// `GWarn->Logf(TEXT("%s"), text)`.
     pub warn_text: unsafe extern "C" fn(text: *const TChar),
-    /// `GIsRequestingExit = 1`.
+    /// Sets the Rust-owned graceful-exit request.
     pub set_requesting_exit: unsafe extern "C" fn(),
     /// `appCreateProc(url, params, show)`.
     pub proc_create:
@@ -146,6 +161,30 @@ pub struct StatLogServices {
     pub proc_return_code: unsafe extern "C" fn(handle: *mut c_void, rc: *mut i32) -> i32,
     /// `appLaunchURL(GFileManager->GetDefaultDirectory() * url)`.
     pub launch_url: unsafe extern "C" fn(url: *const TChar),
+    /// `AActor::XLevel->URL.Map` (FString*).
+    pub stat_log_actor_level_url_map: unsafe extern "C" fn(actor: *mut c_void) -> *mut c_void,
+    /// Reproduces `Hp2StatLogRaise` (`AStatLog.cpp`) for a native's own call site. `status`
+    /// is one of `HP2_STAT_LOG_STATUS_*` (`crates/hp2-ffi/src/engine_stat_log.rs`), `expr`
+    /// the ANSI check expression (`CheckFailed` only), `line` the original call site's
+    /// `__LINE__`. Returns 0, or 1 on a raised C++ exception.
+    pub stat_log_raise: unsafe extern "C" fn(status: i32, expr: *const c_void, line: i32) -> i32,
+}
+
+static mut STAT_LOG_SERVICES: Option<StatLogServices> = None;
+
+/// # Safety
+/// Engine-thread serialized. Callbacks remain live until all calls using this
+/// publication finish. Publication invokes no callbacks.
+pub unsafe fn publish_services(value: StatLogServices) {
+    unsafe {
+        (&raw mut STAT_LOG_SERVICES).write(Some(value));
+    }
+}
+
+/// # Safety
+/// Serialized with publication.
+pub unsafe fn published_services() -> Result<StatLogServices, i32> {
+    unsafe { (&raw const STAT_LOG_SERVICES).read().ok_or(1) }
 }
 
 /// Failure of a native. The C++ shell maps each variant to the original call.
@@ -444,32 +483,56 @@ unsafe fn close_runtime(svc: &StatLogServices, owner: *mut c_void) {
     runtime_remove(owner);
 }
 
-/// `AStatLog::execExecuteLocalLogBatcher`.
+/// Releases process-local native state when its canonical owner object is destroyed.
+///
+/// # Safety
+/// `owner` must identify a live owner address, and `services` must remain live
+/// throughout the callback calls.
+pub unsafe fn destroy_runtime_state(svc: &StatLogServices, owner: *mut c_void) {
+    unsafe { close_runtime(svc, owner) };
+}
+
+/// `AStatLog::execExecuteLocalLogBatcher`. A level without a GameInfo fails the
+/// `Level->Game` check, as in `execute_world_log_batcher` (UE1 dereferenced it;
+/// Rust policy, LeadFindings "Local/silent log batcher without GameInfo").
 ///
 /// # Safety
 /// `this` must be a live `AStatLog`, and the services must be live.
-pub unsafe fn execute_local_log_batcher(svc: &StatLogServices, this: *mut c_void) {
+pub unsafe fn execute_local_log_batcher(svc: &StatLogServices, this: *mut c_void) -> StatLogResult {
     let level = unsafe { (svc.actor_level)(this) };
     let game = unsafe { (svc.level_game)(level) };
+    if game.is_null() {
+        return Err(StatLogError::CheckFailed("Level->Game"));
+    }
     let url = unsafe { fstr_units(svc, (svc.stat_log_local_batcher_url)(this)) };
     let log_file_name = unsafe { fstr_units(svc, (svc.game_local_log_file_name)(game)) };
     let show = unsafe { (svc.level_not_dedicated)(level) };
     unsafe { create_proc(svc, &url, &log_file_name, show) };
+    Ok(())
 }
 
-/// `AStatLog::execExecuteSilentLogBatcher`.
+/// `AStatLog::execExecuteSilentLogBatcher`. A level without a GameInfo fails the
+/// `Level->Game` check, as in `execute_world_log_batcher` (UE1 dereferenced it;
+/// Rust policy, LeadFindings "Local/silent log batcher without GameInfo").
 ///
 /// # Safety
 /// `this` must be a live `AStatLog`, and the services must be live.
-pub unsafe fn execute_silent_log_batcher(svc: &StatLogServices, this: *mut c_void) {
+pub unsafe fn execute_silent_log_batcher(
+    svc: &StatLogServices,
+    this: *mut c_void,
+) -> StatLogResult {
     let level = unsafe { (svc.actor_level)(this) };
     let game = unsafe { (svc.level_game)(level) };
+    if game.is_null() {
+        return Err(StatLogError::CheckFailed("Level->Game"));
+    }
     let url = unsafe { fstr_units(svc, (svc.stat_log_local_batcher_url)(this)) };
     let log_file_name = unsafe { fstr_units(svc, (svc.game_local_log_file_name)(game)) };
     let mut params = wide("-b false ");
     params.extend_from_slice(&log_file_name);
     let show = unsafe { (svc.level_not_dedicated)(level) };
     unsafe { create_proc(svc, &url, &params, show) };
+    Ok(())
 }
 
 /// `AStatLog::execBatchLocal`: reads the URL and directory from the class default object.
@@ -593,15 +656,19 @@ unsafe extern "C" fn collect_package(user: *mut c_void, package: *mut c_void) {
 }
 
 /// `AStatLog::execInitialCheck`: logs the game class, then each code package's checksum.
+/// A None `game` (UE1 dereferenced it unconditionally) skips only the GameClass event
+/// (Rust policy, BD/reports/StatLog.md `game-none`).
 ///
 /// # Safety
-/// `this` must be a live `AStatLog`, `game` a live `AGameInfo`, and the services live.
+/// `this` must be a live `AStatLog`, `game` null or a live `AGameInfo`, and the services live.
 pub unsafe fn initial_check(
     svc: &StatLogServices,
     this: *mut c_void,
     game: *mut c_void,
 ) -> StatLogResult {
-    unsafe { event_special_class(svc, this, "GameClass", game) };
+    if !game.is_null() {
+        unsafe { event_special_class(svc, this, "GameClass", game) };
+    }
 
     let mut packages: Vec<*mut c_void> = Vec::new();
     unsafe {
@@ -643,42 +710,80 @@ pub unsafe fn initial_check(
     Ok(())
 }
 
-/// `AStatLog::execLogMutator`.
+/// `AStatLog::execLogMutator`. A None `mutator` (UE1 dereferenced it unconditionally)
+/// logs nothing (Rust policy, BD/reports/StatLog.md `mutator-none`).
 ///
 /// # Safety
-/// `this` must be a live `AStatLog`, `mutator` a live `AMutator`, and the services live.
+/// `this` must be a live `AStatLog`, `mutator` null or a live `AMutator`, and the services live.
 pub unsafe fn log_mutator(svc: &StatLogServices, this: *mut c_void, mutator: *mut c_void) {
-    unsafe { event_special_class(svc, this, "GameMutator", mutator) };
+    if !mutator.is_null() {
+        unsafe { event_special_class(svc, this, "GameMutator", mutator) };
+    }
 }
 
-/// `AStatLog::execGetPlayerChecksum`.
+/// `AStatLog::execGetPlayerChecksum`. A None `pawn` yields `NoChecksum` like an empty
+/// secret, and a pawn without `PlayerReplicationInfo` hashes an empty name; UE1
+/// dereferenced both unconditionally (Rust policy, BD/reports/StatLog.md).
 ///
 /// # Safety
-/// `pawn` must be a live `APlayerPawn`, `checksum` a live `FString`, and the services live.
+/// `pawn` must be null or a live `APlayerPawn`, `checksum` a live `FString`, and the
+/// services live.
 pub unsafe fn get_player_checksum(
     svc: &StatLogServices,
     pawn: *mut c_void,
     checksum: *mut c_void,
 ) -> StatLogResult {
-    let secret = unsafe { fstr_units(svc, (svc.stat_log_player_secret)(pawn)) };
+    let secret = if pawn.is_null() {
+        Vec::new()
+    } else {
+        unsafe { fstr_units(svc, (svc.stat_log_player_secret)(pawn)) }
+    };
     if secret.is_empty() {
         let text = nul_terminated(&wide("NoChecksum"));
         unsafe { (svc.fstr_assign)(checksum, text.as_ptr()) };
         return Ok(());
     }
-    let name = unsafe { fstr_units(svc, (svc.stat_log_player_name)(pawn)) };
+    let name_ptr = unsafe { (svc.stat_log_player_name)(pawn) };
+    let name = if name_ptr.is_null() {
+        Vec::new()
+    } else {
+        unsafe { fstr_units(svc, name_ptr) }
+    };
     let digest = unsafe { md5_digest(svc, &[(&name, false), (&secret, false)])? };
     let text = nul_terminated(&hex_units(&digest));
     unsafe { (svc.fstr_assign)(checksum, text.as_ptr()) };
     Ok(())
 }
 
+/// `AStatLog::execGetGMTRef`: `appGetGMTRef()`.
+///
+/// # Safety
+/// `result` must be a live `FString`, and the services must be live.
+pub unsafe fn get_gmt_ref(svc: &StatLogServices, result: *mut c_void) {
+    let mut buf = [0i32; 1024];
+    unsafe { ansi_math::gmt_ref(buf.as_mut_ptr().cast()) };
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    let mut text: Vec<TChar> = buf[..len].iter().map(|&c| c as TChar).collect();
+    text.push(0);
+    unsafe { (svc.fstr_assign)(result, text.as_ptr()) };
+}
+
+/// `AStatLog::execGetMapFileName`: `XLevel->URL.Map`.
+///
+/// # Safety
+/// `this` must be a live `AStatLog` with a live `XLevel`, `result` a live `FString`, and
+/// the services live.
+pub unsafe fn get_map_file_name(svc: &StatLogServices, this: *mut c_void, result: *mut c_void) {
+    let map = unsafe { (svc.stat_log_actor_level_url_map)(this) };
+    let text = nul_terminated(&unsafe { fstr_units(svc, map) });
+    unsafe { (svc.fstr_assign)(result, text.as_ptr()) };
+}
+
 /// `AStatLogFile::execOpenLog`.
 ///
 /// # Safety
-/// `this` must be a live `AStatLogFile`, and the services must be live. `log_dir` is the
-/// NUL-terminated `TEXT("..") PATH_SEPARATOR TEXT("Logs")` built by the C++ shell, so the
-/// separator matches the target's `PATH_SEPARATOR`.
+/// `this` must be a live `AStatLogFile`, `log_dir` a live NUL-terminated TCHAR string,
+/// and the services must be live.
 pub unsafe fn open_log(svc: &StatLogServices, this: *mut c_void, log_dir: *const TChar) {
     unsafe { close_runtime(svc, this) };
     runtime_get_or_add(this);
@@ -834,8 +939,7 @@ mod tests {
         assert_eq!(text, "d41d8cd98f00b204e9800998ecf8427e");
     }
 
-    /// The 2-byte surrogate-merge gate is off for 4-byte `TCHAR` (non-Windows targets).
-    #[cfg(not(windows))]
+    /// The 2-byte surrogate-merge gate is off for 4-byte `TCHAR`.
     #[test]
     fn encode_without_merge_on_wide_tchar() {
         let u = |c: i32| c as TChar;

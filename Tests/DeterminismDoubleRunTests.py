@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """determinism_double_run: two full launches of one map must agree exactly.
 
-Launches the installed app bundle twice against the prototype data root for
-the same map with the same tick budget and HP2_CAPTURE_FRAMES enabled, then
-asserts run-to-run determinism on two axes:
+Launches the app bundle twice against prototype data with a fixed 1/60-second
+simulation step, RNG seed 1, and the same tick budget. With
+HP2_CAPTURE_FRAMES enabled, it asserts run-to-run determinism on two axes:
 
 * normalized engine logs are byte-identical (timing/duration/pid-shaped noise
   is stripped through LOG_NOISE_PATTERNS / DROP_LINE_PATTERNS below), and
@@ -41,7 +41,9 @@ DEFAULT_APP = Path("out/macos-arm64/hp2_game")
 DEFAULT_APP_FALLBACK = Path("dist/macos-arm64/HarryPotter2.app")
 DEFAULT_DATA_ROOT = Path("HarryPotter2/Unreal")
 DEFAULT_MAP_STEM = "PrivetDr"
-DEFAULT_TICKS = 60
+DEFAULT_TICKS = 300
+DEFAULT_FIXED_DT = 0.016666667
+DEFAULT_RNG_SEED = 1
 FRAME_TOLERANCE = 2
 DEFAULT_TIMEOUT_SECONDS = 120.0
 
@@ -171,10 +173,12 @@ def _launch(
         timeout_seconds=timeout_seconds,
         log_path=run_directory / "engine.log",
         no_sound=True,
+        fixed_dt=DEFAULT_FIXED_DT,
         extra_env={
             "HP2_CAPTURE_FRAMES": str(frames_directory),
             "HP2_CAPTURE_MAP": Path(selected_map).stem,
             "HP2_CAPTURE_TICKS": str(ticks),
+            "HP2_RNG_SEED": str(DEFAULT_RNG_SEED),
         },
     )
     if not result["passed"]:
@@ -205,6 +209,8 @@ def run_contract(
         "map": selected_map,
         "renderer": "wgpu",
         "ticks": ticks,
+        "fixed_dt": DEFAULT_FIXED_DT,
+        "rng_seed": DEFAULT_RNG_SEED,
         "timeout_seconds": timeout_seconds,
         "launches": ["run_1", "run_2"],
     }
@@ -212,6 +218,8 @@ def run_contract(
         "map": selected_map,
         "map_stem": map_stem,
         "ticks": ticks,
+        "fixed_dt": DEFAULT_FIXED_DT,
+        "rng_seed": DEFAULT_RNG_SEED,
         "frame_tolerance": FRAME_TOLERANCE,
     }
 

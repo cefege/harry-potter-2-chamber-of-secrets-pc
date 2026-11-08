@@ -1,8 +1,5 @@
-//! Port of `InitTables()` minus the two engine calls that stay in C++: `appSin`
-//! (passed in as `sine`) and `appRand` (passed in as `rng_seed`). The C++ shell
-//! keeps the `Initialized` guard.
-
-use crate::abi::FireTraceHooks;
+//! Pure numerical table initialization. Native calls and checked traces are
+//! orchestrated by `fire`; no global lock is held across those calls.
 use crate::globals::{FireGlobals, LIGHTPHASEBIAS};
 
 /// `appRound` on GCC/clang is `static_cast<INT>(f)` (truncation), see
@@ -11,21 +8,12 @@ pub(crate) fn app_round(value: f32) -> i32 {
     value as i32
 }
 
-/// Fills the global tables from the C++-supplied engine results and reports
-/// the init trace.
+/// Fills the global tables from the supplied engine results.
 ///
 /// * `sine[t]` must equal `appSin((FLOAT)t/256.f * 6.2831853f)`, for `t` in `0..256`.
 /// * `rng_seed` holds the 512 bytes `(BYTE)(appRand() & 255)` in draw order.
-/// * `before` and `after` are `appGetRandTraceOrdinal()` read before the
-///   `appRand` draws and after the init block.
 #[allow(clippy::needless_range_loop)] // index loops mirror the C `for (t...)`
-pub fn init_tables(
-    g: &mut FireGlobals,
-    sine: &[f64; 256],
-    rng_seed: &[u8; 512],
-    before: u64,
-    after: u64,
-) {
+pub fn init_tables(g: &mut FireGlobals, sine: &[f64; 256], rng_seed: &[u8; 512]) -> u64 {
     for t in 0..256 {
         // C++: appRound(127.45f + 127.5f*appSin(...)). appSin is DOUBLE, so the sum is double and rounds to FLOAT only at appRound.
         g.phase_table[t] = app_round((127.45f32 as f64 + 127.5f64 * sine[t]) as f32) as u8;
@@ -42,8 +30,7 @@ pub fn init_tables(
     g.speed_rindex = 0;
     g.stale_rindex = 0;
 
-    let fingerprint = fingerprint(g);
-    (g.trace.init_tables)(before, after, fingerprint);
+    fingerprint(g)
 }
 
 /// FNV-1a over SpeedRandArr(512), PhaseTable, SignedPhaseTable, LightPhaseTable,
@@ -67,10 +54,7 @@ fn fingerprint(g: &FireGlobals) -> u64 {
 
 /// Hook-free variant used by unit tests that only need the table values.
 pub fn init_tables_quiet(g: &mut FireGlobals, sine: &[f64; 256], rng_seed: &[u8; 512]) {
-    let saved = g.trace;
-    g.trace = FireTraceHooks::NOOP;
-    init_tables(g, sine, rng_seed, 0, 0);
-    g.trace = saved;
+    init_tables(g, sine, rng_seed);
 }
 
 #[cfg(test)]

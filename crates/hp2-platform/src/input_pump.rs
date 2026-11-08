@@ -7,33 +7,276 @@
 //! What is here: the SDL event-type dispatch for every event the pump
 //! handles, the normalized key/button/wheel/text/joystick mapping, the
 //! window loss/restore/resize decisions, the relative-mouse deltas, the
-//! ReleaseAllInput iteration order, and the stalest-realtime-viewport pick.
+//! ReleaseAllInput iteration order, the stalest-realtime-viewport pick, and
+//! (via [`poll_and_flatten`]) the `SDL_PollEvent` call and the flattening of
+//! each real `SDL_Event` into [`SdlEvent`] -- this crate's own hand-declared
+//! mirror of the pinned SDL2 headers' event union, not a second behavior
+//! policy. `viewport_policy::update_input`/`phase` supply
+//! `SDL_GetRelativeMouseState` (`mouse_state::get_relative_mouse_state`) and
+//! the live window pointer this module's `SDL_GetWindowFlags` call (inside
+//! the `WINDOWEVENT` case, via `window_lifecycle::get_window_flags`) needs.
 //!
-//! What stays in C++ and why: `SDL_PollEvent`, `SDL_GetRelativeMouseState`,
-//! `SDL_GetWindowFlags`, and the flattening of each `SDL_Event` into
-//! [`SdlEvent`] are SDL calls that only the C++ shell can make against its
-//! own `SDL_Event` union. The engine-global services (`UEngine::Key`,
+//! What stays in C++ and why: the engine-global services (`UEngine::Key`,
 //! `UEngine::MousePosition`, `UEngine::InputEvent`, `UInput::KeyDown`,
 //! `UpdateMouseGrabState`, `ResizeViewport`) are reached through the C++
 //! executor, which runs the returned [`Action`]s in order. Rust never holds
 //! state across an engine call, so an engine exception unwinds only through
 //! C++ frames.
 //!
-//! SDL constants below are hardcoded from the pinned SDL2 headers
-//! (`out/macos-arm64/_deps/hp2_sdl2-src/include/SDL_events.h`,
-//! `SDL_video.h`); `SDLViewport.cpp` `static_assert`s every one of them
-//! against the same header so a drift breaks the C++ build.
+//! SDL constants below, and [`poll_and_flatten`]'s event-struct mirrors, are
+//! hardcoded from the pinned SDL2 headers (`out/macos-arm64/_deps/
+//! hp2_sdl2-src/include/SDL_events.h`, `SDL_video.h`, `SDL_keyboard.h`).
+//! `ffi::SdlEventRaw` and its variant structs are cross-checked against the
+//! real SDL2 headers by `hp2-ffi`'s `input.rs` (size/offset consts exported
+//! through `hp2_rs.h`) and `SDLDrv/Src/SDLViewport.cpp`'s `static_assert`s
+//! against `sizeof`/`offsetof` on the genuine `SDL_Event` struct family.
+//!
+//! Deterministic verification (`HP2_DETERMINISTIC_VERIFICATION=1`, cached by
+//! [`deterministic_verification`]) keeps this same policy but drops physical
+//! keyboard/text/mouse/joystick events before they can mutate gameplay,
+//! skips the relative-mouse sample, and suppresses focus-driven release or
+//! restore side effects. Window resize/lifecycle events still run. Controlled
+//! replay or Engine input injection never passes through this module, so it
+//! stays intact.
 
 use crate::input_event::{self, HP2InputEvent, ik, ist};
 use crate::joystick_input::{self, JOY_AXIS_KEYS, MAX_JOYSTICK_AXES};
 use crate::mouse_capture::{self, Action as CaptureAction, State, WindowFlags};
 use crate::mouse_state;
+use std::sync::LazyLock;
+
+/// Process-start environment switch for deterministic verification. Shared
+/// with the audio slice so one variable describes the whole run.
+pub const DETERMINISTIC_VERIFICATION_ENV: &str = "HP2_DETERMINISTIC_VERIFICATION";
+
+/// Whether this process runs deterministic verification. The switch is the
+/// process-start environment variable [`DETERMINISTIC_VERIFICATION_ENV`] set
+/// to `1`; absence or any other value leaves production behavior untouched.
+/// The answer is cached for the life of the process, so the per-frame pump
+/// never reads the environment.
+pub fn deterministic_verification() -> bool {
+    static FLAG: LazyLock<bool> = LazyLock::new(|| {
+        std::env::var_os(DETERMINISTIC_VERIFICATION_ENV)
+            .is_some_and(|value| value.to_str() == Some("1"))
+    });
+    *FLAG
+}
+
+
+/// Process-global gameplay gate: set when the game enters its main loop
+/// (after init and any `-LOAD` save travel), read by the input recorder and
+/// replayer so load-phase frames can never collide with recorded gameplay
+/// timestamps.
+pub mod gameplay_gate {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    pub fn set_active() {
+        ACTIVE.store(true, Ordering::Release);
+    }
+    pub fn active() -> bool {
+        ACTIVE.load(Ordering::Acquire)
+    }
+}
+/// Input recording/replay: `HP2_INPUT_RECORD=<path>` appends one line per
+/// polled SDL event (and per-frame relative mouse deltas), tagged with the
+/// input-pump call index; `HP2_INPUT_REPLAY=<path>` disables physical polling
+/// and feeds the recorded events back through the same translation path at
+/// the same call indices, so one recorded play session reproduces
+/// indefinitely against any build (pair with `--fixed-dt` for determinism).
+mod input_trace {
+    use super::SdlEvent;
+    use std::collections::HashMap;
+    use std::ffi::c_void;
+    use std::sync::LazyLock;
+    use std::sync::Mutex;
+
+    use std::sync::atomic::AtomicU64;
+    const TEXT_SIZE: usize = 32;
+
+    enum Mode {
+        Off,
+        Record { file: Mutex<std::fs::File> },
+        Replay { entries: Vec<TraceEntry>, cursor: std::sync::atomic::AtomicUsize },
+    }
+
+    struct TraceEntry {
+        time: f32,
+        relative: Option<(i32, i32)>,
+        event: Option<SdlEvent>,
+    }
+
+    static MODE: LazyLock<Mode> = LazyLock::new(|| {
+        if let Some(path) = std::env::var_os("HP2_INPUT_REPLAY") {
+            let data = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+                eprintln!("HP2_INPUT_REPLAY: cannot read {path:?}: {error}");
+                String::new()
+            });
+            let mut entries = Vec::new();
+            for line in data.lines() {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.len() < 3 {
+                    continue;
+                }
+                let Ok(time) = fields[0].parse::<f32>() else { continue };
+                match fields[1] {
+                    "R" if fields.len() >= 4 => {
+                        if let (Ok(dx), Ok(dy)) = (fields[2].parse::<i32>(), fields[3].parse::<i32>()) {
+                            entries.push(TraceEntry { time, relative: Some((dx, dy)), event: None });
+                        }
+                    }
+                    "E" if fields.len() >= 18 => {
+                        let mut text = [0u8; TEXT_SIZE];
+                        for (index, slot) in fields[4].split(',').enumerate() {
+                            if index >= TEXT_SIZE { break; }
+                            if let Ok(byte) = u8::from_str_radix(slot, 16) {
+                                text[index] = byte;
+                            }
+                        }
+                        // Layout: time E kind key_sym text motion_x motion_y
+                        // motion_state button wheel_y joy_axis joy_axis_value
+                        // joy_button joy_hat window_event window_data1
+                        // window_data2 window_flags -- 13 numbers after the text.
+                        let numbers: Vec<i64> = fields[5..]
+                            .iter()
+                            .map(|field| field.parse::<i64>().unwrap_or(0))
+                            .collect();
+                        if numbers.len() < 13 { continue; }
+                        let event = SdlEvent {
+                            kind: fields[2].parse::<u32>().unwrap_or(0),
+                            key_sym: fields[3].parse::<i32>().unwrap_or(0),
+                            text,
+                            motion_x: numbers[0] as i32,
+                            motion_y: numbers[1] as i32,
+                            motion_state: numbers[2] as u32,
+                            button: numbers[3] as u8,
+                            wheel_y: numbers[4] as i32,
+                            joy_axis: numbers[5] as u8,
+                            joy_axis_value: numbers[6] as i32,
+                            joy_button: numbers[7] as u8,
+                            joy_hat: numbers[8] as u8,
+                            window_event: numbers[9] as u8,
+                            window_data1: numbers[10] as i32,
+                            window_data2: numbers[11] as i32,
+                            window_flags: numbers[12] as u32,
+                        };
+                        entries.push(TraceEntry { time, relative: None, event: Some(event) });
+                    }
+                    _ => {}
+                }
+            }
+            Mode::Replay { entries, cursor: std::sync::atomic::AtomicUsize::new(0) }
+        } else if let Some(path) = std::env::var_os("HP2_INPUT_RECORD") {
+            let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)
+                .unwrap_or_else(|error| {
+                    eprintln!("HP2_INPUT_RECORD: cannot open {path:?}: {error}");
+                    std::fs::File::create("/dev/null").expect("null sink")
+                });
+            Mode::Record { file: Mutex::new(file) }
+        } else {
+            Mode::Off
+        }
+    });
+
+    fn mode() -> &'static Mode {
+        &MODE
+    }
+
+    pub fn recording() -> bool {
+        matches!(mode(), Mode::Record { .. })
+    }
+
+    pub fn replaying() -> bool {
+        matches!(mode(), Mode::Replay { .. })
+    }
+    /// Gameplay-relative sample of the level clock: the first pump call after
+    /// the main loop starts defines zero for both record and replay, so
+    /// load-phase timing differences cancel out. `None` before gameplay.
+    pub(crate) fn gameplay_time(raw: f32) -> Option<f32> {
+        if !super::gameplay_gate::active() {
+            return None;
+        }
+        static BASE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let mut base = BASE.load(std::sync::atomic::Ordering::Relaxed);
+        if base == u32::MAX {
+            base = raw.to_bits();
+            BASE.store(base, std::sync::atomic::Ordering::Relaxed);
+        }
+        Some(raw - f32::from_bits(base))
+    }
+    fn write_line(line: String) {
+        if let Mode::Record { file } = mode() {
+            if let Ok(mut file) = file.lock() {
+                let _ = std::io::Write::write_all(&mut *file, line.as_bytes());
+            }
+        }
+    }
+
+    pub fn record_relative(time: f32, dx: i32, dy: i32) {
+        write_line(format!("{time:.4} R {dx} {dy}\n"));
+    }
+
+    pub fn record_event(time: f32, event: &SdlEvent) {
+        let text: Vec<String> = event.text.iter().map(|byte| format!("{byte:02x}")).collect();
+        write_line(format!(
+            "{time:.4} E {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
+            event.kind, event.key_sym, text.join(","),
+            event.motion_x, event.motion_y, event.motion_state, event.button,
+            event.wheel_y, event.joy_axis, event.joy_axis_value, event.joy_button,
+            event.joy_hat, event.window_event, event.window_data1,
+            event.window_data2, event.window_flags,
+        ));
+    }
+
+    /// One replayed pump call: delivers every pending entry recorded at or
+    /// before `now` (level `TimeSeconds`), preserving record order.
+    pub fn replay_frame(now: f32) -> (Option<(i32, i32)>, Vec<SdlEvent>) {
+        match mode() {
+            Mode::Replay { entries, cursor } => {
+                let mut relative = None;
+                let mut events = Vec::new();
+                loop {
+                    let index = cursor.load(std::sync::atomic::Ordering::Relaxed);
+                    let Some(entry) = entries.get(index) else { break };
+                    if entry.time > now {
+                        break;
+                    }
+                    cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if let Some((dx, dy)) = entry.relative {
+                        relative = Some((dx, dy));
+                    }
+                    if let Some(event) = entry.event {
+                        events.push(event);
+                    }
+                }
+                (relative, events)
+            }
+            _ => (None, Vec::new()),
+        }
+    }
+}
+
+/// Replay supplies its own relative samples and must not pump physical input
+/// as a side effect of a capture transition.
+#[cfg(feature = "sdl")]
+pub(crate) fn input_replaying() -> bool {
+    input_trace::replaying()
+}
+
+/// Announces the isolation boundary exactly once per process. The harness
+/// requires this marker so a binary that ignores the environment switch
+/// cannot be mistaken for one that honored it.
+#[cfg(feature = "sdl")]
+fn announce_input_isolation() {
+    static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+    ANNOUNCED.call_once(|| eprintln!("<HP2_VERIFY> input=isolated"));
+}
 
 /// `SDL_EventType` values used by the pump.
 pub mod sdl_event {
     pub const WINDOWEVENT: u32 = 0x200;
     pub const KEYDOWN: u32 = 0x300;
     pub const KEYUP: u32 = 0x301;
+    pub const TEXTEDITING: u32 = 0x302;
     pub const TEXTINPUT: u32 = 0x303;
     pub const MOUSEMOTION: u32 = 0x400;
     pub const MOUSEBUTTONDOWN: u32 = 0x401;
@@ -43,6 +286,7 @@ pub mod sdl_event {
     pub const JOYHATMOTION: u32 = 0x602;
     pub const JOYBUTTONDOWN: u32 = 0x603;
     pub const JOYBUTTONUP: u32 = 0x604;
+    pub const QUIT: u32 = 0x100;
 }
 
 /// `SDL_WindowEventID` values used by the pump (`SDL_video.h`, enum counts
@@ -55,6 +299,7 @@ pub mod sdl_window_event {
     pub const RESTORED: u8 = 9;
     pub const FOCUS_GAINED: u8 = 12;
     pub const FOCUS_LOST: u8 = 13;
+    pub const CLOSE: u8 = 14;
 }
 
 /// `SDL_WINDOW_*` flag bits (`SDL_video.h`).
@@ -72,9 +317,9 @@ pub const TEXT_SIZE: usize = 32;
 /// notch with a joystick hat fold; nothing emits more than three.
 pub const MAX_ACTIONS: usize = 4;
 
-/// One polled `SDL_Event`, flattened by the C++ shell. Only the fields the
-/// event's own `type` uses are meaningful; the rest are zero.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// One polled `SDL_Event`, flattened by [`poll_and_flatten`]. Only the
+/// fields the event's own `type` uses are meaningful; the rest are zero.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct SdlEvent {
     pub kind: u32,
     /// `keysym.sym` for `KEYDOWN`/`KEYUP`.
@@ -102,6 +347,244 @@ pub struct SdlEvent {
     pub window_data1: i32,
     pub window_data2: i32,
     pub window_flags: u32,
+}
+
+#[cfg(feature = "sdl")]
+pub mod ffi {
+    /// `SDL_CommonEvent` (`SDL_events.h:184-188`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlCommonEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+    }
+    /// `SDL_Keysym` (`SDL_keyboard.h:48-54`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlKeysym {
+        pub scancode: i32,
+        pub sym: i32,
+        pub modifiers: u16,
+        pub unused: u32,
+    }
+    /// `SDL_KeyboardEvent` (`SDL_events.h:224-234`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlKeyboardEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub state: u8,
+        pub repeat: u8,
+        pub padding2: u8,
+        pub padding3: u8,
+        pub keysym: SdlKeysym,
+    }
+    /// `SDL_TextInputEvent` (`SDL_events.h:288-294`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlTextInputEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub text: [u8; super::TEXT_SIZE],
+    }
+    /// `SDL_TextEditingEvent` (`SDL_events.h`: preedit composition event).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlTextEditingEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub text: [u8; super::TEXT_SIZE],
+        pub start: i32,
+        pub length: i32,
+    }
+    /// `SDL_MouseMotionEvent` (`SDL_events.h:299-310`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlMouseMotionEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub which: u32,
+        pub state: u32,
+        pub x: i32,
+        pub y: i32,
+        pub xrel: i32,
+        pub yrel: i32,
+    }
+    /// `SDL_MouseButtonEvent` (`SDL_events.h:315-327`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlMouseButtonEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub which: u32,
+        pub button: u8,
+        pub state: u8,
+        pub clicks: u8,
+        pub padding1: u8,
+        pub x: i32,
+        pub y: i32,
+    }
+    /// `SDL_MouseWheelEvent` (`SDL_events.h:332-345`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlMouseWheelEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub which: u32,
+        pub x: i32,
+        pub y: i32,
+        pub direction: u32,
+        pub precise_x: f32,
+        pub precise_y: f32,
+        pub mouse_x: i32,
+        pub mouse_y: i32,
+    }
+    /// `SDL_JoyAxisEvent` (`SDL_events.h:350-361`); `which` is
+    /// `SDL_JoystickID` (`Sint32`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlJoyAxisEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub which: i32,
+        pub axis: u8,
+        pub padding1: u8,
+        pub padding2: u8,
+        pub padding3: u8,
+        pub value: i16,
+        pub padding4: u16,
+    }
+    /// `SDL_JoyHatEvent` (`SDL_events.h:382-397`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlJoyHatEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub which: i32,
+        pub hat: u8,
+        pub value: u8,
+        pub padding1: u8,
+        pub padding2: u8,
+    }
+    /// `SDL_JoyButtonEvent` (`SDL_events.h:402-411`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlJoyButtonEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub which: i32,
+        pub button: u8,
+        pub state: u8,
+        pub padding1: u8,
+        pub padding2: u8,
+    }
+    /// `SDL_WindowEvent` (`SDL_events.h:208-219`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlWindowEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub window_id: u32,
+        pub event: u8,
+        pub padding1: u8,
+        pub padding2: u8,
+        pub padding3: u8,
+        pub data1: i32,
+        pub data2: i32,
+    }
+    /// `SDL_Event` (`SDL_events.h:655-703`): a 56-byte union on every
+    /// 64-bit target this builds for (`sizeof(void*) <= 8`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub union SdlEventRaw {
+        pub kind: u32,
+        pub common: SdlCommonEvent,
+        pub key: SdlKeyboardEvent,
+        pub text: SdlTextInputEvent,
+        pub motion: SdlMouseMotionEvent,
+        pub button: SdlMouseButtonEvent,
+        pub wheel: SdlMouseWheelEvent,
+        pub jaxis: SdlJoyAxisEvent,
+        pub jbutton: SdlJoyButtonEvent,
+        pub jhat: SdlJoyHatEvent,
+        pub window: SdlWindowEvent,
+        pub padding: [u8; 56],
+        // SDL's omitted user/drop events contain pointers and align the union.
+        pub pointer_alignment: *mut std::ffi::c_void,
+    }
+
+    unsafe extern "C" {
+        pub fn SDL_PollEvent(event: *mut SdlEventRaw) -> i32;
+    }
+}
+
+/// Replaces `Hp2PlatformViewportLeaf_PollEvent`/`FlattenEvent` and the
+/// file's own `FlattenSdlEvent` helper (`SDLViewport.cpp:82-116`,
+/// `:322-323`). Polls one SDL event and flattens it exactly as the
+/// original; returns `None` once the queue is empty (`SDL_PollEvent`
+/// returned `0`). The `WINDOWEVENT` case alone additionally reads
+/// `window`'s SDL flags, matching the original's `if (V.SdlWindow)` guard.
+///
+/// # Safety
+/// `window`, if non-null, must be a valid `SDL_Window*` for the duration
+/// of this call.
+#[cfg(feature = "sdl")]
+pub unsafe fn poll_and_flatten(window: *mut std::ffi::c_void) -> Option<SdlEvent> {
+    let mut raw = ffi::SdlEventRaw { padding: [0u8; 56] };
+    // SAFETY: `raw` is a valid, zero-initialized out-param for the
+    // duration of the call; SDL's event subsystem is initialized by
+    // construction (C++ owns that init and only calls into this crate
+    // afterward).
+    if unsafe { ffi::SDL_PollEvent(&mut raw) } == 0 {
+        return None;
+    }
+    // SAFETY: `kind` is the union's first field, valid for every variant.
+    let kind = unsafe { raw.kind };
+    let mut out = SdlEvent {
+        kind,
+        ..Default::default()
+    };
+    // SAFETY: `SDL_PollEvent` filled `raw` as the variant selected by
+    // `kind`; each arm below reads only that variant.
+    unsafe {
+        match kind {
+            sdl_event::KEYDOWN | sdl_event::KEYUP => out.key_sym = raw.key.keysym.sym,
+            sdl_event::TEXTINPUT => out.text = raw.text.text,
+            sdl_event::MOUSEMOTION => {
+                out.motion_x = raw.motion.x;
+                out.motion_y = raw.motion.y;
+                out.motion_state = raw.motion.state;
+            }
+            sdl_event::MOUSEBUTTONDOWN | sdl_event::MOUSEBUTTONUP => out.button = raw.button.button,
+            sdl_event::MOUSEWHEEL => out.wheel_y = raw.wheel.y,
+            sdl_event::JOYAXISMOTION => {
+                out.joy_axis = raw.jaxis.axis;
+                out.joy_axis_value = raw.jaxis.value as i32;
+            }
+            sdl_event::JOYBUTTONDOWN | sdl_event::JOYBUTTONUP => {
+                out.joy_button = raw.jbutton.button
+            }
+            sdl_event::JOYHATMOTION => out.joy_hat = raw.jhat.value,
+            sdl_event::WINDOWEVENT => {
+                out.window_event = raw.window.event;
+                out.window_data1 = raw.window.data1;
+                out.window_data2 = raw.window.data2;
+                if !window.is_null() {
+                    // SAFETY: non-null checked; validity is this
+                    // function's own contract (see above).
+                    out.window_flags = crate::window_lifecycle::get_window_flags(window.cast());
+                }
+            }
+            _ => {}
+        }
+    }
+    Some(out)
 }
 
 /// Per-event snapshot of the `USDLViewport`/`USDLClient` fields the pump reads.
@@ -209,16 +692,32 @@ fn push_normalized(out: &mut ActionList, event: HP2InputEvent) {
     }
 }
 
+/// Translates one polled event under the process verification switch.
+pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
+    translate_event_with_verification(ctx, ev, deterministic_verification())
+}
+
 /// Translates one polled event. Mirrors the `switch (Event.type)` in
 /// `UpdateInput`; every arm keeps the original's guards and call order.
-pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
+///
+/// With `verification` set, the physical producers are dropped before they
+/// can reach a gameplay mutation: SDL keyboard, text, mouse motion/button/
+/// wheel, and joystick events produce no [`Action`]s. Window events still go
+/// through [`translate_window`], which keeps resize handling and suppresses
+/// the loss/restore grab-and-release side effects. Controlled replay or
+/// Engine input injection never enters this translator, so it is unaffected.
+pub fn translate_event_with_verification(
+    ctx: &Context,
+    ev: &SdlEvent,
+    verification: bool,
+) -> ActionList {
     let mut out = ActionList::new();
     match ev.kind {
-        sdl_event::KEYDOWN | sdl_event::KEYUP => {
+        sdl_event::KEYDOWN | sdl_event::KEYUP if !verification => {
             let normalized = input_event::make_key_event(ev.key_sym, ev.kind == sdl_event::KEYDOWN);
             push_normalized(&mut out, normalized);
         }
-        sdl_event::TEXTINPUT => {
+        sdl_event::TEXTINPUT if !verification => {
             let len = ev.text.iter().position(|&b| b == 0).unwrap_or(TEXT_SIZE);
             let normalized = input_event::make_text_event(Some(&ev.text[..len]));
             if normalized.key != ik::NONE && ctx.has_engine && ctx.has_actor {
@@ -227,7 +726,7 @@ pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
                 });
             }
         }
-        sdl_event::MOUSEMOTION => {
+        sdl_event::MOUSEMOTION if !verification => {
             if !ctx.mouse_is_grabbed && ctx.has_engine {
                 out.push(Action::EngineMousePosition {
                     buttons: mouse_state::buttons_from_sdl_state(ev.motion_state),
@@ -236,14 +735,14 @@ pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
                 });
             }
         }
-        sdl_event::MOUSEBUTTONDOWN | sdl_event::MOUSEBUTTONUP => {
+        sdl_event::MOUSEBUTTONDOWN | sdl_event::MOUSEBUTTONUP if !verification => {
             let normalized = input_event::make_mouse_button_event(
                 ev.button,
                 ev.kind == sdl_event::MOUSEBUTTONDOWN,
             );
             push_normalized(&mut out, normalized);
         }
-        sdl_event::MOUSEWHEEL => {
+        sdl_event::MOUSEWHEEL if !verification => {
             let mut wheel = [input_event::make_none_event(); 3];
             let count = input_event::make_wheel_events(ev.wheel_y, &mut wheel);
             for event in wheel.iter().take(count as usize) {
@@ -254,7 +753,7 @@ pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
                 });
             }
         }
-        sdl_event::JOYAXISMOTION => {
+        sdl_event::JOYAXISMOTION if !verification => {
             if let Some((key, value)) = joystick_input::map_joystick_axis(
                 ev.joy_axis as i32,
                 ev.joy_axis_value,
@@ -269,7 +768,7 @@ pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
                 });
             }
         }
-        sdl_event::JOYBUTTONDOWN | sdl_event::JOYBUTTONUP => {
+        sdl_event::JOYBUTTONDOWN | sdl_event::JOYBUTTONUP if !verification => {
             if let Some((key, action)) = joystick_input::map_joystick_button(
                 ev.joy_button as i32,
                 ev.kind == sdl_event::JOYBUTTONDOWN,
@@ -281,7 +780,7 @@ pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
                 });
             }
         }
-        sdl_event::JOYHATMOTION => {
+        sdl_event::JOYHATMOTION if !verification => {
             if ctx.joy_hat_folds_to_buttons {
                 let (new_last, events, count) =
                     joystick_input::fold_joystick_hat(ev.joy_hat, ctx.last_joy_hat);
@@ -295,13 +794,23 @@ pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
                 out.push(Action::SetLastJoyHat(new_last));
             }
         }
-        sdl_event::WINDOWEVENT => translate_window(ctx, ev, &mut out),
+        sdl_event::WINDOWEVENT => translate_window(ctx, ev, verification, &mut out),
         _ => {}
     }
     out
 }
 
-fn translate_window(ctx: &Context, ev: &SdlEvent, out: &mut ActionList) {
+/// Notify the owner of a real focus-gained event before legacy grab actions.
+/// Replayed and deterministic-verification input must not notify an owner.
+#[cfg(feature = "overlay-mouse")]
+fn observe_focus_gained<E>(ev: &SdlEvent, verification: bool, mut notify: impl FnMut() -> Result<(), E>) -> Result<(), E> {
+    if !verification && ev.kind == sdl_event::WINDOWEVENT && ev.window_event == sdl_window_event::FOCUS_GAINED {
+        notify()?;
+    }
+    Ok(())
+}
+
+fn translate_window(ctx: &Context, ev: &SdlEvent, verification: bool, out: &mut ActionList) {
     use sdl_window_event as we;
 
     let kind = ev.window_event;
@@ -314,6 +823,12 @@ fn translate_window(ctx: &Context, ev: &SdlEvent, out: &mut ActionList) {
     };
 
     if loss {
+        // Deterministic verification never turns a focus loss into input
+        // state: releasing the grab is meaningless (no grab was taken) and
+        // `ReleaseAll` would also drop keys injected by a controlled replay.
+        if verification {
+            return;
+        }
         if matches!(
             mouse_capture::on_loss(&state).action,
             CaptureAction::Release
@@ -324,6 +839,12 @@ fn translate_window(ctx: &Context, ev: &SdlEvent, out: &mut ActionList) {
         // Held input dies on every loss event, grabbed or not.
         out.push(Action::ReleaseAll);
     } else if restore && ctx.has_window {
+        // Focus regain must not re-enter OS mouse capture during
+        // verification (it would trap the user's cursor and re-couple the
+        // session to physical focus changes).
+        if verification {
+            return;
+        }
         let flags = WindowFlags {
             has_input_focus: ev.window_flags & sdl_window_flags::INPUT_FOCUS != 0,
             minimized_or_hidden: ev.window_flags
@@ -479,6 +1000,144 @@ pub fn release_all_next(cursor: &mut ReleaseAllCursor, held: bool) -> Option<Rel
             ReleasePhase::Done => return None,
         }
     }
+}
+
+/// Typed operations used to execute the shared SDL input policy.
+pub trait UpdateInputBackend {
+    /// Failure type supplied by the owning Engine/Core adapter.
+    type Error;
+
+    /// Rebinds the viewport's owning client at the original method boundary.
+    fn bind_client(&mut self) -> Result<(), Self::Error>;
+    /// Reads `MouseIsGrabbed` at the source's branch boundary.
+    fn mouse_is_grabbed(&mut self) -> Result<bool, Self::Error>;
+    /// Reads the live input fields used by the pure event translator.
+    fn context(&mut self) -> Result<Context, Self::Error>;
+    /// Reports whether `UViewport::Input` is live.
+    fn has_input(&mut self) -> Result<bool, Self::Error>;
+    /// Returns the live level's `TimeSeconds` for input replay alignment.
+    fn game_time(&mut self) -> Result<f32, Self::Error>;
+    /// Returns this viewport's live SDL window, or null.
+    fn window(&mut self) -> Result<*mut std::ffi::c_void, Self::Error>;
+    fn key_down(&mut self, key: i32) -> Result<bool, Self::Error>;
+    /// Dispatches one `CauseInputEvent`.
+    fn cause_input(&mut self, key: i32, action: i32, delta: f32) -> Result<(), Self::Error>;
+    /// Executes non-input side effects in the returned action sequence.
+    fn execute_action(&mut self, action: Action) -> Result<(), Self::Error>;
+    /// Stores `LastJoyHat`.
+    fn set_last_joy_hat(&mut self, key: i32) -> Result<(), Self::Error>;
+    /// Called before reset or focus-loss releases, while all held keys remain available.
+    fn before_release_all(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    /// Observation only; called for real SDL focus-gained events before legacy
+    /// capture actions, regardless of whether the viewport had a lost grab.
+    #[cfg(feature = "overlay-mouse")]
+    fn observe_focus_gained(&mut self) -> Result<(), Self::Error> { Ok(()) }
+}
+
+/// Executes SDL polling, reset release, relative mouse, and translated events
+/// through a typed host without duplicating the pump's mapping algorithms.
+///
+/// In deterministic verification the relative-mouse hardware sampling and
+/// every physical gameplay event are skipped; window events still flow so
+/// resizing and window lifecycle keep working, and the single isolation
+/// marker is emitted on the first pump.
+///
+/// # Errors
+/// Returns the first host operation failure, stopping later actions in order.
+///
+/// # Safety
+/// `window` results must point to a live SDL window until each poll completes.
+#[cfg(feature = "sdl")]
+pub unsafe fn update_input_with<B: UpdateInputBackend>(
+    backend: &mut B,
+    reset: bool,
+) -> Result<(), B::Error> {
+    let verification = deterministic_verification();
+    if verification {
+        announce_input_isolation();
+    }
+    backend.bind_client()?;
+    if reset {
+        release_all_with(backend)?;
+    }
+    if input_trace::replaying() {
+        if let Some(now) = input_trace::gameplay_time(backend.game_time()?) {
+            let (relative, events) = input_trace::replay_frame(now);
+            if let Some((dx, dy)) = relative {
+                let context = backend.context()?;
+                let actions = relative_mouse(&context, dx, dy);
+                execute_actions(backend, &actions)?;
+            }
+            for event in &events {
+                let context = backend.context()?;
+                let actions = translate_event_with_verification(&context, event, verification);
+                execute_actions(backend, &actions)?;
+            }
+        }
+        return Ok(());
+    }
+    if !verification && backend.mouse_is_grabbed()? && !backend.window()?.is_null() {
+        let (dx, dy) = crate::mouse_state::get_relative_mouse_state();
+        if input_trace::recording() {
+            if let Some(now) = input_trace::gameplay_time(backend.game_time()?) {
+                input_trace::record_relative(now, dx, dy);
+            }
+        }
+        let context = backend.context()?;
+        let actions = relative_mouse(&context, dx, dy);
+        execute_actions(backend, &actions)?;
+    }
+    loop {
+        let window = backend.window()?;
+        // SAFETY: the backend contract guarantees the returned non-null SDL
+        // window remains live for this synchronous poll.
+        let Some(event) = (unsafe { poll_and_flatten(window) }) else {
+            break;
+        };
+        if input_trace::recording() && event.kind != 0x200 && event.kind != 0x100 {
+            if let Some(now) = input_trace::gameplay_time(backend.game_time()?) {
+                input_trace::record_event(now, &event);
+            }
+        }
+        let context = backend.context()?;
+        #[cfg(feature = "overlay-mouse")]
+        observe_focus_gained(&event, verification, || backend.observe_focus_gained())?;
+        let actions = translate_event_with_verification(&context, &event, verification);
+        execute_actions(backend, &actions)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "sdl")]
+pub(crate) fn release_all_with<B: UpdateInputBackend>(backend: &mut B) -> Result<(), B::Error> {
+    backend.before_release_all()?;
+    let mut cursor = release_all_begin(backend.has_input()?);
+    let mut held = false;
+    while let Some(step) = release_all_next(&mut cursor, held) {
+        held = false;
+        match step {
+            ReleaseStep::QueryKeyDown(key) => held = backend.key_down(key)?,
+            ReleaseStep::Cause { key, action, delta } => backend.cause_input(key, action, delta)?,
+            ReleaseStep::SetLastJoyHat(key) => backend.set_last_joy_hat(key)?,
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "sdl")]
+fn execute_actions<B: UpdateInputBackend>(
+    backend: &mut B,
+    actions: &ActionList,
+) -> Result<(), B::Error> {
+    for action in actions.iter() {
+        match action {
+            Action::Cause { key, action, delta } => backend.cause_input(key, action, delta)?,
+            Action::SetLastJoyHat(key) => backend.set_last_joy_hat(key)?,
+            Action::ReleaseAll => release_all_with(backend)?,
+            action => backend.execute_action(action)?,
+        }
+    }
+    Ok(())
 }
 
 /// One non-null entry of `USDLClient::Viewports` as seen by `Tick`.
@@ -973,6 +1632,34 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "overlay-mouse")]
+    #[test]
+    fn focus_gained_observed_with_and_without_a_lost_grab() {
+        let ev = window(sdl_window_event::FOCUS_GAINED, sdl_window_flags::INPUT_FOCUS);
+        for lost in [false, true] {
+            let mut c = ctx(); c.lost_grab = lost; c.capture_mouse = true;
+            let mut observations = 0;
+            observe_focus_gained(&ev, false, || { observations += 1; Ok::<(), ()>(()) }).unwrap();
+            assert_eq!(observations, 1);
+            let actions = collect(&translate_event_with_verification(&c, &ev, false));
+            if lost {
+                assert_eq!(actions, vec![Action::UpdateMouseGrab { capture: true }, Action::SetLostGrab(false)]);
+            } else { assert!(actions.is_empty()); }
+        }
+    }
+
+    #[cfg(feature = "overlay-mouse")]
+    #[test]
+    fn focus_observation_excludes_other_and_verification_events_and_propagates_errors() {
+        let gained = window(sdl_window_event::FOCUS_GAINED, sdl_window_flags::INPUT_FOCUS);
+        let lost = window(sdl_window_event::FOCUS_LOST, 0);
+        let mut observations = 0;
+        observe_focus_gained(&gained, true, || { observations += 1; Ok::<(), &str>(()) }).unwrap();
+        observe_focus_gained(&lost, false, || { observations += 1; Ok::<(), &str>(()) }).unwrap();
+        assert_eq!(observations, 0);
+        assert_eq!(observe_focus_gained(&gained, false, || Err("observer")), Err("observer"));
+    }
+
     #[test]
     fn restore_without_window_is_ignored() {
         let mut c = ctx();
@@ -1242,5 +1929,102 @@ mod tests {
             cand(true, 4, 4, f32::from_bits(0x33d6_8000)),
         ];
         assert_eq!(tick_victim(&subfloat), Some(1));
+    }
+
+    #[test]
+    fn verification_drops_every_physical_gameplay_producer() {
+        let mut c = ctx();
+        c.joy_hat_folds_to_buttons = true;
+        c.last_joy_hat = ik::NONE;
+
+        let mut key_down = event(sdl_event::KEYDOWN);
+        key_down.key_sym = b'a' as i32;
+        let mut key_up = event(sdl_event::KEYUP);
+        key_up.key_sym = b'a' as i32;
+        let mut text = event(sdl_event::TEXTINPUT);
+        text.text[0] = b'a';
+        let mut motion = event(sdl_event::MOUSEMOTION);
+        motion.motion_x = 10;
+        motion.motion_y = 20;
+        motion.motion_state = 4;
+        let mut button_down = event(sdl_event::MOUSEBUTTONDOWN);
+        button_down.button = 1;
+        let mut button_up = event(sdl_event::MOUSEBUTTONUP);
+        button_up.button = 1;
+        let mut wheel = event(sdl_event::MOUSEWHEEL);
+        wheel.wheel_y = 2;
+        let mut axis = event(sdl_event::JOYAXISMOTION);
+        axis.joy_axis = 0;
+        axis.joy_axis_value = 32767;
+        let mut joy_button = event(sdl_event::JOYBUTTONDOWN);
+        joy_button.joy_button = 0;
+        let mut hat = event(sdl_event::JOYHATMOTION);
+        hat.joy_hat = 1;
+
+        let physical = [
+            key_down, key_up, text, motion, button_down, button_up, wheel, axis, joy_button, hat,
+        ];
+        for ev in physical {
+            assert!(
+                !translate_event_with_verification(&c, &ev, false).is_empty(),
+                "production translation must emit actions for event kind {:#x}",
+                ev.kind
+            );
+            assert!(
+                translate_event_with_verification(&c, &ev, true).is_empty(),
+                "verification must drop physical event kind {:#x}",
+                ev.kind
+            );
+        }
+    }
+
+    #[test]
+    fn verification_keeps_resize_and_suppresses_focus_transitions() {
+        // Resize is real window lifecycle, not hardware input: it still runs.
+        let mut resize = window(sdl_window_event::RESIZED, 0);
+        resize.window_data1 = 1024;
+        resize.window_data2 = 768;
+        assert_eq!(
+            collect(&translate_event_with_verification(&ctx(), &resize, true)),
+            vec![Action::ResizeViewport {
+                width: 1024,
+                height: 768,
+            }]
+        );
+
+        // Focus loss normally drops the grab and releases every held key,
+        // including keys injected by a controlled replay.
+        let mut grabbed = ctx();
+        grabbed.mouse_is_grabbed = true;
+        grabbed.capture_mouse = true;
+        let lost = window(sdl_window_event::FOCUS_LOST, 0);
+        assert_eq!(
+            collect(&translate_event_with_verification(&grabbed, &lost, false)),
+            vec![
+                Action::UpdateMouseGrab { capture: false },
+                Action::SetLostGrab(true),
+                Action::ReleaseAll,
+            ]
+        );
+        assert!(translate_event_with_verification(&grabbed, &lost, true).is_empty());
+        for kind in [sdl_window_event::MINIMIZED, sdl_window_event::HIDDEN] {
+            assert!(
+                translate_event_with_verification(&grabbed, &window(kind, 0), true).is_empty()
+            );
+        }
+
+        // Focus regain normally re-enters OS mouse capture.
+        let mut pending = ctx();
+        pending.lost_grab = true;
+        pending.capture_mouse = true;
+        let gained = window(sdl_window_event::FOCUS_GAINED, sdl_window_flags::INPUT_FOCUS);
+        assert_eq!(
+            collect(&translate_event_with_verification(&pending, &gained, false)),
+            vec![
+                Action::UpdateMouseGrab { capture: true },
+                Action::SetLostGrab(false),
+            ]
+        );
+        assert!(translate_event_with_verification(&pending, &gained, true).is_empty());
     }
 }

@@ -8,13 +8,19 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 
-use hp2_abi::engine::generated::ULevel;
-use hp2_engine::level_net::{self, Hp2LevelNetServices};
+use hp2_abi::engine::generated::{
+    AActor, ALevelInfo, FURL, UChannel, UGameEngine, ULevel, UNetConnection, UNetDriver, UObject,
+};
+use hp2_engine::level_net::{self, Hp2LevelNetContinuation, Hp2LevelNetServices};
+use hp2_engine::level_spawn_actor::Hp2SpawnActorContext;
+
+#[path = "level_spawn_actor/mock.rs"]
+mod level_spawn_actor_mock;
 
 const FIXTURE: &str = include_str!("fixtures/level_oracle.txt");
 
 /// Number of `Hp2LevelNetServices` fields (all `unsafe extern "C" fn` pointers).
-const SERVICE_COUNT: usize = 114;
+const SERVICE_COUNT: usize = 71;
 
 /// `"Engine.Level"` as a NUL-terminated TCHAR buffer (`object_full_name`).
 static ENGINE_LEVEL: [u32; 13] = [
@@ -47,12 +53,9 @@ static REMOTE_ADDRESS: [u32; 15] = [
     '7' as u32, ':' as u32, '7' as u32, '7' as u32, '7' as u32, '7' as u32, 0,
 ];
 static EMPTY_TEXT: [u32; 1] = [0];
-static SWITCH_URL: [u32; 2] = ['x' as u32, 0];
 
 thread_local! {
     static SERVER_CONNECTION: Cell<bool> = const { Cell::new(false) };
-    static CHANNEL_TYPE: Cell<i32> = const { Cell::new(0) };
-    static CHANNEL_INDEX: Cell<i32> = const { Cell::new(0) };
     static EXEC_NET_RESULT: Cell<i32> = const { Cell::new(0) };
     static EXEC_DEMO_RESULT: Cell<i32> = const { Cell::new(0) };
     static EXEC_COMMAND: RefCell<String> = const { RefCell::new(String::new()) };
@@ -70,14 +73,27 @@ thread_local! {
     static COUNTDOWN: Cell<f32> = const { Cell::new(0.0) };
     static TRAVEL_PAUSE: Cell<f32> = const { Cell::new(0.0) };
     static ERROR_TEXT: RefCell<String> = const { RefCell::new(String::new()) };
-    static FSTRING_CALL: Cell<usize> = const { Cell::new(0) };
-    static FSTRING_BUFFERS: RefCell<[[u32; 128]; 2]> = const { RefCell::new([[0; 128]; 2]) };
     static PRELOGIN_REJECT: Cell<bool> = const { Cell::new(false) };
     static REQUEST_URL: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
     static CLIENT_TRAVEL: RefCell<String> = const { RefCell::new(String::new()) };
     static NET_SPEED: Cell<i32> = const { Cell::new(0) };
     static CHALLENGE_RESPONSE: Cell<i32> = const { Cell::new(0) };
     static DEBUGF: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+thread_local! {
+    static NET_DRIVER_MEM: RefCell<Box<UNetDriver>> =
+        RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
+    static CONNECTION_MEM: RefCell<Box<UNetConnection>> =
+        RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
+    static CHANNEL_MEM: RefCell<Box<UChannel>> =
+        RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
+    static GAME_ENGINE_MEM: RefCell<Box<UGameEngine>> =
+        RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
+    static LEVEL_INFO_MEM: RefCell<Box<ALevelInfo>> =
+        RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
+    static URL_MEM: RefCell<Box<FURL>> = RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
+    static ACTOR_MEM: RefCell<Box<AActor>> = RefCell::new(Box::new(unsafe { std::mem::zeroed() }));
 }
 
 const _: () = assert!(
@@ -105,130 +121,248 @@ unsafe fn decode(text: *const u32) -> String {
     out
 }
 
-unsafe extern "C" fn debugf_dev_net(text: *const u32) {
-    // SAFETY: forwarded from level_net.
-    let s = unsafe { decode(text) };
-    DEBUGF.with(|d| d.borrow_mut().push(format!("debugf\tdev_net\t{s}")));
+unsafe extern "C" fn debugf_dev_net(text: *const u32) -> i32 {
+    (|| {
+        // SAFETY: forwarded from level_net.
+        let s = unsafe { decode(text) };
+        DEBUGF.with(|d| d.borrow_mut().push(format!("debugf\tdev_net\t{s}")));
+    })();
+    0
 }
 
-unsafe extern "C" fn netdriver_server_connection(_drv: *mut c_void) -> *mut c_void {
-    if SERVER_CONNECTION.with(Cell::get) {
-        0x30 as *mut c_void
-    } else {
-        std::ptr::null_mut()
-    }
-}
 
 fn wide(text: &str) -> Vec<u32> {
     text.encode_utf16().map(u32::from).chain([0]).collect()
 }
-unsafe extern "C" fn output_device_log(_ar: *mut c_void, text: *const u32) {
-    // SAFETY: level_net forwards a NUL-terminated TCHAR string.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("debugf\tlog\t{}", unsafe { decode(text) }))
-    });
+unsafe extern "C" fn output_device_log(_ar: *mut c_void, text: *const u32) -> i32 {
+    (|| {
+        // SAFETY: level_net forwards a NUL-terminated TCHAR string.
+        DEBUGF.with(|d| {
+            d.borrow_mut()
+                .push(format!("debugf\tlog\t{}", unsafe { decode(text) }))
+        });
+    })();
+    0
 }
 
-unsafe extern "C" fn parse_command(stream: *mut *const u32, keyword: *const u32) -> i32 {
-    let command = EXEC_COMMAND.with(|c| c.borrow().clone());
-    // SAFETY: keyword is a NUL-terminated TCHAR string.
-    let keyword = unsafe { decode(keyword) };
-    let Some(rest) = command.strip_prefix(&keyword) else {
-        return 0;
-    };
-    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
-        return 0;
+unsafe extern "C" fn parse_command(
+    stream: *mut *const u32,
+    keyword: *const u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            let command = EXEC_COMMAND.with(|c| c.borrow().clone());
+            // SAFETY: keyword is a NUL-terminated TCHAR string.
+            let keyword = decode(keyword);
+            let Some(rest) = command.strip_prefix(&keyword) else {
+                return 0;
+            };
+            if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+                return 0;
+            }
+            // SAFETY: the command buffer remains alive for the duration of the call.
+            *stream = (*stream).add(keyword.encode_utf16().count());
+            1
+        })();
     }
-    // SAFETY: the command buffer remains alive for the duration of the call.
-    unsafe { *stream = (*stream).add(keyword.encode_utf16().count()) };
-    1
+    0
 }
 
 unsafe extern "C" fn parse_token_fstring(
     _stream: *mut *const u32,
     _token: *mut c_void,
     _escape: i32,
+    result: *mut i32,
 ) -> i32 {
-    DEMO_FILE.with(Cell::get) as i32
+    unsafe {
+        *result = (|| -> i32 { DEMO_FILE.with(Cell::get) as i32 })();
+    }
+    0
 }
 
 extern "C" fn fake_handle() -> *mut c_void {
     0x80 as *mut c_void
 }
 
-unsafe extern "C" fn furl_map(_url: *mut c_void) -> *mut c_void {
-    if DEMO_FILE.with(Cell::get) {
-        if EXEC_COMMAND.with(|c| c.borrow().contains("demo1")) {
-            DEMO1.as_ptr() as *mut c_void
-        } else {
-            DEMO2.as_ptr() as *mut c_void
-        }
-    } else {
-        fake_handle()
-    }
+fn net_driver_ptr() -> *mut c_void {
+    NET_DRIVER_MEM.with(|m| m.borrow().as_ref() as *const UNetDriver as *mut c_void)
 }
 
-unsafe extern "C" fn no_delete(_handle: *mut c_void) {}
+/// Syncs the shared `UNetDriver` mock memory from the scenario's thread-local
+/// flags. Must run after `SERVER_CONNECTION`/`TRAVEL_PAUSE` are set for the
+/// scenario and before the `level_net` call that reads them.
+fn sync_net_driver() {
+    NET_DRIVER_MEM.with(|m| {
+        let mut d = m.borrow_mut();
+        d.server_connection = if SERVER_CONNECTION.with(Cell::get) {
+            fake_handle()
+        } else {
+            std::ptr::null_mut()
+        };
+        d.server_travel_pause = TRAVEL_PAUSE.with(Cell::get);
+        d.max_client_rate = 5000;
+        d.master_map = fake_handle();
+    });
+}
 
-unsafe extern "C" fn fstring_new() -> *mut c_void {
-    FSTRING_CALL.with(|call| {
-        let index = call.get();
-        call.set(index + 1);
-        FSTRING_BUFFERS.with(|buffers| {
-            let mut buffers = buffers.borrow_mut();
-            buffers[index].fill(0);
-            let slot = unsafe { buffers.as_mut_ptr().add(index) };
-            // SAFETY: buffers[index] above proved index < len, so the add stays in bounds.
-            slot.cast::<u32>().cast::<c_void>()
-        })
+fn connection_ptr() -> *mut c_void {
+    CONNECTION_MEM.with(|m| m.borrow().as_ref() as *const UNetConnection as *mut c_void)
+}
+
+/// Links the shared mock `UNetConnection` to the shared mock `UNetDriver`,
+/// for call paths that reach `connection_driver`.
+fn sync_connection_driver() {
+    CONNECTION_MEM.with(|m| m.borrow_mut().driver = net_driver_ptr());
+}
+
+fn channel_ptr() -> *mut c_void {
+    CHANNEL_MEM.with(|m| m.borrow().as_ref() as *const UChannel as *mut c_void)
+}
+
+/// Syncs the shared mock `UChannel`'s connection link and fields, and links
+/// its connection to the shared mock driver.
+fn sync_channel(ch_type: i32, ch_index: i32) {
+    CHANNEL_MEM.with(|m| {
+        let mut c = m.borrow_mut();
+        c.connection = connection_ptr();
+        c.ch_type = ch_type;
+        c.ch_index = ch_index;
+    });
+    sync_connection_driver();
+}
+
+fn game_engine_ptr() -> *mut c_void {
+    GAME_ENGINE_MEM.with(|m| m.borrow().as_ref() as *const UGameEngine as *mut c_void)
+}
+
+/// Syncs the shared mock `UGameEngine`'s `Client` field from `CLIENT_PRESENT`.
+fn sync_game_engine() {
+    GAME_ENGINE_MEM.with(|m| {
+        m.borrow_mut().client = if CLIENT_PRESENT.with(Cell::get) {
+            fake_handle()
+        } else {
+            std::ptr::null_mut()
+        };
+    });
+}
+
+fn actor_ptr() -> *mut c_void {
+    ACTOR_MEM.with(|m| m.borrow().as_ref() as *const AActor as *mut c_void)
+}
+
+fn url_ptr() -> *mut c_void {
+    URL_MEM.with(|m| m.borrow().as_ref() as *const FURL as *mut c_void)
+}
+
+/// Address of the shared mock `FURL`'s `Map` field, matching what the
+/// converted `furl_map` leaf computes from `url_ptr()`.
+fn url_map_ptr() -> *mut c_void {
+    URL_MEM.with(|m| {
+        let r = m.borrow();
+        std::ptr::addr_of!(r.map) as *mut c_void
     })
 }
 
-unsafe extern "C" fn fstring_right(_h: *mut c_void, _n: i32) -> *mut c_void {
-    DEM_SUFFIX.as_ptr() as *mut c_void
+fn level_info_ptr() -> *mut c_void {
+    LEVEL_INFO_MEM.with(|m| m.borrow().as_ref() as *const ALevelInfo as *mut c_void)
 }
 
-unsafe extern "C" fn fstring_ne_text(h: *mut c_void, text: *const u32) -> i32 {
-    if DEMO_FILE.with(Cell::get) {
-        0
-    } else if h == SWITCH_URL.as_ptr() as *mut c_void {
-        NEXT_URL_NONEMPTY.with(Cell::get) as i32
-    } else {
-        (unsafe { decode(h.cast()) } != unsafe { decode(text) }) as i32
+/// Address of the shared mock `ALevelInfo`'s `NextURL` field, matching what
+/// the converted `level_info_next_url` leaf computes from `level_info_ptr()`.
+fn level_info_next_url_ptr() -> *mut c_void {
+    LEVEL_INFO_MEM.with(|m| {
+        let r = m.borrow();
+        std::ptr::addr_of!(r.next_url) as *mut c_void
+    })
+}
+
+/// Syncs the shared mock `ALevelInfo`'s fields read by converted leaves that
+/// are driven by scenario thread-locals, called on every `level_get_level_info`.
+fn sync_level_info() {
+    LEVEL_INFO_MEM.with(|m| {
+        let mut li = m.borrow_mut();
+        li.set_b_lone_player(LONE_PLAYER.with(Cell::get) != 0);
+        li.game = fake_handle();
+    });
+}
+
+/// Marks the shared mock `ULevel`'s `_Linker` as present, for scenarios
+/// driven by `LINKER_PRESENT`.
+unsafe fn set_level_linker_present(level: &mut ULevel) {
+    let obj = (level as *mut ULevel).cast::<UObject>();
+    unsafe { (*obj)._linker = fake_handle() };
+}
+
+
+unsafe extern "C" fn fstring_ne_text(h: *mut c_void, text: *const u32, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            if DEMO_FILE.with(Cell::get) {
+                0
+            } else if h == level_info_next_url_ptr() {
+                NEXT_URL_NONEMPTY.with(Cell::get) as i32
+            } else {
+                (decode(h.cast()) != decode(text)) as i32
+            }
+        })();
     }
+    0
 }
 
-unsafe extern "C" fn fstring_append_text(_h: *mut c_void, _text: *const u32) {}
-
-unsafe extern "C" fn debugf_log(text: *const u32) {
-    // SAFETY: forwarded TCHAR string is NUL-terminated.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("debugf\tlog\t{}", unsafe { decode(text) }))
-    });
+unsafe extern "C" fn fstring_append_text(_h: *mut c_void, _text: *const u32) -> i32 {
+    (|| {})();
+    0
 }
 
-unsafe extern "C" fn output_device_logf(_ar: *mut c_void, text: *const u32) {
-    // SAFETY: forwarded TCHAR string is NUL-terminated.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("debugf\tlog\t{}", unsafe { decode(text) }))
-    });
+unsafe extern "C" fn debugf_log(text: *const u32) -> i32 {
+    (|| {
+        // SAFETY: forwarded TCHAR string is NUL-terminated.
+        DEBUGF.with(|d| {
+            d.borrow_mut()
+                .push(format!("debugf\tlog\t{}", unsafe { decode(text) }))
+        });
+    })();
+    0
 }
 
-unsafe extern "C" fn static_load_class(_base: i32, name: *const u32) -> *mut c_void {
-    // SAFETY: the class name is a NUL-terminated TCHAR string.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("load_class\t{}", unsafe { decode(name) }))
-    });
-    0x90 as *mut c_void
+unsafe extern "C" fn output_device_logf(_ar: *mut c_void, text: *const u32) -> i32 {
+    (|| {
+        // SAFETY: forwarded TCHAR string is NUL-terminated.
+        DEBUGF.with(|d| {
+            d.borrow_mut()
+                .push(format!("debugf\tlog\t{}", unsafe { decode(text) }))
+        });
+    })();
+    0
 }
 
-unsafe extern "C" fn construct_net_driver(_cls: *mut c_void) -> *mut c_void {
-    DEBUGF.with(|d| d.borrow_mut().push("construct_object\tdemo".to_string()));
-    0xA0 as *mut c_void
+unsafe extern "C" fn static_load_class(
+    _base: i32,
+    name: *const u32,
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        *result = (|| -> *mut c_void {
+            // SAFETY: the class name is a NUL-terminated TCHAR string.
+            DEBUGF.with(|d| {
+                d.borrow_mut()
+                    .push(format!("load_class\t{}", decode(name)))
+            });
+            0x90 as *mut c_void
+        })();
+    }
+    0
+}
+
+unsafe extern "C" fn construct_net_driver(_cls: *mut c_void, result: *mut *mut c_void) -> i32 {
+    unsafe {
+        *result = (|| -> *mut c_void {
+            DEBUGF.with(|d| d.borrow_mut().push("construct_object\tdemo".to_string()));
+            0xA0 as *mut c_void
+        })();
+    }
+    0
 }
 
 unsafe extern "C" fn netdriver_init_listen(
@@ -236,74 +370,97 @@ unsafe extern "C" fn netdriver_init_listen(
     _level: *mut c_void,
     _url: *mut c_void,
     error: *mut c_void,
+    result: *mut i32,
 ) -> i32 {
-    let result = DEMO_INIT_OK.with(Cell::get) as i32;
-    if result == 0 {
-        ERROR_TEXT.with(|error| *error.borrow_mut() = "Port busy".to_string());
-        if DEMO_FILE.with(Cell::get) {
-            // The recording path uses the mutable FString from `fstring_new`;
-            // Listen passes the static `PORT_BUSY` fixture buffer instead.
-            unsafe { assign_wide(error.cast(), "Port busy") };
-        }
+    unsafe {
+        *result = (|| -> i32 {
+            let result = DEMO_INIT_OK.with(Cell::get) as i32;
+            if result == 0 {
+                ERROR_TEXT.with(|error| *error.borrow_mut() = "Port busy".to_string());
+                if DEMO_FILE.with(Cell::get) {
+                    // The recording path uses the mutable FString from `fstring_new`;
+                    // Listen passes the static `PORT_BUSY` fixture buffer instead.
+                    assign_wide(error.cast(), "Port busy");
+                }
+            }
+            let name = if DEMO_FILE.with(Cell::get) {
+                if EXEC_COMMAND.with(|c| c.borrow().contains("demo1")) {
+                    "demo1.dem"
+                } else {
+                    "demo2.dem"
+                }
+            } else {
+                "Entry"
+            };
+            let driver = if DEMO_FILE.with(Cell::get) {
+                "demo"
+            } else {
+                "net"
+            };
+            DEBUGF.with(|d| {
+                d.borrow_mut()
+                    .push(format!("init_listen\t{driver}\t{name}\t{result}"))
+            });
+            result
+        })();
     }
-    let name = if DEMO_FILE.with(Cell::get) {
-        if EXEC_COMMAND.with(|c| c.borrow().contains("demo1")) {
-            "demo1.dem"
-        } else {
-            "demo2.dem"
-        }
-    } else {
-        "Entry"
-    };
-    let driver = if DEMO_FILE.with(Cell::get) {
-        "demo"
-    } else {
-        "net"
-    };
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("init_listen\t{driver}\t{name}\t{result}"))
-    });
-    result
+    0
 }
-unsafe extern "C" fn static_construct_net_driver(_cls: *mut c_void) -> *mut c_void {
-    DEBUGF.with(|d| d.borrow_mut().push("construct_object\tnet".to_string()));
-    0xA0 as *mut c_void
+unsafe extern "C" fn static_construct_net_driver(
+    _cls: *mut c_void,
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        *result = (|| -> *mut c_void {
+            DEBUGF.with(|d| d.borrow_mut().push("construct_object\tnet".to_string()));
+            net_driver_ptr()
+        })();
+    }
+    0
 }
 
-unsafe extern "C" fn level_url(_level: *mut c_void) -> *mut c_void {
-    fake_handle()
-}
 
-unsafe extern "C" fn cast_game_engine(_engine: *mut c_void) -> *mut c_void {
-    fake_handle()
+unsafe extern "C" fn cast_game_engine(_engine: *mut c_void, result: *mut *mut c_void) -> i32 {
+    unsafe {
+        *result = (|| -> *mut c_void { fake_handle() })();
+    }
+    0
 }
 
 unsafe extern "C" fn game_build_server_master_map(
     _ge: *mut c_void,
     _drv: *mut c_void,
     _level: *mut c_void,
-) {
-    DEBUGF.with(|d| d.borrow_mut().push("build_master_map".to_string()));
+) -> i32 {
+    (|| {
+        DEBUGF.with(|d| d.borrow_mut().push("build_master_map".to_string()));
+    })();
+    0
 }
 
-unsafe extern "C" fn game_engine_server_actors_num(_ge: *mut c_void) -> i32 {
-    (ACTOR_MODE.with(Cell::get) != 0) as i32
-}
-
-unsafe extern "C" fn engine_client(_engine: *mut c_void) -> *mut c_void {
-    if CLIENT_PRESENT.with(Cell::get) {
-        fake_handle()
-    } else {
-        std::ptr::null_mut()
+unsafe extern "C" fn game_engine_server_actors_num(_ge: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 { (ACTOR_MODE.with(Cell::get) != 0) as i32 })();
     }
-}
-unsafe extern "C" fn engine_client_viewports_num(_client: *mut c_void) -> i32 {
-    1
+    0
 }
 
-unsafe extern "C" fn engine_client_viewport(_client: *mut c_void, _index: i32) -> *mut c_void {
-    fake_handle()
+unsafe extern "C" fn engine_client_viewports_num(_client: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 { 1 })();
+    }
+    0
+}
+
+unsafe extern "C" fn engine_client_viewport(
+    _client: *mut c_void,
+    _index: i32,
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        *result = (|| -> *mut c_void { fake_handle() })();
+    }
+    0
 }
 
 unsafe extern "C" fn engine_set_client_travel(
@@ -312,64 +469,81 @@ unsafe extern "C" fn engine_set_client_travel(
     url: *const u32,
     _items: i32,
     _travel: i32,
-) {
-    CLIENT_TRAVEL.with(|travel| *travel.borrow_mut() = unsafe { decode(url) });
-}
-
-unsafe extern "C" fn netdriver_max_client_rate(_driver: *mut c_void) -> i32 {
-    5000
-}
-
-unsafe extern "C" fn connection_set_current_net_speed(_conn: *mut c_void, speed: i32) {
-    NET_SPEED.with(|value| value.set(speed));
-}
-
-unsafe extern "C" fn connection_current_net_speed(_conn: *mut c_void) -> i32 {
-    NET_SPEED.with(Cell::get)
-}
-
-unsafe extern "C" fn connection_challenge(_conn: *mut c_void) -> u32 {
+) -> i32 {
+    (|| {
+        CLIENT_TRAVEL.with(|travel| *travel.borrow_mut() = unsafe { decode(url) });
+    })();
     0
 }
 
-unsafe extern "C" fn engine_challenge_response(_engine: *mut c_void, challenge: u32) -> i32 {
-    let response = CHALLENGE_RESPONSE.with(Cell::get);
-    DEBUGF.with(|records| {
-        records
-            .borrow_mut()
-            .push(format!("challenge_response\t{challenge}\t{response}"))
-    });
-    response
-}
 
-unsafe extern "C" fn parse_guid(_text: *const u32, _key: *const u32, out: *mut u32) -> i32 {
-    for index in 0..4 {
-        unsafe { *out.add(index) = 0 };
+
+
+
+unsafe extern "C" fn engine_challenge_response(
+    _engine: *mut c_void,
+    challenge: u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            let response = CHALLENGE_RESPONSE.with(Cell::get);
+            DEBUGF.with(|records| {
+                records
+                    .borrow_mut()
+                    .push(format!("challenge_response\t{challenge}\t{response}"))
+            });
+            response
+        })();
     }
-    1
-}
-
-unsafe extern "C" fn package_map_list_num(_pm: *mut c_void) -> i32 {
     0
 }
 
-unsafe extern "C" fn level_get_level_info(_level: *mut c_void) -> *mut c_void {
-    fake_handle()
+unsafe extern "C" fn parse_guid(
+    _text: *const u32,
+    _key: *const u32,
+    out: *mut u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            for index in 0..4 {
+                *out.add(index) = 0;
+            }
+            1
+        })();
+    }
+    0
 }
 
-unsafe extern "C" fn level_info_set_net_mode(_li: *mut c_void, mode: u8) {
-    NET_MODE.with(|value| value.set(mode));
+unsafe extern "C" fn package_map_list_num(_pm: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 { 0 })();
+    }
+    0
 }
 
-unsafe extern "C" fn level_info_set_next_switch_countdown(_li: *mut c_void, value: f32) {
-    COUNTDOWN.with(|countdown| countdown.set(value));
+unsafe extern "C" fn level_get_level_info(_level: *mut c_void, result: *mut *mut c_void) -> i32 {
+    unsafe {
+        *result = (|| -> *mut c_void {
+            sync_level_info();
+            level_info_ptr()
+        })();
+    }
+    0
 }
 
-unsafe extern "C" fn netdriver_server_travel_pause(_drv: *mut c_void) -> f32 {
-    TRAVEL_PAUSE.with(Cell::get)
-}
-unsafe extern "C" fn game_engine_server_actor_text(_ge: *mut c_void, _i: i32) -> *const u32 {
-    ENGINE_LEVEL.as_ptr()
+
+
+unsafe extern "C" fn game_engine_server_actor_text(
+    _ge: *mut c_void,
+    _i: i32,
+    result: *mut *const u32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 { ENGINE_LEVEL.as_ptr() })();
+    }
+    0
 }
 
 unsafe extern "C" fn parse_token_buf(
@@ -377,223 +551,280 @@ unsafe extern "C" fn parse_token_buf(
     buf: *mut u32,
     _max: i32,
     _escape: i32,
+    result: *mut i32,
 ) -> i32 {
-    let mode = ACTOR_MODE.with(Cell::get);
-    let call = PARSE_TOKEN_CALL.with(|n| {
-        let previous = n.get();
-        n.set(previous + 1);
-        previous
-    });
-    let token: &[u32] = match (mode, call) {
-        (1, 0) | (2..=5, 0) => &[
-            'E' as u32, 'n' as u32, 'g' as u32, 'i' as u32, 'n' as u32, 'e' as u32, '.' as u32,
-            'H' as u32, 'e' as u32, 'l' as u32, 'p' as u32, 'e' as u32, 'r' as u32, 0,
-        ],
-        (2, 1) | (3..=5, 2) => &[
-            'a' as u32, 'c' as u32, 't' as u32, 'o' as u32, 'r' as u32, 0,
-        ],
-        (3..=5, 1) => &[
-            'F' as u32, 'l' as u32, 'a' as u32, 'g' as u32, '=' as u32, '5' as u32, 0,
-        ],
-        _ => return 0,
-    };
-    for (i, ch) in token.iter().enumerate() {
-        unsafe { *buf.add(i) = *ch };
-    }
-    1
-}
-
-unsafe extern "C" fn level_spawn_actor(_level: *mut c_void, _cls: *mut c_void) -> *mut c_void {
-    if ACTOR_MODE.with(Cell::get) == 1 {
-        DEBUGF.with(|d| d.borrow_mut().push("spawn_helper\tnull".to_string()));
-        std::ptr::null_mut()
-    } else {
-        DEBUGF.with(|d| d.borrow_mut().push("spawn_helper\tactor".to_string()));
-        0xB0 as *mut c_void
-    }
-}
-
-unsafe extern "C" fn app_strchr(text: *const u32, ch: u32) -> *const u32 {
-    let mut p = text;
-    loop {
-        let value = unsafe { *p };
-        if value == ch || value == 0 {
-            return if value == ch { p } else { std::ptr::null() };
-        }
-        p = unsafe { p.add(1) };
-    }
-}
-
-unsafe extern "C" fn actor_get_class(_actor: *mut c_void) -> *mut c_void {
-    fake_handle()
-}
-
-unsafe extern "C" fn tfield_iter_new(_cls: *mut c_void) -> *mut c_void {
-    FIELD_ITER_VALID.with(|valid| valid.set(true));
-    fake_handle()
-}
-
-unsafe extern "C" fn tfield_iter_valid(_it: *mut c_void) -> i32 {
-    FIELD_ITER_VALID.with(Cell::get) as i32
-}
-
-unsafe extern "C" fn tfield_iter_next(_it: *mut c_void) {
-    FIELD_ITER_VALID.with(|valid| valid.set(false));
-}
-
-unsafe extern "C" fn tfield_iter_delete(_it: *mut c_void) {}
-
-unsafe extern "C" fn uproperty_name_stricmp(_it: *mut c_void, name: *const u32) -> i32 {
-    let name = unsafe { decode(name) };
-    let expected_match = ACTOR_MODE.with(Cell::get) != 5;
-    if expected_match && name == "Flag" {
-        0
-    } else {
-        1
-    }
-}
-
-unsafe extern "C" fn uproperty_is_config(_it: *mut c_void) -> i32 {
-    (ACTOR_MODE.with(Cell::get) == 3) as i32
-}
-
-unsafe extern "C" fn uproperty_import_text(_it: *mut c_void, text: *const u32, _obj: *mut c_void) {
-    // SAFETY: imported text is a NUL-terminated TCHAR string.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("import_text\tFlag\t{}", unsafe { decode(text) }))
-    });
-}
-
-unsafe extern "C" fn netdriver_delete(_drv: *mut c_void) {
-    DEBUGF.with(|d| {
-        d.borrow_mut().push(format!(
-            "delete_driver\t{}",
-            if DEMO_FILE.with(Cell::get) {
-                "demo"
-            } else {
-                "net"
+    unsafe {
+        *result = (|| -> i32 {
+            let mode = ACTOR_MODE.with(Cell::get);
+            let call = PARSE_TOKEN_CALL.with(|n| {
+                let previous = n.get();
+                n.set(previous + 1);
+                previous
+            });
+            let token: &[u32] = match (mode, call) {
+                (1, 0) | (2..=5, 0) => &[
+                    'E' as u32, 'n' as u32, 'g' as u32, 'i' as u32, 'n' as u32, 'e' as u32,
+                    '.' as u32, 'H' as u32, 'e' as u32, 'l' as u32, 'p' as u32, 'e' as u32,
+                    'r' as u32, 0,
+                ],
+                (2, 1) | (3..=5, 2) => &[
+                    'a' as u32, 'c' as u32, 't' as u32, 'o' as u32, 'r' as u32, 0,
+                ],
+                (3..=5, 1) => &[
+                    'F' as u32, 'l' as u32, 'a' as u32, 'g' as u32, '=' as u32, '5' as u32, 0,
+                ],
+                _ => return 0,
+            };
+            for (i, ch) in token.iter().enumerate() {
+                *buf.add(i) = *ch;
             }
-        ))
-    });
-}
-unsafe extern "C" fn level_exec_net(_drv: *mut c_void, cmd: *const u32, _ar: *mut c_void) -> i32 {
-    // SAFETY: command is a NUL-terminated TCHAR string.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("net_exec\tnet\t{}", unsafe { decode(cmd) }))
-    });
-    EXEC_NET_RESULT.with(Cell::get)
+            1
+        })();
+    }
+    0
 }
 
-unsafe extern "C" fn level_exec_demo(_drv: *mut c_void, cmd: *const u32, _ar: *mut c_void) -> i32 {
-    // SAFETY: command is a NUL-terminated TCHAR string.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("net_exec\tdemo\t{}", unsafe { decode(cmd) }))
-    });
-    EXEC_DEMO_RESULT.with(Cell::get)
+unsafe extern "C" fn level_spawn_actor_construct(
+    _ctx: *const Hp2SpawnActorContext,
+    _template: usize,
+    out: *mut usize,
+) -> i32 {
+    unsafe {
+        *out = (|| -> usize {
+            if ACTOR_MODE.with(Cell::get) == 1 {
+                DEBUGF.with(|d| d.borrow_mut().push("spawn_helper\tnull".to_string()));
+                0
+            } else {
+                DEBUGF.with(|d| d.borrow_mut().push("spawn_helper\tactor".to_string()));
+                actor_ptr() as usize
+            }
+        })();
+    }
+    0
+}
+
+unsafe extern "C" fn app_strchr(text: *const u32, ch: u32, result: *mut *const u32) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 {
+            let mut p = text;
+            loop {
+                let value = *p;
+                if value == ch || value == 0 {
+                    return if value == ch { p } else { std::ptr::null() };
+                }
+                p = p.add(1);
+            }
+        })();
+    }
+    0
+}
+
+
+unsafe extern "C" fn tfield_iter_valid(_it: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 { FIELD_ITER_VALID.with(Cell::get) as i32 })();
+    }
+    0
+}
+
+unsafe extern "C" fn tfield_iter_next(_it: *mut c_void) -> i32 {
+    (|| {
+        FIELD_ITER_VALID.with(|valid| valid.set(false));
+    })();
+    0
+}
+
+unsafe extern "C" fn uproperty_name_stricmp(
+    _it: *mut c_void,
+    name: *const u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            let name = decode(name);
+            let expected_match = ACTOR_MODE.with(Cell::get) != 5;
+            if expected_match && name == "Flag" {
+                0
+            } else {
+                1
+            }
+        })();
+    }
+    0
+}
+
+unsafe extern "C" fn uproperty_is_config(_it: *mut c_void, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 { (ACTOR_MODE.with(Cell::get) == 3) as i32 })();
+    }
+    0
+}
+
+unsafe extern "C" fn uproperty_import_text(
+    _it: *mut c_void,
+    text: *const u32,
+    _obj: *mut c_void,
+) -> i32 {
+    (|| {
+        // SAFETY: imported text is a NUL-terminated TCHAR string.
+        DEBUGF.with(|d| {
+            d.borrow_mut()
+                .push(format!("import_text\tFlag\t{}", unsafe { decode(text) }))
+        });
+    })();
+    0
+}
+
+unsafe extern "C" fn netdriver_delete(_drv: *mut c_void) -> i32 {
+    (|| {
+        DEBUGF.with(|d| {
+            d.borrow_mut().push(format!(
+                "delete_driver\t{}",
+                if DEMO_FILE.with(Cell::get) {
+                    "demo"
+                } else {
+                    "net"
+                }
+            ))
+        });
+    })();
+    0
+}
+unsafe extern "C" fn level_exec_net(
+    _drv: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            // SAFETY: command is a NUL-terminated TCHAR string.
+            DEBUGF.with(|d| {
+                d.borrow_mut()
+                    .push(format!("net_exec\tnet\t{}", decode(cmd)))
+            });
+            EXEC_NET_RESULT.with(Cell::get)
+        })();
+    }
+    0
+}
+
+unsafe extern "C" fn level_exec_demo(
+    _drv: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            // SAFETY: command is a NUL-terminated TCHAR string.
+            DEBUGF.with(|d| {
+                d.borrow_mut()
+                    .push(format!("net_exec\tdemo\t{}", decode(cmd)))
+            });
+            EXEC_DEMO_RESULT.with(Cell::get)
+        })();
+    }
+    0
 }
 unsafe extern "C" fn localize_error_assign(
     _level: *mut c_void,
     _error: *mut c_void,
     key: *const i8,
-) {
-    let key = unsafe { std::ffi::CStr::from_ptr(key) }.to_string_lossy();
-    let error = match key.as_ref() {
-        "NetAlready" => "Already listening",
-        "NetListen" => "Listen failed",
-        _ => "",
-    };
-    ERROR_TEXT.with(|value| *value.borrow_mut() = error.to_string());
-    DEBUGF.with(|d| d.borrow_mut().push(format!("localize_error\t{key}")));
+) -> i32 {
+    (|| {
+        let key = unsafe { std::ffi::CStr::from_ptr(key) }.to_string_lossy();
+        let error = match key.as_ref() {
+            "NetAlready" => "Already listening",
+            "NetListen" => "Listen failed",
+            _ => "",
+        };
+        ERROR_TEXT.with(|value| *value.borrow_mut() = error.to_string());
+        DEBUGF.with(|d| d.borrow_mut().push(format!("localize_error\t{key}")));
+    })();
+    0
 }
 
-unsafe extern "C" fn level_get_linker(_level: *mut c_void) -> *mut c_void {
-    if LINKER_PRESENT.with(Cell::get) {
-        fake_handle()
-    } else {
-        std::ptr::null_mut()
+unsafe extern "C" fn uobject_get_name(obj: *mut c_void, result: *mut *const u32) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 {
+            // The outer package is always named "Level" (welcome logs). The level is named only after the
+            // scenario's level_with_levelinfo() (level_harness.cpp:621); begin() zeroes it, so it is "" otherwise.
+            if obj == fake_handle() || LEVEL_NAMED.with(Cell::get) {
+                LEVEL_NAME.as_ptr()
+            } else {
+                EMPTY_TEXT.as_ptr()
+            }
+        })();
     }
+    0
 }
-unsafe extern "C" fn uobject_get_name(obj: *mut c_void) -> *const u32 {
-    // The outer package is always named "Level" (welcome logs). The level is named only after the
-    // scenario's level_with_levelinfo() (level_harness.cpp:621); begin() zeroes it, so it is "" otherwise.
-    if obj == fake_handle() || LEVEL_NAMED.with(Cell::get) {
-        LEVEL_NAME.as_ptr()
-    } else {
-        EMPTY_TEXT.as_ptr()
+
+
+unsafe extern "C" fn app_timestamp(result: *mut *const u32) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 { TIMESTAMP.as_ptr() })();
     }
+    0
 }
 
-unsafe extern "C" fn level_info_next_url(_li: *mut c_void) -> *mut c_void {
-    if NEXT_URL_NONEMPTY.with(Cell::get) {
-        SWITCH_URL.as_ptr() as *mut c_void
-    } else {
-        EMPTY_TEXT.as_ptr() as *mut c_void
+unsafe extern "C" fn debugf_net_come_go(text: *const u32) -> i32 {
+    (|| {
+        // SAFETY: level_net forwards a NUL-terminated TCHAR string.
+        DEBUGF.with(|d| {
+            d.borrow_mut()
+                .push(format!("debugf\tnet_come_go\t{}", unsafe { decode(text) }))
+        });
+    })();
+    0
+}
+
+
+
+unsafe extern "C" fn package_map_copy(_pm: *mut c_void, _master: *mut c_void) -> i32 {
+    (|| {
+        DEBUGF.with(|d| d.borrow_mut().push("package_map_copy".to_string()));
+    })();
+    0
+}
+
+unsafe extern "C" fn connection_send_package_map(_conn: *mut c_void) -> i32 {
+    (|| {
+        DEBUGF.with(|d| d.borrow_mut().push("send_package_map".to_string()));
+    })();
+    0
+}
+
+
+
+unsafe extern "C" fn connection_log(_conn: *mut c_void, text: *const u32) -> i32 {
+    (|| {
+        // SAFETY: forwarded TCHAR string is NUL-terminated.
+        DEBUGF.with(|d| {
+            d.borrow_mut()
+                .push(format!("conn_log\t{}", unsafe { decode(text) }))
+        });
+    })();
+    0
+}
+
+unsafe extern "C" fn connection_flush_net(_conn: *mut c_void) -> i32 {
+    (|| {
+        DEBUGF.with(|d| d.borrow_mut().push("conn_flush".to_string()));
+    })();
+    0
+}
+
+unsafe extern "C" fn app_atoi(text: *const u32, result: *mut i32) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            let text = decode(text);
+            text.trim().parse().unwrap_or(0)
+        })();
     }
+    0
 }
 
-unsafe extern "C" fn app_timestamp() -> *const u32 {
-    TIMESTAMP.as_ptr()
-}
-
-unsafe extern "C" fn connection_lowlevel_remote_address(_conn: *mut c_void) -> *mut c_void {
-    REMOTE_ADDRESS.as_ptr() as *mut c_void
-}
-
-unsafe extern "C" fn debugf_net_come_go(text: *const u32) {
-    // SAFETY: level_net forwards a NUL-terminated TCHAR string.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("debugf\tnet_come_go\t{}", unsafe { decode(text) }))
-    });
-}
-
-unsafe extern "C" fn connection_package_map(_conn: *mut c_void) -> *mut c_void {
-    fake_handle()
-}
-
-unsafe extern "C" fn netdriver_master_map(_drv: *mut c_void) -> *mut c_void {
-    fake_handle()
-}
-
-unsafe extern "C" fn package_map_copy(_pm: *mut c_void, _master: *mut c_void) {
-    DEBUGF.with(|d| d.borrow_mut().push("package_map_copy".to_string()));
-}
-
-unsafe extern "C" fn connection_send_package_map(_conn: *mut c_void) {
-    DEBUGF.with(|d| d.borrow_mut().push("send_package_map".to_string()));
-}
-
-unsafe extern "C" fn uobject_get_outer(_obj: *mut c_void) -> *mut c_void {
-    fake_handle()
-}
-
-unsafe extern "C" fn level_info_b_lone_player(_li: *mut c_void) -> i32 {
-    LONE_PLAYER.with(Cell::get)
-}
-
-unsafe extern "C" fn connection_log(_conn: *mut c_void, text: *const u32) {
-    // SAFETY: forwarded TCHAR string is NUL-terminated.
-    DEBUGF.with(|d| {
-        d.borrow_mut()
-            .push(format!("conn_log\t{}", unsafe { decode(text) }))
-    });
-}
-
-unsafe extern "C" fn connection_flush_net(_conn: *mut c_void) {
-    DEBUGF.with(|d| d.borrow_mut().push("conn_flush".to_string()));
-}
-
-unsafe extern "C" fn app_atoi(text: *const u32) -> i32 {
-    let text = unsafe { decode(text) };
-    text.trim().parse().unwrap_or(0)
-}
-
-unsafe extern "C" fn connection_set_user_flags(_conn: *mut c_void, flags: i32) {
-    DEBUGF.with(|d| d.borrow_mut().push(format!("user_flags\t{flags}")));
-}
 
 unsafe extern "C" fn check_failed(_expr: *const i8, _file: *const i8, _line: i32) -> i32 {
     0
@@ -608,35 +839,43 @@ unsafe extern "C" fn app_errorf(text: *const u32) -> i32 {
     });
     0
 }
-unsafe extern "C" fn connection_channel_close(_conn: *mut c_void, _i: i32) {
-    DEBUGF.with(|d| d.borrow_mut().push("channel_close".to_string()));
+unsafe extern "C" fn connection_channel_close(_conn: *mut c_void, _i: i32) -> i32 {
+    (|| {
+        DEBUGF.with(|d| d.borrow_mut().push("channel_close".to_string()));
+    })();
+    0
 }
 
-unsafe extern "C" fn connection_remote_version(_conn: *mut c_void) -> i32 {
-    219
-}
 
-unsafe extern "C" fn connection_set_remote_version(_conn: *mut c_void, _version: i32) {}
 
-unsafe extern "C" fn connection_set_state_closed(_conn: *mut c_void) {}
 
-unsafe extern "C" fn parse_int(_text: *const u32, key: *const u32, out: *mut i32) -> i32 {
-    let key = unsafe { decode(key) };
-    if key == "MINVER=" || key == "VER=" {
-        unsafe { *out = 219 };
-        return 1;
-    }
-    if key == "RESPONSE=" {
-        let command = EXEC_COMMAND.with(|command| command.borrow().clone());
-        let Some(response) = command
-            .split_once("RESPONSE=")
-            .and_then(|(_, rest)| rest.split_whitespace().next())
-            .and_then(|value| value.parse::<i32>().ok())
-        else {
-            return 0;
-        };
-        unsafe { *out = response };
-        return 1;
+unsafe extern "C" fn parse_int(
+    _text: *const u32,
+    key: *const u32,
+    out: *mut i32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> i32 {
+            let key = decode(key);
+            if key == "MINVER=" || key == "VER=" {
+                *out = 219;
+                return 1;
+            }
+            if key == "RESPONSE=" {
+                let command = EXEC_COMMAND.with(|command| command.borrow().clone());
+                let Some(response) = command
+                    .split_once("RESPONSE=")
+                    .and_then(|(_, rest)| rest.split_whitespace().next())
+                    .and_then(|value| value.parse::<i32>().ok())
+                else {
+                    return 0;
+                };
+                *out = response;
+                return 1;
+            }
+            0
+        })();
     }
     0
 }
@@ -645,60 +884,75 @@ unsafe extern "C" fn parse_text(
     key: *const u32,
     out: *mut u32,
     max: i32,
+    result: *mut i32,
 ) -> i32 {
-    let key = unsafe { decode(key) };
-    let command = EXEC_COMMAND.with(|command| command.borrow().clone());
-    let Some((_, value)) = command.split_once(key.as_str()) else {
-        unsafe { *out = 0 };
-        return 0;
-    };
-    let value = value.trim_start();
-    let chars = value
-        .encode_utf16()
-        .map(u32::from)
-        .take(max.saturating_sub(1) as usize);
-    let mut index = 0;
-    for ch in chars {
-        unsafe { *out.add(index) = ch };
-        index += 1;
+    unsafe {
+        *result = (|| -> i32 {
+            let key = decode(key);
+            let command = EXEC_COMMAND.with(|command| command.borrow().clone());
+            let Some((_, value)) = command.split_once(key.as_str()) else {
+                *out = 0;
+                return 0;
+            };
+            let value = value.trim_start();
+            let chars = value
+                .encode_utf16()
+                .map(u32::from)
+                .take(max.saturating_sub(1) as usize);
+            let mut index = 0;
+            for ch in chars {
+                *out.add(index) = ch;
+                index += 1;
+            }
+            *out.add(index) = 0;
+            1
+        })();
     }
-    unsafe { *out.add(index) = 0 };
-    1
+    0
 }
 
-unsafe extern "C" fn connection_set_request_url(_conn: *mut c_void, text: *const u32) {
-    let text = unsafe { decode(text) };
-    REQUEST_URL.with(|url| *url.borrow_mut() = wide(&text));
+unsafe extern "C" fn connection_set_request_url(_conn: *mut c_void, text: *const u32) -> i32 {
+    (|| {
+        let text = unsafe { decode(text) };
+        REQUEST_URL.with(|url| *url.borrow_mut() = wide(&text));
+    })();
+    0
 }
 
-unsafe extern "C" fn connection_request_url_text(_conn: *mut c_void) -> *const u32 {
-    REQUEST_URL.with(|url| url.borrow().as_ptr())
+unsafe extern "C" fn connection_request_url_text(
+    _conn: *mut c_void,
+    result: *mut *const u32,
+) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 { REQUEST_URL.with(|url| url.borrow().as_ptr()) })();
+    }
+    0
 }
 
-unsafe extern "C" fn level_info_game(_li: *mut c_void) -> *mut c_void {
-    fake_handle()
-}
 
 unsafe extern "C" fn game_pre_login(
     _game: *mut c_void,
+    _conn: *mut c_void,
     options: *const u32,
-    address: *const u32,
     error: *mut c_void,
     fail_code: *mut c_void,
-) {
-    let options = unsafe { decode(options) };
-    let address = unsafe { decode(address) };
-    DEBUGF.with(|records| {
-        records
-            .borrow_mut()
-            .push(format!("pre_login\t{options}\t{address}"))
-    });
-    if PRELOGIN_REJECT.with(Cell::get) {
-        unsafe {
-            assign_wide(error.cast(), "Denied");
-            assign_wide(fail_code.cast(), "Bad");
+) -> i32 {
+    (|| {
+        let options = unsafe { decode(options) };
+        let address = unsafe { decode(REMOTE_ADDRESS.as_ptr()) };
+        DEBUGF.with(|records| {
+            records
+                .borrow_mut()
+                .push(format!("pre_login\t{options}\t{address}"))
+        });
+        if PRELOGIN_REJECT.with(Cell::get) {
+            unsafe {
+                assign_wide(error.cast(), "Denied");
+                assign_wide(fail_code.cast(), "Bad");
+            }
         }
-    }
+    })();
+    0
 }
 
 unsafe fn assign_wide(out: *mut u32, text: &str) {
@@ -708,38 +962,82 @@ unsafe fn assign_wide(out: *mut u32, text: &str) {
     unsafe { *out.add(text.encode_utf16().count()) = 0 };
 }
 
-unsafe extern "C" fn level_welcome_player(level: *mut c_void, conn: *mut c_void) {
+unsafe extern "C" fn level_welcome_player(level: *mut c_void, conn: *mut c_void) -> i32 {
     let services = services();
-    unsafe { level_net::welcome_player(&services, level, conn, EMPTY_TEXT.as_ptr()) };
+    match unsafe { level_net::welcome_player(&services, level, conn, EMPTY_TEXT.as_ptr()) } {
+        Ok(()) => 0,
+        Err(()) => 1,
+    }
 }
 
-unsafe extern "C" fn channel_connection(_ch: *mut c_void) -> *mut c_void {
-    0x10 as *mut c_void
+
+
+
+
+/// Borrows the static `"Engine.Level"` text buffer.
+unsafe extern "C" fn uobject_get_full_name(_obj: *mut c_void, result: *mut *const u32) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 { ENGINE_LEVEL.as_ptr() })();
+    }
+    0
 }
 
-unsafe extern "C" fn connection_driver(_conn: *mut c_void) -> *mut c_void {
-    0x20 as *mut c_void
+unsafe extern "C" fn fstring_text(h: *mut c_void, result: *mut *const u32) -> i32 {
+    unsafe {
+        *result = (|| -> *const u32 {
+            if h == url_map_ptr() {
+                if EXEC_COMMAND.with(|c| c.borrow().contains("demo1")) {
+                    DEMO1.as_ptr()
+                } else {
+                    DEMO2.as_ptr()
+                }
+            } else {
+                h as *const u32
+            }
+        })();
+    }
+    0
 }
 
-unsafe extern "C" fn channel_ch_type(_ch: *mut c_void) -> i32 {
-    CHANNEL_TYPE.with(Cell::get)
+unsafe extern "C" fn string_scope(
+    source: *mut c_void,
+    context: *mut c_void,
+    body: Hp2LevelNetContinuation,
+) -> i32 {
+    let mut storage = [0u32; 128];
+    let local = if source.is_null() {
+        storage.as_mut_ptr().cast()
+    } else {
+        REMOTE_ADDRESS.as_ptr() as *mut c_void
+    };
+    unsafe { body(context, local) }
 }
-
-unsafe extern "C" fn channel_ch_index(_ch: *mut c_void) -> i32 {
-    CHANNEL_INDEX.with(Cell::get)
+unsafe extern "C" fn url_scope(
+    _text: *const u32,
+    context: *mut c_void,
+    body: Hp2LevelNetContinuation,
+) -> i32 {
+    unsafe { body(context, url_ptr()) }
 }
-
-/// Returns a handle whose `fstring_text` is the static `"Engine.Level"` buffer.
-unsafe extern "C" fn uobject_get_full_name(_obj: *mut c_void) -> *mut c_void {
-    ENGINE_LEVEL.as_ptr() as *mut c_void
+unsafe extern "C" fn property_scope(
+    _class: *mut c_void,
+    context: *mut c_void,
+    body: Hp2LevelNetContinuation,
+) -> i32 {
+    FIELD_ITER_VALID.with(|valid| valid.set(true));
+    unsafe { body(context, fake_handle()) }
 }
-
-unsafe extern "C" fn fstring_text(h: *mut c_void) -> *const u32 {
-    h as *const u32
+unsafe extern "C" fn fstring_right_ne_text(
+    _h: *mut c_void,
+    _n: i32,
+    text: *const u32,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        *result = (decode(DEM_SUFFIX.as_ptr()) != decode(text)) as i32;
+    }
+    0
 }
-
-/// The handle is the static buffer, so there is nothing to free.
-unsafe extern "C" fn fstring_delete(_h: *mut c_void) {}
 
 /// A table where every field panics, with the used services overridden.
 fn services() -> Hp2LevelNetServices {
@@ -748,16 +1046,14 @@ fn services() -> Hp2LevelNetServices {
     // SAFETY: the struct is `SERVICE_COUNT` pointer-sized `repr(C)` fields and
     // `usize` has the same size and alignment as a function pointer.
     let mut s: Hp2LevelNetServices = unsafe { std::mem::transmute(raw) };
+    s.string_scope = string_scope;
+    s.url_scope = url_scope;
+    s.property_scope = property_scope;
+    s.fstring_right_ne_text = fstring_right_ne_text;
     s.check_failed = check_failed;
     s.debugf_dev_net = debugf_dev_net;
-    s.netdriver_server_connection = netdriver_server_connection;
-    s.channel_connection = channel_connection;
-    s.connection_driver = connection_driver;
-    s.channel_ch_type = channel_ch_type;
-    s.channel_ch_index = channel_ch_index;
     s.uobject_get_full_name = uobject_get_full_name;
     s.fstring_text = fstring_text;
-    s.fstring_delete = fstring_delete;
     s.level_exec_net = level_exec_net;
     s.level_exec_demo = level_exec_demo;
     s.output_device_log = output_device_log;
@@ -765,7 +1061,6 @@ fn services() -> Hp2LevelNetServices {
     s.parse_token_fstring = parse_token_fstring;
     s.debugf_log = debugf_log;
     s.output_device_logf = output_device_logf;
-    s.fstring_right = fstring_right;
     s.fstring_ne_text = fstring_ne_text;
     s.fstring_append_text = fstring_append_text;
     s.static_load_class = static_load_class;
@@ -773,70 +1068,42 @@ fn services() -> Hp2LevelNetServices {
     s.netdriver_init_listen = netdriver_init_listen;
     s.netdriver_delete = netdriver_delete;
     s.static_construct_net_driver = static_construct_net_driver;
-    s.level_url = level_url;
     s.cast_game_engine = cast_game_engine;
     s.game_build_server_master_map = game_build_server_master_map;
     s.game_engine_server_actors_num = game_engine_server_actors_num;
-    s.engine_client = engine_client;
     s.engine_client_viewports_num = engine_client_viewports_num;
     s.engine_client_viewport = engine_client_viewport;
     s.engine_set_client_travel = engine_set_client_travel;
-    s.netdriver_max_client_rate = netdriver_max_client_rate;
-    s.connection_set_current_net_speed = connection_set_current_net_speed;
-    s.connection_current_net_speed = connection_current_net_speed;
     s.engine_challenge_response = engine_challenge_response;
-    s.connection_challenge = connection_challenge;
     s.parse_guid = parse_guid;
     s.package_map_list_num = package_map_list_num;
     s.parse_text = parse_text;
     s.connection_set_request_url = connection_set_request_url;
     s.connection_request_url_text = connection_request_url_text;
-    s.level_info_game = level_info_game;
     s.game_pre_login = game_pre_login;
     s.level_welcome_player = level_welcome_player;
     s.level_get_level_info = level_get_level_info;
-    s.level_info_set_net_mode = level_info_set_net_mode;
-    s.level_info_set_next_switch_countdown = level_info_set_next_switch_countdown;
-    s.netdriver_server_travel_pause = netdriver_server_travel_pause;
     s.game_engine_server_actor_text = game_engine_server_actor_text;
     s.parse_token_buf = parse_token_buf;
-    s.level_spawn_actor = level_spawn_actor;
+    level_spawn_actor_mock::publish(level_spawn_actor_construct);
     s.app_strchr = app_strchr;
-    s.actor_get_class = actor_get_class;
-    s.tfield_iter_new = tfield_iter_new;
     s.tfield_iter_valid = tfield_iter_valid;
     s.tfield_iter_next = tfield_iter_next;
-    s.tfield_iter_delete = tfield_iter_delete;
     s.uproperty_name_stricmp = uproperty_name_stricmp;
     s.uproperty_is_config = uproperty_is_config;
     s.uproperty_import_text = uproperty_import_text;
 
-    s.fstring_new = fstring_new;
-    s.furl_new = fake_handle;
-    s.furl_map = furl_map;
-    s.furl_delete = no_delete;
     s.localize_error_assign = localize_error_assign;
-    s.level_get_linker = level_get_linker;
     s.uobject_get_name = uobject_get_name;
-    s.level_info_next_url = level_info_next_url;
     s.app_timestamp = app_timestamp;
-    s.connection_lowlevel_remote_address = connection_lowlevel_remote_address;
     s.debugf_net_come_go = debugf_net_come_go;
-    s.connection_package_map = connection_package_map;
-    s.netdriver_master_map = netdriver_master_map;
     s.package_map_copy = package_map_copy;
     s.connection_send_package_map = connection_send_package_map;
-    s.uobject_get_outer = uobject_get_outer;
-    s.level_info_b_lone_player = level_info_b_lone_player;
     s.connection_log = connection_log;
     s.connection_flush_net = connection_flush_net;
     s.app_atoi = app_atoi;
-    s.connection_set_user_flags = connection_set_user_flags;
     s.app_errorf = app_errorf;
     s.connection_channel_close = connection_channel_close;
-    s.connection_remote_version = connection_remote_version;
-    s.connection_set_remote_version = connection_set_remote_version;
-    s.connection_set_state_closed = connection_set_state_closed;
     s.parse_int = parse_int;
 
     s
@@ -863,165 +1130,230 @@ fn run(name: &str) -> (Vec<String>, Option<i32>) {
     COUNTDOWN.with(|value| value.set(0.0));
     TRAVEL_PAUSE.with(|value| value.set(0.0));
     ERROR_TEXT.with(|error| error.borrow_mut().clear());
-    FSTRING_CALL.with(|call| call.set(0));
-    FSTRING_BUFFERS.with(|buffers| {
-        buffers
-            .borrow_mut()
-            .iter_mut()
-            .for_each(|slot| slot.fill(0))
-    });
     PRELOGIN_REJECT.with(|reject| reject.set(false));
     REQUEST_URL.with(|url| url.borrow_mut().clear());
     CLIENT_TRAVEL.with(|travel| travel.borrow_mut().clear());
     NET_SPEED.with(|speed| speed.set(0));
     CHALLENGE_RESPONSE.with(|response| response.set(0));
+    NET_DRIVER_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
+    CONNECTION_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
+    CHANNEL_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
+    GAME_ENGINE_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
+    LEVEL_INFO_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
+    URL_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
+    ACTOR_MEM.with(|m| *m.borrow_mut() = Box::new(unsafe { std::mem::zeroed() }));
     let mut level = unsafe { std::mem::zeroed::<ULevel>() };
     let level_ptr = (&mut level as *mut ULevel).cast::<c_void>();
+    // `UObject::GetOuter()` always returns a non-null constant in these scenarios.
+    unsafe { (*level_ptr.cast::<UObject>()).outer = fake_handle() };
     let ret = match name {
         "net.notify_accepting_connection_client" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(true));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: level and connection-state services are mocked.
             unsafe { level_net::notify_accepting_connection(&s, level_ptr) }.unwrap()
         }
         "net.notify_accepting_connection_switching" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(false));
             NEXT_URL_NONEMPTY.with(|c| c.set(true));
             // Harness calls level_with_levelinfo() here (level_harness.cpp:1508), naming the level.
             LEVEL_NAMED.with(|c| c.set(true));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: level and next-URL services are mocked.
             unsafe { level_net::notify_accepting_connection(&s, level_ptr) }.unwrap()
         }
         "net.notify_accepting_connection_accept" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(false));
             NEXT_URL_NONEMPTY.with(|c| c.set(false));
             // Harness calls level_with_levelinfo() here (level_harness.cpp:1514), naming the level.
             LEVEL_NAMED.with(|c| c.set(true));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: level and next-URL services are mocked.
             unsafe { level_net::notify_accepting_connection(&s, level_ptr) }.unwrap()
         }
         "net.notify_accepted_connection" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(false));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: mocked level, connection, time, and address services are valid.
             unsafe { level_net::notify_accepted_connection(&s, level_ptr, 0x50 as _) }.unwrap();
             0
         }
         "net.welcome_player_default" => {
             LONE_PLAYER.with(|c| c.set(0));
+            sync_net_driver();
+            sync_connection_driver();
             // SAFETY: welcome services are mocked and do not dereference opaque handles.
-            unsafe { level_net::welcome_player(&s, level_ptr, 0x50 as _, EMPTY_TEXT.as_ptr()) };
+            unsafe { level_net::welcome_player(&s, level_ptr, connection_ptr(), EMPTY_TEXT.as_ptr()) }
+                .unwrap();
             0
         }
         "net.welcome_player_optional" => {
             LONE_PLAYER.with(|c| c.set(1));
+            sync_net_driver();
+            sync_connection_driver();
             let optional = wide("extra");
             // SAFETY: optional string and mocked services are live.
-            unsafe { level_net::welcome_player(&s, level_ptr, 0x50 as _, optional.as_ptr()) };
+            unsafe { level_net::welcome_player(&s, level_ptr, connection_ptr(), optional.as_ptr()) }
+                .unwrap();
             0
         }
         "net.notify_received_text_userflag" => {
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "USERFLAG 7".to_string());
             let text = wide("USERFLAG 7");
             // SAFETY: message and connection remain live for the call.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
+            let flags = CONNECTION_MEM.with(|m| m.borrow().user_flags);
+            DEBUGF.with(|d| d.borrow_mut().push(format!("user_flags\t{flags}")));
             0
         }
         "net.notify_received_text_server_hello" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(false));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "HELLO MINVER=219 VER=219".to_string());
             let text = wide("HELLO MINVER=219 VER=219");
             // SAFETY: message, connection, engine client, and version services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_client_failure" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "FAILURE rejected".to_string());
             let text = wide("FAILURE rejected");
             // SAFETY: all reached client-failure services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_netspeed_high" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "NETSPEED 7000".to_string());
             let text = wide("NETSPEED 7000");
             // SAFETY: all reached netspeed services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_netspeed_low" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "NETSPEED 1000".to_string());
             let text = wide("NETSPEED 1000");
             // SAFETY: all reached netspeed services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_have" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             EXEC_COMMAND.with(|c| {
                 *c.borrow_mut() = "HAVE GUID=00000000000000000000000000000000".to_string()
             });
             let text = wide("HAVE GUID=00000000000000000000000000000000");
             // SAFETY: package-map and GUID parsing services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_skip" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             EXEC_COMMAND.with(|c| {
                 *c.borrow_mut() = "SKIP GUID=00000000000000000000000000000000".to_string()
             });
             let text = wide("SKIP GUID=00000000000000000000000000000000");
             // SAFETY: package-map and GUID parsing services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_login_missing_response" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
+            sync_connection_driver();
+            CONNECTION_MEM.with(|m| m.borrow_mut().remote_version = 219);
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "LOGIN URL=?Name=Guest".to_string());
             let text = wide("LOGIN URL=?Name=Guest");
             // SAFETY: challenge and failure-response services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_login_precedence_false" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
+            sync_connection_driver();
+            CONNECTION_MEM.with(|m| m.borrow_mut().remote_version = 219);
             CHALLENGE_RESPONSE.with(|c| c.set(1));
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "LOGIN RESPONSE=0".to_string());
             let text = wide("LOGIN RESPONSE=0");
             // SAFETY: challenge and failure-response services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_login_success" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
+            sync_connection_driver();
+            CONNECTION_MEM.with(|m| m.borrow_mut().remote_version = 219);
             CHALLENGE_RESPONSE.with(|c| c.set(1));
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "LOGIN RESPONSE=1 URL=?Name=Guest".to_string());
-            FSTRING_CALL.with(|c| c.set(0));
             REQUEST_URL.with(|url| url.borrow_mut().clear());
             let text = wide("LOGIN RESPONSE=1 URL=?Name=Guest");
             // SAFETY: challenge, request URL, PreLogin, and Welcome services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_text_login_prelogin_reject" => {
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
+            sync_connection_driver();
+            CONNECTION_MEM.with(|m| m.borrow_mut().remote_version = 219);
             CHALLENGE_RESPONSE.with(|c| c.set(1));
             PRELOGIN_REJECT.with(|c| c.set(true));
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "LOGIN RESPONSE=1 URL=?Name=Guest".to_string());
-            FSTRING_CALL.with(|c| c.set(0));
             REQUEST_URL.with(|url| url.borrow_mut().clear());
             let text = wide("LOGIN RESPONSE=1 URL=?Name=Guest");
             // SAFETY: challenge and PreLogin rejection services are mocked.
-            unsafe { level_net::notify_received_text(&s, level_ptr, 0x50 as _, text.as_ptr()) };
+            unsafe {
+                level_net::notify_received_text(&s, level_ptr, connection_ptr(), text.as_ptr())
+            }
+            .unwrap();
             0
         }
         "net.notify_received_file" => {
@@ -1031,69 +1363,69 @@ fn run(name: &str) -> (Vec<String>, Option<i32>) {
         }
         "net.notify_sending_file_server" => {
             SERVER_CONNECTION.with(|c| c.set(false));
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: `level` is a live, exclusively owned `ULevel`.
-            unsafe { level_net::notify_sending_file(&s, level_ptr) }
+            unsafe { level_net::notify_sending_file(&s, level_ptr) }.unwrap()
         }
         "net.notify_sending_file_client" => {
             SERVER_CONNECTION.with(|c| c.set(true));
-            level.net_driver = 0x20 as *mut _;
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: as above.
-            unsafe { level_net::notify_sending_file(&s, level_ptr) }
+            unsafe { level_net::notify_sending_file(&s, level_ptr) }.unwrap()
         }
         "net.accepting_channel_client_refuse" => {
             SERVER_CONNECTION.with(|c| c.set(true));
-            CHANNEL_TYPE.with(|c| c.set(level_net::CHTYPE_CONTROL));
-            CHANNEL_INDEX.with(|c| c.set(0));
-            // SAFETY: stub services do not dereference the level or channel.
-            unsafe { level_net::notify_accepting_channel(&s, level_ptr, 0x50 as *mut c_void) }
-                .unwrap()
+            sync_net_driver();
+            sync_channel(level_net::CHTYPE_CONTROL, 0);
+            // SAFETY: mocked channel/connection/driver memory backs the handle.
+            unsafe { level_net::notify_accepting_channel(&s, level_ptr, channel_ptr()) }.unwrap()
         }
         "net.accepting_channel_server_control" => {
             SERVER_CONNECTION.with(|c| c.set(false));
-            CHANNEL_TYPE.with(|c| c.set(level_net::CHTYPE_CONTROL));
-            CHANNEL_INDEX.with(|c| c.set(0));
+            sync_net_driver();
+            sync_channel(level_net::CHTYPE_CONTROL, 0);
             // SAFETY: as above.
-            unsafe { level_net::notify_accepting_channel(&s, level_ptr, 0x50 as *mut c_void) }
-                .unwrap()
+            unsafe { level_net::notify_accepting_channel(&s, level_ptr, channel_ptr()) }.unwrap()
         }
         "net.accepting_channel_server_file" => {
             SERVER_CONNECTION.with(|c| c.set(false));
-            CHANNEL_TYPE.with(|c| c.set(level_net::CHTYPE_FILE));
-            CHANNEL_INDEX.with(|c| c.set(0));
+            sync_net_driver();
+            sync_channel(level_net::CHTYPE_FILE, 0);
             // SAFETY: as above.
-            unsafe { level_net::notify_accepting_channel(&s, level_ptr, 0x50 as *mut c_void) }
-                .unwrap()
+            unsafe { level_net::notify_accepting_channel(&s, level_ptr, channel_ptr()) }.unwrap()
         }
         "net.accepting_channel_server_refuse" => {
             SERVER_CONNECTION.with(|c| c.set(false));
-            CHANNEL_TYPE.with(|c| c.set(2));
-            CHANNEL_INDEX.with(|c| c.set(1));
+            sync_net_driver();
+            sync_channel(level_net::CHTYPE_ACTOR, 1);
             // SAFETY: as above.
-            unsafe { level_net::notify_accepting_channel(&s, level_ptr, 0x50 as *mut c_void) }
-                .unwrap()
+            unsafe { level_net::notify_accepting_channel(&s, level_ptr, channel_ptr()) }.unwrap()
         }
         "net.exec_net_handled" => {
-            level.net_driver = 0x20 as *mut _;
+            level.base.net_driver = 0x20 as *mut _;
             EXEC_NET_RESULT.with(|c| c.set(1));
             // SAFETY: the command is a live NUL-terminated TCHAR literal.
             unsafe { level_net::exec(&s, level_ptr, wide("NETHANDLED").as_ptr(), 0x60 as _) }
+                .unwrap()
         }
         "net.exec_demo_handled" => {
-            level.demo_rec_driver = 0x30 as *mut _;
+            level.base.demo_rec_driver = 0x30 as *mut _;
             EXEC_DEMO_RESULT.with(|c| c.set(1));
             // SAFETY: as above.
             unsafe { level_net::exec(&s, level_ptr, wide("DEMOHANDLED").as_ptr(), 0x60 as _) }
+                .unwrap()
         }
         "net.exec_unhandled" => {
-            level.net_driver = 0x20 as *mut _;
+            level.base.net_driver = 0x20 as *mut _;
             // SAFETY: as above.
-            unsafe { level_net::exec(&s, level_ptr, wide("FOO").as_ptr(), 0x60 as _) }
+            unsafe { level_net::exec(&s, level_ptr, wide("FOO").as_ptr(), 0x60 as _) }.unwrap()
         }
         "net.exec_demorec_no_filename" => {
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "DEMOREC".to_string());
             // SAFETY: command and output device pointers are live for the call.
-            unsafe { level_net::exec(&s, level_ptr, wide("DEMOREC").as_ptr(), 0x60 as _) }
+            unsafe { level_net::exec(&s, level_ptr, wide("DEMOREC").as_ptr(), 0x60 as _) }.unwrap()
         }
         "net.exec_demorec_init_fail" => {
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "DEMOREC demo1".to_string());
@@ -1101,6 +1433,7 @@ fn run(name: &str) -> (Vec<String>, Option<i32>) {
             DEMO_INIT_OK.with(|c| c.set(false));
             // SAFETY: scenario-owned inputs and mocked services remain live.
             unsafe { level_net::exec(&s, level_ptr, wide("DEMOREC demo1").as_ptr(), 0x60 as _) }
+                .unwrap()
         }
         "net.exec_demorec_started" => {
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "DEMOREC demo2.dem".to_string());
@@ -1108,115 +1441,150 @@ fn run(name: &str) -> (Vec<String>, Option<i32>) {
             DEMO_INIT_OK.with(|c| c.set(true));
             // SAFETY: as above.
             unsafe { level_net::exec(&s, level_ptr, wide("DEMOREC demo2.dem").as_ptr(), 0x60 as _) }
+                .unwrap()
         }
 
         "net.exec_demoplay_no_filename" => {
             EXEC_COMMAND.with(|c| *c.borrow_mut() = "DEMOPLAY".to_string());
             // SAFETY: as above.
-            unsafe { level_net::exec(&s, level_ptr, wide("DEMOPLAY").as_ptr(), 0x60 as _) }
+            unsafe { level_net::exec(&s, level_ptr, wide("DEMOPLAY").as_ptr(), 0x60 as _) }.unwrap()
         }
         "net.is_server_driver_server" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(false));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: `level` is live; the driver callback is mocked.
-            unsafe { level_net::is_server(&s, level_ptr) }
+            unsafe { level_net::is_server(&s, level_ptr) }.unwrap()
         }
         "net.is_server_driver_client" => {
-            level.net_driver = 0x20 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(true));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: as above.
-            unsafe { level_net::is_server(&s, level_ptr) }
+            unsafe { level_net::is_server(&s, level_ptr) }.unwrap()
         }
         "net.is_server_demo_client" => {
-            level.demo_rec_driver = 0x30 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(true));
+            sync_net_driver();
+            level.base.demo_rec_driver = net_driver_ptr();
             // SAFETY: as above.
-            unsafe { level_net::is_server(&s, level_ptr) }
+            unsafe { level_net::is_server(&s, level_ptr) }.unwrap()
         }
         "net.is_server_demo_present" => {
-            level.net_driver = 0x20 as *mut _;
-            level.demo_rec_driver = 0x30 as *mut _;
             SERVER_CONNECTION.with(|c| c.set(false));
+            sync_net_driver();
+            level.base.net_driver = net_driver_ptr();
+            level.base.demo_rec_driver = net_driver_ptr();
             // SAFETY: as above.
-            unsafe { level_net::is_server(&s, level_ptr) }
+            unsafe { level_net::is_server(&s, level_ptr) }.unwrap()
         }
         "net.listen_already_listening" => {
-            level.net_driver = 0x20 as *mut _;
+            level.base.net_driver = net_driver_ptr();
             // SAFETY: the level is live; localized error assignment is mocked.
-            unsafe { level_net::listen(&s, level_ptr, 0x60 as _) }
+            unsafe { level_net::listen(&s, level_ptr, 0x60 as _) }.unwrap()
         }
         "net.listen_no_linker" => {
             // SAFETY: as above; the linker callback reports the fixture's null linker.
-            unsafe { level_net::listen(&s, level_ptr, 0x60 as _) }
+            unsafe { level_net::listen(&s, level_ptr, 0x60 as _) }.unwrap()
         }
         "net.listen_init_fail" => {
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(false));
+            sync_net_driver();
             // SAFETY: level/linker/init mocks model this fixture path.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_server_ok" | "net.listen_server_actor_blank" => {
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
             if name == "net.listen_server_ok" {
                 TRAVEL_PAUSE.with(|pause| pause.set(2.5));
             }
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: all reached level/game/driver services are mocked.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_dedicated_ok" => {
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(false));
             TRAVEL_PAUSE.with(|pause| pause.set(2.5));
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: as above.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_server_actor_spawn_null" => {
             ACTOR_MODE.with(|mode| mode.set(1));
             PARSE_TOKEN_CALL.with(|call| call.set(0));
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: scenario-specific actor and listen services are mocked.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_server_actor_bare_token" => {
             ACTOR_MODE.with(|mode| mode.set(2));
             PARSE_TOKEN_CALL.with(|call| call.set(0));
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: as above.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_server_actor_config_field" => {
             ACTOR_MODE.with(|mode| mode.set(3));
             PARSE_TOKEN_CALL.with(|call| call.set(0));
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: as above.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_server_actor_non_config_field" => {
             ACTOR_MODE.with(|mode| mode.set(4));
             PARSE_TOKEN_CALL.with(|call| call.set(0));
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: as above.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         "net.listen_server_actor_name_mismatch" => {
             ACTOR_MODE.with(|mode| mode.set(5));
             PARSE_TOKEN_CALL.with(|call| call.set(0));
             LINKER_PRESENT.with(|c| c.set(true));
+            unsafe { set_level_linker_present(&mut level) };
             DEMO_INIT_OK.with(|c| c.set(true));
             CLIENT_PRESENT.with(|c| c.set(true));
+            sync_net_driver();
+            sync_game_engine();
+            level.base.engine = game_engine_ptr();
             // SAFETY: as above.
-            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }
+            unsafe { level_net::listen(&s, level_ptr, PORT_BUSY.as_ptr() as *mut c_void) }.unwrap()
         }
         other => panic!("unknown net scenario {other}"),
     };
@@ -1228,6 +1596,8 @@ fn run(name: &str) -> (Vec<String>, Option<i32>) {
     if name == "net.notify_received_text_netspeed_high"
         || name == "net.notify_received_text_netspeed_low"
     {
+        let speed = CONNECTION_MEM.with(|m| m.borrow().current_net_speed);
+        NET_SPEED.with(|value| value.set(speed));
         NET_SPEED.with(|speed| lines.push(format!("net_speed\t{}", speed.get())));
     }
     if name.starts_with("net.listen_") {
@@ -1235,9 +1605,14 @@ fn run(name: &str) -> (Vec<String>, Option<i32>) {
         lines.push(format!("error_text\t{error}"));
         lines.push(format!(
             "net_driver\t{}",
-            u8::from(!level.net_driver.is_null())
+            u8::from(!level.base.net_driver.is_null())
         ));
         if ret == 1 {
+            LEVEL_INFO_MEM.with(|m| {
+                let li = m.borrow();
+                NET_MODE.with(|mode| mode.set(li.net_mode));
+                COUNTDOWN.with(|countdown| countdown.set(li.next_switch_countdown));
+            });
             NET_MODE.with(|mode| lines.push(format!("net_mode\t{}", mode.get())));
             COUNTDOWN.with(|countdown| lines.push(format!("countdown\t{}", countdown.get())));
         }

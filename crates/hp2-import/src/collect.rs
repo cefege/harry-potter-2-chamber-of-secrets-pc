@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::classify::{is_debris, is_prohibited};
 use crate::files::{child, child_file, walk};
-use crate::hash::hash;
+use hp2_file_hash::hash;
 use crate::lower::lower;
 use crate::util::{fail, lexically_relative, lower_extension, utf8};
 

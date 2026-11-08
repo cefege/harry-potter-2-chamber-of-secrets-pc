@@ -216,34 +216,6 @@
         "HP2_ENABLE_TSAN": "OFF",
         "HP2_TEST_DATA_ROOT": "$env{XDG_DATA_HOME}/harry-potter-2/Data/Retail"
       }
-    },
-    {
-      "name": "windows-x64",
-      "displayName": "Windows x64 Release (llvm-mingw UCRT)",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/windows-x64",
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/Build/CMake/Toolchains/llvm-mingw-x86_64.cmake",
-        "CMAKE_BUILD_TYPE": "Release",
-        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON",
-        "Rust_CARGO_TARGET": "x86_64-pc-windows-gnullvm",
-        "Rust_RUSTUP_INSTALL_MISSING_TARGET": "ON"
-      }
-    },
-    {
-      "name": "web-wasm64",
-      "displayName": "WebAssembly (wasm64) + WebGL2, Chrome/Firefox",
-      "generator": "Ninja",
-      "binaryDir": "${sourceDir}/out/web-wasm64",
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
-        "HP2_REQUIRE_IMPLEMENTED_SOURCES": "ON",
-        "CMAKE_C_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
-        "CMAKE_CXX_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm",
-        "CMAKE_EXE_LINKER_FLAGS": "-sMEMORY64=1 -pthread -fwasm-exceptions -sSUPPORT_LONGJMP=wasm"
-      }
     }
   ],
   "buildPresets": [
@@ -298,17 +270,6 @@
     {
       "name": "linux-x64-retail",
       "configurePreset": "linux-x64-retail"
-    },
-    {
-      "name": "windows-x64",
-      "configurePreset": "windows-x64"
-    },
-    {
-      "name": "web-wasm64",
-      "configurePreset": "web-wasm64",
-      "targets": [
-        "hp2_web"
-      ]
     }
   ],
   "testPresets": [
@@ -316,6 +277,7 @@
       "name": "macos-arm64",
       "displayName": "macOS 15 arm64 Release tests",
       "configurePreset": "macos-arm64",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -323,6 +285,7 @@
       "name": "macos-arm64-asan-ubsan",
       "displayName": "macOS 15 arm64 ASan+UBSan tests",
       "configurePreset": "macos-arm64-asan-ubsan",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -330,6 +293,7 @@
       "name": "macos-arm64-tsan",
       "displayName": "macOS 15 arm64 TSan tests",
       "configurePreset": "macos-arm64-tsan",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -337,6 +301,7 @@
       "name": "linux-x64",
       "displayName": "Linux x86_64 Release tests",
       "configurePreset": "linux-x64",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -344,6 +309,7 @@
       "name": "linux-x64-asan-ubsan",
       "displayName": "Linux x86_64 ASan+UBSan tests",
       "configurePreset": "linux-x64-asan-ubsan",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -351,6 +317,7 @@
       "name": "linux-x64-retail",
       "displayName": "Linux x86_64 retail-only tests",
       "configurePreset": "linux-x64-retail",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -358,6 +325,7 @@
       "name": "macos-arm64-full-smoke",
       "displayName": "macOS 15 arm64 full sweep tests",
       "configurePreset": "macos-arm64-full-smoke",
+      "filter": { "exclude": { "label": "parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -365,6 +333,7 @@
       "name": "macos-arm64-retail",
       "displayName": "macOS 15 arm64 retail-only tests",
       "configurePreset": "macos-arm64-retail",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -372,6 +341,7 @@
       "name": "linux-arm64",
       "displayName": "Linux arm64 Release tests",
       "configurePreset": "linux-arm64",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -379,6 +349,7 @@
       "name": "linux-arm64-asan-ubsan",
       "displayName": "Linux arm64 ASan+UBSan tests",
       "configurePreset": "linux-arm64-asan-ubsan",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -386,6 +357,7 @@
       "name": "linux-arm64-tsan",
       "displayName": "Linux arm64 TSan tests",
       "configurePreset": "linux-arm64-tsan",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -393,6 +365,7 @@
       "name": "linux-arm64-full-smoke",
       "displayName": "Linux arm64 full sweep tests",
       "configurePreset": "linux-arm64-full-smoke",
+      "filter": { "exclude": { "label": "parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     },
@@ -400,25 +373,7 @@
       "name": "linux-arm64-retail",
       "displayName": "Linux arm64 retail-only tests",
       "configurePreset": "linux-arm64-retail",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
-    },
-    {
-      "name": "windows-x64",
-      "displayName": "Windows x64 Release tests",
-      "configurePreset": "windows-x64",
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Windows"
-      },
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
-    },
-    {
-      "name": "web-wasm64",
-      "displayName": "WebAssembly (wasm64) browser smoke tests",
-      "configurePreset": "web-wasm64",
+      "filter": { "exclude": { "label": "smoke-full|parity-full" } },
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error" }
     }

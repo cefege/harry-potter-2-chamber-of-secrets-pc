@@ -1,485 +1,25 @@
-//! Rust port of the renderer, replacing `ThirdParty/XOpenGLDrv`/
-//! `ThirdParty/UT99VulkanDrv` with one `wgpu`-backed render device.
-//! Phase 3.2 of `local://rust-inplace-port-plan.md`.
+//! Rust renderer and complete `UWgpuRenderDevice` execution policy.
 //!
-//! **Scope of this crate today: adapter/device creation, macOS
-//! window-surface creation from a raw `NSView*`, and a real per-tick
-//! configure/acquire/clear/present loop (`lock_frame`/`unlock_frame`),
-//! all wired into the real `UWgpuRenderDevice::Init`/`Lock`/`Unlock`/
-//! `Exit`.** Wired to `hp2-ffi` behind the `renderer-wgpu` feature,
-//! consumed by the real `HarryPotter2/Unreal/WgpuDrv` C++ package
-//! (`UWgpuRenderDevice : URenderDevice`, registered as
-//! `WgpuDrv.WgpuRenderDevice`, gated behind the
-//! `HP2_ENABLE_WGPU_DRIVER` CMake option, default OFF).
+//! [`driver_policy`] owns native-driver ordering, live callback state reads,
+//! texture upload/cache decisions, scene and geometry submission, presentation
+//! accounting, and native-text orchestration. The C++ package retains typed
+//! engine/SDK leaves, native object storage, lexical guards, and exception scopes.
 //!
-//! `create_device_sync` shares one `Instance` between surface and
-//! adapter creation, as wgpu's `compatible_surface` check requires (an
-//! earlier version built two separate, unrelated `Instance`s for the
-//! headless device and the standalone surface-creation test, which
-//! could never have been wired together correctly -- caught and
-//! redesigned before anything downstream depended on it, see
-//! `CreatedDevice`/`create_device_sync`'s own doc for the detail), and
-//! validates `surface.get_capabilities(&adapter).formats` is
-//! non-empty before returning a device at all -- an empty list is
-//! wgpu's own documented signal that the surface is incompatible with
-//! the adapter, so this is a real failure, not a cosmetic check (an
-//! earlier version only checked `surface.is_some()` in one caller's
-//! own test, which was vacuous -- caught on review, fixed in the
-//! production function itself, not just the test).
+//! This crate owns wgpu devices/surfaces, WGSL pipelines, texture conversion and
+//! storage, draw submission, captures, and native-text atlases. The `renderer-wgpu`
+//! feature exposes these through `hp2-ffi` to the sole `WgpuDrv.WgpuRenderDevice`.
+//! Backend and shader contracts are documented beside their implementations.
 //!
-//! `lock_frame`/`unlock_frame` prove the stronger claim the capability
-//! check alone could not: `surface.configure` plus `get_current_
-//! texture`/`Queue::present` actually succeeding on a real window, not
-//! just the surface being reported compatible. `Tests/
-//! WgpuSurfaceTests.cpp` exercises the real `hp2_rs_wgpu_lock`/
-//! `hp2_rs_wgpu_unlock` pair against a real SDL window and passes
-//! reliably on this project's own dev machine, confirmed over several
-//! repeated runs; getting there needed several precautions
-//! (`SDL_HINT_MAC_BACKGROUND_APP`, `SDL_RaiseWindow`,
-//! `SDL_WINDOW_ALWAYS_ON_TOP`, and polling the lock call itself for up
-//! to ~2 seconds) documented in detail in that file. Which single
-//! element of that combination is actually necessary was not isolated
-//! (no ablation study was run); a *persistent* `Occluded` outcome
-//! after that polling window is treated as an environment gap (ctest
-//! `SKIP_RETURN_CODE 77` on that one check) rather than a hard
-//! failure, but every run so far in this project's own dev environment
-//! has passed for real, not skipped.
-//!
-//! That same test-harness pass does **not** mean the real game
-//! presents frames, and this doc does not claim otherwise: a real
-//! `hp2_game -window -testticks=60` launch (`Build/run_wgpu_smoke.py`)
-//! on the same machine got `FrameOutcome::Occluded` on all 60 of 60
-//! real per-tick `Lock` calls -- zero frames ever actually reached the
-//! screen in that run, confirmed via the real cumulative tally
-//! `Lock` itself logs every call (`WgpuDrv: Lock outcome=... tally
-//! presented=... occluded=...`), not inferred from anything indirect.
-//! The most likely difference from the passing test-harness case is
-//! that a real `hp2_game -window` launch applies none of the
-//! precautions above and makes only one attempt per tick (deliberately
-//! -- blocking the real game loop for up to ~2 seconds on every single
-//! frame to work around this would be a bad trade even if it helped,
-//! since a frame failing to acquire is already an expected, transient
-//! condition in real usage that the next tick's own `Lock` call
-//! retries for free), but this was not isolated either.
-//! `run_wgpu_smoke.py` reports this run as `blocked`, not `pass` --
-//! deliberately not suppressed via ctest's `SKIP_RETURN_CODE` either,
-//! since that would hide a real, current gap behind a green summary
-//! (an earlier version of this change did exactly that to keep a
-//! build directory's ctest count looking stable, caught on review as
-//! the wrong tradeoff before it was committed).
-//!
-//! `request_adapter_sync`/`create_device_sync`'s own `#[ignore]`d
-//! tests (CI runners have no GPU, see their own doc) cover the
-//! headless half at the Rust level directly.
-//!
-//! Still open, not started: resize handling beyond what `lock_frame`'s
-//! own per-call drawable-size query already gets for free, all WGSL
-//! shader transcription, real draw-call forwarding for any of
-//! `URenderDevice`'s pure virtuals (`lock_frame` presents an empty,
-//! cleared frame, nothing drawn yet), and -- the open question this
-//! doc's own "zero frames presented in a real launch" paragraph above
-//! leaves unresolved -- why a real, non-test-harness launch behaves
-//! differently from the dedicated ctest on the same machine.
-//!
-//! Shader transcription scoping, from reading the real GLSL sources
-//! (not assumed): the plan's own "hand-transcribe each GLSL source to
-//! WGSL" undersells the actual work. `ThirdParty/XOpenGLDrv/Src/
-//! ShaderProgram.cpp`'s `#extension GL_ARB_bindless_texture : require`
-//! and `DrawTile_GLSL.cpp`'s `DrawTileCoreProgram::BuildGeometryShader`
-//! (130 lines) both use real GL features with no WGSL/WebGPU
-//! equivalent at all (WebGPU has no bindless-handle model, and
-//! deliberately excludes geometry shaders from its pipeline stages).
-//! A literal line-by-line transcription of the "Core" GL 4.x shader
-//! variants cannot work. Two findings change the actual plan:
-//!
-//! 1. Bindless textures are not load-bearing -- `CheckExtensions.cpp`
-//!    runtime-detects support and disables `UseBindlessTextures`
-//!    whenever the extension is missing, *and* unconditionally on AMD
-//!    GPUs regardless of support ("AMD drivers don't like how we use
-//!    bindless textures and perform very poorly"). The fallback this
-//!    already exercises in production is a complete, working, fixed-
-//!    texture-unit path (`ShaderProgram.cpp`'s `#define TMUDiffuse
-//!    Texture<N>` aliases) that maps directly onto WebGPU's ordinary
-//!    bind-group model -- one texture binding per slot, no handle
-//!    indirection. Port from this path, not the bindless one.
-//!    `UseSSBOParametersBuffer` (`DrawTile.cpp`) has the identical
-//!    shape: defaults `false`, a plain per-draw UBO in the fallback,
-//!    mapping directly onto a WebGPU uniform-buffer bind group with a
-//!    dynamic offset per draw call instead of `gl_DrawID`-indexed SSBO
-//!    lookups.
-//! 2. The two geometry shaders are two genuinely different patterns,
-//!    not one -- `DrawComplex_GLSL.cpp`/`DrawSimple_GLSL.cpp` have
-//!    neither a geometry shader nor an ES/Core split, confirmed by
-//!    grepping all four files, not assumed.
-//!    `DrawGouraudProgram::BuildGeometryShader` does *not* amplify
-//!    topology -- `layout(triangles) in; layout(triangle_strip,
-//!    max_vertices = 3) out;`, one triangle in, one out, read in full.
-//!    It does exactly three things, each with a direct vertex/
-//!    fragment-only replacement: (a) broadcast the first vertex's
-//!    `DrawID` to all three vertices as a flat-interpolated value --
-//!    WGSL's `@interpolate(flat)` on a vertex output does this with no
-//!    geometry stage; (b) under `OPT_BumpMaps`, compute a per-triangle
-//!    tangent/bitangent basis from all three vertices' positions and
-//!    UVs -- the standard modern replacement is either precomputing
-//!    tangents per-vertex at mesh-load time (most engines' actual
-//!    practice) or computing them in the fragment shader from screen-
-//!    space derivatives (WGSL has `dpdx`/`dpdy`, the same primitive);
-//!    (c) under `OPT_ClipDistance`, set a per-vertex `gl_ClipDistance`
-//!    against a custom clip plane -- WGSL/WebGPU has no clip-distance
-//!    equivalent at all; the standard replacement is an explicit
-//!    `discard` in the fragment shader against the same plane
-//!    equation.
-//!
-//!    `DrawTileCoreProgram::BuildGeometryShader` is the opposite
-//!    pattern -- confirmed by reading its full body, not inferred from
-//!    `DrawTileESProgram` lacking one, which turned out to be the
-//!    wrong inference to make without checking (an earlier version of
-//!    this doc guessed `DrawTileCoreProgram` matched `DrawGouraud`'s
-//!    shape; it does not). It genuinely amplifies topology:
-//!    `layout(triangles) in; layout(triangle_strip, max_vertices = 6)
-//!    out;`, and only ever reads vertex 0 of the input "triangle"
-//!    (`In[0].TexCoords`/`gl_in[0].gl_Position`/etc. -- vertices 1 and
-//!    2 are never referenced). This is GPU-side quad expansion from a
-//!    single point: the C++ side uploads one vertex per tile carrying
-//!    the whole quad's parameters (screen-space scale/offset, UV rect,
-//!    width/height), and the geometry shader expands it into six
-//!    vertices (two triangles) using that one vertex's data. The
-//!    direct, idiomatic WebGPU replacement is vertex-shader quad
-//!    expansion from `@builtin(vertex_index)`: draw 6 vertices per
-//!    tile instance (one instance per tile, instance-rate attributes
-//!    or a fixed-size uniform array carrying today's per-tile
-//!    parameters -- not a storage buffer, per the DrawID-indexing
-//!    correction elsewhere in this doc: WebGL2/GLES3.0 has zero
-//!    storage buffers available),
-//!    and branch on `vertex_index % 6` in the vertex shader to compute
-//!    which of the quad's six corners this invocation is -- the exact
-//!    same per-corner math already in this geometry shader, just moved
-//!    up one stage. A common, well-established technique for sprite/
-//!    particle/UI rendering on hardware with no geometry shaders at
-//!    all (mobile GPUs, WebGPU itself), not a novel design needed for
-//!    this port specifically.
-//!
-//! Net effect, not uniform across all five shaders: `DrawTile` has a
-//! real, working, geometry-shader-free alternative already running in
-//! production (`DrawTileESProgram`) to copy the vertex-submission shape
-//! from (per-vertex `Coords`/`TexCoords` inputs, not a single
-//! point-per-tile). This crate's own `tile.wgsl` (second real shader
-//! port) already resolved the per-corner-expansion question this
-//! paragraph originally framed as still open between two options --
-//! not a live "either/or" anymore: it copies the ES path's shape
-//! directly, i.e. the CPU-side expansion `DrawTile.cpp`'s
-//! `SubmitTileBatch` already does for that path today, not the
-//! `vertex_index`-based GPU-side alternative sketched above (which
-//! remains a real, valid *technique* in general, just not the one this
-//! crate ended up using, since a working CPU-side alternative already
-//! existed to copy instead of designing a new GPU-side one).
-//!
-//! `DrawGouraud`'s geometry shader is not a single-path thing to design
-//! a replacement for from scratch, the way an earlier version of this
-//! paragraph wrongly claimed (caught on review, corrected after
-//! confirming `DrawGouraud.cpp:376`'s real `GeoShaderFunc =
-//! RenDev->UsingGeometryShaders ? &BuildGeometryShader : nullptr; //
-//! optional`): it is genuinely optional, gated by a runtime flag, and
-//! `DrawGouraudProgram`'s own vertex shader already has a complete,
-//! already-in-production `#else` branch for when it is off
-//! (`DrawGouraud_GLSL.cpp` lines 100-118) that does the final
-//! `modelviewprojMat` transform directly, no geometry stage involved
-//! -- `gouraud.wgsl` (this crate's third real shader port) already
-//! transcribes exactly that branch, not a freshly-designed
-//! replacement. The geometry shader's `OPT_BumpMaps && OPT_HasBumpMap`
-//! per-triangle tangent/bitangent computation is its one genuinely
-//! undesigned piece when it does run -- but that is not the same thing
-//! as bump mapping overall being undesigned: the same
-//! `!OPT_GeometryShaders` branch already carries its own placeholder
-//! vertex-shader-only TBN basis (`T = B = vec3(1,1,1)`, both literally
-//! commented "Arbitrary" in the real source, `N =
-//! normalize(Normals.xyz)`), a direct, already-in-production
-//! transcription target `gouraud.wgsl`'s own header now scopes
-//! correctly -- lower fidelity than the geometry shader's real
-//! per-triangle tangents, but not undesigned. `gouraud.wgsl`'s base
-//! path still correctly defers implementing it at all (see that file's
-//! own header) rather than needing to solve either version to port the
-//! base, non-bump-mapped path.
-//! For bindless textures and SSBO draw parameters specifically, the
-//! non-bindless/non-SSBO fallback branches (not a separate `*ESProgram`
-//! class, just an `#if`/runtime-flag branch within the same shader
-//! source) are real alternatives already exercised in production
-//! (disabled on AMD GPUs today) and are the right transcription
-//! source regardless of which shader.
-//!
-//! `DrawSimple_GLSL.cpp` has been read in full and ported:
-//! `shaders/simple.wgsl`. `DrawComplex_GLSL.cpp` (BSP surface
-//! rendering, 732 lines, by far the largest of the five) has now
-//! actually been read in full -- an earlier version of this doc
-//! claimed that after reading only its first 300 lines (vertex shader
-//! plus parallax helpers), caught on review before the fragment
-//! shader (301-732) was ever read. One load-bearing finding holds up: it has
-//! no geometry shader at all, and its bump-map tangent space
-//! (`vTBNMat`) is computed directly in the vertex shader from the
-//! surface's own known `XAxis`/`YAxis`/`ZAxis` UV mapping axes -- not
-//! derived from adjacent-triangle geometry the way a typical mesh
-//! normal/tangent would be -- so it needs no geometry-shader
-//! replacement design at all, unlike `DrawGouraud`. One real WGSL
-//! translation detail for that same tangent space: `flat in mat3
-//! vTBNMat` has no direct WGSL equivalent -- inter-stage IO values
-//! must be scalars or vectors, not matrices -- so the port needs to
-//! split it into three separate `@location(n) @interpolate(flat)
-//! vec3<f32>` varyings (the matrix's three columns) and reassemble
-//! `mat3x3<f32>` from them in `fs_main`; those three extra locations
-//! count against WGSL's 16-location inter-stage-variable limit
-//! alongside every optional UV varying this shader has, so the real
-//! per-specialization location budget needs counting once all of
-//! `DrawComplex`'s optional outputs are actually laid out, not just
-//! assumed to fit. Its real complexity is breadth, not architecture:
-//! lightmaps, fogmaps, detail/macro textures (both with real HSV
-//! recoloring, not plain multiply), environment maps, height maps,
-//! three alternate parallax-mapping techniques (basic/occlusion/relief,
-//! the latter two using real texture-sampling loops), and -- only
-//! visible once the fragment body itself was actually read -- a real
-//! per-pixel hardware point-light loop used twice (`OPT_HWLighting`
-//! base lighting, and a second pass inside `OPT_BumpMaps` for
-//! tangent-space diffuse+specular), distance fog mixing, and an
-//! `OPT_Editor`-gated block of debug render modes (zone/poly-cut/
-//! walkable-surface visualization, hit-test color override) that is
-//! editor-only, not needed for core gameplay rendering. All `#if`-gated
-//! optional branches of one vertex+fragment pair, each individually
-//! portable with the same non-bindless-fallback strategy as every other
-//! shader here -- except the occlusion/relief parallax loops
-//! specifically need one more real change: both call `GetTexel`
-//! (implicit-derivative texture sampling) from inside a loop whose exit
-//! condition depends on a per-fragment height value read from that same
-//! texture, which is non-uniform control flow -- WGSL's spec restricts
-//! implicit-derivative texture sampling (`textureSample`) to uniform
-//! control flow in exactly this situation, so the port should use
-//! `textureSampleGrad` with derivatives (`dpdx`/`dpdy` of the base UV)
-//! computed once before entering the loop, or `textureSampleLevel`,
-//! instead. This crate's own `naga_accepts_texture_sample_in_non_
-//! uniform_control_flow` test settles, empirically, a real surprise
-//! here: naga's validator does *not* reject the minimal repro of this
-//! exact shape -- it does not implement (or does not apply) WGSL's
-//! full uniformity-analysis restriction. `every_wgsl_shader_parses_
-//! and_validates`'s naga-based CI check therefore cannot be relied on
-//! to catch a parallax loop ported with plain `textureSample` left in
-//! by mistake; a real backend might still reject it or silently
-//! produce wrong derivatives, but naga accepting it is not evidence of
-//! correctness either way. The `textureSampleGrad`/`textureSampleLevel`
-//! requirement above still stands on the WGSL spec's own written text,
-//! independent of naga's enforcement gap -- it changes mipmap
-//! filtering behavior slightly versus the GLSL original, a real, not
-//! cosmetic, porting change for those two techniques
-//! specifically, not the basic parallax technique (no loop) or any
-//! other `#if`-gated branch in this file. None of them have been
-//! transcribed yet. The file also has a second genuinely-dead `#if 0`
-//! block (an unused parallax soft-shadow function, lines 673-732) --
-//! confirmed dead the same way `DrawSimple_GLSL.cpp`'s stipple block
-//! is, and likewise not a transcription target.
-//!
-//! `SetTexture.cpp` (747 lines, texture cache/upload) has been read in
-//! enough depth to scope its shape, though not line-for-line the way
-//! the shader sources above were: textures are keyed by `CacheID`
-//! (`FTextureInfo::CacheID`, with a reused low tag bit distinguishing
-//! the alpha-premultiplied-for-`PF_Masked` copy of a `TEXF_P8` texture
-//! from its unmasked copy -- two real cache entries can exist for one
-//! source texture). Upload is one of: a full upload
-//! (`glTexImage2D`/`glCompressedTexImage2D` for the one compressed
-//! format in use, `TEXF_DXT1`, followed by `glGenerateMipmap`) or an
-//! incremental/partial mip upload (`glTexSubImage2D`/
-//! `glCompressedTexImage2D` at an explicit, manually incremented mip
-//! level, no mipmap generation). `TEXF_DXT1` maps to wgpu's
-//! `Features::TEXTURE_COMPRESSION_BC` (not asserted anywhere yet in
-//! this crate); the other formats (`P8`/`RGBA7`/`RGB16`/`RGB8`/
-//! `RGBA8`) upload uncompressed and would map to `Queue::write_texture`
-//! with a wgpu-side format chosen per source format -- `P8` in
-//! particular is an indexed-palette format needing CPU-side expansion
-//! to RGBA before upload (the real palette-to-RGBA conversion call
-//! site itself has not been read yet). `glGenerateMipmap` itself has
-//! no wgpu equivalent at all -- wgpu never generates mipmaps for you,
-//! full stop -- so a real Rust port needs its own mip-generation step:
-//! a render/blit downsample pass per level for uncompressed formats,
-//! but that path does not exist for `TEXF_DXT1`/BC specifically, since
-//! BC-compressed textures cannot be render or storage targets in
-//! wgpu -- the options there are a CPU decode-downsample-re-encode
-//! pass, uploading only the mips the asset already ships
-//! (`Info.NumMips`, skipping GPU mip generation for compressed
-//! textures entirely), or expanding `TEXF_DXT1` to RGBA8 on upload.
-//! Not yet decided which.
-//!
-//! `DrawComplex.cpp` (304 lines), `DrawGouraud.cpp` (406 lines, also
-//! home to `DrawTriangles`), and `DrawTile.cpp` (379 lines) -- the C++
-//! orchestration that actually issues draw calls, all currently no-op
-//! stubs in `WgpuDrv.cpp` -- have now been read for their `RenDev`
-//! interface entry points, shared private helpers (`SetTextureHelper`
-//! in both `DrawComplex.cpp` and `DrawGouraud.cpp`, `BufferVert`,
-//! `DrawNativeTextTile`, `FlushNativeTextTileBatch`), and
-//! `SubmitTileBatch` in full; an earlier version of this doc claimed
-//! all three "read in full", which overclaimed past what was actually
-//! read at the time (those helper bodies, caught on review) -- each
-//! shader class's own constructor/`CreateInputLayout`/
-//! `Activate`/`DeactivateShader` bodies in these three files remain
-//! genuinely unread, stated here rather than implied. All three share
-//! one real batching architecture that is good news for porting:
-//! CPU-side ring buffers (`VertBuffer`/`DrawBuffer`/
-//! `ParametersBuffer`) accumulate vertices and one small per-draw-call
-//! parameter struct across multiple draw calls, flushed only when
-//! blend state or shader specialization actually changes or a buffer
-//! fills up -- not one GL draw call per engine draw call. Each
-//! buffered draw call gets a `DrawID`, written per-vertex and used
-//! shader-side to index back into that draw call's own parameter slot
-//! (`GetXAxis(DrawID)` etc. in `DrawComplex_GLSL.cpp`). `simple.wgsl`
-//! originally dropped this indexing on an unverified claim that the
-//! non-SSBO fallback only ever binds one `DrawColor` at a time --
-//! caught on review, then disproven by reading
-//! `ShaderProgram.cpp`'s `EmitDrawCallParametersHeader`: the UBO path
-//! emits a bounded *array* (`DrawCallParameters
-//! Draw<Name>Params[ParametersBufferSize]`) and generates
-//! `Get<Field>(uint DrawID)` accessors indexing it by `DrawID`
-//! identically to the SSBO path. `simple.wgsl` now carries `draw_id`
-//! through and indexes a fixed-size `var<uniform>
-//! array<DrawParameters, MAX_DRAWS>` -- not a storage buffer: an
-//! earlier version of this paragraph said storage buffers are "core
-//! and unconditionally available on every backend and web tier",
-//! which is what `simple.wgsl` itself originally shipped with too;
-//! both wrong, caught on review and disproven by reading
-//! `wgpu-types`'s own `Limits::downlevel_webgl2_defaults()`
-//! (`max_storage_buffers_per_shader_stage: 0`,
-//! `max_storage_buffer_binding_size: 0`) -- genuinely zero storage
-//! buffers on WebGL2/GLES3.0, matching this crate's own
-//! `BackendChoice::Gl` and the plan's later Phase 8 web target. A
-//! fixed-size uniform array is the real portable equivalent of GLSL's
-//! UBO fallback this shader already transcribes from.
-//! `DrawComplex`/`DrawGouraud`/`DrawTile`'s eventual WGSL ports need
-//! this uniform-array shape too, not a storage buffer and not the
-//! version this file originally shipped with. Triangulation is
-//! already CPU-side for both `DrawComplex`
-//! (`FSavedPoly` n-gon fan triangulated into `(NumPts-2)*3` vertices)
-//! and `DrawGouraud`/`DrawTriangles` (same fan triangulation, plus
-//! real index-buffer support in `DrawTriangles`) -- no GPU-side
-//! amplification to design around for either. `DrawGouraud`'s
-//! `BufferVert` helper also confirms a real architectural distinction
-//! from `DrawComplex`: per-vertex `LightColor`/`FogColor` are carried
-//! directly on each vertex (true Gouraud shading, interpolated by the
-//! rasterizer) rather than sampled from a lightmap/fogmap texture in
-//! the fragment shader the way `DrawComplex` does. `DrawTile.cpp`'s
-//! `SubmitTileBatch` confirms and sharpens the earlier
-//! `DrawTileCoreProgram`-vs-`DrawTileESProgram` finding: the Core path
-//! packs an entire tile's rect and UVs into a single vertex's
-//! attributes and advances the ring buffer by 3 with only that one
-//! vertex actually written, relying on its geometry shader for the
-//! real 1-to-6 expansion before rasterization; the ES path's C++
-//! computes all 6 corner vertices directly, by hand, right there in
-//! `SubmitTileBatch` (`Out[0..5].Coords`/`TexCoords`, using
-//! `RFX2`/`RFY2`/`Frame->FX2`/`Frame->FY2` the same way the vertex
-//! shader itself would) -- for `DrawTile` this is no longer a
-//! geometry-shader-replacement design problem, it is a direct
-//! transcription target. `DrawNativeTextTile` -- the native-text
-//! rendering path, `default_enabled: true` per AGENTS.md #4 and
-//! distinct from the `NativeText=False` bitmap-font path AGENTS.md #5
-//! requires stay reachable -- is not a separate rendering path at all
-//! -- it is a thin wrapper that binds an externally-supplied GL
-//! texture/sampler (from the CoreText/FreeType backend, bypassing the
-//! normal `FTextureInfo` cache) and then calls the exact same
-//! `SubmitTileBatch` regular `DrawTile` uses; `FlushNativeTextTileBatch`
-//! just forwards to the same `Shader->Flush`. A real Rust port's
-//! native-text path needs no separate design from `DrawTile`'s, only a
-//! way to bind an already-created wgpu texture/sampler instead of
-//! going through the texture cache.
-//!
-//! One real architectural gap all three orchestration files surface,
-//! now actually designed (not left open): GLSL's `#if`-gated shader
-//! specialization (`ShaderCompilationOptions`, lazily compiled and
-//! cached per unique combination of texture layers and blend mode via
-//! `SelectSpecialization`) has no direct WGSL/wgpu equivalent -- wgpu
-//! has no API-level preprocessor. An earlier version of this doc
-//! concluded the port needs to replicate that whole mechanism, either
-//! as a `HashMap<ShaderCompilationOptions, wgpu::RenderPipeline>` keyed
-//! by the full options bitmask, or (after rejecting pipeline-
-//! overridable constants as unable to avoid populating every optional
-//! binding anyway) by generating N actual WGSL source-text variants.
-//! Both wrong, caught on review after actually reading why GLSL needs
-//! this at all, not just that it exists: `DrawComplex.cpp` calls
-//! `SetBlend(NextPolyFlags)` as a plain, separate GL state change
-//! *before* `SelectSpecialization` runs, not something the shader
-//! specialization encodes -- confirming the one genuinely pipeline-
-//! level axis (opaque/alpha-blended/masked blend state, which wgpu
-//! bakes into `ColorTargetState::blend` with no runtime-settable
-//! equivalent) is already structurally separate from everything else
-//! `ShaderCompilationOptions` varies. Of what remains -- optional
-//! texture layers (lightmap/fogmap/detail/macro/bump/environment/
-//! height) and simple per-draw boolean flags (masked/alpha-blended/
-//! modulated/translucent/unlit/render-fog) -- none require a different
-//! bind-group or vertex-buffer layout: `DrawComplex_GLSL.cpp`'s bump-
-//! mapping tangent basis (`vTBNMat`) is computed in the vertex shader
-//! from the surface's own known `XAxis`/`YAxis`/`ZAxis`, not read from
-//! a dedicated bound vertex attribute, so no shader needs a per-option
-//! vertex layout; and this crate's own `complex.wgsl` already proves,
-//! tested on real hardware, that an optional texture layer (lightmap,
-//! fogmap) can instead always be bound (a 1x1 dummy when the real
-//! layer is absent for a given draw) and conditionally sampled at
-//! runtime with `select()`, keyed off the same per-DrawID `DrawFlags`
-//! bits GLSL's per-draw-call signature computation already reads. The
-//! real design, then: one WGSL "uber-shader" module per draw-call type
-//! (already this crate's shape for `complex.wgsl`/`gouraud.wgsl`/
-//! `tile.wgsl`), extending that same proven dummy-texture-plus-
-//! `select()` pattern to the remaining optional texture layers instead
-//! of introducing permutation-cache machinery to avoid building at
-//! all; plus a small, separate `HashMap<BlendMode, wgpu::
-//! RenderPipeline>` per draw-call-type shader for the actual pipeline-
-//! level blend-state axis. `BlendMode` is not a simple 3-4-value enum
-//! (`Opaque`/`AlphaBlended`/`Masked`) as an earlier version of this
-//! paragraph claimed, caught on review after actually reading
-//! `SetTexture.cpp`'s real `SetBlend` in full rather than guessing
-//! its shape from `PolyFlags`' own bit names: it is seven distinct
-//! `glBlendFunc` combinations (Lumos -- `PF_LumosAffected`'s full
-//! mask, HP2-specific, driven by the renderer's own computed `cAlpha`
-//! distance fade; Invisible; Highlighted, two sub-variants gated by
-//! `PF_Translucent`; Translucent, two sub-variants gated by
-//! `SimulateMultiPass` -- the dual-source one needs `wgpu::Features::
-//! DUAL_SOURCE_BLENDING` plus WGSL's `enable dual_source_blending`/
-//! `@blend_src(1)`, unavailable on WebGL2, so not the base path;
-//! Modulated; Opaque, the fallback), plus two more axes `SetBlend`
-//! itself also changes in the same real function (`glColorMask` for
-//! `PF_Invisible`, `glDepthMask` for `PF_Occlude`) and `SetZTestMode`
-//! changes separately (7 depth-compare modes), plus a `HitTesting()`
-//! override that forces `(One, Zero)` unconditionally. The real
-//! pipeline-cache key is this derived blend/depth-write/depth-compare
-//! state, not raw `PolyFlags` or `ShaderCompilationOptions`' `OPT_Is*`
-//! bits directly -- `Masked` itself is not a blend mode at all in the
-//! real source (it is a fragment-shader `discard` plus ordinary
-//! opaque blending, already correctly modeled as a per-pixel branch
-//! in WGSL, not a pipeline-level axis). This also means the earlier
-//! "per-specialization" WGSL inter-stage-location budget (`DrawComplex`
-//! paragraph above) is moot under this design: there is only one real
-//! varying layout per shader module, not one per specialization, so
-//! every optional varying just needs to fit WGSL's 16-location limit
-//! once, globally, for that shader. Not yet implemented: this crate
-//! currently has no `BlendMode` enum, no per-draw-call-type pipeline
-//! cache, and `complex.wgsl`/`gouraud.wgsl` do not yet carry
-//! detail/macro/bump/environment/height textures at all (both still
-//! base-path only, as their own headers already say). Confirmed in
-//! passing: `DrawGouraud.cpp`'s real `MaxVertices()` also returns a
-//! hardcoded `256`, matching `WgpuDrv.cpp`'s current stub value -- not
-//! a shortcut, already correct. Still unexamined: the ring-buffer/
-//! `ShaderProgram::Flush` machinery itself (`ShaderProgram.cpp`, read
-//! only for its bindless/SSBO-fallback logic so far, not its buffering
-//! internals), the shader class constructors/`CreateInputLayout`
-//! bodies named above, and how any of this would connect to
-//! `WgpuDrv.cpp`'s current no-op `DrawComplexSurface`/`DrawTriangles`/
-//! `DrawTile`/`Draw2DLine`/`Draw2DPoint` stubs.
-//!
-//! Depth-range convention (GLSL/OpenGL clip-space Z is -1..1; WebGPU's
-//! is 0..1): resolved in `compute_frame_uniforms` (`glam::camera::
-//! rh::proj::directx`, 0..1, right-handed, Y-up -- see that
-//! function's own doc for the full derivation) -- an earlier version
-//! of this paragraph said "not yet resolved in code, since no Rust
-//! code builds a real projection matrix yet", true when written, now
-//! stale. `simple.wgsl`'s own header comment still states the
-//! per-shader usage contract this satisfies (whatever populates
-//! `modelviewproj_mat` must build it directly in WebGPU's 0..1
-//! convention), not duplicated here.
+//! GPU acceptance and data-profile limits are recorded in
+//! `Docs/BEHAVIOR_MATRIX.md`. Owned render-target captures do not establish
+//! foreground presentation; an occluded surface must remain reported as such.
 
 pub mod capture;
 pub mod draw;
+pub mod driver_policy;
 pub mod native_text;
+#[cfg(feature = "sdl")]
+pub mod sdl_surface;
 pub mod text_atlas;
 pub mod texture;
 
@@ -811,9 +351,9 @@ pub enum FrameOutcome {
     Timeout = 3,
     /// `get_current_texture` returned `Occluded` (window minimized or
     /// behind another window -- or, on macOS, possibly never actually
-    /// mapped to the screen). Nothing is presented; with
-    /// `HP2_CAPTURE_FRAMES` on, the frame is still rendered offscreen
-    /// and captured (`FramePresentable::CaptureOnly`).
+    /// mapped to the screen). Nothing is presented, but the real scene
+    /// is rendered offscreen for engine readback, including screenshot
+    /// commands issued without PNG capture or fidelity reporting.
     Occluded = 4,
     /// `get_current_texture` returned `Outdated`.
     Outdated = 5,
@@ -835,11 +375,17 @@ pub enum FrameOutcome {
     /// only in a log that might not be visible.
     Panicked = 9,
 }
+/// Failure to configure a real surface for a requested viewport size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SurfaceConfigureError {
+    NoSurface,
+    NoDefaultConfig,
+}
+
 
 /// What `lock_frame`/`begin_offscreen_frame` actually acquired:
-/// either a real `wgpu::SurfaceTexture` (the only variant any real
-/// production `WgpuDrv.cpp` call site ever produces), or a plain
-/// `()` marker for an offscreen target with nothing to present.
+/// either a real `wgpu::SurfaceTexture` or an offscreen target with
+/// nothing to present.
 /// Split out specifically so this crate's own tests can exercise the
 /// real `lock_frame`/`unlock_frame` encoder-and-draw-queue machinery
 /// end to end against an offscreen texture, not a hand-rolled replica
@@ -852,12 +398,9 @@ pub enum FrameOutcome {
 enum FramePresentable {
     Surface(wgpu::SurfaceTexture),
     Offscreen,
-    /// `lock_frame` got `Occluded` while `HP2_CAPTURE_FRAMES` is on:
-    /// the frame is rendered into `RenderLoop::capture_target` instead
-    /// (never presented) so it can still be captured -- XOpenGL renders
-    /// and captures every frame regardless of window visibility, and
-    /// capture consumers (`Tests/DeterminismDoubleRunTests.py`,
-    /// `Build/smoke_maps.py`) depend on one capture per frame.
+    /// `lock_frame` got `Occluded`. Keep a real completed scene available
+    /// for engine readback without presenting it. Capture configuration
+    /// must not determine whether normal screenshot commands can work.
     CaptureOnly(wgpu::Texture),
 }
 
@@ -1358,6 +901,7 @@ pub struct TrianglesDrawRequest {
 /// constant, `0.0` for diffuse/`-0.5` for light-map/fog-map, not this
 /// struct, since it is a property of *which* layer is being bound,
 /// not something a real caller chooses per call).
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ComplexTextureLayer {
     pub cache_id: u64,
     pub u_scale: f32,
@@ -1429,9 +973,7 @@ impl RenderLoop {
         }
     }
 
-    /// Lazily reads `HP2_CAPTURE_FRAMES`/`MAP`/`TICKS` once, matching
-    /// XOpenGL.cpp's own `if (!GFrameCapture.Initialized)
-    /// HPInitFrameCapture();`.
+    /// Lazily reads PNG capture configuration.
     fn ensure_capture_initialized(&mut self) {
         if self.capture_initialized {
             return;
@@ -1532,7 +1074,8 @@ impl RenderLoop {
                 dimension: wgpu::TextureDimension::D2,
                 format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1626,6 +1169,17 @@ impl RenderLoop {
 
     pub fn counts(&self) -> FrameCounts {
         self.counts
+    }
+    /// Reads the last completed scene target as tightly packed top-to-bottom RGBA8.
+    /// The target is renderer-owned and has COPY_SRC usage; absent output or an
+    /// unsupported target format is reported as `None`.
+    pub fn read_pixels_rgba8(&self, created: &CreatedDevice) -> Option<(u32, u32, Vec<u8>)> {
+        if self.in_progress.is_some() {
+            return None;
+        }
+        let (texture, _) = self.scene_target.as_ref()?;
+        let (width, height) = (texture.width(), texture.height());
+        capture::read_texture_rgba8(created, texture).map(|pixels| (width, height, pixels))
     }
 
     /// Real per-tick entry point `UWgpuRenderDevice::Draw2DLine`
@@ -2350,6 +1904,15 @@ impl RenderLoop {
         self.in_progress = Some(frame);
     }
 
+    /// Drops the per-device texture cache at the renderer's explicit flush
+    /// boundary. Drain batches first because they resolve cache IDs at dispatch;
+    /// reset the text atlas too because its page pixels were resident in the cache.
+    pub fn clear_texture_cache(&mut self, created: &CreatedDevice) {
+        self.flush_pending_batches(created);
+        self.texture_cache.clear();
+        self.text_atlas.reset();
+    }
+
     /// Uploads `rgba8_bytes` into `self.texture_cache` under
     /// `cache_id` -- thin passthrough to `texture::TextureCache::
     /// upload_rgba8` (that method's own doc has the full real
@@ -2806,6 +2369,66 @@ fn resolve_point_z(is_ortho: bool, z: f32) -> f32 {
     }
 }
 
+/// Configure a real surface for the current viewport size without acquiring a
+/// frame. This is also used by the engine's explicit `SetRes` operation so the
+/// resize is applied before the next `Lock`.
+pub fn configure_surface(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    width: u32,
+    height: u32,
+    present_mode: wgpu::PresentMode,
+) -> Result<(), SurfaceConfigureError> {
+    let Some(surface) = created.surface.as_ref() else {
+        return Err(SurfaceConfigureError::NoSurface);
+    };
+    let capabilities = surface.get_capabilities(&created.adapter);
+    let present_mode = resolve_present_mode(present_mode, &capabilities.present_modes);
+    if loop_state.configured_size == Some((width, height))
+        && loop_state.configured_present_mode == Some(present_mode)
+    {
+        return Ok(());
+    }
+    let Some(mut config) = surface.get_default_config(&created.adapter, width, height) else {
+        return Err(SurfaceConfigureError::NoDefaultConfig);
+    };
+    config.present_mode = present_mode;
+    if let Some(format) = surface_color_format(&capabilities.formats, loop_state.srgb_framebuffer) {
+        config.format = format;
+    }
+    // Capture reads the presented surface texture back, which needs COPY_SRC
+    // on swapchain textures, requested only when capture is active and the
+    // surface supports it.
+    loop_state.ensure_capture_initialized();
+    if loop_state
+        .capture
+        .as_ref()
+        .is_some_and(capture::FrameCapture::is_enabled)
+        && capabilities.usages.contains(wgpu::TextureUsages::COPY_SRC)
+    {
+        config.usage |= wgpu::TextureUsages::COPY_SRC;
+    }
+    surface.configure(&created.device, &config);
+    loop_state.configured_size = Some((width, height));
+    loop_state.configured_present_mode = Some(present_mode);
+    Ok(())
+}
+/// Configures the surface using the renderer's reflected UseVSync value.
+pub fn configure_surface_for_vsync(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    width: u32,
+    height: u32,
+    vsync: u8,
+) -> Result<(), SurfaceConfigureError> {
+    let present_mode = match vsync {
+        0 => wgpu::PresentMode::Immediate,
+        2 => wgpu::PresentMode::FifoRelaxed,
+        _ => wgpu::PresentMode::Fifo,
+    };
+    configure_surface(created, loop_state, width, height, present_mode)
+}
+
 /// Replaces the per-frame-begin half of `UWgpuRenderDevice::Lock`
 /// (plan's still-open "real draw-call forwarding" item's first piece:
 /// nothing is drawn by this function itself, but it is the real
@@ -2833,6 +2456,7 @@ fn resolve_point_z(is_ortho: bool, z: f32) -> f32 {
 /// `get_current_texture` returning anything other than `Success`/
 /// `Suboptimal` -- see `FrameOutcome`'s own doc for what each code
 /// means. Every outcome is tallied into `loop_state.counts()`.
+
 pub fn lock_frame(
     created: &CreatedDevice,
     loop_state: &mut RenderLoop,
@@ -2859,44 +2483,15 @@ pub fn lock_frame(
         loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
     };
-    // Real UseVSync ini key support: resolve_present_mode's own doc
-    // has the full reasoning.
-    let present_mode = resolve_present_mode(
-        present_mode,
-        &surface.get_capabilities(&created.adapter).present_modes,
-    );
-    if loop_state.configured_size != Some((width, height))
-        || loop_state.configured_present_mode != Some(present_mode)
-    {
-        let Some(mut config) = surface.get_default_config(&created.adapter, width, height) else {
-            loop_state.counts.other_failure += 1;
-            return FrameOutcome::NoDefaultConfig;
+    if let Err(error) = configure_surface(created, loop_state, width, height, present_mode) {
+        loop_state.counts.other_failure += 1;
+        return match error {
+            SurfaceConfigureError::NoSurface => FrameOutcome::NoSurface,
+            SurfaceConfigureError::NoDefaultConfig => FrameOutcome::NoDefaultConfig,
         };
-        config.present_mode = present_mode;
-        let formats = surface.get_capabilities(&created.adapter).formats;
-        if let Some(format) = surface_color_format(&formats, loop_state.srgb_framebuffer) {
-            config.format = format;
-        }
-        // Capture reads the presented surface texture back, which needs
-        // COPY_SRC on the swapchain textures -- requested only when
-        // capture is actually on and the surface really supports it
-        // (not every backend does), so the normal path is unchanged.
-        loop_state.ensure_capture_initialized();
-        if loop_state
-            .capture
-            .as_ref()
-            .is_some_and(capture::FrameCapture::is_enabled)
-            && surface
-                .get_capabilities(&created.adapter)
-                .usages
-                .contains(wgpu::TextureUsages::COPY_SRC)
-        {
-            config.usage |= wgpu::TextureUsages::COPY_SRC;
-        }
-        surface.configure(&created.device, &config);
-        loop_state.configured_size = Some((width, height));
-        loop_state.configured_present_mode = Some(present_mode);
     }
+    #[cfg(target_os = "macos")]
+    macos::flush_pending_layer_changes();
     let (texture, is_suboptimal) = match surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(texture) => (texture, false),
         wgpu::CurrentSurfaceTexture::Suboptimal(texture) => (texture, true),
@@ -2906,17 +2501,13 @@ pub fn lock_frame(
         }
         wgpu::CurrentSurfaceTexture::Occluded => {
             loop_state.counts.occluded += 1;
-            // Same format the configure step above picks, so a captured
-            // occluded frame matches a captured visible one.
-            if loop_state
-                .capture
-                .as_ref()
-                .is_some_and(capture::FrameCapture::is_enabled)
-                && let Some(format) = surface_color_format(
-                    &surface.get_capabilities(&created.adapter).formats,
-                    loop_state.srgb_framebuffer,
-                )
-            {
+            // ReadPixels is also used by ordinary cutscene screenshot
+            // commands. Keep its completed scene independent of window
+            // visibility and of optional capture/report configuration.
+            if let Some(format) = surface_color_format(
+                &surface.get_capabilities(&created.adapter).formats,
+                loop_state.srgb_framebuffer,
+            ) {
                 begin_capture_only_frame(created, loop_state, width, height, format, clear_color);
             }
             return FrameOutcome::Occluded;
@@ -2971,6 +2562,34 @@ pub fn lock_frame(
     // over-counted relative to what Build/run_wgpu_smoke.py's
     // presented>0 check is meant to mean).
     FrameOutcome::Presented
+}
+/// Engine-owner adapter that keeps WGPU SDK types behind this crate's feature boundary.
+pub fn lock_frame_rgba(
+    created: &CreatedDevice,
+    loop_state: &mut RenderLoop,
+    width: u32,
+    height: u32,
+    clear_color: [f32; 4],
+    vsync: u8,
+) -> FrameOutcome {
+    let present_mode = match vsync {
+        0 => wgpu::PresentMode::Immediate,
+        2 => wgpu::PresentMode::FifoRelaxed,
+        _ => wgpu::PresentMode::Fifo,
+    };
+    lock_frame(
+        created,
+        loop_state,
+        width,
+        height,
+        wgpu::Color {
+            r: f64::from(clear_color[0]),
+            g: f64::from(clear_color[1]),
+            b: f64::from(clear_color[2]),
+            a: f64::from(clear_color[3]),
+        },
+        present_mode,
+    )
 }
 
 /// Real `UseVSync` ini key support (`lock_frame`'s own real caller).
@@ -3743,12 +3362,13 @@ fn dispatch_batches(
 /// call chose to do with the frame it got, so the next `lock_frame`
 /// reconfigures either way.
 ///
-/// Returns `false` if `loop_state.in_progress` is `None` -- `unlock_
-/// frame` called without a matching successful `lock_frame` first is a
-/// caller bug, not a real runtime condition to report via
-/// `FrameOutcome`.
+/// Returns `false` if no render frame was acquired (for example, an occluded
+/// surface). Pending queue writes still need a submission: uploads and scene
+/// uniforms are produced even on skipped frames, and otherwise their staging
+/// resources accumulate until a later successful render submission.
 pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, present: bool) -> bool {
     let Some(mut frame) = loop_state.in_progress.take() else {
+        created.queue.submit([]);
         return false;
     };
     // Owned locally (not borrowed from loop_state) specifically so
@@ -3881,6 +3501,52 @@ pub mod macos {
     use std::ffi::c_void;
     use std::ptr::NonNull;
 
+    /// Commit layer-tree changes before Metal asks the window server for a drawable.
+    ///
+    /// SDL drives AppKit with a nonblocking event pump rather than NSApplication's
+    /// run loop. Its autorelease pools do not commit Core Animation transactions:
+    /// the SDL Metal view can still be unattached in the compositor when wgpu
+    /// checks the hosting window's occlusion state. Flush after creation and before
+    /// acquisition, including resize changes, without changing genuine occlusion.
+    /// https://developer.apple.com/documentation/quartzcore/catransaction/flush()
+    pub fn flush_pending_layer_changes() {
+        use std::ffi::c_char;
+
+        #[link(name = "objc")]
+        unsafe extern "C" {
+            fn objc_getClass(name: *const c_char) -> *mut c_void;
+            fn sel_registerName(name: *const c_char) -> *mut c_void;
+            fn objc_msgSend();
+            fn objc_autoreleasePoolPush() -> *mut c_void;
+            fn objc_autoreleasePoolPop(pool: *mut c_void);
+        }
+        #[link(name = "QuartzCore", kind = "framework")]
+        unsafe extern "C" {}
+
+        thread_local! {
+            static FLUSH: (*mut c_void, *mut c_void) = {
+                // SAFETY: QuartzCore is linked; both NUL-terminated runtime names
+                // identify process-lifetime objects, cached on the transaction's thread.
+                unsafe {
+                    (objc_getClass(c"CATransaction".as_ptr()), sel_registerName(c"flush".as_ptr()))
+                }
+            };
+        }
+        FLUSH.with(|&(class, selector)| {
+            // SAFETY: CATransaction's class method flush takes no arguments and
+            // returns void. Its implicit transactions belong to the current thread;
+            // the application creates/acquires its SDL surface on the main thread.
+            // The pool bounds any autoreleased objects made during the commit.
+            unsafe {
+                let pool = objc_autoreleasePoolPush();
+                let flush: unsafe extern "C" fn(*mut c_void, *mut c_void) =
+                    std::mem::transmute(objc_msgSend as *const ());
+                flush(class, selector);
+                objc_autoreleasePoolPop(pool);
+            }
+        });
+    }
+
     /// Replaces the window-surface half of `WgpuDrv`'s future `Init`
     /// (plan's "Window surface" bullet). `ns_view` is the pointer
     /// `SDL_Metal_CreateView` returns (itself "can be cast directly to
@@ -3907,12 +3573,16 @@ pub mod macos {
         let raw_display_handle = raw_window_handle::RawDisplayHandle::AppKit(
             raw_window_handle::AppKitDisplayHandle::new(),
         );
-        unsafe {
+        // SAFETY: The caller guarantees main-thread access and a live NSView
+        // that outlives the returned surface; the raw handles describe that view.
+        let surface = unsafe {
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
                 raw_display_handle: Some(raw_display_handle),
                 raw_window_handle,
             })
-        }
+        }?;
+        flush_pending_layer_changes();
+        Ok(surface)
     }
 }
 
@@ -4907,6 +4577,12 @@ mod tests {
             fx2: 50.0,
             fy2: 50.0,
         });
+
+        loop_state.clear_texture_cache(&created);
+        assert!(
+            !loop_state.is_texture_cached(99),
+            "renderer flush must evict the resident texture after draining queued draws"
+        );
 
         let did_unlock = unlock_frame(&created, &mut loop_state, false);
         assert!(
@@ -8174,6 +7850,288 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
                 got.abs_diff(want) <= 2,
                 "channel {channel}: expected {want} +-2, got {got}, full row {row:?}"
             );
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn lumos_complex_surface_blend_and_depth_readback() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        loop_state.upload_texture(
+            &created, 401, 1, 1, &[255, 0, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
+        loop_state.upload_texture(
+            &created, 402, 1, 1, &[0, 255, 0, 255],
+            crate::texture::TextureOptions::default(),
+        );
+
+        let vertices = |z| [
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, 1.0, z] },
+        ];
+        let request = |cache_id, poly_flags, c_alpha| ComplexSurfaceDrawRequest {
+            diffuse: ComplexTextureLayer {
+                cache_id,
+                u_scale: 1.0,
+                v_scale: 1.0,
+                pan_x: 0.0,
+                pan_y: 0.0,
+            },
+            light_map: None,
+            fog_map: None,
+            poly_flags,
+            texture_fields: Some((1.0, 0.0, 1.0)),
+            c_alpha,
+            x_axis: [1.0, 0.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0, 0.0],
+        };
+
+        // A blue background makes the inverse-alpha blend visible. The later
+        // green surface probes depth independently of color. An equal-depth
+        // control demonstrates order dependence under LessEqual; it does not
+        // establish that the affected map has coplanar geometry.
+        for (flags, alpha, probe_z, expected) in [
+            (0x8080_0048, 0, Some(0.9), [255u8, 0, 0, 0]),
+            (0x8080_0048, 0, Some(0.5), [0, 255, 0, 255]),
+            (0x8080_0048, 128, Some(0.9), [127, 0, 128, 192]),
+            (0x0080_0048, 128, None, [127, 0, 128, 192]),
+            (0x0080_0048, 128, Some(0.9), [0, 255, 0, 255]),
+        ] {
+            begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLUE);
+            loop_state.queue_complex_surface(request(401, flags, alpha), &vertices(0.5));
+            if let Some(z) = probe_z {
+                loop_state.queue_complex_surface(request(402, 0, 255), &vertices(z));
+            }
+            assert!(unlock_frame(&created, &mut loop_state, false));
+            let row = read_64px_row(&created, &target);
+            let pixel = &row[32 * 4..32 * 4 + 4];
+            for (channel, (&got, want)) in pixel.iter().zip(expected).enumerate() {
+                assert!(got.abs_diff(want) <= 2,
+                    "flags={flags:#010x} alpha={alpha} probe_z={probe_z:?} channel={channel}: expected {want} +-2, got {got}; pixel={pixel:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn lumos_appear_untriggered_complex_surface_readback() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        for (id, texel) in [
+            (411, [255, 0, 0, 255]),
+            (412, [255, 0, 0, 128]),
+            (413, [255, 0, 0, 64]),
+            (414, [0, 0, 0, 32]),
+            (415, [0, 255, 0, 255]),
+        ] {
+            loop_state.upload_texture(
+                &created, id, 1, 1, &texel,
+                crate::texture::TextureOptions::default(),
+            );
+        }
+        let vertices = |z| [
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, 1.0, z] },
+        ];
+        let layer = |cache_id| ComplexTextureLayer {
+            cache_id, u_scale: 1.0, v_scale: 1.0, pan_x: 0.0, pan_y: 0.0,
+        };
+        let request = |cache_id, flags, fog_map| ComplexSurfaceDrawRequest {
+            diffuse: layer(cache_id),
+            light_map: None,
+            fog_map,
+            poly_flags: flags,
+            texture_fields: Some((1.0, 0.0, 1.0)),
+            c_alpha: 255,
+            x_axis: [1.0, 0.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0, 0.0],
+        };
+        // LumosAppear | LumosAffected | NotSolid, optionally Occlude.
+        // cAlpha=255 does not replace sampled alpha: 128-alpha red leaks
+        // over blue. A fog-map alpha of 32 is doubled and added to the
+        // 64-alpha diffuse, giving approximately the same effective alpha.
+        for (diffuse, occlude, fog, probe, expected) in [
+            (411, false, false, false, [0u8, 0, 255, 255]),
+            (412, false, false, false, [127, 0, 128, 192]),
+            (413, false, true, false, [127, 0, 128, 192]),
+            (411, true, false, true, [0, 0, 255, 255]),
+            (411, false, false, true, [0, 255, 0, 255]),
+        ] {
+            begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLUE);
+            let flags = 0x00a0_0048 | if occlude { 0x8000_0000 } else { 0 };
+            loop_state.queue_complex_surface(
+                request(diffuse, flags, if fog { Some(layer(414)) } else { None }),
+                &vertices(0.5),
+            );
+            if probe {
+                loop_state.queue_complex_surface(request(415, 0, None), &vertices(0.9));
+            }
+            assert!(unlock_frame(&created, &mut loop_state, false));
+            let row = read_64px_row(&created, &target);
+            let pixel = &row[32 * 4..32 * 4 + 4];
+            for (channel, (&got, want)) in pixel.iter().zip(expected).enumerate() {
+                assert!(got.abs_diff(want) <= 2,
+                    "diffuse={diffuse} occlude={occlude} fog={fog} probe={probe} channel={channel}: expected {want} +-2, got {got}; pixel={pixel:?}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn lumos_disappear_pretrigger_opaque_candidate_readback() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        for (id, texel) in [
+            (421, [128, 0, 0, 255]),
+            (422, [64, 64, 64, 255]),
+            (423, [0, 16, 0, 0]),
+            (424, [0, 0, 255, 255]),
+        ] {
+            loop_state.upload_texture(
+                &created, id, 1, 1, &texel,
+                crate::texture::TextureOptions::default(),
+            );
+        }
+        let vertices = |z| [
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, 1.0, z] },
+        ];
+        let layer = |cache_id| ComplexTextureLayer {
+            cache_id, u_scale: 1.0, v_scale: 1.0, pan_x: 0.0, pan_y: 0.0,
+        };
+        let request = |cache_id, flags, alpha, light_map, fog_map| ComplexSurfaceDrawRequest {
+            diffuse: layer(cache_id),
+            light_map,
+            fog_map,
+            poly_flags: flags,
+            texture_fields: Some((1.0, 0.0, 1.0)),
+            c_alpha: alpha,
+            x_axis: [1.0, 0.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0, 0.0],
+        };
+        // Existing untriggered disappearing draw: Lumos+Occlude, alpha 0.
+        // Candidate: clear both Lumos marker bits, alpha 255, keep Occlude.
+        // Probe both with and without a farther surface to check depth.
+        for candidate in [false, true] {
+            for light in [false, true] {
+                for fog in [false, true] {
+                    for probe in [false, true] {
+                        begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+                        let segment = loop_state.frame_uniforms_segment_count() - 1;
+                        created.queue.write_buffer(
+                            loop_state.frame_uniforms_segment(segment).unwrap(),
+                            std::mem::offset_of!(FrameUniforms, light_map_intensity) as u64,
+                            &1.0f32.to_le_bytes(),
+                        );
+                        let flags = if candidate { 0x8000_0008 } else { 0x8080_0048 };
+                        loop_state.queue_complex_surface(
+                            request(421, flags, if candidate { 255 } else { 0 },
+                                if light { Some(layer(422)) } else { None },
+                                if fog { Some(layer(423)) } else { None }),
+                            &vertices(0.5),
+                        );
+                        if probe {
+                            loop_state.queue_complex_surface(
+                                request(424, 0, 255, None, None), &vertices(0.9),
+                            );
+                        }
+                        assert!(unlock_frame(&created, &mut loop_state, false));
+                        let row = read_64px_row(&created, &target);
+                        let pixel = &row[32 * 4..32 * 4 + 4];
+                        let expected = [
+                            if candidate && light { 64u8 } else { 128 },
+                            if fog { 32 } else { 0 },
+                            0,
+                            if candidate { 255 } else { 0 },
+                        ];
+                        for (channel, (&got, want)) in pixel.iter().zip(expected).enumerate() {
+                            assert!(got.abs_diff(want) <= 2,
+                                "candidate={candidate} light={light} fog={fog} probe={probe} channel={channel}: expected {want} +-2, got {got}; pixel={pixel:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn lumos_overlay_is_not_transparent_at_zero_alpha() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let mut loop_state = RenderLoop::new();
+        let target = new_64px_target(&created);
+        for (id, texel) in [
+            (431, [0, 0, 255, 255]),
+            (432, [255, 0, 0, 128]),
+            (433, [0, 16, 0, 32]),
+        ] {
+            loop_state.upload_texture(
+                &created, id, 1, 1, &texel,
+                crate::texture::TextureOptions::default(),
+            );
+        }
+        let vertices = |z| [
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, -1.0, z] },
+            draw::ComplexVertexInput { coords: [1.0, 1.0, z] },
+            draw::ComplexVertexInput { coords: [-1.0, 1.0, z] },
+        ];
+        let layer = |cache_id| ComplexTextureLayer {
+            cache_id, u_scale: 1.0, v_scale: 1.0, pan_x: 0.0, pan_y: 0.0,
+        };
+        let request = |cache_id, flags, alpha, fog_map| ComplexSurfaceDrawRequest {
+            diffuse: layer(cache_id),
+            light_map: None,
+            fog_map,
+            poly_flags: flags,
+            texture_fields: Some((1.0, 0.0, 1.0)),
+            c_alpha: alpha,
+            x_axis: [1.0, 0.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0, 0.0],
+        };
+        // Two distinct, coincident draws model a possible overlay, not a
+        // claim that any particular map contains this geometry. The base is
+        // blue; the overlay has red RGB, half texture alpha, and green fog.
+        // Inverse-alpha Lumos blend makes cAlpha=0 select overlay RGB fully.
+        for (flags, alpha, z, expected) in [
+            (0x8080_0048, 0, 0.5, [255u8, 32, 0, 0]),
+            (0x8000_0008, 255, 0.5, [255, 32, 0, 192]),
+            (0x0080_0048, 128, 0.5, [159, 20, 96, 156]),
+            (0x8080_0048, 0, 0.9, [0, 0, 255, 255]),
+        ] {
+            begin_identity_frame(&created, &mut loop_state, &target, wgpu::Color::BLACK);
+            loop_state.queue_complex_surface(request(431, 0, 255, None), &vertices(0.5));
+            loop_state.queue_complex_surface(request(432, flags, alpha, Some(layer(433))), &vertices(z));
+            assert!(unlock_frame(&created, &mut loop_state, false));
+            let row = read_64px_row(&created, &target);
+            let pixel = &row[32 * 4..32 * 4 + 4];
+            for (channel, (&got, want)) in pixel.iter().zip(expected).enumerate() {
+                assert!(got.abs_diff(want) <= 2,
+                    "flags={flags:#010x} alpha={alpha} z={z} channel={channel}: expected {want} +-2, got {got}; pixel={pixel:?}");
+            }
         }
     }
 

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "profile": "data-prototype",
+  "executable": "out/macos-arm64/hp2_game_rust",
+  "executable_sha256": "5c1d4ea01c59bd49fba20599709c4e4d8485a18f85ea15f1b9a02f8351fc5bcf",
+  "checks": {
+    "oracle_archive": {
+      "status": "pass",
+      "command": ["tar", "-czf", "native-oracle-final-candidate.tar.gz", "-C", "out/macos-arm64", "hp2_game"],
+      "observations": [
+        "archived last first-party C++ engine binary (out/macos-arm64/hp2_game, Nov 5) as the native oracle before cutover",
+        "oracle archive is 9418924 bytes"
+      ],
+      "artifacts": [
+        {"path": "native-oracle-final-candidate.tar.gz", "sha256": "39b0dd337a9727e9460715dd6e399fa9a101ded19cfca8570d63cf92904b78e4"}
+      ]
+    },
+    "installed_launch": {
+      "status": "pass",
+      "command": ["dist/macos-arm64/HarryPotter2.app/Contents/MacOS/HarryPotter2", "Maps/AOLDemo.unr", "-datadir=HarryPotter2/Unreal", "-NOFRONTEND", "-window", "-testticks=30", "--fixed-dt=0.02", "-log"],
+      "observations": [
+        "Entering main loop.",
+        "WgpuDrv: frames presented=30 occluded=0 outdated=0 other_failure=0",
+        "WgpuDrv: selected adapter Apple M1 Max"
+      ],
+      "artifacts": [
+        {"path": "out/macos-arm64/Testing/HP2/canonical_game_boot_entry/Artifacts/smoke-maps.json", "sha256": "e1298926511e23714e63ed9c70720aecdb9d512f378a5fecced500a58e85cf9d"}
+      ]
+    },
+    "installed_persistence": {
+      "status": "pass",
+      "command": ["ctest", "--preset", "macos-arm64", "-R", "^canonical_save_reload_smoke$"],
+      "observations": [
+        "SaveGame 9 then LoadGame 9 across separate processes on the Rust binary",
+        "canonical_save_reload_smoke passed"
+      ],
+      "artifacts": [
+        {"path": "out/macos-arm64/Testing/HP2/canonical_save_reload_smoke/Artifacts/report.json", "sha256": "72fe11dd90d81ed77f0381ef0599353051438c73e003886ae3c185418cfe0e81"}
+      ]
+    }
+  }
+}

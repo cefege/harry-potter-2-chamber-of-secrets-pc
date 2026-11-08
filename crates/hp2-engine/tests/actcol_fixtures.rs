@@ -19,6 +19,8 @@
 //!
 //! Every fixture runs in one test, serially: `CollisionHash` tables are built once
 //! per process from the first `appRand` sequence, exactly as the C++ process does.
+#[path = "actor_services/mock.rs"]
+mod actor_services_mock;
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char, c_void};
@@ -30,6 +32,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use hp2_abi::FVector;
 use hp2_abi::engine::generated::{AActor, FBox, FCheckResult, FRotator};
 use hp2_engine::actcol::{CollisionHash, Hp2ActColServices};
+use hp2_engine::actor::CT_SHAPE;
 
 const INDEX_NONE: i32 = -1;
 
@@ -88,28 +91,38 @@ fn vec_of(toks: &[&str]) -> FVector {
 
 // ---- Service callbacks (mirror of the harness stubs) ----------------------------
 
-unsafe extern "C" fn t_app_rand() -> i32 {
+unsafe extern "C" fn t_app_rand(out: *mut i32) -> i32 {
     let s = RAND_STATE
         .load(Ordering::Relaxed)
         .wrapping_mul(1_103_515_245)
         .wrapping_add(12345);
     RAND_STATE.store(s, Ordering::Relaxed);
-    ((s >> 16) & 0x7fff) as i32
+    unsafe {
+        *out = ((s >> 16) & 0x7fff) as i32;
+    }
+    0
 }
 
-unsafe extern "C" fn t_collision_box(actor: *mut c_void, out: *mut c_void) {
+unsafe extern "C" fn t_collision_box(actor: *mut c_void, out: *mut c_void) -> i32 {
     let bbox = side(actor as usize).bbox;
     // SAFETY: `out` is a valid `FBox*` supplied by `actcol.rs`.
     unsafe { *(out as *mut FBox) = bbox };
+    0
 }
 
-unsafe extern "C" fn t_cylinder_extent(actor: *const c_void, out: *mut c_void) {
+/// `Hp2ActorServices::mesh_collision_extent`: GetCylinderExtent's shape branch,
+/// replaying the harness's per-actor `cyl` value recorded by `ACTOR`/`SET`.
+unsafe extern "C" fn t_mesh_collision_extent(_mesh: *mut c_void, actor: *mut c_void, out: *mut c_void) -> i32 {
     let cyl = side(actor as usize).cyl;
-    // SAFETY: `out` is a valid `FVector*` supplied by `actcol.rs`.
+    // SAFETY: `out` is a valid `FVector*` supplied by `actor::get_cylinder_extent`.
     unsafe { *(out as *mut FVector) = cyl };
+    0
 }
 
-unsafe extern "C" fn t_is_moving_brush(_actor: *const c_void) -> i32 {
+unsafe extern "C" fn t_is_moving_brush(_actor: *const c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = 0;
+    }
     0
 }
 
@@ -130,11 +143,20 @@ unsafe fn write_hit(res: *mut FCheckResult, owner: *mut c_void, location: FVecto
     }
 }
 
+unsafe extern "C" fn t_primitive(actor: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = actor;
+    }
+    0
+}
+
 unsafe extern "C" fn t_point_check(
+    _primitive: *mut c_void,
     owner: *mut c_void,
     res: *mut c_void,
     location: *const c_void,
     extent: *const c_void,
+    out: *mut i32,
 ) -> i32 {
     // SAFETY: `location`/`extent` are valid `FVector*` for the call.
     let (loc, ext) = unsafe { (*(location as *const FVector), *(extent as *const FVector)) };
@@ -142,8 +164,11 @@ unsafe extern "C" fn t_point_check(
     let (l, e) = (axes(loc), axes(ext));
     let (lo, hi) = (axes(bbox.min), axes(bbox.max));
     let hit = (0..3).all(|i| l[i] - e[i] <= hi[i] && l[i] + e[i] >= lo[i]);
+    unsafe {
+        *out = i32::from(!hit);
+    }
     if !hit {
-        return 1;
+        return 0;
     }
     // SAFETY: `res` is a valid `FCheckResult*` supplied by `actcol.rs`.
     unsafe { write_hit(res as *mut FCheckResult, owner, loc, 0.0) };
@@ -151,12 +176,14 @@ unsafe extern "C" fn t_point_check(
 }
 
 unsafe extern "C" fn t_line_check(
+    _primitive: *mut c_void,
     owner: *mut c_void,
     res: *mut c_void,
     end: *const c_void,
     start: *const c_void,
     size: *const c_void,
     _flags: u32,
+    out: *mut i32,
 ) -> i32 {
     // SAFETY: `end`/`start`/`size` are valid `FVector*` for the call.
     let (e_v, s_v, z_v) = unsafe {
@@ -174,33 +201,42 @@ unsafe extern "C" fn t_line_check(
         let hi = (if s[i] > e[i] { s[i] } else { e[i] }) + z[i];
         lo <= hi_b[i] && hi >= lo_b[i]
     });
+    unsafe {
+        *out = i32::from(!hit);
+    }
     if !hit {
-        return 1;
+        return 0;
     }
     // SAFETY: `res` is a valid `FCheckResult*` supplied by `actcol.rs`.
     unsafe { write_hit(res as *mut FCheckResult, owner, s_v, 0.5) };
     0
 }
 
-unsafe extern "C" fn t_alloc(_mem: *mut c_void) -> *mut c_void {
+unsafe extern "C" fn t_alloc(_mem: *mut c_void, out: *mut *mut c_void) -> i32 {
     // Leaked on purpose: the replay is short-lived and results must outlive the query.
-    Box::into_raw(Box::new(zeroed::<FCheckResult>())) as *mut c_void
+    unsafe {
+        *out = Box::into_raw(Box::new(zeroed::<FCheckResult>())) as *mut c_void;
+    }
+    0
 }
 
-unsafe extern "C" fn t_debugf(_actor: *const c_void) {}
+unsafe extern "C" fn t_debugf(_actor: *const c_void) -> i32 {
+    0
+}
 
-unsafe extern "C" fn t_check_failed(expr: *const c_char, file: *const c_char, line: i32) {
+unsafe extern "C" fn t_check_failed(expr: *const c_char, file: *const c_char, line: i32) -> i32 {
     // SAFETY: `actcol.rs` passes NUL-terminated static strings.
     let (expr, file) = unsafe { (CStr::from_ptr(expr), CStr::from_ptr(file)) };
-    panic!("check failed: {} {:?}:{line}", expr.to_string_lossy(), file);
+    eprintln!("check failed: {} {:?}:{line}", expr.to_string_lossy(), file);
+    1
 }
 
 fn services() -> Hp2ActColServices {
     Hp2ActColServices {
         app_rand: t_app_rand,
         actor_collision_bounding_box: t_collision_box,
-        actor_cylinder_extent: t_cylinder_extent,
         actor_is_moving_brush: t_is_moving_brush,
+        actor_primitive: t_primitive,
         primitive_point_check: t_point_check,
         primitive_line_check: t_line_check,
         alloc_check_result: t_alloc,
@@ -231,7 +267,7 @@ struct Scenario {
 impl Scenario {
     fn new() -> Self {
         let svc = services();
-        let hash = CollisionHash::new(&svc);
+        let hash = CollisionHash::new(&svc).unwrap();
         Self {
             svc,
             hash,
@@ -306,6 +342,11 @@ impl Scenario {
                 unsafe {
                     (*p).set_b_collide_actors(collide);
                     (*p).set_b_delete_me(delete);
+                    // Route `GetCylinderExtent` through `mesh_collision_extent` so it
+                    // replays the harness's recorded `cyl`, matching the original
+                    // `GetCylinderExtent()` mock (never derived from collision fields).
+                    (*p).collide_type = CT_SHAPE;
+                    (*p).mesh = p.cast();
                 }
                 SIDES.lock().unwrap().insert(
                     p as usize,
@@ -336,20 +377,31 @@ impl Scenario {
             "ADD" => {
                 let p = self.find(args[0].parse().unwrap());
                 // SAFETY: `p` is a live actor.
-                unsafe { self.hash.add_actor(&self.svc, p) };
+                unsafe { CollisionHash::add_actor(&raw mut self.hash, &self.svc, p).unwrap() };
             }
             "REM" => {
                 let p = self.find(args[0].parse().unwrap());
                 let thorough = args[1].parse::<i32>().unwrap() != 0;
                 // SAFETY: `p` is a live actor.
-                unsafe { self.hash.remove_actor(&self.svc, p, thorough) };
+                unsafe {
+                    CollisionHash::remove_actor(&raw mut self.hash, &self.svc, p, thorough).unwrap()
+                };
+                if thorough && !unsafe { (*p).b_delete_me() } {
+                    assert!(
+                        !unsafe { CollisionHash::actor_is_referenced(&raw const self.hash, p) },
+                        "thorough removal must leave no reachable actor links, including when free-list slots retain actor identities",
+                    );
+                }
             }
             "TICK" => self.hash.tick(),
             "PT" => {
                 let loc = vec_of(&args[0..3]);
                 let ext = vec_of(&args[3..6]);
                 // SAFETY: the hash only touches actors registered by `ACTOR`.
-                let head = unsafe { self.hash.actor_point_check(&self.svc, loc, ext) };
+                let head = unsafe {
+                    CollisionHash::actor_point_check(&raw mut self.hash, &self.svc, loc, ext)
+                        .unwrap()
+                };
                 self.begin_query("PT");
                 self.print_results(head, true);
             }
@@ -357,7 +409,10 @@ impl Scenario {
                 let loc = vec_of(&args[0..3]);
                 let radius = hexf(args[3]);
                 // SAFETY: as above.
-                let head = unsafe { self.hash.actor_radius_check(&self.svc, loc, radius) };
+                let head = unsafe {
+                    CollisionHash::actor_radius_check(&raw mut self.hash, &self.svc, loc, radius)
+                        .unwrap()
+                };
                 self.begin_query("RAD");
                 self.print_results(head, false);
             }
@@ -370,7 +425,16 @@ impl Scenario {
                     roll: args[6].parse().unwrap(),
                 };
                 // SAFETY: `p` is a live actor.
-                let head = unsafe { self.hash.actor_encroachment_check(&self.svc, p, loc, rot) };
+                let head = unsafe {
+                    CollisionHash::actor_encroachment_check(
+                        &raw mut self.hash,
+                        &self.svc,
+                        p,
+                        loc,
+                        rot,
+                    )
+                    .unwrap()
+                };
                 self.begin_query("ENC");
                 self.print_results(head, true);
             }
@@ -381,7 +445,8 @@ impl Scenario {
                 let flags: u8 = args[9].parse().unwrap();
                 // SAFETY: as above; a null `mem` allocates results from `GMem`.
                 let head = unsafe {
-                    self.hash.actor_line_check(
+                    CollisionHash::actor_line_check(
+                        &raw mut self.hash,
                         &self.svc,
                         ptr::null_mut(),
                         e,
@@ -389,6 +454,7 @@ impl Scenario {
                         z,
                         u32::from(flags),
                     )
+                    .unwrap()
                 };
                 self.begin_query("LINE");
                 self.print_results(head, true);
@@ -435,6 +501,7 @@ fn replay(name: &str, text: &str, want: Counts) {
 
 #[test]
 fn actcol_fixtures_replay_bit_exact() {
+    actor_services_mock::publish_with_mesh_collision_extent(t_mesh_collision_extent);
     // Run serially in one test: the shared hash tables and the LCG must follow
     // the same first-hash order as the single-hash C++ oracle process.
     replay(

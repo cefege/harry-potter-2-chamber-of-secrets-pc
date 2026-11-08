@@ -1,0 +1,58 @@
+// Typed failure leaves: never transmute between incompatible function signatures.
+unsafe extern "C" fn unused_demo_app_seconds(_a0: *mut i64) -> i32 { panic!("unexpected leaf: demo_app_seconds"); }
+unsafe extern "C" fn unused_demo_ar_at_end(_a0: *mut c_void, _a1: *mut i32) -> i32 { panic!("unexpected leaf: demo_ar_at_end"); }
+unsafe extern "C" fn unused_demo_ar_tell(_a0: *mut c_void, _a1: *mut i32) -> i32 { panic!("unexpected leaf: demo_ar_tell"); }
+unsafe extern "C" fn unused_demo_ar_seek(_a0: *mut c_void, _a1: i32) -> i32 { panic!("unexpected leaf: demo_ar_seek"); }
+unsafe extern "C" fn unused_demo_ar_write_i32(_a0: *mut c_void, _a1: i32) -> i32 { panic!("unexpected leaf: demo_ar_write_i32"); }
+unsafe extern "C" fn unused_demo_drv_write_time(_a0: *mut c_void, _a1: *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_write_time"); }
+unsafe extern "C" fn unused_demo_ar_read_ftime(_a0: *mut c_void, _a1: *mut i64) -> i32 { panic!("unexpected leaf: demo_ar_read_ftime"); }
+unsafe extern "C" fn unused_demo_url_has_option(_a0: *const c_void, _a1: *const c_void, _a2: *mut i32) -> i32 { panic!("unexpected leaf: demo_url_has_option"); }
+unsafe extern "C" fn unused_demo_parse_command(_a0: *mut c_void, _a1: *const c_void, _a2: *mut i32) -> i32 { panic!("unexpected leaf: demo_parse_command"); }
+unsafe extern "C" fn unused_demo_out_logf_text(_a0: *mut c_void, _a1: *const c_void) -> i32 { panic!("unexpected leaf: demo_out_logf_text"); }
+unsafe extern "C" fn unused_demo_static_load_actor_class(_a0: *const c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_static_load_actor_class"); }
+unsafe extern "C" fn unused_demo_static_load_player_pawn_class(_a0: *const c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_static_load_player_pawn_class"); }
+unsafe extern "C" fn unused_demo_drv_super_init_connect(_a0: *mut c_void, _a1: *mut c_void, _a2: *const c_void, _a3: *mut c_void, _a4: *mut i32) -> i32 { panic!("unexpected leaf: demo_drv_super_init_connect"); }
+unsafe extern "C" fn unused_demo_drv_super_init_listen(_a0: *mut c_void, _a1: *mut c_void, _a2: *const c_void, _a3: *mut c_void, _a4: *mut i32) -> i32 { panic!("unexpected leaf: demo_drv_super_init_listen"); }
+unsafe extern "C" fn unused_demo_drv_set_demo_filename(_a0: *mut c_void, _a1: *const c_void) -> i32 { panic!("unexpected leaf: demo_drv_set_demo_filename"); }
+unsafe extern "C" fn unused_demo_drv_set_time_zero(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_set_time_zero"); }
+unsafe extern "C" fn unused_demo_drv_new_connection(_a0: *mut c_void, _a1: *const c_void, _a2: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_new_connection"); }
+unsafe extern "C" fn unused_demo_drv_set_loop_url(_a0: *mut c_void, _a1: *const c_void) -> i32 { panic!("unexpected leaf: demo_drv_set_loop_url"); }
+unsafe extern "C" fn unused_demo_drv_create_reader(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_create_reader"); }
+unsafe extern "C" fn unused_demo_drv_create_writer(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_create_writer"); }
+unsafe extern "C" fn unused_demo_drv_demo_filename_chars(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_demo_filename_chars"); }
+unsafe extern "C" fn unused_demo_drv_spectator_class_chars(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_spectator_class_chars"); }
+unsafe extern "C" fn unused_demo_drv_set_spectator_class(_a0: *mut c_void, _a1: *const c_void) -> i32 { panic!("unexpected leaf: demo_drv_set_spectator_class"); }
+unsafe extern "C" fn unused_demo_drv_loop_url_to_fstring(_a0: *mut c_void, _a1: *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_loop_url_to_fstring"); }
+unsafe extern "C" fn unused_demo_drv_listen_add_client(_a0: *mut c_void, _a1: *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_listen_add_client"); }
+unsafe extern "C" fn unused_demo_drv_super_tick_dispatch(_a0: *mut c_void, _a1: f32) -> i32 { panic!("unexpected leaf: demo_drv_super_tick_dispatch"); }
+unsafe extern "C" fn unused_demo_drv_time_raw(_a0: *mut c_void, _a1: *mut i64) -> i32 { panic!("unexpected leaf: demo_drv_time_raw"); }
+unsafe extern "C" fn unused_demo_drv_notify_get_level(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_notify_get_level"); }
+unsafe extern "C" fn unused_demo_drv_delete_self(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_delete_self"); }
+unsafe extern "C" fn unused_demo_drv_master_copy_linkers(_a0: *mut c_void, _a1: *mut c_void) -> i32 { panic!("unexpected leaf: demo_drv_master_copy_linkers"); }
+unsafe extern "C" fn unused_demo_drv_add_string_property(_a0: *mut c_void, _a1: *const c_void, _a2: *const c_void) -> i32 { panic!("unexpected leaf: demo_drv_add_string_property"); }
+unsafe extern "C" fn unused_demo_level_engine(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_level_engine"); }
+unsafe extern "C" fn unused_demo_level_netmode(_a0: *mut c_void, _a1: *mut i32) -> i32 { panic!("unexpected leaf: demo_level_netmode"); }
+unsafe extern "C" fn unused_demo_level_net_server_package_map(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_level_net_server_package_map"); }
+unsafe extern "C" fn unused_demo_level_welcome_player(_a0: *mut c_void, _a1: *mut c_void, _a2: *const c_void) -> i32 { panic!("unexpected leaf: demo_level_welcome_player"); }
+unsafe extern "C" fn unused_demo_level_spawn_actor(_a0: *mut c_void, _a1: *mut c_void, _a2: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_level_spawn_actor"); }
+unsafe extern "C" fn unused_demo_level_clear_demo_rec_driver(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_level_clear_demo_rec_driver"); }
+unsafe extern "C" fn unused_demo_level_exec(_a0: *mut c_void, _a1: *const c_void) -> i32 { panic!("unexpected leaf: demo_level_exec"); }
+unsafe extern "C" fn unused_demo_engine_build_server_master_map(_a0: *mut c_void, _a1: *mut c_void, _a2: *mut c_void) -> i32 { panic!("unexpected leaf: demo_engine_build_server_master_map"); }
+unsafe extern "C" fn unused_demo_conn_received_raw_packet(_a0: *mut c_void, _a1: *mut c_void, _a2: i32) -> i32 { panic!("unexpected leaf: demo_conn_received_raw_packet"); }
+unsafe extern "C" fn unused_demo_conn_super_flush_net(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_conn_super_flush_net"); }
+unsafe extern "C" fn unused_demo_conn_super_handle_client_player(_a0: *mut c_void, _a1: *mut c_void) -> i32 { panic!("unexpected leaf: demo_conn_super_handle_client_player"); }
+unsafe extern "C" fn unused_demo_conn_create_control_channel(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_conn_create_control_channel"); }
+unsafe extern "C" fn unused_demo_conn_init_out(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_conn_init_out"); }
+unsafe extern "C" fn unused_demo_pawn_actor_count(_a0: *mut c_void, _a1: *mut i32) -> i32 { panic!("unexpected leaf: demo_pawn_actor_count"); }
+unsafe extern "C" fn unused_demo_pawn_actor_at(_a0: *mut c_void, _a1: i32, _a2: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_actor_at"); }
+unsafe extern "C" fn unused_demo_actor_is_player_start(_a0: *mut c_void, _a1: *mut i32) -> i32 { panic!("unexpected leaf: demo_actor_is_player_start"); }
+unsafe extern "C" fn unused_demo_pawn_spawn_spectator(_a0: *mut c_void, _a1: *mut c_void, _a2: *const c_void, _a3: *const c_void, _a4: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_spawn_spectator"); }
+unsafe extern "C" fn unused_demo_pawn_engine_client(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_engine_client"); }
+unsafe extern "C" fn unused_demo_client_viewport0(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_client_viewport0"); }
+unsafe extern "C" fn unused_demo_pawn_set_player(_a0: *mut c_void, _a1: *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_set_player"); }
+unsafe extern "C" fn unused_demo_pawn_set_admin(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_set_admin"); }
+unsafe extern "C" fn unused_demo_viewport_reset_input(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_viewport_reset_input"); }
+unsafe extern "C" fn unused_demo_pawn_copy_song(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_copy_song"); }
+unsafe extern "C" fn unused_demo_pawn_set_transition_fade(_a0: *mut c_void) -> i32 { panic!("unexpected leaf: demo_pawn_set_transition_fade"); }
+unsafe extern "C" fn unused_demo_viewport_console(_a0: *mut c_void, _a1: *mut *mut c_void) -> i32 { panic!("unexpected leaf: demo_viewport_console"); }
+unsafe extern "C" fn unused_demo_console_is_time_demo(_a0: *mut c_void, _a1: *mut i32) -> i32 { panic!("unexpected leaf: demo_console_is_time_demo"); }

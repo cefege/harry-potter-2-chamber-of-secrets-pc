@@ -120,52 +120,6 @@ jobs:
       - name: Test (data-none profile)
         run: xvfb-run -a ctest --preset linux-arm64 -L data-none --output-on-failure
 
-  windows-x64:
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Rust workspace tests
-        run: cargo test --workspace
-
-      - name: Rust clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Rust clippy (renderer-wgpu feature)
-        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
-
-      - name: Install pinned llvm-mingw UCRT
-        shell: pwsh
-        run: |
-          $source = (Get-Content ThirdParty/sources.json -Raw | ConvertFrom-Json).sources | Where-Object name -eq "llvm-mingw"
-          if (!$source) { throw "ThirdParty/sources.json has no llvm-mingw pin" }
-          $tag = $source.tag
-          $archive = "llvm-mingw-$tag-ucrt-x86_64.zip"
-          $url = "https://github.com/mstorsjo/llvm-mingw/releases/download/$tag/$archive"
-          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\$archive"
-          Expand-Archive -Path "$env:RUNNER_TEMP\$archive" -DestinationPath "$env:RUNNER_TEMP\llvm-mingw"
-          $llvmRoot = "$env:RUNNER_TEMP\llvm-mingw\llvm-mingw-$tag-ucrt-x86_64"
-          "LLVM_MINGW_ROOT=$llvmRoot" >> $env:GITHUB_ENV
-          "$llvmRoot\x86_64-w64-mingw32\bin" >> $env:GITHUB_PATH
-          "$env:GITHUB_WORKSPACE\out\windows-x64\_deps\hp2_openal_soft-build" >> $env:GITHUB_PATH
-
-      - name: Configure
-        run: cmake --preset windows-x64
-
-      - name: Build verification binaries and ZIP
-        run: |
-          cmake --build --preset windows-x64 --target hp2_verification_binaries hp2_windows_zip
-
-      - name: Test (data-none profile)
-        run: ctest --preset windows-x64 -L data-none --output-on-failure
-
-      - name: Upload Windows ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: hp2-windows-${{ github.sha }}
-          path: dist/windows-x64/HarryPotter2-*-windows-x64.zip
-          if-no-files-found: error
-
   cask:
     # The tap is this repository, so a broken cask blocks every install
     # command in the README. Exercise the exact path the README documents,

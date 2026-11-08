@@ -3,5 +3,6 @@
 //! exact C++ source and scope.
 
 pub mod dxt1;
+pub mod dxt1_encode;
 pub mod eaxa;
 pub mod vorbis;

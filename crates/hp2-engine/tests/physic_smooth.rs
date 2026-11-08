@@ -76,7 +76,7 @@ unsafe extern "C" fn smooth_move(
 
 fn smooth_services() -> Hp2PhysicServices {
     Hp2PhysicServices {
-        move_actor: smooth_move,
+        move_actor: smooth_move_checked,
         ..SERVICES
     }
 }
@@ -122,7 +122,10 @@ fn run_smooth(seed: u64, w: &[u32]) -> ([u32; SMOOTH_OUTPUT_WORDS], String) {
         };
     }
     let delta = v3(&w[0..3]);
-    let ret = unsafe { physic::move_smooth(actor_p as *mut AActor, &smooth_services(), delta) };
+    let ret = unsafe {
+        physic::move_smooth(actor_p as *mut AActor, &smooth_services(), delta)
+            .expect("checked physics fixture")
+    };
     let log = with(|s| s.log.clone());
     let h = fnv1a(log.as_bytes());
     (
@@ -195,4 +198,17 @@ fn physic_smooth_matches_original() {
         300,
         "two-wall class"
     );
+}
+
+unsafe extern "C" fn smooth_move_checked(
+    actor: *mut c_void,
+    delta: *const FVector,
+    rot: *const hp2_abi::engine::generated::FRotator,
+    hit: *mut hp2_abi::engine::generated::FCheckResult,
+    result: *mut i32,
+) -> i32 {
+    unsafe {
+        result.write(smooth_move(actor, delta, rot, hit));
+    }
+    0
 }

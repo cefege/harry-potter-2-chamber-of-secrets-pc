@@ -52,11 +52,12 @@ fn swim_services() -> Hp2PhysicServices {
     // The table contains only function pointers; cloning its entries gives this
     // replay the same deterministic engine mocks while replacing PointRegion.
     let mut services = unsafe { std::ptr::read(&SERVICES) };
-    services.point_region_zone = m_swim_point_region_zone;
+    services.point_region_zone = m_swim_point_region_zone_checked;
     services
 }
 
 fn run_swim_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     let mut subj = vec![0u64; 1024];
     let mut zone = vec![0u64; 1024];
     let mut pool = [vec![0u64; 1024], vec![0u64; 1024], vec![0u64; 1024]];
@@ -118,6 +119,8 @@ fn run_swim_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
         (*(subj_p as *mut ACarcass)).set_b_sliding_carcass(w[30] != 0);
         (*p).base.region.zone = zone_p as *mut c_void;
         (*p).head_region.zone = zone_p as *mut c_void;
+        (*p).base.mesh = subj_p as *mut c_void;
+        (*p).base.collide_type = CT_SHAPE;
     }
     let mut hit = FCheckResult {
         next: null_mut(),
@@ -140,26 +143,28 @@ fn run_swim_case(name: &str, seed: u64, w: &[u32]) -> [u32; OUT_WORDS] {
                     f(arg[3]),
                     f(arg[4]),
                     arg[5] as i32,
-                );
+                )
+                .expect("checked physics fixture");
                 0
             }
             "phys_flying" => {
-                physic::swim::phys_flying(actor, &services, f(arg[0]), arg[1] as i32);
+                physic::swim::phys_flying(actor, &services, f(arg[0]), arg[1] as i32)
+                    .expect("checked physics fixture");
                 0
             }
-            "swim" => bits(physic::swim::swim(
-                actor,
-                &services,
-                v3(&arg[0..3]),
-                &mut hit,
-            )),
+            "swim" => bits(
+                physic::swim::swim(actor, &services, v3(&arg[0..3]), &mut hit)
+                    .expect("checked physics fixture"),
+            ),
             "find_water_line" => {
                 line_end = v3(&arg[3..6]);
-                physic::swim::find_water_line(actor, &services, v3(&arg[0..3]), &mut line_end);
+                physic::swim::find_water_line(actor, &services, v3(&arg[0..3]), &mut line_end)
+                    .expect("checked physics fixture");
                 0
             }
             "phys_swimming" => {
-                physic::swim::phys_swimming(actor, &services, f(arg[0]), arg[1] as i32);
+                physic::swim::phys_swimming(actor, &services, f(arg[0]), arg[1] as i32)
+                    .expect("checked physics fixture");
                 0
             }
             other => panic!("unknown swim fixture function {other}"),
@@ -267,4 +272,15 @@ fn physic_swim_matches_original() {
             "{name} physics branch coverage"
         );
     }
+}
+
+unsafe extern "C" fn m_swim_point_region_zone_checked(
+    actor: *mut c_void,
+    location: *const FVector,
+    result: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result.write(m_swim_point_region_zone(actor, location));
+    }
+    0
 }

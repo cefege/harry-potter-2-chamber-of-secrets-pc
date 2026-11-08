@@ -84,37 +84,38 @@ impl ClipPlane {
 /// Every pointer in `input` must point to a live `FTransTexture`. Each pointer
 /// returned by `alloc` must be non-null, live, unaliased, and distinct from the
 /// inputs.
-unsafe fn clip(
+unsafe fn clip<E>(
     plane: ClipPlane,
     frame: &ParticleFrame,
     input: &[*mut FTransTexture],
     out: &mut [*mut FTransTexture],
-    alloc: &mut dyn FnMut() -> *mut FTransTexture,
-) -> usize {
+    alloc: &mut dyn FnMut() -> Result<*mut FTransTexture, E>,
+) -> Result<usize, E> {
     let count = input.len();
     if count < 3 {
-        return 0;
+        return Ok(0);
     }
 
     let mut dst = 0usize;
     let mut j = count - 1;
     for i in 0..count {
         // SAFETY: `input` entries are live per the function contract.
-        let cur = unsafe { &*input[i] };
-        let prev = unsafe { &*input[j] };
-        let dist1 = plane.distance(frame, &cur.transform.point);
-        let dist2 = plane.distance(frame, &prev.transform.point);
+        let cur = input[i];
+        let prev = input[j];
+        let dist1 = plane.distance(frame, unsafe { &(*cur).transform.point });
+        let dist2 = plane.distance(frame, unsafe { &(*prev).transform.point });
         if dist1 * dist2 < 0.0 {
             // Opposite sides of the plane.
             let f = dist1 / (dist1 - dist2);
-            let new = alloc();
-            assert!(!new.is_null(), "clip: allocator returned null");
+            let new = alloc()?;
             out[dst] = new;
             dst += 1;
             // SAFETY: `new` is non-null, live, and distinct from the inputs.
             let out_vert = unsafe { &mut *new };
             // `ClipToPlane::interpolate`: lerp(f, In[i], In[j], out), then Project.
-            lerp_trans(f, cur, prev, out_vert);
+            // Re-read after allocation: a native allocator may reenter or
+            // mutate native storage. No input reference spans that callback.
+            lerp_trans(f, unsafe { &*cur }, unsafe { &*prev }, out_vert);
             project(frame, out_vert);
         }
         if dist1 >= 0.0 {
@@ -123,7 +124,7 @@ unsafe fn clip(
         }
         j = i;
     }
-    dst
+    Ok(dst)
 }
 
 /// `ClipPolygon(Frame, Pts[], LocalCount, code)`: clips the polygon in `pts`
@@ -148,11 +149,35 @@ pub unsafe fn clip_polygon(
     code: u8,
     alloc: &mut dyn FnMut() -> *mut FTransTexture,
 ) -> i32 {
+    // Legacy callers retain their infallible contract. The complete renderer
+    // uses the checked entry below so allocation exceptions never cross Rust.
+    let mut checked = || {
+        let pointer = alloc();
+        assert!(!pointer.is_null(), "clip: allocator returned null");
+        Ok::<_, std::convert::Infallible>(pointer)
+    };
+    match unsafe { clip_polygon_checked(frame, pts, local_count, code, &mut checked) } {
+        Ok(count) => count,
+        Err(never) => match never {},
+    }
+}
+
+/// Fallible clipping, preserving allocation order and leaving the caller's
+/// pointer list untouched if a native allocation fails. The allocator must
+/// return an error rather than a null pointer.
+///
+/// # Safety
+/// The pointer/storage contract is the same as `clip_polygon`; the active
+/// renderer supplies at most four input vertices.
+pub unsafe fn clip_polygon_checked<E>(
+    frame: &ParticleFrame,
+    pts: *mut *mut FTransTexture,
+    local_count: i32,
+    code: u8,
+    alloc: &mut dyn FnMut() -> Result<*mut FTransTexture, E>,
+) -> Result<i32, E> {
     let n = local_count.max(0) as usize;
-    assert!(
-        n <= CLIP_CAPACITY,
-        "clip_polygon: {n} vertices exceed the {CLIP_CAPACITY}-entry scratch"
-    );
+    assert!(n <= CLIP_CAPACITY);
 
     let mut bufs = [[std::ptr::null_mut::<FTransTexture>(); CLIP_CAPACITY]; 2];
     for (p, slot) in bufs[0][..n].iter_mut().enumerate() {
@@ -196,7 +221,7 @@ pub unsafe fn clip_polygon(
             (&hi[0], &mut lo[0])
         };
         // SAFETY: entries in `input[..count]` were set from `pts` or by `clip`.
-        count = unsafe { clip(*plane, frame, &input[..count], output, alloc) };
+        count = unsafe { clip(*plane, frame, &input[..count], output, alloc)? };
         cur ^= 1;
     }
 
@@ -205,9 +230,9 @@ pub unsafe fn clip_polygon(
             // SAFETY: the caller guarantees room for `count` entries.
             unsafe { *pts.add(p) = vert };
         }
-        return count as i32;
+        return Ok(count as i32);
     }
-    0
+    Ok(0)
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ use hp2_abi::render_scene::FBspNode;
 use hp2_abi::{FCoords, FPlane, FVector};
 
 use crate::math::app_sqrt;
+use crate::native_guard::guarded;
 use crate::prim::{
     Aabb, BspArrays, INDEX_NONE, Owner, add, box_push_out, clamp_f, cross, dot, neg, normalize,
     plane_dot, scale, sub, transform_plane_by_ortho, transform_point, transform_vector, v3,
@@ -504,11 +505,16 @@ fn line_check_inner(
 
 /// `UModel::FastLineCheck`.
 pub fn fast_line_check(m: &ModelView, end: FVector, start: FVector) -> bool {
-    let nodes = m.bsp.nodes;
-    if nodes.is_empty() {
-        return m.root_outside;
+    unsafe {
+        guarded(c"UModel::FastLineCheck", || -> Result<bool, std::convert::Infallible> {
+            let nodes = m.bsp.nodes;
+            if nodes.is_empty() {
+                return Ok(m.root_outside);
+            }
+            Ok(line_check_inner(nodes, 0, end, start, m.root_outside))
+        })
     }
-    line_check_inner(nodes, 0, end, start, m.root_outside)
+    .unwrap()
 }
 
 /// Recursive `LineCheck` (`UnTrace.cpp:380`). `coords` is the owner's

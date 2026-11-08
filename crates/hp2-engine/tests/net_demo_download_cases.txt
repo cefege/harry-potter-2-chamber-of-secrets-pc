@@ -1,0 +1,252 @@
+fn reset() { with_mock(|m| *m = Mock::new()); }
+unsafe fn download_case(index: i32) -> (Box<UNetConnection>, Box<UDownload>) {
+    let mut conn = Box::new(unsafe { zeroed::<UNetConnection>() });
+    let mut dl = Box::new(unsafe { zeroed::<UDownload>() });
+    unsafe { download_receive_file(&SVC, (&mut *dl as *mut UDownload).cast(), (&mut *conn as *mut UNetConnection).cast(), index).unwrap(); }
+    (conn, dl)
+}
+fn contains_trace(fragment: &str) -> bool { with_mock(|m| m.trace.iter().any(|s| s.contains(fragment))) }
+fn position(events: &[String], value: &str) -> usize { events.iter().position(|v| v == value).unwrap_or_else(|| panic!("missing {value:?}: {events:?}")) }
+
+#[test]
+fn optional_flag_leaf_receives_package_info_and_skip_requires_writer() {
+    reset(); unsafe {
+        let (_conn, mut d) = download_case(1); let p = (&mut *d as *mut UDownload).cast();
+        assert_eq!(download_try_skip_file(&SVC, p).unwrap(), 0);
+        download_receive_data(&SVC, p, null_mut(), 0).unwrap();
+        assert_eq!(download_try_skip_file(&SVC, p).unwrap(), 1);
+        assert_ne!(d.skipped_file, 0);
+        download_destroy(&SVC, p).unwrap();
+    }
+}
+#[test]
+fn localized_progress_uses_nonempty_parent_and_real_float_rounding() {
+    reset(); with_mock(|m| {
+        m.parent = "Päckage".into();
+        m.localization.insert("ReceiveOptionalFile".into(), "Optional [%s]".into());
+        m.localization.insert("ReceiveSize".into(), "size=%03i; progress=%08.2f%%".into());
+    });
+    unsafe {
+        let (_conn, mut d) = download_case(1); let p = (&mut *d as *mut UDownload).cast();
+        let mut data = [0u8; 123]; download_receive_data(&SVC, p, data.as_mut_ptr().cast(), 123).unwrap();
+        assert!(contains_trace("debugf 'Receiving package 'Päckage''"));
+        assert!(contains_trace("str1='Optional [Päckage]' str2='size=000; progress=00012.30%'"));
+        download_destroy(&SVC, p).unwrap();
+    }
+}
+#[test]
+fn successful_cache_record_uses_url_or_parent_and_saves_after_notification() {
+    for url in ["", "https://example.invalid/Päckage.uxx"] {
+        reset(); with_mock(|m| { m.parent = "Päckage".into(); m.url = url.into(); });
+        unsafe {
+            let (_conn, mut d) = download_case(0); let p = (&mut *d as *mut UDownload).cast();
+            d.transfered = 4096; set_text(&mut d.temp_filename, TEMP);
+            download_done(&SVC, p).unwrap();
+            let e = with_mock(|m| m.events.clone());
+            let value = if url.is_empty() { "Päckage" } else { url };
+            assert!(e.contains(&format!("ini:11111111222222223333333344444444={value}")));
+            assert!(position(&e, "received") < position(&e, "ini_delete"));
+            assert!(contains_trace("str2='Received 'Päckage''"));
+        }
+    }
+}
+#[test]
+fn skipped_completion_ignores_existing_error() {
+    reset(); with_mock(|m| m.parent = "Optional".into());
+    unsafe {
+        let (_conn, mut d) = download_case(1); d.skipped_file = 1;
+        set_text(&mut d.error, "old failure"); set_text(&mut d.temp_filename, TEMP);
+        download_done(&SVC, (&mut *d as *mut UDownload).cast()).unwrap();
+        assert!(contains_trace("notify_received_file index=1 error='' skipped=1"));
+        assert_eq!(read_text(&d.error), "old failure");
+        assert!(!with_mock(|m| m.events.iter().any(|s| s == "ini_new")));
+    }
+}
+#[test]
+fn compressed_signatures_control_codec_stages_and_cleanup_order() {
+    for signature in [1234, 5678, 42] {
+        reset(); with_mock(|m| { m.signature = signature; m.temp_count = 1; });
+        unsafe {
+            let (_conn, mut d) = download_case(0); d.transfered = 90; d.is_compressed = 1;
+            set_text(&mut d.temp_filename, TEMP);
+            download_done(&SVC, (&mut *d as *mut UDownload).cast()).unwrap();
+            let e = with_mock(|m| m.events.clone());
+            assert_eq!(read_text(&d.temp_filename), "/cache/tmp0002.tmp");
+            assert!(position(&e, &format!("delete:{TEMP}")) < position(&e, "archive_delete:-1"));
+            assert!(position(&e, "archive_delete:-1") < position(&e, "archive_delete:0"));
+            if signature == 42 {
+                assert_eq!(read_text(&d.error), "NetSize");
+                assert!(!e.iter().any(|s| s == "codec_new" || s == "original_filename"));
+                assert!(!contains_trace("move dest="));
+            } else {
+                assert!(position(&e, "original_filename") < position(&e, "codec_new"));
+                assert!(position(&e, "decode") < position(&e, "codec_delete"));
+                assert!(position(&e, "codec_delete") < position(&e, &format!("delete:{TEMP}")));
+                assert_eq!(e.iter().filter(|s| *s == "rle").count(), if signature == 5678 { 2 } else { 1 });
+                assert!(contains_trace("src='/cache/tmp0002.tmp' result=1"));
+            }
+        }
+    }
+}
+#[test]
+fn compressed_open_failures_delete_only_live_archives_and_dispatch_virtual_error() {
+    for (reader_fails, writer_fails) in [(true,false),(false,true),(true,true)] {
+        reset(); with_mock(|m| { m.reader_fails = reader_fails; m.create_writer_fails = writer_fails; m.temp_count = 1; m.override_error = true; });
+        unsafe {
+            let (_conn, mut d) = download_case(0); d.transfered = 1; d.is_compressed = 1; set_text(&mut d.temp_filename, TEMP);
+            download_done(&SVC, (&mut *d as *mut UDownload).cast()).unwrap();
+            assert_eq!(read_text(&d.error), "overridden");
+            let e = with_mock(|m| m.events.clone());
+            assert!(e.iter().any(|s| s == "error_virtual:NetOpen"));
+            assert_eq!(e.iter().any(|s| s == "archive_delete:-1"), !reader_fails);
+            assert_eq!(e.iter().any(|s| s == "archive_delete:0"), !writer_fails);
+            assert!(!e.iter().any(|s| s == "codec_new"));
+            assert!(!contains_trace("move dest="));
+        }
+    }
+}
+#[test]
+fn channel_attachment_payload_and_identity_are_real_leaf_state() {
+    reset(); unsafe {
+        let mut conn = Box::new(zeroed::<UNetConnection>());
+        let mut d = Box::new(zeroed::<UChannelDownload>());
+        let p = (&mut *d as *mut UChannelDownload).cast();
+        chdl_receive_file(&SVC, p, (&mut *conn as *mut UNetConnection).cast(), 1).unwrap();
+        let ch = d.ch.cast::<Channel>(); assert_eq!((*ch).download, p); assert_eq!((*ch).package_index, 1);
+        let expected: Vec<u8> = [0x55555555u32,0x66666666,0x77777777,0x88888888].into_iter().flat_map(u32::to_le_bytes).collect();
+        assert_eq!(with_mock(|m| m.payloads[0].clone()), expected);
+        download_receive_data(&SVC, p, null_mut(), 0).unwrap();
+        with_mock(|m| { m.events.clear(); m.bunch_error = true; });
+        assert_eq!(chdl_try_skip_file(&SVC, p).unwrap(), 1);
+        assert_eq!(with_mock(|m| m.payloads[1].clone()), b"\x05SKIP\0");
+        assert!(!with_mock(|m| m.events.iter().any(|s| s == "bunch_is_error")));
+        let other = std::ptr::dangling_mut::<c_void>(); (*ch).download = other;
+        chdl_destroy(&SVC, p).unwrap(); assert!(d.ch.is_null()); assert_eq!((*ch).download, other);
+        drop(Box::from_raw(ch));
+    }
+}
+#[test]
+fn errored_guid_bunch_raises_assertion_without_later_service_calls() {
+    reset(); with_mock(|m| m.bunch_error = true); unsafe {
+        let mut conn = Box::new(zeroed::<UNetConnection>()); let mut d = Box::new(zeroed::<UChannelDownload>());
+        assert!(chdl_receive_file(&SVC, (&mut *d as *mut UChannelDownload).cast(), (&mut *conn as *mut UNetConnection).cast(), 0).is_err());
+        assert!(with_mock(|m| m.payloads.is_empty()));
+        let e = with_mock(|m| m.events.clone()); assert_eq!(&e[e.len()-2..], &["assert:!Bunch.IsError()", "bunch_destruct"]);
+        assert_eq!(e.iter().filter(|s| *s == "bunch_destruct").count(), 1);
+        drop(Box::from_raw(d.ch.cast::<Channel>()));
+    }
+}
+#[test]
+fn connection_detach_preserves_another_download() {
+    reset(); unsafe {
+        let (mut conn, mut d) = download_case(0); let other = std::ptr::dangling_mut::<c_void>(); conn.download = other;
+        download_destroy(&SVC, (&mut *d as *mut UDownload).cast()).unwrap();
+        assert!(d.connection.is_null()); assert_eq!(conn.download, other);
+    }
+}
+#[test]
+fn allocation_failure_dispatches_virtual_done_override() {
+    reset(); with_mock(|m| { m.channel_fails = true; m.override_done = true; }); unsafe {
+        let mut conn = Box::new(zeroed::<UNetConnection>()); let mut d = Box::new(zeroed::<UChannelDownload>());
+        chdl_receive_file(&SVC, (&mut *d as *mut UChannelDownload).cast(), (&mut *conn as *mut UNetConnection).cast(), 0).unwrap();
+        let e = with_mock(|m| m.events.clone()); assert!(position(&e,"error_virtual:ChAllocate") < position(&e,"done_virtual"));
+        assert!(!e.iter().any(|s| s == "received"));
+    }
+}
+#[test]
+fn virtual_failure_stops_before_done_and_does_not_replace_error() {
+    reset(); with_mock(|m| { m.channel_fails = true; m.virtual_error_fails = true; }); unsafe {
+        let mut conn = Box::new(zeroed::<UNetConnection>()); let mut d = Box::new(zeroed::<UChannelDownload>());
+        assert!(chdl_receive_file(&SVC, (&mut *d as *mut UChannelDownload).cast(), (&mut *conn as *mut UNetConnection).cast(), 0).is_err());
+        let e = with_mock(|m| m.events.clone()); assert_eq!(e.last().unwrap(), "error_virtual:ChAllocate");
+    }
+}
+#[test]
+fn failing_out_leaf_is_never_consumed_and_no_later_leaf_runs() {
+    unsafe extern "C" fn fail_info(_conn: *mut c_void, _index: i32, out: *mut *mut c_void) -> i32 {
+        unsafe { *out = std::ptr::dangling_mut::<c_void>(); } event("failed_info"); 7
+    }
+    reset(); unsafe {
+        let mut svc = services(); svc.demo_dl_resolve_info = fail_info;
+        let mut conn = Box::new(zeroed::<UNetConnection>()); let mut d = Box::new(zeroed::<UDownload>());
+        let original_info = INFO_TAGS.as_ptr().cast_mut().cast(); d.info = original_info;
+        assert!(download_receive_file(&svc, (&mut *d as *mut UDownload).cast(), (&mut *conn as *mut UNetConnection).cast(), 1).is_err());
+        assert_eq!(d.info, original_info); assert_eq!(with_mock(|m| m.events.clone()), ["failed_info"]);
+    }
+}
+
+#[test]
+fn bunch_callback_failures_release_storage_and_identity() {
+    unsafe extern "C" fn fail_write(_: *mut c_void, _: *mut c_void) -> i32 { event("failed_write"); 1 }
+    unsafe extern "C" fn fail_reliable(_: *mut c_void) -> i32 { event("failed_reliable"); 1 }
+    unsafe extern "C" fn fail_error(_: *mut c_void, _: *mut i32) -> i32 { event("failed_error"); 1 }
+    unsafe extern "C" fn fail_send(_: *mut c_void, _: *mut c_void) -> i32 { event("failed_send"); 1 }
+    for stage in 0..4 {
+        reset();
+        let mut svc = services();
+        match stage {
+            0 => svc.demo_bunch_write_guid = fail_write,
+            1 => svc.demo_bunch_set_reliable = fail_reliable,
+            2 => svc.demo_bunch_is_error = fail_error,
+            _ => svc.demo_bunch_send = fail_send,
+        }
+        unsafe {
+            let mut conn = Box::new(zeroed::<UNetConnection>());
+            let mut d = Box::new(zeroed::<UChannelDownload>());
+            assert!(chdl_receive_file(&svc, (&raw mut *d).cast(), (&raw mut *conn).cast(), 0).is_err());
+            let events = with_mock(|m| m.events.clone());
+            assert_eq!(events.last().unwrap(), "bunch_destruct");
+            assert_eq!(events.iter().filter(|s| *s == "bunch_destruct").count(), 1);
+            assert!(with_mock(|m| m.payloads.is_empty()));
+            drop(Box::from_raw(d.ch.cast::<Channel>()));
+        }
+    }
+}
+
+#[test]
+fn skip_write_failure_releases_stack_bunch() {
+    unsafe extern "C" fn fail_text(_: *mut c_void, _: *const c_void) -> i32 { event("failed_text"); 1 }
+    reset();
+    unsafe {
+        let mut conn = Box::new(zeroed::<UNetConnection>());
+        let mut d = Box::new(zeroed::<UChannelDownload>());
+        let p = (&raw mut *d).cast();
+        chdl_receive_file(&SVC, p, (&raw mut *conn).cast(), 1).unwrap();
+        download_receive_data(&SVC, p, null_mut(), 0).unwrap();
+        with_mock(|m| m.events.clear());
+        let mut svc = services(); svc.demo_bunch_write_text = fail_text;
+        assert!(chdl_try_skip_file(&svc, p).is_err());
+        let events = with_mock(|m| m.events.clone());
+        assert_eq!(&events[events.len()-3..], &["bunch_construct", "failed_text", "bunch_destruct"]);
+        drop(Box::from_raw(d.ch.cast::<Channel>()));
+        download_destroy(&SVC, p).unwrap();
+    }
+}
+
+#[test]
+fn bunch_send_reentry_preserves_independent_stack_storage() {
+    unsafe extern "C" fn reenter(ch: *mut c_void, bunch: *mut c_void) -> i32 {
+        unsafe {
+            let writer = bunch.cast::<FBitWriter>();
+            let buffer = (*writer).buffer.data;
+            let mut conn = Box::new(zeroed::<UNetConnection>());
+            let mut d = Box::new(zeroed::<UChannelDownload>());
+            chdl_receive_file(&SVC, (&raw mut *d).cast(), (&raw mut *conn).cast(), 1).unwrap();
+            assert_eq!((*writer).buffer.data, buffer);
+            drop(Box::from_raw(d.ch.cast::<Channel>()));
+            mock_bunch_send(ch, bunch)
+        }
+    }
+    reset();
+    unsafe {
+        let mut conn = Box::new(zeroed::<UNetConnection>());
+        let mut d = Box::new(zeroed::<UChannelDownload>());
+        let mut svc = services(); svc.demo_bunch_send = reenter;
+        chdl_receive_file(&svc, (&raw mut *d).cast(), (&raw mut *conn).cast(), 0).unwrap();
+        assert_eq!(with_mock(|m| m.events.iter().filter(|s| *s == "bunch_destruct").count()), 2);
+        let payloads = with_mock(|m| m.payloads.clone());
+        assert_eq!(&payloads[0][..4], &0x55555555u32.to_le_bytes());
+        assert_eq!(&payloads[1][..4], &0x11111111u32.to_le_bytes());
+        drop(Box::from_raw(d.ch.cast::<Channel>()));
+    }
+}

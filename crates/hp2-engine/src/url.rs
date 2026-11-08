@@ -1,897 +1,605 @@
-//! Rust port of `HarryPotter2/Unreal/Engine/Src/UnURL.cpp` (`FURL`, pinned at `42a1e81`).
-//!
-//! FURL members, the `FString` storage, `GConfig` and the static defaults stay in C++.
-//! Every access goes through [`UrlServices`], filled in by `Hp2UrlServices.cpp`.
-//! Constructor parsing runs on an owned [`Draft`] and is committed with one store.
-//! `guard`/`unguard`, the trivial `FURL(const TCHAR*)` constructor and `operator<<`
-//! stay in the C++ shells.
-//!
-//! Divergences, all intentional:
-//! - `SaveURLConfig` copies each option into `TCHAR Temp[1024]` with unbounded
-//!   `appStrcpy`. Past 1023 characters that is undefined behaviour. The port truncates
-//!   to 1023 characters.
-//! - `LoadURLConfig` leaves `TCHAR Text[32767]` uninitialised before `GetSection`. The
-//!   port zero-fills it and stops the scan at the buffer end.
-//! - `appFilePathToFURLToken` reads `Path` into an owned buffer before scanning it.
-//! - The `Base` dereferences in the Relative and Partial constructors have no null
-//!   guard. The original `check(Base)` is compiled out in release builds, so a null
-//!   `Base` is undefined behaviour there too.
-//! - FMA: `UnURL.o` (-O3 -ffp-contract=on) has no floating-point ops, so there are no
-//!   fused sites.
-
-use std::ffi::c_void;
-
+//! Checked policy for the native FURL API. Native storage is never borrowed as Rust
+//! references. Native stack continuations own parser/config buffers and FString
+//! temporaries; every callback returns its first exception as a status.
 use crate::params::TChar;
 
-/// C++ services (`Hp2UrlServices` in `Hp2UrlServices.h`), same field order.
-/// Each entry is a static, config, string or FURL member access the port cannot own.
 #[repr(C)]
 pub struct UrlServices {
-    /// `FURL::Default*` by static id; returns the NUL-terminated chars.
-    pub static_chars: unsafe extern "C" fn(id: i32) -> *const TChar,
-    /// Assign a `FURL::Default*` static from NUL-terminated chars.
-    pub static_set_chars: unsafe extern "C" fn(id: i32, chars: *const TChar),
-    /// `FURL::DefaultPort`.
-    pub default_port: unsafe extern "C" fn() -> i32,
-    /// Assign `FURL::DefaultPort`.
-    pub default_port_set: unsafe extern "C" fn(port: i32),
-    /// `GConfig->GetStr(Section, Key)`.
-    pub config_get_str:
-        unsafe extern "C" fn(section: *const TChar, key: *const TChar) -> *const TChar,
-    /// `GConfig->GetSection(Section, Value, Size, Filename)`.
-    pub config_get_section: unsafe extern "C" fn(
-        section: *const TChar,
-        value: *mut TChar,
-        size: i32,
-        filename: *const TChar,
-    ),
-    /// `GConfig->SetString(Section, Key, Value, Filename)`.
-    pub config_set_string: unsafe extern "C" fn(
-        section: *const TChar,
-        key: *const TChar,
-        value: *const TChar,
-        filename: *const TChar,
-    ),
-    /// `appStricmp`.
-    pub str_icmp: unsafe extern "C" fn(a: *const TChar, b: *const TChar) -> i32,
-    /// `appStrnicmp`.
-    pub str_nicmp: unsafe extern "C" fn(a: *const TChar, b: *const TChar, count: i32) -> i32,
-    /// `appAtoi`.
-    pub str_atoi: unsafe extern "C" fn(s: *const TChar) -> i32,
-    /// `FURL` text member by field id (0 Protocol, 1 Host, 2 Map, 3 Portal).
-    pub url_field: unsafe extern "C" fn(url: *const c_void, field: i32) -> *const TChar,
-    /// `FURL::Port`.
-    pub url_port: unsafe extern "C" fn(url: *const c_void) -> i32,
-    /// `FURL::Valid`.
-    pub url_valid: unsafe extern "C" fn(url: *const c_void) -> i32,
-    /// `FURL::Op.Num()`.
-    pub url_op_count: unsafe extern "C" fn(url: *const c_void) -> i32,
-    /// `*FURL::Op(index)`.
-    pub url_op: unsafe extern "C" fn(url: *const c_void, index: i32) -> *const TChar,
-    /// Assign a `FURL` text member by field id.
-    pub url_set_field: unsafe extern "C" fn(url: *mut c_void, field: i32, chars: *const TChar),
-    /// Assign `FURL::Port`.
-    pub url_set_port: unsafe extern "C" fn(url: *mut c_void, port: i32),
-    /// Assign `FURL::Valid`.
-    pub url_set_valid: unsafe extern "C" fn(url: *mut c_void, valid: i32),
-    /// `FURL::Op.Empty()`.
-    pub url_op_clear: unsafe extern "C" fn(url: *mut c_void),
-    /// `new(Op)FString(chars)`.
-    pub url_op_push: unsafe extern "C" fn(url: *mut c_void, chars: *const TChar),
-    /// `Op(index) = chars`.
-    pub url_op_set: unsafe extern "C" fn(url: *mut c_void, index: i32, chars: *const TChar),
-    /// `*(FString*)str = chars`.
-    pub fstr_set: unsafe extern "C" fn(s: *mut c_void, chars: *const TChar),
-    /// `debugf(TEXT("URL: Adding default option %s"), chars)`.
-    pub log_default_option: unsafe extern "C" fn(chars: *const TChar),
+    pub call: unsafe extern "C" fn(u32, usize, usize, usize, usize, *mut usize) -> i32,
+    pub scope: unsafe extern "C" fn(u32, *const UrlArgs, *mut usize) -> i32,
 }
 
-// Static ids (`Hp2UrlServices.h`): the nine `FURL::Default*` FStrings, in `StaticInit` order.
-const STATIC_PROTOCOL: i32 = 0;
-const STATIC_MAP: i32 = 3;
-const STATIC_HOST: i32 = 5;
-const STATIC_PORTAL: i32 = 6;
-const STATIC_MAP_EXT: i32 = 7;
-const STATIC_SAVE_EXT: i32 = 8;
 
-/// `[URL]` keys read by `StaticInit`, index = static id.
-const STATIC_KEYS: [&str; 9] = [
-    "Protocol",
-    "ProtocolDescription",
-    "Name",
-    "Map",
-    "LocalMap",
-    "Host",
-    "Portal",
-    "MapExt",
-    "SaveExt",
-];
 
-// Field ids (`Hp2UrlServices.h`).
-const FIELD_PROTOCOL: i32 = 0;
-const FIELD_HOST: i32 = 1;
-const FIELD_MAP: i32 = 2;
-const FIELD_PORTAL: i32 = 3;
-
-// `ETravelType` (UnURL.h).
-const TRAVEL_ABSOLUTE: i32 = 0;
-const TRAVEL_PARTIAL: i32 = 1;
-const TRAVEL_RELATIVE: i32 = 2;
-
-/// `Temp[1024]` in the constructor and `SaveURLConfig`.
-const TEMP_LEN: usize = 1024;
-/// `Text[32767]` in `LoadURLConfig`.
-const CONFIG_TEXT_LEN: usize = 32767;
-
-/// Base options that an Absolute internal URL inherits (UnURL.cpp:296-302).
-const INHERITED_PREFIXES: [&str; 7] = [
-    "Name=",
-    "Team=",
-    "Class=",
-    "Skin=",
-    "Face=",
-    "Voice=",
-    "OverrideClass=",
-];
-
-/// Option names a Relative or Partial URL does not inherit (UnURL.cpp:178-181).
-const SKIPPED_BASE_OPTIONS: [&str; 4] = ["PUSH", "POP", "PEER", "LOAD"];
-
-const SPACE: TChar = b' ' as TChar;
-const QMARK: TChar = b'?' as TChar;
-const HASH: TChar = b'#' as TChar;
-const COLON: TChar = b':' as TChar;
-const DOT: TChar = b'.' as TChar;
-const SLASH: TChar = b'/' as TChar;
-const BACKSLASH: TChar = b'\\' as TChar;
-const EQ: TChar = b'=' as TChar;
-
-/// NUL-terminated `TChar` string.
-type Wide = Vec<TChar>;
-
-fn wide(s: &str) -> Wide {
-    let mut v: Wide = s.bytes().map(TChar::from).collect();
-    v.push(0);
-    v
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct UrlArgs {
+    pub url: usize,
+    pub other: usize,
+    pub text: usize,
+    pub extra: usize,
+    pub output: usize,
+    pub mode: usize,
 }
 
-/// Length up to the first NUL, or the whole slice when there is none.
-fn cstr_len(s: &[TChar]) -> usize {
-    s.iter().position(|&c| c == 0).unwrap_or(s.len())
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub enum Op {
+    StaticText,
+    StaticSet,
+    DefaultPort,
+    SetDefaultPort,
+    ConfigGet,
+    ConfigSet,
+    Icmp,
+    Nicmp,
+    Cmp,
+    Atoi,
+    Len,
+    Chr,
+    Char,
+    SetChar,
+    Field,
+    SetField,
+    Port,
+    SetPort,
+    Count,
+    Option,
+    Push,
+    SetOption,
+    Reset,
+    SetValid,
+    Append,
+    AppendPort,
+    LogDefault,
+    Internal,
+    AddOption,
+    GetOption,
+    Literal,
+    CopyField,
+    CopyOption,
+    FieldBool,
+    FieldLen,
+    StaticLen,
+    CopyStaticField,
+    CheckBase,
+    MatchLength,
 }
 
-/// NUL-terminated copy of `s` up to its first NUL.
-fn owned(s: &[TChar]) -> Wide {
-    let n = cstr_len(s);
-    let mut v = s[..n].to_vec();
-    v.push(0);
-    v
+type Result = std::result::Result<usize, i32>;
+
+/// Supplies storage, string, settings, and scoped-buffer operations to URL policy.
+pub trait UrlOps {
+    /// # Safety
+    /// Every raw handle is valid for the operation identified by `code`.
+    unsafe fn call(
+        &self,
+        code: u32,
+        a: usize,
+        b: usize,
+        c: usize,
+        d: usize,
+    ) -> std::result::Result<usize, i32>;
+
+    /// # Safety
+    /// `args` and all handles it contains are valid for the requested scope.
+    unsafe fn scope(&self, entry: u32, args: &UrlArgs) -> std::result::Result<usize, i32>;
 }
 
-fn push_text(out: &mut Vec<TChar>, s: &[TChar]) {
-    out.extend_from_slice(&s[..cstr_len(s)]);
+impl UrlOps for UrlServices {
+    unsafe fn call(
+        &self,
+        code: u32,
+        a: usize,
+        b: usize,
+        c: usize,
+        d: usize,
+    ) -> Result {
+        let mut out = 0;
+        let status = unsafe { (self.call)(code, a, b, c, d, &mut out) };
+        if status == 0 { Ok(out) } else { Err(status) }
+    }
+
+    unsafe fn scope(&self, entry: u32, args: &UrlArgs) -> Result {
+        let mut out = 0;
+        let status = unsafe { (self.scope)(entry, args, &mut out) };
+        if status == 0 { Ok(out) } else { Err(status) }
+    }
 }
 
-fn push_lit(out: &mut Vec<TChar>, s: &str) {
-    out.extend(s.bytes().map(TChar::from));
-}
-
-/// Reads a NUL-terminated string from service memory into an owned `Wide`.
-///
-/// SAFETY: `p` must point at a NUL-terminated buffer.
-unsafe fn read_str(p: *const TChar) -> Wide {
-    let mut v = Vec::new();
-    let mut i = 0;
-    loop {
-        let c = unsafe { *p.add(i) };
-        v.push(c);
-        if c == 0 {
-            return v;
+struct Policy<'a, O: UrlOps>(&'a O);
+impl<O: UrlOps> Policy<'_, O> {
+    fn call(&self, op: Op, a: usize, b: usize, c: usize, d: usize) -> Result {
+        unsafe { self.0.call(op as u32, a, b, c, d) }
+    }
+    fn one(&self, op: Op, a: usize) -> Result {
+        self.call(op, a, 0, 0, 0)
+    }
+    fn two(&self, op: Op, a: usize, b: usize) -> Result {
+        self.call(op, a, b, 0, 0)
+    }
+    fn scope(&self, entry: u32, args: &UrlArgs) -> Result {
+        unsafe { self.0.scope(entry, args) }
+    }
+    fn field(&self, u: usize, field: usize) -> Result {
+        self.two(Op::Field, u, field)
+    }
+    fn set(&self, u: usize, field: usize, text: usize) -> Result {
+        self.call(Op::SetField, u, field, text, 0)
+    }
+    fn literal(&self, id: usize) -> Result {
+        self.one(Op::Literal, id)
+    }
+    fn chr(&self, text: usize, ch: u8) -> Result {
+        self.two(Op::Chr, text, ch as usize)
+    }
+    fn char(&self, text: usize) -> Result {
+        self.one(Op::Char, text)
+    }
+    fn terminate(&self, text: usize) -> Result {
+        self.two(Op::SetChar, text, 0)
+    }
+    fn split(&self, text: usize) -> Result {
+        let a = self.chr(text, b'?')?;
+        let b = self.chr(text, b'#')?;
+        Ok(if a != 0 && (b == 0 || a < b) { a } else { b })
+    }
+    fn invalid(&self, u: usize) -> Result {
+        self.one(Op::Reset, u)?;
+        self.two(Op::SetValid, u, 0)
+    }
+    fn same_default(&self, u: usize, field: usize, id: usize) -> std::result::Result<bool, i32> {
+        Ok(self.two(
+            Op::Icmp,
+            self.field(u, field)?,
+            self.one(Op::StaticText, id)?,
+        )? == 0)
+    }
+    fn ext_mismatch(&self, dot: usize, id: usize) -> std::result::Result<bool, i32> {
+        let ext = self.one(Op::StaticText, id)?;
+        let len = self.one(Op::StaticLen, id)?;
+        if self.call(Op::Nicmp, next(dot), ext, len, 0)? != 0 {
+            return Ok(true);
         }
-        i += 1;
+        let n = self.one(Op::StaticLen, id)?;
+        let ch = self.char(advance(dot, n + 1))?;
+        Ok((b'a' as usize..=b'z' as usize).contains(&ch)
+            || (b'A' as usize..=b'Z' as usize).contains(&ch)
+            || (b'0' as usize..=b'9' as usize).contains(&ch))
     }
-}
-
-/// Length of a NUL-terminated buffer read through a raw pointer.
-///
-/// SAFETY: `p` must point at a NUL-terminated buffer.
-unsafe fn raw_len(p: *const TChar) -> usize {
-    let mut n = 0;
-    while unsafe { *p.add(n) } != 0 {
-        n += 1;
-    }
-    n
-}
-
-/// `appStricmp`. Both operands are `Wide` (NUL-terminated).
-fn icmp(svc: &UrlServices, a: &[TChar], b: &[TChar]) -> i32 {
-    // SAFETY: `Wide` operands always end in NUL, and the service only reads them.
-    unsafe { (svc.str_icmp)(a.as_ptr(), b.as_ptr()) }
-}
-
-/// `appStrnicmp`. Both operands are `Wide` (NUL-terminated).
-fn nicmp(svc: &UrlServices, a: &[TChar], b: &[TChar], count: usize) -> i32 {
-    // SAFETY: `Wide` operands always end in NUL, and the service only reads them.
-    unsafe { (svc.str_nicmp)(a.as_ptr(), b.as_ptr(), count as i32) }
-}
-
-/// `appStrchr(s, c)` over `s[from..]`, stopping at the NUL. Returns an index into `s`.
-fn strchr(s: &[TChar], from: usize, c: TChar) -> Option<usize> {
-    let mut i = from;
-    while i < s.len() && s[i] != 0 {
-        if s[i] == c {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
-}
-
-/// File-scope `appStrchr(Src, A, B)` (UnURL.cpp:136): the earlier of the first `A` or `B`.
-fn strchr2(s: &[TChar], from: usize, a: TChar, b: TChar) -> Option<usize> {
-    let mut i = from;
-    while i < s.len() && s[i] != 0 {
-        if s[i] == a || s[i] == b {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
-}
-
-/// `appIsAlnum` (UnFile.h): ASCII letters and digits only.
-fn is_alnum(c: TChar) -> bool {
-    (c >= b'a' as TChar && c <= b'z' as TChar)
-        || (c >= b'A' as TChar && c <= b'Z' as TChar)
-        || (c >= b'0' as TChar && c <= b'9' as TChar)
-}
-
-/// `ValidNetChar` (UnURL.cpp): no space before the NUL.
-fn valid_net_char(s: &[TChar]) -> bool {
-    !s[..cstr_len(s)].contains(&SPACE)
-}
-
-/// `TCHAR* FURL` static default by id.
-///
-/// SAFETY: the service returns a NUL-terminated buffer.
-unsafe fn static_str(svc: &UrlServices, id: i32) -> Wide {
-    unsafe { read_str((svc.static_chars)(id)) }
-}
-
-/// `Protocol == DefaultProtocol` (`FString::operator==` is `appStricmp`).
-fn is_default_protocol(svc: &UrlServices, protocol: &[TChar]) -> bool {
-    // SAFETY: the static is read through the service; `protocol` is a `Wide`.
-    let default = unsafe { static_str(svc, STATIC_PROTOCOL) };
-    icmp(svc, protocol, &default) == 0
-}
-
-/// `*Options` value check: `*GetOption(name, "") == 0`. True when no option matches `name`,
-/// or when the matching value is empty.
-fn option_value_empty(svc: &UrlServices, ops: &[Wide], name: &[TChar]) -> bool {
-    let n = cstr_len(name);
-    match ops.iter().find(|op| nicmp(svc, op, name, n) == 0) {
-        // The match means `op[..n]` has no NUL, so `op[n]` is in range.
-        Some(op) => op[n] == 0,
-        None => true,
-    }
-}
-
-/// `appStrncpy(Temp, TextURL, ARRAY_COUNT(Temp))`: copies at most 1023 characters and leaves
-/// the buffer zero-terminated.
-///
-/// SAFETY: `text` must be NUL-terminated or have at least 1023 readable characters.
-unsafe fn copy_text(temp: &mut [TChar], text: *const TChar) {
-    temp.fill(0);
-    let mut i = 0;
-    while i < TEMP_LEN - 1 {
-        let c = unsafe { *text.add(i) };
-        if c == 0 {
-            break;
-        }
-        temp[i] = c;
-        i += 1;
-    }
-}
-
-/// `appStrstr(s, needle)` on a NUL-terminated `s` slice.
-fn contains_text(s: &[TChar], needle: &str) -> bool {
-    let needle = wide(needle);
-    let n = cstr_len(&needle);
-    s.windows(n).any(|w| w == &needle[..n])
-}
-
-/// Owned FURL state. Mirrors the FURL members; committed back through [`Draft::store`].
-#[derive(Clone)]
-struct Draft {
-    protocol: Wide,
-    host: Wide,
-    map: Wide,
-    portal: Wide,
-    port: i32,
-    ops: Vec<Wide>,
-    valid: bool,
-}
-
-/// `FURL::Op` as owned `Wide` strings.
-///
-/// SAFETY: `url` must be a valid FURL object.
-unsafe fn load_ops(svc: &UrlServices, url: *const c_void) -> Vec<Wide> {
-    unsafe {
-        let count = (svc.url_op_count)(url);
-        (0..count).map(|i| read_str((svc.url_op)(url, i))).collect()
-    }
-}
-
-/// Replaces `FURL::Op` with `ops`.
-///
-/// SAFETY: `url` must be a valid, writable FURL object.
-unsafe fn store_ops(svc: &UrlServices, url: *mut c_void, ops: &[Wide]) {
-    unsafe {
-        (svc.url_op_clear)(url);
-        for op in ops {
-            (svc.url_op_push)(url, op.as_ptr());
-        }
-    }
-}
-
-impl Draft {
-    /// `FURL()`: member initialisers from the statics, no options, `Valid = 1`.
-    ///
-    /// SAFETY: the services must be initialised (`static_chars`, `default_port`).
-    unsafe fn defaults(svc: &UrlServices) -> Self {
-        unsafe {
-            Self {
-                protocol: static_str(svc, STATIC_PROTOCOL),
-                host: static_str(svc, STATIC_HOST),
-                map: static_str(svc, STATIC_MAP),
-                portal: static_str(svc, STATIC_PORTAL),
-                port: (svc.default_port)(),
-                ops: Vec::new(),
-                valid: true,
+    fn parse(&self, a: &UrlArgs, buffer: usize) -> Result {
+        let u = a.url;
+        if a.mode == 2 {
+            self.one(Op::CheckBase, a.other)?;
+            for field in 0..4 {
+                self.call(Op::CopyField, u, a.other, field, 0)?;
             }
+            self.two(Op::SetPort, u, self.one(Op::Port, a.other)?)?;
         }
-    }
-
-    /// Reads every FURL member from `url`.
-    ///
-    /// SAFETY: `url` must be a valid FURL object.
-    unsafe fn load(svc: &UrlServices, url: *const c_void) -> Self {
-        unsafe {
-            Self {
-                protocol: read_str((svc.url_field)(url, FIELD_PROTOCOL)),
-                host: read_str((svc.url_field)(url, FIELD_HOST)),
-                map: read_str((svc.url_field)(url, FIELD_MAP)),
-                portal: read_str((svc.url_field)(url, FIELD_PORTAL)),
-                port: (svc.url_port)(url),
-                ops: load_ops(svc, url),
-                valid: (svc.url_valid)(url) != 0,
-            }
-        }
-    }
-
-    /// Writes every FURL member back to `url`.
-    ///
-    /// SAFETY: `url` must be a valid, writable FURL object.
-    unsafe fn store(&self, svc: &UrlServices, url: *mut c_void) {
-        unsafe {
-            (svc.url_set_field)(url, FIELD_PROTOCOL, self.protocol.as_ptr());
-            (svc.url_set_field)(url, FIELD_HOST, self.host.as_ptr());
-            (svc.url_set_field)(url, FIELD_MAP, self.map.as_ptr());
-            (svc.url_set_field)(url, FIELD_PORTAL, self.portal.as_ptr());
-            (svc.url_set_port)(url, self.port);
-            (svc.url_set_valid)(url, self.valid as i32);
-            store_ops(svc, url, &self.ops);
-        }
-    }
-}
-
-/// `FURL::AddOption` on an owned option list: replaces the first option whose name (up to and
-/// including `=`) matches case-insensitively, otherwise appends.
-fn push_option(svc: &UrlServices, ops: &mut Vec<Wide>, s: &[TChar]) {
-    let n = cstr_len(s);
-    let match_len = match s[..n].iter().position(|&c| c == EQ) {
-        Some(sep) => sep + 1,
-        None => n + 1,
-    };
-    let entry = owned(s);
-    match ops
-        .iter()
-        .position(|op| nicmp(svc, op, &entry, match_len) == 0)
-    {
-        Some(i) => ops[i] = entry,
-        None => ops.push(entry),
-    }
-}
-
-/// `FURL::FURL(FURL* Base, const TCHAR* TextURL, ETravelType Type)`, after `Temp` is filled.
-/// Returns `false` where the original resets to `FURL()` with `Valid = 0`.
-///
-/// SAFETY: `base` must be a valid FURL for Relative and Partial construction, and `base` may
-/// be null only for Absolute construction.
-unsafe fn parse(
-    svc: &UrlServices,
-    d: &mut Draft,
-    base: *const c_void,
-    temp: &mut [TChar],
-    ty: i32,
-) -> bool {
-    let mut far_host = false;
-    let mut far_map = false;
-
-    // Copy Base.
-    if ty == TRAVEL_RELATIVE {
-        unsafe {
-            d.protocol = read_str((svc.url_field)(base, FIELD_PROTOCOL));
-            d.host = read_str((svc.url_field)(base, FIELD_HOST));
-            d.map = read_str((svc.url_field)(base, FIELD_MAP));
-            d.portal = read_str((svc.url_field)(base, FIELD_PORTAL));
-            d.port = (svc.url_port)(base);
-        }
-    }
-    if ty == TRAVEL_RELATIVE || ty == TRAVEL_PARTIAL {
-        let base_ops = unsafe { load_ops(svc, base) };
-        for op in base_ops {
-            let skipped = SKIPPED_BASE_OPTIONS
-                .iter()
-                .any(|word| icmp(svc, &op, &wide(word)) == 0);
-            if !skipped {
-                d.ops.push(op);
-            }
-        }
-    }
-
-    // Skip leading blanks.
-    let mut u = 0;
-    while temp[u] == SPACE {
-        u += 1;
-    }
-
-    // Options: '?' adds an option, '#' sets the portal.
-    if let Some(first) = strchr2(temp, u, QMARK, HASH) {
-        let mut option_char = temp[first];
-        let mut next_option_char: TChar = 0;
-        temp[first] = 0;
-        let mut cur = Some(first + 1);
-        while let Some(s) = cur {
-            let t = strchr2(temp, s, QMARK, HASH);
-            if let Some(t) = t {
-                next_option_char = temp[t];
-                temp[t] = 0;
-            }
-            let segment = owned(&temp[s..]);
-            if !valid_net_char(&segment) {
-                return false;
-            }
-            if option_char == QMARK {
-                push_option(svc, &mut d.ops, &segment);
-            } else {
-                d.portal = segment;
-            }
-            cur = t.map(|t| t + 1);
-            option_char = next_option_char;
-        }
-    }
-
-    // `cur` is the remaining URL text, or None once the host consumed it.
-    let mut cur: Option<usize>;
-    if cstr_len(&temp[u..]) > 2 && temp[u + 1] == COLON {
-        // Pure filename.
-        unsafe {
-            d.protocol = static_str(svc, STATIC_PROTOCOL);
-            d.portal = static_str(svc, STATIC_PORTAL);
-        }
-        d.map = owned(&temp[u..]);
-        d.host = wide("");
-        cur = None;
-        far_host = true;
-        far_map = true;
-    } else {
-        // Parse protocol: a ':' past index 1 that comes before any '.'.
-        let mut p = u;
-        let colon = strchr(temp, u, COLON);
-        let dot = strchr(temp, u, DOT);
-        if let Some(c) = colon
-            && c > u + 1
-            && dot.is_none_or(|dt| c < dt)
-        {
-            d.protocol = owned(&temp[u..c]);
-            p = c + 1;
-        }
-
-        // Optional leading slashes.
-        if temp[p] == SLASH {
-            p += 1;
-            let next = temp[p];
-            p += 1;
-            if next != SLASH {
-                return false;
-            }
-            far_host = true;
-            d.host = wide("");
-        }
-
-        // Optional host name and port, when the dot is followed by neither map nor save ext.
-        cur = Some(p);
-        let dot = strchr(temp, p, DOT);
-        let (map_ext, save_ext) = unsafe {
-            (
-                static_str(svc, STATIC_MAP_EXT),
-                static_str(svc, STATIC_SAVE_EXT),
-            )
-        };
-        if let Some(dt) = dot
-            && dt > p
-            && ext_mismatch(svc, temp, dt, &map_ext)
-            && ext_mismatch(svc, temp, dt, &save_ext)
-        {
-            let host_start = p;
-            match strchr(temp, host_start, SLASH) {
-                Some(sl) => {
-                    temp[sl] = 0;
-                    cur = Some(sl + 1);
-                }
-                None => cur = None,
-            }
-            if let Some(t) = strchr(temp, host_start, COLON) {
-                temp[t] = 0;
-                let port_text = owned(&temp[t + 1..]);
-                d.port = unsafe { (svc.str_atoi)(port_text.as_ptr()) };
-            }
-            d.host = owned(&temp[host_start..]);
-            d.map = if is_default_protocol(svc, &d.protocol) {
-                unsafe { static_str(svc, STATIC_MAP) }
-            } else {
-                wide("")
-            };
-            far_host = true;
-        }
-    }
-
-    // Copy inherited options from Base (Absolute, internal URL only).
-    if ty == TRAVEL_ABSOLUTE && !base.is_null() && is_default_protocol(svc, &d.protocol) {
-        let base_ops = unsafe { load_ops(svc, base) };
-        for op in base_ops {
-            let inherited = INHERITED_PREFIXES
-                .iter()
-                .any(|prefix| nicmp(svc, &op, &wide(prefix), prefix.len()) == 0);
-            if !inherited {
-                continue;
-            }
-            let name = match op[..cstr_len(&op)].iter().position(|&c| c == EQ) {
-                Some(eq) => owned(&op[..eq]),
-                None => owned(&op),
-            };
-            if option_value_empty(svc, &d.ops, &name) {
-                unsafe { (svc.log_default_option)(op.as_ptr()) };
-                d.ops.push(op);
-            }
-        }
-    }
-
-    // Map and portal.
-    if let Some(u) = cur
-        && temp[u] != 0
-    {
-        if is_default_protocol(svc, &d.protocol) {
-            far_map = true;
-            if let Some(t) = strchr(temp, u, SLASH) {
-                temp[t] = 0;
-                let t1 = t + 1;
-                if let Some(uu) = strchr(temp, t1, SLASH) {
-                    temp[uu] = 0;
-                    if temp[uu + 1] != 0 {
-                        return false;
+        if a.mode == 2 || a.mode == 1 {
+            self.one(Op::CheckBase, a.other)?;
+            let mut i = 0;
+            while i < self.one(Op::Count, a.other)? {
+                let mut skip = false;
+                for word in 14..18 {
+                    if self.two(
+                        Op::Icmp,
+                        self.two(Op::Option, a.other, i)?,
+                        self.literal(word)?,
+                    )? == 0
+                    {
+                        skip = true;
+                        break;
                     }
                 }
-                d.portal = owned(&temp[t1..]);
+                if !skip {
+                    self.call(Op::CopyOption, u, a.other, i, 0)?;
+                }
+                i += 1;
             }
         }
-        d.map = owned(&temp[u..]);
-    }
-
-    // Validate. The Map check is commented out in the original.
-    valid_net_char(&d.protocol)
-        && valid_net_char(&d.host)
-        && valid_net_char(&d.portal)
-        && (far_host || far_map || !d.ops.is_empty())
-}
-
-/// `(appStrnicmp(Dot+1, Ext, Ext.Len()) != 0 || appIsAlnum(Dot[Ext.Len()+1]))`. Returns true
-/// when the dot does not start this extension, or when a letter or digit follows it.
-fn ext_mismatch(svc: &UrlServices, temp: &[TChar], dot: usize, ext: &[TChar]) -> bool {
-    let n = cstr_len(ext);
-    let after = temp.get(dot + n + 1).copied().unwrap_or(0);
-    nicmp(svc, &owned(&temp[dot + 1..]), ext, n) != 0 || is_alnum(after)
-}
-
-/// `FURL::FURL(FURL* Base, const TCHAR* TextURL, ETravelType Type)`, storing the result into `this`.
-///
-/// # Safety
-/// `this` must be a writable FURL. `text` must be NUL-terminated. `base` must be a valid
-/// FURL for Relative and Partial construction.
-pub unsafe fn construct(
-    svc: &UrlServices,
-    this: *mut c_void,
-    base: *const c_void,
-    text: *const TChar,
-    ty: i32,
-) {
-    let mut temp = vec![0 as TChar; TEMP_LEN];
-    unsafe { copy_text(&mut temp, text) };
-    let mut d = unsafe { Draft::defaults(svc) };
-    if !unsafe { parse(svc, &mut d, base, &mut temp, ty) } {
-        d = unsafe { Draft::defaults(svc) };
-        d.valid = false;
-    }
-    unsafe { d.store(svc, this) };
-}
-
-/// `FURL::String(FullyQualified)`: writes the text into the FString at `out` through `fstr_set`.
-///
-/// # Safety
-/// `url` must be a valid FURL, and `out` must address a valid FString.
-pub unsafe fn string(
-    svc: &UrlServices,
-    url: *const c_void,
-    fully_qualified: bool,
-    out: *mut c_void,
-) {
-    let d = unsafe { Draft::load(svc, url) };
-    let (default_protocol, default_host, default_port) = unsafe {
-        (
-            static_str(svc, STATIC_PROTOCOL),
-            static_str(svc, STATIC_HOST),
-            (svc.default_port)(),
-        )
-    };
-
-    let mut r: Vec<TChar> = Vec::new();
-    if icmp(svc, &d.protocol, &default_protocol) != 0 || fully_qualified {
-        push_text(&mut r, &d.protocol);
-        push_lit(&mut r, ":");
-        if icmp(svc, &d.host, &default_host) != 0 {
-            push_lit(&mut r, "//");
+        let mut text = buffer;
+        while self.char(text)? == b' ' as usize {
+            text = next(text);
         }
-    }
-    if icmp(svc, &d.host, &default_host) != 0 || d.port != default_port {
-        push_text(&mut r, &d.host);
-        if d.port != default_port {
-            push_lit(&mut r, ":");
-            push_lit(&mut r, &d.port.to_string());
-        }
-        push_lit(&mut r, "/");
-    }
-    push_text(&mut r, &d.map);
-    for op in &d.ops {
-        push_lit(&mut r, "?");
-        push_text(&mut r, op);
-    }
-    if cstr_len(&d.portal) > 0 {
-        push_lit(&mut r, "#");
-        push_text(&mut r, &d.portal);
-    }
-    r.push(0);
-    unsafe { (svc.fstr_set)(out, r.as_ptr()) };
-}
-
-/// `FURL::IsInternal`: `Protocol == DefaultProtocol`.
-///
-/// # Safety
-/// `url` must be a valid FURL.
-pub unsafe fn is_internal(svc: &UrlServices, url: *const c_void) -> bool {
-    let protocol = unsafe { read_str((svc.url_field)(url, FIELD_PROTOCOL)) };
-    is_default_protocol(svc, &protocol)
-}
-
-/// `FURL::IsLocalInternal`: `IsInternal() && Host.Len() == 0`.
-///
-/// # Safety
-/// `url` must be a valid FURL.
-pub unsafe fn is_local_internal(svc: &UrlServices, url: *const c_void) -> bool {
-    if !unsafe { is_internal(svc, url) } {
-        return false;
-    }
-    let host = unsafe { read_str((svc.url_field)(url, FIELD_HOST)) };
-    cstr_len(&host) == 0
-}
-
-/// `FURL::AddOption(Str)`.
-///
-/// # Safety
-/// `url` must be a valid, writable FURL. `s` must be NUL-terminated.
-pub unsafe fn add_option(svc: &UrlServices, url: *mut c_void, s: *const TChar) {
-    unsafe {
-        let mut ops = load_ops(svc, url);
-        let entry = read_str(s);
-        push_option(svc, &mut ops, &entry);
-        store_ops(svc, url, &ops);
-    }
-}
-
-/// `FURL::LoadURLConfig(Section, Filename)`: adds each NUL-separated `[Section]` entry.
-///
-/// # Safety
-/// `url` must be a valid, writable FURL. `section` and `filename` must be NUL-terminated
-/// (`filename` may be null).
-pub unsafe fn load_config(
-    svc: &UrlServices,
-    url: *mut c_void,
-    section: *const TChar,
-    filename: *const TChar,
-) {
-    unsafe {
-        let mut ops = load_ops(svc, url);
-        let mut text = vec![0 as TChar; CONFIG_TEXT_LEN];
-        (svc.config_get_section)(section, text.as_mut_ptr(), CONFIG_TEXT_LEN as i32, filename);
-        let mut i = 0;
-        while i < text.len() && text[i] != 0 {
-            let entry = owned(&text[i..]);
-            push_option(svc, &mut ops, &entry);
-            i += cstr_len(&text[i..]) + 1;
-        }
-        store_ops(svc, url, &ops);
-    }
-}
-
-/// `FURL::SaveURLConfig(Section, Item, Filename) const`: writes each `Item=Value` option.
-///
-/// # Safety
-/// `url` must be a valid FURL. `section`, `item` must be NUL-terminated. `filename` may
-/// be null.
-pub unsafe fn save_config(
-    svc: &UrlServices,
-    url: *const c_void,
-    section: *const TChar,
-    item: *const TChar,
-    filename: *const TChar,
-) {
-    unsafe {
-        let count = (svc.url_op_count)(url);
-        for i in 0..count {
-            let op = read_str((svc.url_op)(url, i));
-            let n = cstr_len(&op).min(TEMP_LEN - 1);
-            let mut temp = op[..n].to_vec();
-            temp.push(0);
-            if let Some(eq) = temp[..n].iter().position(|&c| c == EQ) {
-                temp[eq] = 0;
-                if (svc.str_icmp)(temp.as_ptr(), item) == 0 {
-                    let value = owned(&temp[eq + 1..]);
-                    (svc.config_set_string)(section, temp.as_ptr(), value.as_ptr(), filename);
+        let first = self.split(text)?;
+        if first != 0 {
+            let mut kind = self.char(first)?;
+            let mut next_kind = 0;
+            self.terminate(first)?;
+            let mut s = next(first);
+            loop {
+                let mut t = self.split(s)?;
+                if t != 0 {
+                    next_kind = self.char(t)?;
+                    self.terminate(t)?;
+                    t = next(t);
+                }
+                if self.chr(s, b' ')? != 0 {
+                    return self.invalid(u);
+                }
+                if kind == b'?' as usize {
+                    self.two(Op::AddOption, u, s)?;
+                } else {
+                    self.set(u, 3, s)?;
+                }
+                s = t;
+                kind = next_kind;
+                if s == 0 {
+                    break;
                 }
             }
         }
-    }
-}
-
-/// `FURL::HasOption(Test) const`.
-///
-/// # Safety
-/// `url` must be a valid FURL. `test` must be NUL-terminated.
-pub unsafe fn has_option(svc: &UrlServices, url: *const c_void, test: *const TChar) -> bool {
-    unsafe {
-        let count = (svc.url_op_count)(url);
-        (0..count).any(|i| (svc.str_icmp)((svc.url_op)(url, i), test) == 0)
-    }
-}
-
-/// `FURL::GetOption(Match, Default) const`: returns a pointer into the matching option's text,
-/// or `default`.
-///
-/// # Safety
-/// `url` must be a valid FURL. `m` must be NUL-terminated. `default` must stay valid.
-/// The returned pointer is only valid while the FURL's options are unchanged.
-pub unsafe fn get_option(
-    svc: &UrlServices,
-    url: *const c_void,
-    m: *const TChar,
-    default: *const TChar,
-) -> *const TChar {
-    unsafe {
-        let n = raw_len(m);
-        let count = (svc.url_op_count)(url);
-        for i in 0..count {
-            let op = (svc.url_op)(url, i);
-            if (svc.str_nicmp)(op, m, n as i32) == 0 {
-                return op.add(n);
+        let mut far_host = false;
+        let mut far_map = false;
+        if self.one(Op::Len, text)? > 2 && self.char(next(text))? == b':' as usize {
+            self.call(Op::CopyStaticField, u, 0, 0, 0)?;
+            self.call(Op::CopyStaticField, u, 1, 5, 0)?;
+            self.set(u, 2, text)?;
+            self.call(Op::CopyStaticField, u, 3, 6, 0)?;
+            text = 0;
+            far_host = true;
+            far_map = true;
+            self.set(u, 1, self.literal(0)?)?;
+        } else {
+            let colon = self.chr(text, b':')?;
+            if colon != 0 && colon > next(text) {
+                let dot = self.chr(text, b'.')?;
+                if dot == 0 || colon < dot {
+                    let s = text;
+                    text = next(colon);
+                    self.terminate(colon)?;
+                    self.set(u, 0, s)?;
+                }
+            }
+            if self.char(text)? == b'/' as usize {
+                text = next(text);
+                let ch = self.char(text)?;
+                text = next(text);
+                if ch != b'/' as usize {
+                    return self.invalid(u);
+                }
+                far_host = true;
+                self.set(u, 1, self.literal(0)?)?;
+            }
+            let dot = self.chr(text, b'.')?;
+            if dot != 0 && dot > text && self.ext_mismatch(dot, 7)? && self.ext_mismatch(dot, 8)? {
+                let s = text;
+                text = self.chr(text, b'/')?;
+                if text != 0 {
+                    self.terminate(text)?;
+                    text = next(text);
+                }
+                let t = self.chr(s, b':')?;
+                if t != 0 {
+                    self.terminate(t)?;
+                    self.two(Op::SetPort, u, self.one(Op::Atoi, next(t))?)?;
+                }
+                self.set(u, 1, s)?;
+                if self.same_default(u, 0, 0)? {
+                    self.call(Op::CopyStaticField, u, 2, 3, 0)?;
+                } else {
+                    self.set(u, 2, self.literal(0)?)?;
+                }
+                far_host = true;
             }
         }
-        default
-    }
-}
-
-/// `FURL::operator==(const FURL& Other) const`.
-///
-/// # Safety
-/// `a` and `b` must be valid FURL objects.
-pub unsafe fn equal(svc: &UrlServices, a: *const c_void, b: *const c_void) -> bool {
-    unsafe {
-        for field in [FIELD_PROTOCOL, FIELD_HOST, FIELD_MAP] {
-            if (svc.str_icmp)((svc.url_field)(a, field), (svc.url_field)(b, field)) != 0 {
-                return false;
+        if a.mode == 0 && a.other != 0 && self.one(Op::Internal, u)? != 0 {
+            let mut i = 0;
+            while i < self.one(Op::Count, a.other)? {
+                let mut inherit = false;
+                for (word, len) in [
+                    (18, 5),
+                    (19, 5),
+                    (20, 6),
+                    (21, 5),
+                    (22, 5),
+                    (23, 6),
+                    (24, 14),
+                ] {
+                    if self.call(
+                        Op::Nicmp,
+                        self.two(Op::Option, a.other, i)?,
+                        self.literal(word)?,
+                        len,
+                        0,
+                    )? == 0
+                    {
+                        inherit = true;
+                        break;
+                    }
+                }
+                if inherit {
+                    self.scope(4, &UrlArgs { text: i, ..*a })?;
+                }
+                i += 1;
             }
         }
-        if (svc.url_port)(a) != (svc.url_port)(b) {
-            return false;
+        if text != 0 && self.char(text)? != 0 {
+            if self.one(Op::Internal, u)? != 0 {
+                far_map = true;
+                let t = self.chr(text, b'/')?;
+                if t != 0 {
+                    self.terminate(t)?;
+                    let t = next(t);
+                    let end = self.chr(t, b'/')?;
+                    if end != 0 {
+                        self.terminate(end)?;
+                        if self.char(next(end))? != 0 {
+                            return self.invalid(u);
+                        }
+                    }
+                    self.set(u, 3, t)?;
+                }
+            }
+            self.set(u, 2, text)?;
         }
-        let count = (svc.url_op_count)(a);
-        if count != (svc.url_op_count)(b) {
-            return false;
+        for field in [0, 1, 3] {
+            if self.chr(self.field(u, field)?, b' ')? != 0 {
+                return self.invalid(u);
+            }
         }
-        (0..count).all(|i| (svc.str_icmp)((svc.url_op)(a, i), (svc.url_op)(b, i)) == 0)
+        if !far_host && !far_map && self.one(Op::Count, u)? == 0 {
+            return self.invalid(u);
+        }
+        Ok(0)
+    }
+    fn string(&self, a: &UrlArgs) -> Result {
+        let u = a.url;
+        let out = a.output;
+        if !self.same_default(u, 0, 0)? || a.mode != 0 {
+            self.two(Op::Append, out, self.field(u, 0)?)?;
+            self.two(Op::Append, out, self.literal(10)?)?;
+            if !self.same_default(u, 1, 5)? {
+                self.two(Op::Append, out, self.literal(11)?)?;
+            }
+        }
+        if !self.same_default(u, 1, 5)? || self.one(Op::Port, u)? != self.one(Op::DefaultPort, 0)? {
+            self.two(Op::Append, out, self.field(u, 1)?)?;
+            if self.one(Op::Port, u)? != self.one(Op::DefaultPort, 0)? {
+                self.two(Op::Append, out, self.literal(10)?)?;
+                self.two(Op::AppendPort, out, u)?;
+            }
+            self.two(Op::Append, out, self.literal(12)?)?;
+        }
+        if self.two(Op::FieldBool, u, 2)? != 0 {
+            self.two(Op::Append, out, self.field(u, 2)?)?;
+        }
+        let mut i = 0;
+        while i < self.one(Op::Count, u)? {
+            self.two(Op::Append, out, self.literal(13)?)?;
+            self.two(Op::Append, out, self.two(Op::Option, u, i)?)?;
+            i += 1;
+        }
+        if self.two(Op::FieldBool, u, 3)? != 0 {
+            self.two(Op::Append, out, self.literal(25)?)?;
+            self.two(Op::Append, out, self.field(u, 3)?)?;
+        }
+        Ok(0)
+    }
+    fn add_option(&self, a: &UrlArgs) -> Result {
+        let sep = self.chr(a.text, b'=')?;
+        let len = if sep != 0 {
+            self.two(Op::MatchLength, sep, a.text)?
+        } else {
+            self.one(Op::Len, a.text)? + 1
+        };
+        let mut i = 0;
+        while i < self.one(Op::Count, a.url)? {
+            if self.call(Op::Nicmp, self.two(Op::Option, a.url, i)?, a.text, len, 0)? == 0 {
+                break;
+            }
+            i += 1;
+        }
+        if i == self.one(Op::Count, a.url)? {
+            self.two(Op::Push, a.url, a.text)
+        } else {
+            self.call(Op::SetOption, a.url, i, a.text, 0)
+        }
+    }
+    fn equal(&self, a: &UrlArgs) -> Result {
+        for field in 0..3 {
+            if self.two(
+                Op::Icmp,
+                self.field(a.url, field)?,
+                self.field(a.other, field)?,
+            )? != 0
+            {
+                return Ok(0);
+            }
+        }
+        if self.one(Op::Port, a.url)? != self.one(Op::Port, a.other)?
+            || self.one(Op::Count, a.url)? != self.one(Op::Count, a.other)?
+        {
+            return Ok(0);
+        }
+        let mut i = 0;
+        while i < self.one(Op::Count, a.url)? {
+            if self.two(
+                Op::Icmp,
+                self.two(Op::Option, a.url, i)?,
+                self.two(Op::Option, a.other, i)?,
+            )? != 0
+            {
+                return Ok(0);
+            }
+            i += 1;
+        }
+        Ok(1)
+    }
+}
+fn advance(p: usize, n: usize) -> usize {
+    p.wrapping_add(n.wrapping_mul(std::mem::size_of::<TChar>()))
+}
+fn next(p: usize) -> usize {
+    advance(p, 1)
+}
+
+/// Runs the native FURL policy using the original service table.
+///
+/// # Safety
+/// The service table and handles required by `entry` must be live.
+pub unsafe fn run(svc: &UrlServices, entry: u32, args: &UrlArgs) -> Result {
+    unsafe { run_with(svc, entry, args) }
+}
+
+/// Runs the shared FURL policy with any genuine operation backend.
+///
+/// # Safety
+/// The backend and all handles required by `entry` must be live.
+pub unsafe fn run_with<O: UrlOps>(ops: &O, entry: u32, a: &UrlArgs) -> Result {
+    let p = Policy(ops);
+    match entry {
+        0 => {
+            for id in 0..9 {
+                p.two(Op::StaticSet, id, p.one(Op::ConfigGet, id)?)?;
+            }
+            p.one(
+                Op::SetDefaultPort,
+                p.one(Op::Atoi, p.one(Op::ConfigGet, 9)?)?,
+            )
+        }
+        1 => {
+            for id in 0..9 {
+                p.two(Op::StaticSet, id, p.literal(0)?)?;
+            }
+            Ok(0)
+        }
+        2 => p.scope(1, a),
+        3 => p.string(a),
+        4 => Ok(usize::from(p.same_default(a.url, 0, 0)?)),
+        5 => Ok(usize::from(
+            p.one(Op::Internal, a.url)? != 0 && p.two(Op::FieldLen, a.url, 1)? == 0,
+        )),
+        6 => p.add_option(a),
+        7 => p.scope(2, a),
+        8 => {
+            let mut i = 0;
+            while i < p.one(Op::Count, a.url)? {
+                p.scope(3, &UrlArgs { other: i, ..*a })?;
+                i += 1;
+            }
+            Ok(0)
+        }
+        9 | 10 => {
+            let mut i = 0;
+            while i < p.one(Op::Count, a.url)? {
+                let op = p.two(Op::Option, a.url, i)?;
+                let equal = if entry == 9 {
+                    p.two(Op::Icmp, op, a.text)? == 0
+                } else {
+                    p.call(Op::Nicmp, op, a.text, p.one(Op::Len, a.text)?, 0)? == 0
+                };
+                if equal {
+                    return if entry == 9 {
+                        Ok(1)
+                    } else {
+                        Ok(advance(
+                            p.two(Op::Option, a.url, i)?,
+                            p.one(Op::Len, a.text)?,
+                        ))
+                    };
+                }
+                i += 1;
+            }
+            Ok(if entry == 9 { 0 } else { a.extra })
+        }
+        11 => p.equal(a),
+        _ => Err(-1),
     }
 }
 
-/// `FURL::StaticInit()`: reads the `[URL]` defaults and `Port`.
+/// Continues the original native-service policy inside its matching stack scope.
 ///
 /// # Safety
-/// the services must be initialised and GConfig must be loaded.
-pub unsafe fn static_init(svc: &UrlServices) {
-    unsafe {
-        let section = wide("URL");
-        for (id, key) in STATIC_KEYS.iter().enumerate() {
-            let key = wide(key);
-            (svc.static_set_chars)(
-                id as i32,
-                (svc.config_get_str)(section.as_ptr(), key.as_ptr()),
-            );
+/// Called only by the matching `UrlServices` scope with a live buffer.
+pub unsafe fn resume(svc: &UrlServices, entry: u32, args: &UrlArgs, buffer: usize) -> Result {
+    unsafe { resume_with(svc, entry, args, buffer) }
+}
+
+/// Continues shared URL policy using a caller-owned scope buffer.
+///
+/// # Safety
+/// `ops`, `args`, and `buffer` must remain live for the continuation.
+pub unsafe fn resume_with<O: UrlOps>(ops: &O, entry: u32, a: &UrlArgs, buffer: usize) -> Result {
+    let p = Policy(ops);
+    match entry {
+        1 => p.parse(a, buffer),
+        2 => {
+            let mut text = buffer;
+            while p.char(text)? != 0 {
+                p.two(Op::AddOption, a.url, text)?;
+                text = advance(text, p.one(Op::Len, text)? + 1);
+            }
+            Ok(0)
         }
-        let key = wide("Port");
-        let port = (svc.config_get_str)(section.as_ptr(), key.as_ptr());
-        (svc.default_port_set)((svc.str_atoi)(port));
+        3 => {
+            let value = p.chr(buffer, b'=')?;
+            if value != 0 {
+                p.terminate(value)?;
+                if p.two(Op::Icmp, buffer, a.extra)? == 0 {
+                    p.call(Op::ConfigSet, a.text, buffer, next(value), a.output)?;
+                }
+            }
+            Ok(0)
+        }
+        4 => {
+            let value = p.call(Op::GetOption, a.url, buffer, p.literal(0)?, 0)?;
+            if p.two(Op::Cmp, value, p.literal(0)?)? == 0 {
+                p.one(Op::LogDefault, p.two(Op::Option, a.other, a.text)?)?;
+                p.call(Op::CopyOption, a.url, a.other, a.text, 0)?;
+            }
+            Ok(0)
+        }
+        _ => Err(-1),
     }
 }
 
-/// `FURL::StaticExit()`: clears the nine `FURL::Default*` strings. `DefaultPort` is kept.
-///
+/// Original path-token loop, without an owned copy or exclusive native borrow.
 /// # Safety
-/// the services must be initialised.
-pub unsafe fn static_exit(svc: &UrlServices) {
-    unsafe {
-        let empty = wide("");
-        for id in 0..STATIC_KEYS.len() {
-            (svc.static_set_chars)(id as i32, empty.as_ptr());
-        }
-    }
-}
-
-/// `appFilePathToFURLToken(Path, Out, OutCapacity)`: writes the token into `out[..capacity]`.
-///
-/// # Safety
-/// when `capacity > 0`, `out` must address `capacity` writable `TChar`s. `path` must be
-/// NUL-terminated or null.
+/// `path` is null or NUL terminated; `out` has `capacity` writable characters.
 pub unsafe fn file_path_to_token(path: *const TChar, out: *mut TChar, capacity: i32) -> bool {
     if out.is_null() || capacity <= 0 {
         return false;
     }
-    let out = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
-    out[0] = 0;
-    if path.is_null() {
+    unsafe {
+        *out = 0;
+    }
+    if path.is_null() || unsafe { *path } == 0 {
         return false;
     }
-    let path = unsafe { read_str(path) };
-    let len = cstr_len(&path);
-    if len == 0 || contains_text(&path[..len], "://") {
-        return false;
-    }
-
-    // `Index >= OutCapacity - 1` rejects the token before a terminator would overflow.
-    let limit = (capacity - 1) as usize;
-    let mut in_options = false;
-    let mut index = 0usize;
-    while index < len {
-        if index >= limit || path[index] == HASH {
-            out[0] = 0;
+    let mut n = 0;
+    while unsafe { *path.add(n) } != 0 {
+        if unsafe { *path.add(n) } == b':' as TChar
+            && unsafe { *path.add(n + 1) } == b'/' as TChar
+            && unsafe { *path.add(n + 2) } == b'/' as TChar
+        {
             return false;
         }
-        let mut ch = path[index];
-        if ch == QMARK {
-            in_options = true;
-        } else if !in_options && (ch == SLASH || ch == BACKSLASH) {
-            ch = BACKSLASH;
-        }
-        out[index] = ch;
-        index += 1;
+        n += 1;
     }
-    out[index] = 0;
-    index > 0 && out[0] != QMARK
+    let mut in_options = false;
+    let mut i = 0;
+    while unsafe { *path.add(i) } != 0 {
+        let mut ch = unsafe { *path.add(i) };
+        if i >= capacity as usize - 1 || ch == b'#' as TChar {
+            unsafe {
+                *out = 0;
+            }
+            return false;
+        }
+        if ch == b'?' as TChar {
+            in_options = true;
+        } else if !in_options && (ch == b'/' as TChar || ch == b'\\' as TChar) {
+            ch = b'\\' as TChar;
+        }
+        unsafe {
+            *out.add(i) = ch;
+        }
+        i += 1;
+    }
+    unsafe {
+        *out.add(i) = 0;
+    }
+    i > 0 && unsafe { *out } != b'?' as TChar
 }

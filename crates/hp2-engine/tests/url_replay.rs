@@ -14,7 +14,7 @@ use std::ffi::c_void;
 use std::ptr;
 
 use hp2_engine::params::TChar;
-use hp2_engine::url::{self, UrlServices};
+use hp2_engine::url::{self as checked_url, UrlArgs, UrlServices};
 
 const FIXTURE: &str = include_str!("fixtures/url_fixture.txt");
 
@@ -353,10 +353,6 @@ unsafe extern "C" fn m_url_set_valid(url: *mut c_void, valid: i32) {
     unsafe { (*(url as *mut Furl)).valid = valid };
 }
 
-unsafe extern "C" fn m_url_op_clear(url: *mut c_void) {
-    unsafe { (*(url as *mut Furl)).ops.clear() };
-}
-
 unsafe extern "C" fn m_url_op_push(url: *mut c_void, chars: *const TChar) {
     let v = unsafe { read_wide(chars) };
     unsafe { (*(url as *mut Furl)).ops.push(v) };
@@ -368,41 +364,414 @@ unsafe extern "C" fn m_url_op_set(url: *mut c_void, index: i32, chars: *const TC
     f.ops[index as usize] = v;
 }
 
-unsafe extern "C" fn m_fstr_set(s: *mut c_void, chars: *const TChar) {
-    let v = unsafe { read_wide(chars) };
-    unsafe { *(s as *mut Wide) = v };
-}
-
 unsafe extern "C" fn m_log_default_option(chars: *const TChar) {
     let entry = format!("URL: Adding default option {}", unsafe { narrow(chars) });
     with_mock(|m| m.trace.push(entry));
 }
 
+// Fixture-only native-storage model. This is not native boundary acceptance evidence.
 fn services() -> UrlServices {
     UrlServices {
-        static_chars: m_static_chars,
-        static_set_chars: m_static_set_chars,
-        default_port: m_default_port,
-        default_port_set: m_default_port_set,
-        config_get_str: m_config_get_str,
-        config_get_section: m_config_get_section,
-        config_set_string: m_config_set_string,
-        str_icmp: m_str_icmp,
-        str_nicmp: m_str_nicmp,
-        str_atoi: m_str_atoi,
-        url_field: m_url_field,
-        url_port: m_url_port,
-        url_valid: m_url_valid,
-        url_op_count: m_url_op_count,
-        url_op: m_url_op,
-        url_set_field: m_url_set_field,
-        url_set_port: m_url_set_port,
-        url_set_valid: m_url_set_valid,
-        url_op_clear: m_url_op_clear,
-        url_op_push: m_url_op_push,
-        url_op_set: m_url_op_set,
-        fstr_set: m_fstr_set,
-        log_default_option: m_log_default_option,
+        call: replay_call,
+        scope: replay_scope,
+    }
+}
+fn literal(id: usize) -> *const TChar {
+    use std::sync::OnceLock;
+    static TEXT: OnceLock<Vec<Wide>> = OnceLock::new();
+    TEXT.get_or_init(|| {
+        [
+            "",
+            "Protocol",
+            "ProtocolDescription",
+            "Name",
+            "Map",
+            "LocalMap",
+            "Host",
+            "Portal",
+            "MapExt",
+            "SaveExt",
+            ":",
+            "//",
+            "/",
+            "?",
+            "PUSH",
+            "POP",
+            "PEER",
+            "LOAD",
+            "Name=",
+            "Team=",
+            "Class=",
+            "Skin=",
+            "Face=",
+            "Voice=",
+            "OverrideClass=",
+            "#",
+        ]
+        .map(wide)
+        .to_vec()
+    })[id]
+        .as_ptr()
+}
+unsafe fn finish(value: std::result::Result<usize, i32>, out: *mut usize) -> i32 {
+    match value {
+        Ok(v) => {
+            unsafe {
+                *out = v;
+            }
+            0
+        }
+        Err(s) => s,
+    }
+}
+unsafe extern "C" fn replay_call(
+    op: u32,
+    a: usize,
+    b: usize,
+    c: usize,
+    d: usize,
+    out: *mut usize,
+) -> i32 {
+    use hp2_engine::url::Op;
+    unsafe {
+        *out = 0;
+        match op {
+            x if x == Op::StaticText as u32 => *out = m_static_chars(a as i32) as usize,
+            x if x == Op::StaticSet as u32 => m_static_set_chars(a as i32, b as *const TChar),
+            x if x == Op::DefaultPort as u32 => *out = m_default_port() as usize,
+            x if x == Op::SetDefaultPort as u32 => m_default_port_set(a as i32),
+            x if x == Op::ConfigGet as u32 => {
+                *out = m_config_get_str(wide("URL").as_ptr(), wide(CFG_KEYS[a]).as_ptr()) as usize
+            }
+            x if x == Op::ConfigSet as u32 => m_config_set_string(a as _, b as _, c as _, d as _),
+            x if x == Op::Icmp as u32 => *out = m_str_icmp(a as _, b as _) as usize,
+            x if x == Op::Nicmp as u32 => *out = m_str_nicmp(a as _, b as _, c as i32) as usize,
+            x if x == Op::Cmp as u32 => *out = usize::from(narrow(a as _) != narrow(b as _)),
+            x if x == Op::Atoi as u32 => *out = m_str_atoi(a as _) as usize,
+            x if x == Op::Len as u32 => *out = read_wide(a as _).len() - 1,
+            x if x == Op::Chr as u32 => {
+                let mut p = a as *const TChar;
+                loop {
+                    if *p == b as TChar {
+                        *out = p as usize;
+                        break;
+                    }
+                    if *p == 0 {
+                        break;
+                    }
+                    p = p.add(1);
+                }
+            }
+            x if x == Op::Char as u32 => *out = *(a as *const TChar) as usize,
+            x if x == Op::SetChar as u32 => *(a as *mut TChar) = b as TChar,
+            x if x == Op::Field as u32 => *out = m_url_field(a as _, b as i32) as usize,
+            x if x == Op::SetField as u32 => m_url_set_field(a as _, b as i32, c as _),
+            x if x == Op::Port as u32 => *out = m_url_port(a as _) as usize,
+            x if x == Op::SetPort as u32 => m_url_set_port(a as _, b as i32),
+            x if x == Op::Count as u32 => *out = m_url_op_count(a as _) as usize,
+            x if x == Op::Option as u32 => *out = m_url_op(a as _, b as i32) as usize,
+            x if x == Op::Push as u32 => m_url_op_push(a as _, b as _),
+            x if x == Op::SetOption as u32 => m_url_op_set(a as _, b as i32, c as _),
+            x if x == Op::Reset as u32 => *(a as *mut Furl) = trivial(None),
+            x if x == Op::SetValid as u32 => m_url_set_valid(a as _, b as i32),
+            x if x == Op::Append as u32 => {
+                let text = read_wide(b as _);
+                let target = &mut *(a as *mut Wide);
+                target.pop();
+                target.extend(text);
+            }
+            x if x == Op::AppendPort as u32 => {
+                let text = wide(&m_url_port(b as _).to_string());
+                let target = &mut *(a as *mut Wide);
+                target.pop();
+                target.extend(text);
+            }
+            x if x == Op::LogDefault as u32 => m_log_default_option(a as _),
+            x if x == Op::Internal as u32 => {
+                return finish(
+                    checked_url::run(
+                        &services(),
+                        4,
+                        &UrlArgs {
+                            url: a,
+                            ..UrlArgs::default()
+                        },
+                    ),
+                    out,
+                );
+            }
+            x if x == Op::AddOption as u32 => {
+                return finish(
+                    checked_url::run(
+                        &services(),
+                        6,
+                        &UrlArgs {
+                            url: a,
+                            text: b,
+                            ..UrlArgs::default()
+                        },
+                    ),
+                    out,
+                );
+            }
+            x if x == Op::GetOption as u32 => {
+                return finish(
+                    checked_url::run(
+                        &services(),
+                        10,
+                        &UrlArgs {
+                            url: a,
+                            text: b,
+                            extra: c,
+                            ..UrlArgs::default()
+                        },
+                    ),
+                    out,
+                );
+            }
+            x if x == Op::Literal as u32 => *out = literal(a) as usize,
+            x if x == Op::CopyField as u32 => {
+                m_url_set_field(a as _, c as i32, m_url_field(b as _, c as i32))
+            }
+            x if x == Op::CopyOption as u32 => m_url_op_push(a as _, m_url_op(b as _, c as i32)),
+            x if x == Op::FieldBool as u32 => {
+                *out = usize::from(!narrow(m_url_field(a as _, b as i32)).is_empty())
+            }
+            x if x == Op::FieldLen as u32 => {
+                *out = read_wide(m_url_field(a as _, b as i32)).len() - 1
+            }
+            x if x == Op::StaticLen as u32 => *out = read_wide(m_static_chars(a as i32)).len() - 1,
+            x if x == Op::CopyStaticField as u32 => {
+                m_url_set_field(a as _, b as i32, m_static_chars(c as i32))
+            }
+            x if x == Op::CheckBase as u32 => {
+                if a == 0 {
+                    return -1;
+                }
+            }
+            x if x == Op::MatchLength as u32 => *out = (a - b) / std::mem::size_of::<TChar>() + 1,
+            _ => return -1,
+        }
+        0
+    }
+}
+unsafe extern "C" fn replay_scope(entry: u32, args: *const UrlArgs, out: *mut usize) -> i32 {
+    unsafe {
+        let a = &*args;
+        match entry {
+            1 => {
+                let text = read_wide(a.text as _);
+                let mut temp = [0 as TChar; 1024];
+                let n = (text.len() - 1).min(1023);
+                temp[..n].copy_from_slice(&text[..n]);
+                finish(
+                    checked_url::resume(&services(), entry, a, temp.as_mut_ptr() as usize),
+                    out,
+                )
+            }
+            2 => {
+                // Fixture GetSection always writes a terminator; production preserves native uninitialized bytes.
+                let mut text = [0 as TChar; 32767];
+                m_config_get_section(a.text as _, text.as_mut_ptr(), 32767, a.extra as _);
+                finish(
+                    checked_url::resume(&services(), entry, a, text.as_mut_ptr() as usize),
+                    out,
+                )
+            }
+            3 => {
+                let text = read_wide(m_url_op(a.url as _, a.other as i32));
+                let mut temp = [0 as TChar; 1024];
+                temp[..text.len()].copy_from_slice(&text);
+                finish(
+                    checked_url::resume(&services(), entry, a, temp.as_mut_ptr() as usize),
+                    out,
+                )
+            }
+            4 => {
+                let text = read_wide(m_url_op(a.other as _, a.text as i32));
+                let len = text
+                    .iter()
+                    .position(|&v| v == b'=' as TChar)
+                    .unwrap_or(text.len() - 1);
+                let mut name = [0 as TChar; 100];
+                name[..len].copy_from_slice(&text[..len]);
+                finish(
+                    checked_url::resume(&services(), entry, a, name.as_mut_ptr() as usize),
+                    out,
+                )
+            }
+            _ => -1,
+        }
+    }
+}
+mod url {
+    use super::*;
+    pub use checked_url::file_path_to_token;
+    unsafe fn run(s: &UrlServices, e: u32, a: UrlArgs) -> usize {
+        unsafe { checked_url::run(s, e, &a).expect("checked URL fixture") }
+    }
+    pub unsafe fn static_init(s: &UrlServices) {
+        unsafe {
+            run(s, 0, UrlArgs::default());
+        }
+    }
+    pub unsafe fn static_exit(s: &UrlServices) {
+        unsafe {
+            run(s, 1, UrlArgs::default());
+        }
+    }
+    pub unsafe fn construct(
+        s: &UrlServices,
+        u: *mut c_void,
+        b: *const c_void,
+        t: *const TChar,
+        ty: i32,
+    ) {
+        unsafe {
+            *(u as *mut Furl) = trivial(None);
+            run(
+                s,
+                2,
+                UrlArgs {
+                    url: u as usize,
+                    other: b as usize,
+                    text: t as usize,
+                    mode: ty as usize,
+                    ..UrlArgs::default()
+                },
+            );
+        }
+    }
+    pub unsafe fn string(s: &UrlServices, u: *const c_void, full: bool, out: *mut c_void) {
+        unsafe {
+            run(
+                s,
+                3,
+                UrlArgs {
+                    url: u as usize,
+                    mode: usize::from(full),
+                    output: out as usize,
+                    ..UrlArgs::default()
+                },
+            );
+        }
+    }
+    pub unsafe fn is_internal(s: &UrlServices, u: *const c_void) -> bool {
+        unsafe {
+            run(
+                s,
+                4,
+                UrlArgs {
+                    url: u as usize,
+                    ..UrlArgs::default()
+                },
+            ) != 0
+        }
+    }
+    pub unsafe fn is_local_internal(s: &UrlServices, u: *const c_void) -> bool {
+        unsafe {
+            run(
+                s,
+                5,
+                UrlArgs {
+                    url: u as usize,
+                    ..UrlArgs::default()
+                },
+            ) != 0
+        }
+    }
+    pub unsafe fn add_option(s: &UrlServices, u: *mut c_void, t: *const TChar) {
+        unsafe {
+            run(
+                s,
+                6,
+                UrlArgs {
+                    url: u as usize,
+                    text: t as usize,
+                    ..UrlArgs::default()
+                },
+            );
+        }
+    }
+    pub unsafe fn load_config(s: &UrlServices, u: *mut c_void, t: *const TChar, f: *const TChar) {
+        unsafe {
+            run(
+                s,
+                7,
+                UrlArgs {
+                    url: u as usize,
+                    text: t as usize,
+                    extra: f as usize,
+                    ..UrlArgs::default()
+                },
+            );
+        }
+    }
+    pub unsafe fn save_config(
+        s: &UrlServices,
+        u: *const c_void,
+        t: *const TChar,
+        item: *const TChar,
+        f: *const TChar,
+    ) {
+        unsafe {
+            run(
+                s,
+                8,
+                UrlArgs {
+                    url: u as usize,
+                    text: t as usize,
+                    extra: item as usize,
+                    output: f as usize,
+                    ..UrlArgs::default()
+                },
+            );
+        }
+    }
+    pub unsafe fn has_option(s: &UrlServices, u: *const c_void, t: *const TChar) -> bool {
+        unsafe {
+            run(
+                s,
+                9,
+                UrlArgs {
+                    url: u as usize,
+                    text: t as usize,
+                    ..UrlArgs::default()
+                },
+            ) != 0
+        }
+    }
+    pub unsafe fn get_option(
+        s: &UrlServices,
+        u: *const c_void,
+        t: *const TChar,
+        d: *const TChar,
+    ) -> *const TChar {
+        unsafe {
+            run(
+                s,
+                10,
+                UrlArgs {
+                    url: u as usize,
+                    text: t as usize,
+                    extra: d as usize,
+                    ..UrlArgs::default()
+                },
+            ) as _
+        }
+    }
+    pub unsafe fn equal(s: &UrlServices, a: *const c_void, b: *const c_void) -> bool {
+        unsafe {
+            run(
+                s,
+                11,
+                UrlArgs {
+                    url: a as usize,
+                    other: b as usize,
+                    ..UrlArgs::default()
+                },
+            ) != 0
+        }
     }
 }
 
@@ -545,14 +914,14 @@ fn install(svc: &UrlServices, rec: &Rec) {
 }
 
 /// Reads the option list through the services.
-fn op_list(svc: &UrlServices, p: *const c_void) -> Vec<String> {
+fn op_list(_svc: &UrlServices, p: *const c_void) -> Vec<String> {
     unsafe {
-        let count = (svc.url_op_count)(p);
-        (0..count).map(|i| narrow((svc.url_op)(p, i))).collect()
+        let count = m_url_op_count(p);
+        (0..count).map(|i| narrow(m_url_op(p, i))).collect()
     }
 }
 
-/// `FURL::String(FullyQualified)` read back through `fstr_set`.
+/// `FURL::String(FullyQualified)` read back through checked append primitives.
 fn out_string(svc: &UrlServices, p: *const c_void, fully_qualified: bool) -> String {
     let mut out: Wide = wide("");
     unsafe {
@@ -569,12 +938,12 @@ fn out_string(svc: &UrlServices, p: *const c_void, fully_qualified: bool) -> Str
 /// The `emit_state` fields, read through the services.
 fn state_fields(svc: &UrlServices, p: *const c_void) -> Vec<(&'static str, String)> {
     unsafe {
-        let text = |id: i32| g(&narrow((svc.url_field)(p, id)));
+        let text = |id: i32| g(&narrow(m_url_field(p, id)));
         vec![
-            ("VALID", (svc.url_valid)(p).to_string()),
+            ("VALID", m_url_valid(p).to_string()),
             ("PROTOCOL", text(FIELD_PROTOCOL)),
             ("HOST", text(FIELD_HOST)),
-            ("PORT", (svc.url_port)(p).to_string()),
+            ("PORT", m_url_port(p).to_string()),
             ("MAP", text(FIELD_MAP)),
             ("PORTAL", text(FIELD_PORTAL)),
             ("OPS", gl(&op_list(svc, p))),
@@ -701,11 +1070,11 @@ fn replay_x(svc: &UrlServices, rec: &Rec) -> Vec<(&'static str, String)> {
     let mut out: Vec<(&'static str, String)> = DEFAULT_FIELDS
         .iter()
         .map(|&(key, id)| {
-            let chars = unsafe { (svc.static_chars)(id) };
+            let chars = unsafe { m_static_chars(id) };
             (key, g(&unsafe { narrow(chars) }))
         })
         .collect();
-    out.push(("DEF_PORT", unsafe { (svc.default_port)() }.to_string()));
+    out.push(("DEF_PORT", unsafe { m_default_port() }.to_string()));
     out
 }
 

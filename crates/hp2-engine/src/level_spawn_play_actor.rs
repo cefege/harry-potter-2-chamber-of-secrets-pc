@@ -106,12 +106,12 @@ struct NativeBackend<'a> {
 impl Backend for NativeBackend<'_> {
     type Error = i32;
     fn invalid_entry(&self) -> Self::Error { 1 }
-    fn call(&self, op: Op, a: usize, b: usize) -> Result {
+    fn call(&self, op: Op, a: usize, b: usize) -> std::result::Result<usize, i32> {
         let mut out = 0;
         let status = unsafe { (self.services.call)(self.context, op as u32, a, b, &mut out) };
         if status == 0 { Ok(out) } else { Err(status) }
     }
-    fn scope(&self, entry: u32, arg: usize) -> Result {
+    fn scope(&self, entry: u32, arg: usize) -> std::result::Result<usize, i32> {
         let mut out = 0;
         let status = unsafe { (self.services.scope)(self.context, entry, arg, &mut out) };
         if status == 0 { Ok(out) } else { Err(status) }
@@ -361,7 +361,7 @@ pub unsafe fn run(
     context: *mut c_void,
     entry: u32,
     arg: usize,
-) -> Result {
+) -> std::result::Result<usize, i32> {
     let backend = NativeBackend { services: unsafe { &*services }, context };
     run_with(&backend, entry, arg)
 }

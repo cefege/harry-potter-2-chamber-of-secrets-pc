@@ -86,8 +86,7 @@ pub struct Hp2UrenServices {
     pub globals: *const Hp2UrenGlobals,
 
     /// `GRenderServices` (`Render/Inc/Render.h:231`, filled in `Render/Src/Render.cpp:108`).
-    /// Provides `frand` (`appFrand`), `mem_push`, `mem_mark_save`, `mem_mark_pop`,
-    /// and `log_warning`. Those are not duplicated in this table.
+    /// Provides the shared RNG, warning device, and math accessors.
     pub render: *const Hp2RenderServices,
 
     /// Forwards to `appSeconds().GetFloat()` (`Core/Inc/UnFile.h:275`, `FTime`).
@@ -137,8 +136,8 @@ pub struct Hp2UrenServices {
     pub cache_id_word:
         unsafe extern "C" fn(base: u32, word: u32, byte: u32, frame: *const c_void) -> u64,
 
-    /// Virtual dispatch: `item->Filter(Viewport, Frame, iNode, Outside)` on an
-    /// `FDynamicItem*` (`Render/Inc/Render.h:115`). Pointers are C++ objects.
+    /// Enters Rust tagged-node filter dispatch through its native leaf context.
+    /// `item` borrows Rust frame-scope storage, never a polymorphic C++ object.
     pub dyn_filter: unsafe extern "C" fn(
         item: *mut c_void,
         viewport: *mut c_void,
@@ -146,8 +145,7 @@ pub struct Hp2UrenServices {
         i_node: i32,
         outside: i32,
     ),
-    /// Virtual dispatch: `item->PreRender(Viewport, Frame, SpanBuffer, iNode, Volumetrics)`
-    /// (`Render/Inc/Render.h:116`).
+    /// Enters Rust final-chunk prerender dispatch with typed span leaves.
     pub dyn_pre_render: unsafe extern "C" fn(
         item: *mut c_void,
         viewport: *mut c_void,

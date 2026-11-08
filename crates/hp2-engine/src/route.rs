@@ -15,6 +15,7 @@ use hp2_abi::engine::generated::{
 };
 
 use crate::math::{app_round, app_sqrt};
+use crate::native_guard::guarded;
 use crate::reach::{R_FLY, R_SWIM};
 use crate::vec;
 
@@ -53,77 +54,259 @@ const LOG_1000_SEARCHED: i32 = 3;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Hp2RouteServices {
-    /// `appFrand()`.
-    pub app_frand: unsafe extern "C" fn() -> f32,
-    /// `ULevel::FarMoveActor(actor, dest, test, noCheck)`.
+    pub app_frand: unsafe extern "C" fn(out: *mut f32) -> i32,
     pub far_move_actor: unsafe extern "C" fn(
         level: *mut c_void,
         actor: *mut c_void,
         dest: *const c_void,
         test: i32,
         no_check: i32,
+        out: *mut i32,
     ) -> i32,
-    /// `APawn::pointReachable(point, knowVisible)`.
-    pub point_reachable:
-        unsafe extern "C" fn(pawn: *mut c_void, point: *const c_void, know_visible: i32) -> i32,
-    /// `APawn::actorReachable(other, knowVisible)`.
-    pub actor_reachable:
-        unsafe extern "C" fn(pawn: *mut c_void, other: *mut c_void, know_visible: i32) -> i32,
-    /// `((APawn*)goal)->jumpLanding(goal->Velocity, *dest)`.
-    pub goal_jump_landing: unsafe extern "C" fn(goal: *mut c_void, dest: *mut c_void),
-    /// `UModel::FastLineCheck(end, start)`.
-    pub model_fast_line_check:
-        unsafe extern "C" fn(model: *mut c_void, end: *const c_void, start: *const c_void) -> u8,
-    /// `ULevel::SingleLineCheck(Hit, source, end, start, TRACE_VisBlocking)`;
-    /// returns `Hit.Actor`.
+    pub point_reachable: unsafe extern "C" fn(
+        pawn: *mut c_void,
+        point: *const c_void,
+        know: i32,
+        out: *mut i32,
+    ) -> i32,
+    pub actor_reachable: unsafe extern "C" fn(
+        pawn: *mut c_void,
+        other: *mut c_void,
+        know: i32,
+        out: *mut i32,
+    ) -> i32,
+    pub model_fast_line_check: unsafe extern "C" fn(
+        model: *mut c_void,
+        end: *const c_void,
+        start: *const c_void,
+        out: *mut u8,
+    ) -> i32,
     pub single_line_hit_actor: unsafe extern "C" fn(
         level: *mut c_void,
         source: *mut c_void,
         end: *const c_void,
         start: *const c_void,
-    ) -> *mut c_void,
-    /// `ULevel::GetLevelInfo()->NavigationPointList`.
-    pub navigation_point_list: unsafe extern "C" fn(level: *mut c_void) -> *mut c_void,
-    /// `actor->IsA(class)` for the `CLASS_*` codes above.
-    pub actor_is_a: unsafe extern "C" fn(actor: *mut c_void, kind: i32) -> i32,
-    /// `((AMover*)mover)->bPlayerOnly`.
-    pub mover_player_only: unsafe extern "C" fn(mover: *mut c_void) -> i32,
-    /// `((ANavigationPoint*)node)->eventSpecialCost(seeker)`.
-    pub event_special_cost: unsafe extern "C" fn(node: *mut c_void, seeker: *mut c_void) -> i32,
-    /// `((AInventory*)item)->IsProbing(NAME_Touch)`.
-    pub item_is_probing_touch: unsafe extern "C" fn(item: *mut c_void) -> i32,
-    /// `((AInventory*)item)->eventBotDesireability(bot)`.
-    pub item_bot_desirability: unsafe extern "C" fn(item: *mut c_void, bot: *mut c_void) -> f32,
-    /// `actor->GetFName().GetIndex()`.
-    pub actor_name_index: unsafe extern "C" fn(actor: *mut c_void) -> i32,
-    /// `actor->GetClass()` (identity only).
-    pub actor_class: unsafe extern "C" fn(actor: *mut c_void) -> *mut c_void,
-    /// Engine `debugf` with the actor's name (kinds `LOG_*`).
-    pub log_actor: unsafe extern "C" fn(kind: i32, actor: *mut c_void),
+        out: *mut *mut c_void,
+    ) -> i32,
+    pub navigation_point_list:
+        unsafe extern "C" fn(level: *mut c_void, out: *mut *mut c_void) -> i32,
+    pub actor_is_a: unsafe extern "C" fn(actor: *mut c_void, kind: i32, out: *mut i32) -> i32,
+    pub mover_player_only: unsafe extern "C" fn(mover: *mut c_void, out: *mut i32) -> i32,
+    pub event_special_cost:
+        unsafe extern "C" fn(node: *mut c_void, seeker: *mut c_void, out: *mut i32) -> i32,
+    pub item_is_probing_touch: unsafe extern "C" fn(item: *mut c_void, out: *mut i32) -> i32,
+    pub item_bot_desirability:
+        unsafe extern "C" fn(item: *mut c_void, bot: *mut c_void, out: *mut f32) -> i32,
+    pub actor_name_index: unsafe extern "C" fn(actor: *mut c_void, out: *mut i32) -> i32,
+    pub actor_class: unsafe extern "C" fn(actor: *mut c_void, out: *mut *mut c_void) -> i32,
+    pub log_actor: unsafe extern "C" fn(kind: i32, actor: *mut c_void) -> i32,
+    pub lists: unsafe extern "C" fn(
+        i32,
+        *mut c_void,
+        unsafe extern "C" fn(*mut c_void, *mut Hp2SortedPathList, *mut Hp2SortedPathList) -> i32,
+    ) -> i32,
+}
+impl Hp2RouteServices {
+    unsafe fn app_frand(&self) -> RouteResult<f32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<f32>::uninit();
+            status((self.app_frand)(out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn far_move_actor(
+        &self,
+        level: *mut c_void,
+        actor: *mut c_void,
+        dest: *const c_void,
+        test: i32,
+        no_check: i32,
+    ) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.far_move_actor)(
+                level,
+                actor,
+                dest,
+                test,
+                no_check,
+                out.as_mut_ptr(),
+            ))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn point_reachable(
+        &self,
+        pawn: *mut c_void,
+        point: *const c_void,
+        know: i32,
+    ) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.point_reachable)(pawn, point, know, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn actor_reachable(
+        &self,
+        pawn: *mut c_void,
+        other: *mut c_void,
+        know: i32,
+    ) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.actor_reachable)(pawn, other, know, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn model_fast_line_check(
+        &self,
+        model: *mut c_void,
+        end: *const c_void,
+        start: *const c_void,
+    ) -> RouteResult<u8> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<u8>::uninit();
+            status((self.model_fast_line_check)(
+                model,
+                end,
+                start,
+                out.as_mut_ptr(),
+            ))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn single_line_hit_actor(
+        &self,
+        level: *mut c_void,
+        source: *mut c_void,
+        end: *const c_void,
+        start: *const c_void,
+    ) -> RouteResult<*mut c_void> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<*mut c_void>::uninit();
+            status((self.single_line_hit_actor)(
+                level,
+                source,
+                end,
+                start,
+                out.as_mut_ptr(),
+            ))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn navigation_point_list(&self, level: *mut c_void) -> RouteResult<*mut c_void> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<*mut c_void>::uninit();
+            status((self.navigation_point_list)(level, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn actor_is_a(&self, actor: *mut c_void, kind: i32) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.actor_is_a)(actor, kind, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn mover_player_only(&self, mover: *mut c_void) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.mover_player_only)(mover, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn event_special_cost(
+        &self,
+        node: *mut c_void,
+        seeker: *mut c_void,
+    ) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.event_special_cost)(node, seeker, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn item_is_probing_touch(&self, item: *mut c_void) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.item_is_probing_touch)(item, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn item_bot_desirability(
+        &self,
+        item: *mut c_void,
+        bot: *mut c_void,
+    ) -> RouteResult<f32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<f32>::uninit();
+            status((self.item_bot_desirability)(item, bot, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn actor_name_index(&self, actor: *mut c_void) -> RouteResult<i32> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<i32>::uninit();
+            status((self.actor_name_index)(actor, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn actor_class(&self, actor: *mut c_void) -> RouteResult<*mut c_void> {
+        unsafe {
+            let mut out = std::mem::MaybeUninit::<*mut c_void>::uninit();
+            status((self.actor_class)(actor, out.as_mut_ptr()))?;
+            Ok(out.assume_init())
+        }
+    }
+    unsafe fn log_actor(&self, kind: i32, actor: *mut c_void) -> RouteResult<()> {
+        unsafe {
+            status((self.log_actor)(kind, actor))?;
+            Ok(())
+        }
+    }
+}
+
+/// Stored once by [`publish_services`]; lets other slices' leaves call the
+/// route hubs directly instead of round-tripping through an `APawn` shell.
+static mut ROUTE_SERVICES: Option<&'static Hp2RouteServices> = None;
+
+/// Store the C++ table.
+///
+/// # Safety
+/// `services` is the program-lifetime `GHp2RouteServices`. Publication
+/// happens once during static initialization, before any engine call.
+pub unsafe fn publish_services(services: &'static Hp2RouteServices) {
+    unsafe { (&raw mut ROUTE_SERVICES).write(Some(services)) };
+}
+
+/// The table stored by [`publish_services`]; `Err(1)` before publication.
+///
+/// # Safety
+/// No concurrent [`publish_services`].
+pub unsafe fn published_services() -> RouteResult<&'static Hp2RouteServices> {
+    unsafe { (&raw const ROUTE_SERVICES).read().ok_or(1) }
+}
+
+pub type RouteResult<T> = Result<T, i32>;
+
+fn status(code: i32) -> RouteResult<()> {
+    if code == 0 { Ok(()) } else { Err(code) }
 }
 
 /// `FSortedPathList` (`UnPath.h`). Same layout as the C++ class so the C++
 /// methods can forward `this`.
+///
+/// Native storage initializes only `num_points` and the populated array prefix.
+/// Keep it behind raw pointers: never borrow or copy the complete struct, read
+/// `check_pos`, or load a tail element. The scalar field types retain the native
+/// C header layout; they do not imply the whole allocation is initialized.
 #[repr(C)]
-#[derive(Clone, Copy)]
 pub struct Hp2SortedPathList {
     pub path: [*mut c_void; 32],
     pub dist: [i32; 32],
     pub num_points: i32,
     pub check_pos: i32,
-}
-
-impl Hp2SortedPathList {
-    /// Zeroed list (the C++ leaves these uninitialized; only the `numPoints`
-    /// prefix is ever read).
-    pub fn empty() -> Self {
-        Self {
-            path: [ptr::null_mut(); 32],
-            dist: [0; 32],
-            num_points: 0,
-            check_pos: 0,
-        }
-    }
 }
 
 /// `FVector::operator|` (dot product) with the `vec::size_squared` FMA
@@ -193,8 +376,8 @@ unsafe fn level_of(pawn: *const APawn) -> *mut ULevel {
 ///
 /// # Safety
 /// `s` must be valid; `actor` must be non-null.
-unsafe fn is_a(s: &Hp2RouteServices, actor: *mut c_void, class: i32) -> bool {
-    unsafe { (s.actor_is_a)(actor, class) != 0 }
+unsafe fn is_a(s: &Hp2RouteServices, actor: *mut c_void, class: i32) -> RouteResult<bool> {
+    unsafe { Ok(s.actor_is_a(actor, class)? != 0) }
 }
 
 /// `ULevel::SingleLineCheck(Hit, source, end, start)` returning `Hit.Actor`.
@@ -207,8 +390,8 @@ unsafe fn single_line_hit(
     source: *mut APawn,
     end: *const FVector,
     start: *const FVector,
-) -> *mut c_void {
-    unsafe { (s.single_line_hit_actor)(level.cast(), source.cast(), end.cast(), start.cast()) }
+) -> RouteResult<*mut c_void> {
+    unsafe { Ok(s.single_line_hit_actor(level.cast(), source.cast(), end.cast(), start.cast())?) }
 }
 
 /// `ULevel::FarMoveActor(pawn, dest, test, noCheck)`.
@@ -222,8 +405,8 @@ unsafe fn far_move(
     dest: *const FVector,
     test: i32,
     no_check: i32,
-) -> i32 {
-    unsafe { (s.far_move_actor)(level.cast(), pawn.cast(), dest.cast(), test, no_check) }
+) -> RouteResult<i32> {
+    unsafe { Ok(s.far_move_actor(level.cast(), pawn.cast(), dest.cast(), test, no_check)?) }
 }
 
 /// `ULevel::Model->FastLineCheck(end, start)`.
@@ -235,59 +418,64 @@ unsafe fn fast_line(
     level: *mut ULevel,
     end: *const FVector,
     start: *const FVector,
-) -> bool {
-    unsafe { (s.model_fast_line_check)((*level).model, end.cast(), start.cast()) != 0 }
+) -> RouteResult<bool> {
+    unsafe { Ok(s.model_fast_line_check((*level).model, end.cast(), start.cast())? != 0) }
 }
 
 /// `APawn::pointReachable(point, knowVisible)`.
 ///
 /// # Safety
-/// `s` valid; `pawn` live; `point` a valid vector.
+/// `pawn` live; `point` a valid vector.
 unsafe fn point_reachable(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
     point: *const FVector,
     know: i32,
-) -> bool {
-    unsafe { (s.point_reachable)(pawn.cast(), point.cast(), know) != 0 }
+) -> RouteResult<bool> {
+    unsafe { Ok(s.point_reachable(pawn.cast(), point.cast(), know)? != 0) }
 }
 
 /// `APawn::actorReachable(other, knowVisible)`.
 ///
 /// # Safety
-/// `s` valid; `pawn`/`other` live.
+/// `pawn`/`other` live.
 unsafe fn actor_reachable(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
     other: *mut AActor,
     know: i32,
-) -> bool {
-    unsafe { (s.actor_reachable)(pawn.cast(), other.cast(), know) != 0 }
+) -> RouteResult<bool> {
+    unsafe { Ok(s.actor_reachable(pawn.cast(), other.cast(), know)? != 0) }
 }
 
 /// `ULevel::GetLevelInfo()->NavigationPointList`.
 ///
 /// # Safety
 /// `s` valid; `level` live.
-unsafe fn nav_list(s: &Hp2RouteServices, level: *mut ULevel) -> *mut ANavigationPoint {
-    unsafe { (s.navigation_point_list)(level.cast()).cast() }
+unsafe fn nav_list(s: &Hp2RouteServices, level: *mut ULevel) -> RouteResult<*mut ANavigationPoint> {
+    unsafe { Ok(s.navigation_point_list(level.cast())?.cast()) }
 }
 
 /// `ANavigationPoint::clearPath()` (`UnRoute.cpp`).
 ///
 /// # Safety
 /// `s` valid; `pawn` and `node` live.
-unsafe fn clear_path(s: &Hp2RouteServices, pawn: *mut APawn, node: *mut ANavigationPoint) {
+unsafe fn clear_path(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    node: *mut ANavigationPoint,
+) -> RouteResult<()> {
     unsafe {
         (*node).visited_weight = 10_000_000;
         (*node).next_ordered = ptr::null_mut();
         (*node).prev_ordered = ptr::null_mut();
         (*node).set_b_end_point(false);
         if (*node).b_special_cost() {
-            (*node).cost = (s.event_special_cost)(node.cast(), pawn.cast());
+            (*node).cost = s.event_special_cost(node.cast(), pawn.cast())?;
         } else {
             (*node).cost = (*node).extra_cost;
         }
+        Ok(())
     }
 }
 
@@ -295,14 +483,19 @@ unsafe fn clear_path(s: &Hp2RouteServices, pawn: *mut APawn, node: *mut ANavigat
 ///
 /// # Safety
 /// `s` valid; `pawn` live with a valid `XLevel`.
-pub unsafe fn clear_paths(s: &Hp2RouteServices, pawn: *mut APawn) {
+pub unsafe fn clear_paths(s: &Hp2RouteServices, pawn: *mut APawn) -> RouteResult<()> {
+    unsafe { guarded(c"APawn::clearPaths", || clear_paths_body(s, pawn)) }
+}
+
+unsafe fn clear_paths_body(s: &Hp2RouteServices, pawn: *mut APawn) -> RouteResult<()> {
     unsafe {
         let level = level_of(pawn);
-        let mut nav = nav_list(s, level);
+        let mut nav = nav_list(s, level)?;
         while !nav.is_null() {
-            clear_path(s, pawn, nav);
+            clear_path(s, pawn, nav)?;
             nav = (*nav).next_navigation_point.cast();
         }
+        Ok(())
     }
 }
 
@@ -310,53 +503,52 @@ impl Hp2SortedPathList {
     /// `FSortedPathList::addPath(node, dist)`.
     ///
     /// # Safety
-    /// `self.path` entries are only read below `num_points`.
-    pub unsafe fn add_path(&mut self, node: *mut AActor, dist: i32) {
-        let np = self.num_points;
-        let mut n: i32 = 0;
-        if np > 8 {
-            if dist > self.dist[(np / 2) as usize] {
-                n = np / 2;
-                if np > 16 && dist > self.dist[(n + np / 4) as usize] {
-                    n += np / 4;
+    /// `(*list).path` entries are only read below `num_points`.
+    pub unsafe fn add_path(list: *mut Self, node: *mut AActor, dist: i32) {
+        unsafe {
+            let count = (*list).num_points as usize;
+            let mut at = 0;
+            if count > 8 {
+                if dist > (*list).dist[count / 2] {
+                    at = count / 2;
+                    if count > 16 && dist > (*list).dist[at + count / 4] {
+                        at += count / 4;
+                    }
+                } else if count > 16 && dist > (*list).dist[count / 4] {
+                    at = count / 4;
                 }
-            } else if np > 16 && dist > self.dist[(np / 4) as usize] {
-                n = np / 4;
             }
-        }
-        while n < self.num_points && dist > self.dist[n as usize] {
-            n += 1;
-        }
-        if (n as usize) < MAXSORTED {
-            let mut next_path = self.path[n as usize];
-            let mut next_dist = self.dist[n as usize] as f32;
-            self.path[n as usize] = node.cast();
-            self.dist[n as usize] = dist;
-            if (self.num_points as usize) < MAXSORTED {
-                self.num_points += 1;
+            while at < count && dist > (*list).dist[at] {
+                at += 1;
             }
-            n += 1;
-            while n < self.num_points {
-                let after_path = self.path[n as usize];
-                let after_dist = self.dist[n as usize] as f32;
-                self.path[n as usize] = next_path;
-                self.dist[n as usize] = app_round(next_dist);
-                next_path = after_path;
-                next_dist = after_dist;
-                n += 1;
+            if at == MAXSORTED {
+                return;
             }
+            let end = count.min(MAXSORTED - 1);
+            for index in (at..end).rev() {
+                (*list).path[index + 1] = (*list).path[index];
+                (*list).dist[index + 1] = app_round((*list).dist[index] as f32);
+            }
+            (*list).path[at] = node.cast();
+            (*list).dist[at] = dist;
+            (*list).num_points = (count + 1).min(MAXSORTED) as i32;
         }
     }
 
     /// `FSortedPathList::removePath(p)`.
-    pub fn remove_path(&mut self, p: i32) {
-        let mut n = p;
-        while n < self.num_points - 1 {
-            self.path[n as usize] = self.path[(n + 1) as usize];
-            self.dist[n as usize] = self.dist[(n + 1) as usize];
-            n += 1;
+    ///
+    /// # Safety
+    /// `list` is native storage with an initialized prefix and `p` is in that prefix.
+    pub unsafe fn remove_path(list: *mut Self, p: i32) {
+        unsafe {
+            let mut n = p;
+            while n < (*list).num_points - 1 {
+                (*list).path[n as usize] = (*list).path[(n + 1) as usize];
+                (*list).dist[n as usize] = (*list).dist[(n + 1) as usize];
+                n += 1;
+            }
+            (*list).num_points -= 1;
         }
-        self.num_points -= 1;
     }
 
     /// `FSortedPathList::FindVisiblePaths`.
@@ -365,57 +557,88 @@ impl Hp2SortedPathList {
     /// All pointers must be live engine objects.
     #[allow(clippy::too_many_arguments)] // mirrors FSortedPathList::FindVisiblePaths's C++ signature
     pub unsafe fn find_visible_paths(
-        &mut self,
+        list: *mut Self,
         s: &Hp2RouteServices,
         pawn: *mut APawn,
         dest: FVector,
-        dest_points: &mut Hp2SortedPathList,
+        dest_points: *mut Hp2SortedPathList,
         clear: i32,
-        startanchor: &mut i32,
-        endanchor: &mut i32,
-    ) {
+        startanchor: *mut i32,
+        endanchor: *mut i32,
+    ) -> RouteResult<()> {
+        unsafe {
+            guarded(c"FSortedPathList::FindVisiblePaths", || {
+                Hp2SortedPathList::find_visible_paths_body(
+                    list,
+                    s,
+                    pawn,
+                    dest,
+                    dest_points,
+                    clear,
+                    startanchor,
+                    endanchor,
+                )
+            })
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn find_visible_paths_body(
+        list: *mut Self,
+        s: &Hp2RouteServices,
+        pawn: *mut APawn,
+        dest: FVector,
+        dest_points: *mut Hp2SortedPathList,
+        clear: i32,
+        startanchor: *mut i32,
+        endanchor: *mut i32,
+    ) -> RouteResult<()> {
         unsafe {
             let level = level_of(pawn);
             let a_loc = (*pawn).base.location;
             let a_h = (*pawn).base.collision_height;
             let mt = (*pawn).move_target.cast::<AActor>();
             if !mt.is_null()
-                && is_a(s, mt.cast(), CLASS_NAVIGATION_POINT)
+                && is_a(s, mt.cast(), CLASS_NAVIGATION_POINT)?
                 && fabs((*mt).location.z - a_loc.z) < a_h
             {
                 let mut targ_dir = vec::sub((*mt).location, a_loc);
                 targ_dir.z = 0.0;
                 let mut max_dist = (*pawn).base.collision_radius * (*pawn).base.collision_radius;
-                if (*pawn).b_is_player() && is_a(s, mt.cast(), CLASS_INVENTORY_SPOT) {
+                if (*pawn).b_is_player() && is_a(s, mt.cast(), CLASS_INVENTORY_SPOT)? {
                     max_dist *= 2.0;
                 }
                 if dot(targ_dir, targ_dir) < max_dist {
                     *startanchor = 1;
-                    self.path[0] = mt.cast();
-                    self.dist[0] = 0;
-                    self.num_points = 1;
+                    (*list).path[0] = mt.cast();
+                    (*list).dist[0] = 0;
+                    (*list).num_points = 1;
                 }
             }
 
-            let mut nav = nav_list(s, level);
+            let mut nav = nav_list(s, level)?;
             while !nav.is_null() {
                 if clear != 0 {
-                    clear_path(s, pawn, nav);
+                    clear_path(s, pawn, nav)?;
                 }
                 if *startanchor == 0 {
-                    let dist = app_round(vec::size_squared(vec::sub(a_loc, (*nav).base.location)));
+                    let dist = app_round(vec::size_squared(vec::sub(
+                        (*pawn).base.location,
+                        (*nav).base.location,
+                    )));
                     if dist < 640_000 {
-                        self.add_path(nav.cast(), dist);
+                        Hp2SortedPathList::add_path(list, nav.cast(), dist);
                     }
                 }
                 if *endanchor == 0 {
                     let dist = app_round(vec::size_squared(vec::sub(dest, (*nav).base.location)));
                     if dist < 640_000 {
-                        dest_points.add_path(nav.cast(), dist);
+                        Hp2SortedPathList::add_path(dest_points, nav.cast(), dist);
                     }
                 }
                 nav = (*nav).next_navigation_point.cast();
             }
+            Ok(())
         }
     }
 
@@ -424,35 +647,58 @@ impl Hp2SortedPathList {
     /// # Safety
     /// `pawn` live; list entries below `num_points` are live actors.
     pub unsafe fn find_end_point(
-        &mut self,
+        list: *mut Self,
         s: &Hp2RouteServices,
         pawn: *mut APawn,
-        startanchor: &mut i32,
-    ) -> i32 {
+        startanchor: *mut i32,
+    ) -> RouteResult<i32> {
+        unsafe {
+            guarded(c"FSortedPathList::findEndPoint", || {
+                Hp2SortedPathList::find_end_point_body(list, s, pawn, startanchor)
+            })
+        }
+    }
+
+    unsafe fn find_end_point_body(
+        list: *mut Self,
+        s: &Hp2RouteServices,
+        pawn: *mut APawn,
+        startanchor: *mut i32,
+    ) -> RouteResult<i32> {
         unsafe {
             let level = level_of(pawn);
             let mut view = (*pawn).base.location;
             view.z += (*pawn).base_eye_height;
-            while self.num_points > 0 {
-                let p0: *mut ANavigationPoint = self.path[0].cast();
-                let p0_loc = (*p0).base.location;
-                if fast_line(s, level, &p0_loc, &view) && point_reachable(s, pawn, &p0_loc, 1) {
-                    self.dist[0] = round_sqrt(self.dist[0]);
+            while (*list).num_points > 0 {
+                if fast_line(
+                    s,
+                    level,
+                    &raw const (*(*list).path[0].cast::<AActor>()).location,
+                    &view,
+                )? && point_reachable(
+                    s,
+                    pawn,
+                    &raw const (*(*list).path[0].cast::<AActor>()).location,
+                    1,
+                )? {
+                    (*list).dist[0] = round_sqrt((*list).dist[0]);
                     let a_loc = (*pawn).base.location;
-                    if self.dist[0] < 48.max(app_round((*pawn).base.collision_radius))
-                        && fabs(p0_loc.z - a_loc.z) < (*pawn).base.collision_height
+                    if (*list).dist[0] < 48.max(app_round((*pawn).base.collision_radius))
+                        && fabs((*(*list).path[0].cast::<AActor>()).location.z - a_loc.z)
+                            < (*pawn).base.collision_height
                     {
                         *startanchor = 1;
                     } else {
+                        let p0 = (*list).path[0].cast::<ANavigationPoint>();
                         (*p0).set_b_end_point(true);
-                        (*p0).best_path_weight = self.dist[0];
+                        (*p0).best_path_weight = (*list).dist[0];
                     }
-                    return 1;
+                    return Ok(1);
                 } else {
-                    self.remove_path(0);
+                    Hp2SortedPathList::remove_path(list, 0);
                 }
             }
-            0
+            Ok(0)
         }
     }
 
@@ -461,27 +707,47 @@ impl Hp2SortedPathList {
     /// # Safety
     /// `pawn` live; `path[0]` a live actor.
     pub unsafe fn check_anchor_path(
-        &mut self,
+        list: *mut Self,
         s: &Hp2RouteServices,
         pawn: *mut APawn,
         dest: FVector,
-    ) -> i32 {
+    ) -> RouteResult<i32> {
+        unsafe {
+            guarded(c"FSortedPathList::checkAnchorPath", || {
+                Hp2SortedPathList::check_anchor_path_body(list, s, pawn, dest)
+            })
+        }
+    }
+
+    unsafe fn check_anchor_path_body(
+        list: *mut Self,
+        s: &Hp2RouteServices,
+        pawn: *mut APawn,
+        dest: FVector,
+    ) -> RouteResult<i32> {
         unsafe {
             let level = level_of(pawn);
             let real = (*pawn).base.location;
-            let p0: *mut AActor = self.path[0].cast();
+            let p0: *mut AActor = (*list).path[0].cast();
             let p0_loc = (*p0).location;
             if vec::size_squared(vec::sub(dest, p0_loc)) < 640_000.0
-                && fast_line(s, level, &p0_loc, &dest)
-                && far_move(s, level, pawn, &p0_loc, 1, 0) != 0
+                && fast_line(s, level, &p0_loc, &dest)?
+                && far_move(
+                    s,
+                    level,
+                    pawn,
+                    &raw const (*(*list).path[0].cast::<AActor>()).location,
+                    1,
+                    0,
+                )? != 0
             {
-                if point_reachable(s, pawn, &dest, 0) {
-                    return 1;
+                if point_reachable(s, pawn, &dest, 0)? {
+                    return Ok(1);
                 }
-                far_move(s, level, pawn, &real, 1, 1);
+                far_move(s, level, pawn, &real, 1, 1)?;
             }
-            self.num_points = 1;
-            0
+            (*list).num_points = 1;
+            Ok(0)
         }
     }
 
@@ -489,10 +755,26 @@ impl Hp2SortedPathList {
     ///
     /// # Safety
     /// `pawn` live; `path[0]` a live navigation point.
-    pub unsafe fn expand_anchor(&mut self, s: &Hp2RouteServices, pawn: *mut APawn) {
+    pub unsafe fn expand_anchor(
+        list: *mut Self,
+        s: &Hp2RouteServices,
+        pawn: *mut APawn,
+    ) -> RouteResult<()> {
+        unsafe {
+            guarded(c"FSortedPathList::expandAnchor", || {
+                Hp2SortedPathList::expand_anchor_body(list, s, pawn)
+            })
+        }
+    }
+
+    unsafe fn expand_anchor_body(
+        list: *mut Self,
+        s: &Hp2RouteServices,
+        pawn: *mut APawn,
+    ) -> RouteResult<()> {
         unsafe {
             let level = level_of(pawn);
-            let anchor: *mut ANavigationPoint = self.path[0].cast();
+            let anchor: *mut ANavigationPoint = (*list).path[0].cast();
             (*anchor).cost = 1_000_000;
             let move_flags = calc_move_flags(pawn);
             let i_radius = app_round((*pawn).base.collision_radius);
@@ -510,14 +792,15 @@ impl Hp2SortedPathList {
                             s,
                             level,
                             pawn,
-                            &(*end).base.location,
-                            &(*start).base.location,
-                        );
+                            &raw const (*end).base.location,
+                            &raw const (*start).base.location,
+                        )?;
                         if hit.is_null()
-                            || !is_a(s, hit, CLASS_MOVER)
+                            || !is_a(s, hit, CLASS_MOVER)?
                             || ((*pawn).b_can_open_doors()
-                                && ((*pawn).b_is_player() || (s.mover_player_only)(hit) == 0))
+                                && ((*pawn).b_is_player() || s.mover_player_only(hit)? == 0))
                         {
+                            let end = (*spec).end.cast::<ANavigationPoint>();
                             (*end).set_b_end_point(true);
                             (*end).best_path_weight = (*spec).distance;
                         }
@@ -525,6 +808,7 @@ impl Hp2SortedPathList {
                     j += 1;
                 }
             }
+            Ok(())
         }
     }
 
@@ -533,43 +817,59 @@ impl Hp2SortedPathList {
     /// # Safety
     /// `pawn` live; `best_path` a live actor; list entries below `num_points` live.
     pub unsafe fn find_alt_end_point(
-        &mut self,
+        list: *mut Self,
         s: &Hp2RouteServices,
         pawn: *mut APawn,
-        best_path: &mut *mut AActor,
-    ) {
+        best_path: *mut *mut AActor,
+    ) -> RouteResult<()> {
+        unsafe {
+            guarded(c"FSortedPathList::findAltEndPoint", || {
+                Hp2SortedPathList::find_alt_end_point_body(list, s, pawn, best_path)
+            })
+        }
+    }
+
+    unsafe fn find_alt_end_point_body(
+        list: *mut Self,
+        s: &Hp2RouteServices,
+        pawn: *mut APawn,
+        best_path: *mut *mut AActor,
+    ) -> RouteResult<()> {
         unsafe {
             let level = level_of(pawn);
             let best_dist =
-                (*(self.path[0] as *mut ANavigationPoint)).visited_weight + self.dist[0];
-            let mut alt = Hp2SortedPathList::empty();
-            let a_loc = (*pawn).base.location;
-            for j in 1..self.num_points as usize {
-                let pj: *mut ANavigationPoint = self.path[j].cast();
-                let mut new_dist = round_sqrt(self.dist[j]);
-                new_dist = new_dist.wrapping_add((*pj).visited_weight);
-                let pj_loc = (*pj).base.location;
-                let best_loc = (*(*best_path)).location;
-                if new_dist < best_dist
-                    && fabs(pj_loc.z - a_loc.z) < 120.0
-                    && (dot(vec::sub(pj_loc, a_loc), vec::sub(best_loc, a_loc)) < 0.0
-                        || new_dist
-                            < app_round(0.85_f32 * best_dist as f32)
-                                .max(best_dist.wrapping_sub(150)))
-                {
-                    alt.add_path(pj.cast(), new_dist);
+                (*((*list).path[0] as *mut ANavigationPoint)).visited_weight + (*list).dist[0];
+            with_lists(s, 1, |alt, _unused| {
+                let a_loc = (*pawn).base.location;
+                for j in 1..(*list).num_points as usize {
+                    let pj: *mut ANavigationPoint = (*list).path[j].cast();
+                    let mut new_dist = round_sqrt((*list).dist[j]);
+                    new_dist = new_dist.wrapping_add((*pj).visited_weight);
+                    let pj_loc = (*pj).base.location;
+                    let best_loc = (*(*best_path)).location;
+                    if new_dist < best_dist
+                        && fabs(pj_loc.z - a_loc.z) < 120.0
+                        && (dot(vec::sub(pj_loc, a_loc), vec::sub(best_loc, a_loc)) < 0.0
+                            || new_dist
+                                < app_round(0.85_f32 * best_dist as f32)
+                                    .max(best_dist.wrapping_sub(150)))
+                    {
+                        Hp2SortedPathList::add_path(alt, pj.cast(), new_dist);
+                    }
                 }
-            }
-            let mut view = a_loc;
-            view.z += (*pawn).base_eye_height;
-            for j in 0..alt.num_points as usize {
-                let aj: *mut AActor = alt.path[j].cast();
-                let aj_loc = (*aj).location;
-                if fast_line(s, level, &aj_loc, &view) && point_reachable(s, pawn, &aj_loc, 1) {
-                    *best_path = aj;
-                    return;
+                let mut view = a_loc;
+                view.z += (*pawn).base_eye_height;
+                for j in 0..(*alt).num_points as usize {
+                    let aj: *mut AActor = (*alt).path[j].cast();
+                    let aj_loc = (*aj).location;
+                    if fast_line(s, level, &aj_loc, &view)? && point_reachable(s, pawn, &aj_loc, 1)?
+                    {
+                        *best_path = aj;
+                        return Ok(());
+                    }
                 }
-            }
+                Ok(())
+            })
         }
     }
 }
@@ -583,7 +883,16 @@ pub unsafe fn can_move_to(
     pawn: *mut APawn,
     anchor: *mut AActor,
     dest: *mut AActor,
-) -> i32 {
+) -> RouteResult<i32> {
+    unsafe { guarded(c"APawn::CanMoveTo", || can_move_to_body(s, pawn, anchor, dest)) }
+}
+
+unsafe fn can_move_to_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    anchor: *mut AActor,
+    dest: *mut AActor,
+) -> RouteResult<i32> {
     unsafe {
         let level = level_of(pawn);
         let start: *mut ANavigationPoint = anchor.cast();
@@ -592,9 +901,9 @@ pub unsafe fn can_move_to(
         let move_flags = calc_move_flags(pawn);
         for pass in 0..2 {
             let list: *const [i32; 16] = if pass == 0 {
-                &(*start).paths
+                &raw const (*start).paths
             } else {
-                &(*start).pruned_paths
+                &raw const (*start).pruned_paths
             };
             let mut j: usize = 0;
             while j < 16 {
@@ -608,22 +917,22 @@ pub unsafe fn can_move_to(
                             s,
                             level,
                             pawn,
-                            &(*dest).location,
-                            &(*start).base.location,
-                        );
+                            &raw const (*dest).location,
+                            &raw const (*start).base.location,
+                        )?;
                         if hit.is_null()
-                            || !is_a(s, hit, CLASS_MOVER)
+                            || !is_a(s, hit, CLASS_MOVER)?
                             || ((*pawn).b_can_open_doors()
-                                && ((*pawn).b_is_player() || (s.mover_player_only)(hit) == 0))
+                                && ((*pawn).b_is_player() || s.mover_player_only(hit)? == 0))
                         {
-                            return 1;
+                            return Ok(1);
                         }
                     }
                     j += 1;
                 }
             }
         }
-        0
+        Ok(0)
     }
 }
 
@@ -636,116 +945,141 @@ pub unsafe fn find_path_toward(
     pawn: *mut APawn,
     goal: *mut AActor,
     single: i32,
-    best_path: &mut *mut AActor,
+    best_path: *mut *mut AActor,
     clear: i32,
-) -> i32 {
+) -> RouteResult<i32> {
+    unsafe {
+        guarded(c"APawn::findPathToward", || {
+            find_path_toward_body(s, pawn, goal, single, best_path, clear)
+        })
+    }
+}
+
+unsafe fn find_path_toward_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    goal: *mut AActor,
+    single: i32,
+    best_path: *mut *mut AActor,
+    clear: i32,
+) -> RouteResult<i32> {
     unsafe {
         *best_path = ptr::null_mut();
         if goal.is_null() {
-            return 0;
+            return Ok(0);
         }
         let level = level_of(pawn);
-        if nav_list(s, level).is_null() || (*level).reach_specs.num == 0 {
-            return 0;
+        if nav_list(s, level)?.is_null() || (*level).reach_specs.num == 0 {
+            return Ok(0);
         }
         if (*pawn).base.physics != PHYS_FLYING
-            && is_a(s, goal.cast(), CLASS_PAWN)
+            && is_a(s, goal.cast(), CLASS_PAWN)?
             && (*goal).physics == PHYS_FALLING
         {
             let mut dest = (*goal).location;
-            (s.goal_jump_landing)(goal.cast(), (&mut dest as *mut FVector).cast());
-            return find_path_to(s, pawn, dest, single, best_path, clear);
+            // `((APawn*)Goal)->jumpLanding(Goal->Velocity, dest)`, default `moveActor = 0`.
+            crate::pawn_reach::jump_landing(
+                crate::pawn_reach::published_services()?,
+                goal.cast(),
+                (*goal).velocity,
+                &mut dest,
+                0,
+            )?;
+            return Ok(find_path_to(s, pawn, dest, single, best_path, clear)?);
         }
 
         let real = (*pawn).base.location;
-        let mut end_points = Hp2SortedPathList::empty();
-        let mut dest_points = Hp2SortedPathList::empty();
-        let mut startanchor: i32 = 0;
-        let mut endanchor: i32 = 0;
-        if is_a(s, goal.cast(), CLASS_NAVIGATION_POINT) {
-            endanchor = 1;
-            dest_points.path[0] = goal.cast();
-            dest_points.dist[0] = 0;
-            dest_points.num_points = 1;
-        }
-        end_points.find_visible_paths(
-            s,
-            pawn,
-            (*goal).location,
-            &mut dest_points,
-            clear,
-            &mut startanchor,
-            &mut endanchor,
-        );
-        if end_points.num_points == 0 || dest_points.num_points == 0 {
-            return 0;
-        }
-        if startanchor == 0 && end_points.find_end_point(s, pawn, &mut startanchor) == 0 {
-            far_move(s, level, pawn, &real, 1, 1);
-            return 0;
-        }
-        if startanchor != 0 {
-            if (is_a(s, goal.cast(), CLASS_NAVIGATION_POINT)
-                && can_move_to(s, pawn, end_points.path[0].cast(), goal) != 0)
-                || end_points.check_anchor_path(s, pawn, (*goal).location) != 0
-            {
-                *best_path = if is_a(s, goal.cast(), CLASS_NAVIGATION_POINT) {
-                    goal
-                } else {
-                    end_points.path[0].cast()
-                };
-                far_move(s, level, pawn, &real, 1, 1);
-                return 1;
-            } else {
-                end_points.expand_anchor(s, pawn);
+        with_lists(s, 2, |end_points, dest_points| {
+            let mut startanchor: i32 = 0;
+            let mut endanchor: i32 = 0;
+            if is_a(s, goal.cast(), CLASS_NAVIGATION_POINT)? {
+                endanchor = 1;
+                (*dest_points).path[0] = goal.cast();
+                (*dest_points).dist[0] = 0;
+                (*dest_points).num_points = 1;
             }
-        }
-        if endanchor == 0 {
-            let goal_loc = (*goal).location;
-            let mut j: i32 = 0;
-            while j < dest_points.num_points {
-                let dj: *mut AActor = dest_points.path[j as usize].cast();
-                let dj_loc = (*dj).location;
-                if fast_line(s, level, &goal_loc, &dj_loc)
-                    && far_move(s, level, pawn, &dj_loc, 1, 0) != 0
-                    && actor_reachable(s, pawn, goal, 1)
-                {
-                    endanchor = 1;
-                    dest_points.path[0] = dest_points.path[j as usize];
-                    dest_points.dist[0] = round_sqrt(dest_points.dist[j as usize]);
-                    j = dest_points.num_points;
-                }
-                j += 1;
-            }
-        }
-        if endanchor == 0 && (*pawn).b_hunting() {
-            endanchor = 1;
-        }
-        if endanchor != 0 {
-            let mut new_path: *mut AActor = ptr::null_mut();
-            let move_flags = calc_move_flags(pawn);
-            let d0: *mut ANavigationPoint = dest_points.path[0].cast();
-            (*d0).visited_weight = dest_points.dist[0];
-            if breadth_path_from(
+            Hp2SortedPathList::find_visible_paths(
+                end_points,
                 s,
                 pawn,
-                dest_points.path[0].cast(),
-                &mut new_path,
-                single,
-                move_flags,
-            ) != 0
-            {
-                *best_path = new_path;
-                far_move(s, level, pawn, &real, 1, 1);
-                if startanchor == 0 && single == 0 {
-                    end_points.find_alt_end_point(s, pawn, best_path);
-                }
-                set_route_cache(pawn, (*best_path).cast());
-                return 1;
+                (*goal).location,
+                dest_points,
+                clear,
+                &mut startanchor,
+                &mut endanchor,
+            )?;
+            if (*end_points).num_points == 0 || (*dest_points).num_points == 0 {
+                return Ok(0);
             }
-        }
-        far_move(s, level, pawn, &real, 1, 1);
-        0
+            if startanchor == 0
+                && Hp2SortedPathList::find_end_point(end_points, s, pawn, &mut startanchor)? == 0
+            {
+                far_move(s, level, pawn, &real, 1, 1)?;
+                return Ok(0);
+            }
+            if startanchor != 0 {
+                if (is_a(s, goal.cast(), CLASS_NAVIGATION_POINT)?
+                    && can_move_to(s, pawn, (*end_points).path[0].cast(), goal)? != 0)
+                    || Hp2SortedPathList::check_anchor_path(end_points, s, pawn, (*goal).location)?
+                        != 0
+                {
+                    *best_path = if is_a(s, goal.cast(), CLASS_NAVIGATION_POINT)? {
+                        goal
+                    } else {
+                        (*end_points).path[0].cast()
+                    };
+                    far_move(s, level, pawn, &real, 1, 1)?;
+                    return Ok(1);
+                } else {
+                    Hp2SortedPathList::expand_anchor(end_points, s, pawn)?;
+                }
+            }
+            if endanchor == 0 {
+                let mut j: i32 = 0;
+                while j < (*dest_points).num_points {
+                    let dj: *mut AActor = (*dest_points).path[j as usize].cast();
+                    let dj_loc = (*dj).location;
+                    if fast_line(s, level, &raw const (*goal).location, &dj_loc)?
+                        && far_move(s, level, pawn, &raw const (*dj).location, 1, 0)? != 0
+                        && actor_reachable(s, pawn, goal, 1)?
+                    {
+                        endanchor = 1;
+                        (*dest_points).path[0] = (*dest_points).path[j as usize];
+                        (*dest_points).dist[0] = round_sqrt((*dest_points).dist[j as usize]);
+                        j = (*dest_points).num_points;
+                    }
+                    j += 1;
+                }
+            }
+            if endanchor == 0 && (*pawn).b_hunting() {
+                endanchor = 1;
+            }
+            if endanchor != 0 {
+                let mut new_path: *mut AActor = ptr::null_mut();
+                let move_flags = calc_move_flags(pawn);
+                let d0: *mut ANavigationPoint = (*dest_points).path[0].cast();
+                (*d0).visited_weight = (*dest_points).dist[0];
+                if breadth_path_from(
+                    s,
+                    pawn,
+                    (*dest_points).path[0].cast(),
+                    &mut new_path,
+                    single,
+                    move_flags,
+                )? != 0
+                {
+                    *best_path = new_path;
+                    far_move(s, level, pawn, &real, 1, 1)?;
+                    if startanchor == 0 && single == 0 {
+                        Hp2SortedPathList::find_alt_end_point(end_points, s, pawn, best_path)?;
+                    }
+                    set_route_cache(pawn, (*best_path).cast());
+                    return Ok(1);
+                }
+            }
+            far_move(s, level, pawn, &real, 1, 1)?;
+            Ok(0)
+        })
     }
 }
 
@@ -756,69 +1090,87 @@ pub unsafe fn find_path_toward(
 pub unsafe fn find_path_toward_best_inventory(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
-    best_path: &mut *mut AActor,
+    best_path: *mut *mut AActor,
     clear: i32,
     min_weight: f32,
     predict: i32,
-) -> f32 {
+) -> RouteResult<f32> {
+    unsafe {
+        guarded(c"APawn::findPathTowardBestInventory", || {
+            find_path_toward_best_inventory_body(s, pawn, best_path, clear, min_weight, predict)
+        })
+    }
+}
+
+unsafe fn find_path_toward_best_inventory_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    best_path: *mut *mut AActor,
+    clear: i32,
+    min_weight: f32,
+    predict: i32,
+) -> RouteResult<f32> {
     unsafe {
         *best_path = ptr::null_mut();
         let level = level_of(pawn);
-        if nav_list(s, level).is_null() || (*level).reach_specs.num == 0 {
-            return 0.0;
+        if nav_list(s, level)?.is_null() || (*level).reach_specs.num == 0 {
+            return Ok(0.0);
         }
         let real = (*pawn).base.location;
-        let mut end_points = Hp2SortedPathList::empty();
-        let mut dest_points = Hp2SortedPathList::empty();
-        let mut startanchor: i32 = 0;
-        let mut endanchor: i32 = 1;
-        end_points.find_visible_paths(
-            s,
-            pawn,
-            FVector {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            &mut dest_points,
-            clear,
-            &mut startanchor,
-            &mut endanchor,
-        );
-        if end_points.num_points == 0 {
-            return 0.0;
-        }
-        if startanchor == 0 && end_points.find_end_point(s, pawn, &mut startanchor) == 0 {
-            far_move(s, level, pawn, &real, 1, 1);
-            return 0.0;
-        }
-        if startanchor == 0 {
-            *best_path = end_points.path[0].cast();
-            far_move(s, level, pawn, &real, 1, 1);
-            return 0.00005;
-        }
-        end_points.expand_anchor(s, pawn);
-        let mut new_path: *mut AActor = ptr::null_mut();
-        let move_flags = calc_move_flags(pawn);
-        let p0: *mut ANavigationPoint = end_points.path[0].cast();
-        (*p0).visited_weight = 10.max(end_points.dist[0]);
-        let best_inv = breadth_path_to_inventory(
-            s,
-            pawn,
-            end_points.path[0].cast(),
-            &mut new_path,
-            move_flags,
-            min_weight,
-            predict,
-        );
-        if best_inv > min_weight {
-            *best_path = new_path;
-            set_route_cache(pawn, (*best_path).cast());
-            far_move(s, level, pawn, &real, 1, 1);
-            return best_inv;
-        }
-        far_move(s, level, pawn, &real, 1, 1);
-        0.0
+        with_lists(s, 2, |end_points, dest_points| {
+            let mut startanchor: i32 = 0;
+            let mut endanchor: i32 = 1;
+            Hp2SortedPathList::find_visible_paths(
+                end_points,
+                s,
+                pawn,
+                FVector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                dest_points,
+                clear,
+                &mut startanchor,
+                &mut endanchor,
+            )?;
+            if (*end_points).num_points == 0 {
+                return Ok(0.0);
+            }
+            if startanchor == 0
+                && Hp2SortedPathList::find_end_point(end_points, s, pawn, &mut startanchor)? == 0
+            {
+                far_move(s, level, pawn, &real, 1, 1)?;
+                return Ok(0.0);
+            }
+            if startanchor == 0 {
+                *best_path = (*end_points).path[0].cast();
+                far_move(s, level, pawn, &real, 1, 1)?;
+                return Ok(0.00005);
+            }
+            Hp2SortedPathList::expand_anchor(end_points, s, pawn)?;
+            let mut new_path: *mut AActor = ptr::null_mut();
+            let move_flags = calc_move_flags(pawn);
+            let p0: *mut ANavigationPoint = (*end_points).path[0].cast();
+            (*p0).visited_weight = 10.max((*end_points).dist[0]);
+            let best_inv = breadth_path_to_inventory(
+                s,
+                pawn,
+                (*end_points).path[0].cast(),
+                &mut new_path,
+                move_flags,
+                min_weight,
+                predict,
+            )?;
+            if best_inv > min_weight {
+                *best_path = new_path;
+                set_route_cache(pawn, (*best_path).cast());
+                far_move(s, level, pawn, &real, 1, 1)?;
+                return Ok(best_inv);
+            }
+            far_move(s, level, pawn, &real, 1, 1)?;
+            Ok(0.0)
+        })
     }
 }
 
@@ -831,87 +1183,105 @@ pub unsafe fn find_path_to(
     pawn: *mut APawn,
     dest: FVector,
     single: i32,
-    best_path: &mut *mut AActor,
+    best_path: *mut *mut AActor,
     clear: i32,
-) -> i32 {
+) -> RouteResult<i32> {
+    unsafe {
+        guarded(c"APawn::findPathTo", || {
+            find_path_to_body(s, pawn, dest, single, best_path, clear)
+        })
+    }
+}
+
+unsafe fn find_path_to_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    dest: FVector,
+    single: i32,
+    best_path: *mut *mut AActor,
+    clear: i32,
+) -> RouteResult<i32> {
     unsafe {
         *best_path = ptr::null_mut();
         let level = level_of(pawn);
-        if nav_list(s, level).is_null() || (*level).reach_specs.num == 0 {
-            return 0;
+        if nav_list(s, level)?.is_null() || (*level).reach_specs.num == 0 {
+            return Ok(0);
         }
         let real = (*pawn).base.location;
-        let mut end_points = Hp2SortedPathList::empty();
-        let mut dest_points = Hp2SortedPathList::empty();
-        let mut startanchor: i32 = 0;
-        let mut endanchor: i32 = 0;
-        end_points.find_visible_paths(
-            s,
-            pawn,
-            dest,
-            &mut dest_points,
-            clear,
-            &mut startanchor,
-            &mut endanchor,
-        );
-        if end_points.num_points == 0 || dest_points.num_points == 0 {
-            return 0;
-        }
-        if startanchor == 0 && end_points.find_end_point(s, pawn, &mut startanchor) == 0 {
-            far_move(s, level, pawn, &real, 1, 1);
-            return 0;
-        }
-        if startanchor != 0 {
-            if end_points.check_anchor_path(s, pawn, dest) != 0 {
-                *best_path = end_points.path[0].cast();
-                far_move(s, level, pawn, &real, 1, 1);
-                return 1;
-            } else {
-                end_points.expand_anchor(s, pawn);
-            }
-        }
-        if endanchor == 0 {
-            let mut j: i32 = 0;
-            while j < dest_points.num_points {
-                let dj: *mut AActor = dest_points.path[j as usize].cast();
-                let dj_loc = (*dj).location;
-                if fast_line(s, level, &dest, &dj_loc)
-                    && far_move(s, level, pawn, &dj_loc, 1, 0) != 0
-                    && point_reachable(s, pawn, &dest, 1)
-                {
-                    endanchor = 1;
-                    dest_points.path[0] = dest_points.path[j as usize];
-                    dest_points.dist[0] = round_sqrt(dest_points.dist[j as usize]);
-                    j = dest_points.num_points;
-                }
-                j += 1;
-            }
-        }
-        if endanchor != 0 {
-            let mut new_path: *mut AActor = ptr::null_mut();
-            let move_flags = calc_move_flags(pawn);
-            let d0: *mut ANavigationPoint = dest_points.path[0].cast();
-            (*d0).visited_weight = dest_points.dist[0];
-            if breadth_path_from(
+        with_lists(s, 2, |end_points, dest_points| {
+            let mut startanchor: i32 = 0;
+            let mut endanchor: i32 = 0;
+            Hp2SortedPathList::find_visible_paths(
+                end_points,
                 s,
                 pawn,
-                dest_points.path[0].cast(),
-                &mut new_path,
-                single,
-                move_flags,
-            ) != 0
-            {
-                *best_path = new_path;
-                far_move(s, level, pawn, &real, 1, 1);
-                if startanchor == 0 && single == 0 {
-                    end_points.find_alt_end_point(s, pawn, best_path);
-                }
-                set_route_cache(pawn, (*best_path).cast());
-                return 1;
+                dest,
+                dest_points,
+                clear,
+                &mut startanchor,
+                &mut endanchor,
+            )?;
+            if (*end_points).num_points == 0 || (*dest_points).num_points == 0 {
+                return Ok(0);
             }
-        }
-        far_move(s, level, pawn, &real, 1, 1);
-        0
+            if startanchor == 0
+                && Hp2SortedPathList::find_end_point(end_points, s, pawn, &mut startanchor)? == 0
+            {
+                far_move(s, level, pawn, &real, 1, 1)?;
+                return Ok(0);
+            }
+            if startanchor != 0 {
+                if Hp2SortedPathList::check_anchor_path(end_points, s, pawn, dest)? != 0 {
+                    *best_path = (*end_points).path[0].cast();
+                    far_move(s, level, pawn, &real, 1, 1)?;
+                    return Ok(1);
+                } else {
+                    Hp2SortedPathList::expand_anchor(end_points, s, pawn)?;
+                }
+            }
+            if endanchor == 0 {
+                let mut j: i32 = 0;
+                while j < (*dest_points).num_points {
+                    let dj: *mut AActor = (*dest_points).path[j as usize].cast();
+                    let dj_loc = (*dj).location;
+                    if fast_line(s, level, &dest, &dj_loc)?
+                        && far_move(s, level, pawn, &dj_loc, 1, 0)? != 0
+                        && point_reachable(s, pawn, &dest, 1)?
+                    {
+                        endanchor = 1;
+                        (*dest_points).path[0] = (*dest_points).path[j as usize];
+                        (*dest_points).dist[0] = round_sqrt((*dest_points).dist[j as usize]);
+                        j = (*dest_points).num_points;
+                    }
+                    j += 1;
+                }
+            }
+            if endanchor != 0 {
+                let mut new_path: *mut AActor = ptr::null_mut();
+                let move_flags = calc_move_flags(pawn);
+                let d0: *mut ANavigationPoint = (*dest_points).path[0].cast();
+                (*d0).visited_weight = (*dest_points).dist[0];
+                if breadth_path_from(
+                    s,
+                    pawn,
+                    (*dest_points).path[0].cast(),
+                    &mut new_path,
+                    single,
+                    move_flags,
+                )? != 0
+                {
+                    *best_path = new_path;
+                    far_move(s, level, pawn, &real, 1, 1)?;
+                    if startanchor == 0 && single == 0 {
+                        Hp2SortedPathList::find_alt_end_point(end_points, s, pawn, best_path)?;
+                    }
+                    set_route_cache(pawn, (*best_path).cast());
+                    return Ok(1);
+                }
+            }
+            far_move(s, level, pawn, &real, 1, 1)?;
+            Ok(0)
+        })
     }
 }
 
@@ -922,65 +1292,76 @@ pub unsafe fn find_path_to(
 pub unsafe fn find_random_dest(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
-    best: &mut *mut AActor,
-) -> i32 {
+    best: *mut *mut AActor,
+) -> RouteResult<i32> {
+    unsafe { guarded(c"APawn::findRandomDest", || find_random_dest_body(s, pawn, best)) }
+}
+
+unsafe fn find_random_dest_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    best: *mut *mut AActor,
+) -> RouteResult<i32> {
     unsafe {
         *best = ptr::null_mut();
         let level = level_of(pawn);
-        let nav0 = nav_list(s, level);
+        let nav0 = nav_list(s, level)?;
         if nav0.is_null() || (*level).reach_specs.num == 0 {
-            return 0;
+            return Ok(0);
         }
-        let mut end_points = Hp2SortedPathList::empty();
-        let a_loc = (*pawn).base.location;
-        let mut view = a_loc;
-        view.z += (*pawn).base_eye_height;
-        let mut actor = nav0;
-        while !actor.is_null() {
-            let act_loc = (*actor).base.location;
-            if vec::size_squared(vec::sub(a_loc, act_loc)) < 250_000.0
-                && fast_line(s, level, &act_loc, &view)
-            {
-                let dir = vec::sub(act_loc, a_loc);
-                let dist = app_round(vec::size(dir));
-                end_points.add_path(actor.cast(), dist);
-                if end_points.num_points == 4 {
-                    break;
+        with_lists(s, 1, |end_points, _unused| {
+            let a_loc = (*pawn).base.location;
+            let mut view = a_loc;
+            view.z += (*pawn).base_eye_height;
+            let mut actor = nav0;
+            while !actor.is_null() {
+                let act_loc = (*actor).base.location;
+                if vec::size_squared(vec::sub((*pawn).base.location, act_loc)) < 250_000.0
+                    && fast_line(s, level, &act_loc, &view)?
+                {
+                    let dir = vec::sub((*actor).base.location, (*pawn).base.location);
+                    let dist = app_round(vec::size(dir));
+                    Hp2SortedPathList::add_path(end_points, actor.cast(), dist);
+                    if (*end_points).num_points == 4 {
+                        break;
+                    }
                 }
+                actor = (*actor).next_navigation_point.cast();
             }
-            actor = (*actor).next_navigation_point.cast();
-        }
 
-        let move_flags = calc_move_flags(pawn);
-        let mut num_reached: i32 = 0;
-        for i in 0..end_points.num_points as usize {
-            let ei: *mut ANavigationPoint = end_points.path[i].cast();
-            if !(*ei).b_end_point() && actor_reachable(s, pawn, end_points.path[i].cast(), 1) {
-                num_reached = num_reached.wrapping_add(traverse_from(
-                    s,
-                    pawn,
-                    end_points.path[i].cast(),
-                    move_flags,
-                ));
-            }
-        }
-        if num_reached == 0 {
-            return 0;
-        }
-        let mut result = 0;
-        actor = nav0;
-        while !actor.is_null() {
-            if (*actor).b_end_point() {
-                result = 1;
-                *best = actor.cast();
-                if (s.app_frand)() * (num_reached as f32) <= 1.0 {
-                    break;
+            let move_flags = calc_move_flags(pawn);
+            let mut num_reached: i32 = 0;
+            for i in 0..(*end_points).num_points as usize {
+                let ei: *mut ANavigationPoint = (*end_points).path[i].cast();
+                if !(*ei).b_end_point()
+                    && actor_reachable(s, pawn, (*end_points).path[i].cast(), 1)?
+                {
+                    num_reached = num_reached.wrapping_add(traverse_from(
+                        s,
+                        pawn,
+                        (*end_points).path[i].cast(),
+                        move_flags,
+                    )?);
                 }
-                num_reached -= 1;
             }
-            actor = (*actor).next_navigation_point.cast();
-        }
-        result
+            if num_reached == 0 {
+                return Ok(0);
+            }
+            let mut result = 0;
+            actor = nav_list(s, level)?;
+            while !actor.is_null() {
+                if (*actor).b_end_point() {
+                    result = 1;
+                    *best = actor.cast();
+                    if s.app_frand()? * (num_reached as f32) <= 1.0 {
+                        break;
+                    }
+                    num_reached -= 1;
+                }
+                actor = (*actor).next_navigation_point.cast();
+            }
+            Ok(result)
+        })
     }
 }
 
@@ -993,7 +1374,16 @@ pub unsafe fn traverse_from(
     pawn: *mut APawn,
     start: *mut AActor,
     move_flags: i32,
-) -> i32 {
+) -> RouteResult<i32> {
+    unsafe { guarded(c"APawn::TraverseFrom", || traverse_from_body(s, pawn, start, move_flags)) }
+}
+
+unsafe fn traverse_from_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    start: *mut AActor,
+    move_flags: i32,
+) -> RouteResult<i32> {
     unsafe {
         let mut num_marked: i32 = 1;
         let node: *mut ANavigationPoint = start.cast();
@@ -1008,20 +1398,19 @@ pub unsafe fn traverse_from(
             } else {
                 let spec = spec_at(level, (*node).paths[i]);
                 let end: *mut AActor = (*spec).end.cast();
-                if is_a(s, end.cast(), CLASS_NAVIGATION_POINT) {
+                if is_a(s, end.cast(), CLASS_NAVIGATION_POINT)? {
                     let next: *mut ANavigationPoint = end.cast();
                     if !(*next).b_end_point()
                         && (!(*next).b_player_only() || (*pawn).b_is_player())
                         && supports(spec, i_radius, i_height, move_flags)
                     {
-                        num_marked =
-                            num_marked.wrapping_add(traverse_from(s, pawn, end, move_flags));
+                        num_marked = num_marked.wrapping_add(traverse_from(s, pawn, end, move_flags)?);
                     }
                 }
                 i += 1;
             }
         }
-        num_marked
+        Ok(num_marked)
     }
 }
 
@@ -1033,10 +1422,25 @@ pub unsafe fn breadth_path_from(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
     start: *mut AActor,
-    best: &mut *mut AActor,
+    best: *mut *mut AActor,
     single: i32,
     move_flags: i32,
-) -> i32 {
+) -> RouteResult<i32> {
+    unsafe {
+        guarded(c"APawn::breadthPathFrom", || {
+            breadth_path_from_body(s, pawn, start, best, single, move_flags)
+        })
+    }
+}
+
+unsafe fn breadth_path_from_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    start: *mut AActor,
+    best: *mut *mut AActor,
+    single: i32,
+    move_flags: i32,
+) -> RouteResult<i32> {
     unsafe {
         let level = level_of(pawn);
         let start_nav: *mut ANavigationPoint = start.cast();
@@ -1053,7 +1457,7 @@ pub unsafe fn breadth_path_from(
             if (*currentnode).b_end_point() {
                 (*start_nav).previous_path = ptr::null_mut();
                 *best = currentnode.cast();
-                return 1;
+                return Ok(1);
             }
             if !(*currentnode).b_player_only()
                 || (*pawn).b_is_player()
@@ -1112,8 +1516,8 @@ pub unsafe fn breadth_path_from(
                                 {
                                     num_list += 1;
                                     if num_list > 500 {
-                                        (s.log_actor)(LOG_BREADTH_OVERFLOW, start.cast());
-                                        return 0;
+                                        s.log_actor(LOG_BREADTH_OVERFLOW, start.cast())?;
+                                        return Ok(0);
                                     }
                                     nextnode = (*nextnode).next_ordered;
                                 }
@@ -1141,15 +1545,15 @@ pub unsafe fn breadth_path_from(
             }
             n += 1;
             if single != 0 && n > 4 {
-                return 0;
+                return Ok(0);
             }
             if n > 1000 {
-                (s.log_actor)(LOG_1000_SEARCHED, start.cast());
-                return 0;
+                s.log_actor(LOG_1000_SEARCHED, start.cast())?;
+                return Ok(0);
             }
             currentnode = (*currentnode).next_ordered;
         }
-        0
+        Ok(0)
     }
 }
 
@@ -1161,11 +1565,27 @@ pub unsafe fn breadth_path_to_inventory(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
     start: *mut AActor,
-    best: &mut *mut AActor,
+    best: *mut *mut AActor,
     move_flags: i32,
     best_weight: f32,
     predict: i32,
-) -> f32 {
+) -> RouteResult<f32> {
+    unsafe {
+        guarded(c"APawn::breadthPathToInventory", || {
+            breadth_path_to_inventory_body(s, pawn, start, best, move_flags, best_weight, predict)
+        })
+    }
+}
+
+unsafe fn breadth_path_to_inventory_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    start: *mut AActor,
+    best: *mut *mut AActor,
+    move_flags: i32,
+    best_weight: f32,
+    predict: i32,
+) -> RouteResult<f32> {
     unsafe {
         let level = level_of(pawn);
         let i_radius = app_round((*pawn).base.collision_radius);
@@ -1183,15 +1603,15 @@ pub unsafe fn breadth_path_to_inventory(
                 (*currentnode).start_path = currentnode.cast();
                 (*currentnode).previous_path = ptr::null_mut();
             }
-            if is_a(s, currentnode.cast(), CLASS_INVENTORY_SPOT) {
+            if is_a(s, currentnode.cast(), CLASS_INVENTORY_SPOT)? {
                 let item: *mut AInventory =
                     (*currentnode.cast::<AInventorySpot>()).marked_item.cast();
                 if !item.is_null()
-                    && ((s.item_is_probing_touch)(item.cast()) != 0
+                    && (s.item_is_probing_touch(item.cast())? != 0
                         || (predict != 0 && (*item).base.latent_float < 5.0))
                     && (*item).max_desireability / ((*currentnode).visited_weight as f32) > best_inv
                 {
-                    let this_item_weight = (s.item_bot_desirability)(item.cast(), pawn.cast())
+                    let this_item_weight = s.item_bot_desirability(item.cast(), pawn.cast())?
                         / ((*currentnode).visited_weight as f32);
                     if this_item_weight > best_inv {
                         best_inv = this_item_weight;
@@ -1255,7 +1675,7 @@ pub unsafe fn breadth_path_to_inventory(
                         {
                             num_list += 1;
                             if num_list > 500 {
-                                return 0.0;
+                                return Ok(0.0);
                             }
                             nextnode = (*nextnode).next_ordered;
                         }
@@ -1282,14 +1702,14 @@ pub unsafe fn breadth_path_to_inventory(
             if n > 250 {
                 if best_inv > 0.0 {
                     reverse_route_for(best_dest);
-                    return best_inv;
+                    return Ok(best_inv);
                 }
                 n = 200;
             }
             currentnode = (*currentnode).next_ordered;
         }
         reverse_route_for(best_dest);
-        best_inv
+        Ok(best_inv)
     }
 }
 
@@ -1339,14 +1759,28 @@ pub unsafe fn reverse_route_for(best: *mut ANavigationPoint) {
 pub unsafe fn find_path(
     s: &Hp2RouteServices,
     pawn: *mut APawn,
-    next: &mut *mut ANavigationPoint,
+    next: *mut *mut ANavigationPoint,
     start: *mut AActor,
     dest_name: i32,
-) -> bool {
+) -> RouteResult<bool> {
+    unsafe {
+        guarded(c"APawn::findPath", || {
+            find_path_body(s, pawn, next, start, dest_name)
+        })
+    }
+}
+
+unsafe fn find_path_body(
+    s: &Hp2RouteServices,
+    pawn: *mut APawn,
+    next: *mut *mut ANavigationPoint,
+    start: *mut AActor,
+    dest_name: i32,
+) -> RouteResult<bool> {
     unsafe {
         *next = ptr::null_mut();
         if start.is_null() {
-            return false;
+            return Ok(false);
         }
         let level = level_of(pawn);
         let mut test_list: [*mut AActor; SEARCH_LIST_LEN] = [ptr::null_mut(); SEARCH_LIST_LEN];
@@ -1354,7 +1788,7 @@ pub unsafe fn find_path(
         let mut tested_path: [i32; SEARCH_LIST_LEN] = [-1; SEARCH_LIST_LEN];
         let mut visit_count: usize = 0;
         let mut curr: i32 = 0;
-        let path_class = (s.actor_class)(start.cast());
+        let path_class = s.actor_class(start.cast())?;
         test_list[0] = start;
         visited[0] = start;
         visit_count += 1;
@@ -1396,8 +1830,8 @@ pub unsafe fn find_path(
                 let spec = spec_at(level, cur);
                 let spec_start: *mut AActor = (*spec).start.cast();
                 let spec_end: *mut AActor = (*spec).end.cast();
-                (s.log_actor)(LOG_START_NAME, spec_start.cast());
-                (s.log_actor)(LOG_END_NAME, spec_end.cast());
+                s.log_actor(LOG_START_NAME, spec_start.cast())?;
+                s.log_actor(LOG_END_NAME, spec_end.cast())?;
                 let in_list = |list: &[*mut AActor], t: *mut AActor| {
                     list.iter().take(visit_count).any(|p| *p == t)
                 };
@@ -1413,15 +1847,15 @@ pub unsafe fn find_path(
                         visited[visit_count] = p_act;
                         visit_count += 1;
                     }
-                    if (s.actor_name_index)(p_act.cast()) == dest_name {
+                    if s.actor_name_index(p_act.cast())? == dest_name {
                         break_out = false;
                         *next = test_list[1].cast();
-                        if next.is_null() {
+                        if (*next).is_null() {
                             *next = p_act.cast();
                         }
                         break;
                     } else {
-                        let this_class = (s.actor_class)(p_act.cast());
+                        let this_class = s.actor_class(p_act.cast())?;
                         if (this_class == path_class || path_class.is_null())
                             && (curr as usize) + 1 < SEARCH_LIST_LEN
                         {
@@ -1433,6 +1867,54 @@ pub unsafe fn find_path(
             }
         }
         // C++ `return status;` (unchanged by the path-found branch).
-        status
+        Ok(status)
+    }
+}
+
+/// Native-owned uninitialized list storage, with only the live prefix accessed.
+/// The callback frame contains only Rust-owned closure/result storage. Native
+/// list storage and output aliases are never exclusively borrowed by this frame.
+unsafe fn with_lists<T, F>(s: &Hp2RouteServices, count: i32, f: F) -> RouteResult<T>
+where
+    F: FnOnce(*mut Hp2SortedPathList, *mut Hp2SortedPathList) -> RouteResult<T>,
+{
+    struct Frame<F, T> {
+        f: Option<F>,
+        out: std::mem::MaybeUninit<T>,
+    }
+    unsafe extern "C" fn run<F, T>(
+        context: *mut c_void,
+        first: *mut Hp2SortedPathList,
+        second: *mut Hp2SortedPathList,
+    ) -> i32
+    where
+        F: FnOnce(*mut Hp2SortedPathList, *mut Hp2SortedPathList) -> RouteResult<T>,
+    {
+        unsafe {
+            let frame = &mut *context.cast::<Frame<F, T>>();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                frame.f.take().expect("route continuation called once")(first, second)
+            }));
+            match result {
+                Ok(Ok(value)) => {
+                    frame.out.write(value);
+                    0
+                }
+                Ok(Err(error)) => error,
+                Err(_) => 1,
+            }
+        }
+    }
+    unsafe {
+        let mut frame = Frame {
+            f: Some(f),
+            out: std::mem::MaybeUninit::uninit(),
+        };
+        status((s.lists)(
+            count,
+            (&mut frame as *mut Frame<F, T>).cast(),
+            run::<F, T>,
+        ))?;
+        Ok(frame.out.assume_init())
     }
 }

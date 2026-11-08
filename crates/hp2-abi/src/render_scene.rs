@@ -1,29 +1,23 @@
-//! `#[repr(C)]` mirrors of the UnRender scene/model/dynamics layouts that the
-//! UnRender port (`hp2-render`) indexes directly. Owning C++ definitions:
+//! `#[repr(C)]` scene/model views and authoritative Rust dynamic-node ABI.
+//! Native declarations consumed by the renderer:
 //!
 //! - `Engine/Inc/UnRender.h`: `FSceneNode`, `FSurfaceInfo`, `FSavedPoly`,
 //!   `FSurfaceFacet`, `FScreenBounds`.
 //! - `Engine/Inc/UnObj.h`: `FVert`, `FBspNode`, `FBspSurf`, `FLeaf`,
 //!   `FZoneProperties`.
 //! - `Engine/Inc/UnActor.h`: `FActorLink`.
-//! - `Render/Inc/Render.h`: `FVolActorLink`, `FDynamicItem`,
-//!   `FDynamicSprite`, `FBspDrawList`, `URender::FStampedPoint`,
-//!   `URender::FDynamicsCache`. These cannot take the C++ asserts in
-//!   `Render.h` (off-limits this phase), so they are pinned in a
-//!   `static_assert` block in `Render/Src/UnRender.cpp`.
+//! - `Render/Inc/Render.h`: borrowed `FDynamicItem`/`FDynamicSprite` views,
+//!   `FVolActorLink`, `FBspDrawList`, `URender::FStampedPoint`, and
+//!   `URender::FDynamicsCache`.
 //!
-//! Every size and offset below was probed with clang++ against the pinned
-//! headers (`sizeof`/`offsetof`, arm64 macOS flags) and is pinned again on
-//! the C++ side.
+//! Sizes and consumed offsets are pinned on both sides of the boundary.
 //!
 //! Conventions:
 //! - C++ pointers to objects Rust never dereferences (`UViewport`, `ULevel`,
 //!   `AActor`, `UTexture`, `FTextureInfo`, `AZoneInfo`, `ABrush`) are
 //!   `*mut c_void`.
 //! - Pointers to mirrored structs keep their concrete type.
-//! - `FDynamicItem` virtuals (`Filter`, `PreRender`) are never mirrored. The
-//!   vtable pointer is `vptr: *const c_void` and dispatch goes through the
-//!   `Hp2UrenServices` hooks.
+//! - Dynamic nodes have explicit Rust-owned kind tags, never native vtables.
 //! - `UBOOL` and `INT` are `i32`. `DWORD` is `u32`. `QWORD` is `u64`. `BYTE`
 //!   is `u8`. `SWORD` is `i16`.
 
@@ -273,25 +267,24 @@ const _: () = assert!(std::mem::offset_of!(FScreenBounds, max_y) == 12);
 const _: () = assert!(std::mem::offset_of!(FScreenBounds, min_z) == 16);
 const _: () = assert!(std::mem::offset_of!(FScreenBounds, max_z) == 20);
 
-/// `FDynamicItem` (`Render.h`): polymorphic base. `vptr` is the C++ vtable
-/// pointer and is never dereferenced by Rust. 24 bytes.
+/// Rust-owned dynamic node header. Native code only borrows this tagged view.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FDynamicItem {
-    pub vptr: *const c_void,
+    pub kind: u32,
+    pub reserved: u32,
     pub filter_next: *mut FDynamicItem,
     pub min_z: f32,
     pub max_z: f32,
 }
 
 const _: () = assert!(size_of::<FDynamicItem>() == 24);
-const _: () = assert!(std::mem::offset_of!(FDynamicItem, vptr) == 0);
+const _: () = assert!(std::mem::offset_of!(FDynamicItem, kind) == 0);
 const _: () = assert!(std::mem::offset_of!(FDynamicItem, filter_next) == 8);
 const _: () = assert!(std::mem::offset_of!(FDynamicItem, min_z) == 16);
 const _: () = assert!(std::mem::offset_of!(FDynamicItem, max_z) == 20);
 
-/// `FDynamicSprite : FDynamicItem` (`Render.h`). 224 bytes. The base is laid
-/// out first, so the derived fields start at offset 24.
+/// Rust-owned sprite view; child pointers borrow the owning node's reusable vector.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FDynamicSprite {
@@ -309,9 +302,12 @@ pub struct FDynamicSprite {
     pub persp: f32,
     pub volumetrics: *mut FActorLink,
     pub leaf_lights: *mut FVolActorLink,
+    pub children: *mut *mut FDynamicSprite,
+    pub child_count: i32,
+    pub reserved: i32,
 }
 
-const _: () = assert!(size_of::<FDynamicSprite>() == 224);
+const _: () = assert!(size_of::<FDynamicSprite>() == 240);
 const _: () = assert!(std::mem::offset_of!(FDynamicSprite, base) == 0);
 const _: () = assert!(std::mem::offset_of!(FDynamicSprite, span_buffer) == 24);
 const _: () = assert!(std::mem::offset_of!(FDynamicSprite, render_next) == 32);
@@ -326,6 +322,8 @@ const _: () = assert!(std::mem::offset_of!(FDynamicSprite, screen_y) == 196);
 const _: () = assert!(std::mem::offset_of!(FDynamicSprite, persp) == 200);
 const _: () = assert!(std::mem::offset_of!(FDynamicSprite, volumetrics) == 208);
 const _: () = assert!(std::mem::offset_of!(FDynamicSprite, leaf_lights) == 216);
+const _: () = assert!(std::mem::offset_of!(FDynamicSprite, children) == 224);
+const _: () = assert!(std::mem::offset_of!(FDynamicSprite, child_count) == 232);
 
 /// `FBspDrawList` (`Render.h`). 128 bytes.
 #[repr(C)]

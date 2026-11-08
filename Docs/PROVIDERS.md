@@ -28,8 +28,6 @@ Declared providers, in declaration order (`Build/CMake/HP2Dependencies.cmake`); 
 |---|---|---|---|
 | `CoreText` | `APPLE AND HP2_CORETEXT_FRAMEWORK AND HP2_COREGRAPHICS_FRAMEWORK` | `HarryPotter2/Unreal/NativeText/Src/NativeTextShared.cpp` | CoreText, CoreGraphics |
 | `FreeType` | `NOT APPLE AND NOT WIN32 AND HP2_FREETYPE_FOUND AND HP2_HARFBUZZ_FOUND AND HP2_FONTCONFIG_FOUND` | `HarryPotter2/Unreal/NativeText/Src/NativeTextFreeType.cpp` | FreeType, HarfBuzz, Fontconfig (pkg-config) |
-| `FreeTypeBundled` | `WIN32` | `HarryPotter2/Unreal/NativeText/Src/NativeTextFreeType.cpp`, `HarryPotter2/Unreal/NativeText/Src/NativeTextFontsBundled.cpp` | freetype, harfbuzz |
-| `FreeTypeEmscripten` | `TRUE` (declared only under `EMSCRIPTEN`) | `HarryPotter2/Unreal/NativeText/Src/NativeTextFreeType.cpp`, `HarryPotter2/Unreal/NativeText/Src/NativeTextFontSeamEmscripten.cpp` | none (link flags via `HP2_WEB_FONTLINK_FLAGS`) |
 
 The framework probes run unconditionally before the declarations so every
 condition is a pure variable test; on hosts without the frameworks
@@ -59,8 +57,9 @@ hp2_declare_text_provider(DirectWrite
 For Pango on Linux, probe with `pkg_check_modules` (or `find_package(Pango)`)
 and use a condition like `PANGO_FOUND AND CAIRO_FOUND`. The new provider's
 sources must expose the same `FNativeTextPlatformBackend` seam that
-`HarryPotter2/Unreal/NativeText/Src/NativeText.cpp` implements; the driver and tests
-compile against the interface, not the backend.
+`HarryPotter2/Unreal/NativeText/Src/NativeTextShared.cpp` (CoreText) and
+`NativeTextFreeType.cpp` (FreeType) each implement directly; the driver and
+tests compile against the interface, not the backend.
 
 ## Gate interaction: capability and default are separate decisions
 

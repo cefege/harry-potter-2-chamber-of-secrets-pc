@@ -292,6 +292,11 @@ unsafe extern "C" fn svc_actor_level(actor: P) -> P {
     unsafe { (*o(actor)).level.cast() }
 }
 
+/// Not exercised by this fixture set (`GetMapFileName` isn't replayed here).
+unsafe extern "C" fn svc_actor_level_url_map(_actor: P) -> P {
+    std::ptr::null_mut()
+}
+
 unsafe extern "C" fn svc_level_game(level: P) -> P {
     unsafe { (*o(level)).level.cast() }
 }
@@ -539,6 +544,12 @@ unsafe extern "C" fn svc_launch_url(url: *const TChar) {
     tok(format!("LU(/work/{url})"));
 }
 
+/// Not exercised by this fixture set: the replayed functions return `StatLogResult`
+/// directly, and only `engine_natives_statlog.rs` (hp2-ffi) calls this field.
+unsafe extern "C" fn svc_stat_log_raise(_status: i32, _expr: *const c_void, _line: i32) -> i32 {
+    0
+}
+
 static SVC: StatLogServices = StatLogServices {
     actor_level: svc_actor_level,
     level_game: svc_level_game,
@@ -586,6 +597,8 @@ static SVC: StatLogServices = StatLogServices {
     proc_create: svc_proc_create,
     proc_return_code: svc_proc_return_code,
     launch_url: svc_launch_url,
+    stat_log_actor_level_url_map: svc_actor_level_url_map,
+    stat_log_raise: svc_stat_log_raise,
 };
 
 // ---------------------------------------------------------------------------
@@ -735,7 +748,7 @@ fn c_local_show(e: &Env) -> &'static str {
     dedicated(e, false);
     set_str(s_of(e.game, 0), "Game.log");
     set_str(s_of(e.stat, 0), "/bin/batcher");
-    unsafe { execute_local_log_batcher(&SVC, e.stat.cast()) };
+    check(unsafe { execute_local_log_batcher(&SVC, e.stat.cast()) });
     "-"
 }
 
@@ -743,7 +756,7 @@ fn c_local_dedicated(e: &Env) -> &'static str {
     dedicated(e, true);
     set_str(s_of(e.game, 0), "Game.log");
     set_str(s_of(e.stat, 0), "/bin/batcher");
-    unsafe { execute_local_log_batcher(&SVC, e.stat.cast()) };
+    check(unsafe { execute_local_log_batcher(&SVC, e.stat.cast()) });
     "-"
 }
 
@@ -751,7 +764,7 @@ fn c_silent_show(e: &Env) -> &'static str {
     dedicated(e, false);
     set_str(s_of(e.game, 0), "Game.log");
     set_str(s_of(e.stat, 0), "/bin/batcher");
-    unsafe { execute_silent_log_batcher(&SVC, e.stat.cast()) };
+    check(unsafe { execute_silent_log_batcher(&SVC, e.stat.cast()) });
     "-"
 }
 

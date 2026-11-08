@@ -1,0 +1,8 @@
+# Diagnostic route based on actual saved endpoint (1327.6,30.1,44.6).
+# Cross CutScene9's authored Y=124 player-bump plane with normal strafe input.
+tick 0.033333335
+idle 240
+hold W 240
+idle 20
+hold D 60
+idle 600

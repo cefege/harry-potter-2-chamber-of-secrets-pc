@@ -20,6 +20,7 @@ fn motion_log_mask(log: &str) -> u32 {
 }
 
 fn run_motion(seed: u64, w: &[u32]) -> [u32; MOTION_OUTPUT_WORDS] {
+    actor_services_mock::publish_with_mesh_and_base_change(t_mesh_collision_extent, t_base_change);
     assert_eq!(w.len(), MOTION_INPUT_WORDS);
     let mut subj = vec![0u64; 1024];
     let mut zone = vec![0u64; 1024];
@@ -40,7 +41,6 @@ fn run_motion(seed: u64, w: &[u32]) -> [u32; MOTION_OUTPUT_WORDS] {
         s.zone = zone_p;
         s.pool = pool_p;
         s.pool_class = [w[39], w[42], w[45]];
-        s.projectile_max_speed = f(w[60]);
         s.motion_action = action;
         s.motion_mover_pool = [w[64] != 0, false, false];
     });
@@ -85,10 +85,15 @@ fn run_motion(seed: u64, w: &[u32]) -> [u32; MOTION_OUTPUT_WORDS] {
         (*p).base.mass = f(w[27]);
         (*p).base.buoyancy = f(w[28]);
         (*(subj_p as *mut ADecoration)).num_landings = w[29] as i32;
+        if action == 0 {
+            (*(subj_p as *mut hp2_abi::engine::generated::AProjectile)).max_speed = f(w[60]);
+        }
         (*(subj_p as *mut ACarcass)).set_b_sliding_carcass(w[30] != 0);
         (*p).base.region.zone = zone_p as *mut c_void;
         (*p).base.region.zone_number = w[59] as u8;
         (*p).base.set_b_bounce(w[64] != 0);
+        (*p).base.mesh = subj_p as *mut c_void;
+        (*p).base.collide_type = CT_SHAPE;
         let floor = (subj_p as *mut u8).add(FLOOR_OFFSET).cast::<FVector>();
         *floor = v3(&w[61..64]);
     }
@@ -98,10 +103,16 @@ fn run_motion(seed: u64, w: &[u32]) -> [u32; MOTION_OUTPUT_WORDS] {
         let actor = subj_p as *mut AActor;
         let pawn = subj_p as *mut APawn;
         match action {
-            0 => physic::motion::phys_projectile(actor, &SERVICES, f(w[56]), w[57] as i32),
-            1 => physic::motion::phys_rolling(actor, &SERVICES, f(w[56]), w[57] as i32),
-            2 => physic::motion::phys_spider(pawn, &SERVICES, f(w[56]), w[57] as i32),
-            3 => ret = physic::motion::check_floor(pawn, &SERVICES, v3(&w[61..64]), &mut hit),
+            0 => physic::motion::phys_projectile(actor, &SERVICES, f(w[56]), w[57] as i32)
+                .expect("checked physics fixture"),
+            1 => physic::motion::phys_rolling(actor, &SERVICES, f(w[56]), w[57] as i32)
+                .expect("checked physics fixture"),
+            2 => physic::motion::phys_spider(pawn, &SERVICES, f(w[56]), w[57] as i32)
+                .expect("checked physics fixture"),
+            3 => {
+                ret = physic::motion::check_floor(pawn, &SERVICES, v3(&w[61..64]), &mut hit)
+                    .expect("checked physics fixture")
+            }
             _ => {
                 ret = physic::motion::find_new_floor(
                     pawn,
@@ -111,6 +122,7 @@ fn run_motion(seed: u64, w: &[u32]) -> [u32; MOTION_OUTPUT_WORDS] {
                     f(w[56]),
                     w[57] as i32,
                 )
+                .expect("checked physics fixture")
             }
         }
     }

@@ -1,9 +1,8 @@
 //! Pure math of `FDynamicChunk::Filter` (split and filter-down) and of the
 //! decision arithmetic in `FDynamicLight::Filter` (`Render/Src/UnSprite.cpp`).
 //!
-//! The C++ side keeps the BSP node/frame lookups, `GDynMem`/`GMem` allocation
-//! in the original order, the `new(GDynMem)` chunk and light constructions,
-//! the engine calls and the planar loop.
+//! `dynamic_items` owns node construction, BSP dispatch and planar traversal;
+//! native leaves only gather SDK facts and allocate typed raster/span storage.
 
 pub use hp2_abi::render_particle::FTransform;
 pub use hp2_abi::render_span::FRasterSpan;

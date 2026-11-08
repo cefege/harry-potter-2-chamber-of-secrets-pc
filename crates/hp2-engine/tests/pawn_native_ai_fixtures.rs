@@ -28,7 +28,7 @@ const PAWN_WORDS: usize = 16;
 const ACTOR_WORDS: usize = 3;
 const WORLD_WORDS: usize = PAWNS * PAWN_WORDS + ACTORS * ACTOR_WORDS;
 const LEVEL_ID: usize = PAWNS + ACTORS + 1;
-const KINDS: usize = 21;
+const KINDS: usize = 23;
 
 // Hook kinds, one per `Hp2PawnNativeAiServices` field (harness enum order).
 const K_ROTATION_VECTOR: u32 = 1;
@@ -51,6 +51,8 @@ const K_REPLICATION_TEAM: u32 = 17;
 const K_LINE_OF_SIGHT_TO: u32 = 18;
 const K_SINGLE_LINE_CHECK: u32 = 19;
 const K_EVENT_LONG_FALL: u32 = 20;
+const K_REACH_SPEC_COUNT: u32 = 21;
+const K_REACH_SPEC_AT: u32 = 22;
 
 #[derive(Clone)]
 struct Script {
@@ -196,7 +198,7 @@ fn vec3(w: &[u32]) -> FVector {
 
 // --- Hook mocks. Each mirrors one `Hp2PawnNativeAiServices` field exactly. ---
 
-unsafe extern "C" fn rotation_vector(rot: *const c_void, out: *mut c_void) {
+unsafe extern "C" fn rotation_vector(rot: *const c_void, out: *mut c_void) -> i32 {
     unsafe {
         let r = &*rot.cast::<FRotator>();
         let o = take(
@@ -205,74 +207,130 @@ unsafe extern "C" fn rotation_vector(rot: *const c_void, out: *mut c_void) {
         );
         *out.cast::<FVector>() = vec3(&o);
     }
+    0
 }
 
-unsafe extern "C" fn state_latent_action(actor: *mut c_void) -> i32 {
-    take(K_STATE_LATENT_ACTION, &[pid(actor)])[0] as i32
+unsafe extern "C" fn state_latent_action(actor: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_STATE_LATENT_ACTION, &[pid(actor)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn set_state_latent_action(actor: *mut c_void, action: i32) {
+unsafe extern "C" fn set_state_latent_action(actor: *mut c_void, action: i32) -> i32 {
     assert!(take(K_SET_STATE_LATENT_ACTION, &[pid(actor), action as u32]).is_empty());
+    0
 }
 
-unsafe extern "C" fn level_net_mode(level: *mut c_void) -> i32 {
-    take(K_LEVEL_NET_MODE, &[pid(level)])[0] as i32
+unsafe extern "C" fn level_net_mode(level: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_LEVEL_NET_MODE, &[pid(level)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn level_pawn_list(level: *mut c_void) -> *mut c_void {
-    ptr_at(take(K_LEVEL_PAWN_LIST, &[pid(level)])[0])
+unsafe extern "C" fn level_pawn_list(level: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = { ptr_at(take(K_LEVEL_PAWN_LIST, &[pid(level)])[0]) };
+    }
+    0
 }
 
-unsafe extern "C" fn set_level_pawn_list(level: *mut c_void, pawn: *mut c_void) {
+unsafe extern "C" fn set_level_pawn_list(level: *mut c_void, pawn: *mut c_void) -> i32 {
     assert!(take(K_SET_LEVEL_PAWN_LIST, &[pid(level), pid(pawn)]).is_empty());
+    0
 }
 
-unsafe extern "C" fn level_team_game(level: *mut c_void) -> i32 {
-    take(K_LEVEL_TEAM_GAME, &[pid(level)])[0] as i32
+unsafe extern "C" fn level_team_game(level: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_LEVEL_TEAM_GAME, &[pid(level)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn level_actor_count(level: *mut c_void) -> i32 {
-    take(K_LEVEL_ACTOR_COUNT, &[pid(level)])[0] as i32
+unsafe extern "C" fn level_actor_count(level: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_LEVEL_ACTOR_COUNT, &[pid(level)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn level_actor(level: *mut c_void, index: i32) -> *mut c_void {
-    ptr_at(take(K_LEVEL_ACTOR, &[pid(level), index as u32])[0])
+unsafe extern "C" fn level_actor(level: *mut c_void, index: i32, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = { ptr_at(take(K_LEVEL_ACTOR, &[pid(level), index as u32])[0]) };
+    }
+    0
 }
 
-unsafe extern "C" fn viewport_count(level: *mut c_void) -> i32 {
-    take(K_VIEWPORT_COUNT, &[pid(level)])[0] as i32
+unsafe extern "C" fn viewport_count(level: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_VIEWPORT_COUNT, &[pid(level)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn viewport_actor(level: *mut c_void, index: i32) -> *mut c_void {
-    ptr_at(take(K_VIEWPORT_ACTOR, &[pid(level), index as u32])[0])
+unsafe extern "C" fn viewport_actor(level: *mut c_void, index: i32, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = { ptr_at(take(K_VIEWPORT_ACTOR, &[pid(level), index as u32])[0]) };
+    }
+    0
 }
 
-unsafe extern "C" fn actor_net_temporary(actor: *mut c_void) -> i32 {
-    take(K_ACTOR_NET_TEMPORARY, &[pid(actor)])[0] as i32
+unsafe extern "C" fn actor_net_temporary(actor: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_ACTOR_NET_TEMPORARY, &[pid(actor)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn actor_proj_target(actor: *mut c_void) -> i32 {
-    take(K_ACTOR_PROJ_TARGET, &[pid(actor)])[0] as i32
+unsafe extern "C" fn actor_proj_target(actor: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_ACTOR_PROJ_TARGET, &[pid(actor)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn actor_is_pawn(actor: *mut c_void) -> i32 {
-    take(K_ACTOR_IS_PAWN, &[pid(actor)])[0] as i32
+unsafe extern "C" fn actor_is_pawn(actor: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_ACTOR_IS_PAWN, &[pid(actor)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn pawn_health(pawn: *mut c_void) -> i32 {
-    take(K_PAWN_HEALTH, &[pid(pawn)])[0] as i32
+unsafe extern "C" fn pawn_health(pawn: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_PAWN_HEALTH, &[pid(pawn)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn pawn_behind_view(pawn: *mut c_void) -> i32 {
-    take(K_PAWN_BEHIND_VIEW, &[pid(pawn)])[0] as i32
+unsafe extern "C" fn pawn_behind_view(pawn: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_PAWN_BEHIND_VIEW, &[pid(pawn)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn replication_team(info: *mut c_void) -> i32 {
-    take(K_REPLICATION_TEAM, &[pid(info)])[0] as i32
+unsafe extern "C" fn replication_team(info: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = { take(K_REPLICATION_TEAM, &[pid(info)])[0] as i32 };
+    }
+    0
 }
 
-unsafe extern "C" fn line_of_sight_to(pawn: *mut c_void, other: *mut c_void) -> i32 {
-    take(K_LINE_OF_SIGHT_TO, &[pid(pawn), pid(other)])[0] as i32
+unsafe extern "C" fn line_of_sight_to(
+    pawn: *mut c_void,
+    other: *mut c_void,
+    show_self: i32,
+    out: *mut i32,
+) -> i32 {
+    // Every exercised call site (test_can_see_me, consider_target) passes 0: the
+    // oracle fixture predates `show_self` and never recorded a value for it.
+    assert_eq!(show_self, 0, "line_of_sight_to show_self");
+    unsafe {
+        *out = { take(K_LINE_OF_SIGHT_TO, &[pid(pawn), pid(other)])[0] as i32 };
+    }
+    0
 }
 
 unsafe extern "C" fn single_line_check(
@@ -283,7 +341,7 @@ unsafe extern "C" fn single_line_check(
     start: *const c_void,
     trace: u32,
     extent: *const c_void,
-) {
+) -> i32 {
     unsafe {
         let end = *end.cast::<FVector>();
         let start = *start.cast::<FVector>();
@@ -298,10 +356,57 @@ unsafe extern "C" fn single_line_check(
         hit.time = f32::from_bits(o[0]);
         hit.normal = vec3(&o[1..4]);
     }
+    0
 }
 
-unsafe extern "C" fn event_long_fall(pawn: *mut c_void) {
+unsafe extern "C" fn event_long_fall(pawn: *mut c_void) -> i32 {
     assert!(take(K_EVENT_LONG_FALL, &[pid(pawn)]).is_empty());
+    0
+}
+
+// The new native public guard hop has no oracle leaf of its own. Replay the
+// unchanged inner hooks without adding or normalizing any golden records.
+unsafe extern "C" fn public_test_can_see_me(
+    actor: *mut c_void,
+    viewer: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    match unsafe { test_can_see_me(&SVC, actor.cast(), viewer.cast()) } {
+        Ok(value) => {
+            unsafe {
+                *out = i32::from(value);
+            }
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+// Not exercised by any fixture entry point (no test calls `describe_spec`
+// directly); wired through `take()` for consistency with every other hook.
+unsafe extern "C" fn reach_spec_count(level: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = take(K_REACH_SPEC_COUNT, &[pid(level)])[0] as i32;
+    }
+    0
+}
+
+unsafe extern "C" fn reach_spec_at(
+    level: *mut c_void,
+    index: i32,
+    start: *mut *mut c_void,
+    end: *mut *mut c_void,
+    reach_flags: *mut i32,
+    distance: *mut i32,
+) -> i32 {
+    unsafe {
+        let outs = take(K_REACH_SPEC_AT, &[pid(level), index as u32]);
+        *start = ptr_at(outs[0]);
+        *end = ptr_at(outs[1]);
+        *reach_flags = outs[2] as i32;
+        *distance = outs[3] as i32;
+    }
+    0
 }
 
 const SVC: Hp2PawnNativeAiServices = Hp2PawnNativeAiServices {
@@ -325,6 +430,9 @@ const SVC: Hp2PawnNativeAiServices = Hp2PawnNativeAiServices {
     line_of_sight_to,
     single_line_check,
     event_long_fall,
+    test_can_see_me: public_test_can_see_me,
+    reach_spec_count,
+    reach_spec_at,
 };
 
 // --- World model: owned storage whose addresses are the object ids. ---
@@ -442,13 +550,15 @@ fn run_record(rec: &Record) {
     let pawn = ptr_of(&ids, a[0]);
     match rec.name.as_str() {
         "player_can_see_me" => {
-            let got = unsafe { player_can_see_me(&SVC, pawn.cast()) };
+            let got =
+                unsafe { player_can_see_me(&SVC, pawn.cast()).expect("checked native AI success") };
             assert_eq!(rec.ret, vec![got as u32], "{}: ret", rec.name);
             assert!(rec.outs.is_empty());
         }
         "test_can_see_me" => {
             let got = unsafe {
                 test_can_see_me(&SVC, ptr_of(&ids, a[0]).cast(), ptr_of(&ids, a[1]).cast())
+                    .expect("checked native AI success")
             };
             assert_eq!(rec.ret, vec![got as u32], "{}: ret", rec.name);
             assert!(rec.outs.is_empty());
@@ -460,9 +570,13 @@ fn run_record(rec: &Record) {
             let start = vec3(&a[6..9]);
             let picked = unsafe {
                 if rec.name == "pick_target" {
-                    pick_target(&SVC, pawn.cast(), &mut aim, &mut dist, fire, start).cast()
+                    pick_target(&SVC, pawn.cast(), &mut aim, &mut dist, fire, start)
+                        .expect("checked native AI success")
+                        .cast()
                 } else {
-                    pick_any_target(&SVC, pawn.cast(), &mut aim, &mut dist, fire, start).cast()
+                    pick_any_target(&SVC, pawn.cast(), &mut aim, &mut dist, fire, start)
+                        .expect("checked native AI success")
+                        .cast()
                 }
             };
             assert_eq!(rec.ret, vec![pid(picked)], "{}: picked", rec.name);
@@ -473,19 +587,30 @@ fn run_record(rec: &Record) {
                 rec.name
             );
         }
-        "add_pawn" => unsafe { add_pawn(&SVC, pawn.cast()) },
-        "remove_pawn" => unsafe { remove_pawn(&SVC, pawn.cast()) },
-        "stop_waiting" => unsafe { stop_waiting(&SVC, pawn.cast()) },
-        "wait_for_landing" => unsafe { wait_for_landing(&SVC, pawn.cast()) },
+        "add_pawn" => unsafe { add_pawn(&SVC, pawn.cast()).expect("checked native AI success") },
+        "remove_pawn" => unsafe {
+            remove_pawn(&SVC, pawn.cast()).expect("checked native AI success")
+        },
+        "stop_waiting" => unsafe {
+            stop_waiting(&SVC, pawn.cast()).expect("checked native AI success")
+        },
+        "wait_for_landing" => unsafe {
+            wait_for_landing(&SVC, pawn.cast()).expect("checked native AI success")
+        },
         "poll_wait_for_landing" => {
             let delta = f32::from_bits(a[1]);
-            unsafe { poll_wait_for_landing(&SVC, pawn.cast(), &delta) };
+            unsafe {
+                poll_wait_for_landing(&SVC, pawn.cast(), &delta).expect("checked native AI success")
+            };
         }
         "find_stair_rotation" => {
             let delta = f32::from_bits(a[1]);
             let mut hit: FCheckResult = unsafe { std::mem::zeroed() };
             hit.time = 1.0;
-            let got = unsafe { find_stair_rotation(&SVC, pawn.cast(), delta, &mut hit) };
+            let got = unsafe {
+                find_stair_rotation(&SVC, pawn.cast(), delta, &mut hit)
+                    .expect("checked native AI success")
+            };
             assert_eq!(rec.ret, vec![got as u32], "{}: stair", rec.name);
         }
         other => panic!("unknown entry {other}"),
@@ -507,17 +632,47 @@ fn run_record(rec: &Record) {
     );
 }
 
+/// `add_pawn` diverges from the UE1 oracle by Rust policy (LeadFindings
+/// "Duplicate AddPawn"): when the pawn is already reachable from the level's
+/// pawn list, UE1 re-pushed it (linking the list into a cycle); Rust only reads
+/// the list head and leaves the world unchanged. Every other record replays the
+/// oracle as recorded.
+fn expected_record(rec: &Record) -> Record {
+    if rec.name != "add_pawn" {
+        return rec.clone();
+    }
+    let head = &rec.scripts[0];
+    assert_eq!(
+        head.kind, K_LEVEL_PAWN_LIST,
+        "add_pawn: first hook reads the list head"
+    );
+    let mut next = head.outs[0] as usize;
+    let mut steps = 0;
+    while (1..=PAWNS).contains(&next) && steps <= PAWNS {
+        if next == rec.args[0] as usize {
+            let mut fixed = rec.clone();
+            fixed.scripts.truncate(1);
+            fixed.post = rec.world.clone();
+            return fixed;
+        }
+        next = rec.world[(next - 1) * PAWN_WORDS + 9] as usize;
+        steps += 1;
+    }
+    rec.clone()
+}
+
 /// Replays every record for `entry` and checks each hook kind was hit exactly
 /// as often as the oracle logged it. Returns the record count.
 fn replay_entry(entry: &str) -> usize {
     let mut count = 0;
     let mut expected = [0usize; KINDS];
     for rec in RECORDS.iter().filter(|r| r.name == entry) {
+        let rec = expected_record(rec);
         count += 1;
         for s in &rec.scripts {
             expected[s.kind as usize] += 1;
         }
-        run_record(rec);
+        run_record(&rec);
     }
     HITS.with(|h| assert_eq!(*h.borrow(), expected, "{entry}: hook hits"));
     count
@@ -542,7 +697,6 @@ fn pick_target_replays() {
 fn pick_any_target_replays() {
     assert_eq!(replay_entry("pick_any_target"), 48);
 }
-
 #[test]
 fn add_pawn_replays() {
     assert_eq!(replay_entry("add_pawn"), 12);

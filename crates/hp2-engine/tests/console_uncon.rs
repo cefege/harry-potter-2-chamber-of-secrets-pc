@@ -115,6 +115,7 @@ unsafe extern "C" fn m_viewport_exec(
     viewport: *mut c_void,
     cmd: *const c_void,
     console: *mut c_void,
+    out: *mut i32,
 ) -> i32 {
     let ret = EXEC_RET.get();
     emit(format!(
@@ -123,14 +124,16 @@ unsafe extern "C" fn m_viewport_exec(
         i32::from(console as usize == CONSOLE.get()),
         unsafe { wstr(cmd) },
     ));
-    ret
+    unsafe { *out = ret };
+    0
 }
 
 unsafe extern "C" fn m_viewport_create_native_font(
     viewport: *mut c_void,
     name: *const c_void,
     height: i32,
-) -> *mut c_void {
+    out: *mut *mut c_void,
+) -> i32 {
     assert_eq!(viewport as usize, VIEWPORT.get());
     let set = FONT_SET.get();
     emit(format!(
@@ -138,23 +141,27 @@ unsafe extern "C" fn m_viewport_create_native_font(
         unsafe { wstr(name) },
         if set { "set" } else { "null" },
     ));
-    if set {
-        (&FONT_OBJECT as *const u64).cast_mut().cast()
-    } else {
-        std::ptr::null_mut()
+    unsafe {
+        *out = if set {
+            (&FONT_OBJECT as *const u64).cast_mut().cast()
+        } else {
+            std::ptr::null_mut()
+        };
     }
+    0
 }
 
 unsafe extern "C" fn m_viewport_time_delta(_viewport: *mut c_void) -> f32 {
     DELTA.get()
 }
 
-unsafe extern "C" fn m_save_string_to_file(string: *const c_void, filename: *const c_void) {
+unsafe extern "C" fn m_save_string_to_file(string: *const c_void, filename: *const c_void) -> i32 {
     emit(format!(
         "save filename={} string={}",
         unsafe { wstr(filename) },
         unsafe { wstr(string) },
     ));
+    0
 }
 
 unsafe extern "C" fn m_frame_compute_render_size(frame: *mut c_void) {
@@ -182,14 +189,15 @@ static SVC: Hp2ConsoleServices = Hp2ConsoleServices {
 /// C++ native would (`*(DWORD*)Result`).
 unsafe fn run_exec(cp: *mut UConsole, cmd: &[u32], ret: i32) {
     EXEC_RET.set(ret);
-    let result = unsafe { console::exec_command(&SVC, cp, cmd.as_ptr().cast()) } as u32;
+    let result = unsafe { console::exec_command(&SVC, cp, cmd.as_ptr().cast()) }.unwrap() as u32;
     emit(format!("exec_result={result}"));
 }
 
 /// `execCreateNativeFont` through the port.
 unsafe fn run_font(cp: *mut UConsole, name: &[u32], height: i32, set: bool) {
     FONT_SET.set(set);
-    let out = unsafe { console::create_native_font(&SVC, cp, name.as_ptr().cast(), height) };
+    let out =
+        unsafe { console::create_native_font(&SVC, cp, name.as_ptr().cast(), height) }.unwrap();
     emit(format!(
         "font_result={}",
         if out.is_null() { "null" } else { "set" }
@@ -242,7 +250,7 @@ fn console_uncon_replays_original_fixture() {
         run_exec(cp, &BOGUS, 0);
 
         // execSaveTimeDemo.
-        console::save_time_demo(&SVC, FPS_DUMP.as_ptr().cast());
+        console::save_time_demo(&SVC, FPS_DUMP.as_ptr().cast()).unwrap();
 
         // execCreateNativeFont.
         run_font(cp, &ARIAL, 12, true);

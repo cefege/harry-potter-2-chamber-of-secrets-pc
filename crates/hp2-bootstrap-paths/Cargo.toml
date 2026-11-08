@@ -1,0 +1,12 @@
+[package]
+name = "hp2-bootstrap-paths"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "hp2_bootstrap_paths"
+[dependencies]
+libc.workspace = true
+hp2-file-hash.workspace = true

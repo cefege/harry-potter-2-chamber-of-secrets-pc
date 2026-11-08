@@ -55,13 +55,14 @@ pub(crate) fn dot(a: FVector, b: FVector) -> f32 {
     a.z.mul_add(b.z, a.x.mul_add(b.x, a.y * b.y))
 }
 
-/// `FVector ^ FVector`.
+/// `FVector ^ FVector`. The C++ `FVector::operator^` arithmetic contracts
+/// each positive product with a separately rounded negative product.
 #[inline]
 pub(crate) fn cross(a: FVector, b: FVector) -> FVector {
     v3(
-        a.y * b.z - a.z * b.y,
-        a.z * b.x - a.x * b.z,
-        a.x * b.y - a.y * b.x,
+        a.y.mul_add(b.z, -(a.z * b.y)),
+        a.z.mul_add(b.x, -(a.x * b.z)),
+        a.x.mul_add(b.y, -(a.y * b.x)),
     )
 }
 
@@ -1046,4 +1047,17 @@ pub fn bsp_surf(
     let node = bsp_node(bsp, item, location, normal, radius, mover_to_local)?;
     let bsp = bsp?;
     Some(bsp.nodes[node].i_surf as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cross, v3};
+
+    #[test]
+    fn cross_contracts_positive_product_with_rounded_negative_product() {
+        let a = v3(0.0, f32::from_bits(0x3F80_0001), 1.0);
+        let b = v3(0.0, 1.0, f32::from_bits(0x3F7F_FFFE));
+
+        assert_eq!(cross(a, b).x.to_bits(), 0xA880_0000);
+    }
 }

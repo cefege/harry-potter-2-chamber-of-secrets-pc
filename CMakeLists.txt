@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
+include("${CMAKE_CURRENT_LIST_DIR}/Build/CMake/HP2NativeFree.cmake")
+
 project(HarryPotter2Native
     VERSION 0.1.0
     LANGUAGES C CXX
@@ -28,14 +30,6 @@ if(APPLE)
         message(FATAL_ERROR
             "HarryPotter2Native targets macOS 15.0; configure with CMAKE_OSX_DEPLOYMENT_TARGET=15.0.")
     endif()
-elseif(EMSCRIPTEN)
-    set(HP2_TARGET_ARCH wasm64 CACHE INTERNAL "Target architecture")
-    # The browser port targets wasm64 so that every package/ABI layout matches
-    # the verified arm64 builds.
-    if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-        message(FATAL_ERROR
-            "HarryPotter2Native web builds require wasm64 (-sMEMORY64=1).")
-    endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|x86_64|AMD64)$")
         message(FATAL_ERROR "HarryPotter2Native supports Linux on aarch64 and x86_64 only.")
@@ -45,14 +39,8 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     else()
         set(HP2_TARGET_ARCH x64 CACHE INTERNAL "Target architecture")
     endif()
-elseif(WIN32)
-    if(NOT MINGW OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
-       NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
-        message(FATAL_ERROR "HarryPotter2Native supports Windows x64 with llvm-mingw only.")
-    endif()
-    set(HP2_TARGET_ARCH x64 CACHE INTERNAL "Target architecture")
 else()
-    message(FATAL_ERROR "HarryPotter2Native supports Darwin, Linux, Windows and Emscripten only.")
+    message(FATAL_ERROR "HarryPotter2Native supports Darwin and Linux only.")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -60,15 +48,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# libSquish still declares compatibility with CMake 2.8. CMake 4 requires an
-# explicit compatibility floor while this immutable dependency is in use.
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING
-    "Minimum policy compatibility accepted for pinned third-party projects" FORCE)
-
-option(HP2_REQUIRE_IMPLEMENTED_SOURCES
-    "Fail configuration unless every planned step-owned source has been implemented"
-    ON
-)
 option(HP2_ENABLE_ASAN_UBSAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(HP2_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 option(HP2_ENABLE_FULL_MAP_SMOKE
@@ -93,8 +72,51 @@ set(BUILD_TESTING ON CACHE BOOL "Build HP2 behavioral tests" FORCE)
 include(CTest)
 
 include(HP2Targets)
-if(EMSCRIPTEN)
-    include(HP2Web)
+include(HP2Install)
+
+# Record the mixed products as well as the Rust importer. Recording a product
+# does not certify it: native engine owners must fail the dependency guard.
+hp2_native_free_manifest(
+    OUTPUT "${CMAKE_BINARY_DIR}/hp2-native-free-manifest.json"
+    PRODUCTS hp2_game_rust hp2_ucc_rust hp2_import
+)
+
+if(DEFINED ENV{RUSTUP_HOME} AND NOT "$ENV{RUSTUP_HOME}" STREQUAL "")
+    set(_hp2_native_free_rustup_home "$ENV{RUSTUP_HOME}")
 else()
-    include(HP2Install)
+    set(_hp2_native_free_rustup_home "$ENV{HOME}/.rustup")
 endif()
+hp2_add_behavior_test(native_free_import "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "RUSTUP_HOME=${_hp2_native_free_rustup_home}"
+    "RUSTC_WRAPPER="
+    "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Build/check_native_free.py"
+    --build-dir "${CMAKE_BINARY_DIR}"
+    --product hp2_import
+    --report "${CMAKE_BINARY_DIR}/Testing/HP2/native_free_import/Artifacts/native-free.json"
+)
+hp2_add_behavior_test(native_free_ucc "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "RUSTUP_HOME=${_hp2_native_free_rustup_home}"
+    "RUSTC_WRAPPER="
+    "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Build/check_native_free.py"
+    --build-dir "${CMAKE_BINARY_DIR}"
+    --product hp2_ucc_rust
+    --report "${CMAKE_BINARY_DIR}/Testing/HP2/native_free_ucc/Artifacts/native-free.json"
+)
+hp2_add_behavior_test(native_free_game "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "RUSTUP_HOME=${_hp2_native_free_rustup_home}"
+    "RUSTC_WRAPPER="
+    "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Build/check_native_free.py"
+    --build-dir "${CMAKE_BINARY_DIR}"
+    --product hp2_game_rust
+    --report "${CMAKE_BINARY_DIR}/Testing/HP2/native_free_game/Artifacts/native-free.json"
+)
+hp2_add_behavior_test(native_free_producer_contracts
+    "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/NativeFreeProducerTests.py"
+)

@@ -28,7 +28,7 @@ The codebase is legacy-era UE1-derived C++ with modern platform support.
 **Linux**
 - arm64 (including Raspberry Pi 4/5 with 64-bit Raspberry Pi OS) and x86_64
 - CMake 3.24+, Git, `pkg-config`, and Clang
-- `make` for the Linux presets; `Ninja` for the Windows cross-build preset
+- `make` for the Linux presets
 - OpenGL development files and the SDL2-probed X11, Wayland, ALSA, and
   PulseAudio development headers
 - GTK3 development files for the native launcher file picker
@@ -90,10 +90,6 @@ cmake --build --preset linux-arm64
 # Linux x86_64
 cmake --preset linux-x64
 cmake --build --preset linux-x64
-
-# Windows x64 cross-build (set LLVM_MINGW_ROOT to the extracted pinned UCRT toolchain)
-cmake --preset windows-x64
-cmake --build --preset windows-x64 --target hp2_windows_zip
 ```
 
 Packaged builds:
@@ -101,7 +97,6 @@ Packaged builds:
 dist/macos-arm64/HarryPotter2.app   # macOS
 dist/linux-arm64/                   # Linux arm64 (bin/, lib/, share/)
 dist/linux-x64/                     # Linux x86_64 (bin/, lib/, share/)
-dist/windows-x64/                   # Windows x64 portable ZIP and staged tree
 ```
 
 ## Import game data from a checkout
@@ -136,10 +131,6 @@ open dist/macos-arm64/HarryPotter2.app
 # Linux
 ./dist/linux-arm64/bin/hp2_game
 ./dist/linux-x64/bin/hp2_game
-
-# Windows (portable ZIP)
-# Extract dist/windows-x64/HarryPotter2-<version>-windows-x64.zip,
-# then run HarryPotter2.exe inside the extracted folder.
 ```
 
 In the launcher window:
@@ -165,7 +156,6 @@ In the launcher window:
 | `linux-x64` | Linux x86_64 | Release build with optimizations |
 | `linux-x64-asan-ubsan` | Linux x86_64 | AddressSanitizer + UndefinedBehaviorSanitizer |
 | `linux-x64-retail` | Linux x86_64 | Release build against retail-only test data |
-| `windows-x64` | Windows x64 / llvm-mingw | Release cross-build; ZIP target included |
 
 Example:
 ```sh
@@ -187,9 +177,6 @@ ctest --preset linux-arm64
 
 # Linux x86_64
 ctest --preset linux-x64
-
-# Windows x64 (on a Windows host)
-ctest --preset windows-x64
 ```
 
 Run a single test:

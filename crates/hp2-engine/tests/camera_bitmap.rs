@@ -221,7 +221,7 @@ unsafe extern "C" fn render_dev_exec_fake(
 ) -> i32 {
     let svc = SERVICES.with(|c| c.get());
     assert!(!svc.is_null(), "services pointer is set before replay");
-    unsafe { render_dev_exec(&*svc, rd, cmd, ar) }
+    unsafe { render_dev_exec(&*svc, rd, cmd, ar).expect("checked replay callback") }
 }
 
 /// `UViewport::Exec`'s `RenDev->ReadPixels`: one LCG step per pixel, reset per case.
@@ -293,13 +293,18 @@ fn services() -> CameraServices {
     // SAFETY: every field of `CameraServices` is a function pointer, so the table has the
     // struct's exact layout. Unused entries point at `unexpected_service`.
     let mut svc: CameraServices = unsafe { std::mem::transmute(table) };
-    svc.parse_command = parse_command;
-    svc.parse_token = parse_token;
-    svc.render_dev_exec = render_dev_exec_fake;
-    svc.render_dev_read_pixels = read_pixels;
-    svc.create_slot_file_writer = create_slot_file_writer;
-    svc.archive_serialize = archive_serialize;
-    svc.archive_delete = archive_delete;
+    svc.parse_command = checked_parse_command;
+    svc.parse_token = checked_parse_token;
+    svc.render_dev_exec = checked_render_dev_exec;
+    svc.render_dev_read_pixels = checked_render_dev_read_pixels;
+    svc.create_slot_file_writer = checked_create_slot_file_writer;
+    svc.archive_serialize = checked_archive_serialize;
+    svc.archive_delete = checked_archive_delete;
+    svc.pixel_scope = replay_pixel_scope;
+    svc.pixel_allocate = replay_pixel_allocate;
+    svc.pixel_channels = replay_pixel_channels;
+    svc.shot_path_scope = replay_shot_path;
+    svc.create_file_writer = replay_create_writer;
     svc
 }
 
@@ -494,4 +499,120 @@ fn camera_bitmap_fixture_replays_bit_exact() {
         matched += 1;
     }
     assert_eq!(matched, BITMAP_CASES, "every bitmap record matched");
+}
+
+// Checked adapters for the unchanged replay oracle, not native exception proof.
+unsafe extern "C" fn checked_parse_command(
+    cursor: *mut c_void,
+    token: *const c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(parse_command(cursor, token));
+    }
+    0
+}
+unsafe extern "C" fn checked_parse_token(
+    cursor: *mut c_void,
+    buf: *mut c_void,
+    len: i32,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(parse_token(cursor, buf, len));
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_exec(
+    rd: *mut c_void,
+    cmd: *const c_void,
+    ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    unsafe {
+        result_out.write(render_dev_exec_fake(rd, cmd, ar));
+    }
+    0
+}
+unsafe extern "C" fn checked_render_dev_read_pixels(_rd: *mut c_void, dest: *mut c_void) -> i32 {
+    unsafe {
+        read_pixels(_rd, dest);
+    }
+    0
+}
+unsafe extern "C" fn checked_create_slot_file_writer(
+    file: *const c_void,
+    result_out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        result_out.write(create_slot_file_writer(file));
+    }
+    0
+}
+unsafe extern "C" fn checked_archive_serialize(
+    ar: *mut c_void,
+    data: *const c_void,
+    count: i32,
+) -> i32 {
+    unsafe {
+        archive_serialize(ar, data, count);
+    }
+    0
+}
+unsafe extern "C" fn checked_archive_delete(ar: *mut c_void) -> i32 {
+    unsafe {
+        archive_delete(ar);
+    }
+    0
+}
+
+thread_local! { static PIXEL_SCOPES: std::cell::RefCell<Vec<Vec<std::mem::MaybeUninit<FColor>>>> = const { std::cell::RefCell::new(Vec::new()) }; }
+unsafe extern "C" fn replay_pixel_scope(
+    _snap: i32,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void) -> i32,
+) -> i32 {
+    PIXEL_SCOPES.with(|s| s.borrow_mut().push(Vec::new()));
+    let status = unsafe { run(context) };
+    PIXEL_SCOPES.with(|s| {
+        s.borrow_mut().pop();
+    });
+    status
+}
+unsafe extern "C" fn replay_pixel_allocate(count: i32, out: *mut *mut c_void) -> i32 {
+    PIXEL_SCOPES.with(|s| {
+        let mut s = s.borrow_mut();
+        let b = s.last_mut().unwrap();
+        b.resize_with(count as usize, std::mem::MaybeUninit::uninit);
+        unsafe {
+            out.write(b.as_mut_ptr().cast());
+        }
+    });
+    0
+}
+unsafe extern "C" fn replay_pixel_channels(pixel: *const c_void, out: *mut i32) -> i32 {
+    unsafe {
+        let p = &*pixel.cast::<FColor>();
+        out.write(i32::from(p.r));
+        out.add(1).write(i32::from(p.g));
+        out.add(2).write(i32::from(p.b));
+        out.add(3).write(i32::from(p.a));
+    }
+    0
+}
+unsafe extern "C" fn replay_shot_path(
+    file: *const c_void,
+    context: *mut c_void,
+    run: unsafe extern "C" fn(*mut c_void, *const c_void) -> i32,
+) -> i32 {
+    let path = tchars(&format!("Slot\\/{}", unsafe {
+        units_str(&read_units(file))
+    }));
+    unsafe { run(context, path.as_ptr().cast()) }
+}
+unsafe extern "C" fn replay_create_writer(file: *const c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        out.write(create_archive(&units_str(&read_units(file))));
+    }
+    0
 }

@@ -5,7 +5,7 @@
 
 use std::sync::{Mutex, MutexGuard};
 
-use crate::abi::FireTraceHooks;
+use crate::abi::{FireCallbackError, FireTraceHooks};
 
 /// `LIGHTPHASEBIAS` from `UnFractal.cpp`.
 pub const LIGHTPHASEBIAS: i32 = 32;
@@ -17,8 +17,6 @@ pub struct FireGlobals {
     pub phase_table: [u8; 256],
     pub signed_phase_table: [u8; 256],
     pub light_phase_table: [u8; 256],
-    /// Trace callbacks for the current call. Refreshed from each FFI call.
-    pub trace: FireTraceHooks,
 }
 
 impl FireGlobals {
@@ -30,7 +28,6 @@ impl FireGlobals {
             phase_table: [0; 256],
             signed_phase_table: [0; 256],
             light_phase_table: [0; 256],
-            trace: FireTraceHooks::NOOP,
         }
     }
 
@@ -42,7 +39,6 @@ impl FireGlobals {
         let dst = &mut self.speed_rand_arr[(idx + 31) & 63];
         *dst ^= src;
         let result = *dst;
-        (self.trace.speed_rand)(self.speed_rindex, result);
         result
     }
 }
@@ -55,4 +51,36 @@ pub fn lock() -> MutexGuard<'static, FireGlobals> {
     GLOBALS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Per-invocation hooks never live in the global state. Reentry gets its own
+/// session and observes the same RNG/tables without overwriting outer hooks.
+pub struct FireSession {
+    pub trace: FireTraceHooks,
+}
+
+impl FireSession {
+    pub fn new(trace: FireTraceHooks) -> Self {
+        Self { trace }
+    }
+
+    pub fn speed_rand(&mut self) -> Result<u8, FireCallbackError> {
+        let (index, value) = {
+            let mut globals = lock();
+            let value = globals.speed_rand();
+            (globals.speed_rindex, value)
+        };
+        self.trace.speed_rand(index, value)?;
+        Ok(value)
+    }
+
+    pub fn phase(&self, index: usize) -> u8 {
+        lock().phase_table[index]
+    }
+    pub fn light_phase(&self, index: usize) -> u8 {
+        lock().light_phase_table[index]
+    }
+    pub fn signed_phase(&self, index: usize) -> u8 {
+        lock().signed_phase_table[index]
+    }
 }

@@ -1,27 +1,16 @@
 //! Rust port of `ThirdParty/XOpenGLDrv/Src/SetTexture.cpp`'s texture
 //! cache/upload (plan's "Texture upload/cache in Rust" Phase 3 item).
-//! Scope today: the `TEXF_P8` (indexed-palette) -> RGBA8 expansion
-//! (`SetTexture.cpp`'s own `case TEXF_P8:` conversion loop,
-//! `ConvertP8_RGBA8888`, read in full), the real `ETextureFormat`
-//! enum and its small pure helpers (`HP2TextureBytes`/
-//! `HP2TextureFormatName`/`IsHP2CompressedTexture`), `FixCacheID`'s
-//! real masked-vs-unmasked bind-map-key tagging, a real `TextureCache`
-//! (the real `BindMap`/`FCachedTexture`, keyed by `CacheID`) with
-//! real GPU-backed `upload_rgba8`/`create_gpu_texture`, and real
-//! `TEXF_P8`/`TEXF_RGBA8` GPU upload end to end (`hp2-ffi`'s own
-//! `hp2_rs_wgpu_upload_texture`, wired from every real `WgpuDrv.cpp`
-//! draw override that needs a texture -- diffuse and lightmap/fogmap
-//! alike, `DrawComplexSurface`'s own override uploads all three
-//! through this same path). Also ported: `TEXF_DXT1` -> `Bc1RgbaUnorm`
-//! upload with the asset's own full mip chain (`create_compressed_gpu_
-//! texture`/`write_bc1_levels`; wgpu cannot generate BC mips, so
-//! uncompressed formats stay mip-0-only), `TEXF_RGB8`/`TEXF_RGB16`
-//! conversion (`rgb8_to_rgba8`/`rgb16_to_rgba8`), and `TEXF_RGBA7`
-//! (byte-identical to RGBA8; always linear, as is RGB16, matching
-//! `SetTexture.cpp:247-257`). A re-upload whose width, height, format
-//! and mip count all match the resident texture writes into it in
-//! place instead of reallocating (`TextureCache::upload_rgba8`/
-//! `upload_compressed`).
+//! Scope includes the real `ETextureFormat` enum and its pure helpers
+//! (`HP2TextureBytes`/`HP2TextureFormatName`/`IsHP2CompressedTexture`),
+//! `FixCacheID`'s masked-vs-unmasked bind-map key, and a GPU-backed
+//! `TextureCache` keyed by the real `CacheID`. All five uncompressed
+//! formats (`TEXF_P8`, `TEXF_RGBA7`, `TEXF_RGB16`, `TEXF_RGB8`,
+//! `TEXF_RGBA8`) upload end to end through `hp2-ffi`'s
+//! `hp2_rs_wgpu_upload_texture`; `TEXF_DXT1` uploads through the separate
+//! compressed-texture entry point with the asset's full mip chain (wgpu
+//! cannot generate BC mips). Uncompressed formats remain mip-0-only.
+//! Matching re-uploads write into the resident texture rather than
+//! reallocating (`TextureCache::upload_rgba8`/`upload_compressed`).
 //!
 //! Investigated and resolved, not left open: lightmap upload needed
 //! no `GL_BGRA`/`.bgr` swizzle after all, unlike an earlier, more
@@ -519,6 +508,12 @@ impl TextureCache {
         Self {
             entries: std::collections::HashMap::new(),
         }
+    }
+    /// Drops every resident GPU texture and releases the cache table's
+    /// retained allocation. The owner must drain queued draws first.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.entries.shrink_to_fit();
     }
 
     /// Real `BindMap->Find(Info.CacheID)` -- `cache_id` must already
@@ -1859,6 +1854,17 @@ mod tests {
             &mapped[0..8],
             &[0u8, 0, 255, 255, 0, 0, 255, 255],
             "expected both texels to read back blue after the reuse upload"
+        );
+        drop(mapped);
+        cache.clear();
+        assert!(
+            cache.get(5).is_none(),
+            "renderer flush must evict textures from the resident CacheID map"
+        );
+        assert_eq!(
+            cache.entries.capacity(),
+            0,
+            "renderer flush must release the empty HashMap allocation"
         );
     }
 

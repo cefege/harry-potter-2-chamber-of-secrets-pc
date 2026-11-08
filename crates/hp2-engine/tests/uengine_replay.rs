@@ -52,6 +52,7 @@ const TICK_STOP: i32 = 6;
 thread_local! {
     static OUT: RefCell<String> = const { RefCell::new(String::new()) };
     static ENV: RefCell<Env> = RefCell::new(Env::new());
+    static WIDE_STORAGE: RefCell<Vec<Vec<u32>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Mock globals, scripted answers, engine and viewport state.
@@ -168,9 +169,14 @@ fn wz(s: &str) -> Vec<u32> {
     s.bytes().map(u32::from).chain([0]).collect()
 }
 
-/// Leaks a NUL-terminated wide string for mock getters that return `const TCHAR*`.
-fn leak_w(s: &str) -> *const u32 {
-    Box::leak(wz(s).into_boxed_slice()).as_ptr()
+/// Owned strings stay valid until the fixture thread releases its storage.
+fn stored_w(s: &str) -> *const u32 {
+    WIDE_STORAGE.with_borrow_mut(|storage| {
+        let text = wz(s);
+        let pointer = text.as_ptr();
+        storage.push(text);
+        pointer
+    })
 }
 
 /// Reads a NUL-terminated wide string, mapping non-ASCII to `?` like `pw`.
@@ -363,7 +369,7 @@ unsafe extern "C" fn m_remove_from_root(_e: *mut c_void) {
 }
 
 unsafe extern "C" fn m_engine_init(e: *mut c_void) {
-    unsafe { uengine::init(&SVC, e) }
+    unsafe { uengine::init(&SVC, e).expect("checked native operation") }
 }
 
 unsafe extern "C" fn m_engine_tick(_e: *mut c_void, delta: f32) {
@@ -377,11 +383,11 @@ unsafe extern "C" fn m_engine_tick(_e: *mut c_void, delta: f32) {
 }
 
 unsafe extern "C" fn m_engine_get_max_tick_rate(_e: *mut c_void) -> f32 {
-    unsafe { uengine::get_max_tick_rate(&SVC) }
+    unsafe { uengine::get_max_tick_rate(&SVC).expect("checked native operation") }
 }
 
 unsafe extern "C" fn m_engine_flush(e: *mut c_void, allow_precache: i32) {
-    unsafe { uengine::flush(&SVC, e, allow_precache) }
+    unsafe { uengine::flush(&SVC, e, allow_precache).expect("checked native operation") }
 }
 
 unsafe extern "C" fn m_load_engine_class() -> *mut c_void {
@@ -527,9 +533,9 @@ unsafe extern "C" fn m_localize(
         wtext(package)
     }));
     if key == "Yes" {
-        leak_w("yes")
+        stored_w("yes")
     } else {
-        leak_w("no")
+        stored_w("no")
     }
 }
 
@@ -762,11 +768,11 @@ unsafe extern "C" fn m_url_valid(_url: *mut c_void) -> i32 {
 }
 
 unsafe extern "C" fn m_url_protocol(_url: *mut c_void) -> *const u32 {
-    leak_w("unreal")
+    stored_w("unreal")
 }
 
 unsafe extern "C" fn m_url_host(_url: *mut c_void) -> *const u32 {
-    leak_w("127.0.0.1")
+    stored_w("127.0.0.1")
 }
 
 unsafe extern "C" fn m_url_port(_url: *mut c_void) -> i32 {
@@ -774,7 +780,7 @@ unsafe extern "C" fn m_url_port(_url: *mut c_void) -> i32 {
 }
 
 unsafe extern "C" fn m_url_map(_url: *mut c_void) -> *const u32 {
-    leak_w("Entry")
+    stored_w("Entry")
 }
 
 unsafe extern "C" fn m_url_num_options(_url: *mut c_void) -> i32 {
@@ -782,108 +788,823 @@ unsafe extern "C" fn m_url_num_options(_url: *mut c_void) -> i32 {
 }
 
 unsafe extern "C" fn m_url_option(_url: *mut c_void, i: i32) -> *const u32 {
-    leak_w(if i == 0 { "?Game=x" } else { "?Listen" })
+    stored_w(if i == 0 { "?Game=x" } else { "?Listen" })
 }
 
 unsafe extern "C" fn m_url_portal(_url: *mut c_void) -> *const u32 {
-    leak_w("Portal")
+    stored_w("Portal")
 }
 
 unsafe extern "C" fn m_url_string(_url: *mut c_void) -> *const u32 {
-    leak_w("unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal")
+    stored_w("unreal://127.0.0.1:7777/Entry?Game=x?Listen#Portal")
+}
+
+unsafe extern "C" fn checked_is_client(out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_is_client();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_is_editor(out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_is_editor();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_is_running(out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_is_running();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_set_is_running(v: i32) -> i32 {
+    unsafe {
+        m_set_is_running(v);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_is_requesting_exit(out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_is_requesting_exit();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_glog(out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_glog();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_cache_size_megs(_e: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_cache_size_megs(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_use_sound(_e: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_use_sound(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_audio(_e: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_audio(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_set_audio(_e: *mut c_void, v: *mut c_void) -> i32 {
+    unsafe {
+        m_set_audio(_e, v);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_render(_e: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_render(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_set_render(_e: *mut c_void, v: *mut c_void) -> i32 {
+    unsafe {
+        m_set_render(_e, v);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_client(_e: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_client(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_set_client(_e: *mut c_void, v: *mut c_void) -> i32 {
+    unsafe {
+        m_set_client(_e, v);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_set_current_tick_rate(_e: *mut c_void, v: f32) -> i32 {
+    unsafe {
+        m_set_current_tick_rate(_e, v);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_create_cylinder(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_create_cylinder(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_create_ocylinder(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_create_ocylinder(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_create_oval_cylinder(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_create_oval_cylinder(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_create_ooval_cylinder(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_create_ooval_cylinder(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_create_box(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_create_box(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_add_to_root(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_add_to_root(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_remove_from_root(_e: *mut c_void) -> i32 {
+    unsafe {
+        m_remove_from_root(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_engine_init(e: *mut c_void) -> i32 {
+    unsafe {
+        m_engine_init(e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_engine_tick(_e: *mut c_void, delta: f32) -> i32 {
+    unsafe {
+        m_engine_tick(_e, delta);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_engine_get_max_tick_rate(_e: *mut c_void, out: *mut f32) -> i32 {
+    unsafe {
+        *out = m_engine_get_max_tick_rate(_e);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_engine_flush(e: *mut c_void, allow_precache: i32) -> i32 {
+    unsafe {
+        m_engine_flush(e, allow_precache);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_load_engine_class(out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_load_engine_class();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_construct_engine(_cls: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_construct_engine(_cls);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_load_audio_class(out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_load_audio_class();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_construct_audio(_cls: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_construct_audio(_cls);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_audio_delete(_audio: *mut c_void) -> i32 {
+    unsafe {
+        m_audio_delete(_audio);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_audio_init(_audio: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_audio_init(_audio);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_log_audio_init_failed() -> i32 {
+    unsafe {
+        m_log_audio_init_failed();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_log_engine_initialized() -> i32 {
+    unsafe {
+        m_log_engine_initialized();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_parse_cmdline_param(param: *const u32, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_parse_cmdline_param(param);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gsys(out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_gsys();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gsys_exec(
+    _sys: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_gsys_exec(_sys, cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_static_exec(cmd: *const u32, _ar: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_static_exec(cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gcache_init(bytes: i32, align: i32) -> i32 {
+    unsafe {
+        m_gcache_init(bytes, align);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gcache_exit(free_memory: i32) -> i32 {
+    unsafe {
+        m_gcache_exit(free_memory);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gcache_flush() -> i32 {
+    unsafe {
+        m_gcache_flush();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gcache_exec(cmd: *const u32, _ar: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_gcache_exec(cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gexec(out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_gexec();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_gexec_exec(
+    _exec: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_gexec_exec(_exec, cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_client_exec(
+    _client: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_client_exec(_client, cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_client_flush(_client: *mut c_void, allow_precache: i32) -> i32 {
+    unsafe {
+        m_client_flush(_client, allow_precache);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_render_exec(
+    _render: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_render_exec(_render, cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_audio_exec(
+    _audio: *mut c_void,
+    cmd: *const u32,
+    _ar: *mut c_void,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_audio_exec(_audio, cmd, _ar);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_engine_mem_init(bytes: i32, name: *const u32) -> i32 {
+    unsafe {
+        m_engine_mem_init(bytes, name);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_engine_mem_exit() -> i32 {
+    unsafe {
+        m_engine_mem_exit();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_static_init() -> i32 {
+    unsafe {
+        m_url_static_init();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_static_exit() -> i32 {
+    unsafe {
+        m_url_static_exit();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_localize(
+    section: *const c_char,
+    key: *const c_char,
+    package: *const u32,
+    out: *mut *const u32,
+) -> i32 {
+    unsafe {
+        *out = m_localize(section, key, package);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_app_to_upper(c: u32, out: *mut u32) -> i32 {
+    unsafe {
+        *out = m_app_to_upper(c);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_app_stricmp(a: *const u32, b: *const u32, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_app_stricmp(a, b);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_config_get_language(buf: *mut u32, len: i32, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_config_get_language(buf, len);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_set_language(text: *const u32) -> i32 {
+    unsafe {
+        m_set_language(text);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_app_seconds(out: *mut i64) -> i32 {
+    unsafe {
+        *out = m_app_seconds();
+    }
+    0
+}
+
+unsafe extern "C" fn checked_ftime_sub(a: i64, b: i64, out: *mut f32) -> i32 {
+    unsafe {
+        *out = m_ftime_sub(a, b);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_app_sleep(seconds: f32) -> i32 {
+    unsafe {
+        m_app_sleep(seconds);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_viewport_console(
+    _viewport: *mut c_void,
+    out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        *out = m_viewport_console(_viewport);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_viewport_actor(_viewport: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_viewport_actor(_viewport);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_viewport_input(_viewport: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_viewport_input(_viewport);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_actor_hud(_actor: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_actor_hud(_actor);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_hud_main_menu(_hud: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_hud_main_menu(_hud);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_object_class(_obj: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_object_class(_obj);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_class_super(cls: *mut c_void, out: *mut *mut c_void) -> i32 {
+    unsafe {
+        *out = m_class_super(cls);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_class_name(cls: *mut c_void, out: *mut *const u32) -> i32 {
+    unsafe {
+        *out = m_class_name(cls);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_console_event_key_type(
+    _console: *mut c_void,
+    key: i32,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_console_event_key_type(_console, key);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_console_event_key_event(
+    _console: *mut c_void,
+    key: i32,
+    state: i32,
+    delta: f32,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_console_event_key_event(_console, key, state, delta);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_console_as_output(
+    _console: *mut c_void,
+    out: *mut *mut c_void,
+) -> i32 {
+    unsafe {
+        *out = m_console_as_output(_console);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_input_pre_process(
+    _input: *mut c_void,
+    key: i32,
+    state: i32,
+    delta: f32,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_input_pre_process(_input, key, state, delta);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_input_process(
+    _input: *mut c_void,
+    ar: *mut c_void,
+    key: i32,
+    state: i32,
+    delta: f32,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_input_process(_input, ar, key, state, delta);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_parse_command(
+    stream: *mut *const u32,
+    m: *const u32,
+    out: *mut i32,
+) -> i32 {
+    unsafe {
+        *out = m_parse_command(stream, m);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_output_log(_ar: *mut c_void, text: *const u32) -> i32 {
+    unsafe {
+        m_output_log(_ar, text);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_output_logf(_ar: *mut c_void, text: *const u32) -> i32 {
+    unsafe {
+        m_output_logf(_ar, text);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_output_logf_s(
+    _ar: *mut c_void,
+    fmt: *const u32,
+    s: *const u32,
+) -> i32 {
+    unsafe {
+        m_output_logf_s(_ar, fmt, s);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_output_logf_i(_ar: *mut c_void, fmt: *const u32, i: i32) -> i32 {
+    unsafe {
+        m_output_logf_i(_ar, fmt, i);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_output_logf_is(
+    _ar: *mut c_void,
+    fmt: *const u32,
+    i: i32,
+    s: *const u32,
+) -> i32 {
+    unsafe {
+        m_output_logf_is(_ar, fmt, i, s);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_valid(_url: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_url_valid(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_protocol(_url: *mut c_void, out: *mut *const u32) -> i32 {
+    unsafe {
+        *out = m_url_protocol(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_host(_url: *mut c_void, out: *mut *const u32) -> i32 {
+    unsafe {
+        *out = m_url_host(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_port(_url: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_url_port(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_map(_url: *mut c_void, out: *mut *const u32) -> i32 {
+    unsafe {
+        *out = m_url_map(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_num_options(_url: *mut c_void, out: *mut i32) -> i32 {
+    unsafe {
+        *out = m_url_num_options(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_option(_url: *mut c_void, i: i32, out: *mut *const u32) -> i32 {
+    unsafe {
+        *out = m_url_option(_url, i);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_url_portal(_url: *mut c_void, out: *mut *const u32) -> i32 {
+    unsafe {
+        *out = m_url_portal(_url);
+    }
+    0
+}
+
+unsafe extern "C" fn checked_crack_url_scope(cmd: *const u32, ar: *mut c_void) -> i32 {
+    struct UrlScope(*mut c_void);
+    impl Drop for UrlScope {
+        fn drop(&mut self) {
+            unsafe { m_url_free(self.0) };
+        }
+    }
+    let url = UrlScope(unsafe { m_url_crack(cmd) });
+    match unsafe { uengine::crack_url(&SVC, url.0, ar) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
+}
+unsafe extern "C" fn checked_url_log_string(url: *mut c_void, ar: *mut c_void) -> i32 {
+    let fmt = wz("       String: '%s'");
+    unsafe {
+        m_output_logf_s(ar, fmt.as_ptr(), m_url_string(url));
+    }
+    0
+}
+unsafe extern "C" fn checked_exit_audio_scope(engine: *mut c_void) -> i32 {
+    match unsafe { uengine::exit_audio(&SVC, engine) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
+}
+unsafe extern "C" fn checked_commandlet_scope(context: *mut c_void, entry: u32) -> i32 {
+    match unsafe { uengine::commandlet_scope(context, entry) } {
+        Ok(()) => 0,
+        Err(status) => status,
+    }
 }
 
 static SVC: Hp2UEngineServices = Hp2UEngineServices {
-    is_client: m_is_client,
-    is_editor: m_is_editor,
-    is_running: m_is_running,
-    set_is_running: m_set_is_running,
-    is_requesting_exit: m_is_requesting_exit,
-    glog: m_glog,
-    cache_size_megs: m_cache_size_megs,
-    use_sound: m_use_sound,
-    audio: m_audio,
-    set_audio: m_set_audio,
-    render: m_render,
-    set_render: m_set_render,
-    client: m_client,
-    set_client: m_set_client,
-    set_current_tick_rate: m_set_current_tick_rate,
-    create_cylinder: m_create_cylinder,
-    create_ocylinder: m_create_ocylinder,
-    create_oval_cylinder: m_create_oval_cylinder,
-    create_ooval_cylinder: m_create_ooval_cylinder,
-    create_box: m_create_box,
-    add_to_root: m_add_to_root,
-    remove_from_root: m_remove_from_root,
-    engine_init: m_engine_init,
-    engine_tick: m_engine_tick,
-    engine_get_max_tick_rate: m_engine_get_max_tick_rate,
-    engine_flush: m_engine_flush,
-    load_engine_class: m_load_engine_class,
-    construct_engine: m_construct_engine,
-    load_audio_class: m_load_audio_class,
-    construct_audio: m_construct_audio,
-    audio_delete: m_audio_delete,
-    audio_init: m_audio_init,
-    log_audio_init_failed: m_log_audio_init_failed,
-    log_engine_initialized: m_log_engine_initialized,
-    parse_cmdline_param: m_parse_cmdline_param,
-    gsys: m_gsys,
-    gsys_exec: m_gsys_exec,
-    static_exec: m_static_exec,
-    gcache_init: m_gcache_init,
-    gcache_exit: m_gcache_exit,
-    gcache_flush: m_gcache_flush,
-    gcache_exec: m_gcache_exec,
-    gexec: m_gexec,
-    gexec_exec: m_gexec_exec,
-    client_exec: m_client_exec,
-    client_flush: m_client_flush,
-    render_exec: m_render_exec,
-    audio_exec: m_audio_exec,
-    engine_mem_init: m_engine_mem_init,
-    engine_mem_exit: m_engine_mem_exit,
-    url_static_init: m_url_static_init,
-    url_static_exit: m_url_static_exit,
-    localize: m_localize,
-    app_to_upper: m_app_to_upper,
-    app_stricmp: m_app_stricmp,
-    config_get_language: m_config_get_language,
-    set_language: m_set_language,
-    app_seconds: m_app_seconds,
-    ftime_sub: m_ftime_sub,
-    app_sleep: m_app_sleep,
-    viewport_console: m_viewport_console,
-    viewport_actor: m_viewport_actor,
-    viewport_input: m_viewport_input,
-    actor_hud: m_actor_hud,
-    hud_main_menu: m_hud_main_menu,
-    object_class: m_object_class,
-    class_super: m_class_super,
-    class_name: m_class_name,
-    console_event_key_type: m_console_event_key_type,
-    console_event_key_event: m_console_event_key_event,
-    console_as_output: m_console_as_output,
-    input_pre_process: m_input_pre_process,
-    input_process: m_input_process,
-    parse_command: m_parse_command,
-    output_log: m_output_log,
-    output_logf: m_output_logf,
-    output_logf_s: m_output_logf_s,
-    output_logf_i: m_output_logf_i,
-    output_logf_is: m_output_logf_is,
-    url_crack: m_url_crack,
-    url_free: m_url_free,
-    url_valid: m_url_valid,
-    url_protocol: m_url_protocol,
-    url_host: m_url_host,
-    url_port: m_url_port,
-    url_map: m_url_map,
-    url_num_options: m_url_num_options,
-    url_option: m_url_option,
-    url_portal: m_url_portal,
-    url_string: m_url_string,
+    is_client: checked_is_client,
+    is_editor: checked_is_editor,
+    is_running: checked_is_running,
+    set_is_running: checked_set_is_running,
+    is_requesting_exit: checked_is_requesting_exit,
+    glog: checked_glog,
+    cache_size_megs: checked_cache_size_megs,
+    use_sound: checked_use_sound,
+    audio: checked_audio,
+    set_audio: checked_set_audio,
+    render: checked_render,
+    set_render: checked_set_render,
+    client: checked_client,
+    set_client: checked_set_client,
+    set_current_tick_rate: checked_set_current_tick_rate,
+    create_cylinder: checked_create_cylinder,
+    create_ocylinder: checked_create_ocylinder,
+    create_oval_cylinder: checked_create_oval_cylinder,
+    create_ooval_cylinder: checked_create_ooval_cylinder,
+    create_box: checked_create_box,
+    add_to_root: checked_add_to_root,
+    remove_from_root: checked_remove_from_root,
+    engine_init: checked_engine_init,
+    engine_tick: checked_engine_tick,
+    engine_get_max_tick_rate: checked_engine_get_max_tick_rate,
+    engine_flush: checked_engine_flush,
+    load_engine_class: checked_load_engine_class,
+    construct_engine: checked_construct_engine,
+    load_audio_class: checked_load_audio_class,
+    construct_audio: checked_construct_audio,
+    audio_delete: checked_audio_delete,
+    audio_init: checked_audio_init,
+    log_audio_init_failed: checked_log_audio_init_failed,
+    log_engine_initialized: checked_log_engine_initialized,
+    parse_cmdline_param: checked_parse_cmdline_param,
+    gsys: checked_gsys,
+    gsys_exec: checked_gsys_exec,
+    static_exec: checked_static_exec,
+    gcache_init: checked_gcache_init,
+    gcache_exit: checked_gcache_exit,
+    gcache_flush: checked_gcache_flush,
+    gcache_exec: checked_gcache_exec,
+    gexec: checked_gexec,
+    gexec_exec: checked_gexec_exec,
+    client_exec: checked_client_exec,
+    client_flush: checked_client_flush,
+    render_exec: checked_render_exec,
+    audio_exec: checked_audio_exec,
+    engine_mem_init: checked_engine_mem_init,
+    engine_mem_exit: checked_engine_mem_exit,
+    url_static_init: checked_url_static_init,
+    url_static_exit: checked_url_static_exit,
+    localize: checked_localize,
+    app_to_upper: checked_app_to_upper,
+    app_stricmp: checked_app_stricmp,
+    config_get_language: checked_config_get_language,
+    set_language: checked_set_language,
+    app_seconds: checked_app_seconds,
+    ftime_sub: checked_ftime_sub,
+    app_sleep: checked_app_sleep,
+    viewport_console: checked_viewport_console,
+    viewport_actor: checked_viewport_actor,
+    viewport_input: checked_viewport_input,
+    actor_hud: checked_actor_hud,
+    hud_main_menu: checked_hud_main_menu,
+    object_class: checked_object_class,
+    class_super: checked_class_super,
+    class_name: checked_class_name,
+    console_event_key_type: checked_console_event_key_type,
+    console_event_key_event: checked_console_event_key_event,
+    console_as_output: checked_console_as_output,
+    input_pre_process: checked_input_pre_process,
+    input_process: checked_input_process,
+    parse_command: checked_parse_command,
+    output_log: checked_output_log,
+    output_logf: checked_output_logf,
+    output_logf_s: checked_output_logf_s,
+    output_logf_i: checked_output_logf_i,
+    output_logf_is: checked_output_logf_is,
+    crack_url_scope: checked_crack_url_scope,
+    url_valid: checked_url_valid,
+    url_protocol: checked_url_protocol,
+    url_host: checked_url_host,
+    url_port: checked_url_port,
+    url_map: checked_url_map,
+    url_num_options: checked_url_num_options,
+    url_option: checked_url_option,
+    url_portal: checked_url_portal,
+    url_log_string: checked_url_log_string,
+    exit_audio_scope: checked_exit_audio_scope,
+    commandlet_scope: checked_commandlet_scope,
 };
 
 // ---- scenario driver -----------------------------------------------------
@@ -924,20 +1645,22 @@ fn setup_viewport(console: bool, actor: bool, hud: bool, menu: bool) {
 }
 
 fn set_chain(names: &[&str]) {
-    env(|e| e.chain = names.iter().map(|n| leak_w(n)).collect());
+    env(|e| e.chain = names.iter().map(|n| stored_w(n)).collect());
 }
 
 fn exec_cmd(cmd: &str) -> i32 {
     let w = wz(cmd);
-    unsafe { uengine::exec(&SVC, eng(), w.as_ptr(), glog()) }
+    unsafe { uengine::exec(&SVC, eng(), w.as_ptr(), glog()).expect("checked native operation") }
 }
 
 fn key_cmd(key: i32) -> i32 {
-    unsafe { uengine::key(&SVC, vp(), key) }
+    unsafe { uengine::key(&SVC, vp(), key).expect("checked native operation") }
 }
 
 fn input_event_cmd(key: i32, state: i32) -> i32 {
-    unsafe { uengine::input_event(&SVC, vp(), key, state, 0.125) }
+    unsafe {
+        uengine::input_event(&SVC, vp(), key, state, 0.125).expect("checked native operation")
+    }
 }
 
 fn replay() -> String {
@@ -945,49 +1668,49 @@ fn replay() -> String {
 
     // Init: client and non-client cache sizing, clamping, Localize yes/no.
     begin("init_default");
-    unsafe { uengine::init(&SVC, eng()) };
+    unsafe { uengine::init(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("init_no_client");
     env(|e| e.is_client = false);
-    unsafe { uengine::init(&SVC, eng()) };
+    unsafe { uengine::init(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("init_clamp_high");
     env(|e| e.cache_megs = 5000);
-    unsafe { uengine::init(&SVC, eng()) };
+    unsafe { uengine::init(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("init_clamp_low");
     env(|e| e.cache_megs = 0);
-    unsafe { uengine::init(&SVC, eng()) };
+    unsafe { uengine::init(&SVC, eng()).expect("checked native operation") };
     dump_state();
 
     // InitAudio.
     begin("audio_ok");
-    unsafe { uengine::init_audio(&SVC, eng()) };
+    unsafe { uengine::init_audio(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("audio_fail");
     env(|e| e.audio_init = 0);
-    unsafe { uengine::init_audio(&SVC, eng()) };
+    unsafe { uengine::init_audio(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("audio_nosound");
     env(|e| e.nosound = 1);
-    unsafe { uengine::init_audio(&SVC, eng()) };
+    unsafe { uengine::init_audio(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("audio_no_usesound");
     env(|e| e.use_sound = 0);
-    unsafe { uengine::init_audio(&SVC, eng()) };
+    unsafe { uengine::init_audio(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("audio_not_client");
     env(|e| e.is_client = false);
-    unsafe { uengine::init_audio(&SVC, eng()) };
+    unsafe { uengine::init_audio(&SVC, eng()).expect("checked native operation") };
     dump_state();
 
     // Exit / Destroy.
     begin("exit_with_audio");
     env(|e| e.audio = AUDIO_PTR);
-    unsafe { uengine::exit(&SVC, eng()) };
+    unsafe { uengine::exit(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("exit_without_audio");
-    unsafe { uengine::exit(&SVC, eng()) };
+    unsafe { uengine::exit(&SVC, eng()).expect("checked native operation") };
     dump_state();
     begin("destroy");
     env(|e| {
@@ -995,29 +1718,29 @@ fn replay() -> String {
         e.render = RENDER_PTR;
         e.client = CLIENT_PTR;
     });
-    unsafe { uengine::destroy(&SVC, eng()) };
+    unsafe { uengine::destroy(&SVC, eng()).expect("checked native operation") };
     dump_state();
 
     // Flush.
     begin("flush_client");
     env(|e| e.client = CLIENT_PTR);
     unsafe {
-        uengine::flush(&SVC, eng(), 1);
-        uengine::flush(&SVC, eng(), 0);
+        uengine::flush(&SVC, eng(), 1).expect("checked native operation");
+        uengine::flush(&SVC, eng(), 0).expect("checked native operation");
     }
     dump_state();
     begin("flush_no_client");
-    unsafe { uengine::flush(&SVC, eng(), 0) };
+    unsafe { uengine::flush(&SVC, eng(), 0).expect("checked native operation") };
     dump_state();
 
     // GetMaxTickRate.
     begin("max_tick_editor");
     env(|e| e.is_editor = true);
-    let r = unsafe { uengine::get_max_tick_rate(&SVC) };
+    let r = unsafe { uengine::get_max_tick_rate(&SVC).expect("checked native operation") };
     emit(format!("result\tmax_tick_editor\t{:08x}", r.to_bits()));
     dump_state();
     begin("max_tick_game");
-    let r = unsafe { uengine::get_max_tick_rate(&SVC) };
+    let r = unsafe { uengine::get_max_tick_rate(&SVC).expect("checked native operation") };
     emit(format!("result\tmax_tick_game\t{:08x}", r.to_bits()));
     dump_state();
 
@@ -1173,7 +1896,7 @@ fn replay() -> String {
         e.is_editor = true;
         e.config_lang = 1;
     });
-    let r = unsafe { uengine::commandlet_main(&SVC) };
+    let r = unsafe { uengine::commandlet_main(&SVC).expect("checked native operation") };
     emit(format!("result\tcmdlet_editor\t{r}"));
     dump_state();
     begin("cmdlet_game_no_lang");
@@ -1181,7 +1904,7 @@ fn replay() -> String {
         e.is_editor = false;
         e.config_lang = 0;
     });
-    let r = unsafe { uengine::commandlet_main(&SVC) };
+    let r = unsafe { uengine::commandlet_main(&SVC).expect("checked native operation") };
     emit(format!("result\tcmdlet_game_no_lang\t{r}"));
     dump_state();
 

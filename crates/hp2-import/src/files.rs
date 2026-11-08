@@ -268,7 +268,7 @@ pub fn child(dir: &Path, want: &str, required: bool) -> Result<Option<PathBuf>, 
 /// `fs::directory_iterator(d)` without an `error_code` overload, so an
 /// unreadable `d` throws `fs::filesystem_error` directly, caught by
 /// `RunImport`'s generic `catch (const std::exception&)` branch
-/// (`HP2ImportOutput.cpp:273-282`) and surfaced as that exception's
+/// (`HP2ImportOutput.cpp:268-277`) and surfaced as that exception's
 /// (implementation-defined, libstdc++/libc++-specific) `what()` text --
 /// not `Fail`'s clean "cannot inspect ..." message `Child` produces for
 /// the same failure. This gives the clean message in both cases instead,

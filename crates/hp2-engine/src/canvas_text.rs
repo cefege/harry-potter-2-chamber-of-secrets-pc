@@ -16,6 +16,8 @@
 use std::ffi::c_void;
 
 use crate::canvas::Hp2CanvasTileRect;
+use hp2_abi::FVector;
+use hp2_abi::engine::generated::FRotator;
 
 /// `ERenderStyle` (`Engine/Inc/UnCamera.h`).
 pub const STY_NONE: i32 = 0;
@@ -35,6 +37,13 @@ pub const PF_RENDER_HINT: u32 = 0x0100_0000;
 pub const LOG_DRAW_TEXT_NO_FONT: u32 = 0;
 pub const LOG_DRAW_TEXT_CLIPPED_NO_FONT: u32 = 1;
 pub const LOG_TEXT_SIZE_NO_FONT: u32 = 2;
+/// Issued directly by the exec handlers (not the text/tile pipeline above),
+/// for the `if( !Tex )` / `if( !Actor )` early-return checks in
+/// `execDrawTile`/`execDrawTileClipped`/`execDrawActor`/`execDrawClippedActor`.
+pub const LOG_DRAW_TILE_MISSING_TEXTURE: u32 = 3;
+pub const LOG_DRAW_TILE_CLIPPED_MISSING_TEXTURE: u32 = 4;
+pub const LOG_DRAW_ACTOR_MISSING_ACTOR: u32 = 5;
+pub const LOG_DRAW_CLIPPED_ACTOR_MISSING_ACTOR: u32 = 6;
 
 /// Texture slots used by `DrawString` (`Infos[5]`).
 pub const TEXT_SLOTS: usize = 5;
@@ -1067,15 +1076,10 @@ pub fn draw_pattern<H: CanvasTextHost + ?Sized>(
     h.draw_tile_texture(cv, &draw);
 }
 
-/// `UCanvas::DrawIcon`: `DrawTile(Texture, ScreenX, ScreenY, XSize, YSize, 0, 0, USize, VSize, ...)`.
-/// Reuses the pattern argument layout: `x/y/xl/yl` plus `z`, `color`, `fog`, `flags`, `span`.
-pub fn draw_icon<H: CanvasTextHost + ?Sized>(
-    h: &mut H,
-    cv: &Hp2CanvasView,
-    a: &Hp2CanvasPatternArgs,
-) {
-    let size = h.texture_size(Texture(a.tex));
-    let draw = Hp2CanvasTileDraw {
+/// Produces the DrawIcon tile request. Native code submits it only after Rust
+/// returns, so a render-device exception cannot unwind through a Rust frame.
+pub fn draw_icon(a: &Hp2CanvasPatternArgs, size: Hp2CanvasSize) -> Hp2CanvasTileDraw {
+    Hp2CanvasTileDraw {
         tex: a.tex,
         rect: Hp2CanvasTileRect {
             x: a.x,
@@ -1092,8 +1096,7 @@ pub fn draw_icon<H: CanvasTextHost + ?Sized>(
         color: a.color,
         fog: a.fog,
         flags: a.flags,
-    };
-    h.draw_tile_texture(cv, &draw);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1104,6 +1107,7 @@ pub fn draw_icon<H: CanvasTextHost + ?Sized>(
 /// Every entry is a plain C function pointer; `canvas`, `slots`, and `stack`
 /// are opaque engine pointers owned by the C++ caller.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Hp2CanvasServices {
     pub ui_scale: unsafe extern "C" fn(canvas: *mut c_void) -> f32,
     pub language_is_int: unsafe extern "C" fn() -> u8,
@@ -1149,6 +1153,56 @@ pub struct Hp2CanvasServices {
         unsafe extern "C" fn(canvas: *mut c_void, draw: *const Hp2CanvasTileDraw),
     pub texture_size: unsafe extern "C" fn(tex: Texture) -> Hp2CanvasSize,
     pub log: unsafe extern "C" fn(stack: *mut c_void, code: u32),
+    /// `FillCanvasTextView(Canvas, Font, View)` (`UnCanvas.cpp`): copies
+    /// `UCanvas`/`Frame` state into a fresh [`Hp2CanvasView`]. Pure field copy.
+    pub fill_view: unsafe extern "C" fn(canvas: *mut c_void, font: Font, view: *mut Hp2CanvasView),
+    /// `WriteBackCanvasTextView(Canvas, View)` (`UnCanvas.cpp`): writes the
+    /// `CurX`/`CurY`/`CurYL`/`ClipX`/`ClipY`/`OrgX`/`OrgY` fields back. Pure field copy.
+    pub write_back_view: unsafe extern "C" fn(canvas: *mut c_void, view: *const Hp2CanvasView),
+    /// Allocates one `FTextureInfo[HP2_CANVAS_TEXT_SLOTS]` scratch block for
+    /// `Hp2CanvasTextCtx::slots` (`FCanvasTextCall::Slots` in the original).
+    pub alloc_slots: unsafe extern "C" fn() -> *mut c_void,
+    /// Frees a block returned by `alloc_slots`.
+    pub free_slots: unsafe extern "C" fn(slots: *mut c_void),
+    /// `Canvas->Font = Font` (`execDrawTextClipped`'s own writeback, distinct
+    /// from `write_back_view`, which never touches `Font`).
+    pub set_font: unsafe extern "C" fn(canvas: *mut c_void, font: Font),
+    /// `Canvas->Font` (read), the implicit `Font` argument every
+    /// `FCanvasTextCall` construction passes (`this->Font`, never a local).
+    pub canvas_font: unsafe extern "C" fn(canvas: *mut c_void) -> Font,
+    /// `Canvas->Viewport`.
+    pub canvas_viewport: unsafe extern "C" fn(canvas: *mut c_void) -> *mut c_void,
+    /// `Canvas->Render`.
+    pub canvas_render: unsafe extern "C" fn(canvas: *mut c_void) -> *mut c_void,
+    /// `Canvas->Frame`.
+    pub canvas_frame: unsafe extern "C" fn(canvas: *mut c_void) -> *mut c_void,
+    /// `RenDev->ClearZ(Frame)` on an instance `URenderDevice*` (`Viewport->RenDev`).
+    pub render_device_clear_z:
+        unsafe extern "C" fn(ren_dev: *mut c_void, frame: *mut c_void) -> i32,
+    /// `GRenderDevice->ClearZ(Frame)` (the global, `execDrawPortal` only).
+    pub grenderdevice_clear_z: unsafe extern "C" fn(frame: *mut c_void) -> i32,
+    /// `Render->DrawActor(Frame, Actor)`.
+    pub render_draw_actor:
+        unsafe extern "C" fn(render: *mut c_void, frame: *mut c_void, actor: *mut c_void) -> i32,
+    /// `Frame->ComputeRenderCoords(V, R)`.
+    pub frame_compute_render_coords:
+        unsafe extern "C" fn(frame: *mut c_void, v: FVector, r: FRotator) -> i32,
+    /// `Frame->ComputeRenderSize()`.
+    pub frame_compute_render_size: unsafe extern "C" fn(frame: *mut c_void) -> i32,
+    /// `Render->CreateMasterFrame(Viewport, CamLocation, CamRotation, &Bounds)`,
+    /// including the original's `check(NewNode)`; `Bounds` is a discarded local
+    /// (`execDrawPortal` never reads it back). Writes the new `FSceneNode*` to `*out`.
+    pub render_create_master_frame: unsafe extern "C" fn(
+        render: *mut c_void,
+        viewport: *mut c_void,
+        cam_location: FVector,
+        cam_rotation: FRotator,
+        out: *mut *mut c_void,
+    ) -> i32,
+    /// `Render->DrawWorld(Frame)`.
+    pub render_draw_world: unsafe extern "C" fn(render: *mut c_void, frame: *mut c_void) -> i32,
+    /// `Render->FinishMasterFrame()`.
+    pub render_finish_master_frame: unsafe extern "C" fn(render: *mut c_void) -> i32,
 }
 
 /// Engine pointers for one FFI call.
@@ -1341,4 +1395,30 @@ impl CanvasTextHost for ServiceHost {
         // SAFETY: stack is the live FFrame of the calling native (may be null for shims).
         unsafe { f(self.ctx.stack, code) }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Publish-once: `Hp2CanvasServices.cpp`'s static initializer hands the table
+// to Rust exactly once; natives in `engine_natives_render.rs` read it back
+// per call (the native handler signature carries no services parameter).
+// ---------------------------------------------------------------------------
+
+static mut CANVAS_SERVICES: Option<Hp2CanvasServices> = None;
+
+/// # Safety
+/// Must run at most once, before any call to [`published_services`], with no
+/// concurrent access (matches the C++ static initializer's single-threaded
+/// startup guarantee).
+pub unsafe fn publish_services(value: Hp2CanvasServices) {
+    unsafe {
+        CANVAS_SERVICES = Some(value);
+    }
+}
+
+/// The published table, or `Err` if `publish_services` has not run yet.
+///
+/// # Safety
+/// Must not race a concurrent [`publish_services`] call.
+pub unsafe fn published_services() -> Result<Hp2CanvasServices, i32> {
+    unsafe { CANVAS_SERVICES.ok_or(1) }
 }

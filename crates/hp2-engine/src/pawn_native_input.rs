@@ -15,19 +15,27 @@
 //! (`fmadd`/`fmsub`), verified with `objdump -dl` against the 32dcfda build.
 //! Every other product is a separate rounded multiply.
 //!
-//! Process state: the Harry property cache, the "contract failure reported"
-//! flag, and the auto-center override are process-wide in C++. They live in one
-//! `Mutex` here. Engine objects are only touched on the game thread, so the
-//! raw pointers stored in the state are not shared across threads.
+//! Process state has the native game-thread-only lifetime. Raw field accesses
+//! preserve partial cache updates and live reentrant reads; no lock or Rust
+//! reference to that state survives a native callback.
 
+use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_void};
 use std::ptr;
-use std::sync::{Mutex, MutexGuard};
 
 use hp2_abi::engine::generated::{AActor, APlayerPawn, FRotator};
 use hp2_abi::{FCoords, FVector};
 
 use crate::coords::{self, Trig};
+use crate::pawn::{PawnResult, checked};
+
+macro_rules! native_value {
+    ($service:expr, $($arg:expr),* $(,)?) => {{
+        let mut value = std::mem::MaybeUninit::uninit();
+        checked(($service)($($arg,)* value.as_mut_ptr()))?;
+        value.assume_init()
+    }};
+}
 
 /// `PI` (UnMath.h:30) as a single-precision constant.
 const PI_F32: f32 = std::f32::consts::PI;
@@ -39,41 +47,45 @@ const MAXWORD_F32: f32 = 65535.0;
 const HARRY_CLASS_PATH: &core::ffi::CStr = c"HGame.Harry";
 
 /// Engine services used by the modern input group. Filled in by
-/// `Hp2PawnNativeInputServices.cpp`. Names are NUL-terminated ASCII; the
-/// adapters widen them to `TCHAR`.
+/// `Hp2PawnNativeInputServices.cpp`. Names are NUL-terminated ASCII; native
+/// adapters widen them into invocation-local `TCHAR` storage. Except for the
+/// two explicitly nonthrowing math leaves, zero status succeeds and return
+/// values are published through the final out pointer only on success.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Hp2PawnNativeInputServices {
     /// `FindField<UBoolProperty>(class, name)`. Null when the field is missing.
     pub find_bool_property:
-        unsafe extern "C" fn(klass: *mut c_void, name: *const c_char) -> *mut c_void,
+        unsafe extern "C" fn(klass: *mut c_void, name: *const c_char, out: *mut *mut c_void) -> i32,
     /// `FindField<UObjectProperty>(class, name)`. Null when the field is missing.
     pub find_object_property:
-        unsafe extern "C" fn(klass: *mut c_void, name: *const c_char) -> *mut c_void,
+        unsafe extern "C" fn(klass: *mut c_void, name: *const c_char, out: *mut *mut c_void) -> i32,
     /// `UProperty::Offset` of a bool or object property.
-    pub property_offset: unsafe extern "C" fn(prop: *mut c_void) -> i32,
+    pub property_offset: unsafe extern "C" fn(prop: *mut c_void, out: *mut i32) -> i32,
     /// `UBoolProperty::BitMask`.
-    pub bool_property_mask: unsafe extern "C" fn(prop: *mut c_void) -> u32,
+    pub bool_property_mask: unsafe extern "C" fn(prop: *mut c_void, out: *mut u32) -> i32,
     /// `UObject::GetClass()`.
-    pub object_class: unsafe extern "C" fn(obj: *mut c_void) -> *mut c_void,
+    pub object_class: unsafe extern "C" fn(obj: *mut c_void, out: *mut *mut c_void) -> i32,
     /// `UClass::GetSuperClass()`.
-    pub class_super: unsafe extern "C" fn(klass: *mut c_void) -> *mut c_void,
+    pub class_super: unsafe extern "C" fn(klass: *mut c_void, out: *mut *mut c_void) -> i32,
     /// `UObject::IsA(class)`. Returns `UBOOL`.
-    pub is_a: unsafe extern "C" fn(obj: *mut c_void, klass: *mut c_void) -> i32,
+    pub is_a: unsafe extern "C" fn(obj: *mut c_void, klass: *mut c_void, out: *mut i32) -> i32,
     /// `appStricmp(class->GetPathName(), name) == 0`. Returns `UBOOL`.
-    pub class_path_equals: unsafe extern "C" fn(klass: *mut c_void, path: *const c_char) -> i32,
+    pub class_path_equals:
+        unsafe extern "C" fn(klass: *mut c_void, path: *const c_char, out: *mut i32) -> i32,
     /// `obj->GetStateFrame()->StateNode`. Null when `obj` is null or has no state frame.
-    pub state_node: unsafe extern "C" fn(obj: *mut c_void) -> *mut c_void,
+    pub state_node: unsafe extern "C" fn(obj: *mut c_void, out: *mut *mut c_void) -> i32,
     /// `UState::GetSuperState()`.
-    pub state_super: unsafe extern "C" fn(state: *mut c_void) -> *mut c_void,
+    pub state_super: unsafe extern "C" fn(state: *mut c_void, out: *mut *mut c_void) -> i32,
     /// `state->GetFName() == FName(name, FNAME_Find)`. Returns `UBOOL`.
-    pub state_name_equals: unsafe extern "C" fn(state: *mut c_void, name: *const c_char) -> i32,
+    pub state_name_equals:
+        unsafe extern "C" fn(state: *mut c_void, name: *const c_char, out: *mut i32) -> i32,
     /// `debugf(NAME_Warning, TEXT("Modern third-person controls disabled: HGame.Harry
     /// is missing required property %s"), name)`.
-    pub log_missing_property: unsafe extern "C" fn(name: *const c_char),
-    /// `GMath.SinTab(angle)`.
+    pub log_missing_property: unsafe extern "C" fn(name: *const c_char) -> i32,
+    /// `GMath.SinTab(angle)`: explicitly nonthrowing, no native reentry.
     pub sin_tab: unsafe extern "C" fn(angle: i32) -> f32,
-    /// `GMath.CosTab(angle)`.
+    /// `GMath.CosTab(angle)`: explicitly nonthrowing, no native reentry.
     pub cos_tab: unsafe extern "C" fn(angle: i32) -> f32,
 }
 
@@ -137,11 +149,12 @@ struct ModernState {
     auto_center: AutoCenterOverride,
 }
 
-// SAFETY: the stored pointers are engine objects and property records that are
-// only dereferenced on the game thread while the mutex is held.
-unsafe impl Send for ModernState {}
+// SAFETY: like the native globals, accessed exclusively on the engine game
+// thread. Reentry is allowed; access through raw pointers never borrows state.
+struct GameThreadState(UnsafeCell<ModernState>);
+unsafe impl Sync for GameThreadState {}
 
-static STATE: Mutex<ModernState> = Mutex::new(ModernState {
+static STATE: GameThreadState = GameThreadState(UnsafeCell::new(ModernState {
     props: HarryProperties::ZERO,
     reported_failure: false,
     auto_center: AutoCenterOverride {
@@ -149,26 +162,22 @@ static STATE: Mutex<ModernState> = Mutex::new(ModernState {
         property: ptr::null_mut(),
         saved_value: false,
     },
-});
-
-fn lock_state() -> MutexGuard<'static, ModernState> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
-}
+}));
 
 /// `ReadModernHarryBool`: `(*(const BITFIELD*)(P + Offset) & BitMask) != 0`.
 unsafe fn read_harry_bool(
     svc: &Hp2PawnNativeInputServices,
     pawn: *const c_void,
     prop: *mut c_void,
-) -> bool {
+) -> PawnResult<bool> {
     unsafe {
-        let offset = (svc.property_offset)(prop) as isize;
-        let mask = (svc.bool_property_mask)(prop);
+        let offset = native_value!(svc.property_offset, prop) as isize;
+        let mask = native_value!(svc.bool_property_mask, prop);
         let storage = (pawn as *const u8)
             .offset(offset)
             .cast::<u32>()
             .read_unaligned();
-        storage & mask != 0
+        Ok(storage & mask != 0)
     }
 }
 
@@ -178,10 +187,10 @@ unsafe fn write_harry_bool(
     pawn: *mut c_void,
     prop: *mut c_void,
     value: bool,
-) {
+) -> PawnResult<()> {
     unsafe {
-        let offset = (svc.property_offset)(prop) as isize;
-        let mask = (svc.bool_property_mask)(prop);
+        let offset = native_value!(svc.property_offset, prop) as isize;
+        let mask = native_value!(svc.bool_property_mask, prop);
         let slot = (pawn as *mut u8).offset(offset).cast::<u32>();
         let storage = slot.read_unaligned();
         slot.write_unaligned(if value {
@@ -189,6 +198,7 @@ unsafe fn write_harry_bool(
         } else {
             storage & !mask
         });
+        Ok(())
     }
 }
 
@@ -197,57 +207,59 @@ unsafe fn read_harry_object(
     svc: &Hp2PawnNativeInputServices,
     pawn: *const c_void,
     prop: *mut c_void,
-) -> *mut c_void {
+) -> PawnResult<*mut c_void> {
     unsafe {
-        let offset = (svc.property_offset)(prop) as isize;
-        (pawn as *const u8)
+        let offset = native_value!(svc.property_offset, prop) as isize;
+        Ok((pawn as *const u8)
             .offset(offset)
             .cast::<*mut c_void>()
-            .read_unaligned()
+            .read_unaligned())
     }
 }
 
 /// `RestoreModernAutoCenter`: writes the saved value back if this pawn owns the override.
 unsafe fn restore_auto_center(
     svc: &Hp2PawnNativeInputServices,
-    st: &mut ModernState,
+    st: *mut ModernState,
     pawn: *mut c_void,
-) {
-    if st.auto_center.pawn != pawn {
-        return;
-    }
+) -> PawnResult<()> {
     unsafe {
+        if (*st).auto_center.pawn != pawn {
+            return Ok(());
+        }
         write_harry_bool(
             svc,
             pawn,
-            st.auto_center.property,
-            st.auto_center.saved_value,
-        )
-    };
-    st.auto_center = AutoCenterOverride {
-        pawn: ptr::null_mut(),
-        property: ptr::null_mut(),
-        saved_value: false,
-    };
+            (*st).auto_center.property,
+            (*st).auto_center.saved_value,
+        )?;
+        (*st).auto_center = AutoCenterOverride {
+            pawn: ptr::null_mut(),
+            property: ptr::null_mut(),
+            saved_value: false,
+        };
+        Ok(())
+    }
 }
 
 /// `SuppressModernAutoCenter`: records the override and clears `bAutoCenterCamera` while it is set.
 unsafe fn suppress_auto_center(
     svc: &Hp2PawnNativeInputServices,
-    st: &mut ModernState,
+    st: *mut ModernState,
     pawn: *mut c_void,
-    props: &HarryProperties,
-) {
+    props: *const HarryProperties,
+) -> PawnResult<()> {
     unsafe {
-        if !read_harry_bool(svc, pawn, props.auto_center_camera) {
-            return;
+        if !read_harry_bool(svc, pawn, (*props).auto_center_camera)? {
+            return Ok(());
         }
-        st.auto_center = AutoCenterOverride {
+        (*st).auto_center = AutoCenterOverride {
             pawn,
-            property: props.auto_center_camera,
+            property: (*props).auto_center_camera,
             saved_value: true,
         };
-        write_harry_bool(svc, pawn, props.auto_center_camera, false);
+        write_harry_bool(svc, pawn, (*props).auto_center_camera, false)?;
+        Ok(())
     }
 }
 
@@ -271,86 +283,92 @@ unsafe fn in_script_state(
     svc: &Hp2PawnNativeInputServices,
     obj: *mut c_void,
     name: &core::ffi::CStr,
-) -> bool {
+) -> PawnResult<bool> {
     unsafe {
-        let mut state = (svc.state_node)(obj);
+        let mut state = native_value!(svc.state_node, obj);
         while !state.is_null() {
-            if (svc.state_name_equals)(state, name.as_ptr()) != 0 {
-                return true;
+            if native_value!(svc.state_name_equals, state, name.as_ptr()) != 0 {
+                return Ok(true);
             }
-            state = (svc.state_super)(state);
+            state = native_value!(svc.state_super, state);
         }
     }
-    false
+    Ok(false)
 }
 
 /// `GetModernHarryProperties`: caches the `HGame.Harry` class and its fields.
 /// Returns `None` when the pawn is not a Harry or the contract check failed.
 unsafe fn harry_properties(
     svc: &Hp2PawnNativeInputServices,
-    st: &mut ModernState,
+    st: *mut ModernState,
     pawn: *mut c_void,
-) -> Option<HarryProperties> {
+) -> PawnResult<Option<*const HarryProperties>> {
     unsafe {
-        let mut harry_class = st.props.harry_class;
-        if harry_class.is_null() || (svc.is_a)(pawn, harry_class) == 0 {
+        let mut harry_class = (*st).props.harry_class;
+        if harry_class.is_null() || native_value!(svc.is_a, pawn, harry_class) == 0 {
             harry_class = ptr::null_mut();
-            let mut candidate = (svc.object_class)(pawn);
+            let mut candidate = native_value!(svc.object_class, pawn);
             while !candidate.is_null() {
-                if (svc.class_path_equals)(candidate, HARRY_CLASS_PATH.as_ptr()) != 0 {
+                if native_value!(svc.class_path_equals, candidate, HARRY_CLASS_PATH.as_ptr()) != 0 {
                     harry_class = candidate;
                     break;
                 }
-                candidate = (svc.class_super)(candidate);
+                candidate = native_value!(svc.class_super, candidate);
             }
             if harry_class.is_null() {
-                return None;
+                return Ok(None);
             }
         }
-        if st.props.harry_class != harry_class {
-            st.props = HarryProperties::ZERO;
-            st.props.harry_class = harry_class;
+        if (*st).props.harry_class != harry_class {
+            (*st).props = HarryProperties::ZERO;
+            (*st).props.harry_class = harry_class;
         }
 
-        if !st.props.resolved {
-            st.props.resolved = true;
+        if !(*st).props.resolved {
+            (*st).props.resolved = true;
             let mut missing: Option<&'static core::ffi::CStr> = None;
-            let mut bool_prop = |name: &'static core::ffi::CStr| {
-                let prop = (svc.find_bool_property)(harry_class, name.as_ptr());
-                if prop.is_null() && missing.is_none() {
-                    missing = Some(name);
-                }
-                prop
-            };
-            st.props.screen_relative_movement = bool_prop(c"bScreenRelativeMovement");
-            st.props.locked_on_target = bool_prop(c"bLockedOnTarget");
-            st.props.fixed_face_direction = bool_prop(c"bFixedFaceDirection");
-            st.props.in_dueling_mode = bool_prop(c"bInDuelingMode");
-            st.props.reverse_input = bool_prop(c"bReverseInput");
-            st.props.keep_stationary = bool_prop(c"bKeepStationary");
-            st.props.lock_out_forward = bool_prop(c"bLockOutForward");
-            st.props.lock_out_backward = bool_prop(c"bLockOutBackward");
-            st.props.lock_out_strafe_left = bool_prop(c"bLockOutStrafeLeft");
-            st.props.lock_out_strafe_right = bool_prop(c"bLockOutStrafeRight");
-            st.props.is_aiming = bool_prop(c"bIsAiming");
-            st.props.e3_demo_lockout = bool_prop(c"bE3DemoLockout");
-            st.props.auto_center_camera = bool_prop(c"bAutoCenterCamera");
-            let boss = (svc.find_object_property)(harry_class, c"BossTarget".as_ptr());
+            macro_rules! bool_prop {
+                ($name:expr) => {{
+                    let prop = native_value!(svc.find_bool_property, harry_class, $name.as_ptr());
+                    if prop.is_null() && missing.is_none() {
+                        missing = Some($name);
+                    }
+                    prop
+                }};
+            }
+            (*st).props.screen_relative_movement = bool_prop!(c"bScreenRelativeMovement");
+            (*st).props.locked_on_target = bool_prop!(c"bLockedOnTarget");
+            (*st).props.fixed_face_direction = bool_prop!(c"bFixedFaceDirection");
+            (*st).props.in_dueling_mode = bool_prop!(c"bInDuelingMode");
+            (*st).props.reverse_input = bool_prop!(c"bReverseInput");
+            (*st).props.keep_stationary = bool_prop!(c"bKeepStationary");
+            (*st).props.lock_out_forward = bool_prop!(c"bLockOutForward");
+            (*st).props.lock_out_backward = bool_prop!(c"bLockOutBackward");
+            (*st).props.lock_out_strafe_left = bool_prop!(c"bLockOutStrafeLeft");
+            (*st).props.lock_out_strafe_right = bool_prop!(c"bLockOutStrafeRight");
+            (*st).props.is_aiming = bool_prop!(c"bIsAiming");
+            (*st).props.e3_demo_lockout = bool_prop!(c"bE3DemoLockout");
+            (*st).props.auto_center_camera = bool_prop!(c"bAutoCenterCamera");
+            let boss = native_value!(
+                svc.find_object_property,
+                harry_class,
+                c"BossTarget".as_ptr()
+            );
             if boss.is_null() && missing.is_none() {
                 missing = Some(c"BossTarget");
             }
-            st.props.boss_target = boss;
+            (*st).props.boss_target = boss;
 
-            st.props.valid = missing.is_none();
+            (*st).props.valid = missing.is_none();
             if let Some(name) = missing
-                && !st.reported_failure
+                && !(*st).reported_failure
             {
-                (svc.log_missing_property)(name.as_ptr());
-                st.reported_failure = true;
+                checked((svc.log_missing_property)(name.as_ptr()))?;
+                (*st).reported_failure = true;
             }
         }
 
-        st.props.valid.then_some(st.props)
+        Ok((*st).props.valid.then_some(ptr::addr_of!((*st).props)))
     }
 }
 
@@ -358,61 +376,62 @@ unsafe fn harry_properties(
 unsafe fn is_modern_context(
     svc: &Hp2PawnNativeInputServices,
     pawn: *mut APlayerPawn,
-    props: &HarryProperties,
-) -> bool {
+    props: *const HarryProperties,
+) -> PawnResult<bool> {
     unsafe {
         let raw = pawn.cast::<c_void>();
-        let view_target = (*pawn).view_target;
-        in_script_state(svc, raw, c"PlayerWalking")
-            && in_script_state(svc, view_target, c"StateStandardCam")
+        Ok(in_script_state(svc, raw, c"PlayerWalking")?
+            && in_script_state(svc, (*pawn).view_target, c"StateStandardCam")?
             && !(*pawn).b_show_menu()
             && !(*pawn).b_is_captured()
-            && !read_harry_bool(svc, raw, props.keep_stationary)
-            && !read_harry_bool(svc, raw, props.e3_demo_lockout)
-            && read_harry_object(svc, raw, props.boss_target).is_null()
-            && !read_harry_bool(svc, raw, props.in_dueling_mode)
-            && !read_harry_bool(svc, raw, props.locked_on_target)
-            && !read_harry_bool(svc, raw, props.fixed_face_direction)
-            && !read_harry_bool(svc, raw, props.reverse_input)
+            && !read_harry_bool(svc, raw, (*props).keep_stationary)?
+            && !read_harry_bool(svc, raw, (*props).e3_demo_lockout)?
+            && read_harry_object(svc, raw, (*props).boss_target)?.is_null()
+            && !read_harry_bool(svc, raw, (*props).in_dueling_mode)?
+            && !read_harry_bool(svc, raw, (*props).locked_on_target)?
+            && !read_harry_bool(svc, raw, (*props).fixed_face_direction)?
+            && !read_harry_bool(svc, raw, (*props).reverse_input)?)
     }
 }
 
-/// `APlayerPawn::BeginModernThirdPersonInput`. `raw` holds
-/// `[RawBaseX, RawStrafe, RawCameraYaw, RawCameraPitch]` and is written only on
-/// the paths where the C++ assigned those references.
+/// `APlayerPawn::BeginModernThirdPersonInput`. Four raw reference arguments
+/// may alias each other or pawn fields. Assignments occur in native order,
+/// including partial mutations before a later service failure.
 ///
 /// # Safety
-/// `pawn` must point to a live `APlayerPawn`, and `raw` must be valid for reads
-/// and writes of four `f32` values, on the game thread.
+/// `pawn` and all four argument pointers must be valid on the game thread.
 pub unsafe fn begin_modern_third_person_input(
     svc: &Hp2PawnNativeInputServices,
     pawn: *mut APlayerPawn,
-    raw: &mut [f32; 4],
-) -> bool {
+    raw_base_x: *mut f32,
+    raw_strafe: *mut f32,
+    raw_camera_yaw: *mut f32,
+    raw_camera_pitch: *mut f32,
+) -> PawnResult<bool> {
     unsafe {
         if !(*pawn).b_modern_third_person_controls() {
-            return false;
+            return Ok(false);
         }
 
-        raw[0] = (*pawn).a_base_x;
-        raw[1] = (*pawn).a_strafe;
-        raw[2] = (*pawn).a_turn;
-        raw[3] = (*pawn).a_look_up;
+        *raw_base_x = (*pawn).a_base_x;
+        *raw_strafe = (*pawn).a_strafe;
+        *raw_camera_yaw = (*pawn).a_turn;
+        *raw_camera_pitch = (*pawn).a_look_up;
 
-        let mut st = lock_state();
+        let st = STATE.0.get();
         let raw_pawn = pawn.cast::<c_void>();
-        let Some(props) = harry_properties(svc, &mut st, raw_pawn) else {
-            return false;
+        let Some(props) = harry_properties(svc, st, raw_pawn)? else {
+            return Ok(false);
         };
-        write_harry_bool(svc, raw_pawn, props.screen_relative_movement, false);
-        if !is_modern_context(svc, pawn, &props) {
-            return false;
+        write_harry_bool(svc, raw_pawn, (*props).screen_relative_movement, false)?;
+        if !is_modern_context(svc, pawn, props)? {
+            return Ok(false);
         }
 
         (*pawn).a_base_x = 0.0;
         (*pawn).a_turn = 0.0;
         (*pawn).a_look_up = 0.0;
-        true
+        Ok(true)
     }
 }
 
@@ -430,26 +449,26 @@ pub unsafe fn finish_modern_third_person_input(
     raw_camera_yaw: f32,
     raw_camera_pitch: f32,
     delta_seconds: f32,
-) {
+) -> PawnResult<()> {
     unsafe {
         if !active || !(*pawn).b_modern_third_person_controls() {
-            return;
+            return Ok(());
         }
 
-        let mut st = lock_state();
+        let st = STATE.0.get();
         let raw_pawn = pawn.cast::<c_void>();
-        let Some(props) = harry_properties(svc, &mut st, raw_pawn) else {
-            return;
+        let Some(props) = harry_properties(svc, st, raw_pawn)? else {
+            return Ok(());
         };
 
-        write_harry_bool(svc, raw_pawn, props.screen_relative_movement, false);
-        if read_harry_bool(svc, raw_pawn, props.keep_stationary)
-            || !is_modern_context(svc, pawn, &props)
+        write_harry_bool(svc, raw_pawn, (*props).screen_relative_movement, false)?;
+        if read_harry_bool(svc, raw_pawn, (*props).keep_stationary)?
+            || !is_modern_context(svc, pawn, props)?
         {
             (*pawn).a_forward = 0.0;
             (*pawn).a_strafe = 0.0;
             (*pawn).a_side_move = 0.0;
-            return;
+            return Ok(());
         }
 
         let camera_scale = (*pawn).desired_fov * 0.01111;
@@ -461,21 +480,24 @@ pub unsafe fn finish_modern_third_person_input(
         // JoyY Speed=2 -> MoveForward Speed=300.
         (*pawn).a_forward = expand_analog_movement((*pawn).a_forward, delta_seconds, 0.4, 15000.0);
         let mut effective_side = 1.2_f32.mul_add(base_x, 0.8 * raw_strafe);
-        if (effective_side < 0.0 && read_harry_bool(svc, raw_pawn, props.lock_out_strafe_left))
-            || (effective_side > 0.0 && read_harry_bool(svc, raw_pawn, props.lock_out_strafe_right))
+        if (effective_side < 0.0 && read_harry_bool(svc, raw_pawn, (*props).lock_out_strafe_left)?)
+            || (effective_side > 0.0
+                && read_harry_bool(svc, raw_pawn, (*props).lock_out_strafe_right)?)
         {
             effective_side = 0.0;
         }
-        if ((*pawn).a_forward > 0.0 && read_harry_bool(svc, raw_pawn, props.lock_out_forward))
-            || ((*pawn).a_forward < 0.0 && read_harry_bool(svc, raw_pawn, props.lock_out_backward))
+        if ((*pawn).a_forward > 0.0 && read_harry_bool(svc, raw_pawn, (*props).lock_out_forward)?)
+            || ((*pawn).a_forward < 0.0
+                && read_harry_bool(svc, raw_pawn, (*props).lock_out_backward)?)
         {
             (*pawn).a_forward = 0.0;
         }
 
         (*pawn).a_side_move = effective_side;
         (*pawn).a_strafe = 1.25 * effective_side;
-        suppress_auto_center(svc, &mut st, raw_pawn, &props);
-        write_harry_bool(svc, raw_pawn, props.screen_relative_movement, true);
+        suppress_auto_center(svc, st, raw_pawn, props)?;
+        write_harry_bool(svc, raw_pawn, (*props).screen_relative_movement, true)?;
+        Ok(())
     }
 }
 
@@ -501,25 +523,25 @@ pub fn vector_rotation(v: FVector) -> FRotator {
 pub unsafe fn apply_modern_third_person_movement(
     svc: &Hp2PawnNativeInputServices,
     pawn: *mut APlayerPawn,
-) {
+) -> PawnResult<()> {
     unsafe {
         let raw_pawn = pawn.cast::<c_void>();
-        let mut st = lock_state();
-        restore_auto_center(svc, &mut st, raw_pawn);
+        let st = STATE.0.get();
+        restore_auto_center(svc, st, raw_pawn)?;
 
         if !(*pawn).b_modern_third_person_controls() {
-            return;
+            return Ok(());
         }
-        let Some(props) = harry_properties(svc, &mut st, raw_pawn) else {
-            return;
+        let Some(props) = harry_properties(svc, st, raw_pawn)? else {
+            return Ok(());
         };
 
-        let was_active = read_harry_bool(svc, raw_pawn, props.screen_relative_movement);
-        write_harry_bool(svc, raw_pawn, props.screen_relative_movement, false);
-        if !was_active || !is_modern_context(svc, pawn, &props) {
-            return;
+        let was_active = read_harry_bool(svc, raw_pawn, (*props).screen_relative_movement)?;
+        write_harry_bool(svc, raw_pawn, (*props).screen_relative_movement, false)?;
+        if !was_active || !is_modern_context(svc, pawn, props)? {
+            return Ok(());
         }
-        write_harry_bool(svc, raw_pawn, props.screen_relative_movement, true);
+        write_harry_bool(svc, raw_pawn, (*props).screen_relative_movement, true)?;
 
         let sin = |angle: i32| (svc.sin_tab)(angle);
         let cos = |angle: i32| (svc.cos_tab)(angle);
@@ -550,7 +572,7 @@ pub unsafe fn apply_modern_third_person_movement(
         };
         (*pawn).base.base.acceleration = acceleration;
 
-        if !read_harry_bool(svc, raw_pawn, props.is_aiming) {
+        if !read_harry_bool(svc, raw_pawn, (*props).is_aiming)? {
             let acc = (*pawn).base.base.acceleration;
             let vel = (*pawn).base.base.velocity;
             let yaw = if acc.x != 0.0 || acc.y != 0.0 {
@@ -567,5 +589,6 @@ pub unsafe fn apply_modern_third_person_movement(
             };
             (*pawn).base.base.desired_rotation.yaw = yaw;
         }
+        Ok(())
     }
 }

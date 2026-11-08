@@ -1,0 +1,28 @@
+obj=0 op=open name=a rec=1 url=http://x ret=1 recording=1 replaying=0 in_replay=0 paused=0 frame=0 pause_count=0 next=00000000 files=1:b5fb50eddf5c4337 resets=1 log=-
+obj=0 op=open name=b rec=1 url=http://y ret=0 recording=1 replaying=0 in_replay=0 paused=0 frame=0 pause_count=0 next=00000000 files=1:b5fb50eddf5c4337 resets=1 log=Already recording: UserDir/a.rep
+obj=0 op=tick delta=3f800000 out=3f800000 ret=1 recording=1 replaying=0 in_replay=0 paused=0 frame=1 pause_count=0 next=00000000 files=1:3e4b712ee268f092 resets=1 log=-
+obj=0 op=input key=5 state=1 delta=00000000 ret=1 recording=1 replaying=0 in_replay=1 paused=0 frame=1 pause_count=0 next=00000000 files=1:8bdf9d1aae347330 resets=1 log=-
+obj=0 op=input key=6 state=2 delta=3f000000 ret=1 recording=1 replaying=0 in_replay=1 paused=0 frame=1 pause_count=0 next=00000000 files=1:30ec0a73c2271217 resets=1 log=-
+obj=0 op=tick delta=3e800000 out=3e800000 ret=1 recording=1 replaying=0 in_replay=1 paused=0 frame=2 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=1 log=-
+obj=0 op=stop ret=1 recording=0 replaying=0 in_replay=1 paused=0 frame=2 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=1 log=-
+obj=0 op=tick delta=3f800000 out=3f800000 ret=1 recording=0 replaying=0 in_replay=1 paused=0 frame=3 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=1 log=-
+obj=0 op=input key=5 state=1 delta=00000000 ret=0 recording=0 replaying=0 in_replay=1 paused=0 frame=3 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=1 log=-
+obj=0 op=open name=c rec=0 url=- ret=0 recording=0 replaying=0 in_replay=1 paused=0 frame=3 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=1 log=Cannot open file UserDir/c.rep
+obj=1 op=open name=a rec=0 url=- ret=1 recording=0 replaying=1 in_replay=0 paused=0 frame=0 pause_count=0 next=3f800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=open name=missing rec=0 url=- ret=0 recording=0 replaying=1 in_replay=0 paused=0 frame=0 pause_count=0 next=3f800000 files=1:fa6a3794772a969b resets=2 log=Already replaying: UserDir/a.rep
+obj=1 op=tick delta=00000000 out=3f800000 ret=1 recording=0 replaying=1 in_replay=0 paused=0 frame=1 pause_count=0 next=3f800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=input key=5 state=1 delta=00000000 ret=1 recording=0 replaying=1 in_replay=1 paused=0 frame=1 pause_count=0 next=3f800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=input_ev key=0 state=0 delta=00000000 out_key=6 out_state=2 out_delta=3f000000 ret=1 recording=0 replaying=1 in_replay=1 paused=0 frame=1 pause_count=0 next=3f800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=input_ev key=0 state=0 delta=00000000 out_key=250 out_state=4 out_delta=3e800000 ret=0 recording=0 replaying=1 in_replay=0 paused=0 frame=1 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=pause on=1 count=2 ret=- recording=0 replaying=1 in_replay=0 paused=0 frame=1 pause_count=2 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=tick delta=00000000 out=3e800000 ret=1 recording=0 replaying=1 in_replay=0 paused=0 frame=2 pause_count=1 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=tick delta=00000000 out=3e800000 ret=1 recording=0 replaying=1 in_replay=0 paused=1 frame=3 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=input_ev key=0 state=0 delta=00000000 out_key=0 out_state=0 out_delta=00000000 ret=0 recording=0 replaying=0 in_replay=0 paused=1 frame=3 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=tick delta=00000000 out=00000000 ret=1 recording=0 replaying=0 in_replay=0 paused=1 frame=4 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=stop ret=1 recording=0 replaying=0 in_replay=0 paused=0 frame=4 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=pause on=0 count=0 ret=- recording=0 replaying=0 in_replay=0 paused=0 frame=4 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=-
+obj=1 op=open name=bad rec=1 url=http://z ret=0 recording=0 replaying=0 in_replay=0 paused=0 frame=4 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=Cannot create file UserDir/bad.rep
+obj=1 op=open name=zzz rec=0 url=- ret=0 recording=0 replaying=0 in_replay=0 paused=0 frame=4 pause_count=0 next=3e800000 files=1:fa6a3794772a969b resets=2 log=Cannot open file UserDir/zzz.rep
+obj=2 op=input key=5 state=1 delta=00000000 ret=0 recording=0 replaying=0 in_replay=0 paused=0 frame=0 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=2 log=-
+obj=2 op=tick delta=3f800000 out=3f800000 ret=1 recording=0 replaying=0 in_replay=0 paused=0 frame=1 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=2 log=-
+obj=2 op=stop ret=1 recording=0 replaying=0 in_replay=0 paused=0 frame=1 pause_count=0 next=00000000 files=1:fa6a3794772a969b resets=2 log=-

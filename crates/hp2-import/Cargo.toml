@@ -8,10 +8,15 @@ publish.workspace = true
 [lib]
 name = "hp2_import"
 
+[[bin]]
+name = "hp2_import"
+path = "src/main.rs"
+required-features = ["archive"]
+
 [dependencies]
 hp2-ffi-support.workspace = true
 hp2-ini.workspace = true
-sha2.workspace = true
+hp2-file-hash.workspace = true
 
 [features]
 # Links against the pinned `archive_static` (libarchive, built by CMake's
@@ -22,3 +27,6 @@ sha2.workspace = true
 # find it) enables this feature. `member_path`'s path-safety validation
 # has no FFI dependency and is always compiled/tested regardless.
 archive = []
+
+[dev-dependencies]
+sha2.workspace = true

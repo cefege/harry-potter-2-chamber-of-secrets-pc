@@ -127,56 +127,74 @@ unsafe extern "C" fn move_actor(
     delta: *const c_void,
     rot: *const c_void,
     hit: *mut c_void,
+    out: *mut i32,
 ) -> i32 {
-    expect_kind(0);
-    assert_eq!(level as usize, LEVEL);
-    let (delta, rot) = unsafe { (*delta.cast::<FVector>(), *rot.cast::<FRotator>()) };
-    expect_vec(delta, "MoveActor delta");
-    assert_eq!(take(), rot.pitch as u32);
-    assert_eq!(take(), rot.yaw as u32);
-    assert_eq!(take(), rot.roll as u32);
-    // Test=1, IgnorePawns=1, bIgnoreBases=0, bNoFail=0 pinned by the C++ shell.
-    assert_eq!([take(), take(), take(), take()], [1, 1, 0, 0]);
-    let ret = take() as i32;
-    let time = take_f();
-    let normal = take_vec();
-    let is_goal = take() != 0;
-    let new_loc = take_vec();
-    unsafe {
-        (*actor.cast::<AActor>()).location = new_loc;
-        let hit = hit.cast::<FCheckResult>();
-        (*hit).time = time;
-        (*hit).normal = normal;
-        (*hit).actor = hit_actor(is_goal);
-    }
-    ret
+    let value = (|| {
+        expect_kind(0);
+        assert_eq!(level as usize, LEVEL);
+        let (delta, rot) = unsafe { (*delta.cast::<FVector>(), *rot.cast::<FRotator>()) };
+        expect_vec(delta, "MoveActor delta");
+        assert_eq!(take(), rot.pitch as u32);
+        assert_eq!(take(), rot.yaw as u32);
+        assert_eq!(take(), rot.roll as u32);
+        // Test=1, IgnorePawns=1, bIgnoreBases=0, bNoFail=0 pinned by the C++ shell.
+        assert_eq!([take(), take(), take(), take()], [1, 1, 0, 0]);
+        let ret = take() as i32;
+        let time = take_f();
+        let normal = take_vec();
+        let is_goal = take() != 0;
+        let new_loc = take_vec();
+        unsafe {
+            (*actor.cast::<AActor>()).location = new_loc;
+            let hit = hit.cast::<FCheckResult>();
+            (*hit).time = time;
+            (*hit).normal = normal;
+            (*hit).actor = hit_actor(is_goal);
+        }
+        ret
+    })();
+    unsafe { *out = value };
+    0
 }
 
 unsafe extern "C" fn far_move_actor(
     level: *mut c_void,
     actor: *mut c_void,
     dest: *const c_void,
+    out: *mut i32,
 ) -> i32 {
-    expect_kind(1);
-    assert_eq!(level as usize, LEVEL);
-    let dest = unsafe { *dest.cast::<FVector>() };
-    expect_vec(dest, "FarMoveActor dest");
-    // Test=1, noCheck=1 pinned by the C++ shell.
-    assert_eq!([take(), take()], [1, 1]);
-    let ret = take() as i32;
-    unsafe { (*actor.cast::<AActor>()).location = dest };
-    ret
+    let value = (|| {
+        expect_kind(1);
+        assert_eq!(level as usize, LEVEL);
+        let dest = unsafe { *dest.cast::<FVector>() };
+        expect_vec(dest, "FarMoveActor dest");
+        // Test=1, noCheck=1 pinned by the C++ shell.
+        assert_eq!([take(), take()], [1, 1]);
+        let ret = take() as i32;
+        unsafe { (*actor.cast::<AActor>()).location = dest };
+        ret
+    })();
+    unsafe { *out = value };
+    0
 }
 
-unsafe extern "C" fn find_water_line(pawn: *mut c_void, start: *const c_void, end: *mut c_void) {
-    expect_kind(2);
-    let _ = pawn;
-    let start = unsafe { *start.cast::<FVector>() };
-    let end = end.cast::<FVector>();
-    expect_vec(start, "findWaterLine start");
-    let end_in = unsafe { *end };
-    expect_vec(end_in, "findWaterLine end-in");
-    unsafe { *end = take_vec() };
+unsafe extern "C" fn find_water_line(
+    pawn: *mut c_void,
+    start: *const c_void,
+    end: *mut c_void,
+) -> i32 {
+    let value = (|| {
+        expect_kind(2);
+        let _ = pawn;
+        let start = unsafe { *start.cast::<FVector>() };
+        let end = end.cast::<FVector>();
+        expect_vec(start, "findWaterLine start");
+        let end_in = unsafe { *end };
+        expect_vec(end_in, "findWaterLine end-in");
+        unsafe { *end = take_vec() };
+    })();
+    let () = value;
+    0
 }
 
 unsafe extern "C" fn far_move_actor_flags(
@@ -185,16 +203,21 @@ unsafe extern "C" fn far_move_actor_flags(
     dest: *const c_void,
     test: i32,
     no_check: i32,
+    out: *mut i32,
 ) -> i32 {
-    expect_kind(1);
-    assert_eq!(level as usize, LEVEL);
-    let dest = unsafe { *dest.cast::<FVector>() };
-    expect_vec(dest, "FarMoveActor dest");
-    assert_eq!(take(), test as u32, "FarMoveActor test");
-    assert_eq!(take(), no_check as u32, "FarMoveActor noCheck");
-    let ret = take() as i32;
-    unsafe { (*actor.cast::<AActor>()).location = dest };
-    ret
+    let value = (|| {
+        expect_kind(1);
+        assert_eq!(level as usize, LEVEL);
+        let dest = unsafe { *dest.cast::<FVector>() };
+        expect_vec(dest, "FarMoveActor dest");
+        assert_eq!(take(), test as u32, "FarMoveActor test");
+        assert_eq!(take(), no_check as u32, "FarMoveActor noCheck");
+        let ret = take() as i32;
+        unsafe { (*actor.cast::<AActor>()).location = dest };
+        ret
+    })();
+    unsafe { *out = value };
+    0
 }
 
 unsafe extern "C" fn single_line_check(
@@ -203,42 +226,46 @@ unsafe extern "C" fn single_line_check(
     hit: *mut c_void,
     end: *const c_void,
     start: *const c_void,
-) {
-    expect_kind(3);
-    let _ = source;
-    assert_eq!(level as usize, LEVEL);
-    let (end, start) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
-    expect_vec(end, "SingleLineCheck end");
-    expect_vec(start, "SingleLineCheck start");
-    assert_eq!(take(), TRACE_VIS_BLOCKING, "SingleLineCheck trace flags");
-    // Extent is the default zero vector; NodeFlags is 0.
-    assert_eq!(
-        [take(), take(), take()],
-        [0, 0, 0],
-        "SingleLineCheck extent"
-    );
-    assert_eq!(take(), 0, "SingleLineCheck nodeFlags");
-    // The original ignores the return value (`GetLevel()->SingleLineCheck(...)` is a statement).
-    let _ret = take();
-    let time = take_f();
-    let normal = take_vec();
-    let actor_kind = take();
-    let actor = match actor_kind {
-        0 => null_mut(),
-        1 => {
-            let g = hit_actor(true);
-            assert!(!g.is_null(), "goal hit without a goal");
-            g
+) -> i32 {
+    let value = (|| {
+        expect_kind(3);
+        let _ = source;
+        assert_eq!(level as usize, LEVEL);
+        let (end, start) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
+        expect_vec(end, "SingleLineCheck end");
+        expect_vec(start, "SingleLineCheck start");
+        assert_eq!(take(), TRACE_VIS_BLOCKING, "SingleLineCheck trace flags");
+        // Extent is the default zero vector; NodeFlags is 0.
+        assert_eq!(
+            [take(), take(), take()],
+            [0, 0, 0],
+            "SingleLineCheck extent"
+        );
+        assert_eq!(take(), 0, "SingleLineCheck nodeFlags");
+        // The original ignores the return value (`GetLevel()->SingleLineCheck(...)` is a statement).
+        let _ret = take();
+        let time = take_f();
+        let normal = take_vec();
+        let actor_kind = take();
+        let actor = match actor_kind {
+            0 => null_mut(),
+            1 => {
+                let g = hit_actor(true);
+                assert!(!g.is_null(), "goal hit without a goal");
+                g
+            }
+            2 => hit_actor(false),
+            _ => panic!("bad SingleLineCheck actor kind {actor_kind}"),
+        };
+        unsafe {
+            let hit = hit.cast::<FCheckResult>();
+            (*hit).time = time;
+            (*hit).normal = normal;
+            (*hit).actor = actor;
         }
-        2 => hit_actor(false),
-        _ => panic!("bad SingleLineCheck actor kind {actor_kind}"),
-    };
-    unsafe {
-        let hit = hit.cast::<FCheckResult>();
-        (*hit).time = time;
-        (*hit).normal = normal;
-        (*hit).actor = actor;
-    }
+    })();
+    let () = value;
+    0
 }
 
 unsafe extern "C" fn point_region(
@@ -246,53 +273,76 @@ unsafe extern "C" fn point_region(
     actor: *mut c_void,
     point: *const c_void,
     out: *mut c_void,
-) {
-    expect_kind(4);
-    let _ = actor;
-    assert_eq!(level as usize, LEVEL);
-    let point = unsafe { *point.cast::<FVector>() };
-    expect_vec(point, "PointRegion point");
-    let k = take() as usize;
-    assert!(k < 3, "PointRegion zone index {k}");
-    let zone = CASE.with(|c| c.borrow().zones[k]);
-    let mut region: FPointRegion = unsafe { std::mem::zeroed() };
-    region.zone = zone;
-    unsafe { *out.cast::<FPointRegion>() = region };
+) -> i32 {
+    let value = (|| {
+        expect_kind(4);
+        let _ = actor;
+        assert_eq!(level as usize, LEVEL);
+        let point = unsafe { *point.cast::<FVector>() };
+        expect_vec(point, "PointRegion point");
+        let k = take() as usize;
+        assert!(k < 3, "PointRegion zone index {k}");
+        let zone = CASE.with(|c| c.borrow().zones[k]);
+        let mut region: FPointRegion = unsafe { std::mem::zeroed() };
+        region.zone = zone;
+        unsafe { *out.cast::<FPointRegion>() = region };
+    })();
+    let () = value;
+    0
 }
 
 unsafe extern "C" fn fast_line_check(
     level: *mut c_void,
     end: *const c_void,
     start: *const c_void,
+    out: *mut i32,
 ) -> i32 {
-    expect_kind(5);
-    assert_eq!(level as usize, LEVEL);
-    let (end, start) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
-    expect_vec(end, "FastLineCheck end");
-    expect_vec(start, "FastLineCheck start");
-    take() as i32
+    let value = (|| {
+        expect_kind(5);
+        assert_eq!(level as usize, LEVEL);
+        let (end, start) = unsafe { (*end.cast::<FVector>(), *start.cast::<FVector>()) };
+        expect_vec(end, "FastLineCheck end");
+        expect_vec(start, "FastLineCheck start");
+        take() as i32
+    })();
+    unsafe { *out = value };
+    0
 }
 
-unsafe extern "C" fn is_a(object: *mut c_void, kind: i32) -> i32 {
-    assert!((0..=3).contains(&kind), "IsA kind {kind}");
-    CASE.with(|c| {
-        let c = c.borrow();
-        // Scene class indices: 0 APawn, 1 AInventory, 2 ATrigger, 3 AWarpZoneMarker, 4 none.
-        let class = if object == c.pawn {
-            0
-        } else if object == c.other {
-            c.other_class
-        } else if object == c.goal_obj {
-            c.goal_class
-        } else {
-            4
-        };
-        i32::from(class == kind as u32)
-    })
+unsafe extern "C" fn is_a(object: *mut c_void, kind: i32, out: *mut i32) -> i32 {
+    let value = (|| {
+        assert!((0..=3).contains(&kind), "IsA kind {kind}");
+        CASE.with(|c| {
+            let c = c.borrow();
+            // Scene class indices: 0 APawn, 1 AInventory, 2 ATrigger, 3 AWarpZoneMarker, 4 none.
+            let class = if object == c.pawn {
+                0
+            } else if object == c.other {
+                c.other_class
+            } else if object == c.goal_obj {
+                c.goal_class
+            } else {
+                4
+            };
+            i32::from(class == kind as u32)
+        })
+    })();
+    unsafe { *out = value };
+    0
 }
 
-unsafe extern "C" fn is_editor() -> i32 {
-    CASE.with(|c| i32::from(c.borrow().editor))
+unsafe extern "C" fn is_editor(out: *mut i32) -> i32 {
+    let value = (|| CASE.with(|c| i32::from(c.borrow().editor)))();
+    unsafe { *out = value };
+    0
+}
+
+// Fixture-only replay scope. Production owns an actual native FCheckResult stack.
+unsafe extern "C" fn with_hit(context: *mut c_void, body: hp2_engine::pawn::PawnHitBody) -> i32 {
+    let mut hit: FCheckResult = unsafe { std::mem::zeroed() };
+    hit.time = 1.0;
+    hit.item = -1;
+    unsafe { body(context, (&mut hit as *mut FCheckResult).cast()) }
 }
 
 fn services() -> Hp2PawnReachServices {
@@ -301,6 +351,7 @@ fn services() -> Hp2PawnReachServices {
             move_actor,
             far_move_actor,
             find_water_line,
+            with_hit,
         },
         far_move_actor_flags,
         single_line_check,
@@ -520,19 +571,14 @@ fn pawn_reach_fixture_replay_bit_exact() {
                 4 => fly_reachable(&svc, pawn_p, v1, thr, rf, goal_arg),
                 5 => swim_reachable(&svc, pawn_p, v1, thr, rf, goal_arg),
                 6 => jump_reachable(&svc, pawn_p, v1, thr, rf, goal_arg),
-                7 => {
-                    jump_landing(&svc, pawn_p, v1, &mut out, flag);
-                    0
-                }
+                7 => jump_landing(&svc, pawn_p, v1, &mut out, flag).map(|()| 0),
                 8 => find_jump_up(&svc, pawn_p, v2),
-                9 => {
-                    suggest_jump_velocity(&svc, pawn_p, v1, &mut out);
-                    0
-                }
+                9 => suggest_jump_velocity(pawn_p, v1, &mut out).map(|()| 0),
                 10 => find_best_jump(&svc, pawn_p, v1, v2, &mut out, flag),
                 _ => panic!("bad fn id {f}"),
             }
-        };
+        }
+        .expect("checked fixture callback");
         let consumed = CASE.with(|c| c.borrow().pos);
         assert_eq!(consumed, n, "call count mismatch in case {total} (fn {f})");
         assert_eq!(ret, ret_want, "return value in case {total} (fn {f})");

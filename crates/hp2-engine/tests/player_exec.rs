@@ -7,7 +7,7 @@
 //! object graph and forwarders: the same callee order, the same executor argument, and
 //! the same mid-call `Actor` clear that the `mut` knob triggers.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 
 use hp2_engine::params::TChar;
@@ -47,6 +47,8 @@ struct Mock {
 }
 
 thread_local! {
+    static FAIL_AT: Cell<Option<&'static str>> = const { Cell::new(None) };
+    static BOUNDARY_CALLS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
     static MOCK: RefCell<Mock> = RefCell::new(Mock::default());
 }
 
@@ -54,82 +56,160 @@ fn with<R>(f: impl FnOnce(&mut Mock) -> R) -> R {
     MOCK.with(|m| f(&mut m.borrow_mut()))
 }
 
-unsafe extern "C" fn m_is_running() -> i32 {
-    with(|m| i32::from(m.is_running))
+unsafe extern "C" fn m_is_running(result_out: *mut i32) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_is_running"));
+    if FAIL_AT.with(|f| f.get() == Some("m_is_running")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| with(|m| i32::from(m.is_running)))());
+    }
+    0
 }
 
-unsafe extern "C" fn m_player_actor(p: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if p as usize != PLAYER {
-            m.trace.push("?player".to_owned());
-        }
-        m.player_actor as *mut c_void
-    })
+unsafe extern "C" fn m_player_actor(p: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_player_actor"));
+    if FAIL_AT.with(|f| f.get() == Some("m_player_actor")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if p as usize != PLAYER {
+                    m.trace.push("?player".to_owned());
+                }
+                m.player_actor as *mut c_void
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_player_set_actor(p: *mut c_void, a: *mut c_void) {
+unsafe extern "C" fn m_player_set_actor(p: *mut c_void, a: *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_player_set_actor"));
+    if FAIL_AT.with(|f| f.get() == Some("m_player_set_actor")) {
+        return 79;
+    }
+
     with(|m| {
         if p as usize != PLAYER {
             m.trace.push("?player".to_owned());
         }
         m.player_actor = a as usize;
     });
+
+    0
 }
 
-unsafe extern "C" fn m_actor_get_level(a: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if a as usize != ACTOR {
-            m.trace.push("?actor".to_owned());
-        }
-    });
-    LEVEL as *mut c_void
+unsafe extern "C" fn m_actor_get_level(a: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_actor_get_level"));
+    if FAIL_AT.with(|f| f.get() == Some("m_actor_get_level")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if a as usize != ACTOR {
+                    m.trace.push("?actor".to_owned());
+                }
+            });
+            LEVEL as *mut c_void
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_actor_clear_player(a: *mut c_void) {
+unsafe extern "C" fn m_actor_clear_player(a: *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_actor_clear_player"));
+    if FAIL_AT.with(|f| f.get() == Some("m_actor_clear_player")) {
+        return 79;
+    }
+
     with(|m| {
         if a as usize != ACTOR {
             m.trace.push("?actor".to_owned());
         }
         m.actor_player_set = false;
     });
+
+    0
 }
 
-unsafe extern "C" fn m_level_destroy_actor(_l: *mut c_void, a: *mut c_void, force: i32) {
+unsafe extern "C" fn m_level_destroy_actor(_l: *mut c_void, a: *mut c_void, force: i32) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_level_destroy_actor"));
+    if FAIL_AT.with(|f| f.get() == Some("m_level_destroy_actor")) {
+        return 79;
+    }
+
     with(|m| {
         let is_actor = i32::from(a as usize == ACTOR);
         m.trace.push(format!("DA{force}{is_actor}"));
     });
+
+    0
 }
 
-unsafe extern "C" fn m_level_exec(l: *mut c_void, _cmd: *const TChar, _ar: *mut c_void) -> i32 {
-    with(|m| {
-        if l as usize != LEVEL {
-            m.trace.push("?level".to_owned());
-        }
-        m.trace.push(format!("LX{}", m.lvl_ret));
-        if m.mut_idx == 1 {
-            m.player_actor = 0;
-        }
-        m.lvl_ret
-    })
+unsafe extern "C" fn m_level_exec(
+    l: *mut c_void,
+    _cmd: *const TChar,
+    _ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_level_exec"));
+    if FAIL_AT.with(|f| f.get() == Some("m_level_exec")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if l as usize != LEVEL {
+                    m.trace.push("?level".to_owned());
+                }
+                m.trace.push(format!("LX{}", m.lvl_ret));
+                if m.mut_idx == 1 {
+                    m.player_actor = 0;
+                }
+                m.lvl_ret
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_actor_level(a: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if a as usize != ACTOR {
-            m.trace.push("?actor".to_owned());
-        }
-        m.actor_level as *mut c_void
-    })
+unsafe extern "C" fn m_actor_level(a: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_actor_level"));
+    if FAIL_AT.with(|f| f.get() == Some("m_actor_level")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if a as usize != ACTOR {
+                    m.trace.push("?actor".to_owned());
+                }
+                m.actor_level as *mut c_void
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_level_game(li: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if li as usize != LI {
-            m.trace.push("?li".to_owned());
-        }
-        m.game as *mut c_void
-    })
+unsafe extern "C" fn m_level_game(li: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_level_game"));
+    if FAIL_AT.with(|f| f.get() == Some("m_level_game")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if li as usize != LI {
+                    m.trace.push("?li".to_owned());
+                }
+                m.game as *mut c_void
+            })
+        })());
+    }
+    0
 }
 
 unsafe extern "C" fn m_sce(
@@ -137,89 +217,149 @@ unsafe extern "C" fn m_sce(
     _cmd: *const TChar,
     _ar: *mut c_void,
     executor: *mut c_void,
+    result_out: *mut i32,
 ) -> i32 {
-    let obj = obj as usize;
-    let e = i32::from(!executor.is_null());
-    // Executor is either absent or the player's actor (object-identity check).
-    let exec_ok = executor.is_null() || executor as usize == ACTOR;
-    with(|m| {
-        if !exec_ok {
-            m.trace.push("?exec".to_owned());
-        }
-        let (tok, ret, mut_at) = if obj == ACTOR {
-            (format!("AS{e}{}", m.actor_ret), m.actor_ret, 4)
-        } else if obj == HUD {
-            (format!("HS{e}{}", m.hud_ret), m.hud_ret, 3)
-        } else if obj == GAME {
-            (format!("GS{e}{}", m.game_ret), m.game_ret, 2)
-        } else {
-            let k = (obj - INV0) / INV_STRIDE;
-            let r = ((m.ibits >> k) & 1) as i32;
-            let mut_at = if k == 0 { 5 } else { -1 };
-            (format!("I{k}S{e}{r}"), r, mut_at)
-        };
-        m.trace.push(tok);
-        if m.mut_idx == mut_at {
-            m.player_actor = 0;
-        }
-        ret
-    })
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_sce"));
+    if FAIL_AT.with(|f| f.get() == Some("m_sce")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            let obj = obj as usize;
+            let e = i32::from(!executor.is_null());
+            // Executor is either absent or the player's actor (object-identity check).
+            let exec_ok = executor.is_null() || executor as usize == ACTOR;
+            with(|m| {
+                if !exec_ok {
+                    m.trace.push("?exec".to_owned());
+                }
+                let (tok, ret, mut_at) = if obj == ACTOR {
+                    (format!("AS{e}{}", m.actor_ret), m.actor_ret, 4)
+                } else if obj == HUD {
+                    (format!("HS{e}{}", m.hud_ret), m.hud_ret, 3)
+                } else if obj == GAME {
+                    (format!("GS{e}{}", m.game_ret), m.game_ret, 2)
+                } else {
+                    let k = (obj - INV0) / INV_STRIDE;
+                    let r = ((m.ibits >> k) & 1) as i32;
+                    let mut_at = if k == 0 { 5 } else { -1 };
+                    (format!("I{k}S{e}{r}"), r, mut_at)
+                };
+                m.trace.push(tok);
+                if m.mut_idx == mut_at {
+                    m.player_actor = 0;
+                }
+                ret
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_actor_hud(a: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if a as usize != ACTOR {
-            m.trace.push("?actor".to_owned());
-        }
-        m.hud as *mut c_void
-    })
+unsafe extern "C" fn m_actor_hud(a: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_actor_hud"));
+    if FAIL_AT.with(|f| f.get() == Some("m_actor_hud")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if a as usize != ACTOR {
+                    m.trace.push("?actor".to_owned());
+                }
+                m.hud as *mut c_void
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_actor_inventory(a: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if a as usize != ACTOR {
-            m.trace.push("?actor".to_owned());
-        }
-        if m.ninv > 0 {
-            INV0 as *mut c_void
-        } else {
-            std::ptr::null_mut()
-        }
-    })
+unsafe extern "C" fn m_actor_inventory(a: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_actor_inventory"));
+    if FAIL_AT.with(|f| f.get() == Some("m_actor_inventory")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if a as usize != ACTOR {
+                    m.trace.push("?actor".to_owned());
+                }
+                if m.ninv > 0 {
+                    INV0 as *mut c_void
+                } else {
+                    std::ptr::null_mut()
+                }
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_inventory_next(inv: *mut c_void) -> *mut c_void {
-    let off = (inv as usize).wrapping_sub(INV0);
-    let k = off / INV_STRIDE;
-    with(|m| {
-        if !off.is_multiple_of(INV_STRIDE) || k >= m.ninv {
-            m.trace.push("?inv".to_owned());
-        }
-        if k + 1 < m.ninv {
-            (INV0 + (k + 1) * INV_STRIDE) as *mut c_void
-        } else {
-            std::ptr::null_mut()
-        }
-    })
+unsafe extern "C" fn m_inventory_next(inv: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_inventory_next"));
+    if FAIL_AT.with(|f| f.get() == Some("m_inventory_next")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            let off = (inv as usize).wrapping_sub(INV0);
+            let k = off / INV_STRIDE;
+            with(|m| {
+                if !off.is_multiple_of(INV_STRIDE) || k >= m.ninv {
+                    m.trace.push("?inv".to_owned());
+                }
+                if k + 1 < m.ninv {
+                    (INV0 + (k + 1) * INV_STRIDE) as *mut c_void
+                } else {
+                    std::ptr::null_mut()
+                }
+            })
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_level_engine(l: *mut c_void) -> *mut c_void {
-    with(|m| {
-        if l as usize != LEVEL {
-            m.trace.push("?level".to_owned());
-        }
-    });
-    ENGINE as *mut c_void
+unsafe extern "C" fn m_level_engine(l: *mut c_void, result_out: *mut *mut c_void) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_level_engine"));
+    if FAIL_AT.with(|f| f.get() == Some("m_level_engine")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if l as usize != LEVEL {
+                    m.trace.push("?level".to_owned());
+                }
+            });
+            ENGINE as *mut c_void
+        })());
+    }
+    0
 }
 
-unsafe extern "C" fn m_engine_exec(e: *mut c_void, _cmd: *const TChar, _ar: *mut c_void) -> i32 {
-    with(|m| {
-        if e as usize != ENGINE {
-            m.trace.push("?engine".to_owned());
-        }
-        m.trace.push(format!("EX{}", m.engine_ret));
-        m.engine_ret
-    })
+unsafe extern "C" fn m_engine_exec(
+    e: *mut c_void,
+    _cmd: *const TChar,
+    _ar: *mut c_void,
+    result_out: *mut i32,
+) -> i32 {
+    BOUNDARY_CALLS.with(|c| c.borrow_mut().push("m_engine_exec"));
+    if FAIL_AT.with(|f| f.get() == Some("m_engine_exec")) {
+        return 79;
+    }
+    unsafe {
+        result_out.write((|| {
+            with(|m| {
+                if e as usize != ENGINE {
+                    m.trace.push("?engine".to_owned());
+                }
+                m.trace.push(format!("EX{}", m.engine_ret));
+                m.engine_ret
+            })
+        })());
+    }
+    0
 }
 
 static SVC: PlayerServices = PlayerServices {
@@ -322,7 +462,11 @@ fn player_exec_replay_matches_original() {
                 let final_actor = with(|m| i64::from(m.player_actor != 0));
                 let trace = with(|m| trace_text(&m.trace));
 
-                assert_eq!(i64::from(ret), num(&rhs, "ret"), "ret mismatch: {line}");
+                assert_eq!(
+                    i64::from(ret.expect("checked native success")),
+                    num(&rhs, "ret"),
+                    "ret mismatch: {line}"
+                );
                 assert_eq!(final_actor, num(&rhs, "final"), "final mismatch: {line}");
                 assert_eq!(trace, kv(&rhs, "trace"), "trace mismatch: {line}");
             }
@@ -340,7 +484,7 @@ fn player_exec_replay_matches_original() {
                     };
                 });
 
-                unsafe { destroy(&SVC, PLAYER as *mut c_void) };
+                unsafe { destroy(&SVC, PLAYER as *mut c_void) }.expect("checked native destroy");
 
                 let pnull = with(|m| i64::from(!m.actor_player_set));
                 let panull = with(|m| i64::from(m.player_actor == 0));
@@ -356,4 +500,74 @@ fn player_exec_replay_matches_original() {
 
     assert_eq!(exec_records, EXPECTED_EXEC, "exec record count");
     assert_eq!(destroy_records, EXPECTED_DESTROY, "destroy record count");
+}
+
+#[test]
+fn every_player_callback_stops_at_first_failure() {
+    let command = [0i32];
+    let prepare = || {
+        with(|m| {
+            *m = Mock {
+                player_actor: ACTOR,
+                actor_player_set: true,
+                actor_level: LI,
+                game: GAME,
+                hud: HUD,
+                ninv: 2,
+                is_running: true,
+                mut_idx: -1,
+                ..Mock::default()
+            }
+        });
+        BOUNDARY_CALLS.with(|c| c.borrow_mut().clear());
+    };
+    prepare();
+    assert_eq!(
+        unsafe {
+            exec(
+                &SVC,
+                PLAYER as *mut c_void,
+                command.as_ptr(),
+                std::ptr::null_mut(),
+            )
+        },
+        Ok(0)
+    );
+    let baseline = BOUNDARY_CALLS.with(|c| c.borrow().clone());
+    for (i, name) in baseline.iter().enumerate() {
+        if baseline[..i].contains(name) {
+            continue;
+        }
+        prepare();
+        FAIL_AT.with(|f| f.set(Some(name)));
+        assert_eq!(
+            unsafe {
+                exec(
+                    &SVC,
+                    PLAYER as *mut c_void,
+                    command.as_ptr(),
+                    std::ptr::null_mut(),
+                )
+            },
+            Err(79)
+        );
+        BOUNDARY_CALLS.with(|c| assert_eq!(&*c.borrow(), &baseline[..=i]));
+        FAIL_AT.with(|f| f.set(None));
+    }
+    prepare();
+    assert_eq!(unsafe { destroy(&SVC, PLAYER as *mut c_void) }, Ok(()));
+    let baseline = BOUNDARY_CALLS.with(|c| c.borrow().clone());
+    for (i, name) in baseline.iter().enumerate() {
+        prepare();
+        FAIL_AT.with(|f| f.set(Some(name)));
+        assert_eq!(unsafe { destroy(&SVC, PLAYER as *mut c_void) }, Err(79));
+        BOUNDARY_CALLS.with(|c| assert_eq!(&*c.borrow(), &baseline[..=i]));
+        if *name == "m_level_destroy_actor" {
+            with(|m| {
+                assert!(!m.actor_player_set);
+                assert_eq!(m.player_actor, ACTOR);
+            });
+        }
+        FAIL_AT.with(|f| f.set(None));
+    }
 }

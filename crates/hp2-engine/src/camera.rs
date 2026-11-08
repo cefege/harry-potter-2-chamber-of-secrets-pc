@@ -3,24 +3,41 @@
 //! (`Draw2DClippedLine`, `Draw3DLine`).
 //!
 //! Engine objects arrive as raw pointers. Their layouts are read through the
-//! `hp2_abi` generated mirrors. Virtual calls into `URenderDevice` and the
-//! `GMath` tables go through [`CameraServices`], which `Hp2CameraServices.cpp`
-//! fills in.
-//!
-//! Throw exposure: the `Hp2CameraServices` thunks that can raise `appErrorf`, `appThrowf`, or
-//! `appFailAssert` are listed in `Hp2CameraServices.h`. A C++ throw unwinding through these Rust
-//! frames is undefined behaviour, the same exposure as the committed console and input ports.
+//! `hp2_abi` generated mirrors. Frame setup's engine operations use
+//! [`CameraServices`]. Line clipping/projection returns a complete draw plan;
+//! native virtual drawing occurs only after Rust returns, so device exceptions
+//! never unwind through the line-planning code.
 
 use std::ffi::c_void;
 
-use hp2_abi::engine::generated::{APlayerPawn, FRotator, FSceneNode, UViewport};
+use hp2_abi::engine::generated::{APlayerPawn, FRotator, FSceneNode, UClient, UViewport};
 use hp2_abi::{FCoords, FPlane, FVector};
+use hp2_core::math;
 
 use crate::cam_mgr::get_effective_fov_angle;
 use crate::camera_math::{LINE_NEAR_CLIP_Z, clip_2d_line, perspective_point};
 use crate::coords::{self, Trig};
 use crate::prim;
 use crate::vec;
+
+type Res<T> = Result<T, i32>;
+
+// Native failures are negative here, distinct from positive bitmap fault codes.
+macro_rules! checked_unit {
+    (($call:expr)($($arg:expr),* $(,)?)) => {{
+        let status = ($call)($($arg),*);
+        if status != 0 { return Err(-status); }
+    }};
+}
+macro_rules! checked_value {
+    (($call:expr)($($arg:expr),* $(,)?)) => {{
+        let mut value = std::mem::MaybeUninit::uninit();
+        let status = ($call)($($arg,)* value.as_mut_ptr());
+        if status != 0 { return Err(-status); }
+        value.assume_init()
+    }};
+}
+pub(crate) use {checked_unit, checked_value};
 
 /// `PI` (UnMath.h:30) as a float literal.
 const PI_F32: f32 = std::f32::consts::PI;
@@ -38,124 +55,119 @@ pub const LINE_PRE_TRANSFORMED: u32 = 4;
 /// C++ services (`Hp2CameraServices` in `Hp2CameraServices.cpp`), same field order.
 #[repr(C)]
 pub struct CameraServices {
-    /// `UViewport::GetOuterUClient()->MaintainVerticalFOV`.
-    pub viewport_maintain_vertical_fov: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
     /// `URenderDevice::SetSceneNode(Frame)` (virtual).
     pub render_dev_set_scene_node:
-        unsafe extern "C" fn(render_dev: *mut c_void, frame: *mut c_void),
-    /// `&GMath.ViewCoords`.
-    pub gmath_view_coords: unsafe extern "C" fn() -> *const FCoords,
-    /// `GMath.SinTab(i)`.
-    pub gmath_sin_tab: unsafe extern "C" fn(index: i32) -> f32,
-    /// `GMath.CosTab(i)`.
-    pub gmath_cos_tab: unsafe extern "C" fn(index: i32) -> f32,
-    /// `URenderDevice::Draw2DLine(Frame, Color, LineFlags, P1, P2)` (virtual).
-    pub render_dev_draw_2d_line: unsafe extern "C" fn(
-        render_dev: *mut c_void,
-        frame: *mut c_void,
-        color: *const FPlane,
-        line_flags: u32,
-        p1: *const FVector,
-        p2: *const FVector,
-    ),
-    /// `URenderDevice::Draw2DPoint(Frame, Color, LineFlags, X1, Y1, X2, Y2, Z)` (virtual).
-    pub render_dev_draw_2d_point: unsafe extern "C" fn(
-        render_dev: *mut c_void,
-        frame: *mut c_void,
-        color: *const FPlane,
-        line_flags: u32,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        z: f32,
-    ),
+        unsafe extern "C" fn(render_dev: *mut c_void, frame: *mut c_void) -> i32,
     /// `ParseCommand(&cursor, token)`; advances `cursor` on match.
-    pub parse_command: unsafe extern "C" fn(cursor: *mut c_void, token: *const c_void) -> i32,
+    pub parse_command:
+        unsafe extern "C" fn(cursor: *mut c_void, token: *const c_void, out: *mut i32) -> i32,
     /// `ParseToken(cursor, buf, len, 0)`.
-    pub parse_token: unsafe extern "C" fn(cursor: *mut c_void, buf: *mut c_void, len: i32) -> i32,
+    pub parse_token:
+        unsafe extern "C" fn(cursor: *mut c_void, buf: *mut c_void, len: i32, out: *mut i32) -> i32,
     /// `ParseLine(cursor, buf, len)`.
-    pub parse_line: unsafe extern "C" fn(cursor: *mut c_void, buf: *mut c_void, len: i32) -> i32,
+    pub parse_line:
+        unsafe extern "C" fn(cursor: *mut c_void, buf: *mut c_void, len: i32, out: *mut i32) -> i32,
     /// `Parse(stream, match, &value)`.
-    pub parse_int:
-        unsafe extern "C" fn(stream: *const c_void, matched: *const c_void, value: *mut i32) -> i32,
+    pub parse_int: unsafe extern "C" fn(
+        stream: *const c_void,
+        matched: *const c_void,
+        value: *mut i32,
+        out: *mut i32,
+    ) -> i32,
     /// `appAtoi(s)`.
-    pub app_atoi: unsafe extern "C" fn(s: *const c_void) -> i32,
-    /// `appUserDir()`.
-    pub app_user_dir: unsafe extern "C" fn() -> *const c_void,
+    pub app_atoi: unsafe extern "C" fn(s: *const c_void, out: *mut i32) -> i32,
     /// `DO_CHECK` as compiled into the adapter TU (nonzero = `check` live).
-    pub check_enabled: unsafe extern "C" fn() -> i32,
+    pub check_enabled: unsafe extern "C" fn(out: *mut i32) -> i32,
     /// `GFileManager->FileSize(path)`.
-    pub file_size: unsafe extern "C" fn(path: *const c_void) -> i32,
+    pub file_size: unsafe extern "C" fn(path: *const c_void, out: *mut i32) -> i32,
     /// `CreateFileWriter(path)`.
-    pub create_file_writer: unsafe extern "C" fn(path: *const c_void) -> *mut c_void,
+    pub create_file_writer: unsafe extern "C" fn(path: *const c_void, out: *mut *mut c_void) -> i32,
     /// `CreateFileWriter(*(GSys->SaveSlotPath * file))`.
-    pub create_slot_file_writer: unsafe extern "C" fn(file: *const c_void) -> *mut c_void,
+    pub create_slot_file_writer:
+        unsafe extern "C" fn(file: *const c_void, out: *mut *mut c_void) -> i32,
     /// `CreateFileWriter(*(FString(appUserDir()) * file))`.
-    pub create_user_dir_file_writer: unsafe extern "C" fn(file: *const c_void) -> *mut c_void,
+    pub create_user_dir_file_writer:
+        unsafe extern "C" fn(file: *const c_void, out: *mut *mut c_void) -> i32,
     /// `Ar->Serialize(data, count)`.
-    pub archive_serialize: unsafe extern "C" fn(ar: *mut c_void, data: *const c_void, count: i32),
+    pub archive_serialize:
+        unsafe extern "C" fn(ar: *mut c_void, data: *const c_void, count: i32) -> i32,
     /// `delete Ar`.
-    pub archive_delete: unsafe extern "C" fn(ar: *mut c_void),
+    pub archive_delete: unsafe extern "C" fn(ar: *mut c_void) -> i32,
     /// `Ar.Logf(fmt)`.
-    pub log_format: unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void),
+    pub log_format: unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void) -> i32,
     /// `Ar.Logf(fmt, str)`.
-    pub log_str: unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void, arg: *const c_void),
+    pub log_str:
+        unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void, arg: *const c_void) -> i32,
     /// `Ar.Logf(fmt, int)`.
-    pub log_int: unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void, arg: i32),
+    pub log_int: unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void, arg: i32) -> i32,
     /// `Ar.Logf(NAME_ExecWarning, fmt, str)`.
     pub log_exec_warning:
-        unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void, arg: *const c_void),
+        unsafe extern "C" fn(ar: *mut c_void, fmt: *const c_void, arg: *const c_void) -> i32,
     /// `debugf(fmt, str)`.
-    pub debugf_str: unsafe extern "C" fn(fmt: *const c_void, arg: *const c_void),
+    pub debugf_str: unsafe extern "C" fn(fmt: *const c_void, arg: *const c_void) -> i32,
     /// `LocalizeError("FileNotFound", TEXT("Core"))`.
-    pub localize_file_not_found: unsafe extern "C" fn() -> *const c_void,
+    pub localize_file_not_found: unsafe extern "C" fn(out: *mut *const c_void) -> i32,
     /// `GIsRunning`.
-    pub is_running: unsafe extern "C" fn() -> i32,
+    pub is_running: unsafe extern "C" fn(out: *mut i32) -> i32,
     /// `viewport->CurrentTime = appSeconds()`.
-    pub viewport_stamp_current_time: unsafe extern "C" fn(viewport: *mut c_void),
-    /// `viewport->CurrentNetSpeed = speed`.
-    pub viewport_set_current_net_speed: unsafe extern "C" fn(viewport: *mut c_void, speed: i32),
+    pub viewport_stamp_current_time: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
     /// SHOWALL loop: `Level->Actors(i)->bHidden = 0` for every actor.
-    pub viewport_show_all_actors: unsafe extern "C" fn(viewport: *mut c_void),
+    pub viewport_show_all_actors: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
     /// REPORT branch: `FStringOutputDevice` report, `Ar.Logf(*Str, Cmd)`, clipboard copy.
     pub viewport_report:
-        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const c_void, ar: *mut c_void),
+        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const c_void, ar: *mut c_void) -> i32,
     /// `Engine->MouseDelta(viewport, kind, 0, 0)`.
-    pub viewport_mouse_delta: unsafe extern "C" fn(viewport: *mut c_void, kind: i32),
+    pub viewport_mouse_delta: unsafe extern "C" fn(viewport: *mut c_void, kind: i32) -> i32,
     /// `UpdateInput(flags)`.
-    pub viewport_update_input: unsafe extern "C" fn(viewport: *mut c_void, flags: i32),
+    pub viewport_update_input: unsafe extern "C" fn(viewport: *mut c_void, flags: i32) -> i32,
     /// `Console && Console->ScriptConsoleExec(cmd, ar, Actor)`.
-    pub viewport_script_console_exec:
-        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const c_void, ar: *mut c_void) -> i32,
+    pub viewport_script_console_exec: unsafe extern "C" fn(
+        viewport: *mut c_void,
+        cmd: *const c_void,
+        ar: *mut c_void,
+        out: *mut i32,
+    ) -> i32,
     /// `UPlayer::Exec(cmd, ar)` (base implementation, non-virtual call).
-    pub viewport_player_exec:
-        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const c_void, ar: *mut c_void) -> i32,
+    pub viewport_player_exec: unsafe extern "C" fn(
+        viewport: *mut c_void,
+        cmd: *const c_void,
+        ar: *mut c_void,
+        out: *mut i32,
+    ) -> i32,
     /// `this->Exec(cmd, ar)` (virtual; reaches `USDLViewport::Exec` overrides).
-    pub viewport_exec:
-        unsafe extern "C" fn(viewport: *mut c_void, cmd: *const c_void, ar: *mut c_void) -> i32,
-    /// `Actor->GetLevel()->NetDriver`.
-    pub viewport_net_driver: unsafe extern "C" fn(viewport: *mut c_void) -> *mut c_void,
-    /// `Actor->GetLevel()->Model->Nodes.Num()`.
-    pub viewport_model_node_count: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
+    pub viewport_exec: unsafe extern "C" fn(
+        viewport: *mut c_void,
+        cmd: *const c_void,
+        ar: *mut c_void,
+        out: *mut i32,
+    ) -> i32,
     /// `SnapBuff.Empty()`.
-    pub viewport_snap_buff_empty: unsafe extern "C" fn(viewport: *mut c_void),
+    pub viewport_snap_buff_empty: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
     /// `SnapBuff.Add(count)`.
-    pub viewport_snap_buff_add: unsafe extern "C" fn(viewport: *mut c_void, count: i32),
-    /// `HitSizes.AddItem(size)`.
-    pub viewport_hit_sizes_add: unsafe extern "C" fn(viewport: *mut c_void, size: i32),
-    /// `HitSizes.Pop()`.
-    pub viewport_hit_sizes_pop: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
+    pub viewport_snap_buff_add: unsafe extern "C" fn(viewport: *mut c_void, count: i32) -> i32,
+    /// Checked `HitSizes.AddItem(size)`: zero on success, pending native exception otherwise.
+    pub viewport_hit_sizes_add: unsafe extern "C" fn(viewport: *mut c_void, size: i32) -> i32,
+    /// Checked `HitSizes.Pop()`, publishing the size only on success.
+    pub viewport_hit_sizes_pop: unsafe extern "C" fn(viewport: *mut c_void, size: *mut i32) -> i32,
     /// `Input->Exec(cmd, ar)` (virtual).
-    pub input_exec:
-        unsafe extern "C" fn(input: *mut c_void, cmd: *const c_void, ar: *mut c_void) -> i32,
+    pub input_exec: unsafe extern "C" fn(
+        input: *mut c_void,
+        cmd: *const c_void,
+        ar: *mut c_void,
+        out: *mut i32,
+    ) -> i32,
     /// `Input->ReadInput(delta, *GLog)` (virtual).
-    pub input_read_input: unsafe extern "C" fn(input: *mut c_void, delta: f32),
+    pub input_read_input: unsafe extern "C" fn(input: *mut c_void, delta: f32) -> i32,
     /// `RenDev->Exec(cmd, ar)` (virtual; reaches the base shell for plain devices).
-    pub render_dev_exec:
-        unsafe extern "C" fn(render_dev: *mut c_void, cmd: *const c_void, ar: *mut c_void) -> i32,
+    pub render_dev_exec: unsafe extern "C" fn(
+        render_dev: *mut c_void,
+        cmd: *const c_void,
+        ar: *mut c_void,
+        out: *mut i32,
+    ) -> i32,
     /// `RenDev->ReadPixels(dest)` (virtual).
-    pub render_dev_read_pixels: unsafe extern "C" fn(render_dev: *mut c_void, dest: *mut c_void),
+    pub render_dev_read_pixels:
+        unsafe extern "C" fn(render_dev: *mut c_void, dest: *mut c_void) -> i32,
     /// `RenDev->Lock(FlashScale, FlashFog, ScreenClear, flags, HitData, HitSize)` (virtual).
     pub render_dev_lock: unsafe extern "C" fn(
         render_dev: *mut c_void,
@@ -165,47 +177,72 @@ pub struct CameraServices {
         flags: u32,
         hit_data: *mut c_void,
         hit_size: *mut i32,
-    ),
+    ) -> i32,
     /// `RenDev->Unlock(blit)` (virtual).
-    pub render_dev_unlock: unsafe extern "C" fn(render_dev: *mut c_void, blit: i32),
-    /// `RenDev->PushHit(hit, size)` (virtual).
+    pub render_dev_unlock: unsafe extern "C" fn(render_dev: *mut c_void, blit: i32) -> i32,
+    /// Checked `RenDev->PushHit(hit, size)` (virtual).
     pub render_dev_push_hit:
-        unsafe extern "C" fn(render_dev: *mut c_void, hit: *const c_void, size: i32),
-    /// `RenDev->PopHit(size, force)` (virtual).
-    pub render_dev_pop_hit: unsafe extern "C" fn(render_dev: *mut c_void, size: i32, force: i32),
-    /// `URenderDevice::DetailTextures`.
-    pub render_dev_detail_textures: unsafe extern "C" fn(render_dev: *mut c_void) -> i32,
+        unsafe extern "C" fn(render_dev: *mut c_void, hit: *const c_void, size: i32) -> i32,
+    /// Checked `RenDev->PopHit(size, force)` (virtual).
+    pub render_dev_pop_hit:
+        unsafe extern "C" fn(render_dev: *mut c_void, size: i32, force: i32) -> i32,
     /// `DetailTextures ^= 1; SaveConfig();`.
-    pub render_dev_toggle_detail_textures: unsafe extern "C" fn(render_dev: *mut c_void),
-    /// `HHitProxy::Size`.
-    pub hit_proxy_size: unsafe extern "C" fn(hit: *const c_void) -> i32,
-    /// `HHitProxy::Size = size`.
-    pub hit_proxy_set_size: unsafe extern "C" fn(hit: *mut c_void, size: i32),
-    /// `HHitProxy::Parent = parent`.
-    pub hit_proxy_set_parent: unsafe extern "C" fn(hit: *mut c_void, parent: *mut c_void),
-    /// `NetDriver->ServerConnection`.
-    pub net_driver_server_connection: unsafe extern "C" fn(driver: *mut c_void) -> *mut c_void,
-    /// `NetDriver->MaxClientRate`.
-    pub net_driver_max_client_rate: unsafe extern "C" fn(driver: *mut c_void) -> i32,
+    pub render_dev_toggle_detail_textures: unsafe extern "C" fn(render_dev: *mut c_void) -> i32,
     /// `URL.HasOption("LAN")` on the connection's URL (NETSPEED/LANSPEED).
-    pub connection_has_lan_option: unsafe extern "C" fn(conn: *mut c_void) -> i32,
-    /// `conn->CurrentNetSpeed = speed`.
-    pub connection_set_current_net_speed: unsafe extern "C" fn(conn: *mut c_void, speed: i32),
+    pub connection_has_lan_option: unsafe extern "C" fn(conn: *mut c_void, out: *mut i32) -> i32,
     /// `conn->Logf(fmt)`.
-    pub connection_logf_format: unsafe extern "C" fn(conn: *mut c_void, fmt: *const c_void),
+    pub connection_logf_format: unsafe extern "C" fn(conn: *mut c_void, fmt: *const c_void) -> i32,
     /// `conn->Logf(fmt, int)`.
-    pub connection_logf_int: unsafe extern "C" fn(conn: *mut c_void, fmt: *const c_void, arg: i32),
+    pub connection_logf_int:
+        unsafe extern "C" fn(conn: *mut c_void, fmt: *const c_void, arg: i32) -> i32,
     /// `GetDefault<UPlayer>()->ConfiguredInternetSpeed = rate; SaveConfig();`.
-    pub player_set_configured_internet_speed: unsafe extern "C" fn(rate: i32),
+    pub player_set_configured_internet_speed: unsafe extern "C" fn(rate: i32) -> i32,
     /// `ImportObject<UTextBuffer>(GetTransientPackage(), NAME_None, 0, file)`; may be null.
-    pub import_text_buffer: unsafe extern "C" fn(file: *const c_void) -> *mut c_void,
+    pub import_text_buffer: unsafe extern "C" fn(file: *const c_void, out: *mut *mut c_void) -> i32,
     /// `text->Text` (the `FString` data pointer).
-    pub text_buffer_text: unsafe extern "C" fn(text: *mut c_void) -> *const c_void,
+    pub text_buffer_text: unsafe extern "C" fn(text: *mut c_void, out: *mut *const c_void) -> i32,
     /// `text->AddToRoot()`.
-    pub text_buffer_add_to_root: unsafe extern "C" fn(text: *mut c_void),
+    pub text_buffer_add_to_root: unsafe extern "C" fn(text: *mut c_void) -> i32,
     /// `text->RemoveFromRoot(); delete text;`.
-    pub text_buffer_release: unsafe extern "C" fn(text: *mut c_void),
+    pub text_buffer_release: unsafe extern "C" fn(text: *mut c_void) -> i32,
+    /// Native FMemMark and uninitialized GMem pixel storage spanning `run`.
+    pub pixel_scope: unsafe extern "C" fn(
+        snap: i32,
+        context: *mut c_void,
+        run: unsafe extern "C" fn(*mut c_void) -> i32,
+    ) -> i32,
+    pub pixel_allocate: unsafe extern "C" fn(count: i32, out: *mut *mut c_void) -> i32,
+    pub shot_path_scope: unsafe extern "C" fn(
+        file: *const c_void,
+        context: *mut c_void,
+        run: unsafe extern "C" fn(*mut c_void, *const c_void) -> i32,
+    ) -> i32,
+    /// Observe native byte channels without creating initialized Rust FColor values.
+    pub pixel_channels: unsafe extern "C" fn(pixel: *const c_void, channels: *mut i32) -> i32,
+    pub shot_name: unsafe extern "C" fn(index: i32, out: *mut c_void) -> i32,
+    /// Preserve the nested public native guard while reentering Rust sizing policy.
+    pub frame_compute_render_size: unsafe extern "C" fn(frame: *mut c_void) -> i32,
+    /// `UViewport::ExecMacro(file, ar)`.
+    pub viewport_exec_macro:
+        unsafe extern "C" fn(viewport: *mut c_void, file: *const c_void, ar: *mut c_void) -> i32,
+    /// Add `viewport` to its outer `UClient::Viewports`.
+    pub viewport_register: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
+    /// Construct and initialize the configured `UCanvas`; publishes it through `out`.
+    pub viewport_create_canvas:
+        unsafe extern "C" fn(viewport: *mut c_void, out: *mut *mut c_void) -> i32,
+    /// Construct the configured `UInput`; publishes it through `out`.
+    pub viewport_create_input: unsafe extern "C" fn(out: *mut *mut c_void) -> i32,
+    /// Assign `LastUpdateTime = appSeconds()`.
+    pub viewport_stamp_last_update_time: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
+    /// Detach the viewport from its engine audio device if it is current.
+    pub viewport_detach_audio: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
+    /// `UViewport::CloseWindow()` virtual dispatch.
+    pub viewport_close_window: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
+    /// Remove `viewport` from its outer `UClient::Viewports`.
+    pub viewport_unregister: unsafe extern "C" fn(viewport: *mut c_void) -> i32,
 }
+
+const _: () = assert!(std::mem::size_of::<CameraServices>() == 63 * std::mem::size_of::<usize>());
 
 #[inline]
 fn v3(x: f32, y: f32, z: f32) -> FVector {
@@ -261,7 +298,25 @@ pub unsafe fn compute_render_coords(
     frame: *mut FSceneNode,
     location: FVector,
     rotation: FRotator,
-) {
+) -> Res<()> {
+    unsafe {
+        compute_render_coords_with(frame, location, rotation, |frame| {
+            let status = (svc.frame_compute_render_size)(frame.cast());
+            if status == 0 { Ok(()) } else { Err(-status) }
+        })
+    }
+}
+
+/// Core/native-independent camera coordinate policy with a typed sizing host.
+///
+/// # Safety
+/// `frame` must satisfy the contract of [`frame_actor`].
+pub unsafe fn compute_render_coords_with(
+    frame: *mut FSceneNode,
+    location: FVector,
+    rotation: FRotator,
+    mut compute_size: impl FnMut(*mut FSceneNode) -> Res<()>,
+) -> Res<()> {
     unsafe {
         let (_, actor) = frame_actor(frame);
         let mut c = match actor.rend_map {
@@ -285,9 +340,9 @@ pub unsafe fn compute_render_coords(
             },
             _ => {
                 // `GMath.ViewCoords / Rotation`.
-                let mut v = *(svc.gmath_view_coords)();
-                let sin = |i: i32| (svc.gmath_sin_tab)(i);
-                let cos = |i: i32| (svc.gmath_cos_tab)(i);
+                let mut v = math::VIEW_COORDS;
+                let sin = |i: i32| math::sin_tab_inline(i, math::trig_table());
+                let cos = |i: i32| math::cos_tab_inline(i, math::trig_table());
                 let trig = Trig {
                     sin: &sin,
                     cos: &cos,
@@ -299,30 +354,53 @@ pub unsafe fn compute_render_coords(
         coords::div_vec(&mut c, location);
         (*frame).coords = c;
         (*frame).uncoords = transpose(&c);
-        compute_render_size(svc, frame);
+        compute_size(frame)?;
     }
+
+    Ok(())
 }
 
 /// `FSceneNode::ComputeRenderSize()` (UnCamera.cpp:344-393).
 ///
 /// # Safety
 /// `frame` must satisfy the contract of [`frame_actor`]; `services` must be valid.
-pub unsafe fn compute_render_size(svc: &CameraServices, frame: *mut FSceneNode) {
+pub unsafe fn compute_render_size(svc: &CameraServices, frame: *mut FSceneNode) -> Res<()> {
     unsafe {
-        let (vp, actor) = frame_actor(frame);
-        let node = &mut *frame;
+        compute_render_size_with(frame, |viewport, frame| {
+            let status = (svc.render_dev_set_scene_node)(
+                (*viewport).ren_dev,
+                frame.cast::<c_void>(),
+            );
+            if status == 0 { Ok(()) } else { Err(-status) }
+        })
+    }
+}
 
-        let fx = node.x as f32;
-        let fy = node.y as f32;
+/// Core/native-independent scene sizing policy with a typed scene-node host.
+///
+/// # Safety
+/// `frame` must satisfy the contract of [`frame_actor`].
+pub unsafe fn compute_render_size_with(
+    frame: *mut FSceneNode,
+    mut set_scene_node: impl FnMut(*mut UViewport, *mut FSceneNode) -> Res<()>,
+) -> Res<()> {
+    unsafe {
+        let vp = (*frame).viewport.cast::<UViewport>();
+        let actor = (*vp).actor.cast::<APlayerPawn>();
+        let node = frame;
+
+        let fx = (*node).x as f32;
+        let fy = (*node).y as f32;
         let fx2 = fx * 0.5;
         let fy2 = fy * 0.5;
         let fx15 = (fx + 1.0001) * 0.5;
         let fy15 = (fy + 1.0001) * 0.5;
-        let mut effective_fov = actor.base.fov_angle;
-        if !is_ortho(actor) {
-            let maintain_vertical = (svc.viewport_maintain_vertical_fov)(node.viewport);
+        let mut effective_fov = (*actor).base.fov_angle;
+        if !is_ortho(&*actor) {
+            let maintain_vertical =
+                i32::from((*(*vp).outer.cast::<UClient>()).maintain_vertical_fov());
             effective_fov =
-                get_effective_fov_angle(effective_fov, node.x, node.y, maintain_vertical);
+                get_effective_fov_angle(effective_fov, (*node).x, (*node).y, maintain_vertical);
         }
         // `0.5f*FX / appTan(EffectiveFovAngle*PI/360.f)`: float divided by a double
         // `appTan`, narrowed to the FLOAT `Proj.Z`.
@@ -335,7 +413,7 @@ pub unsafe fn compute_render_size(svc: &CameraServices, frame: *mut FSceneNode) 
             proj_z,
         );
         let r_proj = v3(1.0 / proj.x, 1.0 / proj.y, 1.0 / proj.z);
-        let zoom = actor.base.ortho_zoom / (fx * 15.0);
+        let zoom = (*actor).base.ortho_zoom / (fx * 15.0);
         let prj_xm = (0.0 - fx2) * (-r_proj.z);
         let prj_xp = (fx - fx2) * r_proj.z;
         let prj_ym = (0.0 - fy2) * (-r_proj.z);
@@ -343,8 +421,8 @@ pub unsafe fn compute_render_size(svc: &CameraServices, frame: *mut FSceneNode) 
 
         // Side info.
         let signs = [-1.0f32, 1.0];
-        let uncoords = node.uncoords;
-        let origin = node.coords.origin;
+        let uncoords = (*node).uncoords;
+        let origin = (*node).coords.origin;
         let mut view_sides = [v3(0.0, 0.0, 0.0); 4];
         let mut view_planes = [FPlane {
             x: 0.0,
@@ -375,70 +453,87 @@ pub unsafe fn compute_render_size(svc: &CameraServices, frame: *mut FSceneNode) 
             );
         }
 
-        node.fx = fx;
-        node.fy = fy;
-        node.fx2 = fx2;
-        node.fy2 = fy2;
-        node.fx15 = fx15;
-        node.fy15 = fy15;
-        node.effective_fov_angle = effective_fov;
-        node.proj = proj;
-        node.r_proj = r_proj;
-        node.zoom = zoom;
-        node.prj_xm = prj_xm;
-        node.prj_xp = prj_xp;
-        node.prj_ym = prj_ym;
-        node.prj_yp = prj_yp;
-        node.view_sides = view_sides;
-        node.view_planes = view_planes;
+        (*node).fx = fx;
+        (*node).fy = fy;
+        (*node).fx2 = fx2;
+        (*node).fy2 = fy2;
+        (*node).fx15 = fx15;
+        (*node).fy15 = fy15;
+        (*node).effective_fov_angle = effective_fov;
+        (*node).proj = proj;
+        (*node).r_proj = r_proj;
+        (*node).zoom = zoom;
+        (*node).prj_xm = prj_xm;
+        (*node).prj_xp = prj_xp;
+        (*node).prj_ym = prj_ym;
+        (*node).prj_yp = prj_yp;
+        (*node).view_sides = view_sides;
+        (*node).view_planes = view_planes;
 
-        // Tell the rendering device.
-        (svc.render_dev_set_scene_node)(vp.ren_dev, frame.cast::<c_void>());
+        set_scene_node(vp, frame)?;
+    }
+
+    Ok(())
+}
+
+/// A complete native line/point submission. No device callback is invoked while
+/// Rust is active. Kind 0 rejects, kind 1 draws a line, kind 2 draws a point box.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CameraLinePlan {
+    pub kind: u32,
+    pub flags: u32,
+    pub p1: FVector,
+    pub p2: FVector,
+}
+
+impl CameraLinePlan {
+    pub const fn none() -> Self {
+        Self {
+            kind: 0,
+            flags: 0,
+            p1: FVector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            p2: FVector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
     }
 }
 
-/// `URenderDevice::Draw2DClippedLine(Frame, Color, LineFlags, P1, P2)` (UnCamera.cpp:108-169).
-///
-/// # Safety
-/// `render_dev` and `frame` must be valid engine objects; `services` must be valid.
-pub unsafe fn draw_2d_clipped_line(
-    svc: &CameraServices,
-    render_dev: *mut c_void,
-    frame: *mut FSceneNode,
-    color: FPlane,
+/// `URenderDevice::Draw2DClippedLine` clipping policy, without device dispatch.
+pub fn plan_2d_clipped_line(
+    frame: &FSceneNode,
     line_flags: u32,
     p1: FVector,
     p2: FVector,
-) {
-    unsafe {
-        let node = &*frame;
-        let Some((a, b)) = clip_2d_line(node.fx, node.fy, p1, p2) else {
-            return;
-        };
-        (svc.render_dev_draw_2d_line)(
-            render_dev,
-            frame.cast::<c_void>(),
-            &color,
-            line_flags,
-            &a,
-            &b,
-        );
+) -> CameraLinePlan {
+    match clip_2d_line(frame.fx, frame.fy, p1, p2) {
+        Some((p1, p2)) => CameraLinePlan {
+            kind: 1,
+            flags: line_flags,
+            p1,
+            p2,
+        },
+        None => CameraLinePlan::none(),
     }
 }
 
-/// `URenderDevice::Draw3DLine(Frame, Color, LineFlags, P1, P2)` (UnCamera.cpp:195-263).
+/// `URenderDevice::Draw3DLine` transformation, clipping and projection policy.
 ///
 /// # Safety
-/// `render_dev` and `frame` must be valid engine objects; `services` must be valid.
-pub unsafe fn draw_3d_line(
-    svc: &CameraServices,
-    render_dev: *mut c_void,
+/// `frame`, its viewport and viewport actor must be live engine objects.
+pub unsafe fn plan_3d_line(
     frame: *mut FSceneNode,
-    color: FPlane,
     line_flags: u32,
     mut p1: FVector,
     mut p2: FVector,
-) {
+) -> CameraLinePlan {
     unsafe {
         let (_, actor) = frame_actor(frame);
         let (sx2, sy2) = ((*frame).fx2, (*frame).fy2);
@@ -456,33 +551,29 @@ pub unsafe fn draw_3d_line(
 
             // Parallel to the line of sight: the line appears as a dot.
             if (p2.x - p1.x).abs() + (p1.y - p2.y).abs() < 0.2 {
-                if actor.base.ortho_zoom < ORTHO_LOW_DETAIL {
-                    (svc.render_dev_draw_2d_point)(
-                        render_dev,
-                        frame.cast::<c_void>(),
-                        &color,
-                        LINE_NONE,
-                        p1.x - 1.0,
-                        p1.y - 1.0,
-                        p1.x + 1.0,
-                        p1.y + 1.0,
-                        1.0,
-                    );
-                }
-                return;
+                return if actor.base.ortho_zoom < ORTHO_LOW_DETAIL {
+                    CameraLinePlan {
+                        kind: 2,
+                        flags: LINE_NONE,
+                        p1: v3(p1.x - 1.0, p1.y - 1.0, 1.0),
+                        p2: v3(p1.x + 1.0, p1.y + 1.0, 1.0),
+                    }
+                } else {
+                    CameraLinePlan::none()
+                };
             }
         } else {
             // Discard the line if its points are identical.
             let d = prim::sub(p2, p1);
             if vec::size_squared(d) < 0.01f32 * 0.01f32 {
-                return;
+                return CameraLinePlan::none();
             }
 
             // Clip to the near clipping plane.
             let ncz = LINE_NEAR_CLIP_Z;
             if p1.z <= ncz {
                 if p2.z < (ncz - 0.01) {
-                    return;
+                    return CameraLinePlan::none();
                 }
                 p1.x += (ncz - p1.z) * d.x / d.z;
                 p1.y += (ncz - p1.z) * d.y / d.z;
@@ -499,6 +590,6 @@ pub unsafe fn draw_3d_line(
             p2 = perspective_point(p2, proj_z, sx2, sy2);
         }
 
-        draw_2d_clipped_line(svc, render_dev, frame, color, line_flags, p1, p2);
+        plan_2d_clipped_line(&*frame, line_flags, p1, p2)
     }
 }
