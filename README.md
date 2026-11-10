@@ -1,136 +1,84 @@
 # Harry Potter and the Chamber of Secrets
 
-Play the 2002 game with a modern launcher on macOS, Linux, and Raspberry Pi. A browser build is also available for compatible browsers.
+Play the 2002 PC game on a modern Mac. The engine is a complete Rust reimplementation of the
+game's Unreal-based engine: no original C++ engine code remains. It renders with Metal through
+`wgpu` and boots straight into the game's own menus.
 
-**You need your own copy of the original game.** This project does not include the game's maps, sounds, textures, or other copyrighted game data. The first time you launch, the game asks you to import your installed game folder. Nothing is installed from the original CD or installer.
+**You need your own copy of the original game.** This project does not include the game's maps,
+sounds, textures, or other copyrighted data. You import your installed copy once (see below).
 
-## macOS
+## What is new
 
-1. Download the latest **macOS arm64 DMG** from [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest).
-2. Open the DMG and drag **HarryPotter2** into **Applications**.
-3. Open **HarryPotter2**. If macOS blocks the app, open **System Settings → Privacy & Security**, then choose **Open Anyway**.
-4. In the launcher, choose **Game Data → Import retail game…** and select the installed game folder (the folder containing `Maps`, `System`, and `Textures`). You can also choose **Import retail archive…** for a `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`, `.tar.xz`, or `.7z` file.
-5. Choose **New Game** or **Continue**.
+- **Fast.** Every retail level runs above 60 fps on Apple silicon; saving no longer pauses the game
+  (the save is written in the background) and loading a save takes about half as long.
+- **Rebuilt menus and HUD.** All menus and the subtitle bar are drawn by a new Rust UI with the
+  original artwork: reliable clicks, real word wrapping, exact mouse-speed entry, mouse smoothing
+  toggle, and every setting in the in-game **Options** pages.
+- **Better image quality** (Options → Sound/Video → Advanced): mipmaps (no more shimmering
+  distant textures), Edge AA for foliage and fences, smoother lighting, MSAA, anisotropic
+  filtering, VSync and frame-rate limits, UI scale, and a 3D scale from 50% up to 200%
+  supersampling.
 
-The app also installs through Homebrew:
+## macOS (Apple silicon, macOS 15 or later)
 
-```sh
-brew tap cefege/hp2 https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc
-brew install --cask cefege/hp2/harry-potter-2
-```
-
-## Linux
-
-There is currently no Linux installer in Releases. Build the game once on your Linux computer. The commands below are for Debian or Ubuntu; Raspberry Pi OS is covered in the next section.
-
-1. Open Terminal and install the required packages:
-
-   ```sh
-   sudo apt update
-   sudo apt install -y build-essential clang make cmake ninja-build pkg-config git python3 \
-     libarchive-tools libgtk-3-dev libgl1-mesa-dev libegl1-mesa-dev \
-     libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
-     libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libasound2-dev \
-     libpulse-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev
-   ```
-
-2. Download the project and build it:
+1. Download the latest **macOS arm64 DMG** from
+   [Releases](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/latest),
+   or install with Homebrew:
 
    ```sh
-   git clone https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc.git
-   cd harry-potter-2-chamber-of-secrets-pc
+   brew tap cefege/hp2 https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc
+   brew install --cask cefege/hp2/harry-potter-2
    ```
 
-   For a typical Intel/AMD 64-bit PC:
+2. Drag **HarryPotter2** into **Applications**. If macOS blocks it, open
+   **System Settings → Privacy & Security** and choose **Open Anyway**.
+3. **Import your game once.** Open Terminal and run (use the folder that contains `Maps`,
+   `System` and `Textures`):
 
    ```sh
-   cmake --preset linux-x64
-   cmake --build --preset linux-x64
-   ./dist/linux-x64/bin/hp2_game
+   /Applications/HarryPotter2.app/Contents/MacOS/hp2_import \
+     --retail-root "/path/to/your game folder" \
+     --profile retail-only \
+     --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail"
    ```
 
-   For a 64-bit ARM Linux computer, use `linux-arm64` instead of `linux-x64` in each command.
+   A `.zip`, `.tar.*` or `.7z` of that folder works too: use `--archive "/path/to/file.zip"`
+   instead of `--retail-root`. The game finds the data in that `--output` folder. If you open
+   the game before importing, it shows this command with your paths filled in.
+4. Open **HarryPotter2** and play. Settings are in the game's own Options pages.
 
-3. Import your game folder in the launcher, then choose **New Game** or **Continue**.
+## Building from source
 
-Other Linux distributions need the equivalent development packages listed in [the build guide](Docs/BUILDING.md).
-
-## Raspberry Pi 4 or 5
-
-Use **64-bit Raspberry Pi OS with the desktop**. The game is not packaged as a Pi installer yet; build it on the Pi:
-
-1. Open Terminal and install the Debian/Ubuntu packages listed in the Linux section above.
-2. Download the project and build the Pi version:
-
-   ```sh
-   git clone https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc.git
-   cd harry-potter-2-chamber-of-secrets-pc
-   cmake --preset linux-arm64
-   cmake --build --preset linux-arm64
-   ./dist/linux-arm64/bin/hp2_game
-   ```
-
-3. Import your own game folder in the launcher. Choose **New Game** to play.
-
-The first launch can take a while while the Pi builds the game. A 32-bit Raspberry Pi OS installation is not supported.
-
-## Browser mode: play on a phone or tablet
-
-Browser mode runs on a computer that hosts the game and sends a secure web link to your phone or tablet. **Android devices with a current Chrome or Firefox browser are the supported mobile option. iPhone and iPad browsers currently cannot run this WebAssembly build.** Check [browser support for WebAssembly Memory64](https://caniuse.com/wf-wasm-memory64) before trying another device.
-
-You need a computer to build and host the browser version. This is not a public game website or a ready-to-download mobile app.
-
-### 1. Build the browser version
-
-On a Mac or Linux computer, install **Git, CMake, Ninja, and Python 3**. From the project folder, install the Emscripten SDK version used by this project and activate it in this terminal:
+The shipping executables (`hp2_game_rust`, `hp2_import`, `hp2_ucc_rust`) are Rust crates built
+through CMake. On macOS:
 
 ```sh
-git clone --branch 6.0.10 --depth 1 https://github.com/emscripten-core/emsdk.git ../emsdk
-../emsdk/emsdk install 6.0.10
-../emsdk/emsdk activate 6.0.10
-source ../emsdk/emsdk_env.sh
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64 --target hp2_verification_binaries
+./out/macos-arm64/hp2_game_rust
 ```
 
-Now build the browser version:
-
-```sh
-cmake --preset web-wasm64
-cmake --build --preset web-wasm64
-```
-
-### 2. Start the local web server
-
-In the same project folder, run:
-
-```sh
-python3 Build/serve_web.py --bind 127.0.0.1 --port 8080
-```
-
-Leave that terminal open. The game is now available on the host computer at <http://127.0.0.1:8080>.
-
-### 3. Open it on your Android phone or tablet
-
-The browser requires HTTPS for its shared-memory feature. For a simple temporary HTTPS link, install [Cloudflare Tunnel (`cloudflared`)](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) on the host computer. Open a second terminal and run:
-
-```sh
-cloudflared tunnel --url http://127.0.0.1:8080
-```
-
-Open the `https://…trycloudflare.com` link printed in that terminal on the phone or tablet. Keep both terminals and the host computer running while you play. The temporary link can be opened by anyone who has it, so close the tunnel when you're done. **Do not add `--data-root`** to the server command; that option is for development and exposes files from a folder on the host.
-
-On the device, choose **Game Data** and select your extracted game-data folder when asked. The browser saves imported data and game saves in that browser's storage on that device. Archives must be extracted before browser import.
+Prerequisites and the Linux presets (`linux-x64`, `linux-arm64`) are described in
+[Docs/BUILDING.md](Docs/BUILDING.md). This release was built and tested on macOS only; the Linux
+presets exist but were not re-verified for it. The older browser build lives on the frozen
+`web-cpp-freeze` branch and is not part of this release.
 
 ## Troubleshooting
 
-- **The launcher says game data is missing:** select the installed game folder containing `Maps`, `System`, and `Textures`; don't select the CD drive or installer.
-- **A browser says it cannot start:** make sure you opened the HTTPS tunnel link, not the host's plain `http://` address. Use a browser that supports WebAssembly Memory64, WebGL2, and cross-origin isolation.
-- **Where are saves stored?** The desktop game keeps saves in your normal user data folder. Browser saves stay in the browser's storage on the device where you played.
-- **Need help?** Open an [issue](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/issues) and include your operating system and the steps that caused the problem. Do not upload copyrighted game files.
+- **The game says to import your game:** run the `hp2_import` command above with the folder that
+  contains `Maps`, `System` and `Textures` (not the CD drive or the installer).
+- **Where are saves?** `~/Library/Application Support/Harry Potter 2/User/Save`.
+- **Need the original look?** `HP2_STOCK_MENUS=1` and `HP2_STOCK_HUD=1` bring back the original
+  menu and HUD drawing; the Advanced options can turn each image-quality feature off.
+- **Need help?** Open an [issue](https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/issues)
+  with your macOS version and the steps that caused the problem. Do not upload game files.
 
 ## Contributions
 
-Contributions are welcome, including AI-assisted and AI-generated contributions. Please describe what changed, disclose AI assistance, and include the checks you ran. Follow [AGENTS.md](AGENTS.md) and preserve the game's and third-party projects' licenses.
+Contributions are welcome, including AI-assisted ones. Describe what changed, disclose AI
+assistance, include the checks you ran, and follow [AGENTS.md](AGENTS.md).
 
 ## License
 
-The code is [MIT licensed](LICENSE). Third-party software credits are in [NOTICE.md](NOTICE.md). Original game content is not included; you must supply your own copy.
+The code is [MIT licensed](LICENSE). Third-party software credits are in [NOTICE.md](NOTICE.md).
+Original game content is not included; you must supply your own copy.

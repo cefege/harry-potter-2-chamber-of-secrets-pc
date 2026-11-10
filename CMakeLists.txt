@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24)
 include("${CMAKE_CURRENT_LIST_DIR}/Build/CMake/HP2NativeFree.cmake")
 
 project(HarryPotter2Native
-    VERSION 0.1.0
+    VERSION 0.2.0
     LANGUAGES C CXX
 )
 

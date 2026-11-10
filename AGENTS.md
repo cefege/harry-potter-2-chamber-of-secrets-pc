@@ -1,9 +1,10 @@
 # AGENTS.md — Operating handbook
 
-This is a Rust application workspace for a UE1-derived engine. CMake imports the
-shipping Rust executables through Corrosion. The former first-party C++ engine
-and `hp2-ffi` static library are not the current build graph. Do not recreate them
-from historical guidance. SDK libraries remain native dependencies.
+This is a Rust application workspace for a UE1-derived engine (Harry Potter and the
+Chamber of Secrets, PC). **All first-party code is Rust**: the former C++ engine, its
+`hp2-ffi` static library and the egui launcher are gone; do not recreate them from
+historical guidance. CMake imports the shipping Rust executables through Corrosion; C/C++
+remain only in pinned third-party dependencies (SDL2, OpenAL Soft, libarchive, fonts).
 
 ## Start with the smallest relevant context
 
@@ -31,10 +32,12 @@ Repository compatibility rules take precedence over generic style guidance.
 | Core, objects, archives, configuration, VM | `crates/hp2-core/` |
 | Game loop, world, input, runtime resource owners | `crates/hp2-engine/` |
 | Scene, canvas, native/bitmap text | `crates/hp2-render/` |
-| GPU device, renderer, uploads | `crates/hp2-wgpu/` |
+| Reactive UI toolkit (signals, flex layout, widgets, draw list) | `crates/hp2-ui/` |
+| Menus and HUD on the toolkit (`ui_pages`, `ui_mirror`, `ui_hud`, `ui_host`) | `crates/hp2-engine/src/ui_*.rs` |
+| GPU device, renderer, uploads, mipmaps, quality features | `crates/hp2-wgpu/` |
 | SDL window/input and native file dialogs | `crates/hp2-platform/` |
 | Audio and codecs | `crates/hp2-audio/`, `crates/hp2-codecs/` |
-| Launcher policy / UI / game process | `crates/hp2-launcher/`, `crates/hp2-game/` |
+| Boot sequence policy / game process (no launcher UI) | `crates/hp2-launcher/`, `crates/hp2-game/` |
 | Data import and generated INI policy | `crates/hp2-import/`, `crates/hp2-ini/` |
 | ABI, FFI support, paths, hashing, fire, UCC | See the complete 18-crate map in `Docs/ARCHITECTURE.md` |
 | Build, test, packaging, release | `Build/`, `Build/CMake/`, `Tests/`, `.github/workflows/` |
@@ -42,16 +45,27 @@ Repository compatibility rules take precedence over generic style guidance.
 
 Shipping binaries are `hp2_game_rust`, `hp2_ucc_rust`, and `hp2_import`.
 
-**Product direction: no external/startup launcher UI; engine-drawn menus.** The startup
-window and its egui host are removed; the game boots directly into the menus (missing
-data exits 1 with `hp2_import` guidance). Settings belong in in-game menus. The owner
-decided (see [Docs/UI_REWRITE.md](Docs/UI_REWRITE.md)) to replace the stock UnrealScript
-menus, every one of them, with menus written in Rust on the `hp2-ui` reactive toolkit and
-drawn by the engine with the retail art. Until a screen is replaced, its stock page and
-its observers (`stock_*` modules, [Docs/STOCK_MENU_LAYOUT.md](Docs/STOCK_MENU_LAYOUT.md))
-stay supported. Follow [Docs/NO_LAUNCHER_CUTOVER.md](Docs/NO_LAUNCHER_CUTOVER.md) for
-launcher-removal gaps. Do not restore the launcher window or removed overlays; preserve
-reusable boot/settings/import policy.
+**Product direction.** No external/startup launcher: the game boots straight into the
+stock `Startup.unr` menus. Missing data exits 1 with `hp2_import` guidance (from the
+macOS app bundle a dialog shows the exact command; `hp2_import` ships in
+`Contents/MacOS`; its CLI is a pinned contract, so the command spells out `--profile
+retail-only --output`). Settings belong in the in-game Options pages. Every menu page
+and the message box are drawn and driven by `hp2-ui`: Sound/Video has a hand-written
+view (`ui_pages`); every other page is mirrored (`ui_mirror`: stock controls stay alive
+and in place, their own `Paint`/pointer handlers are swallowed by script pre-call hooks,
+actions run through the controls' own script functions). The HUD subtitle bar, letterbox
+and status counters are Rust (`ui_hud`); the health bar and the minigame HUD managers
+are still stock. `HP2_STOCK_MENUS=1` / `HP2_STOCK_HUD=1` restore the stock drawing. See
+[Docs/UI_REWRITE.md](Docs/UI_REWRITE.md) and
+[Docs/STOCK_MENU_LAYOUT.md](Docs/STOCK_MENU_LAYOUT.md). Do not restore the launcher
+window; preserve reusable boot/settings/import policy.
+
+**Runtime behaviour to preserve.** Saving forks a copy-on-write child that writes the slot
+while the game keeps running (`game_save_owner`; `HP2_SYNC_SAVE=1` forces the blocking path;
+loads, travel and shutdown wait for it). The level-replacing fade is 25% of
+`Console.FadeoutTime` (`HP2_LOAD_FADE_SCALE`). Image-quality features (`Mipmaps`,
+`AlphaToCoverage`, `SmoothLightmaps` in `[WgpuDrv.WgpuRenderDevice]`, render scale 50-200%)
+default on. Performance and quality evidence is in [Docs/PERFORMANCE.md](Docs/PERFORMANCE.md).
 
 Generated ABI declarations and pinned third-party sources are not style-cleanup
 candidates. Inspect a policy's real caller and resource owner before claiming a
@@ -138,6 +152,15 @@ Use `linux-arm64` or `linux-x64` on a matching Linux host. Sanitizer and full-ma
 presets are separate qualifications; a preset name does not prove that Rust was
 instrumented. Inspect the actual compiler/link flags and reports.
 
+UI, HUD and rendering changes need pictures, not just tests: drive the game with
+`Tests/InputScriptSmoke.py --smoke` fixtures, capture frames with `HP2_CAPTURE_FRAMES` /
+`HP2_CAPTURE_FRAME_INDICES`, compare against `HP2_STOCK_MENUS=1` / `HP2_STOCK_HUD=1` or the
+previous build pixel by pixel, and look at the images. `HP2_LAYOUT_DUMP=1` and
+`HP2_UI_DEBUG=1` log page geometry and UI input. Performance claims use the uncapped
+harness (`Build/perf_baseline.py`, `Build/saveload_bench.py`, `HP2_FRAME_TIMING=1`) plus
+`Build/rng_equiv.py` / `Build/frame_equiv.py` for equivalence, and the 42-map retail sweep
+(`Build/smoke_maps.py`) before a release.
+
 Tests are registered through `hp2_add_behavior_test` in
 `Build/CMake/HP2Targets.cmake` and `CMakeLists.txt`. Rust tests also live in crate
 `tests/` directories and inline modules. Python contracts live in `Tests/`.
@@ -152,7 +175,12 @@ non-ignored library tests; its name is not proof of real surface presentation.
   Linux layouts are `dist/linux-arm64/` and `dist/linux-x64/`, installed through
   `Build/CMake/HP2Install.cmake` and checked with their matching test presets.
 - `hp2_macos_dmg` creates release DMGs. Never publish, tag, or release as a cleanup
-  side effect. Do not modify personal saves or game-data installations.
+  side effect. A release is an explicit owner request: bump `VERSION` in `CMakeLists.txt`,
+  push tag `vX.Y.Z` (must match) and `.github/workflows/release.yml` builds ALL + the DMG,
+  smokes it, publishes the release and stamps the cask. Locally, packaging is blocked while
+  `HP2_CPP_ORACLE_APP` points at `dist/macos-arm64`; verify the CI build in a separate
+  `git worktree` (no oracle configured) instead of overriding the guard. Do not modify
+  personal saves or game-data installations.
 - The Homebrew tap is this repository. Its tap name must match the repository
   name, and its URL must be explicit. `.github/workflows/release.yml` and
   `Build/stamp_cask.py` own `Casks/harry-potter-2.rb` version/hash fields; never

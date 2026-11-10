@@ -263,6 +263,9 @@ impl BootHost {
             }
         });
         if let Some(error) = failure { return Err(error); }
+        if !outcome.success && !args.iter().any(|a| a.to_ascii_lowercase().starts_with(b"-datadir")) {
+            show_first_run_help();
+        }
         out.integer = i32::from(outcome.success);
         if outcome.success {
             let (data, user) = installed.ok_or_else(|| RuntimeError::new("bootstrap path installer did not publish roots"))?;
@@ -756,4 +759,25 @@ unsafe extern "C" fn bootstrap_unix_fatal(
     _failure: hp2_core::unix_text::Hp2UnixTextFailure,
 ) -> i32 {
     1
+}
+
+/// Without the launcher, a player who opens the app before importing their game sees nothing
+/// (the reason goes to stderr). From the macOS app bundle, explain the one import command.
+fn show_first_run_help() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(dir) = exe.parent() else { return };
+    if !dir.to_string_lossy().contains(".app/Contents/MacOS") {
+        return;
+    }
+    let importer = dir.join("hp2_import");
+    let output = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Library/Application Support/Harry Potter 2/Data/Retail");
+    let message = format!(
+        "This game needs your own copy of Harry Potter and the Chamber of Secrets (PC).\n\n\
+         Open Terminal and run:\n\n\"{}\" --retail-root \"/path/to/your game folder\" --profile retail-only --output \"{}\"\n\n\
+         The game folder is the one containing Maps, System and Textures (for a .zip or .7z of it, \
+         use --archive instead of --retail-root). Then open the game again.",
+        importer.display(),
+        output.display()
+    );
+    hp2_platform::message_box::show_simple_error(b"Import your game first", message.as_bytes());
 }

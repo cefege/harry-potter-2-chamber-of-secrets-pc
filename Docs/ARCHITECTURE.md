@@ -26,7 +26,7 @@ The 18 workspace packages, under `crates/`, are:
 | `hp2-game` | Game entry point and boot host |
 | `hp2-import` | Game-data importer |
 | `hp2-ini` | Importer INI generation |
-| `hp2-launcher` | Launcher policy, model and store |
+| `hp2-launcher` | Boot sequence policy, settings store (no launcher UI) |
 | `hp2-platform` | Window, input and platform services |
 | `hp2-render` | Scene, canvas and text rendering logic |
 | `hp2-ucc` | UCC tool entry point |

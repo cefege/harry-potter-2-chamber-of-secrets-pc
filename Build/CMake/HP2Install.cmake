@@ -99,6 +99,11 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     # downloaded or a cask is installed, which breaks the code seal and makes
     # codesign --verify fail on the *installed* app even though the source
     # bundle is clean. One real file, no symlinks, nothing to propagate onto.
+    # The importer ships beside the game: without the launcher it is how a new
+    # player imports their own copy of the game (the game shows the command).
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "$<TARGET_FILE:hp2_import>"
+        "${HP2_MACOS_EXECUTABLE_DIR}/hp2_import"
     COMMAND "${CMAKE_COMMAND}" -E copy
         "$<TARGET_FILE:OpenAL>"
         "${HP2_MACOS_OPENAL_DYLIB}"
@@ -123,6 +128,7 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
         "${HP2_MACOS_APP_DIR}"
     DEPENDS
         hp2_game_rust
+        hp2_import
         OpenAL
     COMMENT "Recreating signed dist/macos-arm64/HarryPotter2.app"
     VERBATIM
