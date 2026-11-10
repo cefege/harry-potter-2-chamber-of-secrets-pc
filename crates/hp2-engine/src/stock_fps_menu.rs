@@ -175,6 +175,11 @@ fn state(access: CoreAccess<'_>) -> Option<&RefCell<State>> {
     access.owner_context::<crate::core_owner::EngineState>().map(|s| &s.stock_fps_menu)
 }
 
+/// The page's added Show FPS checkbox.
+pub(crate) fn checkbox_of(access: CoreAccess<'_>, page: *mut UObject) -> Option<*mut UObject> {
+    state(access)?.try_borrow().ok()?.controls.iter().find(|c| c.page == page).map(|c| c.control)
+}
+
 /// Install for one complete engine tick, including SDL input and window creation.
 /// The guard must be dropped before Core or its packages are shut down.
 pub(crate) unsafe fn install(access: CoreAccess<'_>) -> Option<impl Drop + '_> {

@@ -220,6 +220,11 @@ unsafe fn callback(access: CoreAccess<'_>, page: *mut UObject, event: PageEvent,
     })
 }
 /// Install once per engine tick, before the stock script hook runs.
+/// The page's added display-mode combo and its choices.
+pub(crate) fn combo_of(page: *mut UObject) -> Option<*mut UObject> {
+    STATE.with(|cell| cell.try_borrow().ok()?.controls.iter().find(|c| c.page.object == page).map(|c| c.combo.object))
+}
+pub(crate) fn choice_labels() -> Vec<&'static str> { CHOICES.iter().map(|(_, label)| *label).collect() }
 pub(crate) fn install() -> RuntimeResult<stock_menu_extensions::Guard> { stock_menu_extensions::install("display-mode", callback) }
 
 unsafe fn prompt(access: CoreAccess<'_>, page: *mut UObject) -> RuntimeResult<Weak> {

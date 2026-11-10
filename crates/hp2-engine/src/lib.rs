@@ -121,6 +121,9 @@ mod stock_graphics_gpu;
 mod stock_graphics_gpu_backend;
 mod stock_graphics_menu;
 mod stock_input_menu;
+mod ui_host;
+mod ui_pages;
+mod ui_vm;
 mod stock_graphics_dispatch;
 #[cfg(feature = "sdl")]
 mod stock_display_transition;

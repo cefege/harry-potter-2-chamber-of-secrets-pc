@@ -470,6 +470,13 @@ pub(crate) unsafe fn keyboard_after_keydown(a:CoreAccess<'_>,receiver:*mut UObje
         } Ok(())
     })
 }
+/// The advanced settings in display order: caption and every choice.
+pub(crate) fn advanced_rows()->Vec<(&'static str,Vec<&'static str>)> {SETTINGS.iter().map(|&(s,label)|(label,choices(s).to_vec())).collect()}
+/// The page's advanced combos in the order of [`advanced_rows`].
+pub(crate) fn advanced_combos(page:*mut UObject)->Vec<*mut UObject> {
+    STATE.with(|slot| {let Ok(state)=slot.try_borrow() else {return Vec::new()};
+        SETTINGS.iter().filter_map(|&(s,_)| state.controls.iter().find(|c| c.page.p==page && c.selected==s).map(|c| c.value.p)).collect()})
+}
 pub(crate) fn install()->RuntimeResult<stock_menu_extensions::Guard>{stock_menu_extensions::install("advanced-graphics",callback)}
 /// Called before input each tick. Hide controls if notifications are unavailable.
 pub(crate) unsafe fn tick(a:CoreAccess<'_>)->RuntimeResult<()> { STATE.with(|slot| {let mut state=slot.borrow_mut(); owner(a,&mut state)?;

@@ -2,7 +2,7 @@
 //! or painting.
 use std::rc::Rc;
 
-use crate::style::{Align, Color, Direction, Edges, Font, Justify, Rect, Size, Style};
+use crate::style::{Align, Color, Direction, Edges, Font, Justify, Rect, Size, Style, TextAlign};
 
 pub(crate) type Click = Rc<dyn Fn()>;
 pub(crate) type Toggle = Rc<dyn Fn(bool)>;
@@ -125,6 +125,10 @@ impl Node {
 
     pub fn font(self, font: Font) -> Self {
         self.modify(move |s| s.font = font)
+    }
+
+    pub fn text_align(self, align: TextAlign) -> Self {
+        self.modify(move |s| s.text_align = align)
     }
 
     /// Position inside the parent, outside the flow.

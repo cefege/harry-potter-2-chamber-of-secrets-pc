@@ -39,8 +39,8 @@ impl TextMetrics for FixedMetrics {
 pub(crate) const WIDGET_HEIGHT: f32 = 24.;
 pub(crate) const SLIDER_WIDTH: f32 = 133.;
 pub(crate) const BOX_WIDTH: f32 = 180.;
-pub(crate) const CHECK_SIZE: f32 = 16.;
-pub(crate) const CHECK_GAP: f32 = 6.;
+pub(crate) const CHECK_SIZE: f32 = 12.;
+pub(crate) const CHECK_GAP: f32 = 5.;
 pub(crate) const BUTTON_PAD: f32 = 12.;
 
 fn intrinsic(node: &Node, m: &dyn TextMetrics) -> (f32, f32) {

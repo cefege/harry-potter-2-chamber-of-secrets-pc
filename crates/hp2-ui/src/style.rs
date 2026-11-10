@@ -114,6 +114,14 @@ impl Edges {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
 /// Font role; the host maps it to a real face and size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Font {
@@ -137,6 +145,7 @@ pub struct Style {
     pub color: Color,
     pub background: Option<Color>,
     pub font: Font,
+    pub text_align: TextAlign,
     /// Lay the node out at `(x, y)` inside its parent instead of in the flow (popups, overlays).
     pub absolute: Option<(f32, f32)>,
 }

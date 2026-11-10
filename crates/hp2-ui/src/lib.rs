@@ -23,7 +23,9 @@ mod ui;
 
 pub use layout::{FixedMetrics, TextMetrics};
 pub use node::{Node, button, checkbox, col, label, number_input, row, select, slider, spacer};
-pub use paint::{DrawCmd, Skin, SkinPart, TextureRef};
+pub use paint::{DrawCmd, Fit, PopupMetrics, Skin, SkinPart, SliderMetrics, TextureRef};
 pub use signal::{Signal, Store};
-pub use style::{Align, Color, Direction, Edges, Font, Justify, Rect, Size, Style, Stylesheet};
+pub use style::{
+    Align, Color, Direction, Edges, Font, Justify, Rect, Size, Style, Stylesheet, TextAlign,
+};
 pub use ui::{Key, PointerButton, Ui};

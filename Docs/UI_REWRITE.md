@@ -9,11 +9,26 @@ to say so. Until a screen is replaced its stock page and the `stock_*` observers
 
 | Piece | State |
 | --- | --- |
-| `hp2-ui` toolkit (signals, flex layout, widgets, input, draw list) | **Done, 15 unit tests** (`ui_toolkit_contracts`) |
-| Engine adapter (fonts, art, canvas drawing, input routing, menu manager) | Not started |
-| Any screen on the new toolkit | None yet; no screen is replaced |
+| `hp2-ui` toolkit (signals, flex layout, widgets, input, draw list, skins) | Done, 15 unit tests (`ui_toolkit_contracts`) |
+| Engine adapter: `ui_host` (canvas drawing through the page's own script draw calls, text measured by the page's `TextSize`, retail textures), `ui_vm` (typed script calls) | Done |
+| **Sound/Video page** (`ui_pages`) | **Replaced.** Drawn and handled by `hp2-ui`; verified by replay screenshots and by settings written to the ini |
+| Controls page, pause book pages, save/load, main menu, message boxes | Still stock (with the `stock_*` observers) |
 
-Nothing the player sees has changed yet. The adapter is the next step and the risky one.
+`HP2_STOCK_MENUS=1` brings back the stock page. `HP2_UI_DEBUG=1` logs input and applied commands.
+
+### How a replaced page works
+The stock page is still created by the game, so its script state, the confirmation dialogs and
+the `stock_*` setting observers keep working. The Rust view hides the page's stock controls (the
+Back button stays), mirrors their values into signals every paint, and queues the player's changes.
+On the next engine tick each change is written into the stock control and raised with the
+control's own `Notify(DE_Change)`, so the stock handlers and the observers run exactly as for a
+click. (Calling the page's `Notify` from Rust does not reach the script-call hooks; the control's
+script must forward it.)
+
+Evidence (retail data, macOS arm64, wgpu, replay `ui_click`/`ui_click2`):
+Frame limit 144 -> 30 (`FrameRateLimit=30`), Show FPS on (`ShowFPS=True`), Music volume 0,
+Object detail Very Low, Textures Low were all applied and saved by clicks on the Rust page; the
+screenshot matches the stock layout.
 
 ## The toolkit (`crates/hp2-ui`)
 

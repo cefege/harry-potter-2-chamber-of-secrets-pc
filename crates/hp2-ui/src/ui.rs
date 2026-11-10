@@ -3,9 +3,9 @@
 use crate::{
     layout::{TextMetrics, layout_root},
     node::{Kind, Node},
-    paint::{DrawCmd, PaintState, Skin, format_number, paint, popup_rect, popup_row, slider_thumb},
+    paint::{DrawCmd, PaintState, Skin, format_number, paint, popup_rect, popup_row, texts},
     signal::Store,
-    style::{Rect, Style, Stylesheet},
+    style::{Font, Rect, Style, Stylesheet},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -226,6 +226,23 @@ impl Ui {
         self.open.as_ref().map(|(k, _)| k.as_str())
     }
 
+    /// Every string (with its font) the current tree draws, so a host can measure them first.
+    pub fn text_requests(&self) -> Vec<(String, Font)> {
+        let mut out = Vec::new();
+        texts(&self.root, &mut out);
+        out
+    }
+
+    /// Lays the current tree out again (after the host learned new text measurements).
+    pub fn relayout(&mut self) {
+        layout_root(
+            &mut self.root,
+            self.size.0,
+            self.size.1,
+            self.metrics.as_ref(),
+        );
+    }
+
     /// Whether a number box is being typed in (the host should then route text input here).
     pub fn is_editing(&self) -> bool {
         self.edit.is_some()
@@ -272,7 +289,8 @@ impl Ui {
                     None
                 }
             })
-            && let Some(index) = (0..count).find(|&i| popup_row(anchor, i).contains(x, y))
+            && let Some(index) =
+                (0..count).find(|&i| popup_row(anchor, i, &self.skin).contains(x, y))
         {
             self.open = Some((key, index));
         }
@@ -302,8 +320,10 @@ impl Ui {
             });
             if let Some((rect, count, _, on_select)) = anchor {
                 self.open = None;
-                if popup_rect(rect, count).contains(x, y) {
-                    if let Some(index) = (0..count).find(|&i| popup_row(rect, i).contains(x, y)) {
+                if popup_rect(rect, count, &self.skin).contains(x, y) {
+                    if let Some(index) =
+                        (0..count).find(|&i| popup_row(rect, i, &self.skin).contains(x, y))
+                    {
                         on_select(index);
                     }
                     self.update();
@@ -362,8 +382,9 @@ impl Ui {
             return;
         };
         let rect = node.rect;
-        let thumb = slider_thumb(rect, *min, *max, *value).w;
-        let frac = ((x - rect.x - thumb / 2.) / (rect.w - thumb).max(1.)).clamp(0., 1.);
+        let m = self.skin.slider;
+        let frac =
+            ((x - rect.x - m.thumb_start - m.thumb_width / 2.) / m.travel.max(1.)).clamp(0., 1.);
         let mut next = min + frac * (max - min);
         if *step > 0. {
             next = (min + ((next - min) / step).round() * step).clamp(*min, *max);

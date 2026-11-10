@@ -471,6 +471,10 @@ mod tests {
     }
 }
 /// Register for the duration of each engine tick, before script delivery.
+/// The page's added 3D-scale slider, if it exists.
+pub(crate) fn slider_of(page: *mut UObject) -> Option<*mut UObject> {
+    STATE.with(|cell| cell.try_borrow().ok()?.controls.iter().find(|c| c.page.p == page).map(|c| c.slider.p))
+}
 pub(crate) fn install() -> RuntimeResult<stock_menu_extensions::Guard> { stock_menu_extensions::install("render-scale", callback) }
 /// Called every tick, even when the hook could not be installed. Never leave
 /// a visible interactive slider whose notifications are not being delivered.

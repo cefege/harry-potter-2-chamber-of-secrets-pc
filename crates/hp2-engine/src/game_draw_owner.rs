@@ -726,6 +726,15 @@ pub unsafe fn draw(
             None
         }
     };
+    let _ui_pages = match unsafe { crate::ui_pages::install_paint(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", FindName::Add) {
+                let _ = access.emit_log(category, &format!("Rust menu paint observer: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
     let _resolution_popup = match unsafe { crate::stock_resolution_popup::install(access, viewport) } {
         Ok(guard) => guard,
         Err(error) => {

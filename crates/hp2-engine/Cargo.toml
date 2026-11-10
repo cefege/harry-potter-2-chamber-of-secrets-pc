@@ -16,6 +16,7 @@ hp2-audio.workspace = true
 hp2-codecs.workspace = true
 hp2-wgpu = { workspace = true, optional = true }
 hp2-render.workspace = true
+hp2-ui.workspace = true
 hp2-fire.workspace = true
 libc.workspace = true
 

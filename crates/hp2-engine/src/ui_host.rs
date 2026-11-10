@@ -1,0 +1,181 @@
+//! Hosts `hp2-ui` menus inside the stock UWindow pages: the toolkit lays out, handles input and
+//! produces draw commands; the page's own script functions do the canvas work, so clipping and GUI
+//! scale stay exactly the stock page's.
+use std::{cell::RefCell, collections::HashMap, ffi::c_void, ptr, rc::Rc};
+
+use hp2_abi::engine::generated::{TArrayRaw, UClass, UObject, UProperty};
+use hp2_core::{core_access::{CoreAccess, RuntimeError, RuntimeResult}, name_owner::FindName};
+use hp2_ui::{DrawCmd, Fit, Font, Rect, TextAlign, TextMetrics};
+
+use crate::{stock_graphics_menu::{live, object, prop}, ui_vm::{invoke, V}};
+
+pub(crate) fn name_of(a: CoreAccess<'_>, object: *mut UObject) -> String {
+    a.name_text(i32::from_ne_bytes(unsafe { (*object).name })).map(|u| u.iter().take_while(|&&c| c != 0).filter_map(|&c| char::from_u32(c)).collect()).unwrap_or_default()
+}
+pub(crate) fn class_name_of(a: CoreAccess<'_>, object: *mut UObject) -> String { name_of(a, unsafe { (*object).class.cast() }) }
+
+pub(crate) unsafe fn find_class(a: CoreAccess<'_>, path: &str) -> RuntimeResult<Option<*mut UClass>> {
+    Ok(unsafe { a.find_object_by_name(a.native_class("Core.Class")?, &path.chars().map(u32::from).collect::<Vec<_>>())? }.map(|p| p.cast()))
+}
+
+pub(crate) unsafe fn find_texture(a: CoreAccess<'_>, path: &str) -> RuntimeResult<*mut UObject> {
+    let texture = unsafe { a.find_object_by_name(a.native_class("Engine.Texture")?, &path.chars().map(u32::from).collect::<Vec<_>>())? };
+    texture.map(|p| p.cast()).ok_or_else(|| RuntimeError::new(&format!("Texture {path} not found")))
+}
+
+/// A string property of `object` (for example `UWindowComboListItem.Value`).
+pub(crate) unsafe fn read_string(a: CoreAccess<'_>, object: *mut UObject, name: &str) -> RuntimeResult<String> {
+    let array = unsafe { prop(a, object, name, "Core.StrProperty", size_of::<TArrayRaw>())?.cast::<TArrayRaw>().read_unaligned() };
+    if array.num <= 0 || array.data.is_null() || array.num > 4096 {
+        return Ok(String::new());
+    }
+    let units = unsafe { std::slice::from_raw_parts(array.data.cast::<u32>(), array.num as usize) };
+    Ok(units.iter().take_while(|&&c| c != 0).filter_map(|&c| char::from_u32(c)).collect())
+}
+
+/// `Root.Fonts[index]`.
+unsafe fn root_font(a: CoreAccess<'_>, root: *mut UObject, index: usize) -> RuntimeResult<*mut UObject> {
+    let class = unsafe { (*root).class.cast::<UClass>() };
+    let property = unsafe { a.find_field(class.cast(), a.intern_str("Fonts", FindName::Find)?, a.native_class("Core.ObjectProperty")?) }.cast::<UProperty>();
+    if property.is_null() {
+        return Err(RuntimeError::new("Root has no Fonts"));
+    }
+    let offset = usize::try_from(unsafe { (*property).offset }).map_err(|_| RuntimeError::new("Fonts offset"))?;
+    if index >= usize::try_from(unsafe { (*property).array_dim }).unwrap_or(0) {
+        return Err(RuntimeError::new("Font index out of range"));
+    }
+    Ok(unsafe { root.cast::<u8>().add(offset + index * size_of::<*mut UObject>()).cast::<*mut UObject>().read_unaligned() })
+}
+
+/// Text measurements learned during painting, shared with the toolkit's layout.
+#[derive(Clone, Default)]
+pub(crate) struct HostMetrics {
+    cache: Rc<RefCell<HashMap<(String, Font), (f32, f32)>>>,
+}
+
+impl HostMetrics {
+    pub(crate) fn knows(&self, text: &str, font: Font) -> bool {
+        self.cache.borrow().contains_key(&(text.to_owned(), font))
+    }
+    pub(crate) fn learn(&self, text: &str, font: Font, size: (f32, f32)) {
+        self.cache.borrow_mut().insert((text.to_owned(), font), size);
+    }
+    pub(crate) fn clear(&self) {
+        self.cache.borrow_mut().clear();
+    }
+}
+
+impl TextMetrics for HostMetrics {
+    fn text_size(&self, text: &str, font: Font) -> (f32, f32) {
+        // Before the first paint has measured a string, use a plausible size.
+        self.cache.borrow().get(&(text.to_owned(), font)).copied().unwrap_or((text.chars().count() as f32 * 7.5, 17.))
+    }
+}
+
+pub(crate) fn font_index(font: Font) -> usize {
+    match font {
+        Font::Normal => 0,
+        Font::Bold | Font::Heading => 1,
+    }
+}
+
+/// A page being painted: the window whose script functions draw, and the canvas.
+pub(crate) struct Surface {
+    pub page: *mut UObject,
+    pub canvas: *mut UObject,
+    root: *mut UObject,
+    white: *mut UObject,
+    textures: Rc<RefCell<HashMap<String, (*mut UObject, i32)>>>,
+}
+
+impl Surface {
+    pub(crate) unsafe fn new(a: CoreAccess<'_>, page: *mut UObject, canvas: *mut UObject, textures: Rc<RefCell<HashMap<String, (*mut UObject, i32)>>>) -> RuntimeResult<Self> {
+        let root = unsafe { object(a, page, "Root")? };
+        if !live(a, root) || !live(a, canvas) {
+            return Err(RuntimeError::new("UI surface unavailable"));
+        }
+        let mut surface = Self { page, canvas, root, white: ptr::null_mut(), textures };
+        surface.white = unsafe { surface.texture(a, "UWindow.WhiteTexture")? };
+        Ok(surface)
+    }
+
+    /// A texture by name, cached while the object stays live.
+    unsafe fn texture(&self, a: CoreAccess<'_>, name: &str) -> RuntimeResult<*mut UObject> {
+        if let Some(&(object, index)) = self.textures.borrow().get(name)
+            && a.object_at(index) == object.cast()
+        {
+            return Ok(object);
+        }
+        let object = unsafe { find_texture(a, name)? };
+        self.textures.borrow_mut().insert(name.to_owned(), (object, unsafe { (*object).index }));
+        Ok(object)
+    }
+
+    unsafe fn set_color(&self, a: CoreAccess<'_>, color: [u8; 4]) -> RuntimeResult<()> {
+        unsafe { prop(a, self.canvas, "DrawColor", "Core.StructProperty", 4)?.cast::<[u8; 4]>().write_unaligned(color) };
+        Ok(())
+    }
+
+    unsafe fn use_font(&self, a: CoreAccess<'_>, font: Font, color: [u8; 4]) -> RuntimeResult<()> {
+        let font = unsafe { root_font(a, self.root, font_index(font))? };
+        unsafe { prop(a, self.canvas, "Font", "Core.ObjectProperty", size_of::<*mut UObject>())?.cast::<*mut UObject>().write_unaligned(font) };
+        unsafe { self.set_color(a, color) }
+    }
+
+    /// Text width and height in page units.
+    pub(crate) unsafe fn text_size(&self, a: CoreAccess<'_>, text: &str, font: Font) -> RuntimeResult<(f32, f32)> {
+        unsafe { self.use_font(a, font, [255, 255, 255, 255])? };
+        let outs = unsafe { invoke(a, self.page, "TextSize", &[("C", V::Obj(self.canvas)), ("Text", V::S(text))], &["W", "H"], ptr::null_mut())? };
+        Ok((outs[0], outs[1]))
+    }
+
+    unsafe fn fill(&self, a: CoreAccess<'_>, rect: Rect, color: [u8; 4]) -> RuntimeResult<()> {
+        unsafe { self.set_color(a, color)? };
+        unsafe { invoke(a, self.page, "DrawStretchedTexture", &[("C", V::Obj(self.canvas)), ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("W", V::F(rect.w)), ("H", V::F(rect.h)), ("Tex", V::Obj(self.white))], &[], ptr::null_mut())? };
+        Ok(())
+    }
+
+    /// Draws a toolkit draw list. `metrics` must already know every drawn string.
+    pub(crate) unsafe fn render(&self, a: CoreAccess<'_>, commands: &[DrawCmd], metrics: &HostMetrics) -> RuntimeResult<()> {
+        for command in commands {
+            match command {
+                DrawCmd::Rect { rect, color } => unsafe { self.fill(a, *rect, [color.0, color.1, color.2, color.3])? },
+                DrawCmd::Outline { rect, color } => {
+                    let c = [color.0, color.1, color.2, color.3];
+                    for edge in [Rect::new(rect.x, rect.y, rect.w, 1.), Rect::new(rect.x, rect.bottom() - 1., rect.w, 1.), Rect::new(rect.x, rect.y, 1., rect.h), Rect::new(rect.right() - 1., rect.y, 1., rect.h)] {
+                        unsafe { self.fill(a, edge, c)? };
+                    }
+                }
+                DrawCmd::Image { texture, rect, fit } => {
+                    let tex = unsafe { self.texture(a, &texture.0)? };
+                    unsafe { self.set_color(a, [255, 255, 255, 255])? };
+                    let canvas = ("C", V::Obj(self.canvas));
+                    match fit {
+                        Fit::Stretch => unsafe { invoke(a, self.page, "DrawStretchedTexture", &[canvas, ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("W", V::F(rect.w)), ("H", V::F(rect.h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? },
+                        Fit::Native => unsafe { invoke(a, self.page, "DrawClippedTexture", &[canvas, ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? },
+                        Fit::Region(u, v, w, h) => unsafe { invoke(a, self.page, "DrawStretchedTextureSegment", &[canvas, ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("W", V::F(rect.w)), ("H", V::F(rect.h)), ("tX", V::F(*u)), ("tY", V::F(*v)), ("tW", V::F(*w)), ("tH", V::F(*h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? },
+                    };
+                }
+                DrawCmd::Text { rect, text, font, color, align } => {
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let (tw, th) = metrics.text_size(text, *font);
+                    let x = match align {
+                        TextAlign::Left => rect.x,
+                        TextAlign::Center => rect.x + (rect.w - tw) / 2.,
+                        TextAlign::Right => rect.right() - tw,
+                    };
+                    let y = rect.y + (rect.h - th) / 2.;
+                    unsafe { self.use_font(a, *font, [color.0, color.1, color.2, color.3])? };
+                    unsafe { invoke(a, self.page, "ClipText", &[("C", V::Obj(self.canvas)), ("X", V::F(x)), ("Y", V::F(y)), ("S", V::S(text))], &[], ptr::null_mut())? };
+                }
+                DrawCmd::PushClip(_) | DrawCmd::PopClip => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+#[allow(dead_code)]
+fn _unused(_: *mut c_void) {}

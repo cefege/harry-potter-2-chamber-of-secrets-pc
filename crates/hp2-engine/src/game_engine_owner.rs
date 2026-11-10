@@ -157,6 +157,21 @@ pub unsafe fn tick(access: CoreAccess<'_>, engine: *mut UGameEngine, delta: f32)
             None
         }
     };
+    let _ui_input = match unsafe { crate::ui_pages::install_input(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+                let _ = access.emit_log(category, &format!("Rust menu input observer: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
+    // Apply what the Rust menus queued, through the same Notify path a stock click takes.
+    if let Err(error) = unsafe { crate::ui_pages::tick(access) } {
+        if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+            let _ = access.emit_log(category, &format!("Rust menu tick: {error}").chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
     // Mirror the slider into the Controls page's number box before input dispatch.
     if let Err(error) = unsafe { crate::stock_input_menu::tick(access) } {
         if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
