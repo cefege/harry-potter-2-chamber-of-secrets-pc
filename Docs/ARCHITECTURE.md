@@ -10,7 +10,7 @@ This is a map of the current in-place Rust port, not a completion claim. Start w
 - `hp2-ucc` builds the `hp2_ucc_rust` tool executable.
 - `hp2-import` builds the `hp2_import` CLI with its `archive` feature, as well as a library.
 
-The 17 workspace packages, under `crates/`, are:
+The 18 workspace packages, under `crates/`, are:
 
 | Package | Start here for |
 | --- | --- |
@@ -30,6 +30,7 @@ The 17 workspace packages, under `crates/`, are:
 | `hp2-platform` | Window, input and platform services |
 | `hp2-render` | Scene, canvas and text rendering logic |
 | `hp2-ucc` | UCC tool entry point |
+| `hp2-ui` | Reactive in-game UI toolkit (signals, layout, widgets, draw list); no engine dependency |
 | `hp2-wgpu` | GPU renderer and driver policy |
 
 A policy decides ordering and behavior; an owner holds or controls actual state and resource lifetimes. An adapter translates between these and a host or SDK. Names alone do not prove ownership: trace the production call path and resource teardown. In particular, `crates/hp2-platform/src/lib.rs` and `crates/hp2-wgpu/src/lib.rs` describe native SDK leaves and retained state; a policy test does not prove that a production owner was replaced. The current port still contains native interfaces and compatibility constraints; do not assume all historical shell descriptions describe the current build graph.

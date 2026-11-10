@@ -506,6 +506,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hp2-ui"
+version = "0.1.0"
+
+[[package]]
 name = "hp2-wgpu"
 version = "0.1.0"
 dependencies = [

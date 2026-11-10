@@ -36,18 +36,22 @@ Repository compatibility rules take precedence over generic style guidance.
 | Audio and codecs | `crates/hp2-audio/`, `crates/hp2-codecs/` |
 | Launcher policy / UI / game process | `crates/hp2-launcher/`, `crates/hp2-game/` |
 | Data import and generated INI policy | `crates/hp2-import/`, `crates/hp2-ini/` |
-| ABI, FFI support, paths, hashing, fire, UCC | See the complete 17-crate map in `Docs/ARCHITECTURE.md` |
+| ABI, FFI support, paths, hashing, fire, UCC | See the complete 18-crate map in `Docs/ARCHITECTURE.md` |
 | Build, test, packaging, release | `Build/`, `Build/CMake/`, `Tests/`, `.github/workflows/` |
 | Prototype and legacy reference assets/scripts | `HarryPotter2/Unreal/`; not the current Rust source root |
 
 Shipping binaries are `hp2_game_rust`, `hp2_ucc_rust`, and `hp2_import`.
 
-**Product direction: no external/startup launcher UI.** The startup window and its
-egui host are removed; the game boots directly into the stock `Startup.unr` menus
-(missing data exits 1 with `hp2_import` guidance). Settings belong in the stock
-in-game menus. Follow [Docs/NO_LAUNCHER_CUTOVER.md](Docs/NO_LAUNCHER_CUTOVER.md) for
-remaining gaps. Do not restore the launcher window or removed overlays; preserve
-existing stock-menu work and reusable boot/settings/import policy.
+**Product direction: no external/startup launcher UI; engine-drawn menus.** The startup
+window and its egui host are removed; the game boots directly into the menus (missing
+data exits 1 with `hp2_import` guidance). Settings belong in in-game menus. The owner
+decided (see [Docs/UI_REWRITE.md](Docs/UI_REWRITE.md)) to replace the stock UnrealScript
+menus, every one of them, with menus written in Rust on the `hp2-ui` reactive toolkit and
+drawn by the engine with the retail art. Until a screen is replaced, its stock page and
+its observers (`stock_*` modules, [Docs/STOCK_MENU_LAYOUT.md](Docs/STOCK_MENU_LAYOUT.md))
+stay supported. Follow [Docs/NO_LAUNCHER_CUTOVER.md](Docs/NO_LAUNCHER_CUTOVER.md) for
+launcher-removal gaps. Do not restore the launcher window or removed overlays; preserve
+reusable boot/settings/import policy.
 
 Generated ABI declarations and pinned third-party sources are not style-cleanup
 candidates. Inspect a policy's real caller and resource owner before claiming a

@@ -1,0 +1,12 @@
+[package]
+name = "hp2-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Retained, reactive in-game UI toolkit: signals, flexbox-style layout, widgets, input and a draw list. No engine or GPU dependencies."
+
+[lib]
+name = "hp2_ui"
+
+[dependencies]
