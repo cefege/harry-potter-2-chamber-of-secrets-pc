@@ -3014,6 +3014,8 @@ fn dispatch_batches(
     // pipeline (RenderLoop::line_pipelines' own doc).
     let format = frame.color_format;
     let device = &created.device;
+    // All draws of this flush replay in one render pass (`draw::DrawArena`).
+    let mut arena = draw::DrawArena::default();
     for batch in &batches {
         let key = (format, batch.state, frame.samples);
         match &batch.payload {
@@ -3119,19 +3121,7 @@ fn dispatch_batches(
                     // drop; queue_line's own doc has the full
                     // reasoning.
                     if draw_params.len() >= draw::MAX_DRAWS {
-                        pipeline.record(
-                            &created.device,
-                            &created.queue,
-                            &mut frame.encoder,
-                            draw::LineDrawCall {
-                                frame_uniforms_buffer: buffer,
-                                vertices: &vertices,
-                                draw_params: &draw_params,
-                                target: &frame.view,
-                                depth_target,
-                                load: wgpu::LoadOp::Load,
-                            },
-                        );
+                        arena.push_line(pipeline, buffer, &vertices, &draw_params);
                         vertices.clear();
                         draw_params.clear();
                     }
@@ -3149,19 +3139,7 @@ fn dispatch_batches(
                     });
                 }
                 if !draw_params.is_empty() {
-                    pipeline.record(
-                        &created.device,
-                        &created.queue,
-                        &mut frame.encoder,
-                        draw::LineDrawCall {
-                            frame_uniforms_buffer: buffer,
-                            vertices: &vertices,
-                            draw_params: &draw_params,
-                            target: &frame.view,
-                            depth_target,
-                            load: wgpu::LoadOp::Load,
-                        },
-                    );
+                    arena.push_line(pipeline, buffer, &vertices, &draw_params);
                 }
             }
             BatchPayload::Tiles { cache_id, entries } => {
@@ -3181,21 +3159,7 @@ fn dispatch_batches(
                     // Lines arm above, this time matching DrawTile.
                     // cpp:188-197's own CanBuffer/Flush check.
                     if draw_params.len() >= draw::MAX_DRAWS {
-                        pipeline.record(
-                            &created.device,
-                            &created.queue,
-                            &mut frame.encoder,
-                            draw::TileDrawCall {
-                                frame_uniforms_buffer: buffer,
-                                vertices: &vertices,
-                                draw_params: &draw_params,
-                                texture_view: &cached.view,
-                                sampler,
-                                target: &frame.view,
-                                depth_target,
-                                load: wgpu::LoadOp::Load,
-                            },
-                        );
+                        arena.push_tile(pipeline, buffer, &vertices, &draw_params, &cached.view, sampler);
                         vertices.clear();
                         draw_params.clear();
                     }
@@ -3246,21 +3210,7 @@ fn dispatch_batches(
                     });
                 }
                 if !draw_params.is_empty() {
-                    pipeline.record(
-                        &created.device,
-                        &created.queue,
-                        &mut frame.encoder,
-                        draw::TileDrawCall {
-                            frame_uniforms_buffer: buffer,
-                            vertices: &vertices,
-                            draw_params: &draw_params,
-                            texture_view: &cached.view,
-                            sampler,
-                            target: &frame.view,
-                            depth_target,
-                            load: wgpu::LoadOp::Load,
-                        },
-                    );
+                    arena.push_tile(pipeline, buffer, &vertices, &draw_params, &cached.view, sampler);
                 }
             }
             BatchPayload::Points(points) => {
@@ -3271,19 +3221,7 @@ fn dispatch_batches(
                     // Same real chunk-not-drop reasoning as the
                     // Lines/Tiles arms above.
                     if draw_params.len() >= draw::MAX_DRAWS {
-                        pipeline.record(
-                            &created.device,
-                            &created.queue,
-                            &mut frame.encoder,
-                            draw::LineDrawCall {
-                                frame_uniforms_buffer: buffer,
-                                vertices: &vertices,
-                                draw_params: &draw_params,
-                                target: &frame.view,
-                                depth_target,
-                                load: wgpu::LoadOp::Load,
-                            },
-                        );
+                        arena.push_point(pipeline, buffer, &vertices, &draw_params);
                         vertices.clear();
                         draw_params.clear();
                     }
@@ -3326,19 +3264,7 @@ fn dispatch_batches(
                     });
                 }
                 if !draw_params.is_empty() {
-                    pipeline.record(
-                        &created.device,
-                        &created.queue,
-                        &mut frame.encoder,
-                        draw::LineDrawCall {
-                            frame_uniforms_buffer: buffer,
-                            vertices: &vertices,
-                            draw_params: &draw_params,
-                            target: &frame.view,
-                            depth_target,
-                            load: wgpu::LoadOp::Load,
-                        },
-                    );
+                    arena.push_point(pipeline, buffer, &vertices, &draw_params);
                 }
             }
             BatchPayload::Triangles { cache_id, meshes } => {
@@ -3359,21 +3285,7 @@ fn dispatch_batches(
                     // many actual GPU vertices that one mesh itself
                     // contributes (variable, unlike Tile's fixed 6).
                     if draw_params.len() >= draw::MAX_DRAWS {
-                        pipeline.record(
-                            &created.device,
-                            &created.queue,
-                            &mut frame.encoder,
-                            draw::GouraudDrawCall {
-                                frame_uniforms_buffer: buffer,
-                                vertices: &vertices,
-                                draw_params: &draw_params,
-                                texture_view: &cached.view,
-                                sampler,
-                                target: &frame.view,
-                                depth_target,
-                                load: wgpu::LoadOp::Load,
-                            },
-                        );
+                        arena.push_gouraud(pipeline, buffer, &vertices, &draw_params, &cached.view, sampler);
                         vertices.clear();
                         draw_params.clear();
                     }
@@ -3393,21 +3305,7 @@ fn dispatch_batches(
                     });
                 }
                 if !draw_params.is_empty() {
-                    pipeline.record(
-                        &created.device,
-                        &created.queue,
-                        &mut frame.encoder,
-                        draw::GouraudDrawCall {
-                            frame_uniforms_buffer: buffer,
-                            vertices: &vertices,
-                            draw_params: &draw_params,
-                            texture_view: &cached.view,
-                            sampler,
-                            target: &frame.view,
-                            depth_target,
-                            load: wgpu::LoadOp::Load,
-                        },
-                    );
+                    arena.push_gouraud(pipeline, buffer, &vertices, &draw_params, &cached.view, sampler);
                 }
             }
             BatchPayload::Complex {
@@ -3461,25 +3359,7 @@ fn dispatch_batches(
                     // is one draw_id/one draw_params entry, regardless
                     // of its own variable vertex count.
                     if draw_params.len() >= draw::MAX_DRAWS {
-                        pipeline.record(
-                            &created.device,
-                            &created.queue,
-                            &mut frame.encoder,
-                            draw::ComplexDrawCall {
-                                frame_uniforms_buffer: buffer,
-                                vertices: &vertices,
-                                draw_params: &draw_params,
-                                diffuse_texture_view: &diffuse_cached.view,
-                                diffuse_sampler: sampler,
-                                light_map_texture_view: light_map_view,
-                                light_map_sampler,
-                                fog_map_texture_view: fog_map_view,
-                                fog_map_sampler,
-                                target: &frame.view,
-                                depth_target,
-                                load: wgpu::LoadOp::Load,
-                            },
-                        );
+                        arena.push_complex(pipeline, buffer, &vertices, &draw_params, [(&diffuse_cached.view, sampler), (light_map_view, light_map_sampler), (fog_map_view, fog_map_sampler)]);
                         vertices.clear();
                         draw_params.clear();
                     }
@@ -3500,29 +3380,12 @@ fn dispatch_batches(
                     });
                 }
                 if !draw_params.is_empty() {
-                    pipeline.record(
-                        &created.device,
-                        &created.queue,
-                        &mut frame.encoder,
-                        draw::ComplexDrawCall {
-                            frame_uniforms_buffer: buffer,
-                            vertices: &vertices,
-                            draw_params: &draw_params,
-                            diffuse_texture_view: &diffuse_cached.view,
-                            diffuse_sampler: sampler,
-                            light_map_texture_view: light_map_view,
-                            light_map_sampler,
-                            fog_map_texture_view: fog_map_view,
-                            fog_map_sampler,
-                            target: &frame.view,
-                            depth_target,
-                            load: wgpu::LoadOp::Load,
-                        },
-                    );
+                    arena.push_complex(pipeline, buffer, &vertices, &draw_params, [(&diffuse_cached.view, sampler), (light_map_view, light_map_sampler), (fog_map_view, fog_map_sampler)]);
                 }
             }
         }
     }
+    arena.submit(&created.device, &created.queue, &mut frame.encoder, &frame.view, depth_target);
 }
 
 /// Replaces the per-frame-end half of `UWgpuRenderDevice::Unlock`.

@@ -1992,6 +1992,315 @@ impl ComplexPipeline {
     }
 }
 
+/// Uniform-buffer offset alignment `DrawArena` uses for draw-parameter slots.
+/// wgpu's default limit is 256 bytes; `submit` asserts the device agrees.
+const ARENA_UNIFORM_ALIGNMENT: u64 = 256;
+
+/// Source of zero bytes for the unused tail of each draw-parameter window (the
+/// largest window is `MAX_DRAWS` * 112 bytes = 28 KiB).
+static ARENA_ZEROS: [u8; 32768] = [0; 32768];
+
+enum ArenaKind<'a> {
+    Line(&'a SimpleLinePipeline),
+    Point(&'a SimpleTrianglePipeline),
+    Tile(&'a TilePipeline, &'a wgpu::TextureView, &'a wgpu::Sampler),
+    Gouraud(&'a GouraudPipeline, &'a wgpu::TextureView, &'a wgpu::Sampler),
+    Complex(&'a ComplexPipeline, [(&'a wgpu::TextureView, &'a wgpu::Sampler); 3]),
+}
+
+struct ArenaDraw<'a> {
+    kind: ArenaKind<'a>,
+    frame_uniforms: &'a wgpu::Buffer,
+    vertex_offset: u64,
+    vertex_bytes: u64,
+    vertex_count: u32,
+    params_offset: u64,
+    params_binding: u64,
+}
+
+/// Collects a flush's draws and replays them in order inside ONE render pass,
+/// with vertices and draw parameters packed into two buffers created per flush.
+///
+/// This replaces, per `record` call, one render pass, two freshly created buffers
+/// and a zero-padded 256-entry parameter upload.
+///
+/// * Each draw's parameter window (the shader's full `MAX_DRAWS` array) gets its
+///   own non-overlapping, 256-byte-aligned slot. Overlapping the unused tail of
+///   one window with the next draw's data changed captured frames on Metal even
+///   though the shader indexes only `draw_id < draw_params.len()`. The unused tail
+///   of each slot is written as zeros, like the old zero padding, because staging
+///   memory is not initialized and garbage there also changed captured frames.
+/// * The buffers are NOT reused across flushes: reusing one pair for back-to-back
+///   submissions let a later flush's `write_buffer_with` land before the earlier
+///   submission had finished reading them on Metal (captured frames lost the
+///   earlier flush's draws), so each flush gets fresh buffers sized to its data.
+/// * Every `record` used `LoadOp::Load` on color and depth, so one pass executes the
+///   same draws in the same order against the same attachments. Blending that used
+///   to pass through an 8-bit store and reload between passes now stays in tile
+///   memory, which changes a few blended pixels (see `Build/frame_equiv.py`).
+pub struct DrawArena<'a> {
+    vertex_bytes: Vec<u8>,
+    param_bytes: Vec<u8>,
+    /// (offset in the params buffer, range in `param_bytes`, window size) for each draw.
+    param_chunks: Vec<(u64, std::ops::Range<usize>, u64)>,
+    params_next: u64,
+    params_required: u64,
+    draws: Vec<ArenaDraw<'a>>,
+}
+
+impl Default for DrawArena<'_> {
+    fn default() -> Self {
+        Self {
+            vertex_bytes: Vec::new(),
+            param_bytes: Vec::new(),
+            param_chunks: Vec::new(),
+            params_next: 0,
+            params_required: 0,
+            draws: Vec::new(),
+        }
+    }
+}
+
+impl<'a> DrawArena<'a> {
+    pub fn is_empty(&self) -> bool {
+        self.draws.is_empty()
+    }
+
+    fn push<V: bytemuck::Pod, P: bytemuck::Pod>(
+        &mut self,
+        kind: ArenaKind<'a>,
+        frame_uniforms: &'a wgpu::Buffer,
+        vertices: &[V],
+        draw_params: &[P],
+        vertices_per_primitive: usize,
+        what: &str,
+    ) {
+        assert!(
+            draw_params.len() <= MAX_DRAWS,
+            "draw_params.len() ({}) exceeds the {what} shader's real MAX_DRAWS ({MAX_DRAWS})",
+            draw_params.len()
+        );
+        assert!(
+            vertices.len().is_multiple_of(vertices_per_primitive),
+            "{what} topology needs a vertex count that is a multiple of {vertices_per_primitive}, got {}",
+            vertices.len()
+        );
+        let vertex_offset = self.vertex_bytes.len() as u64;
+        self.vertex_bytes.extend_from_slice(bytemuck::cast_slice(vertices));
+        let used = std::mem::size_of_val(draw_params);
+        let binding = (MAX_DRAWS * std::mem::size_of::<P>()) as u64;
+        let params_offset = self.params_next;
+        let start = self.param_bytes.len();
+        self.param_bytes.extend_from_slice(bytemuck::cast_slice(draw_params));
+        self.param_chunks.push((params_offset, start..start + used, binding));
+        // Windows never overlap: `binding` is MAX_DRAWS * stride, a multiple of 256.
+        self.params_next = (params_offset + binding).next_multiple_of(ARENA_UNIFORM_ALIGNMENT);
+        self.params_required = self.params_required.max(params_offset + binding);
+        self.draws.push(ArenaDraw {
+            kind,
+            frame_uniforms,
+            vertex_offset,
+            vertex_bytes: std::mem::size_of_val(vertices) as u64,
+            vertex_count: vertices.len() as u32,
+            params_offset,
+            params_binding: binding,
+        });
+    }
+
+    pub fn push_line(&mut self, pipeline: &'a SimpleLinePipeline, frame_uniforms: &'a wgpu::Buffer, vertices: &[LineVertex], draw_params: &[DrawParams]) {
+        self.push(ArenaKind::Line(pipeline), frame_uniforms, vertices, draw_params, 2, "line");
+    }
+
+    pub fn push_point(&mut self, pipeline: &'a SimpleTrianglePipeline, frame_uniforms: &'a wgpu::Buffer, vertices: &[LineVertex], draw_params: &[DrawParams]) {
+        self.push(ArenaKind::Point(pipeline), frame_uniforms, vertices, draw_params, 3, "triangle");
+    }
+
+    pub fn push_tile(
+        &mut self, pipeline: &'a TilePipeline, frame_uniforms: &'a wgpu::Buffer, vertices: &[TileVertex],
+        draw_params: &[TileDrawParams], texture_view: &'a wgpu::TextureView, sampler: &'a wgpu::Sampler,
+    ) {
+        self.push(ArenaKind::Tile(pipeline, texture_view, sampler), frame_uniforms, vertices, draw_params, 3, "tile");
+    }
+
+    pub fn push_gouraud(
+        &mut self, pipeline: &'a GouraudPipeline, frame_uniforms: &'a wgpu::Buffer, vertices: &[GouraudVertex],
+        draw_params: &[GouraudDrawParams], texture_view: &'a wgpu::TextureView, sampler: &'a wgpu::Sampler,
+    ) {
+        self.push(ArenaKind::Gouraud(pipeline, texture_view, sampler), frame_uniforms, vertices, draw_params, 3, "gouraud");
+    }
+
+    pub fn push_complex(
+        &mut self, pipeline: &'a ComplexPipeline, frame_uniforms: &'a wgpu::Buffer, vertices: &[ComplexVertex],
+        draw_params: &[ComplexDrawParams], textures: [(&'a wgpu::TextureView, &'a wgpu::Sampler); 3],
+    ) {
+        self.push(ArenaKind::Complex(pipeline, textures), frame_uniforms, vertices, draw_params, 3, "complex");
+    }
+
+    /// Uploads the packed data once per buffer and records every draw into one
+    /// `LoadOp::Load` render pass on `encoder`. A no-op for an empty arena.
+    pub fn submit(
+        self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        depth_target: &wgpu::TextureView,
+    ) {
+        if self.draws.is_empty() {
+            return;
+        }
+        let alignment = u64::from(device.limits().min_uniform_buffer_offset_alignment);
+        assert!(
+            alignment != 0 && ARENA_UNIFORM_ALIGNMENT.is_multiple_of(alignment),
+            "device uniform offset alignment {alignment} does not divide {ARENA_UNIFORM_ALIGNMENT}"
+        );
+        let vertex_len = (self.vertex_bytes.len() as u64).next_multiple_of(4);
+        let vertex_buffer = &device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs arena vertices"),
+            size: vertex_len,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let params_buffer = &device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("draw.rs arena draw params"),
+            size: self.params_required,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        {
+            let mut view = queue
+                .write_buffer_with(vertex_buffer, 0, std::num::NonZeroU64::new(vertex_len).expect("non-empty"))
+                .expect("arena vertex staging buffer");
+            view.slice(..self.vertex_bytes.len()).copy_from_slice(&self.vertex_bytes);
+        }
+        {
+            let span = self.params_required;
+            let mut view = queue
+                .write_buffer_with(params_buffer, 0, std::num::NonZeroU64::new(span).expect("non-empty"))
+                .expect("arena params staging buffer");
+            for (offset, range, window) in &self.param_chunks {
+                let offset = *offset as usize;
+                let used = range.len();
+                view.slice(offset..offset + used).copy_from_slice(&self.param_bytes[range.clone()]);
+                // Unused entries read as zero, exactly like the per-draw zero padding this
+                // replaced: staging memory is not initialized, and leaving garbage there
+                // changed captured frames.
+                let tail = *window as usize - used;
+                assert!(tail <= ARENA_ZEROS.len(), "draw parameter window larger than the zero page");
+                view.slice(offset + used..offset + *window as usize).copy_from_slice(&ARENA_ZEROS[..tail]);
+            }
+        }
+
+        struct Binds {
+            frame: wgpu::BindGroup,
+            params: wgpu::BindGroup,
+            texture: Option<wgpu::BindGroup>,
+        }
+        let make = |layout_frame: &wgpu::BindGroupLayout, layout_params: &wgpu::BindGroupLayout, draw: &ArenaDraw<'_>| {
+            let frame = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("draw.rs arena frame uniforms bind group"),
+                layout: layout_frame,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: draw.frame_uniforms.as_entire_binding() }],
+            });
+            let params = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("draw.rs arena draw params bind group"),
+                layout: layout_params,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: params_buffer,
+                        offset: draw.params_offset,
+                        size: std::num::NonZeroU64::new(draw.params_binding),
+                    }),
+                }],
+            });
+            (frame, params)
+        };
+        let single = |layout: &wgpu::BindGroupLayout, view: &wgpu::TextureView, sampler: &wgpu::Sampler| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("draw.rs arena texture bind group"),
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                ],
+            })
+        };
+        let binds: Vec<Binds> = self
+            .draws
+            .iter()
+            .map(|draw| match &draw.kind {
+                ArenaKind::Line(p) => {
+                    let (frame, params) = make(&p.frame_uniforms_layout, &p.draw_params_layout, draw);
+                    Binds { frame, params, texture: None }
+                }
+                ArenaKind::Point(p) => {
+                    let (frame, params) = make(&p.frame_uniforms_layout, &p.draw_params_layout, draw);
+                    Binds { frame, params, texture: None }
+                }
+                ArenaKind::Tile(p, view, sampler) => {
+                    let (frame, params) = make(&p.frame_uniforms_layout, &p.draw_params_layout, draw);
+                    Binds { frame, params, texture: Some(single(&p.texture_layout, view, sampler)) }
+                }
+                ArenaKind::Gouraud(p, view, sampler) => {
+                    let (frame, params) = make(&p.frame_uniforms_layout, &p.draw_params_layout, draw);
+                    Binds { frame, params, texture: Some(single(&p.texture_layout, view, sampler)) }
+                }
+                ArenaKind::Complex(p, t) => {
+                    let (frame, params) = make(&p.frame_uniforms_layout, &p.draw_params_layout, draw);
+                    let texture = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("draw.rs arena complex texture bind group"),
+                        layout: &p.texture_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(t[0].0) },
+                            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(t[0].1) },
+                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(t[1].0) },
+                            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(t[1].1) },
+                            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(t[2].0) },
+                            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(t[2].1) },
+                        ],
+                    });
+                    Binds { frame, params, texture: Some(texture) }
+                }
+            })
+            .collect();
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("draw.rs batched render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_target,
+                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        for (draw, binds) in self.draws.iter().zip(&binds) {
+            let pipeline = match &draw.kind {
+                ArenaKind::Line(p) => &p.pipeline,
+                ArenaKind::Point(p) => &p.pipeline,
+                ArenaKind::Tile(p, ..) => &p.pipeline,
+                ArenaKind::Gouraud(p, ..) => &p.pipeline,
+                ArenaKind::Complex(p, ..) => &p.pipeline,
+            };
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &binds.frame, &[]);
+            pass.set_bind_group(1, &binds.params, &[]);
+            if let Some(texture) = &binds.texture {
+                pass.set_bind_group(2, texture, &[]);
+            }
+            pass.set_vertex_buffer(0, vertex_buffer.slice(draw.vertex_offset..draw.vertex_offset + draw.vertex_bytes));
+            pass.draw(0..draw.vertex_count, 0..1);
+        }
+    }
+}
+
 /// Real `PostProcessProgram` counterpart (`DrawPostProcess.cpp`): the
 /// final present blit. Copies `source` over all of `target` with gamma
 /// correction, with no depth test and no blending. Draws a fullscreen
@@ -4020,5 +4329,100 @@ mod tests {
             &[255u8, 0, 0, 255],
             "expected the bottom row to stay red (orientation preserved), got {bottom:?}"
         );
+    }
+
+    /// `DrawArena` replays several draws (different textures, overlapping parameter
+    /// windows) in one pass, and back-to-back flushes stay correct while earlier
+    /// work may still be executing.
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
+    fn draw_arena_replays_several_tile_draws_in_one_pass_and_back_to_back_flushes() {
+        let created = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>)
+            .expect("expected a real device to be created");
+        let device = &created.device;
+        let queue = &created.queue;
+        let mut frame_bytes = [0u8; 528];
+        for i in 0..4 {
+            let offset = 256 + i * 20;
+            frame_bytes[offset..offset + 4].copy_from_slice(&1.0f32.to_le_bytes());
+        }
+        let frame_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("arena test frame uniforms"),
+            size: 528,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&frame_buffer, 0, &frame_bytes);
+        let pipeline = TilePipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, RenderState::OPAQUE);
+        let mut texture_cache = crate::texture::TextureCache::new();
+        let red = texture_cache.upload_rgba8(&created, 1, 1, 1, &[255, 0, 0, 255], crate::texture::TextureOptions::default()).view.clone();
+        let green = texture_cache.upload_rgba8(&created, 2, 1, 1, &[0, 255, 0, 255], crate::texture::TextureOptions::default()).view.clone();
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let quad = |x0: f32, x1: f32| {
+            let v = |x: f32, y: f32| TileVertex { coords: [x, y, 0.0], draw_id: 0, tex_coords: [0.0, 0.0] };
+            [v(x0, -1.0), v(x1, -1.0), v(x1, 1.0), v(x0, -1.0), v(x1, 1.0), v(x0, 1.0)]
+        };
+        let params = [TileDrawParams { draw_color: [1.0; 4], draw_flags: 0, _padding: [0; 3] }];
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("arena test target"),
+            size: wgpu::Extent3d { width: 64, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_view = cleared_depth_view(device, queue, &target);
+                let readback = |expect: [[u8; 4]; 3]| {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("arena test readback"),
+                size: 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo { texture: &target, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(256), rows_per_image: Some(1) } },
+                wgpu::Extent3d { width: 64, height: 1, depth_or_array_layers: 1 },
+            );
+            queue.submit(std::iter::once(encoder.finish()));
+            let slice = buffer.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |r| r.expect("map"));
+            device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+            let mapped = slice.get_mapped_range().expect("mapped");
+            for (x, want) in [(8usize, expect[0]), (32, expect[1]), (56, expect[2])] {
+                assert_eq!(&mapped[x * 4..x * 4 + 4], &want, "pixel {x}");
+            }
+        };
+        // Submission 1: clear to blue, then red on the left quarter and green on the
+        // right quarter in one arena (two draws, two textures, overlapping windows).
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &target_view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLUE), store: wgpu::StoreOp::Store } })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &depth_view, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }), stencil_ops: None }),
+                ..Default::default()
+            }));
+            let mut arena = DrawArena::default();
+            arena.push_tile(&pipeline, &frame_buffer, &quad(-1.0, -0.5), &params, &red, &sampler);
+            arena.push_tile(&pipeline, &frame_buffer, &quad(0.5, 1.0), &params, &green, &sampler);
+            arena.submit(device, queue, &mut encoder, &target_view, &depth_view);
+            queue.submit(std::iter::once(encoder.finish()));
+        }
+        // (No readback here: submission 2 must reuse the buffers while submission 1
+        // may still be executing, exactly like two flushes in one frame.)
+        // Submission 2 follows immediately with different geometry.
+        {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            let mut arena = DrawArena::default();
+            arena.push_tile(&pipeline, &frame_buffer, &quad(-0.25, 0.25), &params, &green, &sampler);
+            arena.submit(device, queue, &mut encoder, &target_view, &depth_view);
+            queue.submit(std::iter::once(encoder.finish()));
+        }
+        readback([[255, 0, 0, 255], [0, 255, 0, 255], [0, 255, 0, 255]]);
     }
 }

@@ -6,7 +6,7 @@ use hp2_launcher::main_loop::{
     Hp2LauncherMainLoopReporterOperation as Operation, Hp2LauncherMainLoopScope as Scope,
     Hp2LauncherMainLoopServices, Hp2LauncherMainLoopValue,
 };
-use std::ffi::c_void;
+use std::{ffi::c_void, time::Instant};
 
 #[derive(Default)]
 struct State {
@@ -23,6 +23,35 @@ struct Context {
     trace_tick: u64,
     fixed_delta: f32,
     test_ticks: i32,
+    timing: Option<FrameTiming>,
+}
+
+/// Opt-in (`HP2_FRAME_TIMING=1`) per-tick wall timing. Samples are buffered and
+/// logged after the loop so measurement does not add log I/O to the frame.
+#[derive(Default)]
+struct FrameTiming {
+    tick_ms: Vec<f32>,
+    interval_ms: Vec<f32>,
+    last_start: Option<Instant>,
+}
+
+fn percentile(sorted: &[f32], fraction: f32) -> f32 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let index = ((sorted.len() - 1) as f32 * fraction).round() as usize;
+    sorted[index.min(sorted.len() - 1)]
+}
+
+fn summary(label: &str, samples: &[f32]) -> String {
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let mean = if sorted.is_empty() { 0.0 } else { sorted.iter().sum::<f32>() / sorted.len() as f32 };
+    format!(
+        "<HP2_PERF> {label} n={} mean_ms={mean:.3} p50_ms={:.3} p95_ms={:.3} p99_ms={:.3} max_ms={:.3}",
+        sorted.len(), percentile(&sorted, 0.5), percentile(&sorted, 0.95),
+        percentile(&sorted, 0.99), sorted.last().copied().unwrap_or(0.0),
+    )
 }
 
 pub(super) fn run(boot: &mut BootHost, test_ticks: i32, fixed_delta: f32) -> RuntimeResult<()> {
@@ -35,10 +64,22 @@ pub(super) fn run(boot: &mut BootHost, test_ticks: i32, fixed_delta: f32) -> Run
         trace_tick: 0,
         fixed_delta,
         test_ticks,
+        timing: (std::env::var_os("HP2_FRAME_TIMING").as_deref() == Some(std::ffi::OsStr::new("1")))
+            .then(FrameTiming::default),
     };
     let services = services(&mut context);
-    unsafe { main_loop::run_native(&services) }
-        .map_err(|_| RuntimeError::new("canonical main-loop service failed"))
+    let result = unsafe { main_loop::run_native(&services) }
+        .map_err(|_| RuntimeError::new("canonical main-loop service failed"));
+    if let Some(timing) = context.timing.take() {
+        // Best effort: a missing owner after a failed loop must not mask `result`.
+        let boot = unsafe { &*context.boot };
+        for sample in &timing.tick_ms {
+            let _ = log_resolution_record(boot, format!("<HP2_RES> frame_ms={sample:.3}").as_bytes());
+        }
+        let _ = log_resolution_record(boot, summary("tick", &timing.tick_ms).as_bytes());
+        let _ = log_resolution_record(boot, summary("interval", &timing.interval_ms).as_bytes());
+    }
+    result
 }
 
 fn now() -> i64 {
@@ -222,9 +263,17 @@ fn call_leaf(
                 .owner
                 .as_ref()
                 .ok_or_else(|| RuntimeError::new("EngineOwner is unavailable during tick"))?;
-            unsafe {
-                hp2_engine::game_engine_owner::tick(owner.access(), boot.engine, argument)?;
+            let start = c.timing.is_some().then(Instant::now);
+            let ticked = unsafe {
+                hp2_engine::game_engine_owner::tick(owner.access(), boot.engine, argument)
+            };
+            if let (Some(timing), Some(start)) = (c.timing.as_mut(), start) {
+                timing.tick_ms.push(start.elapsed().as_secs_f32() * 1000.0);
+                if let Some(previous) = timing.last_start.replace(start) {
+                    timing.interval_ms.push(start.duration_since(previous).as_secs_f32() * 1000.0);
+                }
             }
+            ticked?;
         }
         Leaf::RandAfterTick => hp2_core::ansi_trace::set_process_tick(c.trace_tick, b"after_tick"),
         Leaf::CopyOldFromNew => c.old_time = c.new_time,

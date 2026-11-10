@@ -3018,6 +3018,20 @@ if(HP2_TEST_DATA_PRESENT)
     )
 endif()
 if(APPLE)
+        hp2_add_behavior_test(wgpu_draw_arena_gpu "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/wgpu_surface_round_trip/Cargo"
+            "${HP2_CARGO_EXECUTABLE}" test
+            --locked --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-wgpu --lib draw_arena_
+            -- --ignored --test-threads=1
+        )
+        set_tests_properties(wgpu_draw_arena_gpu PROPERTIES
+            LABELS "integration;data-none;renderer;wgpu"
+            RESOURCE_LOCK hp2_gpu
+            TIMEOUT 600
+        )
         hp2_add_behavior_test(wgpu_lumos_readback "${CMAKE_COMMAND}" -E env
             "CARGO_HOME=${HP2_CARGO_HOME}"
             "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/wgpu_surface_round_trip/Cargo"
