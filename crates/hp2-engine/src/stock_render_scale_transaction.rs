@@ -9,18 +9,19 @@
 pub(crate) struct Scale(u8);
 
 // Order matches the launcher choices and the stock slider's left-to-right positions.
-const SLIDER_SCALES: [u8; 12] = [50, 55, 60, 65, 67, 70, 75, 80, 85, 90, 95, 100];
+// Above 100% the world is supersampled.
+const SLIDER_SCALES: [u8; 16] = [50, 55, 60, 65, 67, 70, 75, 80, 85, 90, 95, 100, 125, 150, 175, 200];
 
 impl Scale {
     pub(crate) fn new(percent: u8) -> Option<Self> {
-        ((percent >= 50 && percent <= 100 && percent % 5 == 0) || percent == 67).then_some(Self(percent))
+        ((percent >= 50 && percent <= 100 && percent % 5 == 0) || percent == 67 || matches!(percent, 125 | 150 | 175 | 200)).then_some(Self(percent))
     }
     pub(crate) fn percent(self) -> u8 { self.0 }
     pub(crate) fn config_value(self) -> f64 { f64::from(self.0) / 100.0 }
     /// Reject malformed script values instead of silently persisting one.
     /// The stock slider's `Value` is the zero-based position in `SLIDER_SCALES`.
     pub(crate) fn from_slider(value: f32) -> Option<Self> {
-        if !value.is_finite() || value.fract() != 0.0 || !(0.0..=11.0).contains(&value) {
+        if !value.is_finite() || value.fract() != 0.0 || !(0.0..=15.0).contains(&value) {
             return None;
         }
         Some(Self(SLIDER_SCALES[value as usize]))
@@ -107,12 +108,12 @@ mod tests {
     fn s(n: u8) -> Scale { Scale::new(n).unwrap() }
     #[test]
     fn bounds_and_slider_validation() {
-        for n in 0..=u8::MAX { assert_eq!(Scale::new(n).is_some(), ((50..=100).contains(&n) && n % 5 == 0) || n == 67); }
-        for (index, percent) in [50, 55, 60, 65, 67, 70, 75, 80, 85, 90, 95, 100].into_iter().enumerate() {
+        for n in 0..=u8::MAX { assert_eq!(Scale::new(n).is_some(), ((50..=100).contains(&n) && n % 5 == 0) || n == 67 || matches!(n, 125 | 150 | 175 | 200)); }
+        for (index, percent) in [50, 55, 60, 65, 67, 70, 75, 80, 85, 90, 95, 100, 125, 150, 175, 200].into_iter().enumerate() {
             assert_eq!(Scale::from_slider(index as f32), Some(s(percent)), "index {index}");
             assert_eq!(s(percent).slider_value(), index as f32, "percent {percent}");
         }
-        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 12.0, 4.5, 67.0, 75.5] {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 16.0, 4.5, 67.0, 75.5] {
             assert_eq!(Scale::from_slider(value), None, "value {value}");
         }
         for percent in (0..=u8::MAX).filter_map(Scale::new) {

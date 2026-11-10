@@ -210,7 +210,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // flags as a real hazard for the parallax loops; `select()` avoids
     // the question entirely rather than relying on naga's (confirmed
     // elsewhere in this crate) non-enforcement of it.
-    let light_map_sample = get_texel(light_map_texture, light_map_sampler, in.light_map_coords);
+    var light_map_sample = get_texel(light_map_texture, light_map_sampler, in.light_map_coords);
+    if SMOOTH_LIGHTMAPS {
+        light_map_sample = sample_smooth(light_map_texture, light_map_sampler, in.light_map_coords);
+    }
     let light_color = select(
         vec4<f32>(1.0, 1.0, 1.0, 1.0),
         vec4<f32>(light_map_sample.rgb * (frame.light_map_intensity * 255.0 / 127.0), 1.0),

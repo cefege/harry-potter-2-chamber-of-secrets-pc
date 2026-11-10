@@ -28,6 +28,31 @@
 //! in its real base path, confirmed by its own header), so a plain
 //! `concat!` is enough here; shaders that do need specialization will
 //! need a real generation step, not this.
+/// Optional image-quality features, read when a pipeline is built (`RenderLoop::set_quality`
+/// clears the pipeline caches so a change takes effect).
+static ALPHA_TO_COVERAGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SMOOTH_LIGHTMAPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets the quality features new pipelines are built with.
+pub fn set_quality_flags(alpha_to_coverage: bool, smooth_lightmaps: bool) {
+    ALPHA_TO_COVERAGE.store(alpha_to_coverage, std::sync::atomic::Ordering::Relaxed);
+    SMOOTH_LIGHTMAPS.store(smooth_lightmaps, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a pipeline uses alpha-to-coverage: only multisampled and unblended (opaque and masked
+/// surfaces). Masked edges then become antialiased coverage instead of a hard 50% cut-out.
+fn alpha_to_coverage(samples: u32, state: RenderState) -> bool {
+    samples > 1 && state.blend.is_none() && ALPHA_TO_COVERAGE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Values for the `override` constants `common.wgsl` declares.
+fn quality_constants(alpha_to_coverage: bool) -> [(&'static str, f64); 2] {
+    [
+        ("ALPHA_TO_COVERAGE", f64::from(u8::from(alpha_to_coverage))),
+        ("SMOOTH_LIGHTMAPS", f64::from(u8::from(SMOOTH_LIGHTMAPS.load(std::sync::atomic::Ordering::Relaxed)))),
+    ]
+}
+
 const SIMPLE_WGSL_SOURCE: &str = concat!(
     include_str!("shaders/common.wgsl"),
     include_str!("shaders/simple.wgsl")
@@ -1147,6 +1172,8 @@ impl TilePipeline {
     }
 
     pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
+        let a2c = alpha_to_coverage(samples, state);
+        let constants = quality_constants(a2c);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(TILE_WGSL_SOURCE.into()),
@@ -1183,11 +1210,11 @@ impl TilePipeline {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+            multisample: wgpu::MultisampleState { count: samples, alpha_to_coverage_enabled: a2c, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
                 targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
@@ -1458,6 +1485,8 @@ impl GouraudPipeline {
     }
 
     pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
+        let a2c = alpha_to_coverage(samples, state);
+        let constants = quality_constants(a2c);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gouraud.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(GOURAUD_WGSL_SOURCE.into()),
@@ -1504,11 +1533,11 @@ impl GouraudPipeline {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+            multisample: wgpu::MultisampleState { count: samples, alpha_to_coverage_enabled: a2c, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
                 targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
@@ -1783,6 +1812,8 @@ impl ComplexPipeline {
     }
 
     pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
+        let a2c = alpha_to_coverage(samples, state);
+        let constants = quality_constants(a2c);
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("complex.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(COMPLEX_WGSL_SOURCE.into()),
@@ -1814,11 +1845,11 @@ impl ComplexPipeline {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
+            multisample: wgpu::MultisampleState { count: samples, alpha_to_coverage_enabled: a2c, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
                 targets: &[Some(state.color_target(color_format))],
             }),
             multiview_mask: None,
@@ -2446,6 +2477,25 @@ impl PostProcessPipeline {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn quality_pipelines_compile_with_alpha_to_coverage_and_smooth_lightmaps() {
+        let created = crate::create_device_sync(crate::BackendChoice::Auto, None::<crate::HeadlessSurfaceCreator>).unwrap();
+        let device = &created.device;
+        set_quality_flags(true, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let state = RenderState::for_poly_flags(0x0000_0002, false);
+        assert!(alpha_to_coverage(4, state));
+        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let _tile = TilePipeline::new_with_samples(device, format, state, 4);
+        let _gouraud = GouraudPipeline::new_with_samples(device, format, state, 4);
+        let _complex = ComplexPipeline::new_with_samples(device, format, state, 4);
+        let _complex_single = ComplexPipeline::new_with_samples(device, format, state, 1);
+        let error = pollster::block_on(scope.pop());
+        set_quality_flags(false, false);
+        assert!(error.is_none(), "quality pipelines failed validation: {error:?}");
+    }
+
     use super::*;
     use crate::{BackendChoice, HeadlessSurfaceCreator, backend_name, create_device_sync};
 

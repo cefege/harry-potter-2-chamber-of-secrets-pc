@@ -5,13 +5,14 @@
 
 use crate::{PreparedLogicalTargets, RenderLoop};
 
-/// A percentage of the full world viewport. Values above 100 are not supported.
+/// A percentage of the full world viewport. Above 100 the world is supersampled: rendered larger
+/// and filtered down by the composite pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WorldScale(u8);
 
 impl WorldScale {
     pub fn new(percent: u8) -> Result<Self, &'static str> {
-        if (1..=100).contains(&percent) { Ok(Self(percent)) } else { Err("world scale must be between 1 and 100 percent") }
+        if (1..=200).contains(&percent) { Ok(Self(percent)) } else { Err("world scale must be between 1 and 200 percent") }
     }
 
     pub fn percent(self) -> u8 { self.0 }
@@ -460,7 +461,8 @@ mod tests {
     #[test]
     fn dimensions_validate_and_round_without_overflow() {
         assert!(WorldScale::new(0).is_err());
-        assert!(WorldScale::new(101).is_err());
+        assert!(WorldScale::new(201).is_err());
+        assert_eq!(WorldScale::new(200).unwrap().dimensions(800, 600), Ok((1600, 1200)));
         let half = WorldScale::new(50).unwrap();
         assert_eq!(half.dimensions(1921, 1081), Ok((961, 541)));
         assert_eq!(half.dimensions(1, 1), Ok((1, 1)));

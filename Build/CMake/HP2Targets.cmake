@@ -372,6 +372,14 @@ hp2_add_behavior_test(ui_host_contracts "${CMAKE_COMMAND}" -E env
     --package=hp2-engine --lib ui_host::tests -- --test-threads=1
 )
 set_tests_properties(ui_host_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(wgpu_mipmap_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-wgpu --lib mipmaps:: -- --test-threads=1
+)
+set_tests_properties(wgpu_mipmap_contracts PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(ui_hud_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"

@@ -227,7 +227,7 @@ unsafe fn create(a: CoreAccess<'_>, page: *mut UObject, state: &mut State) -> Ru
         let v = unsafe { prop(a, source, name, kind, 4)?.cast::<u32>().read_unaligned() };
         unsafe { prop(a, slider, name, kind, 4)?.cast::<u32>().write_unaligned(v); }
     }
-    for (name, value) in [("MinValue", 0f32), ("MaxValue", 11f32)] { unsafe { prop(a, slider, name, "Core.FloatProperty", 4)?.cast::<f32>().write_unaligned(value); } }
+    for (name, value) in [("MinValue", 0f32), ("MaxValue", 15f32)] { unsafe { prop(a, slider, name, "Core.FloatProperty", 4)?.cast::<f32>().write_unaligned(value); } }
     unsafe { prop(a, slider, "Step", "Core.IntProperty", 4)?.cast::<i32>().write_unaligned(1); boolean(a, slider, "bNoSlidingNotify", false)?; display(a, slider, session, false, state.failure)?; }
     unsafe { place_before_back(a, page, slider)?; }
     state.controls.push(Control { page: unsafe { Weak::new(page) }, slider: unsafe { Weak::new(slider) }, device: unsafe { Weak::new(dev) }, session, unavailable: false, failure: state.failure });
@@ -386,13 +386,13 @@ mod tests {
                 assert_eq!(check_value(input), expected, "old CheckValue({input})");
                 assert_eq!(set_value(input), expected, "old SetValue({input})");
             }
-            set_range_fields(0.0, 11.0, 1);
+            set_range_fields(0.0, 15.0, 1);
             for (input, expected) in [(-2.0, 0.0), (0.0, 0.0), (3.49, 3.0), (3.5, 4.0),
-                (4.49, 4.0), (4.5, 5.0), (11.0, 11.0), (12.0, 11.0)] {
+                (4.49, 4.0), (4.5, 5.0), (15.0, 15.0), (16.0, 15.0)] {
                 assert_eq!(check_value(input), expected, "ordinal CheckValue({input})");
                 assert_eq!(set_value(input), expected, "ordinal SetValue({input})");
             }
-            for index in 0..12 {
+            for index in 0..16 {
                 assert_eq!(check_value(index as f32), index as f32, "CheckValue index {index}");
                 assert_eq!(set_value(index as f32), index as f32, "SetValue index {index}");
             }

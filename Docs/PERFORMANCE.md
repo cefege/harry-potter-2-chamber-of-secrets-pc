@@ -126,6 +126,22 @@ prints a per-operation breakdown of every `LoadMap` (`<HP2_PERF> load_phase`).
 * Remaining load cost (Adv1Willow load, 420 ms): EndLoad ~140 ms (package preload), garbage collection
   ~128 ms, fade ~125 ms.
 
+## Image-quality features (Sound/Video > Advanced, all default on)
+
+| Setting | Ini key `[WgpuDrv.WgpuRenderDevice]` | What it does |
+| --- | --- | --- |
+| Mipmaps | `Mipmaps` | Full mip chains for uncompressed textures (the port uploaded only mip 0, so distant surfaces shimmered). Linear-light box filter, alpha-weighted colour, masked coverage preserved per level (`hp2-wgpu/src/mipmaps.rs`). |
+| Edge AA | `AlphaToCoverage` | With MSAA, masked surfaces (foliage, fences, hair) use alpha-to-coverage with sharpened alpha: antialiased cut-out edges. Only on multisampled, unblended pipelines. |
+| Light filter | `SmoothLightmaps` | Cubic B-spline lightmap filtering from four bilinear taps; removes bilinear diamond patterns on low-resolution lightmaps. |
+| 3D Scale 125-200% | `RenderScale` up to 2.0 | Supersampling: the world renders larger and the composite filters it down. |
+
+Measured (macOS arm64, wgpu, retail, uncapped, 4x MSAA, 2 runs each): Grounds_hub p50 10.9 -> 11.1 ms
+with all three on, GreatHall_G 6.1 -> 6.0 ms (noise); map loads unchanged (textures upload lazily).
+200% scale on Grounds_hub: 11.3 ms p50. High-frequency noise in a distant wall/fence crop (mean
+horizontal gradient) 18.7 -> 14.3 with the features on. With all three off the output matches the
+previous build except 2 pixels in one Grounds_hub frame (shader compilation with override constants).
+Animation smoothing needed nothing: vertex meshes already interpolate between keyframes every frame.
+
 ## Game speed
 
 Normal play is real time: the loop uses the measured frame time, capped at 0.1 s per tick, times the

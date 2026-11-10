@@ -155,10 +155,25 @@ fn get_texel(tex: texture_2d<f32>, samp: sampler, tex_coords: vec2<f32>) -> vec4
 // == GLSL's `ApplyPolyFlags(vec4 Color, uint DrawFlags)`. Fragment-stage
 // only: `discard` is only legal inside a @fragment entry point in WGSL,
 // exactly as in the real source.
+// Pipeline-overridable quality features (set per pipeline by draw.rs). With
+// ALPHA_TO_COVERAGE the pipeline is multisampled and unblended: masked texels
+// output a sharpened alpha that becomes MSAA coverage (antialiased cut-out
+// edges) and opaque texels output alpha 1 so they keep full coverage.
+override ALPHA_TO_COVERAGE: bool = false;
+override SMOOTH_LIGHTMAPS: bool = false;
+
 fn apply_poly_flags(color: vec4<f32>, draw_flags: u32) -> vec4<f32> {
+    // Derivatives must be taken in uniform control flow, before any branch.
+    let alpha_width = max(fwidth(color.a), 0.0001);
     var result = color;
     if (draw_flags & DRAW_FLAG_MASKED) != 0u {
-        if result.a < 0.5 {
+        if ALPHA_TO_COVERAGE {
+            let coverage = clamp((color.a - 0.5) / alpha_width + 0.5, 0.0, 1.0);
+            if coverage <= 0.0 {
+                discard;
+            }
+            result = vec4<f32>(color.rgb / max(color.a, 0.0001), coverage);
+        } else if result.a < 0.5 {
             discard;
         } else {
             result = vec4<f32>(result.rgb / result.a, result.a);
@@ -167,8 +182,32 @@ fn apply_poly_flags(color: vec4<f32>, draw_flags: u32) -> vec4<f32> {
         if result.a < 0.01 {
             discard;
         }
+    } else if ALPHA_TO_COVERAGE {
+        result.a = 1.0;
     }
     return result;
+}
+
+// Cubic B-spline lightmap filtering from four bilinear taps (SMOOTH_LIGHTMAPS):
+// removes the diamond/stair patterns bilinear filtering shows on the low-
+// resolution lightmaps.
+fn sample_smooth(tex: texture_2d<f32>, samp: sampler, uv: vec2<f32>) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(tex));
+    let st = uv * size - 0.5;
+    let i = floor(st);
+    let f = st - i;
+    let f2 = f * f;
+    let f3 = f2 * f;
+    let w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+    let w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    let w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    let w3 = f3 / 6.0;
+    let g0 = w0 + w1;
+    let g1 = w2 + w3;
+    let h0 = (i - 0.5 + w1 / g0) / size;
+    let h1 = (i + 1.5 + w3 / g1) / size;
+    return g0.y * (g0.x * textureSample(tex, samp, vec2<f32>(h0.x, h0.y)) + g1.x * textureSample(tex, samp, vec2<f32>(h1.x, h0.y)))
+         + g1.y * (g0.x * textureSample(tex, samp, vec2<f32>(h0.x, h1.y)) + g1.x * textureSample(tex, samp, vec2<f32>(h1.x, h1.y)));
 }
 
 // == GLSL's `getFogFactor(float FogCoord)`. DistanceFogMode: -1 disabled,

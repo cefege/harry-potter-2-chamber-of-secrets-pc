@@ -1498,7 +1498,7 @@ fn read_startup_graphics(access: CoreAccess<'_>, default: StartupGraphics) -> Ru
 #[cfg(feature = "renderer-wgpu")]
 fn persisted_world_scale_percent(value: f32) -> RuntimeResult<u8> {
     let percent = value * 100.0;
-    if !percent.is_finite() || !(1.0..=100.0).contains(&percent)
+    if !percent.is_finite() || !(1.0..=200.0).contains(&percent)
         || (percent - percent.round()).abs() > 0.001 {
         return Err(RuntimeError::new("Invalid persisted world render scale"));
     }
@@ -1864,6 +1864,32 @@ pub(crate) unsafe fn set_global_anisotropy(access: CoreAccess<'_>, setting: u16)
     Ok(())
 }
 
+/// The optional image-quality features: `(mipmaps, alpha_to_coverage, smooth_lightmaps)`.
+/// Stored as `[WgpuDrv.WgpuRenderDevice] Mipmaps / AlphaToCoverage / SmoothLightmaps`; all default on.
+pub(crate) fn quality_settings(access: CoreAccess<'_>) -> (bool, bool, bool) {
+    let read = |key: &str| {
+        let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
+        access.config_get_units(&units(QUALITY_SECTION), &units(key)).ok().flatten()
+            .map(|v| v.iter().take_while(|&&c| c != 0).filter_map(|&c| char::from_u32(c)).collect::<String>())
+            .map_or(true, |v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "off" | "0"))
+    };
+    (read("Mipmaps"), read("AlphaToCoverage"), read("SmoothLightmaps"))
+}
+pub(crate) const QUALITY_SECTION: &str = "WgpuDrv.WgpuRenderDevice";
+
+/// Applies the quality features to the running renderer (textures and pipelines rebuild on demand).
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn set_global_quality(access: CoreAccess<'_>, mipmaps: bool, alpha_to_coverage: bool, smooth_lightmaps: bool) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    resources.loop_state.set_quality(mipmaps, alpha_to_coverage, smooth_lightmaps);
+    Ok(())
+}
+
 #[cfg(feature = "renderer-wgpu")]
 pub(crate) unsafe fn set_global_vsync_mode(access: CoreAccess<'_>, setting: u8) -> RuntimeResult<()> {
     let owner = state(access)?;
@@ -2180,6 +2206,8 @@ impl hp2_wgpu::driver_policy::DriverPolicyAdapter for CorePolicy<'_> {
             Leaf::Srgb => self.with_resources(|resources| {
                 let srgb = self.read_i32(unsafe { ptr::addr_of!((*self.device).use_srgb_textures) }) != 0;
                 resources.loop_state.set_srgb_framebuffer(srgb);
+                let (mipmaps, alpha_to_coverage, smooth_lightmaps) = quality_settings(self.access);
+                resources.loop_state.set_quality(mipmaps, alpha_to_coverage, smooth_lightmaps);
                 Ok(0)
             }).map(|v| value(v, 0.0)),
             Leaf::AdapterLog => self.log_adapter().map(|()| value(0, 0.0)),

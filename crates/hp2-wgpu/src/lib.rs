@@ -24,6 +24,7 @@ pub mod text_atlas;
 pub mod texture;
 pub mod world_scale;
 pub mod msaa;
+pub mod mipmaps;
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key -- `from_ffi_discriminant`
@@ -1065,6 +1066,22 @@ impl RenderLoop {
 
     /// Real `UseSRGBTextures` framebuffer half (`srgb_framebuffer`).
     /// A change forces the next `lock_frame` to reconfigure the surface.
+    /// Optional image-quality features (Sound/Video "Advanced", `[WgpuDrv.WgpuRenderDevice]`).
+    /// Textures and pipelines built afterwards use them; the caches are dropped so everything is
+    /// rebuilt on demand. Call between frames.
+    pub fn set_quality(&mut self, mipmaps: bool, alpha_to_coverage: bool, smooth_lightmaps: bool) {
+        if self.texture_cache.generate_mips != mipmaps {
+            self.texture_cache.generate_mips = mipmaps;
+            self.texture_cache.clear();
+        }
+        draw::set_quality_flags(alpha_to_coverage, smooth_lightmaps);
+        self.line_pipelines = PipelineCache::new();
+        self.tile_pipelines = PipelineCache::new();
+        self.point_pipelines = PipelineCache::new();
+        self.gouraud_pipelines = PipelineCache::new();
+        self.complex_pipelines = PipelineCache::new();
+    }
+
     pub fn set_srgb_framebuffer(&mut self, srgb: bool) {
         if srgb != self.srgb_framebuffer {
             self.srgb_framebuffer = srgb;

@@ -33,6 +33,7 @@ enum Ctl {
     Display,
     ShowFps,
     Advanced(usize),
+    Quality(usize),
 }
 
 enum Command {
@@ -40,6 +41,8 @@ enum Command {
     PickIndex(Ctl, usize),
     PickText(Ctl, String),
     Check(Ctl, bool),
+    /// Quality feature `index` (mipmaps, alpha-to-coverage, smooth lightmaps) on or off.
+    Quality(usize, bool),
 }
 
 struct AdvancedRow {
@@ -62,6 +65,7 @@ struct Data {
     display: Signal<String>,
     display_options: Vec<String>,
     show_fps: Signal<bool>,
+    quality: [Signal<bool>; 3],
     advanced: Vec<AdvancedRow>,
     queue: Rc<RefCell<Vec<Command>>>,
 }
@@ -85,6 +89,7 @@ impl Data {
             display: store.signal(String::new()),
             display_options: display_choices(),
             show_fps: store.signal(false),
+            quality: [store.signal(true), store.signal(true), store.signal(true)],
             advanced,
             queue: Rc::new(RefCell::new(Vec::new())),
         })
@@ -137,6 +142,9 @@ fn scale_slider(_: *mut UObject) -> Option<*mut UObject> { None }
 // ---- the view ----------------------------------------------------------------------------
 
 const COLUMN_W: f32 = 280.;
+/// Image-quality features (`render_device_owner::quality_settings`), in that order.
+const QUALITY_CAPTIONS: [&str; 3] = ["Mipmaps", "Edge AA", "Light filter"];
+const QUALITY_KEYS: [&str; 3] = ["Mipmaps", "AlphaToCoverage", "SmoothLightmaps"];
 const ART_W: f32 = 133.;
 
 fn key_of(ctl: Ctl) -> String {
@@ -207,7 +215,7 @@ fn view(d: &Rc<Data>) -> hp2_ui::Node {
         .child(slider_row("Brightness", slider_node(d, Ctl::Brightness, 2., 10., &d.brightness), 46.))
         .child({
             let percent = scale_percent(d.scale.get());
-            let scale = slider_node(d, Ctl::Scale, 0., 11., &d.scale);
+            let scale = slider_node(d, Ctl::Scale, 0., 15., &d.scale);
             row()
                 .width(Size::Px(COLUMN_W))
                 .height(Size::Px(30.))
@@ -233,20 +241,33 @@ fn view(d: &Rc<Data>) -> hp2_ui::Node {
         .child(combo_row("Display", display, 32.))
         .child(row().width(Size::Px(COLUMN_W)).height(Size::Px(26.)).justify(Justify::End).child(col().width(Size::Px(ART_W)).child(fps)));
 
-    // Advanced: four on the left, the rest on the right.
-    let (left, right): (Vec<_>, Vec<_>) = d.advanced.iter().enumerate().partition(|(i, _)| *i < 4);
-    let advanced_column = |rows: Vec<(usize, &AdvancedRow)>| {
-        col().width(Size::Px(COLUMN_W)).children(rows.into_iter().map(|(i, r)| combo_row(r.caption, select_node(d, Ctl::Advanced(i), &r.current, &r.options, false), 28.)))
-    };
+    // Advanced: the GPU and display rows, then the image-quality features; five per column.
+    let mut rows: Vec<hp2_ui::Node> = d.advanced.iter().enumerate().map(|(i, r)| combo_row(r.caption, select_node(d, Ctl::Advanced(i), &r.current, &r.options, false), 26.)).collect();
+    for (i, caption) in QUALITY_CAPTIONS.iter().enumerate() {
+        let options = ["On".to_owned(), "Off".to_owned()];
+        let (queue, signal) = (d.queue.clone(), d.quality[i].clone());
+        let selected = usize::from(!signal.get());
+        let node = select(&options, selected, move |choice| {
+            signal.set(choice == 0);
+            queue.borrow_mut().push(Command::Quality(i, choice == 0));
+        })
+        .key(&key_of(Ctl::Quality(i)))
+        .color(GREY)
+        .font(Font::Bold);
+        rows.push(combo_row(caption, node, 26.));
+    }
+    let right: Vec<_> = rows.split_off(rows.len().div_ceil(2));
+    let left = rows;
+    let advanced_column = |rows: Vec<hp2_ui::Node>| col().width(Size::Px(COLUMN_W)).children(rows);
 
-    col().padding(Edges { top: 44., left: 30., ..Edges::default() }).child(row().gap(16.).height(Size::Px(238.)).align(Align::Start).child(video).child(audio)).child(
-        col().child(label("Advanced").class("header").height(Size::Px(26.))).child(row().gap(16.).child(advanced_column(left)).child(advanced_column(right))),
+    col().padding(Edges { top: 44., left: 30., ..Edges::default() }).child(row().gap(16.).height(Size::Px(226.)).align(Align::Start).child(video).child(audio)).child(
+        col().child(label("Advanced").class("header").height(Size::Px(24.))).child(row().gap(16.).child(advanced_column(left)).child(advanced_column(right))),
     )
 }
 
 /// The stock 12-step render-scale slider as a percent.
 fn scale_percent(step: f32) -> i32 {
-    const SCALES: [i32; 12] = [50, 55, 60, 65, 67, 70, 75, 80, 85, 90, 95, 100];
+    const SCALES: [i32; 16] = [50, 55, 60, 65, 67, 70, 75, 80, 85, 90, 95, 100, 125, 150, 175, 200];
     SCALES.get(step.round().max(0.) as usize).copied().unwrap_or(100)
 }
 
@@ -345,6 +366,10 @@ unsafe fn refresh(a: CoreAccess<'_>, data: &Data, h: &Handles) -> RuntimeResult<
         }
         if let Some(fps) = h.fps {
             data.show_fps.set(read_boolean(a, fps, "bChecked")?);
+        }
+        let (mipmaps, edges, lighting) = crate::render_device_owner::quality_settings(a);
+        for (signal, on) in data.quality.iter().zip([mipmaps, edges, lighting]) {
+            signal.set(on);
         }
         for (row, combo) in data.advanced.iter().zip(&h.advanced) {
             row.current.set(text(a, *combo)?);
@@ -554,6 +579,7 @@ unsafe fn execute(a: CoreAccess<'_>, page: *mut UObject, h: &Handles, command: C
             Command::PickIndex(c, i) => format!("index {c:?} {i}"),
             Command::PickText(c, t) => format!("text {c:?} {t}"),
             Command::Check(c, on) => format!("check {c:?} {on}"),
+            Command::Quality(i, on) => format!("quality {i} {on}"),
         };
         log(a, &format!("HP2_UI_EXEC {what} active={}", crate::stock_menu_extensions::active()));
     }
@@ -585,6 +611,16 @@ unsafe fn execute(a: CoreAccess<'_>, page: *mut UObject, h: &Handles, command: C
                 unsafe { set_text(a, combo, &choice)? };
                 unsafe { notify(a, page, combo)? };
             }
+        }
+        Command::Quality(index, on) => {
+            let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
+            let key = QUALITY_KEYS.get(index).ok_or_else(|| RuntimeError::new("Unknown quality setting"))?;
+            a.config_update_system_staged(&[(units(crate::render_device_owner::QUALITY_SECTION), units(key), units(if on { "True" } else { "False" }))])?;
+            let (mipmaps, edges, lighting) = crate::render_device_owner::quality_settings(a);
+            #[cfg(feature = "renderer-wgpu")]
+            unsafe { crate::render_device_owner::set_global_quality(a, mipmaps, edges, lighting)? };
+            #[cfg(not(feature = "renderer-wgpu"))]
+            let _ = (mipmaps, edges, lighting);
         }
         Command::Check(_, on) => {
             if let Some(fps) = h.fps {

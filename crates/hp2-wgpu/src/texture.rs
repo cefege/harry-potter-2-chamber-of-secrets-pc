@@ -312,6 +312,8 @@ pub fn texture_uv_pan(
 /// re-format an existing texture in place.
 pub struct TextureCache {
     entries: std::collections::HashMap<u64, CachedTexture>,
+    /// Build a full mip chain for RGBA8 uploads (`crate::mipmaps`).
+    pub generate_mips: bool,
 }
 
 impl Default for TextureCache {
@@ -324,6 +326,7 @@ impl TextureCache {
     pub fn new() -> Self {
         Self {
             entries: std::collections::HashMap::new(),
+            generate_mips: false,
         }
     }
     /// Drops every resident GPU texture and releases the cache table's
@@ -395,22 +398,23 @@ impl TextureCache {
         } else {
             wgpu::TextureFormat::Rgba8Unorm
         };
+        let levels = if self.generate_mips { crate::mipmaps::level_count(width, height) } else { 1 };
         let reuse = self.entries.get(&cache_id).is_some_and(|existing| {
             existing.texture.width() == width
                 && existing.texture.height() == height
                 && existing.texture.format() == format
-                && existing.texture.mip_level_count() == 1
+                && existing.texture.mip_level_count() == levels
         });
         if reuse {
             let existing = self
                 .entries
                 .get(&cache_id)
                 .expect("reuse was decided from this cache_id's entry above");
-            write_rgba8_level(created, &existing.texture, width, height, rgba8_bytes);
+            write_rgba8_chain(created, &existing.texture, width, height, rgba8_bytes, srgb);
             return existing;
         }
         let sampler_key = self.first_sampler_key(cache_id, sampler_key);
-        let mut texture = create_gpu_texture(created, width, height, rgba8_bytes, srgb);
+        let mut texture = create_gpu_texture_levels(created, width, height, rgba8_bytes, srgb, levels);
         texture.sampler_key = sampler_key;
         self.entries.insert(cache_id, texture);
         self.entries
@@ -587,6 +591,18 @@ pub fn create_gpu_texture(
     rgba8_bytes: &[u8],
     srgb: bool,
 ) -> CachedTexture {
+    create_gpu_texture_levels(created, width, height, rgba8_bytes, srgb, 1)
+}
+
+/// [`create_gpu_texture`] with `levels` mip levels; levels past 0 come from `crate::mipmaps`.
+pub fn create_gpu_texture_levels(
+    created: &crate::CreatedDevice,
+    width: u32,
+    height: u32,
+    rgba8_bytes: &[u8],
+    srgb: bool,
+    levels: u32,
+) -> CachedTexture {
     assert_eq!(
         rgba8_bytes.len(),
         width as usize * height as usize * 4,
@@ -604,7 +620,7 @@ pub fn create_gpu_texture(
             height,
             depth_or_array_layers: 1,
         },
-        mip_level_count: 1,
+        mip_level_count: levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
@@ -620,7 +636,7 @@ pub fn create_gpu_texture(
             | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    write_rgba8_level(created, &texture, width, height, rgba8_bytes);
+    write_rgba8_chain(created, &texture, width, height, rgba8_bytes, srgb);
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     CachedTexture {
         texture,
@@ -635,9 +651,20 @@ pub fn create_gpu_texture(
 /// `create_gpu_texture`'s own write, factored out so
 /// `TextureCache::upload_rgba8` can reuse it when width, height, format
 /// and mip count match.
+/// Writes mip 0 and, when the texture has more levels, the generated rest of the chain.
+fn write_rgba8_chain(created: &crate::CreatedDevice, texture: &wgpu::Texture, width: u32, height: u32, rgba8_bytes: &[u8], srgb: bool) {
+    write_rgba8_level(created, texture, 0, width, height, rgba8_bytes);
+    if texture.mip_level_count() > 1 {
+        for (level, (w, h, bytes)) in crate::mipmaps::generate(width, height, rgba8_bytes, srgb).iter().enumerate().take(texture.mip_level_count() as usize - 1) {
+            write_rgba8_level(created, texture, level as u32 + 1, *w, *h, bytes);
+        }
+    }
+}
+
 fn write_rgba8_level(
     created: &crate::CreatedDevice,
     texture: &wgpu::Texture,
+    mip_level: u32,
     width: u32,
     height: u32,
     rgba8_bytes: &[u8],
@@ -645,7 +672,7 @@ fn write_rgba8_level(
     created.queue.write_texture(
         wgpu::TexelCopyTextureInfo {
             texture,
-            mip_level: 0,
+            mip_level,
             origin: wgpu::Origin3d::ZERO,
             aspect: wgpu::TextureAspect::All,
         },
