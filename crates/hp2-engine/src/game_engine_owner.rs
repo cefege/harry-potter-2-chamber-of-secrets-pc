@@ -122,6 +122,8 @@ pub unsafe fn tick(access: CoreAccess<'_>, engine: *mut UGameEngine, delta: f32)
     if engine.is_null() {
         return Err(RuntimeError::new("Null canonical UGameEngine"));
     }
+    // Reap a finished background save (and re-save in the foreground if it failed).
+    crate::game_save_owner::poll_pending_save(access)?;
     // Cover stock input and timeout calls with one balanced transaction scope.
     #[cfg(feature = "sdl")]
     let _resolution_lifecycle = unsafe { crate::stock_resolution_lifecycle::install(access, crate::stock_resolution_transaction::callback)? };

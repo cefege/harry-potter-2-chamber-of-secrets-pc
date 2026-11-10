@@ -145,6 +145,7 @@ pub mod unix_dll;
 pub mod unix_file_archive;
 pub mod unix_file_manager;
 pub mod unix_file_manager_owner;
+pub mod fast_hash;
 pub mod unix_identity;
 pub mod unix_path;
 pub mod unix_process;

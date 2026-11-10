@@ -40,7 +40,7 @@
 //! therefore the only class->ops registry and is not slated to migrate into
 //! `class_metadata.rs`.
 
-use std::collections::HashMap;
+use crate::fast_hash::FastMap as HashMap;
 use std::ffi::c_void;
 use std::sync::{LazyLock, Mutex};
 
@@ -56,7 +56,7 @@ pub struct ActorOps {
 }
 
 static ACTOR_OPS_TABLE: LazyLock<Mutex<HashMap<usize, ActorOps>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+    LazyLock::new(|| Mutex::new(HashMap::default()));
 
 fn lock_actor_ops_table() -> std::sync::MutexGuard<'static, HashMap<usize, ActorOps>> {
     ACTOR_OPS_TABLE

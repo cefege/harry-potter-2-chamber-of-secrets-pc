@@ -1462,6 +1462,8 @@ pub unsafe fn load_map(
     if engine.is_null() || url.is_null() || error.is_null() {
         return Err(RuntimeError::new("Invalid canonical LoadMap arguments"));
     }
+    // A background save may still be writing the slot files this load can read.
+    crate::game_save_owner::finish_pending_save(access)?;
     let ops = CoreOps {
         access,
         context: LoadMapContext {

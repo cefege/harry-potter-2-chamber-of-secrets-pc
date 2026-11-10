@@ -613,16 +613,13 @@ impl crate::property_archive::PropertyArchiveOps for DirectArchiveOps<'_, '_, '_
     }
     unsafe fn name_matches(&self, object: Object, name: crate::property_archive::Hp2PropertyArchiveName) -> RuntimeResult<bool> {
         let name_index = unsafe { i32::from_ne_bytes((*object.cast::<UObject>()).name) };
-        let text = self.root.access.name_text(name_index)?;
         let expected = match name {
             crate::property_archive::Hp2PropertyArchiveName::ArchiveFloatParams => "FloatParams",
             crate::property_archive::Hp2PropertyArchiveName::ArchiveColorParams => "ColorParams",
             crate::property_archive::Hp2PropertyArchiveName::ArchiveRand => "Rand",
             crate::property_archive::Hp2PropertyArchiveName::ArchiveAuxAnims => "AuxAnims",
         };
-        Ok(text.len() == expected.len() && text.iter().zip(expected.bytes()).all(|(a, b)| {
-            char::from_u32(*a).is_some_and(|c| c.eq_ignore_ascii_case(&(b as char)))
-        }))
+        self.root.access.name_equals_ascii(name_index, expected)
     }
     unsafe fn struct_name(&self, property: Object) -> RuntimeResult<i32> {
         let structure = unsafe { (*property.cast::<UStructProperty>()).r#struct };

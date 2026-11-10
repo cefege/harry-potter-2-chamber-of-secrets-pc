@@ -359,6 +359,8 @@ impl TravelOps for CoreTravelOps<'_, '_> {
 /// # Safety
 /// Engine, URL and error are live canonical records; optional travel data is live.
 pub unsafe fn browse(access: CoreAccess<'_>, engine: *mut UGameEngine, url: *const FURL, travel_info: *const TMapStringString, error: *mut TArrayRaw) -> RuntimeResult<bool> {
+    // Loading a saved game reads the slot files; let a background save finish writing them.
+    crate::game_save_owner::finish_pending_save(access)?;
     if engine.is_null() || url.is_null() || error.is_null() { return Err(RuntimeError::new("Invalid canonical GameEngine Browse arguments")); }
     let defaults = UrlOwner::current_defaults(access)?;
     let mut copied = MaybeUninit::<FURL>::uninit();

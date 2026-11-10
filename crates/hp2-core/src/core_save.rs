@@ -15,7 +15,7 @@ use crate::runtime_archive::RuntimeArchive;
 use hp2_abi::engine::generated::UObject;
 use std::alloc::Layout;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use crate::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use std::ffi::c_void;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -130,9 +130,9 @@ impl CoreAccess<'_> {
                 names: Vec::new(),
                 imports: Vec::new(),
                 exports: Vec::new(),
-                object_indices: HashMap::new(),
-                name_indices: HashMap::new(),
-                name_usage: HashMap::new(),
+                object_indices: HashMap::default(),
+                name_indices: HashMap::default(),
+                name_usage: HashMap::default(),
                 conform_names: conform_state.names,
                 original_names: None,
                 conform_name_texts: conform_state.name_texts,
@@ -140,7 +140,7 @@ impl CoreAccess<'_> {
                 conform_records: conform_state.records,
                 original_exports: Vec::new(),
                 original_export_used: Vec::new(),
-                conform_name_map: HashMap::new(),
+                conform_name_map: HashMap::default(),
                 has_conform,
                 committed: false,
             };
@@ -499,7 +499,7 @@ impl<'a> DirectSaveOps<'a> {
 
     fn conform_parent_path(tail: &SaveTail, root: &[u32], index: i32) -> RuntimeResult<Vec<u32>> {
         let mut current = index;
-        let mut visited = HashSet::new();
+        let mut visited = HashSet::default();
         let mut names = Vec::new();
         let limit = tail.conform_records.len().saturating_add(tail.conform_imports.len());
         for _ in 0..limit {

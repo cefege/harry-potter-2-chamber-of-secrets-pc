@@ -11,11 +11,18 @@ use std::{cell::RefCell, ffi::c_void, fs, path::{Path, PathBuf}, ptr};
 struct CoreSaveGameOps<'a> {
     access: CoreAccess<'a>,
     slow_task: RefCell<Option<hp2_core::runtime_globals::SlowTaskScope>>,
+    /// A forked save child must not touch the GPU or the shared UI task state, so it skips
+    /// the "Saving" progress screen and the slow-task scope.
+    quiet: bool,
 }
 
 impl<'a> CoreSaveGameOps<'a> {
     fn new(access: CoreAccess<'a>) -> Self {
-        Self { access, slow_task: RefCell::new(None) }
+        Self { access, slow_task: RefCell::new(None), quiet: false }
+    }
+
+    fn quiet(access: CoreAccess<'a>) -> Self {
+        Self { access, slow_task: RefCell::new(None), quiet: true }
     }
 
 
@@ -122,10 +129,12 @@ impl crate::game_save::SaveGameOps for CoreSaveGameOps<'_> {
     }
 
     unsafe fn paint_progress(&self, engine: *mut c_void) -> RuntimeResult<()> {
+        if self.quiet { return Ok(()); }
         unsafe { crate::game_engine_owner::paint_progress(self.access, engine.cast()) }
     }
 
     unsafe fn begin_slow_task_saving(&self) -> RuntimeResult<()> {
+        if self.quiet { return Ok(()); }
         let mut task = self.slow_task.try_borrow_mut()
             .map_err(|_| RuntimeError::new("SaveGame slow-task state reentered"))?;
         if task.is_some() {
@@ -222,6 +231,7 @@ impl crate::game_save::SaveGameOps for CoreSaveGameOps<'_> {
     }
 
     unsafe fn end_slow_task(&self) -> RuntimeResult<()> {
+        if self.quiet { return Ok(()); }
         let mut task = self.slow_task.try_borrow_mut()
             .map_err(|_| RuntimeError::new("SaveGame slow-task state reentered"))?;
         let scope = task.take()
@@ -322,6 +332,168 @@ pub(crate) fn save_slot_file_path(access: CoreAccess<'_>, leaf: &Path) -> Runtim
 /// `engine` is a live canonical `UGameEngine` record.
 pub(crate) unsafe fn save_game(access: CoreAccess<'_>, engine: *mut UGameEngine, position: i32) -> RuntimeResult<()> {
     if engine.is_null() { return Err(RuntimeError::new("Null canonical UGameEngine")); }
+    #[cfg(unix)]
+    if std::env::var_os("HP2_SYNC_SAVE").is_none() {
+        return unsafe { forked::save_game(access, engine, position) };
+    }
+    unsafe { save_game_sync(access, engine, position) }
+}
+
+/// The original blocking save: serialize the level, write the slot, return.
+///
+/// # Safety
+/// `engine` is a live canonical `UGameEngine` record.
+unsafe fn save_game_sync(access: CoreAccess<'_>, engine: *mut UGameEngine, position: i32) -> RuntimeResult<()> {
     let ops = CoreSaveGameOps::new(access);
     unsafe { crate::game_save::save_game_with(&ops, engine.cast(), position) }
+}
+
+/// Waits for a background save (see `forked`) before something reads or replaces its files.
+pub(crate) fn finish_pending_save(access: CoreAccess<'_>) -> RuntimeResult<()> {
+    #[cfg(unix)]
+    return forked::finish(access, true);
+    #[cfg(not(unix))]
+    { let _ = access; Ok(()) }
+}
+
+/// Non-blocking check for a finished background save; call once per tick.
+pub(crate) fn poll_pending_save(access: CoreAccess<'_>) -> RuntimeResult<()> {
+    #[cfg(unix)]
+    return forked::finish(access, false);
+    #[cfg(not(unix))]
+    { let _ = access; Ok(()) }
+}
+
+/// Background save by `fork`: the child is a copy-on-write snapshot of the whole process, so it
+/// can run the unchanged blocking save on a frozen world while the game keeps running.
+///
+/// The child runs the exact original `save_game_with` sequence (so the files are byte-identical
+/// to a blocking save) with the progress screen and slow-task scope disabled, logging detached,
+/// crash handlers reset and no GPU access, then `_exit`s. The parent applies only the state
+/// changes the original made to the live game (brush tracker rebuild, dead-reference cleanup,
+/// mover saved positions, cache flush) and returns at once. Anything that reads or replaces the
+/// slot files first waits for the child: the next save, map load, and shutdown. A child that
+/// fails or hangs (30 s) is replaced by a blocking save of the then-current world.
+#[cfg(unix)]
+mod forked {
+    use super::*;
+    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    #[derive(Clone, Copy)]
+    struct Pending { pid: libc::pid_t, started: Instant, engine: usize, position: i32 }
+
+    static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+    /// Pid of the running child, 0 when none: lets the per-tick poll skip the mutex.
+    static PENDING_PID: AtomicI32 = AtomicI32::new(0);
+    const CHILD_TIMEOUT: Duration = Duration::from_secs(30);
+
+    pub(super) unsafe fn save_game(access: CoreAccess<'_>, engine: *mut UGameEngine, position: i32) -> RuntimeResult<()> {
+        finish(access, true)?;
+        let ops = CoreSaveGameOps::new(access);
+        // SAFETY: the original save also formats and logs the slot name first.
+        unsafe {
+            ops.make_dir_save_path()?;
+            ops.make_dir_save_slot_path()?;
+            let mut filename = [0u32; crate::game_save::PATH_CAPACITY];
+            ops.format_slot_file(filename.as_mut_ptr(), position)?;
+            ops.debugf_saving(filename.as_ptr())?;
+        }
+        // SAFETY: fork has no preconditions here; the child only runs `child` below.
+        match unsafe { libc::fork() } {
+            -1 => unsafe { save_game_sync(access, engine, position) },
+            0 => unsafe { child(access, engine, position) },
+            pid => {
+                *PENDING.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Pending { pid, started: Instant::now(), engine: engine as usize, position });
+                PENDING_PID.store(pid, Ordering::Release);
+                unsafe { parent_state_updates(&ops, engine) }
+            }
+        }
+    }
+
+    unsafe fn child(access: CoreAccess<'_>, engine: *mut UGameEngine, position: i32) -> ! {
+        // Default crash behavior (the parent's reporter writes into the shared working directory),
+        // and no inherited buffered log bytes may be flushed from this copy.
+        for signal in [libc::SIGSEGV, libc::SIGBUS, libc::SIGILL, libc::SIGABRT, libc::SIGFPE, libc::SIGTRAP, libc::SIGTERM] {
+            unsafe { libc::signal(signal, libc::SIG_DFL) };
+        }
+        // Nothing the child prints may interleave with the parent's console output.
+        unsafe {
+            let null = libc::open(c"/dev/null".as_ptr(), libc::O_WRONLY);
+            if null >= 0 {
+                libc::dup2(null, 1);
+                libc::dup2(null, 2);
+            }
+        }
+        access.detach_logging_after_fork();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let ops = CoreSaveGameOps::quiet(access);
+            unsafe { crate::game_save::save_game_with(&ops, engine.cast(), position) }
+        }));
+        let code = match result { Ok(Ok(())) => 0, Ok(Err(_)) => 3, Err(_) => 4 };
+        unsafe { libc::_exit(code) }
+    }
+
+    /// What the blocking save leaves behind in the live game, minus the serialization itself, in
+    /// the original order.
+    unsafe fn parent_state_updates(ops: &CoreSaveGameOps<'_>, engine: *mut UGameEngine) -> RuntimeResult<()> {
+        let engine = engine.cast::<c_void>();
+        unsafe {
+            if ops.level_has_brush_tracker(engine)? != 0 {
+                ops.level_delete_brush_tracker(engine)?;
+            }
+            ops.level_cleanup_destroyed(engine)?;
+            let mut i = 0;
+            while i < ops.level_actor_count(engine)? {
+                let actor = ops.level_actor(engine, i)?;
+                if ops.actor_is_mover(actor)? != 0 {
+                    ops.mover_reset_saved_pos(actor)?;
+                }
+                i += 1;
+            }
+            ops.level_new_brush_tracker(engine)?;
+            ops.level_info_set_action(engine, crate::game_save::LEVACT_NONE)?;
+            ops.gcache_flush()
+        }
+    }
+
+    /// Reaps the background child. With `block`, waits for it (30 s at most); otherwise only
+    /// checks. A failed child triggers the blocking save the child was meant to do.
+    pub(super) fn finish(access: CoreAccess<'_>, block: bool) -> RuntimeResult<()> {
+        if PENDING_PID.load(Ordering::Acquire) == 0 {
+            return Ok(());
+        }
+        let Some(pending) = *PENDING.lock().unwrap_or_else(|e| e.into_inner()) else { return Ok(()) };
+        let mut status = 0;
+        let ok = loop {
+            // SAFETY: plain waitpid on our own child.
+            let reaped = unsafe { libc::waitpid(pending.pid, &mut status, libc::WNOHANG) };
+            if reaped == pending.pid {
+                break libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
+            }
+            if reaped < 0 {
+                if std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) { continue; }
+                break false; // child vanished (for example reaped elsewhere): do not trust the file
+            }
+            if pending.started.elapsed() > CHILD_TIMEOUT {
+                unsafe { libc::kill(pending.pid, libc::SIGKILL); libc::waitpid(pending.pid, &mut status, 0); }
+                break false;
+            }
+            if !block {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        PENDING_PID.store(0, Ordering::Release);
+        if ok {
+            return Ok(());
+        }
+        let ops = CoreSaveGameOps::new(access);
+        let _ = ops.log(&format!("Warning: background save of slot {} failed (status {status}); saving again in the foreground", pending.position));
+        // SAFETY: the engine pointer was live when the save started and the owner outlives it.
+        unsafe { save_game_sync(access, pending.engine as *mut UGameEngine, pending.position) }
+    }
 }

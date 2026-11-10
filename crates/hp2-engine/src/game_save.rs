@@ -7,7 +7,7 @@ use std::ffi::{c_char, c_void};
 pub type Result<T = ()> = std::result::Result<T, i32>;
 const INDEX_NONE: i32 = -1;
 const MAXINT: i32 = i32::MAX;
-const LEVACT_NONE: i32 = 0;
+pub(crate) const LEVACT_NONE: i32 = 0;
 const LEVACT_SAVING: i32 = 2;
 const QUOTE: u32 = b'"' as u32;
 // Slot, hub-copy and queued-save filenames share the platform filesystem path limit.

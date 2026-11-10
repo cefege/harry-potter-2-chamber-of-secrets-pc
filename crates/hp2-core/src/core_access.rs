@@ -217,14 +217,14 @@ struct CoreState {
     pending_localized: UnsafeCell<ObjectCollection>,
     metadata: UnsafeCell<crate::class_metadata::MetadataStorage>,
     startup_structs: UnsafeCell<Vec<StartupStructBinding>>,
-    cpp_property_offsets: UnsafeCell<std::collections::HashMap<(usize, i32), i32>>,
-    loaded_native_modules: UnsafeCell<std::collections::HashSet<usize>>,
+    cpp_property_offsets: UnsafeCell<crate::fast_hash::FastMap<(usize, i32), i32>>,
+    loaded_native_modules: UnsafeCell<crate::fast_hash::FastSet<usize>>,
     /// Successful `native_class` lookups. Native classes live until owner shutdown
     /// (the cache is cleared in `pre_exit`), so a hit skips three name interns and
     /// three object lookups.
-    native_class_cache: RefCell<std::collections::HashMap<String, *mut UClass>>,
+    native_class_cache: RefCell<crate::fast_hash::FastMap<String, *mut UClass>>,
     /// Reflected property offsets by (class, name, kind); absent properties are cached too.
-    property_slots: RefCell<std::collections::HashMap<usize, Vec<PropertySlotEntry>>>,
+    property_slots: RefCell<crate::fast_hash::FastMap<usize, Vec<PropertySlotEntry>>>,
     /// Name indices `property_value` needs on every call: None, Vector, Rotator, Plane.
     /// `None` is cached once found; the others only once they are nonzero (a missing
     /// name reads as index 0 and could still appear later).
@@ -369,10 +369,10 @@ impl CoreOwner {
                 pending_localized: UnsafeCell::new(ObjectCollection::new()),
                 metadata: UnsafeCell::new(crate::class_metadata::MetadataStorage::new()),
                 startup_structs: UnsafeCell::new(Vec::new()),
-                cpp_property_offsets: UnsafeCell::new(std::collections::HashMap::new()),
-                loaded_native_modules: UnsafeCell::new(std::collections::HashSet::new()),
-                native_class_cache: RefCell::new(std::collections::HashMap::new()),
-                property_slots: RefCell::new(std::collections::HashMap::new()),
+                cpp_property_offsets: UnsafeCell::new(Default::default()),
+                loaded_native_modules: UnsafeCell::new(Default::default()),
+                native_class_cache: RefCell::new(Default::default()),
+                property_slots: RefCell::new(Default::default()),
                 value_names: Cell::new([None; 4]),
 
                 loader: UnsafeCell::new(crate::core_loader::LoaderState::new()),
@@ -531,6 +531,15 @@ impl<'a> CoreAccess<'a> {
 
     pub(crate) fn set_log_to_stdout(self, enabled: bool) {
         self.state.log_to_stdout.set(enabled);
+    }
+
+    /// For a `fork`ed child only: stop writing to the shared log. The child's copy of the file
+    /// buffer may hold bytes the parent will also write, so the buffer is leaked, never flushed.
+    pub fn detach_logging_after_fork(self) {
+        self.state.log_to_stdout.set(false);
+        if let Some(writer) = self.state.file_log.borrow_mut().take() {
+            std::mem::forget(writer);
+        }
     }
 
     pub(crate) fn log_to_stdout(self) -> bool {
@@ -1468,6 +1477,17 @@ impl<'a> CoreAccess<'a> {
     pub fn find_name(self, text: &[u32]) -> RuntimeResult<i32> {
         // SAFETY: this only reads engine-thread-owned names without callbacks.
         unsafe { (&*self.state.names.get()).find(text).map(|name| name.index) }
+    }
+
+    /// Compares a name with ASCII text, ignoring ASCII case, without copying the name.
+    pub fn name_equals_ascii(self, index: i32, expected: &str) -> RuntimeResult<bool> {
+        // SAFETY: no reentrant hook runs while the name table is borrowed.
+        let names = unsafe { &*self.state.names.get() };
+        let text = names.text_slice(index).ok_or_else(|| RuntimeError::new("Invalid name index"))?;
+        Ok(text.len() == expected.len()
+            && text.iter().zip(expected.bytes()).all(|(a, b)| {
+                char::from_u32(*a).is_some_and(|c| c.eq_ignore_ascii_case(&(b as char)))
+            }))
     }
 
     pub fn name_text(self, index: i32) -> RuntimeResult<Vec<u32>> {

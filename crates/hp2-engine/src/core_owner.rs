@@ -593,6 +593,9 @@ impl EngineOwner {
     /// # Errors
     /// Returns the first ordered teardown error.
     pub fn shutdown(self) -> RuntimeResult<()> {
-        self.core.shutdown()
+        // Let a background save finish before the process (and its parent) goes away.
+        let waited = crate::game_save_owner::finish_pending_save(self.core.access());
+        let result = self.core.shutdown();
+        waited.and(result)
     }
 }

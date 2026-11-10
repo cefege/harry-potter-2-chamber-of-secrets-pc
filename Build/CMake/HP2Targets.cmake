@@ -2848,6 +2848,17 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app"
         --ticks=300
         --timeout=180
     )
+    hp2_add_behavior_test(save_async_equivalence "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/SaveAsyncEquivalence.py"
+        --engine-bin=$<TARGET_FILE:hp2_game_rust>
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        "--artifact-dir=${CMAKE_BINARY_DIR}/Testing/HP2/save_async_equivalence/Artifacts/run"
+    )
+    set_tests_properties(save_async_equivalence PROPERTIES
+        LABELS "integration;data-prototype"
+        RESOURCE_LOCK hp2_gpu
+        TIMEOUT 600
+    )
     set_tests_properties(canonical_save_reload_smoke PROPERTIES
         LABELS "integration;data-prototype"
         RESOURCE_LOCK hp2_gpu

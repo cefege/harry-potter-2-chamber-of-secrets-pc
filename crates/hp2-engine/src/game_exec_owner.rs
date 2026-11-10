@@ -509,6 +509,9 @@ impl<'access, 'borrow, 'output> ExecOps for CoreExecOps<'access, 'borrow, 'outpu
                 if !(i32::from(b'0')..=i32::from(b'9')).contains(&first) {
                     return Ok(ExecStep::Return(true));
                 }
+                // The slot and cache files this command copies and deletes may still be
+                // being written by a background save.
+                crate::game_save_owner::finish_pending_save(self.access)?;
                 let level = unsafe { (*game).g_level.cast::<ULevel>() };
                 if level.is_null() { return Ok(ExecStep::Return(true)); }
                 let info = unsafe { crate::package_map_level_owner::level_info(level)? };
