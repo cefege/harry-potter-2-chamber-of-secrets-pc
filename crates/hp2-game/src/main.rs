@@ -1,3 +1,4 @@
+mod first_run;
 mod boot_services;
 mod fire_probe;
 mod gate_reporters;

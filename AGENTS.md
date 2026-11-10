@@ -46,16 +46,18 @@ Repository compatibility rules take precedence over generic style guidance.
 Shipping binaries are `hp2_game_rust`, `hp2_ucc_rust`, and `hp2_import`.
 
 **Product direction.** No external/startup launcher: the game boots straight into the
-stock `Startup.unr` menus. Missing data exits 1 with `hp2_import` guidance (from the
-macOS app bundle a dialog shows the exact command; `hp2_import` ships in
-`Contents/MacOS`; its CLI is a pinned contract, so the command spells out `--profile
-retail-only --output`). Settings belong in the in-game Options pages. Every menu page
-and the message box are drawn and driven by `hp2-ui`: Sound/Video has a hand-written
-view (`ui_pages`); every other page is mirrored (`ui_mirror`: stock controls stay alive
-and in place, their own `Paint`/pointer handlers are swallowed by script pre-call hooks,
-actions run through the controls' own script functions). The HUD subtitle bar, letterbox
-and status counters are Rust (`ui_hud`); the health bar and the minigame HUD managers
-are still stock. `HP2_STOCK_MENUS=1` / `HP2_STOCK_HUD=1` restore the stock drawing. See
+stock `Startup.unr` menus. Missing data exits 1 with `hp2_import` guidance; from the
+macOS app bundle the game instead welcomes the player, lets them pick their game folder
+or archive (Finder chooser) and runs the bundled `hp2_import` (`Contents/MacOS`;
+`--profile retail-only --output <data dir>`; its CLI is a pinned contract) before
+continuing (`crates/hp2-game/src/first_run.rs`, `HP2_FIRST_RUN_SOURCE` for automated
+checks). Settings belong in the in-game Options pages. Every menu page and the message
+box are drawn and driven by `hp2-ui`: Sound/Video has a hand-written view (`ui_pages`);
+every other page is mirrored (`ui_mirror`: stock controls stay alive and in place, their
+own `Paint`/pointer handlers are swallowed by script pre-call hooks, actions run through
+the controls' own script functions). The HUD subtitle bar, letterbox and status counters
+are Rust (`ui_hud`); the health bar and the minigame HUD managers are still stock.
+`HP2_STOCK_MENUS=1` / `HP2_STOCK_HUD=1` restore the stock drawing. See
 [Docs/UI_REWRITE.md](Docs/UI_REWRITE.md) and
 [Docs/STOCK_MENU_LAYOUT.md](Docs/STOCK_MENU_LAYOUT.md). Do not restore the launcher
 window; preserve reusable boot/settings/import policy.

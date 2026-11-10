@@ -1283,6 +1283,20 @@ if(APPLE)
         LABELS "integration;data-none"
         FIXTURES_REQUIRED game_boot_unwind_source_order
     )
+    hp2_add_behavior_test(game_first_run_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/game_boot_unwind_contracts/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_GAME_TEST_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-game --bin=hp2_game_rust
+        first_run::tests::
+        -- --test-threads=1
+    )
+    set_tests_properties(game_first_run_contracts PROPERTIES
+        LABELS "fast;data-none"
+        RESOURCE_LOCK game_boot_unwind_cargo
+    )
     hp2_add_behavior_test(no_startup_launcher_contracts "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/NoStartupLauncherTests.py"
         "$<TARGET_FILE:hp2_game_rust>"

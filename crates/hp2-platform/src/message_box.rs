@@ -128,3 +128,37 @@ pub fn confirm_yes_no(message: &[u8]) -> bool {
     }
     pressed != 0
 }
+
+/// An information dialog with several buttons. `buttons[0]` is the default (Return) button and
+/// `buttons[cancel]` answers Escape. Returns the index of the pressed button, or `None` when the
+/// dialog could not be shown.
+#[cfg(feature = "sdl")]
+pub fn choose(title: &str, message: &str, buttons: &[&str], cancel: usize) -> Option<usize> {
+    use std::ffi::CString;
+    let title = CString::new(title).ok()?;
+    let message = CString::new(message).ok()?;
+    let texts = buttons.iter().map(|b| CString::new(*b)).collect::<Result<Vec<_>, _>>().ok()?;
+    let data_buttons: Vec<ffi::SdlMessageBoxButtonData> = texts
+        .iter()
+        .enumerate()
+        .map(|(i, text)| ffi::SdlMessageBoxButtonData {
+            flags: if i == 0 { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT } else { 0 } | if i == cancel { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT } else { 0 },
+            buttonid: i as std::os::raw::c_int,
+            text: text.as_ptr(),
+        })
+        .collect();
+    let data = ffi::SdlMessageBoxData {
+        flags: SDL_MESSAGEBOX_INFORMATION,
+        window: std::ptr::null_mut(),
+        title: title.as_ptr(),
+        message: message.as_ptr(),
+        numbuttons: data_buttons.len() as std::os::raw::c_int,
+        buttons: data_buttons.as_ptr(),
+        color_scheme: std::ptr::null(),
+    };
+    let mut pressed: std::os::raw::c_int = -1;
+    if unsafe { ffi::SDL_ShowMessageBox(&data, &mut pressed) } < 0 || pressed < 0 {
+        return None;
+    }
+    usize::try_from(pressed).ok()
+}

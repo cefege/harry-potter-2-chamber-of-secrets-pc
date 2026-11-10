@@ -32,20 +32,11 @@ sounds, textures, or other copyrighted data. You import your installed copy once
 
 2. Drag **HarryPotter2** into **Applications**. If macOS blocks it, open
    **System Settings → Privacy & Security** and choose **Open Anyway**.
-3. **Import your game once.** Open Terminal and run (use the folder that contains `Maps`,
-   `System` and `Textures`):
-
-   ```sh
-   /Applications/HarryPotter2.app/Contents/MacOS/hp2_import \
-     --retail-root "/path/to/your game folder" \
-     --profile retail-only \
-     --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail"
-   ```
-
-   A `.zip`, `.tar.*` or `.7z` of that folder works too: use `--archive "/path/to/file.zip"`
-   instead of `--retail-root`. The game finds the data in that `--output` folder. If you open
-   the game before importing, it shows this command with your paths filled in.
-4. Open **HarryPotter2** and play. Settings are in the game's own Options pages.
+3. Open **HarryPotter2**. The first time, it welcomes you and asks for your copy of the game:
+   choose the folder where the original PC game is installed (the one containing `Maps`,
+   `System` and `Textures`), or a `.zip`/`.7z`/`.tar` of it. It is copied once into
+   `~/Library/Application Support/Harry Potter 2/Data/Retail` and the game starts.
+4. Play. Settings are in the game's own Options pages.
 
 ## Building from source
 
@@ -65,8 +56,10 @@ presets exist but were not re-verified for it. The older browser build lives on 
 
 ## Troubleshooting
 
-- **The game says to import your game:** run the `hp2_import` command above with the folder that
-  contains `Maps`, `System` and `Textures` (not the CD drive or the installer).
+- **It says the folder doesn't look like the game:** choose the folder where the game is
+  installed (it contains `Maps`, `System` and `Textures`), not the CD drive or the installer.
+- **Command line:** the importer is also available as
+  `/Applications/HarryPotter2.app/Contents/MacOS/hp2_import --retail-root DIR --profile retail-only --output "$HOME/Library/Application Support/Harry Potter 2/Data/Retail"`.
 - **Where are saves?** `~/Library/Application Support/Harry Potter 2/User/Save`.
 - **Need the original look?** `HP2_STOCK_MENUS=1` and `HP2_STOCK_HUD=1` bring back the original
   menu and HUD drawing; the Advanced options can turn each image-quality feature off.

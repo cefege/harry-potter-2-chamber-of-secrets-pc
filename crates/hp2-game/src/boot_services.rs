@@ -254,18 +254,25 @@ impl BootHost {
 
     fn bootstrap_paths(&mut self, out: &mut Hp2LauncherBootValue) -> RuntimeResult<()> {
         let args = self.args.iter().map(|s| s.as_bytes()).collect::<Vec<_>>();
-        let mut installed = None;
-        let mut failure = None;
-        let outcome = hp2_bootstrap_paths::bootstrap_paths::run(0, b"", b"", &args, |system, user| {
-            match bootstrap_root_paths(system, user) {
-                Ok(paths) => { installed = Some(paths); 1 }
-                Err(error) => { failure = Some(error); -1 }
-            }
-        });
-        if let Some(error) = failure { return Err(error); }
-        if !outcome.success && !args.iter().any(|a| a.to_ascii_lowercase().starts_with(b"-datadir")) {
-            show_first_run_help();
+        let attempt = |args: &[&[u8]]| {
+            let mut installed = None;
+            let mut failure = None;
+            let outcome = hp2_bootstrap_paths::bootstrap_paths::run(0, b"", b"", args, |system, user| {
+                match bootstrap_root_paths(system, user) {
+                    Ok(paths) => { installed = Some(paths); 1 }
+                    Err(error) => { failure = Some(error); -1 }
+                }
+            });
+            (outcome, installed, failure)
+        };
+        let (mut outcome, mut installed, mut failure) = attempt(&args);
+        // First run from the app: welcome the player and import their game, then try again.
+        if failure.is_none() && !outcome.success && !args.iter().any(|a| a.to_ascii_lowercase().starts_with(b"-datadir"))
+            && crate::first_run::bundle_dir().is_some() && crate::first_run::run()
+        {
+            (outcome, installed, failure) = attempt(&args);
         }
+        if let Some(error) = failure { return Err(error); }
         out.integer = i32::from(outcome.success);
         if outcome.success {
             let (data, user) = installed.ok_or_else(|| RuntimeError::new("bootstrap path installer did not publish roots"))?;
@@ -759,25 +766,4 @@ unsafe extern "C" fn bootstrap_unix_fatal(
     _failure: hp2_core::unix_text::Hp2UnixTextFailure,
 ) -> i32 {
     1
-}
-
-/// Without the launcher, a player who opens the app before importing their game sees nothing
-/// (the reason goes to stderr). From the macOS app bundle, explain the one import command.
-fn show_first_run_help() {
-    let Ok(exe) = std::env::current_exe() else { return };
-    let Some(dir) = exe.parent() else { return };
-    if !dir.to_string_lossy().contains(".app/Contents/MacOS") {
-        return;
-    }
-    let importer = dir.join("hp2_import");
-    let output = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Library/Application Support/Harry Potter 2/Data/Retail");
-    let message = format!(
-        "This game needs your own copy of Harry Potter and the Chamber of Secrets (PC).\n\n\
-         Open Terminal and run:\n\n\"{}\" --retail-root \"/path/to/your game folder\" --profile retail-only --output \"{}\"\n\n\
-         The game folder is the one containing Maps, System and Textures (for a .zip or .7z of it, \
-         use --archive instead of --retail-root). Then open the game again.",
-        importer.display(),
-        output.display()
-    );
-    hp2_platform::message_box::show_simple_error(b"Import your game first", message.as_bytes());
 }
