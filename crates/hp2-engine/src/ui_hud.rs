@@ -10,6 +10,9 @@
 //!   height per *rendered frame* (0.17 s at 144 fps, 0.8 s at 30 fps); it now slides at the
 //!   30-fps speed whatever the frame rate.
 //!
+//! * `StatusItem.DrawItem` / `DrawCount`: every status counter (beans, potions, keys, cards...)
+//!   that does not draw itself; counts get a contrasting shadow.
+//!
 //! `HP2_STOCK_HUD=1` restores the stock drawing.
 use std::{cell::RefCell, collections::HashMap, ffi::c_void, ptr};
 
@@ -50,6 +53,8 @@ unsafe fn int_of(a: CoreAccess<'_>, o: *mut UObject, name: &str) -> RuntimeResul
 /// A HUD canvas: draws in pixels with the canvas' own natives.
 struct CanvasTarget {
     canvas: *mut UObject,
+    /// Render style for tiles; `None` keeps the canvas' current style (as `DrawIcon` does).
+    tile_style: Option<u8>,
     /// Font slots: 0 big, 1 medium, 2 small, 3 tiny (the console's localized fonts).
     fonts: [*mut UObject; 4],
 }
@@ -89,7 +94,9 @@ impl CanvasTarget {
     }
     unsafe fn tile(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect) -> RuntimeResult<()> {
         unsafe {
-            self.set_style(a, 1)?;
+            if let Some(style) = self.tile_style {
+                self.set_style(a, style)?;
+            }
             self.set_pos(a, dest.x, dest.y)?;
             crate::canvas_owner::native_draw_tile(a, self.canvas.cast(), tex.cast(), dest.w, dest.h, src.x, src.y, src.w, src.h)?;
         }
@@ -220,7 +227,7 @@ unsafe fn draw_border(a: CoreAccess<'_>, manager: *mut UObject, canvas: *mut UOb
     let harry = unsafe { object(a, level, "PlayerHarryActor")? };
     let captured = live(a, harry) && unsafe { read_boolean(a, harry, "bIsCaptured") }.unwrap_or(false);
     let border = unsafe { object(a, manager, "textureBorder")? };
-    let target = CanvasTarget { canvas, fonts: [ptr::null_mut(); 4] };
+    let target = CanvasTarget { canvas, tile_style: Some(1), fonts: [ptr::null_mut(); 4] };
     let mut rects = vec![Rect::new(0., h - height, w, height)];
     if captured {
         rects.push(Rect::new(0., 0., w, height));
@@ -246,7 +253,9 @@ unsafe fn draw_wrapped(a: CoreAccess<'_>, target: &CanvasTarget, text: &str, x0:
     if text.trim().is_empty() || height <= 0. {
         return Ok(());
     }
-    let margin = x0.max(w * 0.06).max(16.);
+    // Like the stock routine, lines are centred in `0..w - x0`.
+    let band = (w - x0).max(1.);
+    let margin = (w * 0.04).max(16.);
     let mut chosen = None;
     for &font in fonts {
         let mut error = None;
@@ -257,7 +266,7 @@ unsafe fn draw_wrapped(a: CoreAccess<'_>, target: &CanvasTarget, text: &str, x0:
                 0.
             }
         };
-        let lines = wrap(text, w - 2. * margin, &mut measure);
+        let lines = wrap(text, band - 2. * margin, &mut measure);
         if let Some(e) = error {
             return Err(e);
         }
@@ -270,15 +279,16 @@ unsafe fn draw_wrapped(a: CoreAccess<'_>, target: &CanvasTarget, text: &str, x0:
     }
     let Some((font, lines, line_h)) = chosen else { return Ok(()) };
     let block_h = line_h * lines.len() as f32;
-    let y0 = if lines.len() <= 3 && block_h <= height { top + (height - block_h) / 2. } else { top + 1. };
+    // Subtitle-sized bands are centred vertically; larger areas start at the top, as before.
+    let y0 = if height <= 4. * line_h && block_h <= height { top + (height - block_h) / 2. } else { top };
     // Plain data, so the view can be rebuilt (the Ui builds once at creation and again on resize).
     let mut rows: Vec<(String, Color, f32, f32)> = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let y = y0 + line_h * i as f32;
-        rows.push((line.clone(), SUBTITLE_SHADOW, margin + 1.5, y + 1.5));
-        rows.push((line.clone(), color, margin, y));
+        rows.push((line.clone(), SUBTITLE_SHADOW, 1.5, y + 1.5));
+        rows.push((line.clone(), color, 0., y));
     }
-    let width = w - 2. * margin;
+    let width = band;
     let metrics = METRICS.with(Clone::clone);
     let view = move || {
         col().children(rows.iter().map(|(text, color, x, y)| label(text).font(font).color(*color).text_align(TextAlign::Center).at(*x, *y).width(Size::Px(width)).height(Size::Px(line_h))))
@@ -314,7 +324,7 @@ unsafe fn draw_cut_style_text(a: CoreAccess<'_>, hud: *mut UObject, function: *m
     let color = unsafe { params.add(at("colorText", "Core.StructProperty", 4)?).cast::<[u8; 4]>().read_unaligned() };
     let given = unsafe { params.add(at("fontText", "Core.ObjectProperty", size_of::<*mut UObject>())?).cast::<*mut UObject>().read_unaligned() };
     let owner = unsafe { object(a, hud, "Owner")? };
-    let mut target = CanvasTarget { canvas, fonts: unsafe { player_fonts(a, owner)? } };
+    let mut target = CanvasTarget { canvas, tile_style: Some(1), fonts: unsafe { player_fonts(a, owner)? } };
     // A caller-chosen font is tried first; the stock fallbacks follow (medium, small, tiny).
     let mut fonts = vec![Font::Slot(1), Font::Slot(2), Font::Slot(3)];
     if live(a, given) {
@@ -322,6 +332,53 @@ unsafe fn draw_cut_style_text(a: CoreAccess<'_>, hud: *mut UObject, function: *m
         fonts.insert(0, Font::Slot(0));
     }
     unsafe { draw_wrapped(a, &target, &text, x, y, height, Color(color[0], color[1], color[2], 255), &fonts) }
+}
+
+/// `StatusItem.DrawItem(canvas, nCurrX, nCurrY, fScaleFactor)`: the icon, then the count.
+unsafe fn draw_status_item(a: CoreAccess<'_>, item: *mut UObject, function: *mut UFunction, params: *const u8, size: usize, canvas: *mut UObject, with_icon: bool) -> RuntimeResult<()> {
+    let expected = usize::from(unsafe { (*function).parms_size });
+    if params.is_null() || size < expected {
+        return Err(RuntimeError::new("StatusItem frame"));
+    }
+    let at = |name: &str, kind: &str| unsafe { field(a, function.cast(), name, kind, 4, expected, true) };
+    let x = unsafe { params.add(at("nCurrX", "Core.IntProperty")?).cast::<i32>().read_unaligned() } as f32;
+    let y = unsafe { params.add(at("nCurrY", "Core.IntProperty")?).cast::<i32>().read_unaligned() } as f32;
+    let scale = unsafe { params.add(at("fScaleFactor", "Core.FloatProperty")?).cast::<f32>().read_unaligned() };
+    let target = CanvasTarget { canvas, tile_style: None, fonts: [ptr::null_mut(); 4] };
+    if with_icon {
+        let icon = unsafe { object(a, item, "textureHudIcon")? };
+        if live(a, icon) {
+            let (w, h) = unsafe { (int_of(a, icon, "USize")? as f32, int_of(a, icon, "VSize")? as f32) };
+            unsafe { target.tile(a, icon, Rect::new(x, y, w * scale, h * scale), Rect::new(0., 0., w, h))? };
+        }
+        if !unsafe { read_boolean(a, item, "bDisplayCount")? } {
+            return Ok(());
+        }
+    }
+    // The count, centred on the icon's count anchor, with a shadow for legibility.
+    let mut text = unsafe { int_of(a, item, "nCount")? }.to_string();
+    if unsafe { read_boolean(a, item, "bDisplayMaxCount")? } {
+        text = format!("{text}/{}", unsafe { int_of(a, item, "nMaxCount")? });
+    }
+    let mut color = [0_u8; 4];
+    unsafe { crate::ui_vm::invoke(a, item, "GetCountColor", &[], &[], (&raw mut color).cast())? };
+    let mut font: *mut UObject = ptr::null_mut();
+    unsafe { crate::ui_vm::invoke(a, item, "GetCountFont", &[("canvas", crate::ui_vm::V::Obj(canvas))], &[], (&raw mut font).cast())? };
+    if !live(a, font) {
+        return Err(RuntimeError::new("StatusItem count font"));
+    }
+    let target = CanvasTarget { canvas, tile_style: None, fonts: [font; 4] };
+    let (tw, th) = unsafe { target.text_size(a, &text, Font::Slot(0))? };
+    let cx = x + unsafe { int_of(a, item, "nCountMiddleX")? } as f32 * scale - tw / 2.;
+    let cy = y + unsafe { int_of(a, item, "nCountMiddleY")? } as f32 * scale - th / 2.;
+    // A light count gets a dark shadow and a dark count a light one.
+    let luminance = u32::from(color[0]) * 3 + u32::from(color[1]) * 6 + u32::from(color[2]);
+    let shadow = if luminance > 1280 { [0, 0, 0, 255] } else { [255, 255, 255, 160] };
+    unsafe {
+        target.text_at(a, cx + 1., cy + 1., &text, Font::Slot(0), shadow)?;
+        target.text_at(a, cx, cy, &text, Font::Slot(0), [color[0], color[1], color[2], 255])?;
+    }
+    Ok(())
 }
 
 /// Frame-rate independent replacement of the state functions `SlideIn/SlideOut.SetCurrBorderHeight`.
@@ -371,6 +428,12 @@ unsafe fn callback(a: CoreAccess<'_>, receiver: *mut UObject, function: *mut UFu
                 }
                 drawn
             }
+            "DrawItem" | "DrawCount" => {
+                let saved = unsafe { CanvasState::save(a, canvas)? };
+                let drawn = unsafe { draw_status_item(a, receiver, function, params, size, canvas, name == "DrawItem") };
+                unsafe { saved.restore(a)? };
+                drawn
+            }
             "SetCurrBorderHeight" => {
                 let state = name_of(a, unsafe { object(a, function.cast(), "Outer") }.unwrap_or(ptr::null_mut()));
                 unsafe { slide(a, receiver, canvas, state == "SlideIn") }
@@ -404,6 +467,7 @@ pub(crate) unsafe fn install(a: CoreAccess<'_>) -> RuntimeResult<Option<impl Dro
     for (owner, class, names) in [
         ("HGame.CutSceneManager", "Core.Class", &["DrawBorder"][..]),
         ("HGame.HPHud", "Core.Class", &["DrawCutStyleText"][..]),
+        ("HGame.StatusItem", "Core.Class", &["DrawItem", "DrawCount"][..]),
         ("HGame.CutSceneManager.SlideIn", "Core.State", &["SetCurrBorderHeight"][..]),
         ("HGame.CutSceneManager.SlideOut", "Core.State", &["SetCurrBorderHeight"][..]),
     ] {
