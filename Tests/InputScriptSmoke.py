@@ -297,6 +297,10 @@ def prepare_user_home(
     (user_dir / "Game.ini").write_text(
         (system / "Default.ini").read_text(encoding="utf-8"), encoding="utf-8",
     )
+    replacement = os.environ.get("HP2_SMOKE_GAME_INI")
+    if replacement:
+        # Opt-in for layout/visual investigations: run with a player's own system ini.
+        (user_dir / "Game.ini").write_text(Path(replacement).read_text(encoding="utf-8"), encoding="utf-8")
     defuser = (system / "DefUser.ini").read_text(encoding="utf-8")
     user_ini = apply_bindings(inject_probe_binding(defuser), bindings)
     (user_dir / "User.ini").write_text(user_ini, encoding="utf-8")
@@ -310,7 +314,7 @@ def build_launch_command(executable: Path, data_root: Path, ticks: int) -> list[
         f"-datadir={data_root}",
         f"-REPLAY={REPLAY_STEM}",
         "-wgpu",
-        "-NOFRONTEND",
+        *([] if os.environ.get("HP2_SMOKE_FRONTEND") == "1" else ["-NOFRONTEND"]),
         "-window",
         # Verification requires the real loopback backend; disabling audio
         # would correctly fail its tick contract before any replay input.

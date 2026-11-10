@@ -120,6 +120,7 @@ mod stock_graphics_settings;
 mod stock_graphics_gpu;
 mod stock_graphics_gpu_backend;
 mod stock_graphics_menu;
+mod stock_input_menu;
 mod stock_graphics_dispatch;
 #[cfg(feature = "sdl")]
 mod stock_display_transition;

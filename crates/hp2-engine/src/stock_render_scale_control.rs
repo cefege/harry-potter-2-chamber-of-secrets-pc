@@ -214,7 +214,7 @@ unsafe fn create(a: CoreAccess<'_>, page: *mut UObject, state: &mut State) -> Ru
     let x = arg("X", "Core.FloatProperty", 4)?; let y = arg("Y", "Core.FloatProperty", 4)?; let w = arg("W", "Core.FloatProperty", 4)?; let h = arg("H", "Core.FloatProperty", 4)?;
     arg("ReturnValue", "Core.ObjectProperty", size_of::<*mut c_void>())?;
     let mut frame = vec![0u64; (size + 7) / 8]; let p = frame.as_mut_ptr().cast::<u8>();
-    unsafe { p.add(cl).cast::<*mut UClass>().write_unaligned(class); for (off, v) in [(x, 40f32), (y, 385f32), (w, 315f32), (h, 1f32)] { p.add(off).cast::<f32>().write_unaligned(v); } }
+    unsafe { p.add(cl).cast::<*mut UClass>().write_unaligned(class); for (off, v) in [(x, 30f32), (y, 220f32), (w, 280f32), (h, 1f32)] { p.add(off).cast::<f32>().write_unaligned(v); } }
     let mut slider: *mut UObject = ptr::null_mut();
     unsafe { a.execute_event(page, f, p.cast(), (&raw mut slider).cast())?; }
     if !live(a, slider) || !unsafe { hp2_core::object_model::is_a(slider.cast(), class.cast()) } { return Err(RuntimeError::new("Render scale CreateControl failed")); }

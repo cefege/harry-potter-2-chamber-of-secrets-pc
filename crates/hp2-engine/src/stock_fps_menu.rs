@@ -344,7 +344,7 @@ unsafe fn callback_inner(access: CoreAccess<'_>, page: *mut UObject, function: *
         let p = frame.as_mut_ptr().cast::<u8>();
         unsafe {
             ptr::write_unaligned(p.add(b.class_arg).cast::<*mut UClass>(), b.checkbox);
-            for (offset, value) in [(b.x, 380.0f32), (b.y, 335.0), (b.w, 180.0), (b.h, 1.0)] { ptr::write_unaligned(p.add(offset).cast::<f32>(), value); }
+            for (offset, value) in [(b.x, 473.0f32), (b.y, 246.0), (b.w, 133.0), (b.h, 1.0)] { ptr::write_unaligned(p.add(offset).cast::<f32>(), value); }
             ptr::write_unaligned(p.add(b.owner).cast::<*mut UObject>(), ptr::null_mut());
         }
         let mut control: *mut UObject = ptr::null_mut();

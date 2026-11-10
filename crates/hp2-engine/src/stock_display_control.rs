@@ -151,13 +151,13 @@ unsafe fn create(access: CoreAccess<'_>, page: *mut UObject, state: &mut State) 
     let cl = a("ControlClass", "Core.ClassProperty", size_of::<*mut c_void>())?;
     let x = a("X", "Core.FloatProperty", 4)?; let y = a("Y", "Core.FloatProperty", 4)?; let w = a("W", "Core.FloatProperty", 4)?; let h = a("H", "Core.FloatProperty", 4)?;
     a("ReturnValue", "Core.ObjectProperty", size_of::<*mut c_void>())?;
-    unsafe { p.add(cl).cast::<*mut UClass>().write_unaligned(class); for (off, v) in [(x, 340f32), (y, 300f32), (w, 280f32), (h, 24f32)] { p.add(off).cast::<f32>().write_unaligned(v); } }
+    unsafe { p.add(cl).cast::<*mut UClass>().write_unaligned(class); for (off, v) in [(x, 326f32), (y, 214f32), (w, 280f32), (h, 24f32)] { p.add(off).cast::<f32>().write_unaligned(v); } }
     let mut combo: *mut UObject = ptr::null_mut();
     unsafe { access.execute_event(page, f, p.cast(), (&raw mut combo).cast())?; }
     if !unsafe { is_a(access, combo, class) } { return Err(RuntimeError::new("Display menu CreateControl failed")); }
     // Do not expose an incomplete control if any script call fails.
     unsafe { write_bool(access, combo, "bAcceptsFocus", false)?; write_bool(access, combo, "bWindowVisible", false)?; }
-    unsafe { call(access, combo, "SetText", &[("NewText", Arg::Str("Display mode"))], ptr::null_mut())?; }
+    unsafe { call(access, combo, "SetText", &[("NewText", Arg::Str("Display"))], ptr::null_mut())?; }
     unsafe { call(access, combo, "SetEditable", &[("bNewCanEdit", Arg::Bool(false))], ptr::null_mut())?; }
     let source = unsafe { obj_prop(access, page, "ResolutionCombo")? };
     if unsafe { is_a(access, source, class) } {
@@ -177,7 +177,9 @@ unsafe fn create(access: CoreAccess<'_>, page: *mut UObject, state: &mut State) 
     }
     for (_, text) in CHOICES { unsafe { call(access, combo, "AddItem", &[("S", Arg::Str(text))], ptr::null_mut())?; } }
     unsafe {
-        property(access, combo, "EditBoxWidth", "Core.FloatProperty", 4)?.cast::<f32>().write_unaligned(170.0);
+        property(access, combo, "EditBoxWidth", "Core.FloatProperty", 4)?.cast::<f32>().write_unaligned(180.0);
+        // Retail combos are TA_Right, which misplaces their edit box, button and list; see stock_graphics_menu::align_left.
+        property(access, combo, "Align", "Core.ByteProperty", 1)?.write_unaligned(0);
         // This control is created after the stock page's Created callback. Its
         // edit child can retain the constructor's full-width geometry instead
         // of the stock controls' laid-out geometry. Match the displayed edit
@@ -186,7 +188,7 @@ unsafe fn create(access: CoreAccess<'_>, page: *mut UObject, state: &mut State) 
         if !live(access, edit) || !hp2_core::object_model::is_a(edit.cast(), access.native_class("UWindow.UWindowEditBox")?.cast()) {
             return Err(RuntimeError::new("Display menu edit box unavailable"));
         }
-        for (field, value) in [("WinLeft", 110.0f32), ("WinTop", 0.0), ("WinWidth", 170.0), ("WinHeight", 24.0)] {
+        for (field, value) in [("WinLeft", 100.0f32), ("WinTop", 0.0), ("WinWidth", 180.0), ("WinHeight", 24.0)] {
             property(access, edit, field, "Core.FloatProperty", 4)?.cast::<f32>().write_unaligned(value);
         }
         set_edit(access, combo, label(mode))?;

@@ -115,6 +115,10 @@ const USER_KEYS: &[ConfigKey] = &[
     },
     ConfigKey {
         section: "Engine.PlayerPawn",
+        key: "bMaxMouseSmoothing",
+    },
+    ConfigKey {
+        section: "Engine.PlayerPawn",
         key: "bInvertMouse",
     },
     ConfigKey {

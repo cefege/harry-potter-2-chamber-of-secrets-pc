@@ -148,6 +148,21 @@ pub unsafe fn tick(access: CoreAccess<'_>, engine: *mut UGameEngine, delta: f32)
             None
         }
     };
+    let _controls_page = match unsafe { crate::stock_input_menu::install(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+                let _ = access.emit_log(category, &format!("Controls page observer: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
+    // Mirror the slider into the Controls page's number box before input dispatch.
+    if let Err(error) = unsafe { crate::stock_input_menu::tick(access) } {
+        if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+            let _ = access.emit_log(category, &format!("Controls page tick: {error}").chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
     // Hide unsupported or orphaned graphics controls before input dispatch.
     let graphics_result = unsafe { crate::stock_graphics_menu::tick(access) };
     if let Err(error) = &graphics_result {

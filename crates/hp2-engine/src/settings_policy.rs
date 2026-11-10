@@ -89,6 +89,7 @@ pub struct SettingsPatch {
     pub sound_volume: Option<f64>,
     pub music_volume: Option<f64>,
     pub mouse_sensitivity: Option<f64>,
+    pub mouse_smoothing: Option<bool>,
     pub invert_mouse: Option<bool>,
     pub control_mode: Option<ControlMode>,
     pub difficulty: Option<Difficulty>,
@@ -381,6 +382,9 @@ impl SettingsPatch {
         };
         if let Some(v) = self.mouse_sensitivity {
             add_user("Engine.PlayerPawn", "MouseSensitivity", v.to_string());
+        }
+        if let Some(v) = self.mouse_smoothing {
+            add_user("Engine.PlayerPawn", "bMaxMouseSmoothing", bool_text(v).into());
         }
         if let Some(v) = self.invert_mouse {
             add_user("Engine.PlayerPawn", "bInvertMouse", bool_text(v).into());
