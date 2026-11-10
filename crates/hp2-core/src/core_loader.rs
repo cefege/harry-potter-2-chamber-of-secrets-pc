@@ -315,20 +315,70 @@ impl LoadObjectsOps for DirectLoadObjects<'_> {
         unsafe { (*self.0.loader_state()).current_loaded = object as *mut UObject; }
     }
     fn sort_loaded_from(&self, index: usize) -> RuntimeResult<()> {
+        use std::cell::Cell;
         let state = self.0.loader_state();
         let count = unsafe { (*state).loaded_objects.len() } - index;
         // Sorting only reads canonical linker keys; no hook can move this buffer.
         let objects = unsafe { (*state).loaded_objects.as_mut_ptr().add(index) };
-        crate::sort::quicksort(
+        // `compare_loaded_with` chases object -> linker -> export table for every comparison and
+        // the sort makes ~15 comparisons per object, repeatedly while preloading grows the list
+        // (about 30% of a map load). Read each object's keys once, sort the keys together with
+        // their objects using the same quicksort and the same comparison decisions, then write
+        // the objects back. Nothing can change an object's linker or export row mid-sort.
+        #[derive(Clone, Copy)]
+        struct Entry { object: *mut UObject, linker: usize, linker_key: i64, offset: Option<i32> }
+        let linker_key = |linker: usize| -> RuntimeResult<i64> {
+            if linker == 0 { Ok(-1) } else { package_flow::LoadObjectsOps::object_index(self, linker).map(i64::from) }
+        };
+        let mut built = Vec::with_capacity(count);
+        for position in 0..count {
+            let object = unsafe { *objects.add(position) };
+            let address = object as usize;
+            let linker = package_flow::LoadObjectsOps::linker(self, address)?;
+            let offset = package_flow::LoadObjectsOps::linker_index(self, address)
+                .and_then(|row| package_flow::LoadObjectsOps::serial_offset(self, linker, row))
+                .ok();
+            built.push(Cell::new(Entry { object, linker, linker_key: linker_key(linker)?, offset }));
+        }
+        let entries = built.as_slice();
+        let current = package_flow::LoadObjectsOps::current(self);
+        let current_linker = package_flow::LoadObjectsOps::linker(self, current)?;
+        let current_offset = std::cell::OnceCell::new();
+        let result = crate::sort::quicksort(
             count as isize,
             |valid| if valid { Ok(()) } else { Err(RuntimeError::new("Invalid loaded object sort range")) },
-            |a, b| package_flow::compare_loaded_with(
-                self,
-                unsafe { *objects.add(a as usize) } as usize,
-                unsafe { *objects.add(b as usize) } as usize,
-            ),
-            |a, b| unsafe { ptr::swap(objects.add(a as usize), objects.add(b as usize)); },
-        )
+            |a, b| {
+                let (ka, kb) = (entries[a as usize].get(), entries[b as usize].get());
+                if ka.linker != kb.linker {
+                    if ka.linker == current_linker { return Ok(-1); }
+                    if kb.linker == current_linker { return Ok(1); }
+                    return Ok(if ka.linker_key > kb.linker_key { 1 } else { -1 });
+                }
+                // An unreadable export row is reported by the original comparison.
+                let (Some(ao), Some(bo)) = (ka.offset, kb.offset) else {
+                    return package_flow::compare_loaded_with(self, ka.object as usize, kb.object as usize);
+                };
+                if ka.linker == current_linker {
+                    let co = *current_offset.get_or_init(|| {
+                        package_flow::LoadObjectsOps::linker_index(self, current)
+                            .and_then(|row| package_flow::LoadObjectsOps::serial_offset(self, current_linker, row))
+                            .ok()
+                    });
+                    let Some(co) = co else {
+                        return package_flow::compare_loaded_with(self, ka.object as usize, kb.object as usize);
+                    };
+                    if ao > co && bo < co { return Ok(-1); }
+                    if ao < co && bo > co { return Ok(1); }
+                }
+                Ok(ao.wrapping_sub(bo))
+            },
+            |a, b| entries[a as usize].swap(&entries[b as usize]),
+        );
+        // Write back even after an error, exactly as the in-place sort leaves a partial order.
+        for (position, entry) in entries.iter().enumerate() {
+            unsafe { *objects.add(position) = entry.get().object; }
+        }
+        result
     }
     fn needs_load(&self, object: usize) -> RuntimeResult<bool> {
         Ok(unsafe { (*(object as *mut UObject)).object_flags }

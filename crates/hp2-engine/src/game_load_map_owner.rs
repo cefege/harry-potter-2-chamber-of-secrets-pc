@@ -498,7 +498,7 @@ impl LoadMapOps for CoreOps<'_> {
                     let current = hp2_core::unix_clock::seconds();
                     let previous = self.context.previous_tick.get()
                         .ok_or_else(|| RuntimeError::new("LoadMap fade-time scope is absent"))?;
-                    (*actor).flash_fog.w = game_load_map::fade_fog(current, previous, (*console).fadeout_time, (*actor).flash_fog.w);
+                    (*actor).flash_fog.w = game_load_map::fade_fog(current, previous, (*console).fadeout_time * load_fade_scale(), (*actor).flash_fog.w);
                     self.context.previous_tick.set(Some(current));
                     Ok(0)
                 }
@@ -1431,10 +1431,12 @@ impl LoadMapOps for CoreOpsRef<'_, '_> {
     type Error = RuntimeError;
 
     fn call(&self, op: Op, a: usize, b: usize) -> RuntimeResult<usize> {
+        let _timer = load_profile::start(0, op as u32);
         self.0.call(op, a, b)
     }
 
     fn scope(&self, entry: u32, arg: usize) -> RuntimeResult<usize> {
+        let _timer = load_profile::start(1, entry);
         self.0.scope(entry, arg)
     }
 
@@ -1480,7 +1482,10 @@ pub unsafe fn load_map(
             catch_error: Cell::new(ptr::null_mut()), filename: Cell::new(ptr::null_mut()),
         },
     };
-    game_load_map::run_with(ops, 0, 0)?;
+    let load_started = std::time::Instant::now();
+    let loaded = game_load_map::run_with(ops, 0, 0);
+    load_profile::report(access, load_started.elapsed());
+    loaded?;
     // The source API returns GLevel after policy success, not the policy's auxiliary value.
     Ok(unsafe { (*engine).g_level.cast() })
 }
@@ -1633,4 +1638,62 @@ mod render_host_contracts {
         unsafe { access.destroy_owned_fstring(&mut state) }.unwrap();
         owner.shutdown().unwrap();
     }
+}
+
+/// Opt-in (`HP2_FRAME_TIMING=1`) per-operation timing of one `LoadMap`: inclusive wall time and
+/// call counts of every policy operation (kind 0, `Op` number) and scope (kind 1, entry number).
+mod load_profile {
+    use std::{cell::RefCell, collections::HashMap, time::{Duration, Instant}};
+
+    thread_local! {
+        static ENABLED: bool = std::env::var_os("HP2_FRAME_TIMING").as_deref() == Some(std::ffi::OsStr::new("1"));
+        static TOTALS: RefCell<HashMap<(u32, u32), (u32, Duration)>> = RefCell::new(HashMap::new());
+    }
+
+    pub(super) struct Timer(Option<(u32, u32, Instant)>);
+
+    pub(super) fn start(kind: u32, id: u32) -> Timer {
+        Timer(ENABLED.with(|on| *on).then(|| (kind, id, Instant::now())))
+    }
+
+    impl Drop for Timer {
+        fn drop(&mut self) {
+            if let Some((kind, id, started)) = self.0.take() {
+                TOTALS.with(|totals| {
+                    let mut totals = totals.borrow_mut();
+                    let entry = totals.entry((kind, id)).or_default();
+                    entry.0 += 1;
+                    entry.1 += started.elapsed();
+                });
+            }
+        }
+    }
+
+    pub(super) fn report(access: hp2_core::core_access::CoreAccess<'_>, total: Duration) {
+        if !ENABLED.with(|on| *on) { return; }
+        let mut rows: Vec<_> = TOTALS.with(|totals| totals.borrow_mut().drain().collect());
+        rows.sort_by(|a, b| b.1.1.cmp(&a.1.1));
+        let Ok(category) = access.intern_str("Log", hp2_core::name_owner::FindName::Add) else { return };
+        let mut lines = vec![format!("<HP2_PERF> load_map total_ms={:.1}", total.as_secs_f64() * 1000.0)];
+        for ((kind, id), (calls, spent)) in rows.into_iter().take(14) {
+            lines.push(format!("<HP2_PERF> load_phase kind={kind} id={id} calls={calls} ms={:.1}", spent.as_secs_f64() * 1000.0));
+        }
+        for line in lines {
+            let _ = access.emit_log(category, &line.chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
+}
+
+/// The fade-out before a level is replaced is drawn frame by frame for `Console.FadeoutTime`
+/// seconds of wall time (about half a second in retail), which was most of a saved-game load.
+/// It now runs this fraction of that time. `HP2_LOAD_FADE_SCALE=1` restores the original
+/// duration; `0.05` is almost a cut.
+fn load_fade_scale() -> f32 {
+    thread_local! {
+        static SCALE: f32 = std::env::var("HP2_LOAD_FADE_SCALE").ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .unwrap_or(0.25);
+    }
+    SCALE.with(|scale| *scale)
 }

@@ -6,7 +6,7 @@ HP2_SYNC_SAVE=1, then compares every file under the save directory. The only byt
 differ are the 16-byte random package GUID (offsets 36..51), which also differs between two
 blocking runs. Also requires the save to stall the game for far less than the blocking save.
 """
-import argparse, glob, os, re, subprocess, sys
+import argparse, glob, os, re, shutil, subprocess, sys
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +37,8 @@ def main():
     p.add_argument("--data-root", type=Path, required=True)
     p.add_argument("--artifact-dir", type=Path, required=True)
     a = p.parse_args()
+    # Stale home-* directories from an earlier run would be mixed into the comparison.
+    shutil.rmtree(a.artifact_dir, ignore_errors=True)
     a.artifact_dir.mkdir(parents=True, exist_ok=True)
     background, background_ms = run(a.engine_bin, a.data_root, a.artifact_dir / "background", False)
     blocking, blocking_ms = run(a.engine_bin, a.data_root, a.artifact_dir / "blocking", True)

@@ -212,6 +212,18 @@ impl OwnedClassRecord {
         Ok(unsafe { (*record).data.assume_init_read() })
     }
 
+    /// Reads only the record kind. `metadata` copies the whole `ClassData`, including every
+    /// class operation pointer, which showed up in save/load profiles via `record_kind`.
+    ///
+    /// # Safety
+    /// Same contract as [`Self::metadata`].
+    pub(crate) unsafe fn kind(record: *const Self) -> RuntimeResult<NativeRecordKind> {
+        if !unsafe { (*record).initialized } {
+            return Err(RuntimeError::new("Class metadata is not initialized"));
+        }
+        Ok(unsafe { (*(*record).data.as_ptr()).kind })
+    }
+
     /// # Safety
     /// The pointer is a live class record with an initialized metadata tail.
     pub(crate) unsafe fn replace_metadata(record: *mut Self, data: ClassData) {

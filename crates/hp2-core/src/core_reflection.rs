@@ -65,7 +65,11 @@ impl CoreAccess<'_> {
     /// The object and its class are live canonical records.
     pub(crate) unsafe fn record_kind(self, object: *mut UObject) -> RuntimeResult<NativeRecordKind> {
         let class = unsafe { ptr::addr_of!((*object).class).read() };
-        Ok(unsafe { self.class_metadata(class.cast())? }.kind)
+        if class.is_null() {
+            return Err(RuntimeError::new("Object has no class"));
+        }
+        // SAFETY: the caller supplies the complete canonical class allocation.
+        unsafe { OwnedClassRecord::kind(class.cast()) }
     }
 
     /// Finds by the existing name/outer hash; no allocation or callback occurs.

@@ -84,6 +84,48 @@ Also run: all 222 `fast` CTests (pass) and the 42-map retail sweep (42/42 clean)
 * Fat LTO + one codegen unit: 2-6% faster and 23% smaller, but it breaks the `native_free_*` audits
   (Apple `nm` cannot read the LLVM bitcode), so it is not enabled; see the note in `Cargo.toml`.
 
+## Change 4: save, load and level switching
+
+Measured with `Build/saveload_bench.py` (Adv1Willow retail map, replay `input_script_save_reload.txt`:
+F5 = `SAVEGAME 9`, F9 = `LOADGAME 9`; stall = worst `frame_ms` in the tick window; median of 3 runs,
+macOS arm64, wgpu, retail data copy). Frame-time logging is `HP2_FRAME_TIMING=1`, which now also
+prints a per-operation breakdown of every `LoadMap` (`<HP2_PERF> load_phase`).
+
+| Operation | Before | After |
+| --- | --- | --- |
+| Save game (game stall) | 336 ms | 18 ms |
+| Save game (blocking, `HP2_SYNC_SAVE=1`) | 336 ms | 263 ms |
+| Load saved game | 826 ms | 420 ms |
+| First map load at startup (`LoadMap`) | 390 ms | 293 ms |
+
+* **Background save.** `SAVEGAME` `fork`s. The child is a copy-on-write snapshot of the process and
+  runs the unchanged blocking `save_game_with` (no GPU, no progress screen, no logging, stdout and
+  stderr to /dev/null, `_exit`). The parent applies the live-state updates the blocking save made
+  after writing (brush tracker, destroyed-actor cleanup, mover positions, `LEVACT_NONE`, cache flush)
+  and returns. The next save, `LOADGAME`/`Browse`, `LoadMap`, the `RestartSounds`/cache-copy exec path
+  and shutdown first wait for the child (`finish_pending_save`); a child that fails or exceeds
+  30 s is replaced by a blocking save. `HP2_SYNC_SAVE=1` restores the blocking path.
+  Risks: forking a multithreaded process is only safe because the child touches no GPU/SDL state and
+  allocates; a lock held by another thread at fork time could hang the child (the timeout then
+  falls back). Stress runs (repeated saves 3 ticks apart, save followed by load 2 ticks later, on two
+  maps) passed with no stalls. `Tests/SaveAsyncEquivalence.py` (`save_async_equivalence`) proves the
+  slot files equal the blocking save's except the 16-byte random package GUID (also different between
+  two blocking runs) and that the stall is under half the blocking stall.
+* **Hashing.** `hp2_core::fast_hash` (FxHash-style) replaces SipHash in the save tables and class/
+  access maps; name comparison in the property archive no longer allocates. Blocking save 336 -> 263 ms.
+* **Load sort.** `sort_loaded_from` read three dependent pointers per comparison. Keys are now read once
+  per object and sorted with the same quicksort and the same decisions. Load/startup 390 -> 293 ms.
+  RNG traces on Entry, Grounds_hub, Adv1Willow and Quidditch are byte-identical to the build before it.
+* **Fade-out shortened (visible change).** Before a level is replaced, `LoadMap` draws a fade-out for
+  `Console.FadeoutTime` seconds of wall time (~0.5 s in retail), it is now 25% of
+  that (`HP2_LOAD_FADE_SCALE=1` restores the original; any value in (0, inf) is accepted).
+* **Cutscene skip.** Not a load operation: holding Space during a cutscene (debug mode only, `HPConsole`)
+  calls `SloMo(8.0)` and fast-forwards the cutscene threads, i.e. it runs game time at 8x. It is as fast
+  as the per-frame cost allows; the map-load speedups above apply when a cutscene ends in a level change.
+  Not changed.
+* Remaining load cost (Adv1Willow load, 420 ms): EndLoad ~140 ms (package preload), garbage collection
+  ~128 ms, fade ~125 ms.
+
 ## Game speed
 
 Normal play is real time: the loop uses the measured frame time, capped at 0.1 s per tick, times the
