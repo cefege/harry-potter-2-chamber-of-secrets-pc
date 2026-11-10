@@ -143,54 +143,87 @@ impl Surface {
 
     /// Draws a toolkit draw list. `metrics` must already know every drawn string.
     pub(crate) unsafe fn render(&self, a: CoreAccess<'_>, commands: &[DrawCmd], metrics: &HostMetrics) -> RuntimeResult<()> {
-        let mut clips: Vec<Rect> = Vec::new();
-        for command in commands {
-            match command {
-                DrawCmd::Rect { rect, color } => unsafe { self.fill(a, *rect, [color.0, color.1, color.2, color.3])? },
-                DrawCmd::Outline { rect, color } => {
-                    let c = [color.0, color.1, color.2, color.3];
-                    for edge in [Rect::new(rect.x, rect.y, rect.w, 1.), Rect::new(rect.x, rect.bottom() - 1., rect.w, 1.), Rect::new(rect.x, rect.y, 1., rect.h), Rect::new(rect.right() - 1., rect.y, 1., rect.h)] {
-                        unsafe { self.fill(a, edge, c)? };
-                    }
-                }
-                DrawCmd::Image { texture, rect, fit } => {
-                    let tex = unsafe { self.texture(a, &texture.0)? };
-                    unsafe { self.set_color(a, [255, 255, 255, 255])? };
-                    let size = unsafe { (i32_prop(a, tex, "USize") as f32, i32_prop(a, tex, "VSize") as f32) };
-                    // Destination rectangle and the texture region drawn into it.
-                    let (dest, src) = match fit {
-                        Fit::Native => (Rect::new(rect.x, rect.y, size.0, size.1), Rect::new(0., 0., size.0, size.1)),
-                        Fit::Stretch => (*rect, Rect::new(0., 0., size.0, size.1)),
-                        Fit::Region(u, v, w, h) => (*rect, Rect::new(*u, *v, *w, *h)),
-                    };
-                    let Some((dest, src)) = clip_image(dest, src, clips.last().copied()) else { continue };
-                    unsafe { invoke(a, self.page, "DrawStretchedTextureSegment", &[("C", V::Obj(self.canvas)), ("X", V::F(dest.x)), ("Y", V::F(dest.y)), ("W", V::F(dest.w)), ("H", V::F(dest.h)), ("tX", V::F(src.x)), ("tY", V::F(src.y)), ("tW", V::F(src.w)), ("tH", V::F(src.h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? };
-                }
-                DrawCmd::Text { rect, text, font, color, align } => {
-                    if text.is_empty() {
-                        continue;
-                    }
-                    let (tw, th) = metrics.text_size(text, *font);
-                    let x = match align {
-                        TextAlign::Left => rect.x,
-                        TextAlign::Center => rect.x + (rect.w - tw) / 2.,
-                        TextAlign::Right => rect.right() - tw,
-                    };
-                    let y = rect.y + (rect.h - th) / 2.;
-                    unsafe { self.use_font(a, *font, [color.0, color.1, color.2, color.3])? };
-                    unsafe { invoke(a, self.page, "ClipText", &[("C", V::Obj(self.canvas)), ("X", V::F(x)), ("Y", V::F(y)), ("S", V::S(text))], &[], ptr::null_mut())? };
-                }
-                DrawCmd::PushClip(rect) => {
-                    let next = clips.last().map_or(*rect, |outer| intersect(*outer, *rect));
-                    clips.push(next);
-                }
-                DrawCmd::PopClip => {
-                    clips.pop();
-                }
-            }
-        }
+        unsafe { render_commands(self, a, commands, metrics) }
+    }
+}
+
+/// What a toolkit draw list needs from a canvas. Implemented for UWindow pages (page units,
+/// drawn through the page's script helpers) and for the HUD canvas (pixels, drawn directly).
+pub(crate) trait DrawTarget {
+    unsafe fn fill(&self, a: CoreAccess<'_>, rect: Rect, color: [u8; 4]) -> RuntimeResult<()>;
+    unsafe fn texture_object(&self, a: CoreAccess<'_>, name: &str) -> RuntimeResult<*mut UObject>;
+    /// Draws texture region `src` into `dest`.
+    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect) -> RuntimeResult<()>;
+    /// Draws `text` with its top-left at `(x, y)`.
+    unsafe fn text_at(&self, a: CoreAccess<'_>, x: f32, y: f32, text: &str, font: Font, color: [u8; 4]) -> RuntimeResult<()>;
+}
+
+impl DrawTarget for Surface {
+    unsafe fn fill(&self, a: CoreAccess<'_>, rect: Rect, color: [u8; 4]) -> RuntimeResult<()> {
+        unsafe { Surface::fill(self, a, rect, color) }
+    }
+    unsafe fn texture_object(&self, a: CoreAccess<'_>, name: &str) -> RuntimeResult<*mut UObject> {
+        unsafe { self.texture(a, name) }
+    }
+    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect) -> RuntimeResult<()> {
+        unsafe { self.set_color(a, [255, 255, 255, 255])? };
+        unsafe { invoke(a, self.page, "DrawStretchedTextureSegment", &[("C", V::Obj(self.canvas)), ("X", V::F(dest.x)), ("Y", V::F(dest.y)), ("W", V::F(dest.w)), ("H", V::F(dest.h)), ("tX", V::F(src.x)), ("tY", V::F(src.y)), ("tW", V::F(src.w)), ("tH", V::F(src.h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? };
         Ok(())
     }
+    unsafe fn text_at(&self, a: CoreAccess<'_>, x: f32, y: f32, text: &str, font: Font, color: [u8; 4]) -> RuntimeResult<()> {
+        unsafe { self.use_font(a, font, color)? };
+        unsafe { invoke(a, self.page, "ClipText", &[("C", V::Obj(self.canvas)), ("X", V::F(x)), ("Y", V::F(y)), ("S", V::S(text))], &[], ptr::null_mut())? };
+        Ok(())
+    }
+}
+
+/// Replays a toolkit draw list on any [`DrawTarget`], applying the widget clip rectangles.
+pub(crate) unsafe fn render_commands<T: DrawTarget>(target: &T, a: CoreAccess<'_>, commands: &[DrawCmd], metrics: &HostMetrics) -> RuntimeResult<()> {
+    let mut clips: Vec<Rect> = Vec::new();
+    for command in commands {
+        match command {
+            DrawCmd::Rect { rect, color } => unsafe { target.fill(a, *rect, [color.0, color.1, color.2, color.3])? },
+            DrawCmd::Outline { rect, color } => {
+                let c = [color.0, color.1, color.2, color.3];
+                for edge in [Rect::new(rect.x, rect.y, rect.w, 1.), Rect::new(rect.x, rect.bottom() - 1., rect.w, 1.), Rect::new(rect.x, rect.y, 1., rect.h), Rect::new(rect.right() - 1., rect.y, 1., rect.h)] {
+                    unsafe { target.fill(a, edge, c)? };
+                }
+            }
+            DrawCmd::Image { texture, rect, fit } => {
+                let tex = unsafe { target.texture_object(a, &texture.0)? };
+                let size = unsafe { (i32_prop(a, tex, "USize") as f32, i32_prop(a, tex, "VSize") as f32) };
+                // Destination rectangle and the texture region drawn into it.
+                let (dest, src) = match fit {
+                    Fit::Native => (Rect::new(rect.x, rect.y, size.0, size.1), Rect::new(0., 0., size.0, size.1)),
+                    Fit::Stretch => (*rect, Rect::new(0., 0., size.0, size.1)),
+                    Fit::Region(u, v, w, h) => (*rect, Rect::new(*u, *v, *w, *h)),
+                };
+                let Some((dest, src)) = clip_image(dest, src, clips.last().copied()) else { continue };
+                unsafe { target.segment(a, tex, dest, src)? };
+            }
+            DrawCmd::Text { rect, text, font, color, align } => {
+                if text.is_empty() {
+                    continue;
+                }
+                let (tw, th) = metrics.text_size(text, *font);
+                let x = match align {
+                    TextAlign::Left => rect.x,
+                    TextAlign::Center => rect.x + (rect.w - tw) / 2.,
+                    TextAlign::Right => rect.right() - tw,
+                };
+                let y = rect.y + (rect.h - th) / 2.;
+                unsafe { target.text_at(a, x, y, text, *font, [color.0, color.1, color.2, color.3])? };
+            }
+            DrawCmd::PushClip(rect) => {
+                let next = clips.last().map_or(*rect, |outer| intersect(*outer, *rect));
+                clips.push(next);
+            }
+            DrawCmd::PopClip => {
+                clips.pop();
+            }
+        }
+    }
+    Ok(())
 }
 
 fn intersect(a: Rect, b: Rect) -> Rect {

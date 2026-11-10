@@ -14,6 +14,9 @@ to say so. Until a screen is replaced its stock page and the `stock_*` observers
 | **Sound/Video page** (`ui_pages`) | **Replaced.** Drawn and handled by `hp2-ui`; verified by replay screenshots and by settings written to the ini |
 | Every other stock page (`ui_mirror`): main/in-game hub, Controls, folio, house points, quidditch, duelling, map, credits, language grid, options, and the message box | **Shown through `hp2-ui`.** All controls are drawn and all pointer input is handled by the toolkit; page artwork painted by the page script (book, cards, counters) stays the page's |
 
+| HUD: cutscene letterbox and subtitles (`ui_hud`) | **Done.** `CutSceneManager.DrawBorder`, `HPHud.DrawCutStyleText` (every subtitle and folio card description: real word wrapping, centred lines, drop shadow) and the border slide (now time-based instead of 1/25 per rendered frame) run in Rust. `HP2_STOCK_HUD=1` restores the stock drawing. |
+| HUD: status bar (health, beans, potions, keys, cards, house points), minigame bars, popups | Next |
+
 `HP2_STOCK_MENUS=1` brings back the stock page. `HP2_UI_DEBUG=1` logs input and applied commands.
 
 ### How the mirrored pages work (`ui_mirror`)
