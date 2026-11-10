@@ -346,22 +346,45 @@ unsafe fn cleanup_destroyed_direct(
     let object_property_class = access.native_class("ObjectProperty")?;
     let struct_property_class = access.native_class("StructProperty")?;
     let actor_class = access.native_class("Engine.Actor")?;
+    let state = access
+        .owner_context::<crate::core_owner::EngineState>()
+        .ok_or_else(|| RuntimeError::new("Engine owner context is unavailable"))?;
     let mut index = 0;
     while index < count {
         let active = unsafe { crate::level_owner::actor_at(level, index) };
         if !active.is_null() {
             let structure = unsafe { (*active.cast::<UObject>()).class.cast::<UStruct>() };
-            unsafe {
-                cleanup_destroyed_refs(
-                    access,
-                    structure,
-                    active.cast(),
-                    true,
-                    property_class.cast::<UClass>(),
-                    object_property_class.cast::<UClass>(),
-                    struct_property_class.cast::<UClass>(),
-                    actor_class.cast::<UClass>(),
-                )?;
+            // The reference slots of a class never change, so find them once per class
+            // instead of walking every field and struct member of every actor each tick.
+            let cached = state.cleanup_slots.borrow().get(&(structure as usize)).cloned();
+            let slots = match cached {
+                Some(slots) => slots,
+                None => {
+                    let mut offsets = Vec::new();
+                    unsafe {
+                        collect_reference_slots(
+                            structure,
+                            0,
+                            property_class.cast::<UClass>(),
+                            object_property_class.cast::<UClass>(),
+                            struct_property_class.cast::<UClass>(),
+                            &mut offsets,
+                        );
+                    }
+                    let slots: std::rc::Rc<[usize]> = offsets.into();
+                    state.cleanup_slots.borrow_mut().insert(structure as usize, slots.clone());
+                    slots
+                }
+            };
+            for &offset in slots.iter() {
+                unsafe {
+                    clear_deleted_actor_reference(
+                        access,
+                        active.cast::<u8>().add(offset).cast::<*mut UObject>(),
+                        actor_class.cast::<UClass>(),
+                        true,
+                    )?;
+                }
             }
         }
         index += 1;
@@ -456,6 +479,77 @@ pub unsafe fn end_touch(
 ) -> RuntimeResult<()> {
     let mut ops = CanonicalRelationOps { access };
     unsafe { crate::actor::end_touch_with_ops(&mut ops, actor, other, no_notify_self) }
+}
+
+/// Records, in `cleanup_destroyed_refs`'s editor traversal order, the byte offset of
+/// every object-reference slot reachable from `structure` (derived class first, nested
+/// structs expanded per array element).
+unsafe fn collect_reference_slots(
+    structure: *mut UStruct,
+    base: usize,
+    property_class: *mut hp2_abi::engine::generated::UClass,
+    object_property_class: *mut hp2_abi::engine::generated::UClass,
+    struct_property_class: *mut hp2_abi::engine::generated::UClass,
+    out: &mut Vec<usize>,
+) {
+    let mut current = structure;
+    while !current.is_null() {
+        let mut field = unsafe { (*current).children.cast::<UField>() };
+        while !field.is_null() {
+            if unsafe { hp2_core::object_model::is_a(field.cast(), property_class.cast()) } {
+                let property = field.cast::<UProperty>();
+                if unsafe { hp2_core::object_model::is_a(field.cast(), object_property_class.cast()) } {
+                    let offset = unsafe { (*property).offset } as usize;
+                    let array_dim = unsafe { (*property).array_dim };
+                    for index in 0..array_dim {
+                        out.push(base + offset + index as usize * std::mem::size_of::<*mut UObject>());
+                    }
+                } else if unsafe { (*field.cast::<UObject>()).class } == struct_property_class.cast() {
+                    let nested = unsafe { (*field.cast::<UStructProperty>()).r#struct.cast::<UStruct>() };
+                    let offset = unsafe { (*property).offset };
+                    let element_size = unsafe { (*property).element_size };
+                    let array_dim = unsafe { (*property).array_dim };
+                    for index in 0..array_dim {
+                        unsafe {
+                            collect_reference_slots(
+                                nested,
+                                base + (offset + index * element_size) as usize,
+                                property_class,
+                                object_property_class,
+                                struct_property_class,
+                                out,
+                            );
+                        }
+                    }
+                }
+            }
+            field = unsafe { (*field).next.cast() };
+        }
+        current = unsafe { (*current.cast::<UField>()).super_field.cast() };
+    }
+}
+
+/// One slot of `cleanup_reference_property`: null a reference to a deleted actor.
+unsafe fn clear_deleted_actor_reference(
+    access: CoreAccess<'_>,
+    slot: *mut *mut UObject,
+    actor_class: *mut hp2_abi::engine::generated::UClass,
+    modify: bool,
+) -> RuntimeResult<()> {
+    let referenced = unsafe { slot.read_unaligned() };
+    if referenced.is_null()
+        || !unsafe {
+            hp2_core::object_model::is_a(referenced.cast(), actor_class.cast())
+                && (*referenced.cast::<AActor>()).b_delete_me()
+        }
+    {
+        return Ok(());
+    }
+    if modify {
+        unsafe { access.modify_object(referenced)?; }
+    }
+    unsafe { slot.write_unaligned(ptr::null_mut()); }
+    Ok(())
 }
 
 unsafe fn cleanup_destroyed_refs(

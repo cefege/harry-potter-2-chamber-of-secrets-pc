@@ -190,6 +190,9 @@ pub(crate) struct EngineState {
     pub(crate) url_defaults: std::cell::RefCell<std::rc::Rc<crate::url_owner::UrlDefaults>>,
     pub(crate) cache: std::cell::RefCell<Option<hp2_core::cache_owner::CacheOwner>>,
     pub(crate) particle_lists: RefCell<std::collections::HashMap<usize, crate::particle_list_owner::ParticleListState>>,
+    /// Per actor class: byte offsets of every object-reference slot, in the order
+    /// `level_lifecycle_owner` visits them when it clears references to deleted actors.
+    pub(crate) cleanup_slots: RefCell<std::collections::HashMap<usize, std::rc::Rc<[usize]>>>,
     pub(crate) memory: hp2_core::mem_owner::MemStackOwner,
 }
 
@@ -220,6 +223,7 @@ impl EngineState {
             url_defaults: Default::default(),
             cache: std::cell::RefCell::new(Some(hp2_core::cache_owner::CacheOwner::uninitialized()?)),
             particle_lists: RefCell::new(std::collections::HashMap::new()),
+            cleanup_slots: RefCell::new(std::collections::HashMap::new()),
             memory: hp2_core::mem_owner::MemStackOwner::new(
                 crate::uengine::ENGINE_MEM_BYTES, &[71, 69, 110, 103, 105, 110, 101, 77, 101, 109, 0],
             ),

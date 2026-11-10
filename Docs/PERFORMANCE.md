@@ -23,24 +23,27 @@ Goal: every retail map at 60 fps or better on Apple Silicon, measured uncapped. 
 
 ## Results
 
-Baseline (`base1`, 5 repeats x 600 ticks) versus after the batched draw arena (`arena4`):
+Median of 5 runs x 600 ticks, M1 Max, uncapped. All 10 maps now meet the 60 fps target (p95 tick time
+at most 16.67 ms) with margin; before, 8 of 10 missed it by up to 2.7x.
 
-| Map | before p50 ms | after p50 ms | before p95 | after p95 | speedup (p50) | after fps@p50 | meets 60 fps (p95 ≤16.67) |
-|---|---:|---:|---:|---:|---:|---:|:--:|
-| PrivetDr | 9.31 | 9.14 | 10.67 | 9.95 | 1.02x | 109 | yes |
-| Entry | 3.28 | 3.29 | 3.96 | 4.60 | 1.00x | 304 | yes |
-| Ch2Skurge | 22.77 | 19.33 | 27.06 | 21.20 | 1.18x | 52 | no |
-| Adv1Willow | 22.42 | 15.38 | 26.17 | 16.90 | 1.46x | 65 | no |
-| Entryhall_hub | 28.48 | 25.38 | 35.06 | 28.08 | 1.12x | 39 | no |
-| Grandstaircase_hub | 31.60 | 28.40 | 44.87 | 31.32 | 1.11x | 35 | no |
-| Grounds_hub | 35.02 | 27.41 | 37.57 | 29.24 | 1.28x | 36 | no |
-| GreatHall_G | 34.28 | 19.63 | 36.52 | 21.03 | 1.75x | 51 | no |
-| Quidditch | 20.30 | 12.00 | 32.53 | 14.62 | 1.69x | 83 | yes |
-| Duel01 | 18.00 | 10.87 | 19.52 | 13.30 | 1.65x | 92 | yes |
+| Map | baseline p50 ms | + draw arena | + engine caches | total speedup | fps@p50 now | p95 ms now | p99 ms now | RSS MB before→now |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| PrivetDr | 9.31 | 9.14 | 3.24 | 2.9x | 308 | 3.84 | 5.63 | 380→347 |
+| Entry | 3.28 | 3.29 | 2.00 | 1.6x | 500 | 2.44 | 2.67 | 329→319 |
+| Ch2Skurge | 22.77 | 19.33 | 6.83 | 3.3x | 147 | 8.02 | 9.11 | 545→465 |
+| Adv1Willow | 22.42 | 15.38 | 6.52 | 3.4x | 153 | 7.54 | 8.36 | 581→466 |
+| Entryhall_hub | 28.48 | 25.38 | 8.24 | 3.5x | 121 | 10.38 | 13.52 | 622→510 |
+| Grandstaircase_hub | 31.60 | 28.40 | 9.35 | 3.4x | 107 | 12.01 | 26.20 | 710→527 |
+| Grounds_hub | 35.02 | 27.41 | 10.00 | 3.5x | 100 | 11.01 | 11.74 | 529→393 |
+| GreatHall_G | 34.28 | 19.63 | 12.09 | 2.8x | 83 | 13.36 | 14.12 | 661→621 |
+| Quidditch | 20.30 | 12.00 | 5.84 | 3.5x | 171 | 8.34 | 8.90 | 676→482 |
+| Duel01 | 18.00 | 10.87 | 6.81 | 2.6x | 147 | 8.63 | 9.60 | 584→468 |
 
-Before the change 8 of 10 maps missed 60 fps (up to 2.7x short). The profile of GreatHall_G showed
-about half of main-thread time inside wgpu command recording: one render pass, two new GPU buffers,
-three bind groups and a 12-28 KB zero-padded uniform upload per batch.
+The first profile of GreatHall_G showed about half of main-thread time inside wgpu command recording
+(one render pass, two new GPU buffers, three bind groups and a 12-28 KB zero-padded uniform upload per
+batch). After that was fixed, the profile of Grounds_hub showed about 60% of the frame in four engine
+hot spots: name interning (23%), clearing references to deleted actors (14%), and two reflected
+property lookups (22%).
 
 ## Change 1: `draw::DrawArena` (hp2-wgpu)
 
@@ -52,6 +55,24 @@ to the old path: blending that used to round through an 8-bit store between pass
 memory. Against the pre-change build, 20 of 27 captured frames are pixel-identical, the other 7 differ in
 at most 321 pixels (0.07%), with a few edge pixels differing by up to 81/255. Treat it as a visual
 tolerance change that needs your sign-off, not as a proven-identical refactor.
+
+## Change 2: engine caches (hp2-core, hp2-engine)
+
+* `CoreAccess::native_class` memoizes successful lookups (it did three name interns and three object
+  lookups per call); cleared in `pre_exit`.
+* `property_value` no longer interns None/Vector/Rotator/Plane on every call.
+* `CoreAccess::property_slot` caches reflected property offsets per class; the dynamic-actor render
+  path used to walk the class hierarchy by name for two properties of every actor every frame.
+* `cleanup_destroyed_direct` computes each class's object-reference slot offsets once, in exactly the
+  order the old field walk visited them, instead of walking every field of every actor on every tick
+  while any actor is pending deletion.
+
+Evidence this changed no simulation logic: `Build/rng_equiv.py` compares the full RNG-consumption trace of
+two builds on fixed-step runs. The trace is byte-identical between the draw-arena build and this one on
+Entry (29 MB), Grounds_hub (33 MB) and Adv1Willow (56 MB). Pixels at one captured frame (Grounds_hub 240)
+differ in 0.45% of pixels by at most 20/255 against the previous build while identical to itself across runs;
+rendering that depends on wall-clock time is the likely reason (frames got faster), not verified further.
+Also run: all 222 `fast` CTests (pass) and the 42-map retail sweep (42/42 clean).
 
 ## Disclosure
 

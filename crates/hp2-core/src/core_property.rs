@@ -372,13 +372,14 @@ impl CoreAccess<'_> {
         archive: Option<&ObjectArchive<'_>>,
     ) -> RuntimeResult<i32> {
         let kind = unsafe { value_kind(self, property)? };
+        let names = self.value_names()?;
         let ops = DirectValueOps {
             access: self,
             archive,
-            none_name: self.intern_str("None", crate::name_owner::FindName::Find)?,
-            vector_name: self.intern_str("Vector", crate::name_owner::FindName::Find)?,
-            rotator_name: self.intern_str("Rotator", crate::name_owner::FindName::Find)?,
-            plane_name: self.intern_str("Plane", crate::name_owner::FindName::Find)?,
+            none_name: names[0],
+            vector_name: names[1],
+            rotator_name: names[2],
+            plane_name: names[3],
             map: ptr::null_mut(),
         };
         unsafe { property_value::run_with(kind, operation, property.cast(), ptr::null_mut(), a, b, index, &ops) }
@@ -399,13 +400,14 @@ impl CoreAccess<'_> {
         index: i32,
     ) -> RuntimeResult<i32> {
         let kind = unsafe { value_kind(self, property)? };
+        let names = self.value_names()?;
         let ops = DirectValueOps {
             access: self,
             archive: Some(archive),
-            none_name: self.intern_str("None", crate::name_owner::FindName::Find)?,
-            vector_name: self.intern_str("Vector", crate::name_owner::FindName::Find)?,
-            rotator_name: self.intern_str("Rotator", crate::name_owner::FindName::Find)?,
-            plane_name: self.intern_str("Plane", crate::name_owner::FindName::Find)?,
+            none_name: names[0],
+            vector_name: names[1],
+            rotator_name: names[2],
+            plane_name: names[3],
             map,
         };
         unsafe {

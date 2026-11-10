@@ -1200,16 +1200,11 @@ fn reflected_actor_class(
             .read_unaligned()
             .cast::<hp2_abi::engine::generated::UClass>()
     };
-    let name = access.intern_str(property_name, hp2_core::name_owner::FindName::Find)?;
-    let property_class = access.native_class("ClassProperty")?;
-    let property = unsafe { access.find_field(object_class.cast(), name, property_class) };
-    if property.is_null() {
+    // SAFETY: `object_class` is the live class of a live actor.
+    let Some(slot) = (unsafe { access.property_slot(object_class, property_name, "ClassProperty")? }) else {
         return Ok(ptr::null_mut());
-    }
-    let offset = unsafe {
-        ptr::addr_of!((*property.cast::<hp2_abi::engine::generated::UProperty>()).offset)
-            .read_unaligned()
     };
+    let offset = slot.offset;
     if offset < 0 {
         return Err(RuntimeError::new(
             "Canonical dynamic actor class property has a negative offset",
@@ -1238,20 +1233,15 @@ fn reflected_actor_bool(
             .read_unaligned()
             .cast::<hp2_abi::engine::generated::UClass>()
     };
-    let name = access.intern_str(property_name, hp2_core::name_owner::FindName::Find)?;
-    let property_class = access.native_class("BoolProperty")?;
-    let property = unsafe { access.find_field(object_class.cast(), name, property_class) }
-        .cast::<hp2_abi::engine::generated::UBoolProperty>();
-    if property.is_null() {
+    // SAFETY: `object_class` is the live class of a live actor.
+    let Some(slot) = (unsafe { access.property_slot(object_class, property_name, "BoolProperty")? }) else {
         return Ok(false);
-    }
-    let offset = unsafe { ptr::addr_of!((*property.cast::<hp2_abi::engine::generated::UProperty>()).offset).read_unaligned() };
-    if offset < 0 {
+    };
+    if slot.offset < 0 {
         return Err(RuntimeError::new("Canonical dynamic actor bool property has a negative offset"));
     }
-    let mask = unsafe { ptr::addr_of!((*property).bit_mask).read_unaligned() };
-    let bits = unsafe { actor.cast::<u8>().add(offset as usize).cast::<u32>().read_unaligned() };
-    Ok(bits & mask != 0)
+    let bits = unsafe { actor.cast::<u8>().add(slot.offset as usize).cast::<u32>().read_unaligned() };
+    Ok(bits & slot.bit_mask != 0)
 }
 
 /// Filters one dynamic item against a BSP node using typed Core source operations.

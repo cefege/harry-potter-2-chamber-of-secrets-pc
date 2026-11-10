@@ -190,6 +190,19 @@ pub struct CoreProcessMode {
     pub lazy_load: bool,
 }
 
+/// A reflected property's byte offset (and bool bit mask) inside its owner's storage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PropertySlot {
+    pub offset: i32,
+    pub bit_mask: u32,
+}
+
+struct PropertySlotEntry {
+    name: String,
+    kind: String,
+    slot: Option<PropertySlot>,
+}
+
 struct StartupStructBinding {
     structure: *mut UObject,
     fields: &'static [crate::core_class_specs::StartupStructField],
@@ -206,6 +219,16 @@ struct CoreState {
     startup_structs: UnsafeCell<Vec<StartupStructBinding>>,
     cpp_property_offsets: UnsafeCell<std::collections::HashMap<(usize, i32), i32>>,
     loaded_native_modules: UnsafeCell<std::collections::HashSet<usize>>,
+    /// Successful `native_class` lookups. Native classes live until owner shutdown
+    /// (the cache is cleared in `pre_exit`), so a hit skips three name interns and
+    /// three object lookups.
+    native_class_cache: RefCell<std::collections::HashMap<String, *mut UClass>>,
+    /// Reflected property offsets by (class, name, kind); absent properties are cached too.
+    property_slots: RefCell<std::collections::HashMap<usize, Vec<PropertySlotEntry>>>,
+    /// Name indices `property_value` needs on every call: None, Vector, Rotator, Plane.
+    /// `None` is cached once found; the others only once they are nonzero (a missing
+    /// name reads as index 0 and could still appear later).
+    value_names: Cell<[Option<i32>; 4]>,
 
     loader: UnsafeCell<crate::core_loader::LoaderState>,
     config: UnsafeCell<crate::core_config::CoreConfig>,
@@ -348,6 +371,9 @@ impl CoreOwner {
                 startup_structs: UnsafeCell::new(Vec::new()),
                 cpp_property_offsets: UnsafeCell::new(std::collections::HashMap::new()),
                 loaded_native_modules: UnsafeCell::new(std::collections::HashSet::new()),
+                native_class_cache: RefCell::new(std::collections::HashMap::new()),
+                property_slots: RefCell::new(std::collections::HashMap::new()),
+                value_names: Cell::new([None; 4]),
 
                 loader: UnsafeCell::new(crate::core_loader::LoaderState::new()),
                 config: UnsafeCell::new(config),
@@ -404,6 +430,9 @@ impl CoreOwner {
             return Ok(());
         }
         self.state.exit_purge.set(true);
+        // Cached class pointers must not outlive the objects being destroyed below.
+        self.state.native_class_cache.borrow_mut().clear();
+        self.state.property_slots.borrow_mut().clear();
         let access = self.access();
         let mut first_error = None;
         loop {
@@ -1101,9 +1130,77 @@ impl<'a> CoreAccess<'a> {
     }
 
     pub fn native_class(self, name: &str) -> RuntimeResult<*mut UClass> {
+        if let Some(&class) = self.state.native_class_cache.borrow().get(name) {
+            return Ok(class);
+        }
         let (package_name, short_name) = name.split_once('.').unwrap_or(("Core", name));
-        self.native_class_in_package(package_name, short_name)
-            .map_err(|error| if package_name == "Core" { error.with_context(name) } else { error })
+        let class = self
+            .native_class_in_package(package_name, short_name)
+            .map_err(|error| if package_name == "Core" { error.with_context(name) } else { error })?;
+        self.state.native_class_cache.borrow_mut().insert(name.to_owned(), class);
+        Ok(class)
+    }
+
+    /// Finds `name` of reflected kind `kind` (for example `"BoolProperty"`) on `class` or
+    /// its superclasses and returns its storage offset and bool bit mask, or `None`.
+    /// Results, including absence, are cached per class for the owner's lifetime.
+    ///
+    /// # Safety
+    /// `class` is a live Core-owned class record.
+    pub unsafe fn property_slot(
+        self,
+        class: *mut UClass,
+        name: &str,
+        kind: &str,
+    ) -> RuntimeResult<Option<PropertySlot>> {
+        let key = class as usize;
+        if let Some(entries) = self.state.property_slots.borrow().get(&key) {
+            if let Some(entry) = entries.iter().find(|entry| entry.name == name && entry.kind == kind) {
+                return Ok(entry.slot);
+            }
+        }
+        let name_index = self.intern_str(name, FindName::Find)?;
+        let kind_class = self.native_class(kind)?;
+        // SAFETY: the caller guarantees `class`; `find_field` only reads reflected records.
+        let property = unsafe { self.find_field(class.cast(), name_index, kind_class) }
+            .cast::<hp2_abi::engine::generated::UProperty>();
+        let slot = if property.is_null() {
+            None
+        } else {
+            // SAFETY: a non-null result is a live reflected property record.
+            let offset = unsafe { std::ptr::addr_of!((*property).offset).read_unaligned() };
+            let bit_mask = if kind == "BoolProperty" {
+                // SAFETY: a BoolProperty record extends UProperty with `bit_mask`.
+                unsafe {
+                    std::ptr::addr_of!((*property.cast::<hp2_abi::engine::generated::UBoolProperty>()).bit_mask)
+                        .read_unaligned()
+                }
+            } else {
+                0
+            };
+            Some(PropertySlot { offset, bit_mask })
+        };
+        self.state.property_slots.borrow_mut().entry(key).or_default().push(PropertySlotEntry {
+            name: name.to_owned(),
+            kind: kind.to_owned(),
+            slot,
+        });
+        Ok(slot)
+    }
+
+    /// The four fixed names every reflected value operation needs.
+    pub(crate) fn value_names(self) -> RuntimeResult<[i32; 4]> {
+        let mut cached = self.state.value_names.get();
+        for (index, text) in ["None", "Vector", "Rotator", "Plane"].into_iter().enumerate() {
+            if cached[index].is_none() {
+                let name = self.intern_str(text, FindName::Find)?;
+                if index == 0 || name != 0 {
+                    cached[index] = Some(name);
+                }
+            }
+        }
+        self.state.value_names.set(cached);
+        Ok(cached.map(|name| name.unwrap_or(0)))
     }
 
     fn native_class_in_package(self, package_name: &str, short_name: &str) -> RuntimeResult<*mut UClass> {
