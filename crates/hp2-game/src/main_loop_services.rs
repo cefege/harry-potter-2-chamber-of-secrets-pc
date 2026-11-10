@@ -33,6 +33,9 @@ struct FrameTiming {
     tick_ms: Vec<f32>,
     interval_ms: Vec<f32>,
     last_start: Option<Instant>,
+    /// (wall seconds since the first tick, `ULevel::TimeSeconds`) after every tick.
+    clock: Vec<(f64, f64)>,
+    first_start: Option<Instant>,
 }
 
 fn percentile(sorted: &[f32], fraction: f32) -> f32 {
@@ -52,6 +55,27 @@ fn summary(label: &str, samples: &[f32]) -> String {
         sorted.len(), percentile(&sorted, 0.5), percentile(&sorted, 0.95),
         percentile(&sorted, 0.99), sorted.last().copied().unwrap_or(0.0),
     )
+}
+
+/// Game seconds advanced per wall second over consecutive one-second wall windows, and
+/// overall. 1.0 means the simulation runs in real time.
+fn speed_summary(clock: &[(f64, f64)]) -> Vec<String> {
+    let (Some(first), Some(last)) = (clock.first(), clock.last()) else { return Vec::new() };
+    let mut windows = Vec::new();
+    let mut start = *first;
+    for &(wall, game) in clock {
+        if wall - start.0 >= 1.0 {
+            windows.push((game - start.1) / (wall - start.0));
+            start = (wall, game);
+        }
+    }
+    windows.sort_by(f64::total_cmp);
+    let overall = if last.0 > first.0 { (last.1 - first.1) / (last.0 - first.0) } else { 0.0 };
+    let pick = |fraction: f64| windows.get(((windows.len().max(1) - 1) as f64 * fraction).round() as usize).copied().unwrap_or(0.0);
+    vec![format!(
+        "<HP2_PERF> game_speed overall={overall:.3} windows={} min={:.3} p50={:.3} max={:.3} (game seconds per wall second)",
+        windows.len(), windows.first().copied().unwrap_or(0.0), pick(0.5), windows.last().copied().unwrap_or(0.0),
+    )]
 }
 
 pub(super) fn run(boot: &mut BootHost, test_ticks: i32, fixed_delta: f32) -> RuntimeResult<()> {
@@ -78,6 +102,9 @@ pub(super) fn run(boot: &mut BootHost, test_ticks: i32, fixed_delta: f32) -> Run
         }
         let _ = log_resolution_record(boot, summary("tick", &timing.tick_ms).as_bytes());
         let _ = log_resolution_record(boot, summary("interval", &timing.interval_ms).as_bytes());
+        for line in speed_summary(&timing.clock) {
+            let _ = log_resolution_record(boot, line.as_bytes());
+        }
     }
     result
 }
@@ -269,6 +296,12 @@ fn call_leaf(
             };
             if let (Some(timing), Some(start)) = (c.timing.as_mut(), start) {
                 timing.tick_ms.push(start.elapsed().as_secs_f32() * 1000.0);
+                let first = *timing.first_start.get_or_insert(start);
+                let level = unsafe { (*boot.engine).g_level.cast::<hp2_abi::engine::generated::ULevel>() };
+                if !level.is_null() {
+                    let fixed = i64::from_ne_bytes(unsafe { (*level).time_seconds });
+                    timing.clock.push((first.elapsed().as_secs_f64(), fixed as f64 / 4_294_967_296.0));
+                }
                 if let Some(previous) = timing.last_start.replace(start) {
                     timing.interval_ms.push(start.duration_since(previous).as_secs_f32() * 1000.0);
                 }

@@ -30,7 +30,21 @@ pub fn by_name(name: &str) -> Option<&'static NativeSpec> {
 /// Finds the checked Core native assigned to opcode.
 #[must_use]
 pub fn by_opcode(opcode: i32) -> Option<&'static NativeSpec> {
-    CORE_NATIVES.iter().find(|spec| spec.opcode == Some(opcode))
+    // Opcodes are unique and below `NATIVE_COUNT` (checked at compile time where the
+    // catalog is defined), so a direct table replaces a scan of the whole catalog on
+    // every VM native call.
+    static INDEX: std::sync::OnceLock<Vec<u16>> = std::sync::OnceLock::new();
+    let index = INDEX.get_or_init(|| {
+        let mut table = vec![u16::MAX; NATIVE_COUNT];
+        for (position, spec) in CORE_NATIVES.iter().enumerate() {
+            if let Some(code) = spec.opcode {
+                table[code as usize] = u16::try_from(position).expect("catalog fits u16");
+            }
+        }
+        table
+    });
+    let position = *index.get(usize::try_from(opcode).ok()?)?;
+    (position != u16::MAX).then(|| &CORE_NATIVES[usize::from(position)])
 }
 
 macro_rules! native_opcode {

@@ -45,6 +45,11 @@ png = "=0.18.1"
 # `atos -o <image_path> -l <image_base> <frame>`. `strip = "none"`
 # overrides Rust's release default (`strip = "debuginfo"`), which would
 # discard them.
+#
+# Measured but NOT enabled: lto = "fat" + codegen-units = 1 is 2-6% faster and 23% smaller on the
+# retail benchmark maps (Docs/PERFORMANCE.md), but the rlibs then hold LLVM bitcode that Apple's `nm`
+# cannot read, which breaks the native_free_* audits. To try it locally:
+#   CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 cmake --build ...
 [profile.release]
 debug = "line-tables-only"
 strip = "none"

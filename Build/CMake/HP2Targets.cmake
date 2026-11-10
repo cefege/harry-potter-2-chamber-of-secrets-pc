@@ -448,6 +448,9 @@ hp2_add_behavior_test(stock_render_scale_launcher_parity "${CMAKE_COMMAND}" -E e
     "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
     --package=hp2-engine --test=settings_launcher_parity -- --test-threads=1
 )
+hp2_add_behavior_test(perf_harness_contracts "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/PerfHarnessTests.py")
+set_tests_properties(perf_harness_contracts PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(stock_render_scale_replay_contracts "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/RetailStockRenderScaleContracts.py")
 set_tests_properties(stock_render_scale_policy stock_render_scale_control stock_render_scale_launcher_parity stock_render_scale_replay_contracts

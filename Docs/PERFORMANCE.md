@@ -23,21 +23,20 @@ Goal: every retail map at 60 fps or better on Apple Silicon, measured uncapped. 
 
 ## Results
 
-Median of 5 runs x 600 ticks, M1 Max, uncapped. All 10 maps now meet the 60 fps target (p95 tick time
-at most 16.67 ms) with margin; before, 8 of 10 missed it by up to 2.7x.
+Median of 5 runs x 600 ticks, M1 Max, uncapped. All 10 maps meet 60 fps (p95 tick <= 16.67 ms); before, 8 of 10 missed it by up to 2.7x.
 
-| Map | baseline p50 ms | + draw arena | + engine caches | total speedup | fps@p50 now | p95 ms now | p99 ms now | RSS MB before→now |
-|---|---:|---:|---:|---:|---:|---:|---:|---|
-| PrivetDr | 9.31 | 9.14 | 3.24 | 2.9x | 308 | 3.84 | 5.63 | 380→347 |
-| Entry | 3.28 | 3.29 | 2.00 | 1.6x | 500 | 2.44 | 2.67 | 329→319 |
-| Ch2Skurge | 22.77 | 19.33 | 6.83 | 3.3x | 147 | 8.02 | 9.11 | 545→465 |
-| Adv1Willow | 22.42 | 15.38 | 6.52 | 3.4x | 153 | 7.54 | 8.36 | 581→466 |
-| Entryhall_hub | 28.48 | 25.38 | 8.24 | 3.5x | 121 | 10.38 | 13.52 | 622→510 |
-| Grandstaircase_hub | 31.60 | 28.40 | 9.35 | 3.4x | 107 | 12.01 | 26.20 | 710→527 |
-| Grounds_hub | 35.02 | 27.41 | 10.00 | 3.5x | 100 | 11.01 | 11.74 | 529→393 |
-| GreatHall_G | 34.28 | 19.63 | 12.09 | 2.8x | 83 | 13.36 | 14.12 | 661→621 |
-| Quidditch | 20.30 | 12.00 | 5.84 | 3.5x | 171 | 8.34 | 8.90 | 676→482 |
-| Duel01 | 18.00 | 10.87 | 6.81 | 2.6x | 147 | 8.63 | 9.60 | 584→468 |
+| Map | before p50 ms | now p50 ms | speedup | fps@p50 now | p95 ms now |
+|---|---:|---:|---:|---:|---:|
+| PrivetDr | 9.31 | 3.40 | 2.7x | 294 | 7.36 |
+| Entry | 3.28 | 2.71 | 1.2x | 368 | 8.27 |
+| Ch2Skurge | 22.77 | 6.37 | 3.6x | 157 | 7.84 |
+| Adv1Willow | 22.42 | 6.88 | 3.3x | 145 | 8.26 |
+| Entryhall_hub | 28.48 | 7.29 | 3.9x | 137 | 9.42 |
+| Grandstaircase_hub | 31.60 | 8.21 | 3.8x | 122 | 10.85 |
+| Grounds_hub | 35.02 | 9.15 | 3.8x | 109 | 10.26 |
+| GreatHall_G | 34.28 | 12.57 | 2.7x | 80 | 13.95 |
+| Quidditch | 20.30 | 6.37 | 3.2x | 157 | 8.89 |
+| Duel01 | 18.00 | 7.12 | 2.5x | 140 | 9.40 |
 
 The first profile of GreatHall_G showed about half of main-thread time inside wgpu command recording
 (one render pass, two new GPU buffers, three bind groups and a 12-28 KB zero-padded uniform upload per
@@ -72,7 +71,27 @@ two builds on fixed-step runs. The trace is byte-identical between the draw-aren
 Entry (29 MB), Grounds_hub (33 MB) and Adv1Willow (56 MB). Pixels at one captured frame (Grounds_hub 240)
 differ in 0.45% of pixels by at most 20/255 against the previous build while identical to itself across runs;
 rendering that depends on wall-clock time is the likely reason (frames got faster), not verified further.
-Also run: all 222 `fast` CTests (pass) and the 42-map retail sweep (42/42 clean).
+Also run: all 222 `fast` CTests (pass) and the 42-map retail sweep (42/42 clean). Final build: 42/42 clean again, 220 of 223 fast CTests plus the three `native_free_*` audits pass after the LTO revert.
+
+## Change 3: startup and small wins
+
+* Overlay verification hashed every file of the retail overlay (455 MB, software SHA-256) on one thread
+  at every launch, about a second. It now hashes on up to 8 threads and reports the first failure in the
+  same entry order, so errors are unchanged. Launch-to-exit of a 5-tick run: Entry 2.97 -> 1.91 s,
+  Grounds_hub 3.48 -> 2.41 s.
+* `core_native_catalog::by_opcode` is a table lookup instead of a scan of the whole native catalog on every
+  VM native call (small measured gain).
+* Fat LTO + one codegen unit: 2-6% faster and 23% smaller, but it breaks the `native_free_*` audits
+  (Apple `nm` cannot read the LLVM bitcode), so it is not enabled; see the note in `Cargo.toml`.
+
+## Game speed
+
+Normal play is real time: the loop uses the measured frame time, capped at 0.1 s per tick, times the
+level's `TimeDilation`. `--fixed-dt`/`-testticks` exist only for tests. `HP2_FRAME_TIMING=1` now also prints
+`game_speed` (game seconds per wall second). `Build/speed_probe.py` on PrivetDr with a focused window:
+1.00 at frame limits 30, 60, 144 and 1000. `Build/dt_probe.py`: Quidditch, Entryhall_hub and the title scene
+look the same at equal game time at 30 and 144 fps. Frames over 100 ms run in slow motion (clamp), and an
+unfocused window is capped to 10 fps by the engine.
 
 ## Disclosure
 

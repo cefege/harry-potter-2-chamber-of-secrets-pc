@@ -661,10 +661,35 @@ fn verify(root: &[u8]) -> Result<i32, Reject> {
             ]),
         ));
     }
-    for (p, entry) in &m {
-        let filename = join(root, cbytes(p));
-        let (size, digest) = hp2_file_hash::hash(path(&filename))
-            .map_err(|_| (4, cat(&[b"overlay entry missing from tree: ", p])))?;
+    // Hash every entry on a few threads (software SHA-256 over a whole overlay took
+    // about a second of every launch), then report the first failure in the same
+    // byte-ordered entry order the sequential loop used, so errors are unchanged.
+    let entries: Vec<(&Bytes, &Identity)> = m.iter().collect();
+    let hashed: Vec<std::sync::OnceLock<Result<(u64, String), String>>> =
+        entries.iter().map(|_| std::sync::OnceLock::new()).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(8)
+        .min(entries.len().max(1));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some((p, _)) = entries.get(index) else { break };
+                    let filename = join(root, cbytes(p));
+                    let _ = hashed[index].set(hp2_file_hash::hash(path(&filename)));
+                }
+            });
+        }
+    });
+    for ((p, entry), result) in entries.iter().zip(&hashed) {
+        let (size, digest) = result
+            .get()
+            .and_then(|result| result.as_ref().ok())
+            .map(|(size, digest)| (*size, digest.as_str()))
+            .ok_or_else(|| (4, cat(&[b"overlay entry missing from tree: ", p])))?;
         if size != entry.size {
             return Err((
                 5,
