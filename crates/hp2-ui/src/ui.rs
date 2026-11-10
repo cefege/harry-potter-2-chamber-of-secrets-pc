@@ -64,6 +64,8 @@ pub struct Ui {
     hover: Option<String>,
     active: Option<String>,
     focus: Option<String>,
+    /// Like CSS `:focus-visible`: the focus ring shows only after keyboard navigation.
+    focus_visible: bool,
     open: Option<(String, usize)>,
     edit: Option<Edit>,
 }
@@ -94,7 +96,7 @@ fn assign_keys(node: &mut Node, path: &str) {
 
 fn collect(node: &Node, out: &mut Vec<Target>) {
     let tag = match node.kind {
-        Kind::Button(_) => Some(Tag::Button),
+        Kind::Button(_) | Kind::ImageButton(_) => Some(Tag::Button),
         Kind::Checkbox { .. } => Some(Tag::Checkbox),
         Kind::Slider { .. } => Some(Tag::Slider),
         Kind::Select { .. } => Some(Tag::Select),
@@ -138,6 +140,7 @@ impl Ui {
             hover: None,
             active: None,
             focus: None,
+            focus_visible: false,
             open: None,
             edit: None,
         };
@@ -254,7 +257,7 @@ impl Ui {
         let state = PaintState {
             hover: self.hover.as_deref(),
             active: self.active.as_deref(),
-            focus: self.focus.as_deref(),
+            focus: self.focus.as_deref().filter(|_| self.focus_visible),
             open: self.open.as_ref().map(|(k, i)| (k.as_str(), *i)),
             edit: self
                 .edit
@@ -280,7 +283,22 @@ impl Ui {
     // ---- pointer ---------------------------------------------------------------------------
 
     pub fn pointer_move(&mut self, x: f32, y: f32) {
-        self.hover = self.hit(x, y).map(|t| t.key);
+        let next = self.hit(x, y).map(|t| t.key);
+        if next != self.hover {
+            let handler = |key: &Option<String>| {
+                key.as_deref()
+                    .and_then(|k| find(&self.root, k))
+                    .and_then(|n| n.on_hover.clone())
+            };
+            let (leave, enter) = (handler(&self.hover), handler(&next));
+            self.hover = next;
+            if let Some(leave) = leave {
+                leave(false);
+            }
+            if let Some(enter) = enter {
+                enter(true);
+            }
+        }
         if let Some((key, _)) = self.open.clone()
             && let Some((anchor, count)) = find(&self.root, &key).and_then(|n| {
                 if let Kind::Select { options, .. } = &n.kind {
@@ -301,6 +319,7 @@ impl Ui {
     }
 
     pub fn pointer_down(&mut self, x: f32, y: f32, button: PointerButton) {
+        self.focus_visible = false;
         if button != PointerButton::Left {
             return;
         }
@@ -401,7 +420,7 @@ impl Ui {
             return;
         };
         match &node.kind {
-            Kind::Button(_) => {
+            Kind::Button(_) | Kind::ImageButton(_) => {
                 if let Some(handler) = node.on_click.clone() {
                     handler();
                 }
@@ -439,6 +458,7 @@ impl Ui {
     }
 
     fn move_focus(&mut self, forward: bool) {
+        self.focus_visible = true;
         self.commit_edit();
         self.open = None;
         let keys: Vec<String> = self.targets().into_iter().map(|t| t.key).collect();
@@ -478,9 +498,10 @@ impl Ui {
             return;
         };
         match (&node.kind, key) {
-            (Kind::Button(_) | Kind::Checkbox { .. }, Key::Enter | Key::Space) => {
-                self.activate(&focus)
-            }
+            (
+                Kind::Button(_) | Kind::ImageButton(_) | Kind::Checkbox { .. },
+                Key::Enter | Key::Space,
+            ) => self.activate(&focus),
             (
                 Kind::Slider {
                     min,

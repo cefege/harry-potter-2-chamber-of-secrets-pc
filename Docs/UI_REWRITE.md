@@ -12,11 +12,24 @@ to say so. Until a screen is replaced its stock page and the `stock_*` observers
 | `hp2-ui` toolkit (signals, flex layout, widgets, input, draw list, skins) | Done, 15 unit tests (`ui_toolkit_contracts`) |
 | Engine adapter: `ui_host` (canvas drawing through the page's own script draw calls, text measured by the page's `TextSize`, retail textures), `ui_vm` (typed script calls) | Done |
 | **Sound/Video page** (`ui_pages`) | **Replaced.** Drawn and handled by `hp2-ui`; verified by replay screenshots and by settings written to the ini |
-| Controls page, pause book pages, save/load, main menu, message boxes | Still stock (with the `stock_*` observers) |
+| Every other stock page (`ui_mirror`): main/in-game hub, Controls, folio, house points, quidditch, duelling, map, credits, language grid, options, and the message box | **Shown through `hp2-ui`.** All controls are drawn and all pointer input is handled by the toolkit; page artwork painted by the page script (book, cards, counters) stays the page's |
 
 `HP2_STOCK_MENUS=1` brings back the stock page. `HP2_UI_DEBUG=1` logs input and applied commands.
 
-### How a replaced page works
+### How the mirrored pages work (`ui_mirror`)
+The stock controls stay alive and in place (the page script still sees their geometry), but
+their own `Paint` and pointer functions are swallowed by script pre-call hooks. Each paint reads
+them into a snapshot (labels, checkboxes, sliders, combos, image buttons with their up/over/down
+art, regions and caption positions), the toolkit draws it, clipped per control like UWindow, and
+handles the pointer; actions run on the stock controls through their own script (`Click`,
+`SetValue`, `SetSelectedIndex`, `Notify`). `MouseEnter`/`MouseLeave` stay stock (tooltips, sounds).
+
+Evidence: replay tours through every hub icon, the Controls page and the quit dialog on the stock
+build and the mirror build; most frames are pixel-identical, the rest differ only in sub-pixel text
+edges (text is drawn from the page's canvas origin instead of each control's). Key rebinding,
+checkboxes and Sound/Video settings were applied and saved through the mirror.
+
+### How the hand-written Sound/Video page works
 The stock page is still created by the game, so its script state, the confirmation dialogs and
 the `stock_*` setting observers keep working. The Rust view hides the page's stock controls (the
 Back button stays), mirrors their values into signals every paint, and queues the player's changes.

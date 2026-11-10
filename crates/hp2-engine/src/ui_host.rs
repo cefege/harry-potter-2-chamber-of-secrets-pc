@@ -1,7 +1,7 @@
 //! Hosts `hp2-ui` menus inside the stock UWindow pages: the toolkit lays out, handles input and
 //! produces draw commands; the page's own script functions do the canvas work, so clipping and GUI
 //! scale stay exactly the stock page's.
-use std::{cell::RefCell, collections::HashMap, ffi::c_void, ptr, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, ptr, rc::Rc};
 
 use hp2_abi::engine::generated::{TArrayRaw, UClass, UObject, UProperty};
 use hp2_core::{core_access::{CoreAccess, RuntimeError, RuntimeResult}, name_owner::FindName};
@@ -60,9 +60,6 @@ impl HostMetrics {
     pub(crate) fn learn(&self, text: &str, font: Font, size: (f32, f32)) {
         self.cache.borrow_mut().insert((text.to_owned(), font), size);
     }
-    pub(crate) fn clear(&self) {
-        self.cache.borrow_mut().clear();
-    }
 }
 
 impl TextMetrics for HostMetrics {
@@ -76,6 +73,7 @@ pub(crate) fn font_index(font: Font) -> usize {
     match font {
         Font::Normal => 0,
         Font::Bold | Font::Heading => 1,
+        Font::Slot(n) => usize::from(n),
     }
 }
 
@@ -101,6 +99,14 @@ impl Surface {
 
     /// A texture by name, cached while the object stays live.
     unsafe fn texture(&self, a: CoreAccess<'_>, name: &str) -> RuntimeResult<*mut UObject> {
+        // `#<index>` names a live object directly (textures read from stock controls).
+        if let Some(index) = name.strip_prefix('#').and_then(|i| i.parse::<i32>().ok()) {
+            let object = a.object_at(index).cast::<UObject>();
+            if object.is_null() {
+                return Err(RuntimeError::new("Texture object is gone"));
+            }
+            return Ok(object);
+        }
         if let Some(&(object, index)) = self.textures.borrow().get(name)
             && a.object_at(index) == object.cast()
         {
@@ -137,6 +143,7 @@ impl Surface {
 
     /// Draws a toolkit draw list. `metrics` must already know every drawn string.
     pub(crate) unsafe fn render(&self, a: CoreAccess<'_>, commands: &[DrawCmd], metrics: &HostMetrics) -> RuntimeResult<()> {
+        let mut clips: Vec<Rect> = Vec::new();
         for command in commands {
             match command {
                 DrawCmd::Rect { rect, color } => unsafe { self.fill(a, *rect, [color.0, color.1, color.2, color.3])? },
@@ -149,12 +156,15 @@ impl Surface {
                 DrawCmd::Image { texture, rect, fit } => {
                     let tex = unsafe { self.texture(a, &texture.0)? };
                     unsafe { self.set_color(a, [255, 255, 255, 255])? };
-                    let canvas = ("C", V::Obj(self.canvas));
-                    match fit {
-                        Fit::Stretch => unsafe { invoke(a, self.page, "DrawStretchedTexture", &[canvas, ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("W", V::F(rect.w)), ("H", V::F(rect.h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? },
-                        Fit::Native => unsafe { invoke(a, self.page, "DrawClippedTexture", &[canvas, ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? },
-                        Fit::Region(u, v, w, h) => unsafe { invoke(a, self.page, "DrawStretchedTextureSegment", &[canvas, ("X", V::F(rect.x)), ("Y", V::F(rect.y)), ("W", V::F(rect.w)), ("H", V::F(rect.h)), ("tX", V::F(*u)), ("tY", V::F(*v)), ("tW", V::F(*w)), ("tH", V::F(*h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? },
+                    let size = unsafe { (i32_prop(a, tex, "USize") as f32, i32_prop(a, tex, "VSize") as f32) };
+                    // Destination rectangle and the texture region drawn into it.
+                    let (dest, src) = match fit {
+                        Fit::Native => (Rect::new(rect.x, rect.y, size.0, size.1), Rect::new(0., 0., size.0, size.1)),
+                        Fit::Stretch => (*rect, Rect::new(0., 0., size.0, size.1)),
+                        Fit::Region(u, v, w, h) => (*rect, Rect::new(*u, *v, *w, *h)),
                     };
+                    let Some((dest, src)) = clip_image(dest, src, clips.last().copied()) else { continue };
+                    unsafe { invoke(a, self.page, "DrawStretchedTextureSegment", &[("C", V::Obj(self.canvas)), ("X", V::F(dest.x)), ("Y", V::F(dest.y)), ("W", V::F(dest.w)), ("H", V::F(dest.h)), ("tX", V::F(src.x)), ("tY", V::F(src.y)), ("tW", V::F(src.w)), ("tH", V::F(src.h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? };
                 }
                 DrawCmd::Text { rect, text, font, color, align } => {
                     if text.is_empty() {
@@ -170,12 +180,52 @@ impl Surface {
                     unsafe { self.use_font(a, *font, [color.0, color.1, color.2, color.3])? };
                     unsafe { invoke(a, self.page, "ClipText", &[("C", V::Obj(self.canvas)), ("X", V::F(x)), ("Y", V::F(y)), ("S", V::S(text))], &[], ptr::null_mut())? };
                 }
-                DrawCmd::PushClip(_) | DrawCmd::PopClip => {}
+                DrawCmd::PushClip(rect) => {
+                    let next = clips.last().map_or(*rect, |outer| intersect(*outer, *rect));
+                    clips.push(next);
+                }
+                DrawCmd::PopClip => {
+                    clips.pop();
+                }
             }
         }
         Ok(())
     }
 }
 
-#[allow(dead_code)]
-fn _unused(_: *mut c_void) {}
+fn intersect(a: Rect, b: Rect) -> Rect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    Rect::new(x, y, (a.right().min(b.right()) - x).max(0.), (a.bottom().min(b.bottom()) - y).max(0.))
+}
+
+/// Crops `dest` to `clip` and the texture region `src` in proportion. `None` when nothing is left.
+fn clip_image(dest: Rect, src: Rect, clip: Option<Rect>) -> Option<(Rect, Rect)> {
+    let Some(clip) = clip else { return Some((dest, src)) };
+    if dest.w <= 0. || dest.h <= 0. {
+        return None;
+    }
+    let cut = intersect(dest, clip);
+    if cut.w <= 0. || cut.h <= 0. {
+        return None;
+    }
+    let (sx, sy) = (src.w / dest.w, src.h / dest.h);
+    Some((cut, Rect::new(src.x + (cut.x - dest.x) * sx, src.y + (cut.y - dest.y) * sy, cut.w * sx, cut.h * sy)))
+}
+
+unsafe fn i32_prop(a: CoreAccess<'_>, o: *mut UObject, name: &str) -> i32 {
+    unsafe { prop(a, o, name, "Core.IntProperty", 4) }.map(|p| unsafe { p.cast::<i32>().read_unaligned() }).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn clipping_crops_the_texture_region_in_proportion() {
+        let (d, s) = clip_image(Rect::new(10., 10., 256., 256.), Rect::new(0., 0., 256., 256.), Some(Rect::new(10., 10., 180., 24.))).unwrap();
+        assert_eq!((d, s), (Rect::new(10., 10., 180., 24.), Rect::new(0., 0., 180., 24.)));
+        let (d, s) = clip_image(Rect::new(0., 0., 20., 20.), Rect::new(0., 0., 10., 10.), Some(Rect::new(5., 0., 100., 100.))).unwrap();
+        assert_eq!((d, s), (Rect::new(5., 0., 15., 20.), Rect::new(2.5, 0., 7.5, 10.)));
+        assert!(clip_image(Rect::new(0., 0., 5., 5.), Rect::new(0., 0., 5., 5.), Some(Rect::new(10., 10., 5., 5.))).is_none());
+    }
+}

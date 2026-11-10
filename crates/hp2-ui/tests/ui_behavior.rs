@@ -388,7 +388,12 @@ fn a_skin_replaces_fallback_rectangles_and_popups_paint_last() {
     let mut ui = Ui::new(store, view, FixedMetrics::default()).with_skin(skin);
     let before = ui.draw();
     assert!(
-        matches!(&before[0], DrawCmd::Image { texture, .. } if texture.0 == "HGame.FEComboIdleTexture")
+        matches!(before.first(), Some(DrawCmd::PushClip(_))),
+        "widget art is clipped to the widget"
+    );
+    let first_image = before.iter().find(|c| matches!(c, DrawCmd::Image { .. }));
+    assert!(
+        matches!(first_image, Some(DrawCmd::Image { texture, .. }) if texture.0 == "HGame.FEComboIdleTexture")
     );
     let (x, y) = center(&ui, "s");
     click(&mut ui, x, y);
@@ -424,4 +429,31 @@ fn state_for_removed_widgets_is_dropped_on_rebuild() {
     ui.update();
     assert!(!ui.is_editing());
     assert_eq!(ui.focused(), None);
+}
+
+#[test]
+fn the_focus_ring_shows_only_after_keyboard_navigation() {
+    let store = Store::new();
+    let view = || {
+        col()
+            .child(button("a").key("a"))
+            .child(button("b").key("b"))
+    };
+    let mut ui = Ui::new(store, view, FixedMetrics::default());
+    let (x, y) = center(&ui, "a");
+    click(&mut ui, x, y);
+    assert_eq!(ui.focused(), Some("a"));
+    assert!(
+        !ui.draw()
+            .iter()
+            .any(|c| matches!(c, DrawCmd::Outline { .. })),
+        "a click focuses without a ring"
+    );
+    ui.key(Key::Tab);
+    assert!(
+        ui.draw()
+            .iter()
+            .any(|c| matches!(c, DrawCmd::Outline { .. })),
+        "Tab shows the ring"
+    );
 }

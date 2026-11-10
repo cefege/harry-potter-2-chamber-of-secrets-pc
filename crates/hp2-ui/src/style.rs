@@ -129,6 +129,8 @@ pub enum Font {
     Normal,
     Bold,
     Heading,
+    /// A host font slot (for the game: `Root.Fonts[n]`).
+    Slot(u8),
 }
 
 /// Box style. Unset fields keep their defaults; a [`Stylesheet`] class is applied first and the

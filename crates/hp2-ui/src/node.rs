@@ -8,6 +8,7 @@ pub(crate) type Click = Rc<dyn Fn()>;
 pub(crate) type Toggle = Rc<dyn Fn(bool)>;
 pub(crate) type Change = Rc<dyn Fn(f32)>;
 pub(crate) type Pick = Rc<dyn Fn(usize)>;
+pub(crate) type Hover = Rc<dyn Fn(bool)>;
 type StyleMod = Rc<dyn Fn(&mut Style)>;
 
 pub(crate) enum Kind {
@@ -38,6 +39,7 @@ pub(crate) enum Kind {
         decimals: usize,
         on_change: Change,
     },
+    ImageButton(Box<ImageButton>),
 }
 
 /// One element of the UI tree.
@@ -50,6 +52,7 @@ pub struct Node {
     pub(crate) key: Option<String>,
     pub(crate) children: Vec<Node>,
     pub(crate) on_click: Option<Click>,
+    pub(crate) on_hover: Option<Hover>,
     pub(crate) disabled: bool,
     pub(crate) rect: Rect,
 }
@@ -64,6 +67,7 @@ impl Node {
             key: None,
             children: Vec::new(),
             on_click: None,
+            on_hover: None,
             disabled: false,
             rect: Rect::default(),
         }
@@ -154,6 +158,12 @@ impl Node {
     /// Click handler for a `button` (and any future clickable box).
     pub fn on_click(mut self, handler: impl Fn() + 'static) -> Self {
         self.on_click = Some(Rc::new(handler));
+        self
+    }
+
+    /// Called with `true` when the pointer enters this node and `false` when it leaves.
+    pub fn on_hover(mut self, handler: impl Fn(bool) + 'static) -> Self {
+        self.on_hover = Some(Rc::new(handler));
         self
     }
 
@@ -249,4 +259,37 @@ impl Kind {
     pub(crate) fn focusable(&self) -> bool {
         !matches!(self, Kind::Box | Kind::Text(_))
     }
+}
+
+/// Art for one button state: a texture and how it is fitted.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ButtonArt {
+    pub texture: crate::paint::TextureRef,
+    pub fit: crate::paint::Fit,
+    /// Offset of the art inside the button.
+    pub offset: (f32, f32),
+    /// Drawn size for `Fit::Region` and `Fit::Stretch` (defaults to the button size).
+    pub size: Option<(f32, f32)>,
+}
+
+/// A button drawn with per-state art and an optional caption (the stock `UWindowButton`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ImageButton {
+    pub up: Option<ButtonArt>,
+    pub over: Option<ButtonArt>,
+    pub down: Option<ButtonArt>,
+    pub disabled: Option<ButtonArt>,
+    pub text: String,
+    pub over_color: Option<Color>,
+    pub shadow: bool,
+    pub text_align: TextAlign,
+    /// Horizontal inset of left- or right-aligned text.
+    pub text_inset: f32,
+    /// Exact top-left of the caption inside the button; overrides alignment.
+    pub text_pos: Option<(f32, f32)>,
+}
+
+/// A button drawn with art; give it a fixed width and height.
+pub fn image_button(button: ImageButton) -> Node {
+    Node::new(Kind::ImageButton(Box::new(button)))
 }

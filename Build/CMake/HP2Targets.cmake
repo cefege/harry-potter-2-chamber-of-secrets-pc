@@ -364,6 +364,14 @@ hp2_add_behavior_test(ui_toolkit_contracts "${CMAKE_COMMAND}" -E env
     --package=hp2-ui -- --test-threads=1
 )
 set_tests_properties(ui_toolkit_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(ui_host_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib ui_host::tests -- --test-threads=1
+)
+set_tests_properties(ui_host_contracts PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(stock_input_menu_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"

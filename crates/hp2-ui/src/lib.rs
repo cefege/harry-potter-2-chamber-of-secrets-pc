@@ -22,7 +22,10 @@ mod style;
 mod ui;
 
 pub use layout::{FixedMetrics, TextMetrics};
-pub use node::{Node, button, checkbox, col, label, number_input, row, select, slider, spacer};
+pub use node::{
+    ButtonArt, ImageButton, Node, button, checkbox, col, image_button, label, number_input, row,
+    select, slider, spacer,
+};
 pub use paint::{DrawCmd, Fit, PopupMetrics, Skin, SkinPart, SliderMetrics, TextureRef};
 pub use signal::{Signal, Store};
 pub use style::{

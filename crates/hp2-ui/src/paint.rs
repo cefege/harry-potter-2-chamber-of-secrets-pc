@@ -328,10 +328,11 @@ pub(crate) fn texts(node: &Node, out: &mut Vec<(String, Font)>) {
     match &node.kind {
         Kind::Text(content) | Kind::Button(content) => out.push((content.clone(), node.style.font)),
         Kind::Checkbox { text, .. } => out.push((text.clone(), node.style.font)),
+        Kind::ImageButton(b) if !b.text.is_empty() => out.push((b.text.clone(), node.style.font)),
         Kind::Select { options, .. } => {
             out.extend(options.iter().map(|o| (o.clone(), node.style.font)))
         }
-        Kind::NumberInput { .. } | Kind::Slider { .. } | Kind::Box => {}
+        Kind::NumberInput { .. } | Kind::Slider { .. } | Kind::Box | Kind::ImageButton(_) => {}
     }
     for child in &node.children {
         texts(child, out);
@@ -352,6 +353,21 @@ fn paint_node(
     let down = state.active == Some(key) && !node.disabled;
     let focused = state.focus == Some(key);
     let style = &node.style;
+    // Like a stock UWindow control, a widget's art is clipped to its own rectangle.
+    let clipped = !matches!(node.kind, Kind::Box | Kind::Text(_));
+    if clipped {
+        let clip = if matches!(node.kind, Kind::Slider { .. }) {
+            Rect::new(
+                rect.x + skin.slider.track_dx.min(0.),
+                rect.y,
+                rect.w - skin.slider.track_dx.min(0.),
+                rect.h,
+            )
+        } else {
+            rect
+        };
+        out.push(DrawCmd::PushClip(clip));
+    }
     match &node.kind {
         Kind::Box => {
             if let Some(color) = style.background {
@@ -366,6 +382,60 @@ fn paint_node(
             style.color,
             style.text_align,
         ),
+        Kind::ImageButton(b) => {
+            let art = if node.disabled {
+                b.disabled.as_ref()
+            } else if down {
+                b.down.as_ref().or(b.up.as_ref())
+            } else if hover {
+                b.over.as_ref().or(b.up.as_ref())
+            } else {
+                b.up.as_ref()
+            };
+            if let Some(art) = art {
+                let (w, h) = art.size.unwrap_or((rect.w, rect.h));
+                out.push(DrawCmd::Image {
+                    texture: art.texture.clone(),
+                    rect: Rect::new(rect.x + art.offset.0, rect.y + art.offset.1, w, h),
+                    fit: art.fit,
+                });
+            }
+            let text_rect = match b.text_pos {
+                Some((tx, ty)) => {
+                    let (tw, th) = metrics.text_size(&b.text, style.font);
+                    Rect::new(rect.x + tx, rect.y + ty, tw, th)
+                }
+                None => Rect::new(
+                    rect.x + b.text_inset,
+                    rect.y,
+                    (rect.w - 2. * b.text_inset).max(0.),
+                    rect.h,
+                ),
+            };
+            let text_align = if b.text_pos.is_some() {
+                TextAlign::Left
+            } else {
+                b.text_align
+            };
+            if !b.text.is_empty() {
+                if b.shadow {
+                    text(
+                        out,
+                        Rect::new(text_rect.x + 1., text_rect.y + 1., text_rect.w, text_rect.h),
+                        &b.text,
+                        style.font,
+                        Color(0, 0, 0, 255),
+                        text_align,
+                    );
+                }
+                let color = if hover && !node.disabled {
+                    b.over_color.unwrap_or(style.color)
+                } else {
+                    style.color
+                };
+                text(out, text_rect, &b.text, style.font, color, text_align);
+            }
+        }
         Kind::Button(content) => {
             let which = if down {
                 SkinPart::ButtonDown
@@ -554,6 +624,9 @@ fn paint_node(
                 });
             }
         }
+    }
+    if clipped {
+        out.push(DrawCmd::PopClip);
     }
     if focused && node.kind.focusable() && !node.disabled {
         out.push(DrawCmd::Outline { rect, color: FOCUS });

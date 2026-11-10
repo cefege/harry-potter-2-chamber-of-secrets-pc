@@ -56,6 +56,7 @@ fn intrinsic(node: &Node, m: &dyn TextMetrics) -> (f32, f32) {
             (CHECK_SIZE + CHECK_GAP + tw, th.max(CHECK_SIZE))
         }
         Kind::Slider { .. } => (SLIDER_WIDTH, WIDGET_HEIGHT),
+        Kind::ImageButton(b) => (m.text_size(&b.text, node.style.font).0, WIDGET_HEIGHT),
         Kind::Select { .. } | Kind::NumberInput { .. } => (BOX_WIDTH, WIDGET_HEIGHT),
         Kind::Box => {
             let flow: Vec<(f32, f32)> = node

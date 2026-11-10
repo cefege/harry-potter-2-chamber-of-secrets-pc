@@ -7,12 +7,12 @@ use std::{cell::RefCell, collections::HashMap, ffi::c_void, rc::Rc};
 use hp2_abi::engine::generated::{UFunction, UObject};
 use hp2_core::{core_access::{CoreAccess, RuntimeError, RuntimeResult}, name_owner::FindName};
 use hp2_ui::{
-    Align, Color, Edges, Font, Justify, Key, PointerButton, PopupMetrics, Signal, Size, Skin, SkinPart, SliderMetrics, Store, Style, Stylesheet, TextAlign, Ui,
+    Align, Color, Edges, Font, Justify, Key, PointerButton, PopupMetrics, Signal, Size, Skin, SkinPart, SliderMetrics, Store, Style, Stylesheet, Ui,
     checkbox, col, label, row, select, slider,
 };
 
 use crate::{
-    stock_graphics_menu::{boolean, children, field, function, live, object, prop, read_boolean, set_text, text, Weak},
+    stock_graphics_menu::{boolean, children, field, live, object, prop, read_boolean, set_text, text, Weak},
     ui_host::{class_name_of, find_class, name_of, read_string, HostMetrics, Surface},
     ui_vm::{invoke, V},
 };

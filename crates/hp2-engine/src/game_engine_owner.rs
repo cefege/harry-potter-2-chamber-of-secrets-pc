@@ -166,6 +166,25 @@ pub unsafe fn tick(access: CoreAccess<'_>, engine: *mut UGameEngine, delta: f32)
             None
         }
     };
+    let _ui_mirror_input = match unsafe { crate::ui_mirror::install_input(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+                let _ = access.emit_log(category, &format!("Rust menu mirror input: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
+    let _ui_mirror_controls = match unsafe { crate::ui_mirror::install_control_input(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+                let _ = access.emit_log(category, &format!("Rust menu mirror controls: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
+    let _ = unsafe { crate::ui_mirror::tick(access) };
     // Apply what the Rust menus queued, through the same Notify path a stock click takes.
     if let Err(error) = unsafe { crate::ui_pages::tick(access) } {
         if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
