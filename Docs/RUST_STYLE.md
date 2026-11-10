@@ -20,3 +20,10 @@ Use `Result` for expected failure where the boundary permits it; do not silently
 ## Verification
 
 Choose tests by the touched domain and production feature set, not by style alone. Use `cargo fmt --check` rather than a workspace-wide formatting rewrite when checking a bounded task. A generic `--all-features` Cargo invocation may require platform SDKs or incompatible linkage; select supported combinations and report what was not checked. CTest registration, data profiles, artifacts and required behavioral evidence are described in [WORKER_CONTRACTS.md](WORKER_CONTRACTS.md). A compile, clippy run or component test alone is not runtime or retail verification.
+
+## Lint backlog
+
+The ported crates carry a backlog of pre-existing `rustc`/clippy warnings (unused imports,
+redundant `unsafe` blocks, style lints) inherited from the port. CI runs clippy with
+`-D warnings` only for crates written clean (`hp2-ui`); add a crate to that step once its backlog
+is cleared. Do not suppress the backlog with blanket `allow` attributes.

@@ -10,6 +10,8 @@
     <string>Harry Potter 2</string>
     <key>CFBundleExecutable</key>
     <string>HarryPotter2</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.hp2.native</string>
     <key>CFBundleInfoDictionaryVersion</key>

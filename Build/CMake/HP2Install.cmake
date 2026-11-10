@@ -113,6 +113,10 @@ add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${PROJECT_SOURCE_DIR}/ThirdParty/fonts"
         "${HP2_MACOS_RESOURCES_DIR}/fonts"
+    # Original app icon artwork (Build/make_app_icon.py), referenced by CFBundleIconFile.
+    COMMAND "${CMAKE_COMMAND}" -E copy
+        "${PROJECT_SOURCE_DIR}/Build/macos/AppIcon.icns"
+        "${HP2_MACOS_RESOURCES_DIR}/AppIcon.icns"
     COMMAND "${HP2_INSTALL_NAME_TOOL}"
         -id "@rpath/$<TARGET_SONAME_FILE_NAME:OpenAL>"
         "${HP2_MACOS_OPENAL_DYLIB}"
