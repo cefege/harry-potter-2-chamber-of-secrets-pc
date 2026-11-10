@@ -1,4 +1,4 @@
-# Harry Potter and the Chamber of Secrets
+# Harry Potter and the Chamber of Secrets PC: Mac/Linux/Windows/Web Native
 
 Play the 2002 PC game on a modern Mac. The engine is a complete Rust reimplementation of the
 game's Unreal-based engine: no original C++ engine code remains. It renders with Metal through
