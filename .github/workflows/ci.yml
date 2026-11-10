@@ -18,6 +18,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Free disk space
+        # The full build plus the per-domain test Cargo caches exceed the runner's free disk
+        # ("No space left on device" during the test step). Remove large preinstalled tools this
+        # job never uses; keep the active Xcode.
+        run: |
+          set -uo pipefail
+          df -h /
+          active="$(xcode-select -p | sed 's#/Contents/Developer##')"
+          for app in /Applications/Xcode*.app; do [ "$app" = "$active" ] || sudo rm -rf "$app"; done
+          xcrun simctl delete all >/dev/null 2>&1 || true
+          sudo rm -rf ~/Library/Developer/CoreSimulator /Library/Developer/CoreSimulator/Profiles/Runtimes \
+            ~/Library/Android /usr/local/lib/android /opt/hostedtoolcache/CodeQL ~/.dotnet /usr/local/share/dotnet \
+            ~/.ghcup /usr/local/share/powershell /usr/local/miniconda || true
+          df -h /
+
       - name: Install the pinned Rust toolchain
         # Corrosion needs the rust-toolchain.toml channel installed; the runner only has stable.
         run: |
@@ -71,7 +86,9 @@ jobs:
       # configuration gap on this runner, not skips. See
       # Docs/BEHAVIOR_MATRIX.md for what each data profile covers.
       - name: Test (data-none profile)
-        run: ctest --preset macos-arm64 --no-tests=error -L data-none --output-on-failure
+        run: |
+          df -h /
+          ctest --preset macos-arm64 --no-tests=error -L data-none --output-on-failure
 
       - name: Verify bundle
         run: python3 Build/check_bundle.py
