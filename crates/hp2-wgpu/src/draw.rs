@@ -309,6 +309,10 @@ impl SimpleLinePipeline {
         color_format: wgpu::TextureFormat,
         state: RenderState,
     ) -> Self {
+        Self::new_with_samples(device, color_format, state, 1)
+    }
+
+    pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("simple.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(SIMPLE_WGSL_SOURCE.into()),
@@ -347,7 +351,7 @@ impl SimpleLinePipeline {
                 ..wgpu::PrimitiveState::default()
             },
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
@@ -544,6 +548,10 @@ impl SimpleTrianglePipeline {
         color_format: wgpu::TextureFormat,
         state: RenderState,
     ) -> Self {
+        Self::new_with_samples(device, color_format, state, 1)
+    }
+
+    pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("simple.wgsl (draw.rs triangle production)"),
             source: wgpu::ShaderSource::Wgsl(SIMPLE_WGSL_SOURCE.into()),
@@ -578,7 +586,7 @@ impl SimpleTrianglePipeline {
                 ..wgpu::PrimitiveState::default()
             },
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
@@ -1135,6 +1143,10 @@ impl TilePipeline {
         color_format: wgpu::TextureFormat,
         state: RenderState,
     ) -> Self {
+        Self::new_with_samples(device, color_format, state, 1)
+    }
+
+    pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("tile.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(TILE_WGSL_SOURCE.into()),
@@ -1171,7 +1183,7 @@ impl TilePipeline {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
@@ -1442,6 +1454,10 @@ impl GouraudPipeline {
         color_format: wgpu::TextureFormat,
         state: RenderState,
     ) -> Self {
+        Self::new_with_samples(device, color_format, state, 1)
+    }
+
+    pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gouraud.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(GOURAUD_WGSL_SOURCE.into()),
@@ -1488,7 +1504,7 @@ impl GouraudPipeline {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
@@ -1763,6 +1779,10 @@ impl ComplexPipeline {
         color_format: wgpu::TextureFormat,
         state: RenderState,
     ) -> Self {
+        Self::new_with_samples(device, color_format, state, 1)
+    }
+
+    pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, state: RenderState, samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("complex.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(COMPLEX_WGSL_SOURCE.into()),
@@ -1794,7 +1814,7 @@ impl ComplexPipeline {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(state.depth_stencil()),
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
@@ -1989,11 +2009,14 @@ pub struct PostProcessPipeline {
 }
 
 impl PostProcessPipeline {
-    /// Builds the pipeline for `color_format`, the real target this
-    /// pipeline renders into. Source and target always match in size, so
-    /// one nearest-filtered, clamped sampler lands exactly on texel
-    /// centers.
+    /// Builds the pipeline for `color_format`, the real output format.
+    /// A nearest-filtered, clamped sampler also supports scaling a logical
+    /// fullscreen scene into the desktop drawable.
     pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
+        Self::new_with_samples(device, color_format, 1)
+    }
+
+    pub fn new_with_samples(device: &wgpu::Device, color_format: wgpu::TextureFormat, samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("postprocess.wgsl (draw.rs production)"),
             source: wgpu::ShaderSource::Wgsl(POST_PROCESS_WGSL_SOURCE.into()),
@@ -2012,7 +2035,7 @@ impl PostProcessPipeline {
                 ..wgpu::PrimitiveState::default()
             },
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState { count: samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_main"),
@@ -2056,6 +2079,15 @@ impl PostProcessPipeline {
         source: &wgpu::TextureView,
         target: &wgpu::TextureView,
     ) {
+        self.record_with_viewport(device, encoder, frame_uniforms_buffer, source, target, None);
+    }
+
+    /// Draw into a centered subrectangle after clearing the whole output to black.
+    pub fn record_with_viewport(
+        &self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder,
+        frame_uniforms_buffer: &wgpu::Buffer, source: &wgpu::TextureView,
+        target: &wgpu::TextureView, viewport: Option<(f32, f32, f32, f32)>,
+    ) {
         let frame_uniforms_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("postprocess.wgsl frame uniforms bind group"),
             layout: &self.frame_uniforms_layout,
@@ -2096,6 +2128,9 @@ impl PostProcessPipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &frame_uniforms_bind_group, &[]);
         pass.set_bind_group(1, &source_bind_group, &[]);
+        if let Some((x, y, width, height)) = viewport {
+            pass.set_viewport(x, y, width, height, 0.0, 1.0);
+        }
         pass.draw(0..4, 0..1);
     }
 }
@@ -2104,6 +2139,20 @@ impl PostProcessPipeline {
 mod tests {
     use super::*;
     use crate::{BackendChoice, HeadlessSurfaceCreator, backend_name, create_device_sync};
+
+    #[test]
+    fn unorm_modulation_cannot_be_reconstructed_from_black_and_white() {
+        // PF_Modulated is Dst*Src + Src*Dst. An unorm render target
+        // clamps after every draw, not just after the last draw. These two
+        // legal sequences agree on black and white but not on intermediate
+        // backgrounds. A two-sample affine compositor therefore cannot
+        // preserve the result for arbitrary full-resolution PreRender UI.
+        let amplify_then_dim = |background: f32| (background * 1.6).min(1.0) * 0.5;
+        let dim = |background: f32| background * 0.5;
+        assert_eq!(amplify_then_dim(0.0), dim(0.0));
+        assert_eq!(amplify_then_dim(1.0), dim(1.0));
+        assert!((amplify_then_dim(0.25) - dim(0.25)).abs() > 0.07);
+    }
 
     /// Depth view sized like `color_target`, cleared to 1.0 in its own
     /// submitted encoder. The pipeline pass under test only loads it.

@@ -15,6 +15,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import fire_texture_trace  # noqa: E402
 import game_test  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 
 
 class FireTextureHarnessContracts(unittest.TestCase):
@@ -34,6 +35,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    @mocked_native_preflight
     def test_side_paths_require_requested_artifacts_from_both_legs(self) -> None:
         paths = game_test._prepare_fire_texture_trace_paths(self.root / "fire-traces")
         checkpoint_manifest = self.root / "checkpoints.json"
@@ -44,6 +46,14 @@ class FireTextureHarnessContracts(unittest.TestCase):
             environment = kwargs["extra_env"]
             assert isinstance(environment, dict)
             environments.append(environment)
+            log_path = kwargs["log_path"]
+            assert isinstance(log_path, Path)
+            log_path.write_text(
+                "<HP2_VERIFY> input=isolated\n"
+                "<HP2_VERIFY> audio=loopback rate=44100 channels=2 format=short\n"
+                "<HP2_VERIFY> visuals=tick\n",
+                encoding="utf-8",
+            )
             if environment["HP2_FIRE_TEXTURE_TRACE"] == str(paths["cpp"]):
                 paths["cpp"].write_text(json.dumps(fire_texture_trace._synthetic_trace()), encoding="utf-8")
             return {"passed": True, "resources": {"script_deferred": 0, "script_deferral_reasons": {}, "script_deferral_subjects": {}}}
@@ -96,6 +106,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
             {"status": "match", "first_difference": None},
         )
 
+    @mocked_native_preflight
     def test_paired_report_fails_when_requested_rust_artifact_is_missing(self) -> None:
         app = self.root / "app"
         engine_bin = self.root / "engine-bin"
@@ -149,6 +160,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
         )
         self.assertTrue((trace_dir / "fire-texture-trace-comparison.json").is_file())
 
+    @mocked_native_preflight
     def test_paired_valid_trace_mismatch_fails_diagnostic_gate(self) -> None:
         app = self.root / "app"
         engine_bin = self.root / "engine-bin"
@@ -202,6 +214,7 @@ class FireTextureHarnessContracts(unittest.TestCase):
             arguments = game_test._arguments()
         self.assertEqual(arguments.fire_texture_trace_dir, Path("fire-traces"))
 
+    @mocked_native_preflight
     def test_omitted_option_leaves_side_environment_unchanged(self) -> None:
         checkpoint_manifest = self.root / "checkpoints.json"
         checkpoint_manifest.write_text("{}", encoding="utf-8")
@@ -211,6 +224,14 @@ class FireTextureHarnessContracts(unittest.TestCase):
             environment = kwargs["extra_env"]
             assert isinstance(environment, dict)
             environments.append(environment)
+            log_path = kwargs["log_path"]
+            assert isinstance(log_path, Path)
+            log_path.write_text(
+                "<HP2_VERIFY> input=isolated\n"
+                "<HP2_VERIFY> audio=loopback rate=44100 channels=2 format=short\n"
+                "<HP2_VERIFY> visuals=tick\n",
+                encoding="utf-8",
+            )
             return {"passed": True, "resources": {"script_deferred": 0, "script_deferral_reasons": {}, "script_deferral_subjects": {}}}
 
         with patch.object(game_test, "run_command", side_effect=fake_run_command):
@@ -226,6 +247,46 @@ class FireTextureHarnessContracts(unittest.TestCase):
         self.assertTrue(run["passed"])
         self.assertNotIn("HP2_FIRE_TEXTURE_TRACE", environments[0])
         self.assertNotIn("fire_texture_trace", run)
+
+    @mocked_native_preflight
+    def test_missing_verification_markers_fail_even_without_trace_options(self) -> None:
+        markers = {
+            "input": "<HP2_VERIFY> input=isolated\n",
+            "audio": "<HP2_VERIFY> audio=loopback rate=44100 channels=2 format=short\n",
+            "visuals": "<HP2_VERIFY> visuals=tick\n",
+        }
+        checkpoint_manifest = self.root / "checkpoints.json"
+        checkpoint_manifest.write_text("{}", encoding="utf-8")
+        for missing in [None, *markers]:
+            with self.subTest(missing=missing):
+                def fake_run_command(*_args: object, **kwargs: object) -> dict[str, object]:
+                    log_path = kwargs["log_path"]
+                    assert isinstance(log_path, Path)
+                    log_path.write_text(
+                        "" if missing is None else "".join(
+                            text for name, text in markers.items() if name != missing
+                        ),
+                        encoding="utf-8",
+                    )
+                    return {"passed": True, "resources": {
+                        "script_deferred": 0, "script_deferral_reasons": {},
+                        "script_deferral_subjects": {},
+                    }}
+
+                with patch.object(game_test, "run_command", side_effect=fake_run_command):
+                    run, _, _ = game_test._run_fidelity_side(
+                        name="cpp", executable=self.root / "mock-cpp", data_root=self.data_root,
+                        selected_map="Maps/Test.unr", map_token="Maps/Test.unr", renderer="wgpu",
+                        ticks=1, fixed_dt=0.02, input_script=None, replay=None, timeout_seconds=1.0,
+                        artifact_root=self.root / "artifacts" / str(missing),
+                        checkpoint_manifest=checkpoint_manifest, start_gate=threading.Barrier(1),
+                        rng_trace_path=None, shadow_update_trace_path=None,
+                    )
+                self.assertFalse(run["passed"])
+                self.assertEqual(run["verification"]["status"], "unavailable")
+                self.assertEqual(run["verification_violation"]["code"], "verification.mode_not_observed")
+                for name, field in [("input", "input_isolated"), ("audio", "audio_loopback"), ("visuals", "visual_tick_clock")]:
+                    self.assertEqual(run["verification"][field], missing is not None and name != missing)
 
 
 if __name__ == "__main__":

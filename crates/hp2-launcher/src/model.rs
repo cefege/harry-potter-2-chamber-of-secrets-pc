@@ -90,7 +90,8 @@ impl Default for DisplayResolution {
     }
 }
 
-pub const RENDER_SCALE_VALUES: [f64; 5] = [0.50, 0.67, 0.75, 0.85, 1.00];
+// The stock graphics slider uses 5% steps. Keep 67% for existing configs.
+pub const RENDER_SCALE_VALUES: [f64; 12] = [0.50, 0.55, 0.60, 0.65, 0.67, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00];
 pub const UI_SCALE_VALUES: [f64; 6] = [0.75, 1.00, 1.25, 1.50, 1.75, 2.00];
 pub const ANTI_ALIASING_SAMPLE_VALUES: [i32; 3] = [0, 2, 4];
 pub const ANISOTROPY_VALUES: [i32; 4] = [0, 4, 8, 16];

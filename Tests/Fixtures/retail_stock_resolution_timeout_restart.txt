@@ -1,0 +1,11 @@
+# Same isolated home; reopen sound/video after the timeout rollback.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 680 455
+idle 5
+press LeftMouse
+idle 80

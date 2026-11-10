@@ -14,6 +14,12 @@ pub(crate) fn fail(message: impl Into<String>) -> String {
     message.into()
 }
 
+/// Checks the slash-separated destination before it is joined to a stage.
+pub(crate) fn valid_destination(path: &str) -> bool {
+    path.split('/')
+        .all(|component| !component.is_empty() && component != "." && component != "..")
+}
+
 /// Matches `Utf8(path)`. `None` (mapped to an `Err` by the caller) stands
 /// in for the C++ side's implementation-defined handling of a native path
 /// that is not valid UTF-8 -- see `crate::files`'s module doc.
@@ -111,6 +117,35 @@ pub(crate) fn lexically_relative(base: &Path, path: &Path) -> Option<PathBuf> {
         result.push(component.as_os_str());
     }
     Some(result)
+}
+
+#[cfg(test)]
+mod destination_tests {
+    use super::valid_destination;
+
+    #[test]
+    fn path_safety_destination_components_must_be_normal_and_relative() {
+        for path in [
+            "",
+            "/",
+            "/System/Core.u",
+            "../outside.u",
+            "System/../outside.u",
+            "System/./Core.u",
+            "System//Core.u",
+            "System/",
+        ] {
+            assert!(!valid_destination(path), "accepted {path:?}");
+        }
+        for path in [
+            "System/Core.u",
+            "System/Cutscenes/intro.int",
+            "Music/a..b.ogg",
+            ".hidden/file",
+        ] {
+            assert!(valid_destination(path), "rejected {path:?}");
+        }
+    }
 }
 
 #[cfg(test)]

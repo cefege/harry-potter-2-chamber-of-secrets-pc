@@ -4,16 +4,10 @@
 //!
 //! **Design: hand-written `extern "C"` declarations against the pinned NFD
 //! (Native File Dialog Extended) headers, no `rfd`/`nfd`/`nfd-sys` crate
-//! dependency, behind the `nfd` Cargo feature -- the same pattern
-//! `clipboard.rs` already established for SDL2 (see that module's doc
-//! comment for the full staticlib-bundling rationale; identical reasoning
-//! applies here: a crate-managed native link for NFD would duplicate the
-//! exact same `nfd::nfd` archive `hp2_game` already needs to link on its
-//! own account elsewhere in the build). The only place NFD is ever linked
-//! is `hp2_ffi`'s CMake `INTERFACE` (`target_link_libraries(hp2_ffi
-//! INTERFACE ... nfd::nfd)`), the same archive every other NFD consumer in
-//! this build already links, resolved exactly once into `hp2_game`'s final
-//! binary.
+//! dependency, behind the `nfd` Cargo feature. CMake fetches NFD and
+//! `Build/CMake/HP2Targets.cmake` links `nfd::nfd` into the Corrosion-imported
+//! `hp2_game_rust` executable. Bare Cargo builds need the native library
+//! supplied separately when the `nfd` feature is enabled.
 //!
 //! Signatures are against the pinned header
 //! (`out/macos-arm64/_deps/hp2_nativefiledialog-src/src/include/nfd.h`).
@@ -81,28 +75,70 @@ unsafe extern "C" {
     fn NFD_GetError() -> *const c_char;
 }
 
+#[cfg(all(feature = "nfd", target_os = "macos"))]
+static PICKER_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(all(feature = "nfd", target_os = "macos"))]
+unsafe extern "C" {
+    fn pthread_main_np() -> std::ffi::c_int;
+}
+
+#[cfg(all(feature = "nfd", target_os = "macos"))]
+struct PickerAdmission(std::marker::PhantomData<std::rc::Rc<()>>);
+
+#[cfg(all(feature = "nfd", target_os = "macos"))]
+impl PickerAdmission {
+    fn acquire() -> Option<Self> {
+        // SAFETY: pthread_main_np takes no arguments and reports the calling thread.
+        if unsafe { pthread_main_np() } == 0 {
+            return None;
+        }
+        PICKER_ACTIVE
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::Acquire,
+                std::sync::atomic::Ordering::Relaxed,
+            )
+            .ok()?;
+        Some(Self(std::marker::PhantomData))
+    }
+}
+
+#[cfg(all(feature = "nfd", target_os = "macos"))]
+impl Drop for PickerAdmission {
+    fn drop(&mut self) {
+        PICKER_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// `FNfdSession` (`HP2LauncherPlatform.cpp:21-32`): `NFD_Init`/`NFD_Quit`
 /// RAII, quitting only if init actually succeeded.
 #[cfg(feature = "nfd")]
 struct NfdSession {
     ready: bool,
+    // Fields drop after NfdSession::drop, so admission covers NFD_Quit.
+    #[cfg(target_os = "macos")]
+    _admission: PickerAdmission,
 }
 
 #[cfg(feature = "nfd")]
 impl NfdSession {
-    fn new() -> Self {
-        // SAFETY: `NFD_Init` is safe to call at any time; this session's
-        // `Drop` is the only place that calls `NFD_Quit`, and only when
-        // this call actually succeeded.
+    fn new() -> Option<Self> {
+        #[cfg(target_os = "macos")]
+        let admission = PickerAdmission::acquire()?;
+        // SAFETY: On macOS the admission requires the OS main thread and
+        // excludes nested sessions. Other platforms retain their existing NFD
+        // initialization behavior. Drop quits only after successful init.
         let ready = unsafe { NFD_Init() } == NfdResult::Okay;
         if !ready {
             // `if (!Ready) SDL_Log("HP2Launcher: native file dialog
             // initialization failed: %s", NFD_GetError());`
             // (`HP2LauncherPlatform.cpp:26`). `NFD_GetError()`'s pointer is
             // forwarded straight through, same as the original.
-            // SAFETY: `NFD_GetError` always returns either null or a
-            // NUL-terminated string owned by NFD, valid until the next NFD
-            // call on this thread; `SDL_Log`'s format string has exactly
+            // SAFETY: `NFD_GetError` returns either null or a
+            // NUL-terminated string owned by NFD. On macOS admission excludes
+            // other picker sessions; `SDL_Log`'s format string has exactly
             // one `%s` for it.
             unsafe {
                 SDL_Log(
@@ -111,7 +147,11 @@ impl NfdSession {
                 );
             }
         }
-        Self { ready }
+        Some(Self {
+            ready,
+            #[cfg(target_os = "macos")]
+            _admission: admission,
+        })
     }
 }
 
@@ -141,11 +181,12 @@ unsafe fn take_selected(selected: *mut c_char) -> Vec<u8> {
 
 /// `HP2LauncherPlatform::PickFolder` (`HP2LauncherPlatform.cpp:41-55`).
 /// `None` on cancel, failed init, or dialog error (matching the real C++'s
-/// untouched `Path` out-parameter on a `false` return). The returned bytes
+/// untouched `Path` out-parameter on a `false` return). On macOS, calls from
+/// other threads or nested picker calls also return `None`. The returned bytes
 /// are NFD's raw result, not validated UTF-8.
 #[cfg(feature = "nfd")]
 pub fn pick_folder() -> Option<Vec<u8>> {
-    let session = NfdSession::new();
+    let session = NfdSession::new()?;
     if !session.ready {
         return None;
     }
@@ -192,12 +233,13 @@ fn join_specification(extensions: &[&str]) -> String {
 /// only for the retail archive picker's nine extensions
 /// (`crates/hp2-launcher/src/import_session.rs`'s `pick_archive`, via
 /// `hp2_rs_launcher_pick_file`). `extensions` is joined into one NFD filter
-/// spec by [`join_specification`], exactly as the real C++ built
+/// spec by `join_specification`, exactly as the real C++ built
 /// `specification`; an empty result after joining picks with no filter at
 /// all (`filterCount == 0`), matching the real C++'s
 /// `specification.empty() ? nullptr : &filter` branch. `None` on cancel,
 /// failed init, or dialog error (matching the real C++'s untouched `Path`
-/// out-parameter on a `false` return). The returned bytes are NFD's raw
+/// out-parameter on a `false` return). On macOS, calls from other threads or
+/// nested picker calls also return `None`. The returned bytes are NFD's raw
 /// result, not validated UTF-8 (see [`pick_folder`]).
 #[cfg(feature = "nfd")]
 pub fn pick_file(extensions: &[&str]) -> Option<Vec<u8>> {
@@ -212,7 +254,7 @@ pub fn pick_file(extensions: &[&str]) -> Option<Vec<u8>> {
         name: name.as_ptr(),
         spec: spec.as_ptr(),
     };
-    let session = NfdSession::new();
+    let session = NfdSession::new()?;
     if !session.ready {
         return None;
     }

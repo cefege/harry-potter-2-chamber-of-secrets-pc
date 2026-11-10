@@ -30,7 +30,7 @@ GATES = {
     "G3": ("Rust three-map renderer smoke", ("canonical_renderer_smoke_maps",)),
     "G4": ("Prototype load/run and observed functional gameplay", ()),
     "G5": ("Scripted input and cross-process persistence", ("canonical_input_script_smoke", "canonical_save_reload_smoke")),
-    "G6": ("egui launcher contracts and actual UI delivery", ("launcher_ui_contracts",)),
+    "G6": ("No startup launcher; settings through stock in-game menus", ("no_startup_launcher_contracts", "stock_render_scale_control")),
     "G7": ("Archived oracle, installed Rust products and native-free audits", ("native_free_game", "native_free_ucc", "native_free_import")),
     "G8": ("Installed user approval, then no first-party native code or hp2-ffi", ()),
     "G9": ("Full macOS functional/component suite", ()),
@@ -45,7 +45,7 @@ FUNCTIONAL_REQUIREMENTS = {
         "world_interaction", "cutscene_return_control", "map_travel",
     )),
     "G5": ("data-prototype", ("cross_process_persistence",)),
-    "G6": ("data-none", ("launcher_actual_ui",)),
+    "G6": ("data-none", ("stock_menu_settings_delivery",)),
     "G7": ("data-prototype", ("oracle_archive", "installed_launch", "installed_persistence")),
     "G10": ("data-retail", (
         "data_provenance", "retail_launch", "movement_collision", "projectile_hit",

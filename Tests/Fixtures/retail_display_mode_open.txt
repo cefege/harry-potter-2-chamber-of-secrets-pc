@@ -1,0 +1,13 @@
+# Open the unmodified retail sound/video page from the main menu.
+# Coordinates correspond to the existing 800x600 retail replay fixture.
+# capture: 245
+ tick 0.033333335
+ idle 60
+ press Enter
+ idle 40
+ press Escape
+ idle 80
+ mouse 680 455
+ idle 4
+ press LeftMouse
+ idle 90

@@ -124,9 +124,10 @@ impl Decoder {
     /// Port of `Decode`.
     ///
     /// # Safety
-    /// `dest` must be valid for writes of `samples` `i16`s. The buffer
+    /// For positive `samples`, `dest` must be valid for writes of
+    /// `samples * 2` bytes; it need not be aligned for `i16`. The buffer
     /// supplied to the most recent `feed` must still be valid for reads of
-    /// its given length.
+    /// its given length and must not overlap the written destination.
     pub unsafe fn decode(&mut self, dest: *mut i16, samples: i32) -> i32 {
         if dest.is_null() || samples <= 0 {
             return 0;
@@ -137,7 +138,9 @@ impl Decoder {
                 let copy_samples = (samples - produced).min(self.residue_samples);
                 for index in 0..copy_samples {
                     let value = self.residue[(self.residue_offset + index) as usize];
-                    unsafe { *dest.offset((produced + index) as isize) = value };
+                    // SAFETY: the caller provides writable space for all requested
+                    // samples; write_unaligned also permits byte-aligned output.
+                    unsafe { dest.add((produced + index) as usize).write_unaligned(value) };
                 }
                 produced += copy_samples;
                 self.residue_offset += copy_samples;
@@ -259,6 +262,62 @@ mod tests {
             assert_eq!(decoder.decode(out.as_mut_ptr().add(3), 7), 7);
         }
         assert!(out.iter().all(|&s| s == 5), "{out:?}");
+    }
+
+    #[test]
+    fn aligned_characterization_full_partial_and_residue() {
+        let block = make_block(1, 12, 3);
+        let mut full = Decoder::new();
+        let mut split = Decoder::new();
+        let mut expected = [0i16; 28];
+        let mut actual = [0i16; 30];
+        unsafe {
+            assert!(full.feed(block.as_ptr(), 15, 28));
+            assert!(split.feed(block.as_ptr(), 15, 28));
+            assert_eq!(full.decode(expected.as_mut_ptr(), 28), 28);
+            assert_eq!(split.decode(actual.as_mut_ptr(), 3), 3);
+            assert_eq!(split.decode(actual.as_mut_ptr().add(3), 25), 25);
+            assert_eq!(split.decode(actual.as_mut_ptr().add(28), 2), 0);
+        }
+        assert_eq!(&actual[..28], &expected);
+        assert_eq!(expected, [
+            3, 5, 7, 9, 11, 13, 15, 17, 18, 19, 20, 21, 22, 23,
+            24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 33, 33, 33, 33,
+        ]);
+        assert_eq!(&actual[28..], &[0, 0]);
+    }
+
+    #[test]
+    fn odd_address_full_partial_and_residue_match_aligned_output() {
+        let block = make_block(1, 12, 3);
+        let mut reference = Decoder::new();
+        let mut full = Decoder::new();
+        let mut split = Decoder::new();
+        let mut expected = [0i16; 28];
+        // u16 backing guarantees that byte offset 1 is not i16-aligned.
+        let mut full_backing = [0xa5a5u16; 30];
+        let mut split_backing = [0xa5a5u16; 30];
+        unsafe {
+            assert!(reference.feed(block.as_ptr(), 15, 28));
+            assert!(full.feed(block.as_ptr(), 15, 28));
+            assert!(split.feed(block.as_ptr(), 15, 28));
+            assert_eq!(reference.decode(expected.as_mut_ptr(), 28), 28);
+            let full_bytes = std::slice::from_raw_parts_mut(full_backing.as_mut_ptr().cast::<u8>(), 60);
+            let split_bytes = std::slice::from_raw_parts_mut(split_backing.as_mut_ptr().cast::<u8>(), 60);
+            let full_dest = full_bytes.as_mut_ptr().add(1).cast::<i16>();
+            let split_dest = split_bytes.as_mut_ptr().add(1).cast::<i16>();
+            assert_eq!(full.decode(full_dest, 28), 28);
+            assert_eq!(split.decode(split_dest, 3), 3);
+            assert_eq!(split.decode(split_dest.add(3), 25), 25);
+            assert_eq!(split.decode(split_dest.add(28), 1), 0);
+            let expected_bytes: Vec<u8> = expected.iter().flat_map(|sample| sample.to_ne_bytes()).collect();
+            assert_eq!(&full_bytes[1..57], expected_bytes);
+            assert_eq!(&split_bytes[1..57], expected_bytes);
+            assert_eq!(full_bytes[0], 0xa5);
+            assert_eq!(&full_bytes[57..], &[0xa5; 3]);
+            assert_eq!(split_bytes[0], 0xa5);
+            assert_eq!(&split_bytes[57..], &[0xa5; 3]);
+        }
     }
 
     #[test]

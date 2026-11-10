@@ -9,6 +9,8 @@
 # Grammar (blank lines and #-comments are ignored):
 #   tick <float>     Per-frame delta seconds. Exactly one, must be first.
 #   idle <N>         N frames without input.
+#   mouse <x> <y>    Set absolute viewport coordinates via replay mouse records.
+#                    This takes one frame; follow with press LeftMouse to click.
 #   press <Key>      IST_Press this frame, IST_Release the next (2 frames).
 #   hold <Key> <N>   IST_Press, then N-1 IST_Hold frames, then IST_Release
 #                    (N+1 frames total).

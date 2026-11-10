@@ -1330,7 +1330,7 @@ def rust_objects_for_closure(
         message for message in record["messages"]
         if message.get("reason") == "compiler-artifact"
     ]
-    observed_targets: set[tuple[str, str, str]] = set()
+    observed_targets: set[tuple[str, str, tuple[str, ...], str]] = set()
     selected_executables = []
     for event in artifact_messages:
         package_id = event.get("package_id")
@@ -1485,8 +1485,8 @@ def rust_objects_for_closure(
         failures.append(
             "selected Cargo compiler-artifact records missing for targets/roles: "
             + ", ".join(
-                f"{packages[package_id]['name']}:{target_name}:{role}"
-                for package_id, target_name, role in sorted(missing_targets)
+                f"{packages[package_id]['name']} ({package_id}):{target_name}:{target_kind!r}:{role}"
+                for package_id, target_name, target_kind, role in sorted(missing_targets)
             )
         )
     expected = expected_cargo_binary(options, metadata, command_dir)

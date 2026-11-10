@@ -5,7 +5,7 @@ Two modes:
 
 1. Contract tests (default): deterministic unittest suite over the smoke
    runner using a stub ucc binary. No engine build required; safe for ctest.
-2. Live smoke (--smoke): runs the real out/<preset>/hp2_ucc against the
+2. Live smoke (--smoke): runs the real out/<preset>/hp2_ucc_rust against the
    prototype data root, emits a report-schema-v1 JSON document on stdout,
    and exits 0 (pass), 1 (fail), or 3 (blocked).
 
@@ -64,12 +64,12 @@ BLOCKED_EXIT_CODE = 3
 
 
 def discover_ucc_binary(explicit: str | None = None) -> Path | None:
-    """Locate the hp2_ucc executable, or None when not built.
+    """Locate the UCC executable, or None when not built.
 
     An explicit argument or HP2_UCC_BINARY is authoritative: a missing or
     non-executable path yields None (reported as blocked/binary_missing)
     instead of silently falling back to another build. Otherwise search
-    out/<preset>/hp2_ucc for each known preset, then any out/*/hp2_ucc
+    out/<preset>/hp2_ucc_rust for each known preset, then any out/*/hp2_ucc_rust
     sorted alphabetically.
     """
     named: list[Path] = []
@@ -85,10 +85,10 @@ def discover_ucc_binary(explicit: str | None = None) -> Path | None:
         return None
     candidates: list[Path] = []
     for preset in PRESET_CANDIDATES:
-        candidates.append(REPOSITORY_ROOT / "out" / preset / "hp2_ucc")
+        candidates.append(REPOSITORY_ROOT / "out" / preset / "hp2_ucc_rust")
     out_root = REPOSITORY_ROOT / "out"
     if out_root.is_dir():
-        candidates.extend(sorted(out_root.glob("*/hp2_ucc")))
+        candidates.extend(sorted(out_root.glob("*/hp2_ucc_rust")))
     for candidate in candidates:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate
@@ -416,6 +416,34 @@ class UccSmokeContracts(unittest.TestCase):
             os.environ, {"HP2_UCC_BINARY": str(self.binary)}
         ):
             self.assertEqual(discover_ucc_binary(), self.binary)
+
+    def test_default_discovery_prefers_rust_preset(self) -> None:
+        import unittest.mock
+
+        preset = self.root / "out" / "macos-arm64" / "hp2_ucc_rust"
+        fallback = self.root / "out" / "aaa-other" / "hp2_ucc_rust"
+        legacy = self.root / "out" / "macos-arm64" / "hp2_ucc"
+        for binary in (preset, fallback, legacy):
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("stub")
+            binary.chmod(0o755)
+        with unittest.mock.patch.dict(globals(), {"REPOSITORY_ROOT": self.root}):
+            with unittest.mock.patch.dict(os.environ, {"HP2_UCC_BINARY": ""}):
+                self.assertEqual(discover_ucc_binary(), preset)
+
+    def test_default_discovery_sorts_rust_fallbacks(self) -> None:
+        import unittest.mock
+
+        later = self.root / "out" / "z-other" / "hp2_ucc_rust"
+        first = self.root / "out" / "a-other" / "hp2_ucc_rust"
+        non_executable = self.root / "out" / "0-other" / "hp2_ucc_rust"
+        for binary in (later, first, non_executable):
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_text("stub")
+            binary.chmod(0o644 if binary == non_executable else 0o755)
+        with unittest.mock.patch.dict(globals(), {"REPOSITORY_ROOT": self.root}):
+            with unittest.mock.patch.dict(os.environ, {"HP2_UCC_BINARY": ""}):
+                self.assertEqual(discover_ucc_binary(), first)
 
     def test_profile_classification(self) -> None:
         self.assertEqual(classify_data_profile(Path("/repo/HarryPotter2/Unreal")), "data-prototype")

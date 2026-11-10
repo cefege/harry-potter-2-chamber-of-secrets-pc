@@ -63,10 +63,6 @@ mod ffi {
         pub fn SDL_GetMouseState(x: *mut c_int, y: *mut c_int) -> u32;
         pub fn SDL_GetRelativeMouseState(x: *mut c_int, y: *mut c_int) -> u32;
         pub fn SDL_SetWindowGrab(window: *mut SdlWindow, grabbed: i32);
-        #[cfg(feature = "overlay-mouse")]
-        pub fn SDL_GetWindowGrab(window: *mut SdlWindow) -> i32;
-        #[cfg(feature = "overlay-mouse")]
-        pub fn SDL_GetRelativeMouseMode() -> i32;
         pub fn SDL_SetRelativeMouseMode(enabled: i32) -> c_int;
         pub fn SDL_ShowCursor(toggle: i32) -> i32;
     }
@@ -239,53 +235,6 @@ pub unsafe fn update_mouse_grab_state_with(
     // Do not initialize replay mode or sample hardware in verification mode.
     let replay = !verification && crate::input_pump::input_replaying();
     capture_transition(&mut SdlCapture(sdl_window), capture, mouse_is_grabbed, verification, replay)
-}
-
-/// Checked SDL adapter for the experimental arbiter. It is not connected to
-/// production input. SDL cursor and relative mode remain process-global.
-#[cfg(all(feature = "sdl", feature = "overlay-mouse"))]
-pub struct CheckedSdlMouseHost { window: *mut SdlWindow }
-
-#[cfg(all(feature = "sdl", feature = "overlay-mouse"))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CheckedSdlMouseError { NullWindow, RelativeMode, CursorQuery, CursorSet, WindowGrab }
-
-#[cfg(all(feature = "sdl", feature = "overlay-mouse"))]
-impl CheckedSdlMouseHost {
-    /// # Safety
-    /// `window` must remain a live SDL window for the host's entire lifetime.
-    pub unsafe fn new(window: *mut SdlWindow) -> Result<Self, CheckedSdlMouseError> {
-        if window.is_null() { return Err(CheckedSdlMouseError::NullWindow); }
-        Ok(Self { window })
-    }
-}
-
-#[cfg(all(feature = "sdl", feature = "overlay-mouse"))]
-impl crate::capture_arbitration::MouseHost for CheckedSdlMouseHost {
-    type Error = CheckedSdlMouseError;
-    fn snapshot(&mut self) -> Result<crate::capture_arbitration::MouseState, Self::Error> {
-        let cursor = unsafe { ffi::SDL_ShowCursor(-1) };
-        if cursor < 0 { return Err(CheckedSdlMouseError::CursorQuery); }
-        Ok(crate::capture_arbitration::MouseState {
-            grabbed: unsafe { ffi::SDL_GetWindowGrab(self.window) } != 0,
-            relative: unsafe { ffi::SDL_GetRelativeMouseMode() } != 0,
-            cursor_visible: cursor != 0,
-        })
-    }
-    fn set_grab(&mut self, enabled: bool) -> Result<(), Self::Error> {
-        unsafe { ffi::SDL_SetWindowGrab(self.window, i32::from(enabled)); }
-        if (unsafe { ffi::SDL_GetWindowGrab(self.window) } != 0) != enabled { return Err(CheckedSdlMouseError::WindowGrab); }
-        Ok(())
-    }
-    fn set_relative(&mut self, enabled: bool) -> Result<(), Self::Error> {
-        if unsafe { ffi::SDL_SetRelativeMouseMode(i32::from(enabled)) } != 0 { return Err(CheckedSdlMouseError::RelativeMode); }
-        Ok(())
-    }
-    fn set_cursor_visible(&mut self, visible: bool) -> Result<(), Self::Error> {
-        let result = unsafe { ffi::SDL_ShowCursor(i32::from(visible)) };
-        if result < 0 || (result != 0) != visible { return Err(CheckedSdlMouseError::CursorSet); }
-        Ok(())
-    }
 }
 
 #[cfg(test)]

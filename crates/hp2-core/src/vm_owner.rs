@@ -352,6 +352,9 @@ pub trait VmHost: Sized {
     ) -> RuntimeResult<StepControl>;
 
 
+    /// A scoped, owner-validated per-object function substitution.
+    fn redirect_function(&self, _object: *mut c_void, function: *mut UFunction) -> RuntimeResult<*mut UFunction> { Ok(function) }
+
     /// Notify the object owner at event entry/exit; the executor owns frame/local allocation.
     fn event_boundary(
         &self,
@@ -446,6 +449,8 @@ impl<'host, H: VmHost> VmExecutor<'host, H> {
         parameters: *mut u8,
         result: *mut c_void,
     ) -> RuntimeResult<()> {
+        let function = self.host.redirect_function(object, function)?;
+        if function.is_null() { return Err(RuntimeError::new("Null redirected script function")); }
         let structure = function.cast::<UStruct>();
         let script = unsafe { std::ptr::addr_of!((*structure).script).read() };
         let base = script.data.cast::<u8>();

@@ -22,6 +22,7 @@ import threading
 from typing import Mapping, Sequence
 
 import game_test
+import oracle_preflight
 
 
 TRACE_VERSION = 1
@@ -826,6 +827,8 @@ def _run_side(
     start_gate: threading.Barrier,
     protocol: GateProtocol = FULL_PROTOCOL,
 ) -> dict[str, object]:
+    if name == "cpp":
+        oracle_preflight.require_native_oracle()
     protocol = _require_protocol(protocol)
     side_dir = artifact_dir / name
     side_dir.mkdir(parents=True, exist_ok=True)
@@ -878,6 +881,7 @@ def _run_gate(
     timeout_seconds: float,
     protocol: GateProtocol,
 ) -> dict[str, object]:
+    oracle_preflight.require_native_oracle()
     protocol = _require_protocol(protocol)
     if renderer not in game_test.RENDERERS:
         raise WorldCollisionGateError(f"unsupported renderer: {renderer}")
@@ -1055,7 +1059,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             renderer=arguments.renderer,
             timeout_seconds=arguments.timeout,
         )
-    except WorldCollisionGateError as error:
+    except (WorldCollisionGateError, oracle_preflight.OracleUnavailableError) as error:
         print(f"world collision gate: {error}", file=sys.stderr)
         return 2
     return 0 if report["passed"] else 1

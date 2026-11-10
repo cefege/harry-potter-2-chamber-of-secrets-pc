@@ -51,6 +51,31 @@ mod tests {
     }
 
     #[test]
+    fn every_pre_render_failure_returns_its_error_and_stops_at_that_leaf() {
+        let order = [
+            PreRenderLeaf::CopyEndTime,
+            PreRenderLeaf::StartTime,
+            PreRenderLeaf::ClearCounts,
+            PreRenderLeaf::MarkMemory,
+            PreRenderLeaf::EnableFastMath,
+            PreRenderLeaf::TickRandoms,
+        ];
+        for (fail_at, &failure) in order.iter().enumerate() {
+            let mut calls = Vec::new();
+            let error = run(|leaf| {
+                calls.push(leaf);
+                if leaf == failure {
+                    Err(fail_at)
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(error, Err(fail_at), "pre-render error at {failure:?}");
+            assert_eq!(calls, order[..=fail_at], "pre-render prefix at {failure:?}");
+        }
+    }
+
+    #[test]
     fn stops_before_random_tick_on_prior_failure() {
         let mut calls = Vec::new();
         assert!(

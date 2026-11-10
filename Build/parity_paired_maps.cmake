@@ -4,6 +4,14 @@ if(NOT DEFINED HP2_PYTHON OR NOT DEFINED HP2_SOURCE_DIR
     message(FATAL_ERROR "parity_paired_maps requires configured Python, source, app, engine, data, and output paths")
 endif()
 
+execute_process(
+    COMMAND "${HP2_PYTHON}" "${HP2_SOURCE_DIR}/Build/oracle_preflight.py"
+    RESULT_VARIABLE _oracle_preflight_result
+)
+if(NOT _oracle_preflight_result STREQUAL "0")
+    message(FATAL_ERROR "native oracle preflight blocked parity: ${_oracle_preflight_result}")
+endif()
+
 file(MAKE_DIRECTORY "${HP2_OUTPUT_DIR}")
 set(_smoke_report "${HP2_OUTPUT_DIR}/oracle-smoke.json")
 set(_parity_report "${HP2_OUTPUT_DIR}/parity.json")

@@ -10,30 +10,57 @@ concurrency:
 
 jobs:
   build:
-    # The engine is arm64-only and refuses cross-compilation (see
-    # CMakeLists.txt), so this needs a real Apple silicon runner.
+    # The macOS preset requires a native Apple silicon host. Linux has
+    # separate arm64 and x64 jobs below.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
       - name: Rust workspace tests
-        run: cargo test --workspace
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/macos-arm64/Testing/HP2/workspace_cargo/Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$HP2_ARTIFACT_DIR"/{Home,Tmp,Config,Cache,Data}
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          export HOME="$HP2_ARTIFACT_DIR/Home" TMPDIR="$HP2_ARTIFACT_DIR/Tmp"
+          export XDG_CONFIG_HOME="$HP2_ARTIFACT_DIR/Config"
+          export XDG_CACHE_HOME="$HP2_ARTIFACT_DIR/Cache"
+          export XDG_DATA_HOME="$HP2_ARTIFACT_DIR/Data"
+          export LC_ALL=C TZ=UTC HP2_TEST_NAME=workspace_cargo
+          exec > >(tee "$HP2_ARTIFACT_DIR/workspace.log") 2>&1
+          cargo test --locked --workspace
 
       - name: Rust clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Rust clippy (renderer-wgpu feature)
-        # cargo clippy --workspace (above) never touches code behind
-        # hp2-ffi's renderer-wgpu feature (off by default, matching
-        # platform-sdl/hp2-import/archive), so it could silently stop
-        # compiling until someone builds with -DHP2_ENABLE_WGPU_DRIVER=ON.
-        # Clippy only type-checks, not links, so this needs none of the
-        # Metal/QuartzCore framework linking HP2Targets.cmake adds for the
-        # real CMake build.
-        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
+        # hp2-engine owns renderer-wgpu. Type-checking does not establish
+        # native SDK linkage or actual presentation behavior.
+        run: cargo clippy --locked -p hp2-engine --features renderer-wgpu --all-targets -- -D warnings
 
       - name: Configure
-        run: cmake --preset macos-arm64
+        run: cmake --preset macos-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
+
+      - name: Agent and required-test contracts
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/macos-arm64/Testing/HP2/agent_ci/Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$HP2_ARTIFACT_DIR"
+          ctest --preset macos-arm64 --show-only=json-v1 > "$HP2_ARTIFACT_DIR/ctest.json"
+          python3 -B Build/check_agent_contracts.py \
+            --ctest-json "$HP2_ARTIFACT_DIR/ctest.json" \
+            --require-test agent_contracts \
+            --require-test agent_navigation_contracts \
+            --require-test native_free_game \
+            --require-test native_free_ucc \
+            --require-test native_free_import \
+            --require-test cargo_test_cache_contracts \
+            --require-test fractal_ice_alias_contracts \
+            --require-test file_hash_contracts \
+            --require-label data-none
 
       - name: Build
         run: cmake --build --preset macos-arm64
@@ -49,7 +76,7 @@ jobs:
       # configuration gap on this runner, not skips. See
       # Docs/BEHAVIOR_MATRIX.md for what each data profile covers.
       - name: Test (data-none profile)
-        run: ctest --preset macos-arm64 -L data-none --output-on-failure
+        run: ctest --preset macos-arm64 --no-tests=error -L data-none --output-on-failure
 
       - name: Verify bundle
         run: python3 Build/check_bundle.py
@@ -60,13 +87,26 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust workspace tests
-        run: cargo test --workspace
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-x64/Testing/HP2/workspace_cargo/Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$HP2_ARTIFACT_DIR"/{Home,Tmp,Config,Cache,Data}
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          export HOME="$HP2_ARTIFACT_DIR/Home" TMPDIR="$HP2_ARTIFACT_DIR/Tmp"
+          export XDG_CONFIG_HOME="$HP2_ARTIFACT_DIR/Config"
+          export XDG_CACHE_HOME="$HP2_ARTIFACT_DIR/Cache"
+          export XDG_DATA_HOME="$HP2_ARTIFACT_DIR/Data"
+          export LC_ALL=C TZ=UTC HP2_TEST_NAME=workspace_cargo
+          exec > >(tee "$HP2_ARTIFACT_DIR/workspace.log") 2>&1
+          cargo test --locked --workspace
 
       - name: Rust clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Rust clippy (renderer-wgpu feature)
-        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
+        run: cargo clippy --locked -p hp2-engine --features renderer-wgpu --all-targets -- -D warnings
 
       - name: Install build dependencies
         run: |
@@ -79,13 +119,32 @@ jobs:
             libgtk-3-dev xvfb
 
       - name: Configure
-        run: cmake --preset linux-x64
+        run: cmake --preset linux-x64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
+
+      - name: Agent and required-test contracts
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-x64/Testing/HP2/agent_ci/Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$HP2_ARTIFACT_DIR"
+          ctest --preset linux-x64 --show-only=json-v1 > "$HP2_ARTIFACT_DIR/ctest.json"
+          python3 -B Build/check_agent_contracts.py \
+            --ctest-json "$HP2_ARTIFACT_DIR/ctest.json" \
+            --require-test agent_contracts \
+            --require-test agent_navigation_contracts \
+            --require-test native_free_game \
+            --require-test native_free_ucc \
+            --require-test native_free_import \
+            --require-test cargo_test_cache_contracts \
+            --require-test fractal_ice_alias_contracts \
+            --require-test file_hash_contracts \
+            --require-label data-none
 
       - name: Build verification binaries
         run: cmake --build --preset linux-x64 --target hp2_verification_binaries
 
       - name: Test (data-none profile)
-        run: xvfb-run -a ctest --preset linux-x64 -L data-none --output-on-failure
+        run: xvfb-run -a ctest --preset linux-x64 --no-tests=error -L data-none --output-on-failure
 
   linux-arm64:
     runs-on: ubuntu-24.04-arm
@@ -93,13 +152,26 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Rust workspace tests
-        run: cargo test --workspace
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-arm64/Testing/HP2/workspace_cargo/Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$HP2_ARTIFACT_DIR"/{Home,Tmp,Config,Cache,Data}
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          export HOME="$HP2_ARTIFACT_DIR/Home" TMPDIR="$HP2_ARTIFACT_DIR/Tmp"
+          export XDG_CONFIG_HOME="$HP2_ARTIFACT_DIR/Config"
+          export XDG_CACHE_HOME="$HP2_ARTIFACT_DIR/Cache"
+          export XDG_DATA_HOME="$HP2_ARTIFACT_DIR/Data"
+          export LC_ALL=C TZ=UTC HP2_TEST_NAME=workspace_cargo
+          exec > >(tee "$HP2_ARTIFACT_DIR/workspace.log") 2>&1
+          cargo test --locked --workspace
 
       - name: Rust clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Rust clippy (renderer-wgpu feature)
-        run: cargo clippy -p hp2-ffi --features renderer-wgpu --all-targets -- -D warnings
+        run: cargo clippy --locked -p hp2-engine --features renderer-wgpu --all-targets -- -D warnings
 
       - name: Install build dependencies
         run: |
@@ -112,13 +184,32 @@ jobs:
             libgtk-3-dev xvfb
 
       - name: Configure
-        run: cmake --preset linux-arm64
+        run: cmake --preset linux-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
+
+      - name: Agent and required-test contracts
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-arm64/Testing/HP2/agent_ci/Artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$HP2_ARTIFACT_DIR"
+          ctest --preset linux-arm64 --show-only=json-v1 > "$HP2_ARTIFACT_DIR/ctest.json"
+          python3 -B Build/check_agent_contracts.py \
+            --ctest-json "$HP2_ARTIFACT_DIR/ctest.json" \
+            --require-test agent_contracts \
+            --require-test agent_navigation_contracts \
+            --require-test native_free_game \
+            --require-test native_free_ucc \
+            --require-test native_free_import \
+            --require-test cargo_test_cache_contracts \
+            --require-test fractal_ice_alias_contracts \
+            --require-test file_hash_contracts \
+            --require-label data-none
 
       - name: Build verification binaries
         run: cmake --build --preset linux-arm64 --target hp2_verification_binaries
 
       - name: Test (data-none profile)
-        run: xvfb-run -a ctest --preset linux-arm64 -L data-none --output-on-failure
+        run: xvfb-run -a ctest --preset linux-arm64 --no-tests=error -L data-none --output-on-failure
 
   cask:
     # The tap is this repository, so a broken cask blocks every install

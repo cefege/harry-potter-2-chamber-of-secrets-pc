@@ -1,0 +1,22 @@
+# Calibration only. Review the captured selector and value lists before
+# recording coordinates for the behavioral replay.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 680 455
+press LeftMouse
+idle 65
+# Open advanced setting selector.
+mouse 650 470
+press LeftMouse
+idle 40
+# Close selector and open its value list.
+mouse 650 470
+press LeftMouse
+idle 20
+mouse 650 510
+press LeftMouse
+idle 60

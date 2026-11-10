@@ -30,6 +30,7 @@ const SDL_INIT_VIDEO_JOYSTICK: u32 = 0x0000_0020 | 0x0000_0200;
 /// success) so the caller can still decide whether to log the failure.
 #[cfg(feature = "sdl")]
 pub fn init_video_and_joystick() -> i32 {
+    if !crate::sdl_runtime::configure_fullscreen_hint() { return -1; }
     unsafe { ffi::SDL_Init(SDL_INIT_VIDEO_JOYSTICK) }
 }
 

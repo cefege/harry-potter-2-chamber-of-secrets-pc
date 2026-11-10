@@ -13,38 +13,6 @@ use hp2_core::{
 };
 use std::ptr;
 
-#[cfg(feature = "in-game-overlay")]
-unsafe fn with_overlay_canvas<T, E>(canvas: *mut hp2_abi::engine::generated::UCanvas, draw: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
-    // WrappedPrint changes these fields even when its host reports an error.
-    let saved = unsafe { ((*canvas).cur_x, (*canvas).cur_y, (*canvas).cur_yl, (*canvas).clip_x,
-        (*canvas).clip_y, (*canvas).org_x, (*canvas).org_y, (*canvas).color) };
-    let result = draw();
-    unsafe { ((*canvas).cur_x, (*canvas).cur_y, (*canvas).cur_yl, (*canvas).clip_x,
-        (*canvas).clip_y, (*canvas).org_x, (*canvas).org_y, (*canvas).color) = saved; }
-    result
-}
-
-#[cfg(all(test, feature = "in-game-overlay"))]
-mod overlay_tests {
-    use super::*;
-    #[test]
-    fn canvas_state_restored_after_success_and_error() {
-        let mut canvas: hp2_abi::engine::generated::UCanvas = unsafe { std::mem::zeroed() };
-        canvas.cur_x = 3.0; canvas.clip_y = 72.0; canvas.color = [1, 2, 3, 4];
-        let p = &mut canvas as *mut _;
-        for fails in [false, true] {
-            let result: Result<(), ()> = unsafe { with_overlay_canvas(p, || {
-                (*p).cur_x = 10.0; (*p).clip_y = 99.0; (*p).color = [9; 4];
-                if fails { Err(()) } else { Ok(()) }
-            }) };
-            assert_eq!(result.is_err(), fails);
-            let (x, clip, color) = (canvas.cur_x, canvas.clip_y, canvas.color);
-            assert_eq!((x, clip, color), (3.0, 72.0, [1, 2, 3, 4]));
-        }
-    }
-}
-
-
 #[repr(C)]
 pub(crate) struct PlayerCalcViewParams {
     pub view_actor: *mut AActor,
@@ -558,7 +526,12 @@ impl crate::game_tick::draw::DrawOps for CoreDrawOps<'_> {
         render: *mut std::ffi::c_void,
         frame: *mut std::ffi::c_void,
     ) -> RuntimeResult<()> {
-        unsafe { crate::render_owner::draw_world(self.access, render.cast(), frame.cast()) }
+        unsafe {
+            crate::render_device_owner::begin_scaled_world(self.access)?;
+            let world = crate::render_owner::draw_world(self.access, render.cast(), frame.cast());
+            let restore = crate::render_device_owner::end_scaled_world(self.access);
+            world.and(restore)
+        }
     }
 
     unsafe fn renderdev_end_flash(&self, device: *mut std::ffi::c_void) -> RuntimeResult<()> {
@@ -599,40 +572,20 @@ impl crate::game_tick::draw::DrawOps for CoreDrawOps<'_> {
         console: *mut std::ffi::c_void,
         canvas: *mut std::ffi::c_void,
     ) -> RuntimeResult<()> {
-        unsafe {
-            crate::console_owner::event_post_render(
-                self.access,
-                console.cast(),
-                canvas.cast(),
-            )
-        }
-    }
-
-    #[cfg(feature = "in-game-overlay")]
-    unsafe fn in_game_overlay(&self, viewport: *mut std::ffi::c_void, canvas: *mut std::ffi::c_void) -> RuntimeResult<()> {
-        let Some((content, selected)) = crate::in_game_overlay::snapshot(viewport as usize) else { return Ok(()); };
         let canvas = canvas.cast::<hp2_abi::engine::generated::UCanvas>();
-        if canvas.is_null() { return Err(RuntimeError::new("Overlay has no Canvas")); }
-        unsafe {
-            let font = (*canvas).small_font.cast::<hp2_abi::engine::generated::UFont>();
-            if font.is_null() { return Ok(()); }
-            with_overlay_canvas(canvas, || {
-            (*canvas).color = [255, 255, 255, 255];
-            let mut lines = vec![content.title];
-            lines.extend(content.status);
-            for (i, action) in content.actions.iter().enumerate() {
-                lines.push(format!("{} {}{}", if i == selected { ">" } else { " " }, action.label, if action.enabled { "" } else { " (unavailable)" }));
-            }
-                for (i, line) in lines.iter().enumerate() {
-                    (*canvas).cur_x = 24.0;
-                    (*canvas).cur_y = 24.0 + i as f32 * 22.0;
-                    let mut text: Vec<u16> = line.encode_utf16().collect();
-                    text.push(0);
-                    crate::canvas_owner::wrapped_printf(self.access, canvas, font, false, &text)?;
-                }
-                Ok(())
-            })
+        if canvas.is_null() {
+            return Err(RuntimeError::new("Console post-render has no Canvas"));
         }
+        let (frame, viewport) = unsafe { ((*canvas).frame, (*canvas).viewport) };
+        if frame.is_null() || viewport.is_null() {
+            return unsafe { crate::console_owner::event_post_render(self.access, console.cast(), canvas) };
+        }
+        let frame = frame.cast::<hp2_abi::engine::generated::FSceneNode>();
+        let user_scale = unsafe { viewport_ui_scale(viewport.cast())? };
+        let scale = unsafe { crate::game_tick::get_console_ui_scale((*frame).fx, (*frame).fy, user_scale) };
+        crate::canvas_text::with_console_text_scale(scale, || unsafe {
+            crate::console_owner::event_post_render(self.access, console.cast(), canvas)
+        })
     }
 
     unsafe fn replay_replaying(&self, engine: *mut std::ffi::c_void) -> RuntimeResult<i32> {
@@ -757,6 +710,31 @@ pub unsafe fn draw(
     }
     unsafe { (*game).g_is_drawing = true };
     let _drawing = DrawingFlag(game);
+    // HPMessageBox timeout closes during AfterPaint, including outside tick.
+    #[cfg(feature = "sdl")]
+    let _resolution_lifecycle = unsafe { crate::stock_resolution_lifecycle::install(access, crate::stock_resolution_transaction::callback)? };
+    // Draw can run outside the input tick. Give paint observers the same
+    // validated stock-hook scope without replacing an already active hook.
+    let _draw_stock_hook = if !crate::stock_menu_extensions::active() { unsafe { crate::stock_fps_menu::install(access) } } else { None };
+    let _draw_stock_tick = if !crate::stock_menu_extensions::active() && _draw_stock_hook.is_some() { Some(crate::stock_menu_extensions::begin_tick()?) } else { None };
+    let _graphics_paint = match unsafe { crate::stock_graphics_dispatch::install_paint(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", FindName::Add) {
+                let _ = access.emit_log(category, &format!("Graphics paint observer: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
+    let _resolution_popup = match unsafe { crate::stock_resolution_popup::install(access, viewport) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", FindName::Add) {
+                let _ = access.emit_log(category, &format!("Stock resolution popup: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
     // FPushMemTag maps to Core FMalloc::SetTag, whose source body is empty.
     let ops = CoreDrawOps { access };
     unsafe {

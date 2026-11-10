@@ -196,7 +196,16 @@ unsafe fn static_load_object_with_sandbox(
                 }
             }
         }
-        if found.is_null() { return missing_load(flags, text, "Object outer was not found"); }
+        if found.is_null() {
+            // ResolveName(Create=1) creates intermediate package groups even
+            // when no such group is present in the file. Linker::Create then
+            // searches the package's exports by class/name across groups.
+            let package_class = access.native_class("Core.Package")?;
+            found = unsafe {
+                access.construct_object(package_class, target_outer, name_index,
+                    hp2_abi::engine::generated::CORE_LINKER_CONSTANTS.public_flag, ptr::null_mut())?
+            };
+        }
         target_outer = found;
         segment = segments.next().ok_or_else(|| RuntimeError::new("Object name is empty"))?;
     }

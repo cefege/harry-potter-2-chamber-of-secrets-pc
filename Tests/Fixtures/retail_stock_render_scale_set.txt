@@ -1,0 +1,53 @@
+# 800x600 viewport. Open the stock sound/video page and use the slider.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 680 455
+press LeftMouse
+idle 50
+# Eleven stock track clicks step the 12 slider positions from 100% to 50%
+# (100 95 90 85 80 75 70 67 65 60 55 50).
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+mouse 270 495
+press LeftMouse
+idle 3
+idle 64
+# Return to the game so the GPU trace can observe a world scope at 50%.
+mouse 755 555
+press LeftMouse
+idle 40
+mouse 755 455
+press LeftMouse
+idle 160

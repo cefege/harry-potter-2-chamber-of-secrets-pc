@@ -14,6 +14,7 @@ from unittest.mock import patch
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import game_test  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 
 
 def _trace() -> dict[str, object]:
@@ -44,6 +45,7 @@ class CreatureGeneratorHarnessContracts(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    @mocked_native_preflight
     def test_paired_stages_side_specific_artifacts_and_comparison(self) -> None:
         app = self.root / "app"
         engine_bin = self.root / "engine-bin"
@@ -109,6 +111,7 @@ class CreatureGeneratorHarnessContracts(unittest.TestCase):
             arguments = game_test._arguments()
         self.assertEqual(arguments.creature_generator_trace_dir, Path("generator-traces"))
 
+    @mocked_native_preflight
     def test_side_env_is_side_specific_and_missing_artifact_fails_leg(self) -> None:
         paths = game_test._prepare_creature_generator_trace_paths(self.root / "generator-traces")
         checkpoint_manifest = self.root / "checkpoints.json"
@@ -119,6 +122,14 @@ class CreatureGeneratorHarnessContracts(unittest.TestCase):
             environment = kwargs["extra_env"]
             assert isinstance(environment, dict)
             environments.append(environment)
+            log_path = kwargs["log_path"]
+            assert isinstance(log_path, Path)
+            log_path.write_text(
+                "<HP2_VERIFY> input=isolated\n"
+                "<HP2_VERIFY> audio=loopback rate=44100 channels=2 format=short\n"
+                "<HP2_VERIFY> visuals=tick\n",
+                encoding="utf-8",
+            )
             path = Path(environment["HP2_CREATURE_GENERATOR_TRACE"])
             if path == paths["cpp"]:
                 path.write_text(json.dumps(_trace()), encoding="utf-8")

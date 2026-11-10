@@ -798,7 +798,7 @@ pub fn validate_launcher_settings(settings: &LauncherSettings) -> Result<(), Str
         return Err("Brightness must be between 0.1 and 1.0.".to_string());
     }
     if !settings.render_scale.is_finite() || !RENDER_SCALE_VALUES.contains(&settings.render_scale) {
-        return Err("Render scale must be 0.50, 0.67, 0.75, 0.85, or 1.00.".to_string());
+        return Err("Render scale must be 0.50 to 1.00 in 0.05 steps, or the legacy value 0.67.".to_string());
     }
     if !settings.ui_scale.is_finite() || !UI_SCALE_VALUES.contains(&settings.ui_scale) {
         return Err("UI scale must be 0.75, 1.00, 1.25, 1.50, 1.75, or 2.00.".to_string());
@@ -980,10 +980,10 @@ mod tests {
             "Resolution dimensions must each be between 320 and 16384."
         );
         s = LauncherSettings::default();
-        s.render_scale = 0.6;
+        s.render_scale = 0.61;
         assert_eq!(
             validate_launcher_settings(&s).unwrap_err(),
-            "Render scale must be 0.50, 0.67, 0.75, 0.85, or 1.00."
+            "Render scale must be 0.50 to 1.00 in 0.05 steps, or the legacy value 0.67."
         );
         s = LauncherSettings::default();
         s.frame_rate_limit = 50;

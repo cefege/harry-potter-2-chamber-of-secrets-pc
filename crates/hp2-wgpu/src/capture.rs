@@ -92,6 +92,9 @@ pub struct FrameCapture {
     map_name: String,
     requested_ticks: Option<i32>,
     frame_index: u32,
+    presented_index: u32,
+    selected_frames: Option<Vec<u32>>,
+    selected_index: Option<u32>,
     meta_entries: Vec<String>,
     enabled: bool,
 }
@@ -105,11 +108,12 @@ impl FrameCapture {
         let requested_ticks = env_value("HP2_CAPTURE_TICKS").map(|value| parse_ticks(&value));
         // Best effort, like the C++ mkdir: the harness normally pre-creates it.
         let _ = std::fs::create_dir_all(&directory);
-        Some(FrameCapture::new(
-            std::path::PathBuf::from(directory),
-            map_name,
-            requested_ticks,
-        ))
+        let mut capture = FrameCapture::new(std::path::PathBuf::from(directory), map_name, requested_ticks);
+        if let Some(filter) = env_value("HP2_CAPTURE_FRAME_INDICES") {
+            // Malformed filters fail closed. Never silently capture every frame.
+            capture.selected_frames = Some(parse_frame_indices(&filter).unwrap_or_default());
+        }
+        Some(capture)
     }
 
     pub fn new(
@@ -122,6 +126,9 @@ impl FrameCapture {
             map_name,
             requested_ticks,
             frame_index: 0,
+            presented_index: 0,
+            selected_frames: None,
+            selected_index: None,
             meta_entries: Vec::new(),
             enabled: true,
         }
@@ -129,6 +136,16 @@ impl FrameCapture {
 
     pub fn is_enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// Called once per presented frame before GPU readback. A filtered capture
+    /// keeps the presented frame index in the output filename.
+    pub fn wants_presented_frame(&mut self) -> bool {
+        let index = self.presented_index;
+        self.presented_index = self.presented_index.saturating_add(1);
+        let wanted = self.selected_frames.as_ref().is_none_or(|frames| frames.binary_search(&index).is_ok());
+        self.selected_index = self.selected_frames.as_ref().and(wanted.then_some(index));
+        wanted
     }
 
     /// Writes one presented frame. `rgba` is tightly packed RGBA8, top row first.
@@ -152,7 +169,7 @@ impl FrameCapture {
 
         let path = self
             .directory
-            .join(format!("frame_{:06}.png", self.frame_index));
+            .join(format!("frame_{:06}.png", self.selected_index.unwrap_or(self.frame_index)));
         if let Err(error) = write_png(&path, &rgb, width, height) {
             self.enabled = false;
             return Err(error);
@@ -185,6 +202,19 @@ impl FrameCapture {
     fn meta_json(&self) -> String {
         format!("{{\"captures\":[{}]}}\n", self.meta_entries.join(","))
     }
+}
+
+fn parse_frame_indices(value: &str) -> Option<Vec<u32>> {
+    let mut result = Vec::new();
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() || !part.bytes().all(|c| c.is_ascii_digit()) { return None; }
+        result.push(part.parse().ok()?);
+        if result.len() > 4096 { return None; }
+    }
+    result.sort_unstable();
+    result.dedup();
+    Some(result)
 }
 
 fn env_value(name: &str) -> Option<String> {
@@ -250,6 +280,21 @@ fn parse_ticks(text: &str) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_filter_is_strict_and_skips_unrequested_frames() {
+        assert_eq!(parse_frame_indices("4,1,4, 2"), Some(vec![1, 2, 4]));
+        for bad in ["", "1,", "-1", "1,no", "4294967296"] { assert_eq!(parse_frame_indices(bad), None); }
+        let mut capture = FrameCapture::new(std::path::PathBuf::new(), String::new(), None);
+        capture.selected_frames = parse_frame_indices("1,3");
+        assert!(!capture.wants_presented_frame());
+        assert!(capture.wants_presented_frame());
+        assert_eq!(capture.selected_index, Some(1));
+        assert!(!capture.wants_presented_frame());
+        assert!(capture.wants_presented_frame());
+        assert_eq!(capture.selected_index, Some(3));
+        assert!(!capture.wants_presented_frame());
+    }
 
     #[test]
     #[ignore = "needs a real GPU adapter; run explicitly with `cargo test -p hp2-wgpu -- --ignored`"]
@@ -394,6 +439,19 @@ mod tests {
             std::process::id(),
             suffix
         ))
+    }
+
+    #[test]
+    fn checkpoint_filter_writes_only_selected_numbered_pngs() {
+        let root = std::path::PathBuf::from(std::env::var_os("HP2_ARTIFACT_DIR").expect("HP2_ARTIFACT_DIR"));
+        let dir = root.join(format!("capture-checkpoints-{}", std::process::id()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut capture = FrameCapture::new(dir.clone(), "Map".into(), None);
+        capture.selected_frames = parse_frame_indices("1,3");
+        for _ in 0..5 {
+            if capture.wants_presented_frame() { capture.write_frame(&[0, 0, 0, 255], 1, 1, 1.0, "R").unwrap(); }
+        }
+        for i in 0..5 { assert_eq!(dir.join(format!("frame_{i:06}.png")).exists(), i == 1 || i == 3); }
     }
 
     #[test]

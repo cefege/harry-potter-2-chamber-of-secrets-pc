@@ -510,6 +510,17 @@ class CargoArtifactClosureTests(unittest.TestCase):
                     findings,
                 )
 
+    def test_missing_artifact_diagnostic_includes_full_unit_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = self.make_closure(Path(directory))
+            fixture[-1]["messages"].pop(1)
+            _, _, findings = self.inspect_closure(fixture)
+        self.assertIn(
+            "selected Cargo compiler-artifact records missing for targets/roles: "
+            "hp2-core (workspace#hp2-core@0.1.0):hp2_core:('lib',):target",
+            findings,
+        )
+
     def test_metadata_union_cannot_replace_selected_unit_graph(self):
         target = {"name": "game", "kind": ["bin"]}
         metadata = {
@@ -711,7 +722,7 @@ class NativeFreePlatformProvenanceTests(unittest.TestCase):
 
     def test_generated_native_header_requires_pinned_producer_inputs_and_output_hash(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             build, repo = root / "build", root / "repo"
             source_root = build / "_deps" / "hp2_openal_soft-src"
             output = build / "_deps" / "hp2_openal_soft-build" / "config.h"
@@ -752,9 +763,15 @@ class NativeFreePlatformProvenanceTests(unittest.TestCase):
                 "template_sha256": digest(template),
                 "sha256": digest(output),
             }
+            alias = root / "build-alias"
+            alias.symlink_to(build, target_is_directory=True)
+            aliased_output = alias / output.relative_to(build)
             with mock.patch.object(check_native_free, "pinned_generated_source", return_value=True):
                 self.assertTrue(check_native_free.generated_native_header(
                     output.resolve(), build, repo, allow, [record], {"OpenAL"},
+                ))
+                self.assertTrue(check_native_free.generated_native_header(
+                    aliased_output, alias, repo, allow, [record], {"OpenAL"},
                 ))
                 output.write_text("tampered header\n", encoding="utf-8")
                 self.assertFalse(check_native_free.generated_native_header(
@@ -764,6 +781,7 @@ class NativeFreePlatformProvenanceTests(unittest.TestCase):
 
 class CMakeObjectProducerTests(unittest.TestCase):
     def make_closure(self, root: Path, *, reachable=True, duplicate=False, source=True, owner=True):
+        root = root.resolve()
         repo = root / "checkout"
         build = repo / "out" / "macos-arm64"
         reply = build / ".cmake/api/v1/reply"
@@ -807,6 +825,18 @@ class CMakeObjectProducerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             build, cpp, obj = self.make_closure(Path(directory))
             findings, sources, artifacts, targets = check_native_free.file_api_closure(build, "game", [])
+            self.assertEqual(findings, [])
+            self.assertEqual(sources, {cpp})
+            self.assertIn(obj, artifacts)
+            self.assertIn("fmt", targets)
+
+    def test_symlinked_build_root_keeps_canonical_producer_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            build, cpp, obj = self.make_closure(root)
+            alias = root / "build-alias"
+            alias.symlink_to(build, target_is_directory=True)
+            findings, sources, artifacts, targets = check_native_free.file_api_closure(alias, "game", [])
             self.assertEqual(findings, [])
             self.assertEqual(sources, {cpp})
             self.assertIn(obj, artifacts)

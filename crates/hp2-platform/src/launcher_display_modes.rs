@@ -79,6 +79,7 @@ pub fn ensure_video_initialized() -> bool {
         if ffi::SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO != 0 {
             return false;
         }
+        if !crate::sdl_runtime::configure_fullscreen_hint() { return false; }
         ffi::SDL_InitSubSystem(SDL_INIT_VIDEO) == 0
     }
 }

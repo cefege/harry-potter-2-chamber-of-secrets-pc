@@ -29,7 +29,29 @@ mod ffi {
     unsafe extern "C" {
         pub fn SDL_GetVersion(ver: *mut SdlVersion);
         pub fn SDL_GetError() -> *const c_char;
+        #[cfg(target_os = "macos")]
+        pub fn SDL_GetHint(name: *const c_char) -> *const c_char;
+        #[cfg(target_os = "macos")]
+        pub fn SDL_SetHint(name: *const c_char, value: *const c_char) -> i32;
+        #[cfg(target_os = "macos")]
+        pub fn SDL_SetError(format: *const c_char, ...) -> i32;
     }
+}
+
+/// Prefer SDL's borderless desktop implementation over macOS fullscreen
+/// Spaces. SDL must read this hint before video initialization. Respect an
+/// existing SDL hint or environment override instead of replacing it.
+#[cfg(feature = "sdl")]
+pub fn configure_fullscreen_hint() -> bool {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        if !ffi::SDL_GetHint(c"SDL_VIDEO_MAC_FULLSCREEN_SPACES".as_ptr()).is_null() { return true; }
+        if ffi::SDL_SetHint(c"SDL_VIDEO_MAC_FULLSCREEN_SPACES".as_ptr(), c"0".as_ptr()) != 0 { return true; }
+        ffi::SDL_SetError(c"Could not set macOS fullscreen hint".as_ptr());
+        false
+    }
+    #[cfg(not(target_os = "macos"))]
+    { true }
 }
 
 /// `SDL_MAJOR_VERSION`/`SDL_MINOR_VERSION`/`SDL_PATCHLEVEL` from the
@@ -75,6 +97,24 @@ mod tests {
     /// Bump this alongside the vendored SDL2 pin
     /// (`Build/CMake/HP2Dependencies.cmake`'s `FetchContent_Declare(hp2_sdl2
     /// ...)`), or `LogVersion`'s "compiled against" half silently goes stale.
+    #[cfg(all(feature = "sdl", target_os = "macos"))]
+    #[test]
+    fn fullscreen_hint_defaults_to_borderless_and_respects_override() {
+        if let Ok(expected) = std::env::var("HP2_HINT_TEST_CHILD") {
+            assert!(configure_fullscreen_hint());
+            let p = unsafe { ffi::SDL_GetHint(c"SDL_VIDEO_MAC_FULLSCREEN_SPACES".as_ptr()) };
+            assert!(!p.is_null());
+            assert_eq!(unsafe { std::ffi::CStr::from_ptr(p) }.to_str().unwrap(), expected);
+            return;
+        }
+        for (expected, override_value) in [("0", None), ("1", Some("1"))] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command.args(["--exact", "sdl_runtime::tests::fullscreen_hint_defaults_to_borderless_and_respects_override"])
+                .env("HP2_HINT_TEST_CHILD", expected).env_remove("SDL_VIDEO_MAC_FULLSCREEN_SPACES");
+            if let Some(value) = override_value { command.env("SDL_VIDEO_MAC_FULLSCREEN_SPACES", value); }
+            assert!(command.status().unwrap().success());
+        }
+    }
     #[test]
     fn compiled_version_matches_the_pinned_sdl_version_h() {
         assert_eq!(COMPILED_VERSION, (2, 32, 10));

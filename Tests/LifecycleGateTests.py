@@ -15,6 +15,7 @@ from unittest.mock import patch
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import lifecycle_gate  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 
 
 class LifecycleGateContracts(unittest.TestCase):
@@ -228,6 +229,7 @@ class LifecycleGateContracts(unittest.TestCase):
         with self.assertRaisesRegex(lifecycle_gate.LifecycleGateError, "atomic temporary"):
             lifecycle_gate.read_atomic_trace(trace)
 
+    @mocked_native_preflight
     def test_side_launch_uses_bounded_url_and_separate_trace_path(self) -> None:
         calls: list[dict[str, object]] = []
 

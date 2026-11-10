@@ -50,8 +50,6 @@ pub enum Hp2LauncherBootLeaf {
     ArgCount,
     /// `BootstrapHP2Paths(ArgC, ArgV)`; output is `Bootstrap.Installed` (2486).
     BootstrapPaths,
-    /// `ShouldRunNativeLauncher(ArgC, ArgV)` (2487, 2515).
-    ShouldRunNativeLauncher,
     /// `CrashConfig.process_name = "hp2_game"; CrashConfig.log_file_base =
     /// "HarryPotter2.log"; hp2_rs_crash_reporter_install(&CrashConfig);` (2493-2496).
     InstallCrashReporter,
@@ -62,14 +60,6 @@ pub enum Hp2LauncherBootLeaf {
     /// `ForwardedCommandLine(ArgC, ArgV)` stored as `ForwardedArguments`,
     /// with `EngineCommandLine = ForwardedArguments` (2513-2514).
     ForwardCommandLine,
-    /// `RunNativeLauncherRound(ArgC, ArgV, HasOverride, OverrideRoot,
-    /// Outcome)`; output is whether to continue (2550-2551).
-    RunLauncherRound,
-    /// `Outcome.EnginePrefix.Len()` (2554).
-    EnginePrefixLen,
-    /// `EngineCommandLine = Outcome.EnginePrefix + TEXT(" ") +
-    /// ForwardedArguments;` (2555).
-    BuildEngineCommandLineWithPrefix,
 
     // -- HP2BootAfterLauncher() --
     /// `GIsStarted = 1;` (2201).
@@ -297,8 +287,9 @@ fn pack_context_flags(is_client: bool, lazy_load: bool) -> i32 {
 pub unsafe fn run_main(services: &Hp2LauncherBootServices) -> Result<Option<i32>, i32> {
     use Hp2LauncherBootLeaf::*;
 
-    let installed = services.call(BootstrapPaths, 0)? != 0;
-    if !installed && services.call(ShouldRunNativeLauncher, 0)? == 0 {
+    // The game never opens a startup window. Without installed data, bootstrap
+    // has already printed its recovery diagnostic; exit before creating owners.
+    if services.call(BootstrapPaths, 0)? == 0 {
         return Ok(Some(1));
     }
 
@@ -312,16 +303,6 @@ pub unsafe fn run_main(services: &Hp2LauncherBootServices) -> Result<Option<i32>
     }
 
     services.call(ForwardCommandLine, 0)?;
-    let show_launcher = services.call(ShouldRunNativeLauncher, 0)? != 0;
-
-    if show_launcher {
-        if services.call(RunLauncherRound, 0)? == 0 {
-            return Ok(Some(0));
-        }
-        if services.call(EnginePrefixLen, 0)? > 0 {
-            services.call(BuildEngineCommandLineWithPrefix, 0)?;
-        }
-    }
 
     Ok(None)
 }
@@ -537,13 +518,9 @@ mod tests {
         match leaf {
             ArgCount => "ArgCount",
             BootstrapPaths => "BootstrapPaths",
-            ShouldRunNativeLauncher => "ShouldRunNativeLauncher",
             InstallCrashReporter => "InstallCrashReporter",
             DataDirectoryArgument => "DataDirectoryArgument",
             ForwardCommandLine => "ForwardCommandLine",
-            RunLauncherRound => "RunLauncherRound",
-            EnginePrefixLen => "EnginePrefixLen",
-            BuildEngineCommandLineWithPrefix => "BuildEngineCommandLineWithPrefix",
             SetIsStarted1 => "SetIsStarted1",
             PlatformStaticInit => "PlatformStaticInit",
             SetIsGuarded1 => "SetIsGuarded1",
@@ -623,22 +600,19 @@ mod tests {
     }
 
     #[test]
-    fn main_returns_one_when_bootstrap_absent_and_no_native_launcher() {
-        let (result, calls) =
-            run_with_script(&[("BootstrapPaths", 0), ("ShouldRunNativeLauncher", 0)]);
+    fn main_returns_one_when_bootstrap_absent_without_any_startup_ui() {
+        let (result, calls) = run_with_script(&[("BootstrapPaths", 0)]);
         assert_eq!(result, Ok(Some(1)));
-        assert_eq!(calls, vec![("BootstrapPaths", 0), ("ShouldRunNativeLauncher", 0)]);
+        assert_eq!(calls, vec![("BootstrapPaths", 0)]);
     }
 
     #[test]
-    fn main_returns_zero_when_launcher_round_declines_to_continue() {
+    fn main_continues_directly_to_engine_without_a_launcher_round() {
         let (result, calls) = run_with_script(&[
             ("BootstrapPaths", 1),
-            ("ShouldRunNativeLauncher", 1),
             ("ArgCount", 1),
-            ("RunLauncherRound", 0),
         ]);
-        assert_eq!(result, Ok(Some(0)));
+        assert_eq!(result, Ok(None));
         assert_eq!(
             calls,
             vec![
@@ -646,8 +620,6 @@ mod tests {
                 ("InstallCrashReporter", 0),
                 ("ArgCount", 0),
                 ("ForwardCommandLine", 0),
-                ("ShouldRunNativeLauncher", 0),
-                ("RunLauncherRound", 0),
             ]
         );
     }
@@ -656,7 +628,6 @@ mod tests {
     fn main_scans_every_argument_for_a_data_directory_override_until_found() {
         let (_result, calls) = run_with_script(&[
             ("BootstrapPaths", 1),
-            ("ShouldRunNativeLauncher", 0),
             ("ArgCount", 4),
             ("DataDirectoryArgument", 0),
         ]);
@@ -672,7 +643,6 @@ mod tests {
             let mut s = s.borrow_mut();
             s.clear();
             s.insert("BootstrapPaths", 1);
-            s.insert("ShouldRunNativeLauncher", 0);
             s.insert("ArgCount", 5);
         });
         // DataDirectoryArgument returns 1 (found) on the second call only.
@@ -706,27 +676,6 @@ mod tests {
             c.borrow().iter().filter(|(n, _)| *n == "DataDirectoryArgument").map(|(_, a)| *a).collect()
         });
         assert_eq!(indices, vec![1, 2]);
-    }
-
-    #[test]
-    fn main_builds_prefixed_engine_command_line_only_when_prefix_is_non_empty() {
-        let (_result, calls) = run_with_script(&[
-            ("BootstrapPaths", 1),
-            ("ShouldRunNativeLauncher", 1),
-            ("ArgCount", 1),
-            ("RunLauncherRound", 1),
-            ("EnginePrefixLen", 0),
-        ]);
-        assert!(!calls.iter().any(|(n, _)| *n == "BuildEngineCommandLineWithPrefix"));
-
-        let (_result, calls) = run_with_script(&[
-            ("BootstrapPaths", 1),
-            ("ShouldRunNativeLauncher", 1),
-            ("ArgCount", 1),
-            ("RunLauncherRound", 1),
-            ("EnginePrefixLen", 3),
-        ]);
-        assert!(calls.iter().any(|(n, _)| *n == "BuildEngineCommandLineWithPrefix"));
     }
 
     unsafe extern "C" fn fake_call_app_init_fails(

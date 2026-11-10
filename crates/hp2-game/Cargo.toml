@@ -14,12 +14,7 @@ hp2-abi.workspace = true
 hp2-core.workspace = true
 hp2-engine = { workspace = true, features = ["sdl", "openal", "renderer-wgpu", "text-coretext"] }
 hp2-launcher.workspace = true
-hp2-platform = { workspace = true, features = ["sdl", "nfd"] }
+hp2-platform = { workspace = true, features = ["sdl"] }
 hp2-wgpu = { workspace = true, features = ["sdl"] }
-egui = { version = "=0.37.0", features = ["default_fonts"] }
-hp2-import.workspace = true
-hp2-ini.workspace = true
-egui-wgpu = "=0.37.0"
-wgpu.workspace = true
 hp2-bootstrap-paths.workspace = true
 libc.workspace = true

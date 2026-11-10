@@ -191,10 +191,10 @@ pub struct Hp2PlatformClientServices {
     pub write_float: unsafe extern "C" fn(*mut c_void, Hp2PlatformClientField, f32) -> i32,
 }
 
-/// Entry points execute under the correspondingly named action's unwind label,
-/// now emitted by hp2-ffi's `native_guard::guarded` rather than the original
-/// native USDLClient `guard()`/`unguard`. StaticDefaults runs after all native
-/// property placement constructions.
+/// Actions accepted by `run` through the checked client service table.
+/// `StaticDefaults` and the other actions use the callbacks and error
+/// contracts described by `Hp2PlatformClientServices`. The caller must finish
+/// all property placement constructions before running `StaticDefaults`.
 ///
 /// cbindgen:prefix-with-name
 #[repr(u32)]
@@ -470,7 +470,9 @@ pub unsafe fn run(
         A::Destroy => destroy(&services)?,
         A::PostEditChange => {
             services.simple(L::SuperPostEditChange)?;
-            if !(services.read_real(F::UIScale)? > 0.0) {
+            if services.read_real(F::UIScale)?.partial_cmp(&0.0)
+                != Some(std::cmp::Ordering::Greater)
+            {
                 services.write_real(F::UIScale, 1.0)?;
             }
         }
@@ -482,3 +484,6 @@ pub unsafe fn run(
     }
     Ok(0)
 }
+
+#[cfg(test)]
+mod client_post_edit_contracts;

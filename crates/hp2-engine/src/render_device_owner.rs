@@ -225,7 +225,13 @@ struct RenderRuntime {
 
 #[cfg(feature = "renderer-wgpu")]
 struct RenderResources {
+    generation: u64,
     loop_state: hp2_wgpu::RenderLoop,
+    persisted_world_scale_loaded: bool,
+    startup_requested_scale: Option<u8>,
+    persisted_graphics: Option<StartupGraphics>,
+    startup_warnings: StartupWarnings,
+    persisted_graphics_loaded: bool,
     created: Option<hp2_wgpu::CreatedDevice>,
     text: TextResources,
     #[cfg(all(feature = "sdl", target_os = "macos"))]
@@ -472,10 +478,22 @@ impl RenderRuntime {
 }
 
 #[cfg(feature = "renderer-wgpu")]
+fn next_graphics_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |n| n.checked_add(1)).expect("render device generations exhausted")
+}
+
+#[cfg(feature = "renderer-wgpu")]
 impl RenderResources {
     fn new() -> Self {
         Self {
+            generation: next_graphics_generation(),
             loop_state: hp2_wgpu::RenderLoop::new(),
+            persisted_world_scale_loaded: false,
+            startup_requested_scale: None,
+            persisted_graphics: None,
+            startup_warnings: StartupWarnings::default(),
+            persisted_graphics_loaded: false,
             created: None,
             text: TextResources::default(),
             #[cfg(all(feature = "sdl", target_os = "macos"))]
@@ -484,7 +502,13 @@ impl RenderResources {
     }
 
     fn release_device(&mut self) {
+        self.generation = next_graphics_generation();
         self.loop_state = hp2_wgpu::RenderLoop::new();
+        self.persisted_world_scale_loaded = false;
+        self.startup_requested_scale = None;
+        self.persisted_graphics = None;
+        self.startup_warnings = StartupWarnings::default();
+        self.persisted_graphics_loaded = false;
         self.created = None;
     }
 }
@@ -677,6 +701,70 @@ pub(crate) unsafe fn set_res(
         Err(RuntimeError::new("Canonical WGPU renderer provider is disabled"))
     }
 }
+/// Returns the live WGPU device's maximum 2D texture dimension.
+///
+/// # Safety
+/// The device and viewport must be live canonical records from this owner.
+pub(crate) unsafe fn max_texture_dimension_2d(
+    access: CoreAccess<'_>, device: *mut URenderDevice, viewport: *mut UViewport,
+) -> RuntimeResult<u32> {
+    if device.is_null() || viewport.is_null() { return Err(RuntimeError::new("Invalid canonical render device")); }
+    #[cfg(feature = "renderer-wgpu")]
+    {
+        let adapter = policy(access, device.cast::<UWgpuRenderDevice>(), viewport.cast(), 1, 1)?;
+        adapter.with_resources(|resources| {
+            let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("Canonical WGPU device is unavailable"))?;
+            Ok(created.device.limits().max_texture_dimension_2d)
+        })
+    }
+    #[cfg(not(feature = "renderer-wgpu"))]
+    { let _ = access; Err(RuntimeError::new("Canonical WGPU renderer provider is disabled")) }
+}
+
+/// A staged target pair. Dropping it leaves the active renderer targets intact.
+pub(crate) struct PreparedFullscreenTargets {
+    #[cfg(feature = "renderer-wgpu")]
+    targets: hp2_wgpu::PreparedLogicalTargets,
+}
+
+/// Preallocates the fullscreen scene targets before committing a resolution.
+///
+/// # Safety
+/// The device and viewport must be live canonical records from this owner.
+pub(crate) unsafe fn prepare_fullscreen_targets(
+    access: CoreAccess<'_>, device: *mut URenderDevice, viewport: *mut UViewport, width: u32, height: u32,
+) -> RuntimeResult<PreparedFullscreenTargets> {
+    if device.is_null() || viewport.is_null() { return Err(RuntimeError::new("Invalid canonical render device")); }
+    #[cfg(feature = "renderer-wgpu")]
+    {
+        let adapter = policy(access, device.cast::<UWgpuRenderDevice>(), viewport.cast(), width as i32, height as i32)?;
+        adapter.with_resources(|resources| {
+            let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("Canonical WGPU device is unavailable"))?;
+            let targets = resources.loop_state.prepare_fullscreen_targets(created, width, height).map_err(|e| RuntimeError::new(&e))?;
+            Ok(PreparedFullscreenTargets { targets })
+        })
+    }
+    #[cfg(not(feature = "renderer-wgpu"))]
+    { let _ = (access, width, height); Err(RuntimeError::new("Canonical WGPU renderer provider is disabled")) }
+}
+
+/// Publish staged targets after the renderer and config have accepted the change.
+///
+/// # Safety
+/// The device and viewport must remain live and belong to the same renderer that prepared the targets.
+pub(crate) unsafe fn commit_fullscreen_targets(
+    access: CoreAccess<'_>, device: *mut URenderDevice, viewport: *mut UViewport, staged: PreparedFullscreenTargets,
+) -> RuntimeResult<()> {
+    if device.is_null() || viewport.is_null() { return Err(RuntimeError::new("Invalid canonical render device")); }
+    #[cfg(feature = "renderer-wgpu")]
+    {
+        let adapter = policy(access, device.cast::<UWgpuRenderDevice>(), viewport.cast(), 1, 1)?;
+        adapter.with_resources(|resources| { resources.loop_state.commit_logical_targets(staged.targets); Ok(()) })
+    }
+    #[cfg(not(feature = "renderer-wgpu"))]
+    { let _ = (access, staged); Err(RuntimeError::new("Canonical WGPU renderer provider is disabled")) }
+}
+
 /// Draw-call counters owned by one canonical WGPU render-device record.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct RenderDrawStats {
@@ -1274,6 +1362,631 @@ pub(crate) unsafe fn clear_z(access: CoreAccess<'_>, device: *mut URenderDevice)
     }
 }
 
+#[cfg(feature = "renderer-wgpu")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StartupGraphics { msaa: i32, anisotropy: u16, vsync: u8 }
+
+#[cfg(feature = "renderer-wgpu")]
+#[derive(Clone, Debug, Default)]
+struct StartupWarnings { vsync: Option<String>, msaa: Option<String>, anisotropy: Option<String>, scale: Option<String> }
+
+#[cfg(feature = "renderer-wgpu")]
+fn fallback_apply<T: Copy + PartialEq>(requested: T, fallback: T, mut apply: impl FnMut(T) -> Result<(), String>) -> Result<(T, Option<String>), String> {
+    match apply(requested) {
+        Ok(()) => Ok((requested, None)),
+        Err(error) if requested != fallback => {
+            apply(fallback).map_err(|rollback| format!("requested setting failed: {error}; fallback failed: {rollback}"))?;
+            Ok((fallback, Some(error)))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(feature = "renderer-wgpu")]
+fn graphics_bool(text: &str) -> Option<bool> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "true" | "on" | "yes" | "1" => Some(true),
+        "false" | "off" | "no" | "0" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "renderer-wgpu")]
+fn parse_startup_graphics(default: StartupGraphics, aa: Option<&str>, samples: Option<&str>, anisotropy: Option<&str>, vsync: Option<&str>) -> RuntimeResult<StartupGraphics> {
+    let enabled = match aa { Some(v) => graphics_bool(v).ok_or_else(|| RuntimeError::new("Invalid persisted UseAA"))?, None => default.msaa != 0 };
+    let msaa = if enabled {
+        let value = match samples { Some(v) => v.trim().parse::<i32>().map_err(|_| RuntimeError::new("Invalid persisted NumAASamples"))?, None => if default.msaa == 0 { 4 } else { default.msaa } };
+        if ![2, 4].contains(&value) { return Err(RuntimeError::new("Invalid persisted NumAASamples")); }
+        value
+    } else { 0 };
+    let anisotropy = if let Some(value) = anisotropy {
+        let value = value.trim().parse::<f64>().map_err(|_| RuntimeError::new("Invalid persisted MaxAnisotropy"))?;
+        // Legacy Game.ini files can contain 2, even though the current live
+        // control only offers off/4/8/16. Keep the request for fallback reporting.
+        if !value.is_finite() || value.fract() != 0.0 || ![0.0, 2.0, 4.0, 8.0, 16.0].contains(&value) { return Err(RuntimeError::new("Invalid persisted MaxAnisotropy")); }
+        value as u16
+    } else { default.anisotropy };
+    if ![0, 2, 4, 8, 16].contains(&anisotropy) { return Err(RuntimeError::new("Invalid persisted MaxAnisotropy")); }
+    let vsync = match vsync {
+        Some(v) if v.trim().eq_ignore_ascii_case("adaptive") || v.trim() == "2" => 2,
+        Some(v) => u8::from(graphics_bool(v).ok_or_else(|| RuntimeError::new("Invalid persisted UseVSync"))?),
+        None => default.vsync,
+    };
+    if vsync > 2 { return Err(RuntimeError::new("Invalid persisted UseVSync")); }
+    Ok(StartupGraphics { msaa, anisotropy, vsync })
+}
+
+#[cfg(feature = "renderer-wgpu")]
+unsafe fn apply_startup_scene(renderer: &mut hp2_wgpu::RenderLoop, created: &hp2_wgpu::CreatedDevice, device: *mut UWgpuRenderDevice, graphics: StartupGraphics) -> RuntimeResult<(Option<String>, Option<String>)> {
+    let old_anisotropy = renderer.anisotropy_live();
+    let (anisotropy, anisotropy_warning) = fallback_apply(graphics.anisotropy, 0, |value| renderer.set_anisotropy_live(created, value))
+        .map_err(|error| RuntimeError::new(&format!("Cannot apply persisted anisotropy or fallback: {error}")))?;
+    let (msaa, msaa_warning) = match fallback_apply(graphics.msaa, 0, |value| renderer.set_msaa(created, value)) {
+        Ok(value) => value,
+        Err(error) => {
+            if let Err(rollback) = renderer.restore_anisotropy_live(created, old_anisotropy) {
+                return Err(RuntimeError::new(&format!("Cannot apply persisted MSAA or fallback: {error}; anisotropy rollback failed: {rollback}")));
+            }
+            return Err(RuntimeError::new(&format!("Cannot apply persisted MSAA or fallback: {error}")));
+        }
+    };
+    unsafe {
+        let aa = ptr::addr_of!((*device).use_aa).read_unaligned();
+        ptr::addr_of_mut!((*device).use_aa).write_unaligned((aa & !1) | i32::from(msaa != 0));
+        ptr::addr_of_mut!((*device).num_aa_samples).write_unaligned(msaa);
+        ptr::addr_of_mut!((*device).max_anisotropy).write_unaligned(f32::from(anisotropy));
+    }
+    Ok((anisotropy_warning, msaa_warning))
+}
+
+/// Interpret stale configuration without modifying it or preventing startup.
+#[cfg(feature = "renderer-wgpu")]
+fn tolerant_startup_graphics(default: StartupGraphics, aa: Option<&str>, samples: Option<&str>, anisotropy: Option<&str>, vsync: Option<&str>) -> (StartupGraphics, StartupWarnings) {
+    let mut warnings = StartupWarnings::default();
+    let enabled = match aa {
+        Some(text) => graphics_bool(text).unwrap_or_else(|| { warnings.msaa = Some(format!("invalid UseAA {text:?}; using off")); false }),
+        None => default.msaa != 0,
+    };
+    let msaa = if enabled {
+        let value = samples.and_then(|text| text.trim().parse::<i32>().ok()).unwrap_or(if samples.is_some() { -1 } else if default.msaa == 0 { 4 } else { default.msaa });
+        if [2, 4].contains(&value) { value } else { warnings.msaa = Some(format!("invalid NumAASamples {:?}; using off", samples)); 0 }
+    } else {
+        if let Some(text) = samples {
+            if !matches!(text.trim().parse::<i32>(), Ok(0 | 2 | 4)) {
+                warnings.msaa.get_or_insert_with(|| format!("invalid NumAASamples {text:?}; AA remains off"));
+            }
+        }
+        0
+    };
+    let anisotropy = match anisotropy {
+        Some(text) => match text.trim().parse::<f32>() {
+            Ok(value) if value.is_finite() => {
+                let clamp = hp2_wgpu::texture::anisotropy_clamp(value);
+                let effective = if clamp == 1 { 0 } else { clamp };
+                if value != f32::from(effective) { warnings.anisotropy = Some(format!("legacy MaxAnisotropy {text:?} maps to {effective}")); }
+                effective
+            }
+            _ => { warnings.anisotropy = Some(format!("invalid MaxAnisotropy {text:?}; using off")); 0 }
+        },
+        None if default.anisotropy <= 16 => default.anisotropy,
+        None => { warnings.anisotropy = Some("invalid default MaxAnisotropy; using off".into()); 0 }
+    };
+    let vsync = match vsync {
+        Some(text) if text.trim().eq_ignore_ascii_case("adaptive") || text.trim() == "2" => 2,
+        Some(text) => match graphics_bool(text) { Some(value) => u8::from(value), None => { warnings.vsync = Some(format!("invalid UseVSync {text:?}; using FIFO")); 1 } },
+        None if default.vsync <= 2 => default.vsync,
+        None => { warnings.vsync = Some("invalid default UseVSync; using FIFO".into()); 1 }
+    };
+    (StartupGraphics { msaa, anisotropy, vsync }, warnings)
+}
+
+#[cfg(feature = "renderer-wgpu")]
+fn read_startup_graphics(access: CoreAccess<'_>, default: StartupGraphics) -> RuntimeResult<(StartupGraphics, StartupWarnings)> {
+    let section: Vec<u32> = "WgpuDrv.WgpuRenderDevice".chars().map(u32::from).collect();
+    let read = |key: &str| -> RuntimeResult<Option<String>> {
+        let key: Vec<u32> = key.chars().map(u32::from).collect();
+        Ok(access.config_get_units_from(None, &section, &key)?.map(|units| units.into_iter().map(|unit| char::from_u32(unit).unwrap_or(char::REPLACEMENT_CHARACTER)).collect()))
+    };
+    let aa = read("UseAA")?;
+    let samples = read("NumAASamples")?;
+    let anisotropy = read("MaxAnisotropy")?;
+    let vsync = read("UseVSync")?;
+    Ok(tolerant_startup_graphics(default, aa.as_deref(), samples.as_deref(), anisotropy.as_deref(), vsync.as_deref()))
+}
+
+/// Convert the reflected 0..1 setting without accepting malformed values.
+#[cfg(feature = "renderer-wgpu")]
+fn persisted_world_scale_percent(value: f32) -> RuntimeResult<u8> {
+    let percent = value * 100.0;
+    if !percent.is_finite() || !(1.0..=100.0).contains(&percent)
+        || (percent - percent.round()).abs() > 0.001 {
+        return Err(RuntimeError::new("Invalid persisted world render scale"));
+    }
+    Ok(percent.round() as u8)
+}
+
+#[cfg(all(test, feature = "renderer-wgpu"))]
+mod persisted_world_scale_tests {
+    #[test]
+    fn validated_percent_accepts_saved_slider_and_launcher_values() {
+        for (value, expected) in [(0.5, 50), (0.67, 67), (0.75, 75), (1.0, 100)] {
+            assert_eq!(super::persisted_world_scale_percent(value).unwrap(), expected);
+        }
+        for value in [f32::NAN, f32::INFINITY, 0.0, 1.01, 0.505] {
+            assert!(super::persisted_world_scale_percent(value).is_err());
+        }
+    }
+}
+
+#[cfg(all(test, feature = "renderer-wgpu"))]
+mod live_graphics_wrapper_tests {
+    use super::*;
+    use hp2_core::core_access::CoreOptions;
+    fn output(_: CoreAccess<'_>, _: i32, _: &[u32]) -> RuntimeResult<()> { Ok(()) }
+
+    #[test]
+    fn startup_fallback_keeps_reasons_and_rejects_failed_fallbacks() {
+        let mut attempted = Vec::new();
+        let result = fallback_apply(4, 0, |value| { attempted.push(value); if value == 4 { Err("unsupported".into()) } else { Ok(()) } }).unwrap();
+        assert_eq!(result, (0, Some("unsupported".into())));
+        assert_eq!(attempted, [4, 0]);
+        assert!(fallback_apply(4, 0, |_| Err("device lost".into())).unwrap_err().contains("fallback failed"));
+        assert!(fallback_apply(0, 0, |_| Err("device lost".into())).is_err());
+        // VSync Off/Adaptive -> FIFO; anisotropy/MSAA -> off; scale -> 100%.
+        for (requested, fallback) in [(0, 1), (2, 1), (16, 0), (4, 0), (50, 100)] {
+            let (effective, warning) = fallback_apply(requested, fallback, |v| if v == requested { Err("unsupported".into()) } else { Ok(()) }).unwrap();
+            assert_eq!(effective, fallback);
+            assert!(warning.is_some());
+        }
+    }
+
+    #[test]
+    fn startup_graphics_rejects_invalid_values_and_matches_launcher_booleans() {
+        let d = StartupGraphics { msaa: 4, anisotropy: 16, vsync: 0 };
+        assert_eq!(parse_startup_graphics(d, Some("yes"), Some("2"), Some("8.000"), Some("On")).unwrap(), StartupGraphics { msaa: 2, anisotropy: 8, vsync: 1 });
+        assert_eq!(parse_startup_graphics(d, Some("Off"), Some("stale"), Some("0"), Some("Adaptive")).unwrap(), StartupGraphics { msaa: 0, anisotropy: 0, vsync: 2 });
+        assert_eq!(parse_startup_graphics(d, None, None, Some("2.000"), None).unwrap().anisotropy, 2);
+        assert_eq!(parse_startup_graphics(StartupGraphics { anisotropy: 2, ..d }, None, None, None, None).unwrap().anisotropy, 2);
+        for args in [(Some("maybe"), None, None, None), (Some("true"), Some("3"), None, None), (None, None, Some("4.5"), None), (None, None, Some("NaN"), None), (None, None, Some("-2"), None), (None, None, Some("3"), None), (None, None, None, Some("invalid"))] {
+            assert!(parse_startup_graphics(d, args.0, args.1, args.2, args.3).is_err());
+        }
+    }
+
+    #[test]
+    fn stale_graphics_settings_use_warned_fallbacks() {
+        let defaults = StartupGraphics { msaa: 4, anisotropy: 8, vsync: 0 };
+        let (settings, warnings) = tolerant_startup_graphics(defaults, Some("true"), Some("nonsense"), Some("4.5"), Some("stale"));
+        assert_eq!(settings, StartupGraphics { msaa: 0, anisotropy: 4, vsync: 1 });
+        assert!(warnings.msaa.is_some() && warnings.anisotropy.is_some() && warnings.vsync.is_some());
+        for value in ["NaN", "inf", "junk"] {
+            let (settings, warnings) = tolerant_startup_graphics(defaults, None, None, Some(value), None);
+            assert_eq!(settings.anisotropy, 0);
+            assert!(warnings.anisotropy.is_some());
+        }
+        for value in ["-3", "0.5", "1", "2", "4.5", "7", "16", "64"] {
+            let (settings, _) = tolerant_startup_graphics(defaults, None, None, Some(value), None);
+            let clamp = hp2_wgpu::texture::anisotropy_clamp(value.parse().unwrap());
+            assert_eq!(settings.anisotropy, if clamp == 1 { 0 } else { clamp });
+        }
+        let (settings, warnings) = tolerant_startup_graphics(defaults, Some("stale"), None, None, None);
+        assert_eq!(settings.msaa, 0);
+        assert!(warnings.msaa.is_some());
+    }
+
+    #[test]
+    #[ignore = "requires GPU and HP2_ARTIFACT_DIR"]
+    fn persisted_graphics_reopen_and_gpu_reset_reapply_before_first_draw() {
+        let root = std::path::PathBuf::from(std::env::var_os("HP2_ARTIFACT_DIR").unwrap()).join("persisted-graphics-restart");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Game.ini"), "[WgpuDrv.WgpuRenderDevice]\nUseAA=True\nNumAASamples=4\nMaxAnisotropy=8\nUseVSync=On\n").unwrap();
+        let open = || crate::EngineOwner::new(CoreOptions { data_root: root.clone(), system_ini: root.join("Game.ini"), user_ini: root.join("User.ini"), command_line: vec![], output, log_file: None }).unwrap();
+        let defaults = StartupGraphics { msaa: 0, anisotropy: 0, vsync: 0 };
+        let first = open();
+        let saved = read_startup_graphics(first.access(), defaults).unwrap().0;
+        assert_eq!(saved, StartupGraphics { msaa: 4, anisotropy: 8, vsync: 1 });
+        first.shutdown().unwrap();
+        let second = open();
+        assert_eq!(read_startup_graphics(second.access(), defaults).unwrap().0, saved);
+        let mut device: UWgpuRenderDevice = unsafe { std::mem::zeroed() };
+        let mut resources = RenderResources::new();
+        let target = |gpu: &hp2_wgpu::CreatedDevice| gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("persisted graphics first draw"), size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
+        });
+        for _ in 0..2 {
+            resources.created = Some(hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, None::<hp2_wgpu::HeadlessSurfaceCreator>).unwrap());
+            let gpu = resources.created.as_ref().unwrap();
+            let target = target(gpu);
+            hp2_wgpu::begin_offscreen_frame(gpu, &mut resources.loop_state, &target, wgpu::Color::BLACK);
+            unsafe { apply_startup_scene(&mut resources.loop_state, gpu, &mut device, saved).unwrap(); }
+            assert_eq!((resources.loop_state.msaa(), resources.loop_state.anisotropy_live()), (4, 8));
+            assert_eq!((device.use_aa & 1, device.num_aa_samples, device.max_anisotropy), (1, 4, 8.0));
+            assert!(resources.loop_state.begin_scaled_world(gpu).unwrap());
+            resources.loop_state.end_scaled_world(gpu).unwrap();
+            hp2_wgpu::unlock_frame(gpu, &mut resources.loop_state, false);
+            resources.persisted_graphics = Some(saved);
+            resources.persisted_graphics_loaded = true;
+            resources.release_device();
+            assert!(resources.persisted_graphics.is_none());
+            assert!(!resources.persisted_graphics_loaded);
+        }
+        resources.created = Some(hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, None::<hp2_wgpu::HeadlessSurfaceCreator>).unwrap());
+        // A rejected MSAA setting uses the safe off fallback while retaining
+        // the independently supported anisotropy setting.
+        let gpu = resources.created.as_ref().unwrap();
+        let target = target(gpu);
+        hp2_wgpu::begin_offscreen_frame(gpu, &mut resources.loop_state, &target, wgpu::Color::BLACK);
+        device.num_aa_samples = 4;
+        device.max_anisotropy = 12.0;
+        let (anisotropy_warning, msaa_warning) = unsafe { apply_startup_scene(&mut resources.loop_state, gpu, &mut device, StartupGraphics { msaa: 3, anisotropy: 4, vsync: 1 }) }.unwrap();
+        assert!(anisotropy_warning.is_none() && msaa_warning.is_some());
+        assert_eq!((resources.loop_state.msaa(), resources.loop_state.anisotropy_live()), (0, 4));
+        assert_eq!((device.num_aa_samples, device.max_anisotropy), (0, 4.0));
+        let legacy = parse_startup_graphics(defaults, Some("False"), None, Some("2"), None).unwrap();
+        let (warning, _) = unsafe { apply_startup_scene(&mut resources.loop_state, gpu, &mut device, legacy) }.unwrap();
+        assert!(warning.is_some());
+        assert_eq!(legacy.anisotropy, 2);
+        assert_eq!(resources.loop_state.anisotropy_live(), 0);
+        assert_eq!(device.max_anisotropy, 0.0);
+        hp2_wgpu::unlock_frame(gpu, &mut resources.loop_state, false);
+        second.shutdown().unwrap();
+        let legacy_root = root.join("legacy-anisotropy");
+        std::fs::create_dir_all(&legacy_root).unwrap();
+        let legacy_ini = "[WgpuDrv.WgpuRenderDevice]\nMaxAnisotropy=2\n";
+        std::fs::write(legacy_root.join("Game.ini"), legacy_ini).unwrap();
+        let legacy_owner = crate::EngineOwner::new(CoreOptions { data_root: legacy_root.clone(), system_ini: legacy_root.join("Game.ini"), user_ini: legacy_root.join("User.ini"), command_line: vec![], output, log_file: None }).unwrap();
+        assert_eq!(read_startup_graphics(legacy_owner.access(), defaults).unwrap().0.anisotropy, 2);
+        legacy_owner.shutdown().unwrap();
+        assert_eq!(std::fs::read_to_string(legacy_root.join("Game.ini")).unwrap(), legacy_ini);
+        let stale_ini = "[WgpuDrv.WgpuRenderDevice]\nUseAA=True\nNumAASamples=garbage\nMaxAnisotropy=4.5\nUseVSync=broken\n";
+        std::fs::write(legacy_root.join("Game.ini"), stale_ini).unwrap();
+        let stale_owner = crate::EngineOwner::new(CoreOptions { data_root: legacy_root.clone(), system_ini: legacy_root.join("Game.ini"), user_ini: legacy_root.join("User.ini"), command_line: vec![], output, log_file: None }).unwrap();
+        let (settings, warnings) = read_startup_graphics(stale_owner.access(), defaults).unwrap();
+        assert_eq!(settings, StartupGraphics { msaa: 0, anisotropy: 4, vsync: 1 });
+        assert!(warnings.msaa.is_some() && warnings.anisotropy.is_some() && warnings.vsync.is_some());
+        stale_owner.shutdown().unwrap();
+        assert_eq!(std::fs::read_to_string(legacy_root.join("Game.ini")).unwrap(), stale_ini);
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn startup_unsupported_gpu_format_falls_back_without_changing_request() {
+        let gpu = hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, None::<hp2_wgpu::HeadlessSurfaceCreator>).unwrap();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("unsupported MSAA format"), size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Uint, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING, view_formats: &[],
+        });
+        let mut renderer = hp2_wgpu::RenderLoop::new();
+        hp2_wgpu::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        let request = StartupGraphics { msaa: 4, anisotropy: 0, vsync: 1 };
+        let mut device: UWgpuRenderDevice = unsafe { std::mem::zeroed() };
+        let (_, warning) = unsafe { apply_startup_scene(&mut renderer, &gpu, &mut device, request) }.unwrap();
+        assert!(warning.is_some());
+        assert_eq!(request.msaa, 4);
+        assert_eq!(renderer.msaa(), 0);
+        assert_eq!(device.num_aa_samples, 0);
+        let requested_scale = 50;
+        let (effective_scale, scale_warning) = fallback_apply(requested_scale, 100, |value| renderer.set_world_scale(&gpu, value)).unwrap();
+        assert_eq!(requested_scale, 50);
+        assert_eq!(effective_scale, 100);
+        assert_eq!(renderer.world_scale(), 100);
+        assert!(scale_warning.is_some());
+        hp2_wgpu::unlock_frame(&gpu, &mut renderer, false);
+    }
+
+    #[test]
+    #[ignore = "requires GPU and HP2_ARTIFACT_DIR"]
+    fn snapshot_apply_and_restore_keep_reflection_and_gpu_distinct() {
+        let root = std::path::PathBuf::from(std::env::var_os("HP2_ARTIFACT_DIR").unwrap()).join("live-graphics-wrapper");
+        std::fs::create_dir_all(&root).unwrap();
+        let owner = crate::EngineOwner::new(CoreOptions { data_root: root.clone(), system_ini: root.join("Game.ini"), user_ini: root.join("User.ini"), command_line: vec![], output, log_file: None }).unwrap();
+        let access = owner.access();
+        let mut device: UWgpuRenderDevice = unsafe { std::mem::zeroed() };
+        device.use_aa = 2;
+        device.num_aa_samples = 4;
+        device.max_anisotropy = 12.0;
+        let device_ptr = &mut device as *mut UWgpuRenderDevice;
+        let owner_state = state(access).unwrap();
+        owner_state.register(device_ptr as usize).unwrap();
+        owner_state.global_device.set(device_ptr.cast());
+        let runtime = owner_state.runtime(device_ptr as usize).unwrap();
+        let gpu = hp2_wgpu::create_device_sync(hp2_wgpu::BackendChoice::Auto, None::<hp2_wgpu::HeadlessSurfaceCreator>).unwrap();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wrapper test"), size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        {
+            let mut lease = runtime.lease().unwrap();
+            let resources = lease.resources();
+            resources.loop_state.set_max_anisotropy(7.0);
+            hp2_wgpu::begin_offscreen_frame(&gpu, &mut resources.loop_state, &target, wgpu::Color::BLACK);
+            resources.created = Some(gpu);
+        }
+        assert!(unsafe { global_live_graphics_snapshot(access) }.is_err());
+        assert!(unsafe { set_global_msaa(access, 4) }.is_err());
+        { let mut lease = runtime.lease().unwrap(); lease.resources().persisted_graphics_loaded = true; }
+        let snapshot = unsafe { global_live_graphics_snapshot(access).unwrap() };
+        assert_eq!((snapshot.msaa, snapshot.anisotropy), (0, 7));
+        unsafe { set_global_msaa(access, 4).unwrap(); }
+        assert_eq!((device.use_aa, device.num_aa_samples), (3, 4));
+        unsafe { restore_global_msaa(access, snapshot).unwrap(); }
+        assert_eq!((device.use_aa, device.num_aa_samples), (2, 4));
+        assert_eq!(unsafe { global_live_graphics_snapshot(access).unwrap() }.msaa, 0);
+        unsafe { set_global_anisotropy(access, 4).unwrap(); }
+        assert_eq!(device.max_anisotropy, 4.0);
+        unsafe { restore_global_anisotropy(access, snapshot).unwrap(); }
+        assert_eq!(device.max_anisotropy, 12.0);
+        assert_eq!(unsafe { global_live_graphics_snapshot(access).unwrap() }.anisotropy, 7);
+        {
+            let mut lease = runtime.lease().unwrap();
+            let resources = lease.resources();
+            resources.persisted_graphics = Some(StartupGraphics { msaa: 4, anisotropy: 16, vsync: 0 });
+            resources.startup_requested_scale = Some(50);
+            resources.startup_warnings.msaa = Some("unsupported".into());
+            resources.startup_warnings.scale = Some("allocation failed".into());
+        }
+        let state = unsafe { global_live_graphics_snapshot(access).unwrap() };
+        assert_eq!((state.requested_msaa, state.msaa, state.requested_scale, state.effective_scale), (4, 0, 50, 100));
+        assert!(state.startup_msaa_fallback && state.startup_scale_fallback);
+        unsafe { commit_global_graphics_preference(access, 0).unwrap(); }
+        let committed = unsafe { global_live_graphics_snapshot(access).unwrap() };
+        assert_eq!(committed.requested_msaa, 0);
+        assert!(!committed.startup_msaa_fallback && committed.startup_scale_fallback);
+        { let mut lease = runtime.lease().unwrap(); lease.resources().release_device(); }
+        assert!(unsafe { restore_global_msaa(access, snapshot) }.is_err());
+        owner_state.unregister(device_ptr as usize).unwrap();
+        // A new renderer can reuse the same canonical address. Its new
+        // generation must reject rollback into that replacement.
+        owner_state.register(device_ptr as usize).unwrap();
+        owner_state.global_device.set(device_ptr.cast());
+        assert!(unsafe { restore_global_msaa(access, snapshot) }.is_err());
+        owner_state.unregister(device_ptr as usize).unwrap();
+        owner.shutdown().unwrap();
+    }
+}
+
+/// Change the live world scale only after its GPU attachments validate.
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn set_global_world_scale(access: CoreAccess<'_>, percent: u8) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("No active GPU device"))?;
+    resources.loop_state.set_world_scale(created, percent).map_err(|e| RuntimeError::new(&e))?;
+    // The reflected configuration property uses a 0..1 float, not percent.
+    // Publish it only after GPU target preflight has succeeded.
+    unsafe { ptr::addr_of_mut!((*device.cast::<UWgpuRenderDevice>()).render_scale).write_unaligned(f32::from(percent) / 100.0); }
+    Ok(())
+}
+
+/// Snapshot both GPU state and reflected values before a settings transaction.
+/// They can differ, for example when a persisted value has not yet been applied.
+#[cfg(feature = "renderer-wgpu")]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LiveGraphicsSnapshot {
+    device_id: usize,
+    generation: u64,
+    pub msaa: i32,
+    /// A world scope has run since this renderer was created.
+    pub msaa_observed: bool,
+    /// The most recent world scope could not safely use MSAA.
+    pub msaa_unavailable: bool,
+    pub anisotropy: u16,
+    pub vsync_mode: Option<u8>,
+    pub requested_msaa: i32,
+    pub requested_anisotropy: u16,
+    pub requested_vsync: u8,
+    pub requested_scale: u8,
+    pub effective_scale: u8,
+    pub startup_msaa_fallback: bool,
+    pub startup_anisotropy_fallback: bool,
+    pub startup_vsync_fallback: bool,
+    pub startup_scale_fallback: bool,
+    pub reflected_use_aa: i32,
+    pub reflected_samples: i32,
+    pub reflected_anisotropy: f32,
+    pub reflected_vsync: u8,
+}
+
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn global_live_graphics_snapshot(access: CoreAccess<'_>) -> RuntimeResult<LiveGraphicsSnapshot> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    if !resources.persisted_graphics_loaded { return Err(RuntimeError::new("Persisted graphics settings are not applied")); }
+    let renderer = &resources.loop_state;
+    Ok(LiveGraphicsSnapshot {
+        device_id: device as usize,
+        generation: resources.generation,
+        msaa: renderer.msaa(), msaa_observed: renderer.msaa_observed(),
+        msaa_unavailable: renderer.msaa_unavailable(),
+        anisotropy: renderer.anisotropy_live(), vsync_mode: renderer.vsync_mode_live(),
+        requested_msaa: resources.persisted_graphics.map_or(renderer.msaa(), |v| v.msaa),
+        requested_anisotropy: resources.persisted_graphics.map_or(renderer.anisotropy_live(), |v| v.anisotropy),
+        requested_vsync: resources.persisted_graphics.map_or(1, |v| v.vsync),
+        requested_scale: resources.startup_requested_scale.unwrap_or(renderer.world_scale()),
+        effective_scale: renderer.world_scale(),
+        startup_msaa_fallback: resources.startup_warnings.msaa.is_some(),
+        startup_anisotropy_fallback: resources.startup_warnings.anisotropy.is_some(),
+        startup_vsync_fallback: resources.startup_warnings.vsync.is_some(),
+        startup_scale_fallback: resources.startup_warnings.scale.is_some(),
+        reflected_use_aa: unsafe { ptr::addr_of!((*device).use_aa).read_unaligned() },
+        reflected_samples: unsafe { ptr::addr_of!((*device).num_aa_samples).read_unaligned() },
+        reflected_anisotropy: unsafe { ptr::addr_of!((*device).max_anisotropy).read_unaligned() },
+        reflected_vsync: unsafe { ptr::addr_of!((*device).use_v_sync).read_unaligned() },
+    })
+}
+
+/// Applies one live value and publishes its reflected property only on success.
+/// The settings owner must persist afterward and roll back on persistence failure.
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn set_global_msaa(access: CoreAccess<'_>, setting: i32) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    if !resources.persisted_graphics_loaded { return Err(RuntimeError::new("Persisted graphics settings are not applied")); }
+    let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("No active GPU device"))?;
+    resources.loop_state.set_msaa(created, setting).map_err(|e| RuntimeError::new(&e))?;
+    unsafe {
+        let old = ptr::addr_of!((*device).use_aa).read_unaligned();
+        ptr::addr_of_mut!((*device).use_aa).write_unaligned((old & !1) | i32::from(setting != 0));
+        ptr::addr_of_mut!((*device).num_aa_samples).write_unaligned(setting);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn set_global_anisotropy(access: CoreAccess<'_>, setting: u16) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    if !resources.persisted_graphics_loaded { return Err(RuntimeError::new("Persisted graphics settings are not applied")); }
+    let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("No active GPU device"))?;
+    resources.loop_state.set_anisotropy_live(created, setting).map_err(|e| RuntimeError::new(&e))?;
+    unsafe { ptr::addr_of_mut!((*device).max_anisotropy).write_unaligned(f32::from(setting)); }
+    Ok(())
+}
+
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn set_global_vsync_mode(access: CoreAccess<'_>, setting: u8) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    if !resources.persisted_graphics_loaded { return Err(RuntimeError::new("Persisted graphics settings are not applied")); }
+    let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("No active GPU device"))?;
+    resources.loop_state.set_vsync_mode_live(created, setting).map_err(|e| RuntimeError::new(&e))?;
+    unsafe { ptr::addr_of_mut!((*device).use_v_sync).write_unaligned(setting); }
+    Ok(())
+}
+
+/// Roll back one field after persistence fails. A device replacement invalidates
+/// the snapshot; do not write reflected fields on the replacement device.
+#[cfg(feature = "renderer-wgpu")]
+unsafe fn live_graphics_snapshot_device(access: CoreAccess<'_>, snapshot: LiveGraphicsSnapshot) -> RuntimeResult<*mut UWgpuRenderDevice> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() || device as usize != snapshot.device_id { return Err(RuntimeError::new("Render device changed during graphics transaction")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    if lease.resources().generation != snapshot.generation { return Err(RuntimeError::new("Render device changed during graphics transaction")); }
+    Ok(device)
+}
+
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn restore_global_msaa(access: CoreAccess<'_>, snapshot: LiveGraphicsSnapshot) -> RuntimeResult<()> {
+    let device = unsafe { live_graphics_snapshot_device(access, snapshot)? };
+    unsafe { set_global_msaa(access, snapshot.msaa)?; }
+    unsafe {
+        ptr::addr_of_mut!((*device).use_aa).write_unaligned(snapshot.reflected_use_aa);
+        ptr::addr_of_mut!((*device).num_aa_samples).write_unaligned(snapshot.reflected_samples);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn restore_global_anisotropy(access: CoreAccess<'_>, snapshot: LiveGraphicsSnapshot) -> RuntimeResult<()> {
+    let device = unsafe { live_graphics_snapshot_device(access, snapshot)? };
+    let owner = state(access)?;
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("No active GPU device"))?;
+    resources.loop_state.restore_anisotropy_live(created, snapshot.anisotropy).map_err(|e| RuntimeError::new(&e))?;
+    unsafe { ptr::addr_of_mut!((*device).max_anisotropy).write_unaligned(snapshot.reflected_anisotropy); }
+    Ok(())
+}
+
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn restore_global_vsync(access: CoreAccess<'_>, snapshot: LiveGraphicsSnapshot) -> RuntimeResult<()> {
+    let device = unsafe { live_graphics_snapshot_device(access, snapshot)? };
+    let mode = snapshot.vsync_mode.ok_or_else(|| RuntimeError::new("Previous surface present mode is unknown"))?;
+    unsafe { set_global_vsync_mode(access, mode)?; }
+    unsafe { ptr::addr_of_mut!((*device).use_v_sync).write_unaligned(snapshot.reflected_vsync); }
+    Ok(())
+}
+
+/// Called only after the matching live change has been persisted successfully.
+/// Kind: 0=MSAA, 1=anisotropy, 2=VSync, 3=world scale.
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn commit_global_graphics_preference(access: CoreAccess<'_>, kind: u8) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    match kind {
+        0 => { if let Some(prefs) = resources.persisted_graphics.as_mut() { prefs.msaa = resources.loop_state.msaa(); } resources.startup_warnings.msaa = None; }
+        1 => { if let Some(prefs) = resources.persisted_graphics.as_mut() { prefs.anisotropy = resources.loop_state.anisotropy_live(); } resources.startup_warnings.anisotropy = None; }
+        2 => { if let Some(prefs) = resources.persisted_graphics.as_mut() { prefs.vsync = unsafe { ptr::addr_of!((*device).use_v_sync).read_unaligned() }; } resources.startup_warnings.vsync = None; }
+        3 => { resources.startup_requested_scale = Some(resources.loop_state.world_scale()); resources.startup_warnings.scale = None; }
+        _ => return Err(RuntimeError::new("Invalid graphics preference kind")),
+    }
+    Ok(())
+}
+
+/// True when the last world scope could not apply the requested scale because
+/// prior full-resolution color draws require an unsupported composition.
+/// The UI should present this as a temporary unavailable state, not as a
+/// successful change to the effective scale.
+#[cfg(feature = "renderer-wgpu")]
+pub(crate) unsafe fn world_scale_unavailable(access: CoreAccess<'_>) -> RuntimeResult<bool> {
+    let owner = state(access)?;
+    let device = owner.global_device.get();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    Ok(resources.loop_state.world_scale_unavailable() || resources.startup_warnings.scale.is_some())
+}
+
+#[cfg(feature = "renderer-wgpu")]
+unsafe fn scaled_world_scope_action(access: CoreAccess<'_>, begin: bool) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    let device = owner.global_device.get();
+    if device.is_null() { return Err(RuntimeError::new("No active render device")); }
+    let runtime = owner.runtime(device as usize)?;
+    let mut lease = runtime.lease()?;
+    let resources = lease.resources();
+    let created = resources.created.as_ref().ok_or_else(|| RuntimeError::new("No active GPU device"))?;
+    if begin { resources.loop_state.begin_scaled_world(created).map(|_| ()) }
+    else { resources.loop_state.end_scaled_world(created) }.map_err(|e| RuntimeError::new(&e))
+}
+
+pub(crate) unsafe fn begin_scaled_world(access: CoreAccess<'_>) -> RuntimeResult<()> {
+    #[cfg(feature = "renderer-wgpu")]
+    { unsafe { scaled_world_scope_action(access, true) } }
+    #[cfg(not(feature = "renderer-wgpu"))]
+    { let _ = access; Ok(()) }
+}
+
+pub(crate) unsafe fn end_scaled_world(access: CoreAccess<'_>) -> RuntimeResult<()> {
+    #[cfg(feature = "renderer-wgpu")]
+    { unsafe { scaled_world_scope_action(access, false) } }
+    #[cfg(not(feature = "renderer-wgpu"))]
+    { let _ = access; Ok(()) }
+}
+
 /// Clears depth on the source global device, not necessarily the Canvas viewport's device.
 ///
 /// # Safety
@@ -1462,13 +2175,8 @@ impl hp2_wgpu::driver_policy::DriverPolicyAdapter for CorePolicy<'_> {
                 { let _ = resources; }
                 Ok(0)
             }).map(|v| value(v, 0.0)),
-            Leaf::Anisotropy => self.with_resources(|resources| {
-                if let Some(created) = resources.created.as_ref() {
-                    resources.loop_state.set_max_anisotropy(self.read_f32(unsafe { ptr::addr_of!((*self.device).max_anisotropy) }));
-                    let _ = created;
-                }
-                Ok(0)
-            }).map(|v| value(v, 0.0)),
+            // Applied transactionally with persisted graphics before the first draw.
+            Leaf::Anisotropy => Ok(value(0, 0.0)),
             Leaf::Srgb => self.with_resources(|resources| {
                 let srgb = self.read_i32(unsafe { ptr::addr_of!((*self.device).use_srgb_textures) }) != 0;
                 resources.loop_state.set_srgb_framebuffer(srgb);
@@ -2374,8 +3082,7 @@ impl CorePolicy<'_> {
                 if palette.is_null() { return Err(RuntimeError::new("Canonical P8 texture has no palette")); }
                 let palette = unsafe { &*palette.cast::<[hp2_wgpu::texture::FColor; 256]>() };
                 let mode = if masked { hp2_wgpu::texture::P8MaskMode::Masked } else { hp2_wgpu::texture::P8MaskMode::Unmasked };
-                hp2_wgpu::texture::p8_to_rgba8(bytes,palette,mode).into_iter()
-                    .flat_map(|c| [c.r,c.g,c.b,c.a]).collect::<Vec<u8>>()
+                hp2_wgpu::texture::p8_to_rgba8_bytes(bytes,palette,mode)
             }
             hp2_wgpu::texture::TextureFormat::Rgba7 | hp2_wgpu::texture::TextureFormat::Rgba8 => bytes.to_vec(),
             hp2_wgpu::texture::TextureFormat::Rgb8 => hp2_wgpu::texture::rgb8_to_rgba8(bytes),
@@ -3173,21 +3880,99 @@ impl CorePolicy<'_> {
             self.pixel_height.set(height);
         }
         let (width, height) = (width as u32, height as u32);
-        let vsync = self.read_u8(unsafe { ptr::addr_of!((*self.device).use_v_sync) });
         self.with_resources(|resources| {
             let Some(created) = resources.created.as_ref() else { return Err(RuntimeError::new("Canonical WGPU device is unavailable")); };
-            hp2_wgpu::configure_surface_for_vsync(created, &mut resources.loop_state, width, height, vsync)
-                .map(|()| true)
-                .map_err(|_| RuntimeError::new("Unable to configure canonical WGPU surface"))
+            let vsync = if resources.persisted_graphics_loaded {
+                self.read_u8(unsafe { ptr::addr_of!((*self.device).use_v_sync) })
+            } else {
+                let raw_aa = self.read_i32(unsafe { ptr::addr_of!((*self.device).use_aa) });
+                let raw_samples = self.read_i32(unsafe { ptr::addr_of!((*self.device).num_aa_samples) });
+                let raw_anisotropy = self.read_f32(unsafe { ptr::addr_of!((*self.device).max_anisotropy) });
+                let default_clamp = hp2_wgpu::texture::anisotropy_clamp(raw_anisotropy);
+                let defaults = StartupGraphics { msaa: if raw_aa & 1 != 0 { raw_samples } else { 0 }, anisotropy: if default_clamp == 1 { 0 } else { default_clamp }, vsync: self.read_u8(unsafe { ptr::addr_of!((*self.device).use_v_sync) }) };
+                let (requested, warnings) = read_startup_graphics(self.access, defaults)?;
+                resources.startup_warnings = warnings;
+                for warning in [&resources.startup_warnings.msaa, &resources.startup_warnings.anisotropy, &resources.startup_warnings.vsync].into_iter().flatten() { eprintln!("WgpuDrv: WARNING: {warning}"); }
+                resources.persisted_graphics = Some(requested);
+                requested.vsync
+            };
+            let (effective, warning) = fallback_apply(vsync, 1, |mode| hp2_wgpu::configure_surface_for_vsync_strict(created, &mut resources.loop_state, width, height, mode))
+                .map_err(|e| RuntimeError::new(&format!("Cannot apply VSync or FIFO fallback: {e}")))?;
+            if let Some(error) = &warning { eprintln!("WgpuDrv: WARNING: requested VSync mode {vsync} unavailable; using FIFO: {error}"); }
+            if !resources.persisted_graphics_loaded && warning.is_some() { resources.startup_warnings.vsync = warning; }
+            unsafe { ptr::addr_of_mut!((*self.device).use_v_sync).write_unaligned(effective); }
+            Ok(true)
         })
     }
     fn lock_frame(&self, width: i64, height: i64) -> RuntimeResult<hp2_wgpu::FrameOutcome> {
         self.with_resources(|resources| {
             let Some(created) = resources.created.as_ref() else { return Err(RuntimeError::new("Canonical WGPU device is unavailable")); };
-            Ok(hp2_wgpu::lock_frame_rgba(
+            let fullscreen = !self.viewport.is_null() && unsafe {
+                hp2_platform::viewport::is_fullscreen((*self.viewport).blit_flags)
+            };
+            resources.loop_state.set_logical_scene_size(if fullscreen {
+                Some((self.viewport_width().max(1) as u32, self.viewport_height().max(1) as u32))
+            } else { None });
+            let requested = if resources.persisted_world_scale_loaded {
+                persisted_world_scale_percent(self.read_f32(unsafe { ptr::addr_of!((*self.device).render_scale) }))?
+            } else {
+                let section: Vec<u32> = "WgpuDrv.WgpuRenderDevice".chars().map(u32::from).collect();
+                let key: Vec<u32> = "RenderScale".chars().map(u32::from).collect();
+                let raw = self.access.config_get_units_from(None, &section, &key)?;
+                let value = match raw {
+                    Some(units) => units.into_iter().map(char::from_u32).collect::<Option<String>>().and_then(|text| text.trim().parse::<f32>().ok()),
+                    None => Some(self.read_f32(unsafe { ptr::addr_of!((*self.device).render_scale) })),
+                };
+                match value.and_then(|value| persisted_world_scale_percent(value).ok()) {
+                    Some(percent) => percent,
+                    None => {
+                        let warning = "invalid persisted world scale; using 100%".to_owned();
+                        eprintln!("WgpuDrv: WARNING: {warning}");
+                        resources.startup_warnings.scale = Some(warning);
+                        100
+                    }
+                }
+            };
+            if !resources.persisted_world_scale_loaded { resources.startup_requested_scale = Some(requested); }
+            let outcome = hp2_wgpu::lock_frame_rgba(
                 created, &mut resources.loop_state, width.max(1) as u32, height.max(1) as u32,
                 self.screen_clear, self.read_u8(unsafe { ptr::addr_of!((*self.device).use_v_sync) }),
-            ))
+            );
+            // The first scene is created by Lock, not Init. Preflight before
+            // any draws so the very first world uses the persisted setting.
+            // A reset replaces RenderLoop, so this also reapplies it after a
+            // device recreation without touching the stored property.
+            if resources.loop_state.has_world_scale_frame() {
+                let apply = (|| -> RuntimeResult<()> {
+                    if resources.loop_state.world_scale() != requested {
+                        let (effective, warning) = fallback_apply(requested, 100, |value| resources.loop_state.set_world_scale(created, value))
+                            .map_err(|error| RuntimeError::new(&format!("Cannot apply world scale or 100% fallback: {error}")))?;
+                        if let Some(error) = &warning { eprintln!("WgpuDrv: WARNING: requested world scale {requested}% unavailable; using 100%: {error}"); }
+                        if warning.is_some() { resources.startup_warnings.scale = warning; }
+                        unsafe { ptr::addr_of_mut!((*self.device).render_scale).write_unaligned(f32::from(effective) / 100.0); }
+                    }
+                    if !resources.persisted_graphics_loaded {
+                        let graphics = resources.persisted_graphics.ok_or_else(|| RuntimeError::new("Persisted graphics settings were not prepared"))?;
+                        let (anisotropy_warning, msaa_warning) = unsafe { apply_startup_scene(&mut resources.loop_state, created, self.device, graphics)? };
+                        if let Some(error) = &anisotropy_warning { eprintln!("WgpuDrv: WARNING: requested anisotropy {}x unavailable; using off: {error}", graphics.anisotropy); }
+                        if let Some(error) = &msaa_warning { eprintln!("WgpuDrv: WARNING: requested MSAA {}x unavailable; using off: {error}", graphics.msaa); }
+                        if anisotropy_warning.is_some() { resources.startup_warnings.anisotropy = anisotropy_warning; }
+                        if msaa_warning.is_some() { resources.startup_warnings.msaa = msaa_warning; }
+                        resources.persisted_graphics_loaded = true;
+                    }
+                    if !resources.persisted_world_scale_loaded {
+                        unsafe { ptr::addr_of_mut!((*self.device).render_scale).write_unaligned(f32::from(resources.loop_state.world_scale()) / 100.0); }
+                        resources.persisted_world_scale_loaded = true;
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = apply {
+                    // Discard the acquired frame; it must not show a partial startup.
+                    hp2_wgpu::unlock_frame(created, &mut resources.loop_state, false);
+                    return Err(error);
+                }
+            }
+            Ok(outcome)
         })
     }
     fn unlock_frame(&self) -> RuntimeResult<bool> {
@@ -3255,3 +4040,6 @@ mod render_host_contracts {
         owner.shutdown().unwrap();
     }
 }
+
+#[cfg(all(test, feature = "renderer-wgpu"))]
+mod p8_upload_tests;

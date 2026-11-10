@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import game_test
+import oracle_preflight
 
 
 def _positive_int(value: str) -> int:
@@ -84,6 +85,7 @@ def _selected_maps(smoke_report: Path, allowlist: str | None) -> list[dict[str, 
 def main() -> int:
     arguments = _arguments()
     try:
+        oracle_preflight.require_native_oracle()
         repo_root = game_test._repo_root()
         oracle_app = game_test._resolve_path(arguments.oracle_app, repo_root, strict=True)
         engine_bin = game_test._resolve_path(arguments.engine_bin, repo_root, strict=True)
@@ -149,7 +151,8 @@ def main() -> int:
         ).encode("utf-8"))
         print(f"{game_test._display_path(output, repo_root)}: {passed_count}/{len(rows)} maps passed")
         return 0 if passed_count == len(rows) else 1
-    except (OSError, ValueError, json.JSONDecodeError, game_test.GameTestError) as error:
+    except (OSError, ValueError, json.JSONDecodeError, game_test.GameTestError,
+            oracle_preflight.OracleUnavailableError) as error:
         print(f"parity_sweep.py: {error}", file=sys.stderr)
         return 2
 

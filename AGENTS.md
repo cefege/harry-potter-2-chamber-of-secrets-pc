@@ -1,155 +1,172 @@
-# AGENTS.md — Operating Handbook for AI Agents
+# AGENTS.md — Operating handbook
 
-Rules of engagement for autonomous agents working in this repository. The
-canonical operational reference is `Docs/OPERATIONS.md`; this handbook defines
-behavior and boundaries, not procedure detail.
+This is a Rust application workspace for a UE1-derived engine. CMake imports the
+shipping Rust executables through Corrosion. The former first-party C++ engine
+and `hp2-ffi` static library are not the current build graph. Do not recreate them
+from historical guidance. SDK libraries remain native dependencies.
 
-This is a C++ codebase (legacy UE1-derived engine, modernized) being ported to
-Rust in place. The Rust workspace (`Cargo.toml`, `crates/`) is built by CMake
-through Corrosion as the `hp2-ffi` staticlib; cbindgen writes its C header to
-`out/<preset>/rust-include/hp2_rs.h`. Each subsystem moves from C++ to Rust in
-one change, and the C++ it replaces is deleted in that same change.
+## Start with the smallest relevant context
 
-## Ownership / Subsystem Map
+1. Read this handbook, then [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md) to find the
+   owning crate, production call path, features, and starting tests.
+2. For Rust, read [.agents/skills/rust-best-practices/SKILL.md](.agents/skills/rust-best-practices/SKILL.md)
+   and [Docs/RUST_STYLE.md](Docs/RUST_STYLE.md). Also use
+   [rust-review](.agents/skills/rust-review/SKILL.md) for review and
+   [rust-port](.agents/skills/rust-port/SKILL.md) for behavior-preserving migration.
+3. Use [Docs/WORKER_CONTRACTS.md](Docs/WORKER_CONTRACTS.md) for bounded tasks and
+   handbacks. Do not load all historical documentation for a small change.
+4. Use [Docs/BUILDING.md](Docs/BUILDING.md) for prerequisites and
+   `CMakePresets.json` for actual platform presets. `Docs/OPERATIONS.md` contains
+   useful procedures **and historical build descriptions**; check commands against
+   the current manifests, presets, and configured CTest list before using them.
 
-|Subsystem|Path|Notes|
-|---|---|---|
-|Core|`HarryPotter2/Unreal/Core/`|Object model, serialization (`FName`/`FString`, package79 archives), memory, names, portable SHA-256|
-|Engine|`HarryPotter2/Unreal/Engine/`|Game loop, `UEngine::InputEvent` dispatch, level flow|
-|Render|`HarryPotter2/Unreal/Render/`|Scene rendering shared by driver backends|
-|WgpuDrv|`HarryPotter2/Unreal/WgpuDrv/`|Sole render device: C++ driver shell over the Rust `hp2-wgpu` crate (FFI via `hp2-ffi`, feature `renderer-wgpu`)|
-|NativeText|`HarryPotter2/Unreal/NativeText/`|Provider-neutral native text seam (`FCanvasTextRequest`, `Hp2NativeText::` in `Engine/Inc/UnRenDev.h`): CoreText on macOS, FreeType on Linux. Bitmap fonts stay reachable via `[Display] NativeText=False`|
-|SDLDrv|`HarryPotter2/Unreal/SDLDrv/`|SDL2 window/input (`USDLViewport` → `CauseInputEvent`)|
-|SDLLaunch|`HarryPotter2/Unreal/SDLLaunch/`|Launch policy/store, desktop shell integration (`HP2ShellLauncher`), `HP2MacLauncher.mm`|
-|Launcher|`HarryPotter2/Unreal/Launch/`|Bootstrap paths, static packages, editor runtime entry, platform path resolution (`HP2Paths.cpp`)|
-|ALAudio / codecs|`HarryPotter2/Unreal/ALAudio/`, `EAAudioCodec/`, `Vorbis/`, `OpenAL/`|Sound pipeline|
-|Launcher shell UI|`Launcher/Quickshell/`|Quickshell-based desktop launcher scaffold|
-|Build scripts|`Build/*.py`|`game_test.py`, `smoke_maps.py`, `check_bundle.py`, `prepare_retail_data.py`, `repair_save.py`, `abi_inventory.py`, `retail_flow_smoke.py`; CMake modules in `Build/CMake/`|
-|Tests|`Tests/`|C++ `*Tests.cpp` (`main()`-style, minimal TU), Python `*Tests.py` (`unittest`, no app launch), fixtures in `Tests/Fixtures/`. Registered via `hp2_add_behavior_test` in `Build/CMake/HP2Targets.cmake`|
-|Data roots|`HarryPotter2/Unreal/` (prototype), retail overlay via `Build/prepare_retail_data.py`|Prototype root is `HP2_UNREAL_ROOT` in `Build/CMake/HP2Sources.cmake`|
-|Dist bundle (macOS)|`dist/macos-arm64/HarryPotter2.app`|Verify with `Build/check_bundle.py`|
-|Dist bundle (Linux)|`dist/linux-arm64/` (`bin/`, `lib/`, `share/`)|Installed by the `linux-arm64*` presets via `Build/CMake/HP2Install.cmake`|
-| Release DMG (macOS)|`dist/macos-arm64/HarryPotter2-<version>-macos-arm64.dmg`|Built by the `hp2_macos_dmg` target (macOS branch of `HP2Install.cmake`); the artifact Homebrew and GitHub Releases serve|
-| Homebrew cask|`Casks/harry-potter-2.rb`|This repo is its own tap. Tap name must equal the repo name, and the URL must be passed explicitly, or Homebrew looks for a separate `homebrew-hp2` repo. `version`/`sha256` are owned by `.github/workflows/release.yml` via `Build/stamp_cask.py` — never hand-edit|
-| In-bundle importer|`Build/hp2-import-game-data.sh`|Wraps `prepare_retail_data.py`; shipped as `Contents/Resources/Import Game Data.command` and documented in `Docs/PLAYING.md`. Requires `python3` on the user machine|
+The BeautifulRust skills are pinned, MIT-licensed local copies; their provenance
+and update rules are in [.agents/skills/README.md](.agents/skills/README.md).
+Repository compatibility rules take precedence over generic style guidance.
 
-## Platforms
+## Ownership and products
 
-Two supported platforms, both arm64, built from the same CMake tree:
+| Area | Current owner / entry point |
+| --- | --- |
+| Core, objects, archives, configuration, VM | `crates/hp2-core/` |
+| Game loop, world, input, runtime resource owners | `crates/hp2-engine/` |
+| Scene, canvas, native/bitmap text | `crates/hp2-render/` |
+| GPU device, renderer, uploads | `crates/hp2-wgpu/` |
+| SDL window/input and native file dialogs | `crates/hp2-platform/` |
+| Audio and codecs | `crates/hp2-audio/`, `crates/hp2-codecs/` |
+| Launcher policy / UI / game process | `crates/hp2-launcher/`, `crates/hp2-game/` |
+| Data import and generated INI policy | `crates/hp2-import/`, `crates/hp2-ini/` |
+| ABI, FFI support, paths, hashing, fire, UCC | See the complete 17-crate map in `Docs/ARCHITECTURE.md` |
+| Build, test, packaging, release | `Build/`, `Build/CMake/`, `Tests/`, `.github/workflows/` |
+| Prototype and legacy reference assets/scripts | `HarryPotter2/Unreal/`; not the current Rust source root |
 
-- **macOS 15+** — presets `macos-arm64`, `macos-arm64-asan-ubsan`,
-  `macos-arm64-tsan`, `macos-arm64-full-smoke`, `macos-arm64-vulkan`,
-  `macos-arm64-retail`.
-- **Linux (arm64)** — presets `linux-arm64`, `linux-arm64-asan-ubsan`,
-  `linux-arm64-tsan`, `linux-arm64-full-smoke`, `linux-arm64-retail`.
+Shipping binaries are `hp2_game_rust`, `hp2_ucc_rust`, and `hp2_import`.
 
-`Docs/OPERATIONS.md` predates the Linux presets and still says "macOS 15+ on
-arm64 only" in places — the presets in `CMakePresets.json` are the source of
-truth for what actually exists, not that sentence.
+**Product direction: no external/startup launcher UI.** The startup window and its
+egui host are removed; the game boots directly into the stock `Startup.unr` menus
+(missing data exits 1 with `hp2_import` guidance). Settings belong in the stock
+in-game menus. Follow [Docs/NO_LAUNCHER_CUTOVER.md](Docs/NO_LAUNCHER_CUTOVER.md) for
+remaining gaps. Do not restore the launcher window or removed overlays; preserve
+existing stock-menu work and reusable boot/settings/import policy.
 
-## Known Stale References
+Generated ABI declarations and pinned third-party sources are not style-cleanup
+candidates. Inspect a policy's real caller and resource owner before claiming a
+production cutover.
 
-Left over from the earlier Rust rewrite that was removed before this port.
-Found by grep at this commit; not yet fixed. Do not treat as live, do not
-extend, and flag before editing:
+## Platforms and data profiles
 
-- `Build/retail_flow_smoke.py` (`DEFAULT_APP`) and `Build/verify_playable.py`
-  (`DEFAULT_BUNDLE`) default to `dist/macos-arm64-rs/HarryPotter2.app`, a path
-  this repo's build never produces. Pass `--app dist/macos-arm64/HarryPotter2.app`
-  explicitly until someone fixes the default.
-- `hp2rs`, `hp-app`, `hp-engine`, `target/release/`, and `dist/macos-arm64-rs/`
-  references in `Build/game_test.py` (`RUST_REPLAY_MARKER`, `paired`),
-  `Build/*_trace.py`, `Tests/GameTestTests.py`,
-  `Tests/StaticMovementGateTests.py`, `Tests/WorldCollisionGateTests.py`,
-  `Docs/BEHAVIOR_MATRIX.md`, `Docs/REASON_CODES.md`,
-  `Docs/RNG_TICK_DIVERGENCE.md`, and `Tests/Fixtures/render-baseline/rust_vs_cpp.md`.
-- `crates/` by itself is ambiguous in those files: it existed before (removed
-  rewrite, deleted at `167f46a`) and exists again now (this port). Check which
-  era a given mention means before relying on it; do not assume either.
+- macOS 15+ on arm64; Linux on arm64 and x64. Use the existing matching preset.
+- Cargo features that expose SDL, OpenAL, native dialogs, text providers, or
+  libarchive need the relevant SDK and linked build. Do not use unrestricted
+  `--all-features` as proof of a supported configuration.
+- `data-none` has no game data. `data-prototype` uses the configured prototype
+  root, normally `HarryPotter2/Unreal`. `data-retail` uses a prepared overlay.
+- A result for one platform, feature set, or data profile proves nothing about
+  another. Retail evidence must explain data and index provenance.
+  `hp2-bootstrap-paths` verifies the overlay manifest/checksums when either passes
+  its readable-file check. It accepts legacy roots when neither does. Bootstrap
+  acceptance alone does not establish a verified retail profile.
 
-If a task touches these paths, flag the drift to the user rather than quietly
-"fixing" cross-cutting doc/script debt as a side effect of an unrelated
-change.
+## Non-negotiables
 
-## Non-Negotiables
+1. **Preserve concurrent work.** Inspect status and relevant diffs before editing.
+   Do not reset, stash, overwrite, commit, or format somebody else's changes.
+   Stop on overlapping ownership rather than silently expanding a task.
+2. **Preserve contracts.** Keep ABI layouts/packing/discriminants, TCHAR/FString
+   encoding, package/save/network bytes, callback order and synchronous reentry,
+   allocation ownership, error/partial side effects, RNG consumption, numerical
+   behavior, and teardown order. A cleaner API is not authority to change them.
+3. **Separate change classes.** Structural moves, behavior fixes, formatting,
+   dependency/toolchain updates, and optimizations need distinct evidence. Do not
+   introduce traits, builders, crates, or generality solely for a style checklist.
+4. **Never claim done from compilation.** Run the named behavioral CTest targets
+   for the changed domain. Use exact selections with `--no-tests=error`. Check
+   each required name, not merely a combined regular expression's nonzero count.
+   Missing or disabled required tests are blocked, never passes.
+5. **Keep evidence under `HP2_ARTIFACT_DIR`.** CTest supplies isolated `HOME`,
+   `TMPDIR`, XDG directories, `LC_ALL=C`, `TZ=UTC`, and `HP2_TEST_NAME`. Standalone
+   checks must manage their own isolation and artifact directory. Retain commands,
+   results, logs, input/profile provenance, and executable identities.
+6. **Do not retry to green.** Report the first failure and any flakiness. A rerun
+   needs a specific investigated change or a distinct measurement purpose; never
+   replace the failure evidence with a later success.
+7. **Do not suppress symptoms.** No swallowed errors, skipped assertions,
+   input-specific special cases, broad warning suppression, or weakened gates to
+   make a check pass. Distinguish pre-existing lint/format debt from new findings.
+8. **Feature promotion needs acceptance.** Preserve defaults and gate states.
+   Historical native-text prose and `Build/feature-gates.json` disagree; report
+   the disagreement instead of changing runtime policy to match a document.
+   `experimental` → `runtime-verified` → `retail-verified` → `default-enabled`
+   requires matching profile evidence and a separate acceptance record.
+9. **Bitmap text compatibility is intentional.** Keep `[Display] NativeText=False`
+   and its page-backed Canvas/cursor-advance behavior supported. Use the current
+   `canvas_compatibility_contracts` and relevant process tests, not removed C++
+   test paths. Do not route compatibility glyphs through native text as a fix.
+10. **Protect reference evidence.** Do not overwrite the independent native oracle
+    with a packaged Rust product or call Rust-versus-Rust a parity result. Verify
+    provenance and identity before packaging or parity runs. A configured path
+    named `HP2_CPP_ORACLE_APP` does not prove that its contents are independent.
+11. **Goldens need separate acceptance.** Fixture/golden refreshes require their
+    own command, observed result, and acceptance record. Never hide a golden
+    change inside a refactor or optimization.
+12. **Keep pins and licenses.** `ThirdParty/sources.json`, exact Cargo dependency
+    pins, and the toolchain change only in explicit, separable tasks. State the
+    upstream version and reason. Do not casually edit pinned upstream sources.
+13. **Platform representation matters.** Rust uses the actual `target_os` and
+    feature conditions. Historical Apple C++ uses `MACOSX`, not `__APPLE__` alone;
+    keep that distinction when comparing original layouts and UTF-32 assumptions.
+    Do not conflate Apple and Linux/POSIX behavior.
+14. **Measure performance.** File size, idiom, and clean lints do not prove speed.
+    Record equivalent inputs, builds, features, repeated measurements, noise,
+    allocations/latency where relevant, and behavioral checks. Keep runtime and
+    development-loop performance claims separate.
 
-1. **Never claim done from compile alone.** A green build proves nothing about
-   behavior. Run the named ctest targets that cover the change and report the
-   observed result.
-2. **Artifacts go to `HP2_ARTIFACT_DIR`.** Test env provides isolated
-   `HOME`/`TMPDIR`, `LC_ALL=C`, `TZ=UTC`, `HP2_TEST_NAME`, and a pre-created
-   `HP2_ARTIFACT_DIR`. Structured reports, logs, captures land there — never
-   in ad-hoc stdout or the repo root.
-3. **Data-profile honesty.** State which profile a claim holds for:
-   `data-none` (no game data), `data-prototype` (`HarryPotter2/Unreal`),
-   `data-retail` (overlay from `prepare_retail_data.py`). A result under one
-   profile is not evidence under another. The runtime does not yet validate
-   `overlay-manifest.json`; retail claims must say how data was verified.
-4. **Feature-gate promotion is earned.** `experimental` → `runtime-verified` →
-   `retail-verified` → `default-enabled` requires passing verification under
-   the matching data profile, recorded in the acceptance evidence (see
-   `Build/feature-gates.json`). Native text is `runtime-verified` and
-   `default_enabled: true` as of 2026-09-28: `[Display] NativeText` defaults to
-   on, verified under `data-prototype` only — no `data-retail` run backs it, so
-   `retail-verified` is still unearned. Do not flip gates in drive-by changes.
-5. **Bitmap-font compatibility mode is intentional.** Do not "fix" fallback
-   glyph rendering to use native text paths; the compatibility mode exists for
-   stock-font fidelity. It stays reachable and supported while native text is
-   the default: set `[Display] NativeText=False` in `Game.ini`, or use the
-   launcher's text-rendering toggle. `Tests/CanvasCompatibilityTests.cpp`
-   pins that `NativeText=False` retains the page-backed Canvas path and cursor
-   advance — that contract must survive any future gate promotion.
-6. **MACOSX macro caution.** Apple platform code uses UE1-era `MACOSX` guards
-   (not `__APPLE__` alone). New platform conditionals must match surrounding
-   convention or `TCHAR`/UTF-32 assumptions silently diverge. Linux code paths
-   use standard `__linux__`/POSIX guards — do not conflate the two.
+## Verification commands
 
-## Command Cheatsheet
+```sh
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64 --target hp2_verification_binaries
+ctest --preset macos-arm64 --show-only=json-v1
+ctest --preset macos-arm64 --no-tests=error --output-on-failure -R '^core_config_safety$'
+```
 
-Full procedure, presets, and interpretation: `Docs/OPERATIONS.md` (CMake/CTest
-sections are current; ignore the "Cargo era" section per above). Quick map:
+Use `linux-arm64` or `linux-x64` on a matching Linux host. Sanitizer and full-map
+presets are separate qualifications; a preset name does not prove that Rust was
+instrumented. Inspect the actual compiler/link flags and reports.
 
-|Task|Command|
-|---|---|
-|Configure + build (macOS)|`cmake --preset macos-arm64 && cmake --build --preset macos-arm64 --target hp2_verification_binaries`|
-|Configure + build (Linux)|`cmake --preset linux-arm64 && cmake --build --preset linux-arm64 --target hp2_verification_binaries`|
-|Run verification suite|`ctest --preset macos-arm64` / `ctest --preset linux-arm64` (sanitizer variants: `*-asan-ubsan`, `*-tsan`)|
-|Single test|`ctest --preset <preset> -R '^<name>$'` — e.g. `abi_widths`, `package79_manifest`, `game_test_contract`, `renderer_smoke_wgpu` (see `Docs/BEHAVIOR_MATRIX.md` for the full list)|
-|List maps|`python3 Build/game_test.py maps --data-root HarryPotter2/Unreal`|
-|Launch one map|`python3 Build/game_test.py run <map> ...` (see `Docs/OPERATIONS.md`)|
-|Renderer smoke|`python3 Build/smoke_maps.py --renderer=wgpu --output=<report.json> [--maps=...]`|
-|Bundle integrity|`python3 Build/check_bundle.py` (macOS `.app`; exit 0 pass / 1 fail / 2 blocked). Linux install is verified by the `linux-arm64*` ctest presets, not a separate script|
-|Retail data overlay|`python3 Build/prepare_retail_data.py` → writes `overlay-manifest.json`|
-|Retail-flow smoke|`python3 Build/retail_flow_smoke.py` (windowed retail launch + continue-flag step; manual steps printed at end)|
+Tests are registered through `hp2_add_behavior_test` in
+`Build/CMake/HP2Targets.cmake` and `CMakeLists.txt`. Rust tests also live in crate
+`tests/` directories and inline modules. Python contracts live in `Tests/`.
+Conditional data-backed tests must be present before qualification. See
+`Docs/ARCHITECTURE.md` for domain entry points and the configured commands for
+actual execution scope. In particular, `wgpu_surface_round_trip` currently runs
+non-ignored library tests; its name is not proof of real surface presentation.
 
-Test registration: tests are registered in `Build/CMake/HP2Targets.cmake` via
-`hp2_add_behavior_test` (isolated HOME + `HP2_ARTIFACT_DIR` per test).
-Renderer smoke requires the installed bundle and prototype data at configure
-time; without them the tests do not exist — that is a configuration gap, not
-a skip.
+## Distribution and historical tools
 
-## PR / Change Checklist
+- macOS bundle: `dist/macos-arm64/HarryPotter2.app`; use `Build/check_bundle.py`.
+  Linux layouts are `dist/linux-arm64/` and `dist/linux-x64/`, installed through
+  `Build/CMake/HP2Install.cmake` and checked with their matching test presets.
+- `hp2_macos_dmg` creates release DMGs. Never publish, tag, or release as a cleanup
+  side effect. Do not modify personal saves or game-data installations.
+- The Homebrew tap is this repository. Its tap name must match the repository
+  name, and its URL must be explicit. `.github/workflows/release.yml` and
+  `Build/stamp_cask.py` own `Casks/harry-potter-2.rb` version/hash fields; never
+  hand-edit them.
+- Use explicit current `--app` paths with legacy flow/replay tools until their
+  defaults are repaired and tested. `dist/macos-arm64-rs/`, `hp2rs`, `hp-app`,
+  `hp-engine`, and older `target/release/` instructions can refer to the removed
+  rewrite. `Docs/BEHAVIOR_MATRIX.md`, `Docs/OPERATIONS.md`, and completion logs
+  retain historical evidence; do not silently rewrite or delete it. When a task
+  touches a stale path or tool, flag the drift and avoid unrelated cross-cutting
+  repairs; make any necessary repair explicit in the task and evidence.
+- The CI web job checks out `web-cpp-freeze`, a separate frozen C++ implementation.
+  Its success does not qualify the current Rust desktop tree or a Rust web port.
 
-Every change ships with, in the PR description:
+## Required handback
 
-1. **Invariant** — the one-sentence behavior that must hold.
-2. **Command** — the exact ctest/script invocation run.
-3. **Observed result** — actual pass/fail output, artifact paths under
-   `HP2_ARTIFACT_DIR`; not a summary of what you expected.
-4. **Unresolved conditions** — anything not covered (data profile not
-   exercised, gate not promoted, platform not verified). Stated explicitly,
-   never implied.
-
-## Forbidden Actions
-
-- **Golden updates without a separate acceptance record.** Refreshing
-  `Tests/Fixtures/*` goldens requires its own acceptance evidence (command +
-  observed result) — never bundle a golden bump silently into a feature commit.
-- **Retry-to-green.** Re-running a failing test until it passes is evidence
-  tampering. A flaky result is a finding; report it.
-- **Touching ThirdParty pinned sources casually.** `ThirdParty/` is pinned
-  upstream (`sources.json`). Changes need an explicit reason, a note of the
-  upstream version, and must be separable from unrelated work.
-- **Committing without the checklist above** (Lead responsibility).
-- **Suppressing symptoms** — no special-casing inputs, swallowing errors, or
-  skipping assertions to make a run pass.
+Report **invariant**, **changed paths**, **exact commands**, **observed results**,
+**artifact paths**, and **unresolved conditions**. Include the platform, features,
+and data profile. Mark planned → implementing → review → integrated → verified
+honestly; blocked work is not complete. Do not commit without the repository
+checklist and explicit task authority.

@@ -43,8 +43,13 @@ mod ffi {
         pub fn SDL_GL_SetAttribute(attr: c_int, value: c_int) -> c_int;
     }
 }
+/// Returns the flags of a launcher window.
+///
+/// # Safety
+/// `window`, if non-null, must remain a live SDL window for this call.
+/// The caller must obey SDL's video-thread requirements.
 #[cfg(feature = "sdl")]
-pub fn launcher_window_flags(window: *mut SdlWindow) -> u32 {
+pub unsafe fn launcher_window_flags(window: *mut SdlWindow) -> u32 {
     // SAFETY: the caller supplies a live SDL window.
     unsafe { ffi::SDL_GetWindowFlags(window) }
 }
@@ -102,6 +107,11 @@ pub fn create_launcher_window(title: &std::ffi::CStr, width: i32, height: i32) -
 }
 
 /// Returns logical window size and physical drawable size for egui's point scale.
+///
+/// # Safety
+/// `window`, if non-null, must remain a live SDL window for both calls.
+/// The caller must obey SDL's video-thread requirements. For a null window,
+/// the initialized sizes remain zero; SDL can set its error state.
 #[cfg(feature = "sdl")]
 pub unsafe fn launcher_window_sizes(window: *mut SdlWindow) -> ((i32, i32), (i32, i32)) {
     let (mut width, mut height, mut drawable_width, mut drawable_height) = (0, 0, 0, 0);

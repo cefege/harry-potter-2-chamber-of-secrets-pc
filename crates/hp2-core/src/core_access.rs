@@ -605,6 +605,11 @@ impl<'a> CoreAccess<'a> {
         drop(previous);
     }
 
+    /// Whether object modification can invoke a transaction callback.
+    pub(crate) fn has_object_transactions(self) -> bool {
+        self.state.transactions.borrow().is_some()
+    }
+
     /// # Safety
     /// The object is live and remains valid through transaction callback reentry.
     pub unsafe fn modify_object(self, object: *mut UObject) -> RuntimeResult<()> {
@@ -881,7 +886,10 @@ impl<'a> CoreAccess<'a> {
             // RF_Suppress is applied to the real interned entry, preserving other flags.
             unsafe { (*entry).flags |= 0x0000_1000; }
         }
-        crate::native_runtime_init::initialize(self, system)?;
+        // SAFETY: `system` came from this owner's `system()` above and was just
+        // checked for its Paths and Suppress storage; nothing else mutates it
+        // during this synchronous call.
+        unsafe { crate::native_runtime_init::initialize(self, system)? };
         Ok(system)
     }
 

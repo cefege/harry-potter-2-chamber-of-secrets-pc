@@ -78,7 +78,9 @@ pub(super) struct RuntimeReporters {
 }
 
 impl RuntimeReporters {
-    /// The owner remains in the boot frame's final field until after detach.
+    /// # Safety
+    /// `owner` must remain live at the same address until these reporters detach
+    /// and are dropped. The boot host drops reporters before its owner.
     pub(super) unsafe fn new(owner: *const EngineOwner) -> RuntimeResult<Self> {
         if owner.is_null() {
             return Err(RuntimeError::new(

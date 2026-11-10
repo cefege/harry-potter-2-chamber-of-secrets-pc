@@ -20,12 +20,11 @@ hp2-fire.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+wgpu.workspace = true
 hp2-launcher.workspace = true
 hp2-ini.workspace = true
 
 [features]
-# Experimental local UI shell; no settings provider is connected by default.
-in-game-overlay = []
 # SDK resource owners are built by the CMake host; bare Cargo tests remain
 # native-link-free, just like hp2-platform's feature of the same name.
 sdl = ["hp2-platform/sdl", "hp2-wgpu?/sdl"]

@@ -20,7 +20,7 @@
 //! `caseless::default_case_fold_str`'s output for the same codepoints --
 //! found 146 real divergences, concentrated in Unicode additions newer
 //! than `unicode-normalization`'s bundled tables (e.g. the Garay script,
-//! Unicode 16.0). [`crate::fold_table`] is that same exhaustive dump,
+//! Unicode 16.0). `crate::fold_table` is that same exhaustive dump,
 //! reduced to the 1,606 codepoints whose fold actually changes something
 //! (the same sparse shape as Unicode's own `CaseFolding.txt`), committed
 //! as a plain Rust table and binary-searched here -- pure Rust, and exact

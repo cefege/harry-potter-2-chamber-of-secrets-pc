@@ -115,6 +115,31 @@ pub mod route;
 pub mod scr_tex;
 pub mod settings_policy;
 pub mod settings_config;
+mod stock_fps_menu;
+mod stock_graphics_settings;
+mod stock_graphics_gpu;
+mod stock_graphics_gpu_backend;
+mod stock_graphics_menu;
+mod stock_graphics_dispatch;
+#[cfg(feature = "sdl")]
+mod stock_display_transition;
+#[cfg(feature = "sdl")]
+mod stock_display_menu;
+#[cfg(feature = "sdl")]
+mod stock_display_control;
+#[cfg(feature = "renderer-wgpu")]
+mod stock_render_scale_transaction;
+#[cfg(feature = "renderer-wgpu")]
+mod stock_render_scale_control;
+mod stock_menu_extensions;
+mod live_texture_detail;
+mod stock_resolution_deferred;
+mod stock_resolution_display;
+mod stock_resolution_menu;
+mod stock_resolution_lifecycle;
+#[cfg(feature = "sdl")]
+mod stock_resolution_transaction;
+mod stock_resolution_popup;
 pub mod services;
 pub mod skeletal;
 pub mod stat_log;
@@ -162,10 +187,6 @@ mod game_init_owner;
 mod game_exec_owner;
 mod game_save_owner;
 mod game_draw_owner;
-#[cfg(feature = "in-game-overlay")]
-pub mod in_game_overlay;
-#[cfg(feature = "in-game-overlay")]
-mod overlay_settings_provider;
 mod game_tick_owner;
 mod level_tick_owner;
 mod level_tick_demo_owner;

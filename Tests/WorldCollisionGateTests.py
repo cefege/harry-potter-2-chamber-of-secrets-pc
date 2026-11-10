@@ -15,6 +15,7 @@ from unittest.mock import patch
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import world_collision_gate  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 
 
 class WorldCollisionGateContracts(unittest.TestCase):
@@ -346,6 +347,7 @@ class WorldCollisionGateContracts(unittest.TestCase):
             },
         ])
 
+    @mocked_native_preflight
     def test_side_launch_receives_shared_scenario_and_its_own_atomic_trace_path(self) -> None:
         artifact_dir = self.root / "artifacts"
         scenario_path = artifact_dir / world_collision_gate.SCENARIO_FILENAME
@@ -381,6 +383,7 @@ class WorldCollisionGateContracts(unittest.TestCase):
         self.assertEqual(environment[world_collision_gate.SCENARIO_ENVIRONMENT], str(scenario_path))
         self.assertEqual(environment[world_collision_gate.TRACE_ENVIRONMENT], str(artifact_dir / "cpp" / world_collision_gate.TRACE_FILENAME))
 
+    @mocked_native_preflight
     def test_bump_side_launch_uses_the_dedicated_environment_and_trace_name(self) -> None:
         artifact_dir = self.root / "bump-artifacts"
         scenario_path = artifact_dir / world_collision_gate.BUMP_SCENARIO_FILENAME

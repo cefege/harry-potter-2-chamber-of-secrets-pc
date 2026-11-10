@@ -9,8 +9,6 @@ publish.workspace = true
 name = "hp2_platform"
 
 [features]
-# Experimental capture arbitration; not connected to the game input path.
-overlay-mouse = []
 # Links against the pinned `SDL2::SDL2-static` (built by CMake's
 # FetchContent) for `clipboard`'s real SDL2 FFI calls. Off by default so
 # `cargo build`/`cargo test` work standalone with no SDL2 binary to find

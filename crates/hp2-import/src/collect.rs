@@ -19,9 +19,9 @@ use std::path::{Path, PathBuf};
 
 use crate::classify::{is_debris, is_prohibited};
 use crate::files::{child, child_file, walk};
-use hp2_file_hash::hash;
 use crate::lower::lower;
-use crate::util::{fail, lexically_relative, lower_extension, utf8};
+use crate::util::{fail, lexically_relative, lower_extension, utf8, valid_destination};
+use hp2_file_hash::hash;
 
 /// Replaces `Posix`: backslash-to-forward-slash, nothing else (not a full
 /// path normalization -- callers already work with POSIX-relative
@@ -71,7 +71,7 @@ impl Default for Asset {
 
 /// Replaces `MakeAsset`. `file` must be a real (non-symlink) regular
 /// file under `root`, and `dest` must not be [`is_prohibited`]. The
-/// root-escape check (via [`lexically_relative`]) was verified against
+/// root-escape check (via `lexically_relative`) was verified against
 /// the real compiled `MakeAsset` on both an escaping path (two sibling
 /// absolute directories, `file` under the one that isn't `root`) and a
 /// valid one: identical "input asset escapes ... root: ..." text and
@@ -99,6 +99,9 @@ pub fn make_asset(source: &str, root: &Path, file: &Path, dest: String) -> Resul
         return Err(fail(format!(
             "prohibited asset selected for overlay: {dest}"
         )));
+    }
+    if !valid_destination(&dest) {
+        return Err(fail(format!("invalid planned output path: {dest}")));
     }
     let (size, digest) = hash(file)?;
     Ok(Asset {

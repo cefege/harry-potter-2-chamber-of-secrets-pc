@@ -23,6 +23,7 @@ import threading
 from typing import Mapping, Sequence
 
 import game_test
+import oracle_preflight
 
 
 TRACE_VERSION = 1
@@ -711,6 +712,8 @@ def _run_side(
     timeout_seconds: float,
     start_gate: threading.Barrier,
 ) -> dict[str, object]:
+    if name == "cpp":
+        oracle_preflight.require_native_oracle()
     side_dir = artifact_dir / name
     side_dir.mkdir(parents=True, exist_ok=True)
     trace_path = side_dir / "lifecycle-gate.json"
@@ -760,6 +763,7 @@ def run_lifecycle_gate(
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, object]:
     """Stage the committed fixture and compare the C++ oracle trace to Rust."""
+    oracle_preflight.require_native_oracle()
     if renderer not in game_test.RENDERERS:
         raise LifecycleGateError(f"unsupported renderer: {renderer}")
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
@@ -872,7 +876,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             renderer=arguments.renderer,
             timeout_seconds=arguments.timeout,
         )
-    except LifecycleGateError as error:
+    except (LifecycleGateError, oracle_preflight.OracleUnavailableError) as error:
         print(f"lifecycle gate: {error}", file=sys.stderr)
         return 2
     return 0 if report["passed"] else 1

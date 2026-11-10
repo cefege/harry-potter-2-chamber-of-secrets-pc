@@ -19,6 +19,7 @@ import unittest
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import game_test  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 import package79_reference  # noqa: E402
 import smoke_maps  # noqa: E402
 
@@ -309,6 +310,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertEqual(result["replay"]["rust_capability"]["status"], "missing")
 
+    @mocked_native_preflight
     def test_paired_side_rejects_missing_or_nonzero_script_deferrals(self) -> None:
         checkpoint_manifest = self.root / "checkpoints.json"
         checkpoint_manifest.write_text("{}")
@@ -822,6 +824,7 @@ class GameTestContracts(unittest.TestCase):
             "shadow_update_trace.artifact_invalid",
         )
 
+    @mocked_native_preflight
     def test_shadow_update_trace_env_is_side_specific_and_missing_trace_fails_leg(self) -> None:
         paths = game_test._prepare_shadow_update_trace_paths(
             self.root / "shadow-update-traces",
@@ -913,6 +916,7 @@ class GameTestContracts(unittest.TestCase):
             Path("shadow-update-traces"),
         )
 
+    @mocked_native_preflight
     def test_paired_rng_trace_limit_cli_is_strict_and_requires_trace_directory(self) -> None:
         base = [
             "game_test.py", "paired", "--app", "app", "--engine-bin", "engine",
@@ -945,6 +949,7 @@ class GameTestContracts(unittest.TestCase):
             )
 
 
+    @mocked_native_preflight
     def test_paired_rng_trace_limit_is_shared_and_opt_in(self) -> None:
         checkpoint_manifest = self.root / "checkpoints.json"
         checkpoint_manifest.write_text("{}")
@@ -988,6 +993,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertIn("HP2_RNG_TRACE", environments[2])
 
 
+    @mocked_native_preflight
     def test_paired_rng_trace_limit_report_records_effective_request(self) -> None:
         self._map("Maps/Test.unr")
         app = self.root / "app"
@@ -1045,6 +1051,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertEqual(game_test._effective_rng_seed(game_test.RNG_SEED_MAX), 1)
         self.assertEqual(game_test._effective_rng_seed(42), 42)
 
+    @mocked_native_preflight
     def test_paired_seed_uses_cpp_environment_and_rust_argument(self) -> None:
         checkpoint_manifest = self.root / "checkpoints.json"
         checkpoint_manifest.write_text("{}")
@@ -1084,6 +1091,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertEqual(cpp_run["rng_seed"], expected_metadata)
         self.assertEqual(rust_run["rng_seed"], expected_metadata)
 
+    @mocked_native_preflight
     def test_paired_seed_rejects_replay_before_launch(self) -> None:
         self._map("Maps/Test.unr")
         app = self.root / "app"
@@ -1150,6 +1158,7 @@ class GameTestContracts(unittest.TestCase):
             missing["diagnostic"]["code"], "actor_slot_dump.artifact_missing",
         )
 
+    @mocked_native_preflight
     def test_actor_slot_dump_env_is_side_specific_and_missing_dump_fails_leg(self) -> None:
         paths = game_test._prepare_actor_slot_dump_paths(self.root / "actor-slots")
         checkpoint_manifest = self.root / "checkpoints.json"
@@ -1228,6 +1237,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertFalse(rust_run["passed"])
         self.assertEqual(rust_run["actor_slot_dump"]["status"], "missing")
 
+    @mocked_native_preflight
     def test_paired_output_retains_actor_slot_dump_metadata_and_failure(self) -> None:
         self._map("Maps/Test.unr")
         app = self.root / "app"
@@ -1284,6 +1294,7 @@ class GameTestContracts(unittest.TestCase):
             "actor_slot_dump.artifact_missing",
         )
 
+    @mocked_native_preflight
     def test_paired_actor_slot_semantic_join_keeps_raw_ids_diagnostic_only(self) -> None:
         self._map("Maps/Test.unr")
         app = self.root / "app"
@@ -1500,6 +1511,7 @@ class GameTestContracts(unittest.TestCase):
         self.assertFalse(boundaries["boundaries_match"])
         self.assertFalse(boundaries["matches"])
 
+    @mocked_native_preflight
     def test_paired_actor_transition_ledger_stages_side_specific_artifacts_and_compares(self) -> None:
         self._map("Maps/Test.unr")
         app = self.root / "app"
@@ -1592,6 +1604,7 @@ class GameTestContracts(unittest.TestCase):
             Path("actor-transition-ledgers"),
         )
 
+    @mocked_native_preflight
     def test_actor_transition_ledger_env_is_side_specific_and_missing_artifact_fails_leg(self) -> None:
         paths = game_test._prepare_actor_transition_ledger_paths(
             self.root / "actor-transition-ledgers",

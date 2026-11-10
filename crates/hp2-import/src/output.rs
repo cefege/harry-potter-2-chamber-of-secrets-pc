@@ -8,7 +8,7 @@
 //! prototype data tree -- every one of their own tests uses a
 //! throwaway temp directory. [`run_import`] is the top-level
 //! orchestration tying all of those together with [`crate::plan::plan`]
-//! and (for the `--archive` input path) [`crate::archive::extract`];
+//! and (for the `--archive` input path) `crate::archive::extract`;
 //! porting it waited until both of those existed, since calling
 //! functions that don't exist yet isn't an option. Its own tests follow
 //! the same honest-scoping pattern [`crate::plan::plan`]'s doc explains
@@ -43,19 +43,19 @@
 //! same kind of finding):
 //! - `std::fs::copy` silently overwrites an existing destination; the
 //!   real C++'s `fs::copy_file(..., fs::copy_options::none)` fails with
-//!   "File exists" instead. [`copy_file_no_overwrite`] replicates the
+//!   "File exists" instead. `copy_file_no_overwrite` replicates the
 //!   refusal.
 //! - `std::fs::create_dir` errors with `AlreadyExists` even when the
 //!   existing entry already is a directory; the real C++'s
 //!   `fs::create_directory` is idempotent there (`created=false`, no
-//!   error). [`create_directory_idempotent`] replicates the
+//!   error). `create_directory_idempotent` replicates the
 //!   idempotency, used for `materialize`'s six category-root
 //!   directories (the only single-level `create_dir` call in this
 //!   module -- the per-asset `destination.parent()` creation already
 //!   uses `create_dir_all`, confirmed independently idempotent in Rust
 //!   too, matching C++'s equally-idempotent `create_directories`).
 //!
-//! [`lexically_normal`] (used by `run_import` to normalize the
+//! `lexically_normal` (used by `run_import` to normalize the
 //! `--output` argument before splitting it into parent+filename) has
 //! lower verification confidence than the rest of this module: a
 //! well-known standard algorithm, not a C++ transcription, and not
@@ -72,9 +72,9 @@ use crate::collect::Asset;
 use crate::lower::lower;
 use crate::manifest::checksums;
 use crate::plan::LinkMode;
-use crate::util::{fail, lexically_relative, strerror_of, utf8};
-use hp2_ini::Profile;
+use crate::util::{fail, lexically_relative, strerror_of, utf8, valid_destination};
 use hp2_file_hash::hash;
+use hp2_ini::Profile;
 
 fn display(p: &Path) -> String {
     utf8(p).unwrap_or_else(|_| p.display().to_string())
@@ -127,7 +127,7 @@ pub fn safe_directory(path: &Path, label: &str) -> Result<PathBuf, String> {
 /// Replaces `Overlap`: true when `a` is lexically inside `b`, `b` is
 /// lexically inside `a`, or they are the same canonical path.
 ///
-/// [`lexically_relative`] returns an *empty* `PathBuf` for identical
+/// `lexically_relative` returns an *empty* `PathBuf` for identical
 /// paths (zero `..` components, zero trailing components -- the only
 /// way to get both is `base == path`), where C++'s own
 /// `fs::path::lexically_relative` returns `"."` for the same case. Both
@@ -464,6 +464,9 @@ pub fn materialize(
         {
             return Err(fail("Import cancelled."));
         }
+        if !valid_destination(&asset.path) {
+            return Err(fail(format!("invalid planned output path: {}", asset.path)));
+        }
         let destination = stage.join(&asset.path);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -633,7 +636,7 @@ fn lexically_normal(path: &Path) -> PathBuf {
     result
 }
 
-/// Dispatches to the real [`crate::archive::extract`] when the
+/// Dispatches to the real `crate::archive::extract` when the
 /// `archive` Cargo feature is enabled, or fails with the same
 /// user-facing message the real C++ gave when archive support was
 /// compiled out: "not compiled into this build". This crate has no
@@ -1048,6 +1051,101 @@ mod tests {
         let stage = tempdir();
         fs::create_dir(stage.path().join("System")).unwrap();
         materialize(stage.path(), &[], "M\n", LinkMode::Auto, None).unwrap();
+    }
+
+    #[cfg(unix)]
+    fn reject_collected_traversal(mode: LinkMode) {
+        use std::os::unix::fs::DirBuilderExt;
+
+        let artifacts = std::env::var_os("HP2_ARTIFACT_DIR")
+            .expect("HP2_ARTIFACT_DIR must name an isolated artifact directory");
+        let artifacts = fs::canonicalize(artifacts).expect("artifact directory must exist");
+        let fixture = artifacts.join(format!("import-traversal-{}", random_hex()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&fixture)
+            .expect("create private traversal fixture exclusively");
+        let retail = fixture.join("retail");
+        for root in ["System", "Maps", "Textures", "Sounds", "Music"] {
+            fs::create_dir_all(retail.join(root)).unwrap();
+        }
+        let source = retail.join("System").join(r"..\..\escaped.u");
+        fs::write(&source, b"fixture payload").unwrap();
+        let stage = fixture.join("stage");
+        fs::create_dir(&stage).unwrap();
+        let escaped = fixture.join("escaped.u");
+        assert!(
+            !escaped.exists(),
+            "fixture target already exists: {}",
+            escaped.display()
+        );
+
+        let error = crate::collect::collect_side(&retail, "retail")
+            .expect_err("collection must reject traversal");
+        assert_eq!(
+            error,
+            "invalid planned output path: System/../../escaped.u",
+            "unexpected result for mode={mode:?}; fixture={}",
+            fixture.display()
+        );
+        assert!(
+            !escaped.exists(),
+            "traversal created {}; mode={mode:?}; fixture={}",
+            escaped.display(),
+            fixture.display()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn path_safety_collected_traversal_is_rejected_in_copy_mode() {
+        reject_collected_traversal(LinkMode::Copy);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn path_safety_collected_traversal_is_rejected_in_auto_mode() {
+        reject_collected_traversal(LinkMode::Auto);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn path_safety_materialize_rejects_crafted_generated_traversal_before_asset_writes() {
+        use std::os::unix::fs::DirBuilderExt;
+        use std::sync::atomic::Ordering;
+
+        let artifacts = std::env::var_os("HP2_ARTIFACT_DIR")
+            .expect("HP2_ARTIFACT_DIR must name an isolated artifact directory");
+        let artifacts = fs::canonicalize(artifacts).expect("artifact directory must exist");
+        let fixture = artifacts.join(format!("import-traversal-sink-{}", random_hex()));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&fixture)
+            .expect("create private traversal fixture exclusively");
+        let stage = fixture.join("stage");
+        fs::create_dir(&stage).unwrap();
+        let escaped = fixture.join("escaped.u");
+        let assets = [Asset {
+            path: "System/../../escaped.u".to_string(),
+            generated: true,
+            content: "fixture payload".to_string(),
+            ..Asset::default()
+        }];
+        let progress = Progress::default();
+        progress.files_done.store(7, Ordering::Relaxed);
+        let error =
+            materialize(&stage, &assets, "manifest", LinkMode::Copy, Some(&progress)).unwrap_err();
+        assert_eq!(error, "invalid planned output path: System/../../escaped.u");
+        assert!(!escaped.exists(), "escaped file at {}", escaped.display());
+        assert!(!stage.join("overlay-manifest.json").exists());
+        assert_eq!(progress.files_done.load(Ordering::Relaxed), 7);
+
+        progress.cancel_requested.store(true, Ordering::Relaxed);
+        let error =
+            materialize(&stage, &assets, "manifest", LinkMode::Copy, Some(&progress)).unwrap_err();
+        assert_eq!(error, "Import cancelled.");
+        assert_eq!(progress.files_done.load(Ordering::Relaxed), 7);
+        assert!(!escaped.exists(), "escaped file at {}", escaped.display());
     }
 
     // -- validate_output -----------------------------------------------------

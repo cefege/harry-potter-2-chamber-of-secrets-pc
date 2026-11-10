@@ -289,6 +289,9 @@ pub fn is_safe_float(v: f32) -> bool {
 
 /// `GetCanvasTextScale` given the UI scale from the host.
 pub fn text_scale_from(cv: &Hp2CanvasView, ui_scale: f32) -> f32 {
+    if let Some(scale) = CONSOLE_TEXT_SCALE.with(|slot| slot.get()) {
+        return scale;
+    }
     let width = if cv.has_frame != 0 {
         cv.frame_fx
     } else {
@@ -302,7 +305,54 @@ pub fn text_scale_from(cv: &Hp2CanvasView, ui_scale: f32) -> f32 {
     c_max(1.0, width / 640.0) * ui
 }
 
-/// `GetCanvasTextScale(Canvas)`.
+thread_local! {
+    // The console paints into a centered virtual 4:3 canvas. Its text must use
+    // the same scale as its controls, not the enclosing widescreen frame.
+    static CONSOLE_TEXT_SCALE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn with_console_text_scale<T>(scale: f32, draw: impl FnOnce() -> T) -> T {
+    struct Restore(Option<f32>);
+    impl Drop for Restore {
+        fn drop(&mut self) { CONSOLE_TEXT_SCALE.with(|slot| slot.set(self.0)); }
+    }
+    let old = CONSOLE_TEXT_SCALE.with(|slot| slot.replace(Some(scale)));
+    let _restore = Restore(old);
+    draw()
+}
+
+#[cfg(test)]
+mod console_scale_tests {
+    use super::*;
+
+    #[test]
+    fn virtual_canvas_text_scale_is_scoped_and_restored() {
+        assert_eq!(CONSOLE_TEXT_SCALE.with(|slot| slot.get()), None);
+        let wide = crate::game_tick::get_console_ui_scale(1280.0, 720.0, 1.0);
+        let four_three = crate::game_tick::get_console_ui_scale(800.0, 600.0, 1.0);
+        assert_eq!(wide, 1.5);
+        assert_eq!(four_three, 1.25);
+        let mut cv: Hp2CanvasView = unsafe { std::mem::zeroed() };
+        cv.has_frame = 1;
+        cv.frame_fx = 1280.0;
+        assert_eq!(text_scale_from(&cv, 1.0), 2.0);
+        with_console_text_scale(wide, || {
+            assert_eq!(text_scale_from(&cv, 1.0), 1.5);
+            with_console_text_scale(four_three, || {
+                assert_eq!(text_scale_from(&cv, 1.0), 1.25);
+            });
+            assert_eq!(text_scale_from(&cv, 1.0), 1.5);
+        });
+        assert_eq!(text_scale_from(&cv, 1.0), 2.0);
+        cv.frame_fx = 800.0;
+        assert_eq!(text_scale_from(&cv, 1.0), four_three);
+        with_console_text_scale(four_three, || assert_eq!(text_scale_from(&cv, 1.0), four_three));
+        assert_eq!(CONSOLE_TEXT_SCALE.with(|slot| slot.get()), None);
+    }
+}
+
+/// `GetCanvasTextScale(Canvas)`, with the console's virtual-canvas scale
+/// scoped to its post-render event. Other Canvas users retain their policy.
 pub fn text_scale<H: CanvasTextHost + ?Sized>(h: &mut H, cv: &Hp2CanvasView) -> f32 {
     let ui = h.ui_scale();
     text_scale_from(cv, ui)

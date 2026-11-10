@@ -858,7 +858,9 @@ fn selected_object_loading_defers_unrequested_exports_until_explicit_package_loa
     assert!(unsafe { source.save_package(package, selected, 4, &path, None) }.unwrap());
     source_owner.shutdown().unwrap();
 
-    for object_path in ["LazyObjects.Selected", "LazyObjects.Group.Nested.Selected"] {
+    // StaticLoadObject's ResolveName(Create=1) permits absent intermediate
+    // groups; the linker then searches by class/name across actual groups.
+    for object_path in ["LazyObjects.Selected", "LazyObjects.Group.Nested.Selected", "LazyObjects.Absent.Selected", "LazyObjects.Absent.Nested.Selected"] {
         let restored_owner = owner(&data_root, &system_ini);
         let restored = restored_owner.access();
         let class = restored.native_class("Core.TextBuffer").unwrap();

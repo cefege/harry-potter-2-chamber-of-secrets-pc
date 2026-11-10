@@ -1,0 +1,105 @@
+# Retail stock settings, viewport pixels. Starts at 800x600.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+# Input settings: initial invert=False, auto-center=True.
+mouse 120 472
+idle 5
+press LeftMouse
+idle 40
+# Matrix: (True,True), (True,False), (False,False), (True,False).
+mouse 170 168
+press LeftMouse
+idle 12
+mouse 170 198
+press LeftMouse
+idle 12
+mouse 170 168
+press LeftMouse
+idle 12
+mouse 170 168
+press LeftMouse
+idle 12
+# Remaining visible input toggles and forward binding.
+mouse 170 228
+press LeftMouse
+idle 12
+mouse 170 258
+press LeftMouse
+idle 12
+mouse 170 359
+press LeftMouse
+idle 12
+mouse 650 95
+press LeftMouse
+idle 10
+press G
+idle 30
+mouse 755 555
+press LeftMouse
+idle 45
+# Sound/video settings.
+mouse 680 455
+press LeftMouse
+idle 40
+mouse 335 430
+press LeftMouse
+idle 10
+mouse 550 200
+press LeftMouse
+idle 10
+mouse 550 318
+press LeftMouse
+idle 10
+mouse 320 279
+press LeftMouse
+idle 8
+mouse 250 332
+press LeftMouse
+idle 25
+# Select 640x480, reject, acknowledge restore.
+mouse 320 178
+press LeftMouse
+idle 40
+mouse 250 233
+press LeftMouse
+idle 100
+mouse 380 280
+press LeftMouse
+idle 50
+mouse 475 350
+press LeftMouse
+idle 20
+# Select 640x480 again, accept.
+mouse 320 178
+press LeftMouse
+idle 8
+mouse 250 233
+press LeftMouse
+idle 40
+mouse 260 280
+press LeftMouse
+idle 50
+# Coordinates below are in the resulting 640x480 viewport.
+# Toggle the added Show FPS checkbox, lower object detail, and inspect depth.
+mouse 386 343
+press LeftMouse
+idle 15
+mouse 180 272
+press LeftMouse
+idle 15
+mouse 210 182
+press LeftMouse
+idle 30
+mouse 210 182
+press LeftMouse
+idle 15
+mouse 604 445
+press LeftMouse
+idle 40
+mouse 604 362
+press LeftMouse
+idle 40

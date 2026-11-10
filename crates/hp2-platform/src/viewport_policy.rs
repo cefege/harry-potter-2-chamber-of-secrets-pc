@@ -1,10 +1,8 @@
-//! Active USDLViewport policy. SDK objects, virtual dispatch, and lexical
-//! SDL/TArray temporaries stay in checked invocation-local native frames;
-//! each action's unwind label is emitted by `native_guard::guarded` around
-//! the matching `hp2-ffi` export (`platform_viewport_policy.rs`), not by a
-//! C++ `guard()`/`unguard` in the native shell, which the shell no longer has.
-//! Every callback may reenter with an independent frame; no native object is
-//! borrowed, locked, or shadowed across a callback. See each leaf's contract.
+//! Viewport policy and checked service-table adapters. The canonical Engine
+//! path uses `hp2-engine::platform_owner::set_mouse_capture` to call
+//! `set_mouse_capture_with` when `sdl` is enabled. That owner supplies the
+//! live viewport state, window-flags query, and mouse-grab update callbacks.
+//! Other policies and adapters in this module have their own call contracts.
 use crate::input_pump as pump;
 use crate::viewport;
 use std::ffi::c_void;
@@ -21,11 +19,11 @@ pub fn set_mouse_capture_with<E>(
     let mut capture = capture;
     if capture == 0 {
         set_lost_grab(false)?;
-    } else if focus_only != 0 {
-        if window_flags()?.is_some_and(|flags| flags & pump::sdl_window_flags::INPUT_FOCUS == 0) {
-            capture = 0;
-            set_lost_grab(true)?;
-        }
+    } else if focus_only != 0
+        && window_flags()?.is_some_and(|flags| flags & pump::sdl_window_flags::INPUT_FOCUS == 0)
+    {
+        capture = 0;
+        set_lost_grab(true)?;
     }
     update_grab(capture)
 }
@@ -101,9 +99,9 @@ pub enum Hp2PlatformViewportLeaf {
     /// Write-only: SystemCursors[input.cursor.slot] = input.cursor.object. No
     /// SDL call; stores the pointer Rust already created or cleared.
     CursorStore,
-    /// Input.integer is slot; output.object = SystemCursors[slot].
+    /// Input.integer is slot; `output.object = SystemCursors[slot]`.
     CursorAt,
-    /// Input.integer is slot; SystemCursors[slot] = NULL.
+    /// Input.integer is slot; `SystemCursors[slot] = NULL`.
     CursorClear,
     /// Caps |= CC_RGB565; no other cap changes.
     AddRgb565Cap,
@@ -183,7 +181,7 @@ pub enum Hp2PlatformViewportLeaf {
     EngineInputEvent,
     /// Input->KeyDown(input.integer), live Input; output.integer. No new gate.
     KeyDown,
-    /// ConstructObject<UFont>(UFont::StaticClass(),GetOuter()); output.object.
+    /// `ConstructObject<UFont>(UFont::StaticClass(),GetOuter())`; output.object.
     ConstructFont,
     /// input.object is saved Font; Font->FontName = original FontName argument.
     SetFontName,
@@ -205,7 +203,7 @@ pub enum Hp2PlatformViewportLeaf {
     /// StaticLoadClass(URenderDevice::StaticClass(),NULL,candidate,NULL,
     /// LOAD_NoFail,NULL); output.object. Native class pointer stays opaque.
     LoadRenderClass,
-    /// RenDev = ConstructObject<URenderDevice>((UClass*)input.object,this).
+    /// `RenDev = ConstructObject<URenderDevice>((UClass*)input.object,this)`.
     ConstructRenderDevice,
     /// RenDev->Init(this,input.render.x,y,color,fullscreen), live RenDev;
     /// output.integer is exact UBOOL, not RenDev presence.
@@ -264,7 +262,7 @@ pub enum Hp2PlatformViewportLog {
 /// matching Rust phase synchronously with a service table pointing at that
 /// scope's native frame. It returns the nested status unchanged. Destruction
 /// occurs on scope exit, never before the nested call. TitleUtf8 owns
-/// TArray<ANSICHAR> from before conversion until after SDL title. Native
+/// `TArray<ANSICHAR>` from before conversion until after SDL title. Native
 /// exceptions/signals must be contained at EVERY native callback and stored
 /// in the original invocation; rethrow only after the Rust caller exits.
 /// cbindgen:prefix-with-name
@@ -1128,3 +1126,6 @@ pub fn create_native_font_with<E>(
     if !font.is_null() { initialize(font)?; }
     Ok(font)
 }
+
+#[cfg(test)]
+mod viewport_capture_contracts;

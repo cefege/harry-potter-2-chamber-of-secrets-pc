@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import struct
@@ -34,6 +35,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Union
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
@@ -120,14 +122,17 @@ def _tick_record(tick_delta: float) -> bytes:
     return _event_bytes(IK_PLAY, IST_AXIS, tick_delta)
 
 
-def parse_fixture(text: str) -> tuple[float, list[list[tuple[int, int]]]]:
-    """Parse the fixture DSL into (tick_delta, frames of (key, state) events).
+ReplayEvent = Union[tuple[int, int], tuple[int, int, float]]
+
+
+def parse_fixture(text: str) -> tuple[float, list[list[ReplayEvent]]]:
+    """Parse the fixture DSL into (tick_delta, frames of replay events).
 
     Raises FixtureError on unknown directives, unknown keys, misplaced
     ``tick``, or unbalanced down/up sequences.
     """
     tick: float | None = None
-    frames: list[list[tuple[int, int]]] = []
+    frames: list[list[ReplayEvent]] = []
     down_keys: set[int] = set()
 
     def new_frame() -> None:
@@ -170,6 +175,18 @@ def parse_fixture(text: str) -> tuple[float, list[list[tuple[int, int]]]]:
                 raise FixtureError(f"line {line_number}: idle needs a frame count")
             for _ in range(int(arguments[0])):
                 new_frame()
+        elif directive == "mouse":
+            if len(arguments) != 2:
+                raise FixtureError(f"line {line_number}: mouse needs x and y")
+            try:
+                x, y = (float(value) for value in arguments)
+            except ValueError as error:
+                raise FixtureError(f"line {line_number}: bad mouse coordinate") from error
+            if not all(math.isfinite(value) and abs(value) <= 1_000_000 for value in (x, y)):
+                raise FixtureError(f"line {line_number}: mouse coordinates must be finite and bounded")
+            # IST_MAX mouse records are the native replay's absolute viewport position.
+            frames[-1].extend(((228, 5, x), (229, 5, y)))
+            new_frame()
         elif directive == "press":
             if len(arguments) != 1:
                 raise FixtureError(f"line {line_number}: press needs a key")
@@ -200,7 +217,7 @@ def parse_fixture(text: str) -> tuple[float, list[list[tuple[int, int]]]]:
         raise FixtureError(f"fixture ends with keys still held: {names}")
     return tick, frames
 
-def validate_launch_safe_frames(frames: list[list[tuple[int, int]]]) -> None:
+def validate_launch_safe_frames(frames: list[list[ReplayEvent]]) -> None:
     """Require the initial empty frame that gives FReplay its first tick."""
     if not frames or frames[0]:
         raise FixtureError(
@@ -208,7 +225,7 @@ def validate_launch_safe_frames(frames: list[list[tuple[int, int]]]) -> None:
         )
 
 
-def compile_replay(url: str, tick_delta: float, frames: list[list[tuple[int, int]]]) -> bytes:
+def compile_replay(url: str, tick_delta: float, frames: list[list[ReplayEvent]]) -> bytes:
     """Compile parsed frames into the exact FReplay .rep byte stream.
 
     Stream layout (UnReplay.cpp): serialized starting URL FString, then per
@@ -220,8 +237,8 @@ def compile_replay(url: str, tick_delta: float, frames: list[list[tuple[int, int
     out = bytearray()
     out += serialize_fstring(url)
     for events in frames:
-        for key, state in events:
-            out += _event_bytes(key, state)
+        for event in events:
+            out += _event_bytes(*event)
         out += _tick_record(tick_delta)
     return bytes(out)
 
@@ -444,9 +461,10 @@ def run_input_script_smoke(
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     tick_delta, frames = parse_fixture(fixture_path.read_text(encoding="utf-8"))
+    validate_launch_safe_frames(frames)
     expected_probe_shots = sum(
-        key == KEY_IDS[PROBE_KEY] and state == IST_PRESS
-        for frame in frames for key, state in frame
+        event[0] == KEY_IDS[PROBE_KEY] and event[1] == IST_PRESS
+        for frame in frames for event in frame
     )
     replay_bytes = compile_replay(f"{selected_map}.unr", tick_delta, frames)
 
@@ -601,6 +619,19 @@ class InputScriptContracts(unittest.TestCase):
             compile_replay("Entry.unr", tick, delimiter_first)[11:17],
             bytes((IK_PLAY, IST_AXIS | DELTA_FLAG)) + struct.pack("<f", tick),
         )
+
+    def test_absolute_mouse_records_and_click_match_replay_wire_format(self) -> None:
+        tick, frames = parse_fixture("tick 0.5\nidle 1\nmouse 80 378\npress LeftMouse\n")
+        validate_launch_safe_frames(frames)
+        self.assertEqual(frames[1], [(228, 5, 80.0), (229, 5, 378.0)])
+        self.assertEqual(frames[2], [(KEY_IDS["LeftMouse"], IST_PRESS)])
+        self.assertEqual(frames[3], [(KEY_IDS["LeftMouse"], IST_RELEASE)])
+        blob = compile_replay("Entry.unr", tick, frames)
+        self.assertIn(bytes((228, 5 | DELTA_FLAG)) + struct.pack("<f", 80.0)
+                      + bytes((229, 5 | DELTA_FLAG)) + struct.pack("<f", 378.0), blob)
+        for value in ("nan 1", "inf 1", "1000001 1", "1", "bad 2"):
+            with self.subTest(value=value), self.assertRaises(FixtureError):
+                parse_fixture(f"tick 0.5\nmouse {value}\n")
 
     def test_parser_rejects_unknown_or_unbalanced_scripts(self) -> None:
         with self.assertRaisesRegex(FixtureError, "unknown directive"):

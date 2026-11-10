@@ -175,6 +175,33 @@ const fn ascii_token<const N: usize>(text: &[u8]) -> [hp2_core::ansi::Tchar; N] 
     result
 }
 
+fn eq_ascii_case(units: &[u32], ascii: &[u8]) -> bool {
+    units.len() == ascii.len() && units.iter().zip(ascii).all(|(&a, &b)| {
+        a <= 127 && (a as u8).eq_ignore_ascii_case(&b)
+    })
+}
+
+unsafe fn find_key(access: CoreAccess<'_>, input: *mut UInput, wanted: &[u32]) -> RuntimeResult<Option<(usize, Vec<u32>)>> {
+    let enum_object = unsafe { (*input).input_keys.cast::<UEnum>() };
+    if enum_object.is_null() { return Err(RuntimeError::new("UInput key enum metadata is unavailable")); }
+    let names = unsafe { (*enum_object).names };
+    if names.num < 0 || names.max < names.num || (names.num > 0 && names.data.is_null()) {
+        return Err(RuntimeError::new("UInput key enum names have invalid storage"));
+    }
+    for index in 0..names.num.min(255) as usize {
+        let name = unsafe { names.data.cast::<FName>().add(index).read_unaligned() };
+        if name.index == 0 { continue; }
+        let text = access.name_text(name.index)?;
+        let Some(suffix) = text.get(3..) else { continue; };
+        if suffix.len() == wanted.len() && suffix.iter().zip(wanted).all(|(&a, &b)| {
+            if a <= 127 && b <= 127 { (a as u8).eq_ignore_ascii_case(&(b as u8)) } else { a == b }
+        }) {
+            return Ok(Some((index, suffix.to_vec())));
+        }
+    }
+    Ok(None)
+}
+
 /// Executes a canonical `UInput::Exec` command using Core parsers and metadata.
 ///
 /// # Safety
@@ -198,6 +225,59 @@ pub(crate) unsafe fn exec(
             let stream = (&mut command as *mut *const u32).cast();
             unsafe { hp2_core::command::parse_command(stream, TARGET.as_ptr()) != 0 }
         }};
+    }
+
+    // The stock input page sends SET Input <key> <complete binding>. Handle
+    // only actual EInputKey names here; all other SET commands must continue
+    // through the ordinary viewport/engine command chain.
+    {
+        let mut cursor = command;
+        if unsafe { hp2_core::command::parse_command((&mut cursor as *mut *const u32).cast(), hp2_core::lit!("SET").as_ptr().cast()) } != 0 {
+            let mut class = [0u32; 256];
+            let mut key = [0u32; 256];
+            let has_class = unsafe { hp2_core::tokenize::parse_token((&mut cursor as *mut *const u32).cast(), class.as_mut_ptr().cast(), 256, true) };
+            if has_class && eq_ascii_case(&trim_nul(&class), b"Input")
+                && unsafe { hp2_core::tokenize::parse_token((&mut cursor as *mut *const u32).cast(), key.as_mut_ptr().cast(), 256, true) }
+            {
+                if let Some((index, canonical)) = unsafe { find_key(access, input, &trim_nul(&key))? } {
+                    while unsafe { *cursor } == b' ' as u32 { cursor = unsafe { cursor.add(1) }; }
+                    let mut value = Vec::new();
+                    while unsafe { *cursor } != 0 {
+                        value.push(unsafe { *cursor });
+                        cursor = unsafe { cursor.add(1) };
+                    }
+                    // Allocate first, then publish through the canonical User cache.
+                    // On publication failure the live binding stays unchanged.
+                    let class = unsafe { (*input.cast::<UObject>()).class };
+                    let defaults = unsafe { access.default_object(class.cast())? }.cast::<UInput>();
+                    if defaults == input { return Err(RuntimeError::new("Cannot rebind an input class default")); }
+                    let mut replacement: TArrayRaw = unsafe { mem::zeroed() };
+                    let mut default_replacement: TArrayRaw = unsafe { mem::zeroed() };
+                    let mut terminated = value.clone();
+                    terminated.push(0);
+                    unsafe { access.assign_fstring(&raw mut replacement, &terminated)?; }
+                    if let Err(error) = unsafe { access.assign_fstring(&raw mut default_replacement, &terminated) } {
+                        unsafe { access.destroy_owned_fstring(&raw mut replacement)?; }
+                        return Err(error);
+                    }
+                    let changes = vec![("Engine.Input".chars().map(u32::from).collect(), canonical, value)];
+                    if let Err(error) = access.config_update_user_staged(&changes) {
+                        unsafe {
+                            access.destroy_owned_fstring(&raw mut replacement)?;
+                            access.destroy_owned_fstring(&raw mut default_replacement)?;
+                        }
+                        return Err(error);
+                    }
+                    unsafe {
+                        mem::swap(&mut (*input).bindings[index], &mut replacement);
+                        mem::swap(&mut (*defaults).bindings[index], &mut default_replacement);
+                        access.destroy_owned_fstring(&raw mut replacement)?;
+                        access.destroy_owned_fstring(&raw mut default_replacement)?;
+                    }
+                    return Ok(true);
+                }
+            }
+        }
     }
 
     let binding_mode = if matched!("BUTTON") {
@@ -275,7 +355,7 @@ pub(crate) unsafe fn exec(
             let name = unsafe { names.data.cast::<FName>().add(key as usize).read_unaligned() };
             if name.index != 0 {
                 let text = access.name_text(name.index)?;
-                return emit_units(output, &text);
+                return emit_units(output, text.get(3..).unwrap_or(&[]));
             }
         }
         return Ok(true);
@@ -291,24 +371,14 @@ pub(crate) unsafe fn exec(
         } {
             return Ok(true);
         }
-        let wanted = access.intern(&trim_nul(&token), FindName::Find)?;
-        let enum_object = unsafe { (*input).input_keys.cast::<UEnum>() };
-        if enum_object.is_null() { return Err(RuntimeError::new("UInput key enum metadata is unavailable")); }
-        let names = unsafe { (*enum_object).names };
-        if names.num < 0 || (names.num > 0 && names.data.is_null()) {
-            return Err(RuntimeError::new("UInput key enum names have invalid storage"));
-        }
-        for key in 0..names.num.min(255) {
-            let name = unsafe { names.data.cast::<FName>().add(key as usize).read_unaligned() };
-            if name.index != wanted { continue; }
-            let binding = unsafe { &(*input).bindings[key as usize] };
+        if let Some((key, _)) = unsafe { find_key(access, input, &trim_nul(&token))? } {
+            let binding = unsafe { &(*input).bindings[key] };
             if binding.num < 0 || (binding.num > 0 && binding.data.is_null()) {
                 return Err(RuntimeError::new("UInput key binding has invalid FString storage"));
             }
             if binding.num > 0 {
                 return emit_wide(output, binding.data.cast());
             }
-            break;
         }
         return Ok(true);
     }
@@ -720,6 +790,22 @@ pub(crate) unsafe fn zero_input_floats(
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "input_owner_set_binding_tests.rs"]
+mod set_binding_tests;
+#[cfg(test)]
+#[path = "input_owner_vm_binding_tests.rs"]
+mod vm_binding_tests;
+#[cfg(test)]
+#[path = "input_owner_gameplay_tests.rs"]
+mod gameplay_tests;
+#[cfg(test)]
+#[path = "input_owner_inversion_tests.rs"]
+mod inversion_tests;
+#[cfg(test)]
+#[path = "input_owner_inversion_vm_tests.rs"]
+mod inversion_vm_tests;
 
 #[cfg(test)]
 mod render_host_contracts {

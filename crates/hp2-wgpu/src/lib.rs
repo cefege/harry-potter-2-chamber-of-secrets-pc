@@ -22,6 +22,8 @@ pub mod native_text;
 pub mod sdl_surface;
 pub mod text_atlas;
 pub mod texture;
+pub mod world_scale;
+pub mod msaa;
 
 /// Backend selection, matching the plan's `[WgpuDrv.WgpuRenderDevice]
 /// Backend=Auto|Metal|Vulkan|Dx12|Gl` ini key -- `from_ffi_discriminant`
@@ -417,6 +419,11 @@ enum FramePresentable {
 /// `unlock_frame` is never actually called with `present: true`,
 /// matching wgpu's own documented behavior).
 struct InProgressFrame {
+    size: (u32, u32),
+    /// At least one color-writing batch has been dispatched this frame.
+    /// A scaled world cannot safely replace such a background: downsampling
+    /// it would destroy full-resolution PreRender UI.
+    color_drawn: bool,
     presentable: FramePresentable,
     /// Where this frame's draws go: `RenderLoop::scene_target` for
     /// surface and capture-only frames, or the caller's own texture for
@@ -434,6 +441,8 @@ struct InProgressFrame {
     /// one (`begin_offscreen_frame`), not assumed or re-derived from
     /// surface config each time.
     color_format: wgpu::TextureFormat,
+    color_sampleable: bool,
+    samples: u32,
     /// `true` if `get_current_texture` returned `Suboptimal`, not
     /// `Success` -- `unlock_frame` clears `configured_size` for this
     /// case the same way `lock_frame` already does for `Outdated`,
@@ -643,7 +652,7 @@ struct Batch {
 }
 
 /// `RenderLoop`'s per-kind pipeline caches (`RenderLoop::line_pipelines`).
-type PipelineCache<P> = std::collections::HashMap<(wgpu::TextureFormat, draw::RenderState), P>;
+type PipelineCache<P> = std::collections::HashMap<(wgpu::TextureFormat, draw::RenderState, u32), P>;
 
 /// Per-`CreatedDevice` state that must persist across the
 /// `lock_frame`/`unlock_frame` pair (`UWgpuRenderDevice::Lock`/
@@ -778,6 +787,9 @@ pub struct RenderLoop {
     /// and recorded per captured frame as `backing_scale_factor`, the
     /// same value XOpenGL.cpp:2728-2731 computes from SDL.
     backing_scale: f64,
+    /// Fullscreen desktop uses a fixed drawable and a separate logical scene.
+    logical_scene_size: Option<(u32, u32)>,
+    present_viewport: Option<(f32, f32, f32, f32)>,
     /// Native-text glyph atlas (`text_atlas::TextAtlas`, XOpenGL's
     /// `FNativeTextAtlas`); its pages live in `texture_cache`
     /// (`native_text::NATIVE_TEXT_PAGE_CACHE_ID_BASE`).
@@ -796,6 +808,7 @@ pub struct RenderLoop {
     /// XOpenGL's persistent `FrameState` holds the last
     /// `SetSceneNode`'s `GetViewportGamma` the same way.
     postprocess_uniforms: Option<wgpu::Buffer>,
+    world_scale_state: world_scale::WorldScaleState,
     /// Set by every `set_scene_node` call -- the real `RFX2`/`RFY2`/
     /// `Frame->FX2`/`FY2` screen-to-clip transform `Draw2DLine`'s own
     /// real source applies (`DrawSimple.cpp:80,82`) is derived
@@ -811,6 +824,12 @@ pub struct RenderLoop {
     /// reachable edge case, not a caller bug: `Draw2DLine` called
     /// before any `SetSceneNode` this session).
     last_scene: Option<SceneFrame>,
+}
+
+/// A validated logical target pair that does not replace the active frame targets.
+pub struct PreparedLogicalTargets {
+    color: (wgpu::Texture, wgpu::TextureView),
+    depth: (wgpu::Texture, wgpu::TextureView),
 }
 
 impl Default for RenderLoop {
@@ -965,11 +984,14 @@ impl RenderLoop {
             capture: None,
             capture_initialized: false,
             backing_scale: 1.0,
+            logical_scene_size: None,
+            present_viewport: None,
             text_atlas: text_atlas::TextAtlas::new(),
             capture_target: None,
             scene_target: None,
             postprocess_pipeline: None,
             postprocess_uniforms: None,
+            world_scale_state: world_scale::WorldScaleState::default(),
         }
     }
 
@@ -985,8 +1007,58 @@ impl RenderLoop {
         }
     }
 
-    /// Records the real HiDPI backing scale for the next captured frame
-    /// (`backing_scale`'s own doc).
+    /// Prepare a logical color and depth target before a display setting commits.
+    /// Existing targets remain intact if allocation or validation fails.
+    pub fn prepare_logical_targets(
+        &self, device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32,
+    ) -> Result<PreparedLogicalTargets, String> {
+        let limit = device.limits().max_texture_dimension_2d;
+        if width == 0 || height == 0 || width > limit || height > limit {
+            return Err("logical target dimensions exceed device limits".into());
+        }
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hp2-wgpu prepared scene color target"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth = draw::create_depth_target(device, width, height);
+        let poll_result = device.poll(wgpu::PollType::wait_indefinitely());
+        let memory_error = pollster::block_on(memory.pop());
+        let internal_error = pollster::block_on(internal.pop());
+        let validation_error = pollster::block_on(validation.pop());
+        if let Err(error) = poll_result { return Err(format!("device poll failed: {error}")); }
+        if let Some(error) = memory_error.or(internal_error).or(validation_error) {
+            return Err(format!("logical target allocation failed: {error}"));
+        }
+        Ok(PreparedLogicalTargets { color: (texture, view), depth })
+    }
+
+    /// Atomically publish a prepared pair after the display transaction commits.
+    pub fn commit_logical_targets(&mut self, staged: PreparedLogicalTargets) {
+        self.scene_target = Some(staged.color);
+        self.depth_target = Some(staged.depth);
+    }
+
+    /// Prepare targets for the actual surface format before a resolution change.
+    pub fn prepare_fullscreen_targets(&self, created: &CreatedDevice, width: u32, height: u32) -> Result<PreparedLogicalTargets, String> {
+        let surface = created.surface.as_ref().ok_or("WGPU surface unavailable")?;
+        let caps = surface.get_capabilities(&created.adapter);
+        let format = surface_color_format(&caps.formats, self.srgb_framebuffer)
+            .ok_or("WGPU surface has no compatible color format")?;
+        self.prepare_logical_targets(&created.device, format, width, height)
+    }
+
+    /// Set a fullscreen logical scene size, or None for drawable-sized rendering.
+    pub fn set_logical_scene_size(&mut self, size: Option<(u32, u32)>) {
+        self.logical_scene_size = size.filter(|&(w, h)| w > 0 && h > 0);
+    }
+
     pub fn set_backing_scale(&mut self, scale: f64) {
         self.backing_scale = scale;
     }
@@ -1009,6 +1081,92 @@ impl RenderLoop {
             self.anisotropy_clamp = clamp;
             self.samplers.clear();
         }
+    }
+
+    /// Stage every sampler variant before publishing a live graphics setting.
+    /// The UI values are 0 (off), 4, 8 and 16. Previously queued draws
+    /// are flushed with the old samplers before the new set is committed.
+    pub fn set_anisotropy_live(&mut self, created: &CreatedDevice, value: u16) -> Result<(), String> {
+        if ![0, 4, 8, 16].contains(&value) { return Err("anisotropy must be off, 4x, 8x or 16x".into()); }
+        self.restore_anisotropy_live(created, value)
+    }
+
+    /// Restore an earlier clamp, including legacy values not offered by the UI.
+    pub fn restore_anisotropy_live(&mut self, created: &CreatedDevice, value: u16) -> Result<(), String> {
+        if value > 16 { return Err("anisotropy exceeds the WGPU limit".into()); }
+        if value > 1 && !created.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING) {
+            return Err("anisotropic filtering is unsupported by this adapter".into());
+        }
+        if self.world_scale_state.is_active() { return Err("world render scope is active".into()); }
+        let clamp = value.max(1);
+        if self.anisotropy_clamp == clamp { return Ok(()); }
+        let device = &created.device;
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let mut staged = std::collections::HashMap::new();
+        for bits in 0..8 {
+            let key = texture::SamplerKey::from_bits(bits);
+            staged.insert(key, device.create_sampler(&key.descriptor(clamp)));
+        }
+        let poll = device.poll(wgpu::PollType::wait_indefinitely());
+        let memory_error = pollster::block_on(memory.pop());
+        let internal_error = pollster::block_on(internal.pop());
+        let validation_error = pollster::block_on(validation.pop());
+        poll.map_err(|e| format!("anisotropy device poll failed: {e}"))?;
+        if let Some(e) = memory_error.or(internal_error).or(validation_error) { return Err(format!("anisotropy sampler preparation failed: {e}")); }
+        if let Some(mut frame) = self.in_progress.take() {
+            let batches = std::mem::take(&mut self.batches);
+            dispatch_batches(created, self, &mut frame, batches);
+            self.in_progress = Some(frame);
+        }
+        self.samplers = staged;
+        self.anisotropy_clamp = clamp;
+        Ok(())
+    }
+
+    pub fn anisotropy_live(&self) -> u16 { if self.anisotropy_clamp == 1 { 0 } else { self.anisotropy_clamp } }
+
+    pub fn vsync_mode_live(&self) -> Option<u8> {
+        match self.configured_present_mode {
+            Some(wgpu::PresentMode::Immediate) => Some(0),
+            Some(wgpu::PresentMode::Fifo) => Some(1),
+            Some(wgpu::PresentMode::FifoRelaxed) => Some(2),
+            _ => None,
+        }
+    }
+
+    /// Switch a configured surface between FIFO and Immediate. Call only
+    /// between frames. Unsupported modes are rejected rather than silently
+    /// persisting a value that the surface did not apply.
+    pub fn set_vsync_live(&mut self, created: &CreatedDevice, enabled: bool) -> Result<(), String> {
+        self.set_vsync_mode_live(created, u8::from(enabled))
+    }
+
+    /// Uses the reflected renderer enum: Off=0, On=1, Adaptive=2. Adaptive
+    /// permits exact rollback of an existing setting after persistence fails.
+    pub fn set_vsync_mode_live(&mut self, created: &CreatedDevice, value: u8) -> Result<(), String> {
+        let mode = match value { 0 => wgpu::PresentMode::Immediate, 1 => wgpu::PresentMode::Fifo, 2 => wgpu::PresentMode::FifoRelaxed, _ => return Err("invalid VSync mode".into()) };
+        if self.in_progress.is_some() { return Err("VSync change requires a frame boundary".into()); }
+        let surface = created.surface.as_ref().ok_or("WGPU surface unavailable")?;
+        if !surface.get_capabilities(&created.adapter).present_modes.contains(&mode) {
+            return Err("requested VSync mode is unsupported by the surface".into());
+        }
+        let (width, height) = self.configured_size.ok_or("surface is not configured")?;
+        let previous = self.configured_present_mode.ok_or("surface present mode is unknown")?;
+        if previous == mode { return Ok(()); }
+        if let Err(error) = configure_surface_checked(created, self, width, height, mode) {
+            // A configure failure can leave the surface unconfigured. Restore
+            // the previous mode and do not report a successful setting change.
+            self.configured_size = None;
+            if let Err(rollback) = configure_surface_checked(created, self, width, height, previous) {
+                self.configured_size = None;
+                self.configured_present_mode = None;
+                return Err(format!("VSync change failed: {error}; rollback failed: {rollback}"));
+            }
+            return Err(format!("VSync change failed: {error}"));
+        }
+        Ok(())
     }
 
     /// Creates the sampler for `cache_id`'s `SamplerKey` if it does not
@@ -1133,12 +1291,13 @@ impl RenderLoop {
             .postprocess_pipeline
             .as_ref()
             .expect("just ensured above");
-        pipeline.record(
+        pipeline.record_with_viewport(
             &created.device,
             &mut frame.encoder,
             buffer,
             &frame.view,
             output,
+            self.present_viewport,
         );
     }
 
@@ -2413,6 +2572,31 @@ pub fn configure_surface(
     loop_state.configured_present_mode = Some(present_mode);
     Ok(())
 }
+fn configure_surface_checked(created: &CreatedDevice, renderer: &mut RenderLoop, width: u32, height: u32, mode: wgpu::PresentMode) -> Result<(), String> {
+    let device = &created.device;
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let result = configure_surface(created, renderer, width, height, mode);
+    let poll = device.poll(wgpu::PollType::wait_indefinitely());
+    let memory_error = pollster::block_on(memory.pop());
+    let internal_error = pollster::block_on(internal.pop());
+    let validation_error = pollster::block_on(validation.pop());
+    poll.map_err(|e| format!("surface device poll failed: {e}"))?;
+    result.map_err(|e| format!("surface configuration failed: {e:?}"))?;
+    if let Some(e) = memory_error.or(internal_error).or(validation_error) { return Err(format!("surface configuration failed: {e}")); }
+    Ok(())
+}
+
+/// Configure a startup surface without silently falling back to another mode.
+pub fn configure_surface_for_vsync_strict(created: &CreatedDevice, renderer: &mut RenderLoop, width: u32, height: u32, value: u8) -> Result<(), String> {
+    let mode = match value { 0 => wgpu::PresentMode::Immediate, 1 => wgpu::PresentMode::Fifo, 2 => wgpu::PresentMode::FifoRelaxed, _ => return Err("invalid VSync mode".into()) };
+    if renderer.in_progress.is_some() { return Err("surface configuration requires a frame boundary".into()); }
+    let surface = created.surface.as_ref().ok_or("WGPU surface unavailable")?;
+    if !surface.get_capabilities(&created.adapter).present_modes.contains(&mode) { return Err("requested VSync mode is unsupported by the surface".into()); }
+    configure_surface_checked(created, renderer, width, height, mode)
+}
+
 /// Configures the surface using the renderer's reflected UseVSync value.
 pub fn configure_surface_for_vsync(
     created: &CreatedDevice,
@@ -2457,6 +2641,16 @@ pub fn configure_surface_for_vsync(
 /// `Suboptimal` -- see `FrameOutcome`'s own doc for what each code
 /// means. Every outcome is tallied into `loop_state.counts()`.
 
+/// Center a logical image in a drawable without changing its aspect ratio.
+/// All dimensions must be positive.
+pub fn aspect_fit(width: u32, height: u32, logical_width: u32, logical_height: u32) -> (f32, f32, f32, f32) {
+    assert!(width > 0 && height > 0 && logical_width > 0 && logical_height > 0);
+    let scale = (width as f64 / logical_width as f64).min(height as f64 / logical_height as f64);
+    let w = (logical_width as f64 * scale) as f32;
+    let h = (logical_height as f64 * scale) as f32;
+    ((width as f32 - w) * 0.5, (height as f32 - h) * 0.5, w, h)
+}
+
 pub fn lock_frame(
     created: &CreatedDevice,
     loop_state: &mut RenderLoop,
@@ -2479,6 +2673,7 @@ pub fn lock_frame(
     if let Some(scene) = loop_state.last_scene {
         loop_state.set_scene_node(&created.device, &created.queue, &scene);
     }
+    loop_state.present_viewport = None;
     let Some(surface) = created.surface.as_ref() else {
         loop_state.counts.other_failure += 1;
         return FrameOutcome::NoSurface;
@@ -2541,10 +2736,16 @@ pub fn lock_frame(
     let output_view = texture
         .texture
         .create_view(&wgpu::TextureViewDescriptor::default());
+    let output_width = texture.texture.width();
+    let output_height = texture.texture.height();
+    let (scene_width, scene_height) = loop_state.logical_scene_size.unwrap_or((output_width, output_height));
+    loop_state.present_viewport = loop_state.logical_scene_size.map(|_| {
+        aspect_fit(output_width, output_height, scene_width, scene_height)
+    });
     let scene = loop_state.ensure_scene_target(
         &created.device,
-        texture.texture.width(),
-        texture.texture.height(),
+        scene_width,
+        scene_height,
         texture.texture.format(),
     );
     begin_offscreen_frame(created, loop_state, &scene, clear_color);
@@ -2674,6 +2875,7 @@ pub fn begin_offscreen_frame(
     );
     // Same real per-frame reset lock_frame itself does -- see its own
     // comment at the equivalent point for the full reasoning.
+    loop_state.world_scale_state.begin_frame();
     loop_state.frame_uniforms_segments.clear();
     loop_state.batches.clear();
     // XOpenGL reuses the last SetSceneNode projection for 2D draws in frames
@@ -2708,11 +2910,15 @@ pub fn begin_offscreen_frame(
         });
     }
     loop_state.in_progress = Some(InProgressFrame {
+        size: (target.width(), target.height()),
+        color_drawn: false,
         presentable: FramePresentable::Offscreen,
         view,
         output: None,
         encoder,
         color_format: target.format(),
+        color_sampleable: target.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING),
+        samples: 1,
         suboptimal: false,
     });
 }
@@ -2764,7 +2970,11 @@ fn begin_capture_only_frame(
             view_formats: &[],
         }),
     };
-    let scene = loop_state.ensure_scene_target(&created.device, width, height, format);
+    let (scene_width, scene_height) = loop_state.logical_scene_size.unwrap_or((width, height));
+    loop_state.present_viewport = loop_state.logical_scene_size.map(|_| {
+        aspect_fit(width, height, scene_width, scene_height)
+    });
+    let scene = loop_state.ensure_scene_target(&created.device, scene_width, scene_height, format);
     begin_offscreen_frame(created, loop_state, &scene, clear_color);
     if let Some(frame) = loop_state.in_progress.as_mut() {
         frame.presentable = FramePresentable::CaptureOnly(target.clone());
@@ -2797,41 +3007,44 @@ fn dispatch_batches(
     frame: &mut InProgressFrame,
     batches: Vec<Batch>,
 ) {
+    // Track even mid-frame flushes (for example, texture reuploads). The
+    // world-scale fallback must see earlier UI after its batches are gone.
+    frame.color_drawn |= batches.iter().any(|batch| batch.state.color_write);
     // Every (kind, format, RenderState) a batch uses needs its own
     // pipeline (RenderLoop::line_pipelines' own doc).
     let format = frame.color_format;
     let device = &created.device;
     for batch in &batches {
-        let key = (format, batch.state);
+        let key = (format, batch.state, frame.samples);
         match &batch.payload {
             BatchPayload::Lines(_) => {
                 loop_state
                     .line_pipelines
                     .entry(key)
-                    .or_insert_with(|| draw::SimpleLinePipeline::new(device, format, batch.state));
+                    .or_insert_with(|| draw::SimpleLinePipeline::new_with_samples(device, format, batch.state, frame.samples));
             }
             BatchPayload::Tiles { .. } => {
                 loop_state
                     .tile_pipelines
                     .entry(key)
-                    .or_insert_with(|| draw::TilePipeline::new(device, format, batch.state));
+                    .or_insert_with(|| draw::TilePipeline::new_with_samples(device, format, batch.state, frame.samples));
             }
             BatchPayload::Points(_) => {
                 loop_state.point_pipelines.entry(key).or_insert_with(|| {
-                    draw::SimpleTrianglePipeline::new(device, format, batch.state)
+                    draw::SimpleTrianglePipeline::new_with_samples(device, format, batch.state, frame.samples)
                 });
             }
             BatchPayload::Triangles { .. } => {
                 loop_state
                     .gouraud_pipelines
                     .entry(key)
-                    .or_insert_with(|| draw::GouraudPipeline::new(device, format, batch.state));
+                    .or_insert_with(|| draw::GouraudPipeline::new_with_samples(device, format, batch.state, frame.samples));
             }
             BatchPayload::Complex { .. } => {
                 loop_state
                     .complex_pipelines
                     .entry(key)
-                    .or_insert_with(|| draw::ComplexPipeline::new(device, format, batch.state));
+                    .or_insert_with(|| draw::ComplexPipeline::new_with_samples(device, format, batch.state, frame.samples));
             }
         }
     }
@@ -2893,7 +3106,7 @@ fn dispatch_batches(
         .expect("the frame-begin functions create the depth target")
         .1;
     for batch in &batches {
-        let key = (format, batch.state);
+        let key = (format, batch.state, frame.samples);
         let buffer = &loop_state.frame_uniforms_segments[batch.segment];
         match &batch.payload {
             BatchPayload::Lines(lines) => {
@@ -3371,6 +3584,7 @@ pub fn unlock_frame(created: &CreatedDevice, loop_state: &mut RenderLoop, presen
         created.queue.submit([]);
         return false;
     };
+    loop_state.world_scale_state.finish_frame();
     // Owned locally (not borrowed from loop_state) specifically so
     // the loop below can freely take immutable borrows of loop_
     // state's other fields (frame_uniforms_segments, texture_cache,
@@ -3427,7 +3641,7 @@ fn capture_presented_frame(
     let Some(frame_capture) = loop_state.capture.as_mut() else {
         return;
     };
-    if !frame_capture.is_enabled() {
+    if !frame_capture.is_enabled() || !frame_capture.wants_presented_frame() {
         return;
     }
     if !texture.usage().contains(wgpu::TextureUsages::COPY_SRC) {
@@ -3588,6 +3802,133 @@ pub mod macos {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn fullscreen_target_preflight_applies_rejects_and_restores_on_real_gpu() {
+        let created = super::create_device_sync(super::BackendChoice::Auto, None::<super::HeadlessSurfaceCreator>).expect("GPU adapter");
+        let mut state = super::RenderLoop::new();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let dimensions = |s: &super::RenderLoop| {
+            let color = &s.scene_target.as_ref().unwrap().0;
+            let depth = &s.depth_target.as_ref().unwrap().0;
+            (color.width(), color.height(), depth.width(), depth.height())
+        };
+        let initial = state.prepare_logical_targets(&created.device, format, 640, 480).unwrap();
+        assert!(state.scene_target.is_none());
+        state.commit_logical_targets(initial);
+        assert_eq!(dimensions(&state), (640, 480, 640, 480));
+        let canceled = state.prepare_logical_targets(&created.device, format, 800, 600).unwrap();
+        assert_eq!(dimensions(&state), (640, 480, 640, 480));
+        drop(canceled);
+        assert_eq!(dimensions(&state), (640, 480, 640, 480));
+        let next = state.prepare_logical_targets(&created.device, format, 800, 600).unwrap();
+        state.commit_logical_targets(next);
+        assert_eq!(dimensions(&state), (800, 600, 800, 600));
+        let too_large = created.device.limits().max_texture_dimension_2d + 1;
+        assert!(state.prepare_logical_targets(&created.device, format, too_large, 1).is_err());
+        assert_eq!(dimensions(&state), (800, 600, 800, 600));
+        // BC1 cannot be a render attachment. This reaches WGPU validation,
+        // rather than only exercising the size guard above.
+        assert!(state.prepare_logical_targets(&created.device, wgpu::TextureFormat::Bc1RgbaUnorm, 8, 8).is_err());
+        assert_eq!(dimensions(&state), (800, 600, 800, 600));
+        let revert = state.prepare_logical_targets(&created.device, format, 640, 480).unwrap();
+        assert_eq!(dimensions(&state), (800, 600, 800, 600));
+        state.commit_logical_targets(revert);
+        assert_eq!(dimensions(&state), (640, 480, 640, 480));
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn fullscreen_postprocess_letterbox_and_windowed_transition_on_gpu() {
+        let created = super::create_device_sync(super::BackendChoice::Auto, None::<super::HeadlessSurfaceCreator>).unwrap();
+        let device = &created.device;
+        let queue = &created.queue;
+        let texture = |width, height, usage| device.create_texture(&wgpu::TextureDescriptor {
+            label: None, size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm, usage, view_formats: &[],
+        });
+        let source = texture(4, 4, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING);
+        let output = texture(8, 4, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
+        let source_view = source.create_view(&Default::default());
+        let output_view = output.create_view(&Default::default());
+        let mut uniforms: super::FrameUniforms = bytemuck::Zeroable::zeroed();
+        uniforms.gamma = 1.0;
+        uniforms.y_scale = 1.0;
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of_val(&uniforms) as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&uniforms));
+        let pipeline = super::draw::PostProcessPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let readback = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 1024, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        for fullscreen in [true, false, true] {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &source_view, depth_slice: None, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::RED), store: wgpu::StoreOp::Store } })],
+                    ..Default::default()
+                });
+            }
+            pipeline.record_with_viewport(device, &mut encoder, &buffer, &source_view, &output_view,
+                fullscreen.then(|| super::aspect_fit(8, 4, 4, 4)));
+            encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo { texture: &output, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyBufferInfo { buffer: &readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(256), rows_per_image: Some(4) } },
+                wgpu::Extent3d { width: 8, height: 4, depth_or_array_layers: 1 });
+            queue.submit(Some(encoder.finish()));
+            let slice = readback.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |result| result.unwrap());
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            let bytes = slice.get_mapped_range().unwrap();
+            let row = &bytes[256..];
+            assert_eq!(&row[0..4], if fullscreen { &[0, 0, 0, 255] } else { &[255, 0, 0, 255] });
+            assert_eq!(&row[12..16], &[255, 0, 0, 255]);
+            assert_eq!(&row[28..32], if fullscreen { &[0, 0, 0, 255] } else { &[255, 0, 0, 255] });
+            drop(bytes);
+            readback.unmap();
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn capture_only_matches_surface_letterboxing_on_gpu() {
+        let gpu = super::create_device_sync(super::BackendChoice::Auto, None::<super::HeadlessSurfaceCreator>).unwrap();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut capture = super::RenderLoop::new();
+        let mut surface = super::RenderLoop::new();
+        let output = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("simulated acquired surface"),
+            size: wgpu::Extent3d { width: 8, height: 4, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        for logical in [Some((4, 4)), None, Some((4, 4))] {
+            capture.set_logical_scene_size(logical);
+            surface.set_logical_scene_size(logical);
+            super::begin_capture_only_frame(&gpu, &mut capture, 8, 4, format, wgpu::Color::RED);
+            let (width, height) = logical.unwrap_or((8, 4));
+            let scene = surface.ensure_scene_target(&gpu.device, width, height, format);
+            surface.present_viewport = logical.map(|_| super::aspect_fit(8, 4, width, height));
+            super::begin_offscreen_frame(&gpu, &mut surface, &scene, wgpu::Color::RED);
+            surface.in_progress.as_mut().unwrap().output = Some(output.create_view(&Default::default()));
+            assert!(super::unlock_frame(&gpu, &mut surface, true));
+            assert!(super::unlock_frame(&gpu, &mut capture, true));
+            let actual = super::capture::read_texture_rgba8(&gpu, capture.capture_target.as_ref().unwrap()).unwrap();
+            let expected = super::capture::read_texture_rgba8(&gpu, &output).unwrap();
+            assert_eq!(actual, expected);
+            let pixel = |x: usize, y: usize| &actual[(y * 8 + x) * 4..(y * 8 + x + 1) * 4];
+            assert_eq!(pixel(0, 1), if logical.is_some() { &[0, 0, 0, 255] } else { &[255, 0, 0, 255] });
+            assert_eq!(pixel(3, 1), &[255, 0, 0, 255]);
+            assert_eq!(pixel(7, 1), if logical.is_some() { &[0, 0, 0, 255] } else { &[255, 0, 0, 255] });
+            assert_eq!((capture.scene_target.as_ref().unwrap().0.width(), capture.scene_target.as_ref().unwrap().0.height()), (width, height));
+        }
+    }
+
+    #[test]
+    fn fullscreen_aspect_fit_centers_logical_scene() {
+        assert_eq!(super::aspect_fit(1920, 1080, 800, 600), (240.0, 0.0, 1440.0, 1080.0));
+        assert_eq!(super::aspect_fit(800, 1200, 800, 600), (0.0, 300.0, 800.0, 600.0));
+        assert_eq!(super::aspect_fit(1600, 1200, 800, 600), (0.0, 0.0, 1600.0, 1200.0));
+    }
     use super::*;
 
     // Real reference scene, loosely matching a typical in-game FSceneNode:
@@ -7749,6 +8090,289 @@ fn f(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             texture_alpha: None,
             fx2: 50.0,
             fy2: 50.0,
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires a Metal GPU adapter"]
+    fn world_scale_vsync_real_metal_surface_transaction() {
+        use std::ffi::c_void;
+        #[link(name = "QuartzCore", kind = "framework")]
+        unsafe extern "C" {}
+        #[link(name = "objc")]
+        unsafe extern "C" {
+            fn objc_getClass(name: *const i8) -> *mut c_void;
+            fn sel_registerName(name: *const i8) -> *mut c_void;
+            fn objc_msgSend();
+        }
+        // A detached layer provides a real Metal surface without opening or
+        // presenting a window on the display used by the running UI test.
+        unsafe {
+            let send: unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void = std::mem::transmute(objc_msgSend as *const ());
+            let class = objc_getClass(c"CAMetalLayer".as_ptr());
+            assert!(!class.is_null());
+            let allocated = send(class, sel_registerName(c"alloc".as_ptr()));
+            let layer = send(allocated, sel_registerName(c"init".as_ptr()));
+            assert!(!layer.is_null());
+            let make_surface = |instance: &wgpu::Instance| instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer));
+            let gpu = try_create_device_once(BackendChoice::Metal, Some(&make_surface)).expect("Metal surface and adapter");
+            let caps = gpu.surface.as_ref().unwrap().get_capabilities(&gpu.adapter);
+            if let Some(dir) = std::env::var_os("HP2_ARTIFACT_DIR") {
+                std::fs::write(std::path::PathBuf::from(dir).join("metal-present-modes.txt"), format!("{:?}\n", caps.present_modes)).unwrap();
+            }
+            let mut renderer = RenderLoop::new();
+            configure_surface_for_vsync_strict(&gpu, &mut renderer, 64, 64, 1).unwrap();
+            assert_eq!(renderer.vsync_mode_live(), Some(1));
+            if caps.present_modes.contains(&wgpu::PresentMode::Immediate) {
+                configure_surface_for_vsync_strict(&gpu, &mut renderer, 64, 64, 0).unwrap();
+                assert_eq!(renderer.vsync_mode_live(), Some(0));
+                configure_surface_for_vsync_strict(&gpu, &mut renderer, 64, 64, 1).unwrap();
+            }
+            if !caps.present_modes.contains(&wgpu::PresentMode::FifoRelaxed) {
+                assert!(configure_surface_for_vsync_strict(&gpu, &mut renderer, 64, 64, 2).is_err());
+                assert_eq!(renderer.vsync_mode_live(), Some(1));
+            }
+            let sync_enabled: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i8 = std::mem::transmute(objc_msgSend as *const ());
+            let sync_selector = sel_registerName(c"displaySyncEnabled".as_ptr());
+            assert_ne!(sync_enabled(layer, sync_selector), 0);
+            for (setting, mode) in [(0, wgpu::PresentMode::Immediate), (2, wgpu::PresentMode::FifoRelaxed)] {
+                let result = renderer.set_vsync_mode_live(&gpu, setting);
+                if caps.present_modes.contains(&mode) {
+                    result.unwrap();
+                    assert_eq!(renderer.vsync_mode_live(), Some(setting));
+                    if setting == 0 { assert_eq!(sync_enabled(layer, sync_selector), 0); }
+                    renderer.set_vsync_mode_live(&gpu, 1).unwrap();
+                    assert_eq!(renderer.vsync_mode_live(), Some(1));
+                    assert_ne!(sync_enabled(layer, sync_selector), 0);
+                } else {
+                    assert!(result.is_err());
+                    assert_eq!(renderer.vsync_mode_live(), Some(1));
+                }
+            }
+            assert!(renderer.set_vsync_mode_live(&gpu, 3).is_err());
+            assert_eq!(renderer.vsync_mode_live(), Some(1));
+            let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("VSync frame boundary test"),
+                size: wgpu::Extent3d { width: 8, height: 8, depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT, view_formats: &[],
+            });
+            begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+            assert!(renderer.set_vsync_live(&gpu, false).is_err());
+            assert_eq!(renderer.vsync_mode_live(), Some(1));
+            unlock_frame(&gpu, &mut renderer, false);
+            drop(renderer);
+            drop(gpu);
+            // Recreate both renderer and GPU device, then reapply the saved
+            // mode before acquiring the replacement surface's first frame.
+            let gpu = try_create_device_once(BackendChoice::Metal, Some(&make_surface)).expect("replacement Metal surface and adapter");
+            let mut renderer = RenderLoop::new();
+            let saved = if caps.present_modes.contains(&wgpu::PresentMode::Immediate) { 0 } else { 1 };
+            configure_surface_for_vsync_strict(&gpu, &mut renderer, 64, 64, saved).unwrap();
+            assert_eq!(renderer.vsync_mode_live(), Some(saved));
+            assert_eq!(sync_enabled(layer, sync_selector) != 0, saved == 1);
+            drop(renderer);
+            drop(gpu);
+            let release: unsafe extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(objc_msgSend as *const ());
+            release(layer, sel_registerName(c"release".as_ptr()));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn world_scale_and_msaa_availability_are_independent_across_scopes() {
+        let gpu = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>).unwrap();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("multi scope availability"), size: wgpu::Extent3d { width: 64, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
+        });
+        let mut renderer = RenderLoop::new();
+        begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        renderer.upload_texture(&gpu, 1, 1, 1, &[255, 0, 0, 255], texture::TextureOptions::default());
+        renderer.set_msaa(&gpu, 4).unwrap();
+        assert!(renderer.begin_scaled_world(&gpu).unwrap());
+        renderer.queue_tile(full_row_tile(1, 0.5, 0));
+        renderer.end_scaled_world(&gpu).unwrap();
+        assert!(!renderer.begin_scaled_world(&gpu).unwrap());
+        assert!(!renderer.msaa_observed(), "availability publishes only at frame completion");
+        unlock_frame(&gpu, &mut renderer, false);
+        assert!(renderer.msaa_unavailable());
+        assert!(!renderer.world_scale_unavailable(), "100% scale is not unavailable when only MSAA is blocked");
+        begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        renderer.set_msaa(&gpu, 0).unwrap();
+        renderer.set_world_scale(&gpu, 50).unwrap();
+        assert!(renderer.begin_scaled_world(&gpu).unwrap());
+        renderer.queue_tile(full_row_tile(1, 0.5, 0));
+        renderer.end_scaled_world(&gpu).unwrap();
+        assert!(!renderer.begin_scaled_world(&gpu).unwrap());
+        unlock_frame(&gpu, &mut renderer, false);
+        assert!(renderer.world_scale_unavailable());
+        assert!(!renderer.msaa_unavailable());
+        begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        assert!(renderer.begin_scaled_world(&gpu).unwrap());
+        renderer.end_scaled_world(&gpu).unwrap();
+        unlock_frame(&gpu, &mut renderer, false);
+        assert!(!renderer.world_scale_unavailable(), "a clean next frame clears the prior fallback");
+        begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        unlock_frame(&gpu, &mut renderer, false);
+        assert!(!renderer.msaa_observed(), "a completed frame without world scopes is unobserved");
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn world_scale_unsupported_scene_falls_back_without_crashing() {
+        let gpu = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>).unwrap();
+        let mut renderer = RenderLoop::new();
+        let initial = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("sampleable world"), size: wgpu::Extent3d { width: 64, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING, view_formats: &[],
+        });
+        begin_identity_frame(&gpu, &mut renderer, &initial, wgpu::Color::BLACK);
+        renderer.set_world_scale(&gpu, 50).unwrap();
+        unlock_frame(&gpu, &mut renderer, false);
+        let target = new_64px_target(&gpu); // no TEXTURE_BINDING usage
+        begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        assert!(!renderer.begin_scaled_world(&gpu).unwrap());
+        unlock_frame(&gpu, &mut renderer, false);
+        assert!(renderer.world_scale_unavailable());
+        assert!(!renderer.msaa_unavailable());
+        assert_eq!(renderer.world_scale(), 50);
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn world_scale_live_graphics_sampler_transaction() {
+        let gpu = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>).unwrap();
+        let mut renderer = RenderLoop::new();
+        assert_eq!(renderer.anisotropy_live(), 0);
+        assert!(renderer.set_anisotropy_live(&gpu, 3).is_err());
+        assert_eq!(renderer.anisotropy_live(), 0);
+        assert!(renderer.set_vsync_live(&gpu, true).is_err()); // headless
+        if gpu.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::ANISOTROPIC_FILTERING) {
+            renderer.set_anisotropy_live(&gpu, 4).unwrap();
+            assert_eq!(renderer.anisotropy_live(), 4);
+            assert_eq!(renderer.samplers.len(), 8);
+            assert!(renderer.set_anisotropy_live(&gpu, 3).is_err());
+            assert_eq!(renderer.anisotropy_live(), 4);
+            assert_eq!(renderer.samplers.len(), 8);
+            renderer.set_anisotropy_live(&gpu, 0).unwrap();
+            assert_eq!(renderer.anisotropy_live(), 0);
+            assert_eq!(renderer.samplers.len(), 8);
+        } else {
+            assert!(renderer.set_anisotropy_live(&gpu, 4).is_err());
+            assert_eq!(renderer.anisotropy_live(), 0);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn world_scale_msaa_scope_draws_resolves_and_restores_ui() {
+        let gpu = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>).unwrap();
+        let mut renderer = RenderLoop::new();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("MSAA world scope test"),
+            size: wgpu::Extent3d { width: 64, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        renderer.upload_texture(&gpu, 1, 1, 1, &[255, 0, 0, 255], texture::TextureOptions::default());
+        renderer.upload_texture(&gpu, 2, 1, 1, &[0, 255, 0, 255], texture::TextureOptions::default());
+        renderer.set_msaa(&gpu, 4).unwrap();
+        assert!(renderer.set_msaa(&gpu, 3).is_err());
+        assert_eq!(renderer.msaa(), 4);
+        assert!(!renderer.msaa_observed());
+        match renderer.set_msaa(&gpu, 2) {
+            Ok(()) => { assert_eq!(renderer.msaa(), 2); renderer.set_msaa(&gpu, 4).unwrap(); }
+            Err(_) => assert_eq!(renderer.msaa(), 4),
+        }
+        assert!(renderer.begin_scaled_world(&gpu).unwrap());
+        assert!(!renderer.msaa_observed());
+        assert_eq!(renderer.depth_target.as_ref().unwrap().0.sample_count(), 4);
+        assert!(renderer.set_msaa(&gpu, 0).is_err());
+        assert_eq!(renderer.msaa(), 4);
+        renderer.end_scaled_world(&gpu).unwrap();
+        renderer.set_world_scale(&gpu, 50).unwrap();
+        assert!(renderer.begin_scaled_world(&gpu).unwrap());
+        assert_eq!(renderer.in_progress.as_ref().unwrap().samples, 4);
+        let mut world = full_row_tile(1, 0.5, 0);
+        world.y = 0.0;
+        world.yl = 100.0;
+        renderer.queue_tile(world);
+        renderer.end_scaled_world(&gpu).unwrap();
+        assert_eq!(renderer.in_progress.as_ref().unwrap().samples, 1);
+        renderer.set_msaa(&gpu, 0).unwrap();
+        assert_eq!(renderer.msaa(), 0);
+        renderer.set_msaa(&gpu, 4).unwrap();
+        assert_eq!(renderer.msaa(), 4);
+        assert!(!renderer.msaa_observed());
+        renderer.clear_z(&gpu);
+        let mut ui = full_row_tile(2, 0.5, 0);
+        ui.y = 0.0;
+        ui.yl = 100.0;
+        ui.xl = 30.0;
+        renderer.queue_tile(ui);
+        assert!(!renderer.begin_scaled_world(&gpu).unwrap());
+        assert!(!renderer.msaa_observed());
+        unlock_frame(&gpu, &mut renderer, false);
+        assert!(renderer.msaa_observed());
+        assert!(renderer.msaa_unavailable());
+        let row = read_64px_row(&gpu, &target);
+        // The world tile covers only half of this one-pixel-high target.
+        // A multisample resolve therefore produces partial red coverage.
+        assert!(row.chunks_exact(4).any(|p| p[0] > 0 && p[0] < 255 && p[1] == 0), "row: {row:?}");
+        assert!(row.chunks_exact(4).any(|p| p == [0, 255, 0, 255]), "row: {row:?}");
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn world_scale_preserves_prior_ui_and_order_across_flushes() {
+        let gpu = create_device_sync(BackendChoice::Auto, None::<HeadlessSurfaceCreator>).unwrap();
+        let render = |scale, flush_prior, world_flags| {
+            let mut renderer = RenderLoop::new();
+            let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("prior UI world-scale target"), size: wgpu::Extent3d { width: 64, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC, view_formats: &[],
+            });
+            begin_identity_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+            for (id, rgba) in [(1, [200, 100, 50, 255]), (2, [80, 160, 220, 128]), (3, [0, 255, 0, 255])] {
+                renderer.upload_texture(&gpu, id, 1, 1, &rgba, texture::TextureOptions::default());
+            }
+            renderer.set_world_scale(&gpu, scale).unwrap();
+            renderer.queue_tile(full_row_tile(1, 0.5, 0));
+            if flush_prior { renderer.clear_z(&gpu); }
+            let scaled = renderer.begin_scaled_world(&gpu).unwrap();
+            assert!(!scaled, "prior UI requires a full-resolution fallback");
+            let stats = renderer.world_scale_observations();
+            assert_eq!((stats.scopes, stats.prior_color, stats.scaled), (1, 1, 0));
+            assert_eq!(stats.unavailable, u64::from(scale < 100));
+            assert!(!renderer.world_scale_unavailable()); // publish only at frame completion
+            renderer.clear_z(&gpu);
+            renderer.queue_tile(full_row_tile(2, 0.5, world_flags));
+            renderer.end_scaled_world(&gpu).unwrap();
+            renderer.clear_z(&gpu);
+            let mut ui = full_row_tile(3, 0.5, 0);
+            ui.xl = 30.0;
+            renderer.queue_tile(ui);
+            unlock_frame(&gpu, &mut renderer, false);
+            assert_eq!(renderer.world_scale_unavailable(), scale < 100);
+            read_64px_row(&gpu, &target)
+        };
+        // Opaque occlusion, modulation, and source-alpha blending.
+        for flags in [0, 0x0000_0040, 0x1000_0004] {
+            for flushed in [false, true] {
+                let reference = render(100, flushed, flags);
+                assert_eq!(render(50, flushed, flags), reference);
+                assert!(reference.chunks_exact(4).any(|pixel| pixel == [0, 255, 0, 255]));
+                assert!(reference.chunks_exact(4).any(|pixel| pixel[0] != 0 && pixel[0] != 200));
+            }
         }
     }
 

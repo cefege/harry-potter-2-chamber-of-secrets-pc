@@ -243,7 +243,15 @@ unsafe extern "C" fn text_failure(_opaque: *mut c_void, _failure: crate::unix_te
 }
 
 
-pub fn initialize(access: CoreAccess<'_>, system: *mut SystemRecord) -> RuntimeResult<()> {
+/// Runs the shared save-slot, map-path, cache-load and configuration policy.
+///
+/// # Safety
+/// `system` must be the live, initialized `Core.System` record owned by the same
+/// Core graph as `access`, including valid `Paths`, `SavePath`, `SaveSlotPath` and
+/// `MapPath` array storage. The record and that storage must stay valid and must
+/// not be mutated by other code until this function returns. Native leaves may
+/// reenter Core through `access`.
+pub unsafe fn initialize(access: CoreAccess<'_>, system: *mut SystemRecord) -> RuntimeResult<()> {
     let owner = NativePaths::new(access, system);
     owner.finish(runtime_init::initialize_paths(&owner))
 }

@@ -192,7 +192,9 @@ impl SettingsPatch {
             }
         }
         if let Some(v) = self.render_scale {
-            if ![0.50, 0.67, 0.75, 0.85, 1.0].contains(&v) {
+            // Preserve the legacy 67% launcher choice as well as the stock
+            // slider's 5% steps. Match launcher validation exactly.
+            if ![0.50, 0.55, 0.60, 0.65, 0.67, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00].contains(&v) {
                 return Err(ValidationError {
                     field: "render_scale",
                     message: "must match an allowed render scale",

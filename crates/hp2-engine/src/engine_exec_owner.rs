@@ -1,5 +1,12 @@
 //! Canonical Engine command dispatch without native UObject vptrs.
 
+#[cfg(test)]
+#[path = "object_detail_command_tests.rs"]
+mod object_detail_command_tests;
+#[cfg(test)]
+#[path = "object_detail_menu_vm_tests.rs"]
+mod object_detail_menu_vm_tests;
+
 use hp2_abi::engine::generated::{FURL, TArrayRaw, UEngine, UFunction, UObject, URender, UALAudioSubsystem};
 use hp2_core::{
     cache_owner::CacheOwner,

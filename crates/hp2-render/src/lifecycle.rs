@@ -130,6 +130,58 @@ mod tests {
     }
 
     #[test]
+    fn every_lifecycle_failure_returns_its_error_and_stops_at_that_leaf() {
+        let init = [
+            InitLeaf::DynamicMemory,
+            InitLeaf::SceneMemory,
+            InitLeaf::Base,
+            InitLeaf::GlobalRender,
+            InitLeaf::ApplySettings,
+            InitLeaf::Cache,
+            InitLeaf::VectorMemory,
+            InitLeaf::Statistics,
+            InitLeaf::LightManager,
+            InitLeaf::Log,
+        ];
+        for (fail_at, &failure) in init.iter().enumerate() {
+            let mut calls = Vec::new();
+            let error = initialize(|leaf| {
+                calls.push(leaf);
+                if leaf == failure {
+                    Err(fail_at)
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(error, Err(fail_at), "init error at {failure:?}");
+            assert_eq!(calls, init[..=fail_at], "init prefix at {failure:?}");
+        }
+
+        let teardown = [
+            DestroyLeaf::DynamicMemory,
+            DestroyLeaf::SceneMemory,
+            DestroyLeaf::DynamicLightStorage,
+            DestroyLeaf::LightManager,
+            DestroyLeaf::VectorMemory,
+            DestroyLeaf::Log,
+            DestroyLeaf::Base,
+        ];
+        for (fail_at, &failure) in teardown.iter().enumerate() {
+            let mut calls = Vec::new();
+            let error = destroy(|leaf| {
+                calls.push(leaf);
+                if leaf == failure {
+                    Err(fail_at)
+                } else {
+                    Ok(())
+                }
+            });
+            assert_eq!(error, Err(fail_at), "destroy error at {failure:?}");
+            assert_eq!(calls, teardown[..=fail_at], "destroy prefix at {failure:?}");
+        }
+    }
+
+    #[test]
     fn lifecycle_stops_at_first_failed_leaf() {
         let mut calls = Vec::new();
         assert!(

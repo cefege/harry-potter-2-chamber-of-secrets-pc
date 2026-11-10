@@ -74,6 +74,31 @@ unsafe fn bytes<'a>(
     Ok(unsafe { std::slice::from_raw_parts(pointer, length) })
 }
 
+/// Resamples either disjoint spans or the same complete mip in place.
+///
+/// # Safety
+/// Each nonempty span must be valid for its stated access and lifetime. The spans
+/// must be disjoint or have the same base and length; no other access may occur
+/// during the call. Partial overlap is not handled by this adapter.
+unsafe fn ice_resample(
+    trace: FireTraceHooks,
+    params: &hp2_fire::ice::FireIceResample,
+    destination: FireArena<u8>,
+    source: FireArena<u8>,
+) -> RuntimeResult<()> {
+    let same_mip = destination.data == source.data && destination.len == source.len;
+    // SAFETY: the caller supplies valid spans and excludes concurrent access.
+    let destination = unsafe { bytes_mut(destination.data, destination.len, "Ice local source is null")? };
+    let source = if same_mip {
+        IceRead::Dest
+    } else {
+        // SAFETY: the caller guarantees different spans are disjoint.
+        IceRead::Separate(unsafe { bytes(source.data, source.len, "Ice source mip is null")? })
+    };
+    hp2_fire::ice::resample_source(trace, params, destination, source);
+    Ok(())
+}
+
 unsafe fn array_at<T>(object: *mut UObject, offset: usize) -> *mut T {
     unsafe { object.cast::<u8>().add(offset).cast() }
 }
@@ -446,12 +471,16 @@ pub(super) unsafe fn try_leaf(
                 hp2_fire::ice::ice_resample_params_from_texture(object.cast(), a as i32, b as i32)
             };
             let mut trace = TraceContext::new(access);
-            hp2_fire::ice::resample_source(
-                trace.hooks(),
-                &params,
-                unsafe { bytes_mut(local, len, "Ice local source is null")? },
-                IceRead::Separate(unsafe { bytes(src, src_len, "Ice source mip is null")? }),
-            );
+            // SAFETY: mip storage must remain valid and either be disjoint or be
+            // the same complete mip; partial overlap remains unverified.
+            unsafe {
+                ice_resample(
+                    trace.hooks(),
+                    &params,
+                    FireArena { data: local, len },
+                    FireArena { data: src, len: src_len },
+                )?;
+            }
             trace_result(&mut trace, Ok(()))?;
             Some(0)
         }
@@ -648,4 +677,58 @@ pub(super) unsafe fn try_leaf(
         _ => None,
     };
     Ok(answer)
+}
+
+#[cfg(test)]
+mod ice_resample_tests {
+    use super::*;
+    use hp2_fire::ice::FireIceResample;
+
+    #[repr(align(8))]
+    struct Aligned([u8; 6]);
+
+    fn params() -> FireIceResample {
+        FireIceResample {
+            u_size: 4,
+            v_size: 1,
+            u_scaler: 1,
+            v_scaler: 0,
+            src_u_bits: 1,
+        }
+    }
+
+    #[test]
+    fn disjoint_baseline_preserves_canaries() {
+        let source = Aligned([0xa1, 1, 2, 3, 4, 0xa2]);
+        let mut destination = Aligned([0xb1, 9, 9, 9, 9, 0xb2]);
+        // SAFETY: the spans are separate, live allocations of four bytes each.
+        unsafe {
+            ice_resample(
+                FireTraceHooks::NOOP,
+                &params(),
+                FireArena { data: destination.0.as_mut_ptr().add(1), len: 4 },
+                FireArena { data: source.0.as_ptr().add(1).cast_mut(), len: 4 },
+            ).unwrap();
+        }
+        assert_eq!(destination.0, [0xb1, 1, 1, 2, 2, 0xb2]);
+        assert_eq!(source.0, [0xa1, 1, 2, 3, 4, 0xa2]);
+    }
+
+    #[test]
+    fn exact_alias_reads_prior_writes_and_preserves_canaries() {
+        let mut mip = Aligned([0xa1, 1, 2, 3, 4, 0xa2]);
+        // SAFETY: both spans are the same live four-byte mip and no other
+        // access occurs during resampling.
+        unsafe {
+            let data = mip.0.as_mut_ptr().add(1);
+            ice_resample(
+                FireTraceHooks::NOOP,
+                &params(),
+                FireArena { data, len: 4 },
+                FireArena { data, len: 4 },
+            ).unwrap();
+        }
+        // The write to index 1 is read when index 2 is computed.
+        assert_eq!(mip.0, [0xa1, 1, 1, 1, 1, 0xa2]);
+    }
 }

@@ -14,6 +14,7 @@ from unittest.mock import patch
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import game_test  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 
 
 def _trace() -> dict[str, object]:
@@ -44,6 +45,7 @@ class GlobalTickHarnessContracts(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    @mocked_native_preflight
     def test_paired_stages_side_specific_artifacts_and_atomic_comparison(self) -> None:
         app = self.root / "app"
         engine_bin = self.root / "engine-bin"
@@ -102,6 +104,7 @@ class GlobalTickHarnessContracts(unittest.TestCase):
             arguments = game_test._arguments()
         self.assertEqual(arguments.global_tick_trace_dir, Path("global-tick-traces"))
 
+    @mocked_native_preflight
     def test_side_env_is_side_specific_and_missing_artifact_fails_leg(self) -> None:
         path = game_test._prepare_global_tick_trace_paths(self.root / "global-tick-traces")["cpp"]
         checkpoint_manifest = self.root / "checkpoints.json"

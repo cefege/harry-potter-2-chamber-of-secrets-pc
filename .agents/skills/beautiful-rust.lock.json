@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/morganlinton/BeautifulRust",
+  "commit": "b9718436d77ee7bcf17cdcb6aa27628feb95d97a",
+  "license": "MIT",
+  "files": [
+    {
+      "source": "LICENSE",
+      "path": "LICENSE.BeautifulRust",
+      "sha256": "fe7214bea08bfb3d6b8c34841b54f7bc8ee84b080c83888aed9b0df321705d7c"
+    },
+    {
+      "source": "lints/lints.toml",
+      "path": "upstream/beautiful-rust-lints.toml",
+      "sha256": "ec06c539416d1f807e64d93048f18ae3646ee1c20a03dd7dd232183dd11be41e"
+    },
+    {
+      "source": "lints/clippy.toml",
+      "path": "upstream/beautiful-rust-clippy.toml",
+      "sha256": "012446990fbaa1b4705319c7cf95ed59ffbd14ac7ca9ec4b907f27a0ead82c42"
+    },
+    {
+      "source": "skills/rust-best-practices/SKILL.md",
+      "path": "rust-best-practices/SKILL.md",
+      "sha256": "f9446430549a64d9fb2d480c875c4920b1d98c2540b937bd41448200b2639f6a"
+    },
+    {
+      "source": "skills/rust-review/SKILL.md",
+      "path": "rust-review/SKILL.md",
+      "sha256": "3a2ee9874896d2f8f980b617e2b32ce3daff8275ec6ee12c2fb2710e2ae91a9f"
+    },
+    {
+      "source": "skills/rust-port/SKILL.md",
+      "path": "rust-port/SKILL.md",
+      "sha256": "f7c8ee4f328ae52086245b4ef628a9ed5d8f306c4dbee7f41551871cac93d073"
+    },
+    {
+      "source": "skills/rust-best-practices/references/bevy.md",
+      "path": "rust-best-practices/references/bevy.md",
+      "sha256": "f8a96bccecd2e3faa2d79d206c24061ac9c5eb2dab3269573717b910ba5e8899"
+    },
+    {
+      "source": "skills/rust-best-practices/references/effective-rust.md",
+      "path": "rust-best-practices/references/effective-rust.md",
+      "sha256": "c0fe4ea29d2601224ac68b307d8c6137dd932b2565c141c1527c88ba1c5d5415"
+    },
+    {
+      "source": "skills/rust-best-practices/references/google-rust-style-guide.md",
+      "path": "rust-best-practices/references/google-rust-style-guide.md",
+      "sha256": "cfe61cd554c9dc32b412bb22dec7bd58e9eb4b3931db79124a61b8c2f573542c"
+    },
+    {
+      "source": "skills/rust-best-practices/references/microsoft-rust-guidelines.md",
+      "path": "rust-best-practices/references/microsoft-rust-guidelines.md",
+      "sha256": "648cfee06cea304e3d9c525e6de9047c296ce353e156a8117111094418ccc4b8"
+    },
+    {
+      "source": "skills/rust-best-practices/references/rust-api-guidelines.md",
+      "path": "rust-best-practices/references/rust-api-guidelines.md",
+      "sha256": "392a94ed5151a7eeaf6f0d0f0cbd29904fa41ae4c4ae5ae98d79e7da3ba2a8af"
+    },
+    {
+      "source": "skills/rust-best-practices/references/rust-design-patterns.md",
+      "path": "rust-best-practices/references/rust-design-patterns.md",
+      "sha256": "3102f45153ac7c75179ee43b12d143b33e4aaba9b2209c454dd4f0542cae7ae7"
+    }
+  ]
+}

@@ -4,6 +4,13 @@ use hp2_abi::engine::generated::{AActor, ALevelInfo, APlayerPawn, ULevel, UPlaye
 use hp2_abi::FColor;
 use hp2_core::core_access::{CoreAccess, RuntimeError, RuntimeResult};
 
+#[path = "sdl_display_exec.rs"]
+pub(crate) mod sdl_display_exec;
+
+#[cfg(test)]
+#[path = "retail_dialog_loader_tests.rs"]
+mod retail_dialog_loader_tests;
+
 /// Executes the canonical source-ordered `UViewport::Exec` dispatch chain.
 ///
 /// # Safety
@@ -21,6 +28,8 @@ pub(crate) unsafe fn exec(
     if unsafe { (*viewport).actor.is_null() } {
         return Err(RuntimeError::new("UViewport::Exec requires an actor"));
     }
+    #[cfg(feature = "sdl")]
+    unsafe { crate::stock_resolution_transaction::before_command(access, viewport, command)?; }
     let mut context = ExecContext { access, output };
     unsafe {
         crate::camera_exec::viewport_exec_dispatch_with(
@@ -33,7 +42,13 @@ pub(crate) unsafe fn exec(
             |context, device, command| {
                 crate::render_device_owner::exec(context.access, device.cast(), command, context.output)
             },
-            |context, viewport, command| viewport_commands(context, viewport, command),
+            |context, viewport, command| {
+                if sdl_display_exec::exec(context.access, viewport, command, context.output)? {
+                    Ok(true)
+                } else {
+                    viewport_commands(context, viewport, command)
+                }
+            },
             |context, viewport, command| {
                 let console = unsafe { (*viewport).console };
                 if console.is_null() { return Ok(false); }

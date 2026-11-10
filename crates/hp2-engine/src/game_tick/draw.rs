@@ -92,7 +92,6 @@ pub(crate) trait DrawOps {
         -> Result<(), Self::Error>;
     unsafe fn console_event_post_render(&self, console: *mut c_void, canvas: *mut c_void)
         -> Result<(), Self::Error>;
-    unsafe fn in_game_overlay(&self, _viewport: *mut c_void, _canvas: *mut c_void) -> Result<(), Self::Error> { Ok(()) }
     unsafe fn replay_replaying(&self, engine: *mut c_void) -> Result<i32, Self::Error>;
     unsafe fn replay_recording(&self, engine: *mut c_void) -> Result<i32, Self::Error>;
     unsafe fn canvas_replay_text(
@@ -421,9 +420,6 @@ unsafe fn draw_locked<O: DrawOps>(
         if !console.is_null() {
             console_block(s, viewport, frame, console)?;
         }
-
-        #[cfg(feature = "in-game-overlay")]
-        s.in_game_overlay(viewport, unsafe { super::viewport_canvas(viewport) })?;
 
         // Replay status text (oracle 1801–1811).
         if s.replay_replaying(e)? != 0 || s.replay_recording(e)? != 0 {

@@ -167,6 +167,8 @@ pub(crate) struct AudioBinding {
 /// shipping C++ client. Client initialization/destruction publish and clear it.
 pub(crate) struct EngineState {
     pub(crate) bitmap_client: Cell<Option<NonNull<UClient>>>,
+    pub(crate) texture_lod_cache: Cell<Option<[i32; 8]>>,
+    pub(crate) stock_fps_menu: RefCell<crate::stock_fps_menu::State>,
     pub(crate) sound_audio: Cell<Option<AudioBinding>>,
     pub(crate) platform: Rc<crate::platform_owner::PlatformOwnerState>,
     pub(crate) audio_resources: Rc<crate::audio_owner::AudioOwnerState>,
@@ -202,6 +204,8 @@ impl EngineState {
             fire_trace_observer: Cell::new(fire_trace_observer),
             actor_slot_dump_observer: Cell::new(None),
             bitmap_client: Cell::new(None),
+            texture_lod_cache: Cell::new(None),
+            stock_fps_menu: RefCell::new(crate::stock_fps_menu::State::default()),
             sound_audio: Cell::new(None),
             platform: Rc::new(crate::platform_owner::PlatformOwnerState::default()),
             audio_resources: Rc::default(),

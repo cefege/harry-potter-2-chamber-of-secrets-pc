@@ -1,0 +1,19 @@
+# Choose 640x480 and do not answer the 20-second dialog.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 680 455
+idle 5
+press LeftMouse
+idle 50
+mouse 320 178
+idle 5
+press LeftMouse
+idle 10
+mouse 250 233
+press LeftMouse
+# More than 20 seconds of replay time; no further input.
+idle 760

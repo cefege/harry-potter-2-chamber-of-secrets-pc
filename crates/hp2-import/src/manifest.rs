@@ -7,7 +7,7 @@
 //! `json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) +
 //! "\n"` (`prepare_retail_data.py:1338`), since the Python importer and
 //! this one produce the same `overlay-manifest.json` and V1's
-//! verification is a byte-for-byte `cmp`. [`Json`]'s `Object` variant
+//! verification is a byte-for-byte `cmp`. `Json`'s `Object` variant
 //! uses [`BTreeMap`], whose iteration order is sorted by key byte value
 //! -- matching both the C++ `std::map<std::string, Json>` it replaces
 //! (also always sorted) and Python's `sort_keys=True`, so no explicit

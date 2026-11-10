@@ -5,15 +5,21 @@ play. This page is for building, testing, and hacking on the engine.
 
 ## Overview
 
-This is a faithful recreation of the classic 2002 game engine for **macOS 15+ on Apple silicon (arm64)** and **Linux (arm64)**. It uses:
+The current desktop application is a Rust workspace for a UE1-derived engine.
+Supported targets are **macOS 15+ on Apple silicon (arm64)** and **Linux arm64/x64**.
+CMake imports the Rust executables through Corrosion and builds their native SDK
+dependencies. The former first-party C++ engine and `hp2-ffi` static library are
+not the current build graph. See [ARCHITECTURE.md](ARCHITECTURE.md) for crate owners.
 
-- **wgpu** (`HarryPotter2/Unreal/WgpuDrv/` + Rust `crates/hp2-wgpu`) — the sole render device on every platform
-- **SDL2** — window management and input handling  
-- **Native text rendering** — the default text backend (CoreText on macOS,
-  FreeType on Linux); the 2002 bitmap fonts remain available via
-  `[Display] NativeText=False`
-
-The codebase is legacy-era UE1-derived C++ with modern platform support.
+- **wgpu** (`crates/hp2-wgpu`) supplies the GPU backend. The Engine runtime owner
+  is `crates/hp2-engine/src/render_device_owner.rs`; the older
+  `HarryPotter2/Unreal/WgpuDrv/` tree is reference material, not this Rust source root.
+- **SDL2** supplies native window and input services through `crates/hp2-platform`.
+- **Text providers** include SDK-linked CoreText and FreeType configurations.
+  Provider compilation does not establish activation or qualification. Historical
+  native-text default claims disagree with `Build/feature-gates.json`; this page
+  does not resolve that disagreement or change defaults. The bitmap/page-backed
+  `[Display] NativeText=False` compatibility path remains supported.
 
 ## Requirements
 
@@ -70,13 +76,28 @@ sudo dnf install clang make cmake ninja-build pkgconf-pkg-config git \
   harfbuzz-devel fontconfig-devel
 ```
 
-`bsdtar` is not used by the runtime importer: ZIP, TAR, and 7z extraction is
-provided by the statically linked C++ importer. The test suite still uses
+`bsdtar` is not used by the runtime importer: the Rust `hp2-import` crate's
+`archive` feature uses linked libarchive for ZIP, TAR, and 7z extraction. The test suite still uses
 `/usr/bin/bsdtar` in `verify_prototype_archive.py`; install the package above
 (`libarchive-tools` on Debian/Ubuntu, `bsdtar` on Fedora) when running the full
 Linux test suite.
 
 ## Build
+
+For a verification-only build, use the explicit target after configuration:
+
+```sh
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64 --target hp2_verification_binaries
+ctest --preset macos-arm64 --show-only=json-v1
+```
+
+Run each applicable behavioral test by its exact name, with `--no-tests=error`.
+A listing or successful compilation is not behavioral qualification. Check the
+configured data profile and required SDKs. Packaging and native-oracle checks have
+additional provenance/path-separation requirements; do not clear a failing guard
+or use a Rust executable as an independent native oracle. Consult
+[AGENTS.md](../AGENTS.md) before running the general build commands below.
 
 ```sh
 # macOS
@@ -101,8 +122,9 @@ dist/linux-x64/                     # Linux x86_64 (bin/, lib/, share/)
 
 ## Import game data from a checkout
 
-Players import a retail folder or supported archive from the in-engine
-launcher. No Python runtime or external archive utility is needed.
+Players import a retail folder or supported archive with the `hp2_import` CLI;
+the game has no startup launcher window and exits with guidance when no data is
+installed. No Python runtime or external archive utility is needed.
 
 For developer workflows, build and run the native CLI:
 
@@ -133,10 +155,9 @@ open dist/macos-arm64/HarryPotter2.app
 ./dist/linux-x64/bin/hp2_game
 ```
 
-In the launcher window:
-- **Game Data** → select retail or prototype data; import a retail folder/archive
-- **New Game** → start a fresh campaign
-- **Continue** → resume from a save
+The game starts directly in the stock menus (`Startup.unr`). If data is missing it
+prints import guidance and exits 1; pass `-datadir=PATH` to select a data root.
+Use the stock New Game / Load menus and Options pages in game.
 
 ## Build Presets
 

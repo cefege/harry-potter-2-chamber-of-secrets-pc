@@ -186,9 +186,6 @@ unsafe fn construct_sdl_viewport(access: CoreAccess<'_>, object: *mut UObject) -
 }
 unsafe fn destroy_sdl_viewport(access: CoreAccess<'_>, object: *mut UObject) -> RuntimeResult<()> {
     if object.is_null() { return Err(RuntimeError::new("Null canonical SDL viewport")); }
-    // Drop the address-keyed UI state even if a later teardown operation fails.
-    #[cfg(feature = "in-game-overlay")]
-    crate::in_game_overlay::destroy_viewport(object as usize);
     unsafe {
         let viewport = object.cast::<USDLViewport>();
         let client = (*viewport).base.outer.cast::<USDLClient>();
@@ -944,7 +941,26 @@ pub unsafe fn open_viewport_window(
         }
         let width = unsafe { ptr::addr_of!((*client).base.windowed_viewport_x).read_unaligned() };
         let height = unsafe { ptr::addr_of!((*client).base.windowed_viewport_y).read_unaligned() };
-        let (width, height) = hp2_platform::viewport::open_window_size(new_x, new_y, open_x, open_y, width, height);
+        let (mut width, mut height) = hp2_platform::viewport::open_window_size(new_x, new_y, open_x, open_y, width, height);
+        let startup = unsafe { ptr::addr_of!((*client).startup_fullscreen).read_unaligned() != 0 };
+        let desktop = unsafe { ptr::addr_of!((*client).use_desktop_resolution).read_unaligned() != 0 };
+        let preference = if temporary { None } else {
+            match crate::stock_display_transition::explicit_mode(access) {
+                Ok(mode) => mode,
+                Err(error) => {
+                    let category = access.intern_str("Warning", hp2_core::name_owner::FindName::Add)?;
+                    access.emit_log(category, &format!("Startup display mode preference ignored: {error}").chars().map(u32::from).collect::<Vec<_>>())?;
+                    None
+                }
+            }
+        };
+        let requested = crate::stock_display_transition::startup_mode(preference, startup, temporary);
+        let start_fullscreen = requested != hp2_platform::live_display_mode::DisplayMode::Windowed;
+        if start_fullscreen && !desktop {
+            let x = unsafe { ptr::addr_of!((*client).base.fullscreen_viewport_x).read_unaligned() };
+            let y = unsafe { ptr::addr_of!((*client).base.fullscreen_viewport_y).read_unaligned() };
+            if x > 0 && y > 0 { width = x; height = y; }
+        }
         let existing = unsafe { ptr::addr_of!((*viewport).sdl_window).read_unaligned() };
         if existing.is_null() {
             use hp2_platform::window_lifecycle as windows;
@@ -970,19 +986,27 @@ pub unsafe fn open_viewport_window(
             );
             (*viewport).blit_flags &= !hp2_platform::viewport::BLIT_FULLSCREEN;
         }
-        let startup = unsafe { ptr::addr_of!((*client).startup_fullscreen).read_unaligned() != 0 };
-        let desktop = unsafe { ptr::addr_of!((*client).use_desktop_resolution).read_unaligned() != 0 };
-        if hp2_platform::viewport::startup_fullscreen(startup, desktop) {
-            unsafe {
-                (*viewport).blit_flags |= hp2_platform::viewport::BLIT_FULLSCREEN;
-                hp2_platform::window_lifecycle::start_fullscreen(
-                    ptr::addr_of!((*viewport).sdl_window).read_unaligned().cast(),
-                );
-            }
-        }
-        unsafe { (*viewport).set_lost_fullscreen(false); }
         let window = unsafe { ptr::addr_of!((*viewport).sdl_window).read_unaligned().cast() };
+        // Use the explicit selector directly. Never briefly enter fullscreen
+        // before honoring Windowed, even if older INI values disagree.
+        // UseDesktopResolution selects dimensions, not startup fullscreen.
+        use hp2_platform::live_display_mode::{DisplayMode, set_sdl_mode};
+        if let Err(error) = unsafe { set_sdl_mode(window, requested) } {
+            if unsafe { set_sdl_mode(window, DisplayMode::Windowed) }.is_err() { return Err(RuntimeError::new("Startup display mode failed and windowed fallback failed")); }
+            let category = access.intern_str("Warning", hp2_core::name_owner::FindName::Add)?;
+            access.emit_log(category, &format!("Startup display mode {requested:?} failed: {error}; restored Windowed").chars().map(u32::from).collect::<Vec<_>>())?;
+        }
+        let actual = DisplayMode::from_sdl_flags(unsafe { hp2_platform::window_lifecycle::get_window_flags(window) });
+        if std::env::var_os("HP2_STOCK_DISPLAY_TRACE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+            let category = access.intern_str("Log", hp2_core::name_owner::FindName::Add)?;
+            access.emit_log(category, &format!("StockDisplayProbe startup requested={requested:?} actual={actual:?} startup={startup} desktop={desktop}").chars().map(u32::from).collect::<Vec<_>>())?;
+        }
+        unsafe { if actual == DisplayMode::Windowed { (*viewport).blit_flags &= !hp2_platform::viewport::BLIT_FULLSCREEN; } else { (*viewport).blit_flags |= hp2_platform::viewport::BLIT_FULLSCREEN; } }
+        unsafe { (*viewport).set_lost_fullscreen(false); }
         let (window_x, window_y) = unsafe { hp2_platform::window_lifecycle::get_window_size(window) };
+        if desktop && actual != DisplayMode::Windowed && window_x > 0 && window_y > 0 {
+            unsafe { (*viewport).base.size_x = window_x; (*viewport).base.size_y = window_y; }
+        }
         let size_x = unsafe { ptr::addr_of!((*viewport).base.size_x).read_unaligned() };
         let size_y = unsafe { ptr::addr_of!((*viewport).base.size_y).read_unaligned() };
         let (mouse_scale_x, mouse_scale_y) =
@@ -1065,15 +1089,21 @@ impl CoreInputBackend<'_> {
         Ok(false)
     }
     fn engine_key(&mut self, key: i32) -> RuntimeResult<()> {
-        #[cfg(feature = "in-game-overlay")]
-        if crate::in_game_overlay::is_open(self.viewport as usize) { return Ok(()); }
         let console = unsafe { (*self.viewport).base.console.cast::<UObject>() };
         if console.is_null() { return Ok(()); }
         #[repr(C)] struct Params { key: u8, _pad: [u8; 3], result: u32 }
         let mut params = Params { key: key as u8, _pad: [0; 3], result: 0 };
         self.dispatch_event(console, "KeyType", (&mut params as *mut Params).cast())
     }
-    fn engine_mouse_position(&mut self, _buttons: u32, x: f32, y: f32) -> RuntimeResult<()> {
+    fn engine_mouse_position(&mut self, _buttons: u32, mut x: f32, mut y: f32) -> RuntimeResult<()> {
+        let vp = unsafe { &*self.viewport };
+        if hp2_platform::viewport::is_fullscreen(vp.blit_flags) && !vp.sdl_window.is_null() {
+            let (w, h) = unsafe { hp2_platform::window_lifecycle::get_window_size(vp.sdl_window.cast()) };
+            if let Some((sx, sy, left, top)) = hp2_platform::viewport::fullscreen_mouse_mapping(w, h, vp.base.size_x, vp.base.size_y) {
+                x = (x - left * sx).clamp(0.0, (vp.base.size_x - 1).max(0) as f32);
+                y = (y - top * sy).clamp(0.0, (vp.base.size_y - 1).max(0) as f32);
+            }
+        }
         unsafe {
             (*self.viewport).base.windows_mouse_x = x;
             (*self.viewport).base.windows_mouse_y = y;
@@ -1082,6 +1112,9 @@ impl CoreInputBackend<'_> {
     }
     fn resize(&mut self, width: i32, height: i32) -> RuntimeResult<()> {
         let viewport = unsafe { &mut *self.viewport };
+        // SDL reports the desktop drawable's size on fullscreen transitions.
+        // It must not replace the selected logical resolution.
+        if hp2_platform::viewport::is_fullscreen(viewport.blit_flags) { return Ok(()); }
         let state = hp2_platform::viewport::resize_viewport(
             hp2_platform::viewport::ViewportSize { blit_flags: viewport.blit_flags, size_x: viewport.base.size_x, size_y: viewport.base.size_y, color_bytes: viewport.base.color_bytes },
             hp2_platform::viewport::BLIT_NO_WINDOW_CHANGE, width, height, hp2_platform::viewport::INDEX_NONE,
@@ -1134,10 +1167,17 @@ impl hp2_platform::input_pump::UpdateInputBackend for CoreInputBackend<'_> {
         let base = unsafe { &*self.viewport.cast::<UViewport>() };
         let client = unsafe { base.outer.cast::<USDLClient>().as_ref() }.ok_or_else(|| RuntimeError::new("SDL viewport has no client"))?;
         let client_base = unsafe { &*base.outer.cast::<UClient>() };
+        let (mut scale_x, mut scale_y) = (vp.mouse_scale_x, vp.mouse_scale_y);
+        if hp2_platform::viewport::is_fullscreen(vp.blit_flags) && !vp.sdl_window.is_null() {
+            let (w, h) = unsafe { hp2_platform::window_lifecycle::get_window_size(vp.sdl_window.cast()) };
+            if let Some((x, y, _, _)) = hp2_platform::viewport::fullscreen_mouse_mapping(w, h, base.size_x, base.size_y) {
+                (scale_x, scale_y) = (x, y);
+            }
+        }
         Ok(hp2_platform::input_pump::Context {
             mouse_is_grabbed: vp.mouse_is_grabbed(), lost_grab: vp.lost_grab(), capture_mouse: client_base.capture_mouse(),
             has_window: !vp.sdl_window.is_null(), has_engine: !client_base.engine.is_null(), has_actor: !base.actor.is_null(),
-            joy_hat_folds_to_buttons: client.joy_hat_folds_to_buttons != 0, mouse_scale_x: vp.mouse_scale_x, mouse_scale_y: vp.mouse_scale_y,
+            joy_hat_folds_to_buttons: client.joy_hat_folds_to_buttons != 0, mouse_scale_x: scale_x, mouse_scale_y: scale_y,
             size_x: base.size_x, size_y: base.size_y, joystick_dead_zone: client.joystick_dead_zone, scale_jbx: client.scale_jbx,
             scale_jby: client.scale_jby, last_joy_hat: vp.last_joy_hat,
         })
@@ -1167,22 +1207,6 @@ impl hp2_platform::input_pump::UpdateInputBackend for CoreInputBackend<'_> {
             unsafe { crate::input_owner::process(access, input, key, action, delta, &mut output)?; }
             Ok(())
         };
-        #[cfg(feature = "in-game-overlay")]
-        {
-            // Replay modes retain their control keys and cannot open local UI.
-            let client = unsafe { (*self.viewport).base.outer.cast::<UClient>() };
-            if client.is_null() { return Err(RuntimeError::new("SDL viewport has no client")); }
-            let engine = unsafe { (*client).engine.cast::<UGameEngine>() };
-            let replay_active = !engine.is_null() && unsafe { !(*ptr::addr_of!((*engine).replay)).file_ar.is_null() };
-            if !replay_active {
-                let viewport = self.viewport as usize;
-                let handled = crate::in_game_overlay::event(viewport, key, action);
-                if crate::in_game_overlay::is_open(viewport) {
-                    unsafe { crate::overlay_settings_provider::sync(self.access, viewport, &mut *client); }
-                }
-                if handled { return Ok(()); }
-            }
-        }
         if self.game_engine_input_event(key, action, delta)? {
             return Ok(());
         }
@@ -1233,11 +1257,6 @@ impl hp2_platform::input_pump::UpdateInputBackend for CoreInputBackend<'_> {
         }
     }
     fn set_last_joy_hat(&mut self, key: i32) -> RuntimeResult<()> { unsafe { (*self.viewport).last_joy_hat = key; } Ok(()) }
-    fn before_release_all(&mut self) -> RuntimeResult<()> {
-        #[cfg(feature = "in-game-overlay")]
-        crate::in_game_overlay::focus_lost(self.viewport as usize);
-        Ok(())
-    }
 }
 
 /// SDLViewport::CreateNativeFont, or UViewport's intentional null default.

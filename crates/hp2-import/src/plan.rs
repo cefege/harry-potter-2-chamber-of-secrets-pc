@@ -55,9 +55,9 @@ use hp2_ini::Profile;
 
 use crate::classify::is_prohibited;
 use crate::collect::Asset;
-use hp2_file_hash::hash_bytes;
 use crate::lower::lower;
-use crate::util::{fail, strerror_of, utf8};
+use crate::util::{fail, strerror_of, utf8, valid_destination};
+use hp2_file_hash::hash_bytes;
 
 /// Replaces `Generated`. Builds a fully-formed, already-hashed
 /// `Asset` for in-memory content (`Default.ini`/`DefUser.ini`'s own
@@ -88,7 +88,7 @@ pub fn generated(
 
 /// Replaces `AddRequired`. `exact` is keyed by the asset's *exact*
 /// (not casefolded) output path -- a different map shape than
-/// [`crate::collect::insert`]'s casefold-keyed one, matching
+/// [`crate::collect::collect_side`]'s casefold-keyed one, matching
 /// `ValidatePlan`'s own local `exact` map in the C++ source.
 pub fn add_required(
     exact: &BTreeMap<String, Asset>,
@@ -288,6 +288,7 @@ pub fn validate_plan(plan: &[Asset], profile: Profile) -> Result<(), String> {
             root,
             "System" | "Maps" | "Textures" | "Sounds" | "Music" | "Help"
         ) || is_prohibited(&asset.path)
+            || !valid_destination(&asset.path)
         {
             return Err(fail(format!("invalid planned output path: {}", asset.path)));
         }
@@ -980,6 +981,13 @@ mod tests {
         let plan = vec![asset("prototype", "System/payload.exe", "")];
         let err = validate_plan(&plan, Profile::Safe).unwrap_err();
         assert_eq!(err, "invalid planned output path: System/payload.exe");
+    }
+
+    #[test]
+    fn path_safety_validate_plan_rejects_parent_components() {
+        let plan = vec![asset("retail", "System/../../escaped.u", "")];
+        let err = validate_plan(&plan, Profile::RetailOnly).unwrap_err();
+        assert_eq!(err, "invalid planned output path: System/../../escaped.u");
     }
 
     #[test]

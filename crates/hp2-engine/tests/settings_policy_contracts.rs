@@ -88,7 +88,7 @@ fn validation_rejects_entire_patch_and_checks_boundaries() {
             ..Default::default()
         },
         SettingsPatch {
-            render_scale: Some(0.6),
+            render_scale: Some(0.61),
             ..Default::default()
         },
         SettingsPatch {
@@ -120,6 +120,17 @@ fn validation_rejects_entire_patch_and_checks_boundaries() {
             .field,
             "frame_rate_limit"
         );
+    }
+}
+
+#[test]
+fn render_scale_accepts_slider_steps_and_legacy_choice() {
+    for percent in (50..=100).step_by(5) {
+        assert!(SettingsPatch { render_scale: Some(percent as f64 / 100.0), ..Default::default() }.plan().is_ok());
+    }
+    assert!(SettingsPatch { render_scale: Some(0.67), ..Default::default() }.plan().is_ok());
+    for value in [0.49, 0.51, 0.68, 1.01, f64::NAN, f64::INFINITY] {
+        assert!(SettingsPatch { render_scale: Some(value), ..Default::default() }.plan().is_err());
     }
 }
 

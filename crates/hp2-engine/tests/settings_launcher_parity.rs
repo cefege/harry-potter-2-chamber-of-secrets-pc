@@ -272,7 +272,7 @@ fn invalid_values_match_launcher_validation() {
             .is_err()
         );
     }
-    for value in [0.6, f64::NAN] {
+    for value in [0.61, f64::NAN] {
         let s = l::LauncherSettings {
             render_scale: value,
             ..Default::default()

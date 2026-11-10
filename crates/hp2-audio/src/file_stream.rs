@@ -275,15 +275,19 @@ unsafe fn read_stream(stream: &mut Hp2Stream, bytes: i32, destination: *mut c_vo
                     return false;
                 }
                 let state = &mut *stream.tdd.cast::<XaState>();
-                let dest = destination.cast::<i16>();
+                // Stream destinations are writable byte buffers, not necessarily i16-aligned.
+                let dest = destination.cast::<u8>();
                 let samples = bytes / 2;
                 let mut count = 0;
                 let mut refeed_without_progress = false;
                 while count < samples {
                     let requested = samples - count;
-                    let read = state.decoder.decode(dest.add(count as usize), requested);
+                    let output = dest.add(count as usize * 2);
+                    // SAFETY: the remaining destination bytes are writable; the XA
+                    // decoder accepts unaligned sample destinations.
+                    let read = state.decoder.decode(output.cast::<i16>(), requested);
                     if read < 0 || read > requested {
-                        ptr::write_bytes(dest.add(count as usize), 0, requested as usize);
+                        ptr::write_bytes(output, 0, requested as usize * 2);
                         stream.end_of_file = 1;
                         return false;
                     }
@@ -293,12 +297,12 @@ unsafe fn read_stream(stream: &mut Hp2Stream, bytes: i32, destination: *mut c_vo
                         continue;
                     }
                     if stream.kind != 4 {
-                        ptr::write_bytes(dest.add(count as usize), 0, (samples - count) as usize);
+                        ptr::write_bytes(output, 0, (samples - count) as usize * 2);
                         stream.end_of_file = 1;
                         return true;
                     }
                     if refeed_without_progress || !state.refeed(stream.num_samples) {
-                        ptr::write_bytes(dest.add(count as usize), 0, (samples - count) as usize);
+                        ptr::write_bytes(output, 0, (samples - count) as usize * 2);
                         stream.end_of_file = 1;
                         return false;
                     }
@@ -547,7 +551,8 @@ unsafe fn create_resource(
 
 /// # Safety
 /// Source/context must remain valid synchronously. Destination holds
-/// chunk_size*initial_chunks writable bytes; Ogg TDD is caller-owned until success.
+/// chunk_size*initial_chunks writable bytes, with no sample-alignment requirement;
+/// Ogg TDD is caller-owned until success.
 pub unsafe extern "C" fn hp2_rs_stream_create(
     instance: *mut c_void,
     source: Hp2StreamSource,
@@ -606,8 +611,9 @@ pub unsafe extern "C" fn hp2_rs_stream_create(
 
 
 /// # Safety
-/// A queued destination remains writable until completed, cancelled, or destroy
-/// returns. Capacity counts outstanding completions, not only pending reads.
+/// A queued destination provides `chunk_size` writable bytes, with no sample-alignment
+/// requirement, until completed, cancelled, or destroy returns. Capacity counts
+/// outstanding completions, not only pending reads.
 /// In deterministic verification mode the read completes before this returns.
 pub unsafe extern "C" fn hp2_rs_stream_request(
     instance: *mut c_void,
@@ -868,6 +874,31 @@ mod tests {
             source.status
         }
     }
+    struct OneShotSource {
+        bytes: [u8; 15],
+        calls: usize,
+    }
+
+    unsafe extern "C" fn one_shot_xa_source(
+        context: *mut c_void,
+        bytes: *mut *const u8,
+        length: *mut usize,
+        valid: *mut i32,
+    ) -> i32 {
+        // SAFETY: the test passes a live OneShotSource and writable outputs.
+        unsafe {
+            let source = &mut *context.cast::<OneShotSource>();
+            source.calls += 1;
+            if source.calls != 1 {
+                return 37;
+            }
+            *bytes = source.bytes.as_ptr();
+            *length = source.bytes.len();
+            *valid = 1;
+            0
+        }
+    }
+
     fn pop(instance: *mut c_void, id: i32) -> (*mut c_void, i32) {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -879,6 +910,92 @@ mod tests {
             assert!(Instant::now() < deadline, "stream completion timed out");
             thread::yield_now();
         }
+    }
+
+    #[test]
+    fn xa_odd_address_short_read_zero_fills_tail_with_canaries() {
+        let _serial = lock(&TEST_SERIAL);
+        let manager = Manager::new(1);
+        let mut source = Source { bytes: [0x33; 15], status: 0 };
+        source.bytes[0] = 12;
+        let mut backing = [0xa5a5u16; 6];
+        let bytes = unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 12) };
+        let destination = unsafe { bytes.as_mut_ptr().add(1) }.cast::<c_void>();
+        let mut id = -1;
+        // Initial read uses the production stream path: 2 samples, then EOF.
+        assert_eq!(unsafe {
+            hp2_rs_stream_create(manager.instance(), xa_source, (&mut source as *mut Source).cast(),
+                1, 2, 8, 1, destination, HP2_STREAM_XA, ptr::null_mut(), &mut id)
+        }, 0);
+        assert!(id >= 0);
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&3i16.to_ne_bytes());
+        expected.extend_from_slice(&3i16.to_ne_bytes());
+        expected.extend_from_slice(&[0; 4]);
+        assert_eq!(&bytes[1..9], expected);
+        assert_eq!(bytes[0], 0xa5);
+        assert_eq!(&bytes[9..], &[0xa5; 3]);
+        assert_eq!(unsafe { hp2_rs_stream_alive(manager.instance(), id) }, 0);
+    }
+
+    #[test]
+    fn xa_odd_address_looping_refeed_failure_preserves_partial_pcm_and_tail() {
+        let _serial = lock(&TEST_SERIAL);
+        let manager = Manager::new(1);
+        let mut source = OneShotSource { bytes: [0x33; 15], calls: 0 };
+        source.bytes[0] = 12;
+        let mut id = -1;
+        // SAFETY: the source and output remain live for the synchronous create call.
+        let status = unsafe {
+            hp2_rs_stream_create(
+                manager.instance(), one_shot_xa_source, (&mut source as *mut OneShotSource).cast(),
+                1, 2, 8, 0, ptr::null_mut(), HP2_STREAM_XA_LOOPING, ptr::null_mut(), &mut id,
+            )
+        };
+        assert_eq!((status, id, source.calls), (0, 0, 1));
+
+        let mut backing = [0xa5a5u16; 6];
+        // SAFETY: the backing array contains 12 initialized bytes. Offset 1 is odd.
+        let bytes = unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 12) };
+        let destination = unsafe { bytes.as_mut_ptr().add(1) }.cast::<c_void>();
+        let runtime = runtime(manager.instance()).unwrap();
+        let _permit = runtime.locks[id as usize].permit();
+        // The source callback is never called on XA refeed: the encoded copy is
+        // retained. Inject an invalid refeed count to exercise that failure path.
+        // SAFETY: the stream lock is held and the destination has 8 writable bytes.
+        let stream = unsafe { &mut *runtime.streams[id as usize].get() };
+        stream.num_samples = -1;
+        assert!(!unsafe { read_stream(stream, 8, destination) });
+        assert_eq!(stream.end_of_file, 1);
+        assert_eq!(source.calls, 1);
+        let sample = 3i16.to_ne_bytes();
+        assert_eq!(&bytes[1..9], &[sample[0], sample[1], sample[0], sample[1], 0, 0, 0, 0]);
+        assert_eq!(bytes[0], 0xa5);
+        assert_eq!(&bytes[9..], &[0xa5; 3]);
+    }
+
+    #[test]
+    fn xa_odd_address_empty_loop_stops_without_progress() {
+        let _serial = lock(&TEST_SERIAL);
+        let manager = Manager::new(1);
+        let mut source = OneShotSource { bytes: [0; 15], calls: 0 };
+        let mut backing = [0xa5a5u16; 4];
+        // SAFETY: the backing array contains 8 initialized bytes. Offset 1 is odd.
+        let bytes = unsafe { std::slice::from_raw_parts_mut(backing.as_mut_ptr().cast::<u8>(), 8) };
+        let destination = unsafe { bytes.as_mut_ptr().add(1) }.cast::<c_void>();
+        let mut id = -1;
+        // SAFETY: the source and output are live and the destination holds 4 bytes.
+        let status = unsafe {
+            hp2_rs_stream_create(
+                manager.instance(), one_shot_xa_source, (&mut source as *mut OneShotSource).cast(),
+                1, 0, 4, 1, destination, HP2_STREAM_XA_LOOPING, ptr::null_mut(), &mut id,
+            )
+        };
+        assert_eq!((status, id, source.calls), (0, 0, 1));
+        assert_eq!(&bytes[1..5], &[0; 4]);
+        assert_eq!(bytes[0], 0xa5);
+        assert_eq!(&bytes[5..], &[0xa5; 3]);
+        assert_eq!(unsafe { hp2_rs_stream_alive(manager.instance(), id) }, 0);
     }
 
     #[test]

@@ -122,7 +122,83 @@ pub unsafe fn tick(access: CoreAccess<'_>, engine: *mut UGameEngine, delta: f32)
     if engine.is_null() {
         return Err(RuntimeError::new("Null canonical UGameEngine"));
     }
-    unsafe { crate::game_tick_owner::tick(access, engine, delta) }
+    // Cover stock input and timeout calls with one balanced transaction scope.
+    #[cfg(feature = "sdl")]
+    let _resolution_lifecycle = unsafe { crate::stock_resolution_lifecycle::install(access, crate::stock_resolution_transaction::callback)? };
+    // Keep the display listener registered through post-tick rollback work.
+    #[cfg(feature = "sdl")]
+    let _display_mode = crate::stock_display_control::install()?;
+    #[cfg(feature = "renderer-wgpu")]
+    let _render_scale = crate::stock_render_scale_control::install()?;
+    let _graphics_controls = crate::stock_graphics_menu::install()?;
+    // The stock window scripts run synchronously during client input in this
+    // tick. Drop the hook before returning to the owner or unloading packages.
+    let _stock_fps = unsafe { crate::stock_fps_menu::install(access) };
+    // Registered controls share the stock hook. End listener delivery before
+    // dropping that hook, including on an early return from the tick.
+    let _stock_menu_tick = if _stock_fps.is_some() { Some(crate::stock_menu_extensions::begin_tick()?) } else { None };
+    let _graphics_input = match unsafe { crate::stock_graphics_dispatch::install_input(access) } {
+        Ok(guard) => guard,
+        Err(error) => {
+            if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+                let _ = access.emit_log(category, &format!("Graphics input observer: {error}").chars().map(u32::from).collect::<Vec<_>>());
+            }
+            None
+        }
+    };
+    // Hide unsupported or orphaned graphics controls before input dispatch.
+    let graphics_result = unsafe { crate::stock_graphics_menu::tick(access) };
+    if let Err(error) = &graphics_result {
+        if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+            let _ = access.emit_log(category, &format!("Graphics controls tick: {error}").chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
+    // Suspend orphaned controls before input when the hook is unavailable.
+    // Refresh again after the game tick to observe renderer changes made there.
+    #[cfg(feature = "renderer-wgpu")]
+    let scale_pre_result = unsafe { crate::stock_render_scale_control::tick(access, crate::render_device_owner::world_scale_unavailable(access).ok()) };
+    #[cfg(feature = "renderer-wgpu")]
+    if let Err(error) = &scale_pre_result {
+        if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+            let _ = access.emit_log(category, &format!("Render scale pre-tick: {error}").chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
+    unsafe { crate::live_texture_detail::sync(access, engine)?; }
+    let result = unsafe { crate::game_tick_owner::tick(access, engine, delta) };
+    #[cfg(feature = "sdl")]
+    unsafe { crate::stock_resolution_transaction::process_timeouts(access); }
+    // Process pending rollback even when the hook is unavailable or the tick
+    // failed. If both fail, log the display error and preserve the tick error.
+    #[cfg(feature = "sdl")]
+    let display_result = unsafe { crate::stock_display_control::tick(access) };
+    #[cfg(feature = "renderer-wgpu")]
+    let scale_result = unsafe { crate::stock_render_scale_control::tick(access, crate::render_device_owner::world_scale_unavailable(access).ok()) };
+    #[cfg(feature = "renderer-wgpu")]
+    if let Err(error) = &scale_result {
+        if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+            let _ = access.emit_log(category, &format!("Render scale tick: {error}").chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
+    #[cfg(feature = "sdl")]
+    if let Err(error) = &display_result {
+        if let Ok(category) = access.intern_str("Warning", hp2_core::name_owner::FindName::Add) {
+            let _ = access.emit_log(category, &format!("Display mode tick: {error}").chars().map(u32::from).collect::<Vec<_>>());
+        }
+    }
+    if result.is_ok() {
+        graphics_result?;
+        #[cfg(feature = "sdl")]
+        display_result?;
+        #[cfg(feature = "renderer-wgpu")]
+        scale_pre_result?;
+        #[cfg(feature = "renderer-wgpu")]
+        scale_result?;
+        unsafe { crate::live_texture_detail::sync(access, engine)?; }
+        unsafe { crate::stock_resolution_deferred::process(access, engine)?; }
+        unsafe { crate::stock_resolution_display::sync(access, engine)?; }
+    }
+    unsafe { crate::stock_fps_menu::probe(access); }
+    result
 }
 
 /// Executes the source-shared canonical `UGameEngine::Exec` policy.

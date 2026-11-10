@@ -1,0 +1,12 @@
+# Calibration only: 800x600 viewport. Open the stock sound/video page.
+# Coordinates come from the existing retail render-scale page-opening replay.
+# Do not claim an advanced-settings interaction from this fixture.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 680 455
+press LeftMouse
+idle 100

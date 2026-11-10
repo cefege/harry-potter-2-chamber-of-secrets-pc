@@ -1,0 +1,17 @@
+# Reopen the same isolated home after accepting 640x480.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 96 378
+idle 5
+press LeftMouse
+idle 70
+mouse 604 445
+press LeftMouse
+idle 40
+mouse 544 364
+press LeftMouse
+idle 70

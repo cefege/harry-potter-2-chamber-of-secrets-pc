@@ -36,6 +36,27 @@ set(HP2_MACOS_FRAMEWORKS_DIR "${HP2_MACOS_CONTENTS_DIR}/Frameworks")
 set(HP2_MACOS_EXECUTABLE "${HP2_MACOS_EXECUTABLE_DIR}/HarryPotter2")
 set(HP2_MACOS_INFO_PLIST "${HP2_MACOS_CONTENTS_DIR}/Info.plist")
 set(HP2_MACOS_RESOURCES_DIR "${HP2_MACOS_CONTENTS_DIR}/Resources")
+
+# Diagnose old unsafe cache values without clearing or accepting any reference.
+# The packaging target repeats the check immediately before bundle removal.
+if(NOT "${HP2_CPP_ORACLE_APP}" STREQUAL "")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${PROJECT_SOURCE_DIR}/Build/check_oracle_paths.py"
+            --oracle "${HP2_CPP_ORACLE_APP}" --destination "${HP2_MACOS_APP_DIR}"
+        RESULT_VARIABLE _hp2_oracle_path_result
+        ERROR_VARIABLE _hp2_oracle_path_error
+    )
+    if(NOT "${_hp2_oracle_path_result}" STREQUAL "0")
+        message(WARNING
+            "Configured HP2_CPP_ORACLE_APP is unsafe or could not be checked; "
+            "the value is preserved and packaging remains blocked. "
+            "${_hp2_oracle_path_error}")
+    endif()
+    unset(_hp2_oracle_path_result)
+    unset(_hp2_oracle_path_error)
+endif()
+
 set(HP2_MACOS_OPENAL_DYLIB
     "${HP2_MACOS_FRAMEWORKS_DIR}/$<TARGET_SONAME_FILE_NAME:OpenAL>")
 
@@ -62,6 +83,8 @@ endif()
 # libraries must never survive a packaging invocation. Assets intentionally
 # remain external to the application bundle.
 add_custom_target(hp2_macos_app ${_hp2_bundle_in_all}
+    COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/Build/check_oracle_paths.py"
+        --oracle "${HP2_CPP_ORACLE_APP}" --destination "${HP2_MACOS_APP_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${HP2_MACOS_APP_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${HP2_MACOS_EXECUTABLE_DIR}"

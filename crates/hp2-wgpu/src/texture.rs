@@ -1,35 +1,8 @@
-//! Rust port of `ThirdParty/XOpenGLDrv/Src/SetTexture.cpp`'s texture
-//! cache/upload (plan's "Texture upload/cache in Rust" Phase 3 item).
-//! Scope includes the real `ETextureFormat` enum and its pure helpers
-//! (`HP2TextureBytes`/`HP2TextureFormatName`/`IsHP2CompressedTexture`),
-//! `FixCacheID`'s masked-vs-unmasked bind-map key, and a GPU-backed
-//! `TextureCache` keyed by the real `CacheID`. All five uncompressed
-//! formats (`TEXF_P8`, `TEXF_RGBA7`, `TEXF_RGB16`, `TEXF_RGB8`,
-//! `TEXF_RGBA8`) upload end to end through `hp2-ffi`'s
-//! `hp2_rs_wgpu_upload_texture`; `TEXF_DXT1` uploads through the separate
-//! compressed-texture entry point with the asset's full mip chain (wgpu
-//! cannot generate BC mips). Uncompressed formats remain mip-0-only.
-//! Matching re-uploads write into the resident texture rather than
-//! reallocating (`TextureCache::upload_rgba8`/`upload_compressed`).
+//! Texture formats, pixel conversion, caching, and GPU upload.
 //!
-//! Investigated and resolved, not left open: lightmap upload needed
-//! no `GL_BGRA`/`.bgr` swizzle after all, unlike an earlier, more
-//! cautious version of this paragraph assumed before actually reading
-//! the real condition that gates it (`DrawComplex_GLSL.cpp:439-444`'s
-//! `OPT_GLES` branch). That branch only ever compiles in when
-//! `UXOpenGLRenderDevice::OpenGLVersion == GL_ES` (`ShaderProgram.cpp:
-//! 1048-1051`), and this port's own two real target platforms never
-//! produce that value: macOS hardcodes `OpenGLVersion = GL_Core`
-//! unconditionally (`XOpenGL.cpp:391-392`, "HP2's macOS renderer is
-//! deliberately limited to Apple's OpenGL 4.1 core surface"), and
-//! Linux defaults to `GL_Core` too, only ever falling back to `GL_ES`
-//! if the real GPU driver cannot provide OpenGL 3.3 core at all
-//! (`XOpenGL.cpp:824-829`) -- not a configuration this project's own
-//! supported Linux arm64 target normally hits. The real `#else`
-//! branch (`OPT_GLCore`) is plain `LightColor.rgb`, no swizzle at all
-//! -- exactly what `complex.wgsl`'s own already-shipped lightmap
-//! sampling already does (`light_map_sample.rgb * (frame.light_map_
-//! intensity * 255.0 / 127.0)`). No code change was needed.
+//! Uncompressed textures upload mip zero; DXT1 textures use their supplied mip chain.
+//! Matching uploads reuse the resident texture. Lightmaps use RGB without a swizzle,
+//! matching the GL core shader path.
 
 /// Real `ETextureFormat` (`UnTex.h`): `TEXF_P8=0x00, TEXF_RGBA7=0x01,
 /// TEXF_RGB16=0x02, TEXF_DXT1=0x03, TEXF_RGB8=0x04, TEXF_RGBA8=0x05`
@@ -143,171 +116,15 @@ pub fn fix_cache_id(cache_id: u64, format: TextureFormat, poly_flags: u32) -> u6
     }
 }
 
-/// Real `FColor` (`UnTex.h`), re-used from `hp2-abi` rather than
-/// redefined here (caught on review: an earlier version of this
-/// module defined its own `#[repr(C)] struct FColor` with no
-/// `align(4)`, which would have been a real layout bug if this value
-/// ever became a direct view of raw `FTextureInfo::Palette` memory --
-/// `hp2_abi::FColor` is already probe-verified against the real C++
-/// layout, including that `align(4)` from the real `union { DWORD
-/// Int4; struct {...}; }`, and its own doc already covers the real
-/// R,G,B,A memory order this module's "no swizzle needed for
-/// Rgba8Unorm" claim below depends on, not duplicated here). Rust-
-/// internal only: never crosses the FFI boundary through cbindgen
-/// (this module has no `extern "C"` functions at all yet), so this
-/// does not risk the real redefinition collision a `SceneFrame`-level
-/// change would have -- `hp2_rs.h` is `#include`d in many real C++
-/// translation units that already define their own `class FColor`/
-/// `FCoords`/`FVector` from the real UE1 headers (confirmed before
-/// considering this: WgpuDrv.cpp, SDLClient.cpp, ALAudioSubsystem.cpp,
-/// and others), so cbindgen must never be told to emit a conflicting
-/// typedef for any of those three names -- `SceneFrame`'s own flat
-/// `[f32; 3]` fields deliberately stay as they are for exactly this
-/// reason, not changed to `hp2_abi::FCoords` despite the superficial
-/// appeal of a direct struct-pointer pass-through.
+/// Engine color with the ABI-defined RGBA layout.
 pub use hp2_abi::FColor;
 
-/// Real source's `MASKED_TEXTURE_TAG`/`FixCacheID`-driven behavior
-/// (`SetTexture.cpp`'s own comment: "we might render the textures
-/// without PF_Masked later... we potentially need two copies of all
-/// P8 textures"), expressed as the one real difference it makes to
-/// this function rather than the cache-key logic around it (not
-/// ported yet -- see this module's own header).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum P8MaskMode {
-    /// `PolyFlags & PF_Masked` unset: palette index 0 keeps its real
-    /// RGBA color (`Palette` used as-is).
-    Unmasked,
-    /// `PolyFlags & PF_Masked` set: a local copy of the palette has
-    /// index 0 forced to `FColor(0, 0, 0, 0)` (`SetTexture.cpp`'s own
-    /// `LocalPal[0] = FColor(0, 0, 0, 0);`) before expansion, so
-    /// palette-0 texels become fully transparent instead of keeping
-    /// whatever RGB the source palette actually stored there.
-    Masked,
-}
-
-/// Replaces `SetTexture.cpp`'s real `case TEXF_P8:` expansion loop
-/// (`ConvertP8_RGBA8888`, `*Ptr++ = GET_COLOR_DWORD(Palette[Mip->
-/// DataPtr[i]]);`) plus the `PF_Masked` local-palette-copy branch
-/// immediately above it in the same function. `indices` is one byte
-/// per texel (the real `Mip->DataPtr`, a `TEXF_P8` mip's raw indexed
-/// data); `palette` is the real 256-entry `FTextureInfo::Palette`.
-/// Returns one `FColor` per input index, in the same order -- the
-/// real source's own output shape before it gets reinterpreted as a
-/// flat byte buffer for `glTexImage2D`'s `GL_RGBA`/`GL_UNSIGNED_BYTE`
-/// upload; this crate's own future upload code reinterprets the
-/// result the same way for `wgpu::TextureFormat::Rgba8Unorm` (or
-/// `Rgba8UnormSrgb` under `UnpackSRGB` -- `SetTexture.cpp`'s own
-/// `InternalFormat = UnpackSRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8`), since
-/// `FColor`'s own real `R,G,B,A` memory order already matches
-/// `Rgba8Unorm`'s byte order exactly -- no swizzle needed for this
-/// conversion specifically (unlike the lightmap `.bgr` case this
-/// module's own header flags separately).
-pub fn p8_to_rgba8(indices: &[u8], palette: &[FColor; 256], mask_mode: P8MaskMode) -> Vec<FColor> {
-    let mut local_palette;
-    let palette = match mask_mode {
-        P8MaskMode::Unmasked => palette,
-        P8MaskMode::Masked => {
-            local_palette = *palette;
-            local_palette[0] = FColor {
-                r: 0,
-                g: 0,
-                b: 0,
-                a: 0,
-            };
-            &local_palette
-        }
-    };
-    indices
-        .iter()
-        .map(|&index| palette[index as usize])
-        .collect()
-}
-
-/// Replaces `SetTexture.cpp`'s real `TEXF_RGB8` upload path
-/// (`InternalFormat = UnpackSRGB ? GL_SRGB8 : GL_RGB8; SourceFormat =
-/// GL_RGB;`, `ImgSrc = Mip->DataPtr` passed straight through --
-/// confirmed by direct re-read that the real engine performs no CPU-
-/// side conversion at all here, relying on OpenGL's own native
-/// 3-byte-per-texel `GL_RGB`/`GL_RGB8` support). wgpu has no 3-byte-
-/// per-texel texture format at all (no GPU API commonly exposes one,
-/// for alignment reasons), so unlike the real source, this port must
-/// expand to 4 bytes per texel before upload -- alpha forced to 255
-/// (opaque), the real source's own implicit behavior too: `GL_RGB`
-/// source data has no alpha channel for the driver to read in the
-/// first place, and a real `GL_RGB8`-internal-format texture has no
-/// alpha channel to sample either, so every real consumer of a
-/// TEXF_RGB8 texture already only ever sees fully opaque texels.
-/// `rgb_bytes` must be exactly `width * height * 3` bytes, tightly
-/// packed (R,G,B each one byte, matching `HP2TextureBytes`'s own
-/// real 3-bytes-per-pixel formula for this format).
-///
-/// # Panics
-/// If `rgb_bytes.len()` is not a whole multiple of 3 -- a caller bug,
-/// same `FTextureInfo`-fields-are-never-inconsistent reasoning
-/// `TextureCache::upload_rgba8`'s own doc already establishes.
-pub fn rgb8_to_rgba8(rgb_bytes: &[u8]) -> Vec<u8> {
-    assert_eq!(
-        rgb_bytes.len() % 3,
-        0,
-        "rgb_bytes length must be a whole multiple of 3"
-    );
-    rgb_bytes
-        .chunks_exact(3)
-        .flat_map(|rgb| [rgb[0], rgb[1], rgb[2], 255])
-        .collect()
-}
-
-/// Replaces `SetTexture.cpp`'s real `TEXF_RGB16` upload path
-/// (`SourceType = GL_UNSIGNED_SHORT_5_6_5_REV`, `ImgSrc = Mip->
-/// DataPtr` passed straight through to the driver, which performs the
-/// packed-to-float unpacking in hardware). wgpu has no equivalent
-/// packed-565 texture format, so unlike the real source this port
-/// must unpack on the CPU before upload. Real bit layout confirmed
-/// from the OpenGL specification's own packed-pixel-type table before
-/// writing this, not assumed from the `_REV` suffix's name alone (an
-/// easy direction to get backwards -- the non-REV `GL_UNSIGNED_SHORT_
-/// 5_6_5` layout is the *opposite* of this one): for `GL_RGB` +
-/// `_5_6_5_REV`, a little-endian 16-bit value holds B in bits 15..11
-/// (5 bits), G in bits 10..5 (6 bits), R in bits 4..0 (5 bits) --
-/// functionally identical to `GL_BGR` + plain `_5_6_5`, per the
-/// OpenGL wiki's own Pixel Transfer page. Each N-bit channel is
-/// expanded to a full byte via bit replication (`(v << (8-n)) | (v >>
-/// (2n-8))`), the standard, widely-used technique that maps 0 to 0
-/// and the real N-bit maximum to 255 exactly, not a plain linear
-/// rescale (which also maps the endpoints correctly but distributes
-/// the real OpenGL-driver-produced intermediate values differently --
-/// bit replication is what real GPU texture samplers and drivers
-/// generally use for this exact kind of fixed-point channel expansion).
-/// Alpha is always 255 (opaque) -- `GL_RGB`, like `TEXF_RGB8`, has no
-/// real alpha channel at all. `packed_bytes` must be exactly `width *
-/// height * 2` bytes (one little-endian `u16` per texel, matching
-/// `HP2TextureBytes`'s own real 2-bytes-per-pixel formula for this
-/// format).
-///
-/// # Panics
-/// If `packed_bytes.len()` is not a whole multiple of 2 -- a caller
-/// bug, same reasoning as `rgb8_to_rgba8`'s own doc.
-pub fn rgb16_to_rgba8(packed_bytes: &[u8]) -> Vec<u8> {
-    assert_eq!(
-        packed_bytes.len() % 2,
-        0,
-        "packed_bytes length must be a whole multiple of 2"
-    );
-    packed_bytes
-        .chunks_exact(2)
-        .flat_map(|pair| {
-            let value = u16::from_le_bytes([pair[0], pair[1]]);
-            let r5 = (value & 0x1F) as u8;
-            let g6 = ((value >> 5) & 0x3F) as u8;
-            let b5 = ((value >> 11) & 0x1F) as u8;
-            let r8 = (r5 << 3) | (r5 >> 2);
-            let g8 = (g6 << 2) | (g6 >> 4);
-            let b8 = (b5 << 3) | (b5 >> 2);
-            [r8, g8, b8, 255]
-        })
-        .collect()
-}
+mod conversion;
+pub use conversion::P8MaskMode;
+pub use conversion::p8_to_rgba8;
+pub use conversion::p8_to_rgba8_bytes;
+pub use conversion::rgb8_to_rgba8;
+pub use conversion::rgb16_to_rgba8;
 
 /// One real uploaded GPU texture, keyed by the real `CacheID` in a
 /// `TextureCache`. `width`/`height` are the real mip-0 `USize`/
@@ -1155,6 +972,111 @@ mod tests {
     }
 
     #[test]
+    fn conversion_characterization_empty_and_exact_bytes() {
+        let mut palette = [FColor {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }; 256];
+        palette[0] = FColor {
+            r: 1,
+            g: 2,
+            b: 3,
+            a: 4,
+        };
+        palette[255] = FColor {
+            r: 251,
+            g: 252,
+            b: 253,
+            a: 254,
+        };
+        for mode in [P8MaskMode::Unmasked, P8MaskMode::Masked] {
+            assert!(p8_to_rgba8(&[], &palette, mode).is_empty());
+            let bytes: Vec<_> = p8_to_rgba8(&[0, 255, 0], &palette, mode)
+                .iter()
+                .flat_map(|c| [c.r, c.g, c.b, c.a])
+                .collect();
+            let zero = if mode == P8MaskMode::Masked {
+                [0, 0, 0, 0]
+            } else {
+                [1, 2, 3, 4]
+            };
+            assert_eq!(bytes, [zero, [251, 252, 253, 254], zero].concat());
+        }
+        assert_eq!(
+            [palette[0].r, palette[0].g, palette[0].b, palette[0].a],
+            [1, 2, 3, 4]
+        );
+        assert!(rgb8_to_rgba8(&[]).is_empty());
+        assert!(rgb16_to_rgba8(&[]).is_empty());
+        assert_eq!(
+            rgb8_to_rgba8(&[1, 2, 3, 254, 128, 0]),
+            [1, 2, 3, 255, 254, 128, 0, 255]
+        );
+        assert_eq!(
+            rgb16_to_rgba8(&[0x21, 0x08, 0xff, 0xff]),
+            [8, 4, 8, 255, 255, 255, 255, 255]
+        );
+    }
+
+    #[test]
+    fn p8_owned_bytes_match_reference_and_expected_texels() {
+        let palette: [FColor; 256] = std::array::from_fn(|i| FColor {
+            r: (i as u8).wrapping_mul(17).wrapping_add(1),
+            g: (i as u8).wrapping_mul(31).wrapping_add(2),
+            b: (i as u8).wrapping_mul(47).wrapping_add(3),
+            a: (i as u8).wrapping_mul(59).wrapping_add(4),
+        });
+        let original = palette;
+        let mut all_indices: Vec<u8> = (0..=255).collect();
+        all_indices.extend_from_slice(&[0, 0, 255, 0, 7, 7, 0, 0]);
+        for indices in [
+            &[][..],
+            &[0, 0, 255, 0, 7, 7, 0, 0][..],
+            &all_indices[..],
+        ] {
+            for mode in [P8MaskMode::Unmasked, P8MaskMode::Masked] {
+                let actual = p8_to_rgba8_bytes(indices, &palette, mode);
+                let reference: Vec<u8> = p8_to_rgba8(indices, &palette, mode)
+                    .into_iter()
+                    .flat_map(|c| [c.r, c.g, c.b, c.a])
+                    .collect();
+                assert_eq!(actual, reference, "two-stage reference, mode {mode:?}");
+                assert_eq!(actual.len(), indices.len() * 4);
+                for (index, pixel) in indices.iter().zip(actual.chunks_exact(4)) {
+                    let color = palette[*index as usize];
+                    let expected = if mode == P8MaskMode::Masked && *index == 0 {
+                        [0, 0, 0, 0]
+                    } else {
+                        [color.r, color.g, color.b, color.a]
+                    };
+                    assert_eq!(pixel, expected, "palette index {index}, mode {mode:?}");
+                }
+                assert_eq!(palette, original, "palette changed in mode {mode:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn conversion_characterization_rejects_partial_texels() {
+        for bytes in [&[1u8][..], &[1, 2], &[1, 2, 3, 4], &[1, 2, 3, 4, 5]] {
+            let panic = std::panic::catch_unwind(|| rgb8_to_rgba8(bytes)).unwrap_err();
+            let text = panic
+                .downcast_ref::<String>()
+                .expect("assertion panic text");
+            assert!(text.contains("rgb_bytes length must be a whole multiple of 3"));
+        }
+        for bytes in [&[1u8][..], &[1, 2, 3]] {
+            let panic = std::panic::catch_unwind(|| rgb16_to_rgba8(bytes)).unwrap_err();
+            let text = panic
+                .downcast_ref::<String>()
+                .expect("assertion panic text");
+            assert!(text.contains("packed_bytes length must be a whole multiple of 2"));
+        }
+    }
+
+    #[test]
     fn rgb8_to_rgba8_expands_each_texel_and_forces_opaque_alpha() {
         // Red, then green, tightly packed 3 bytes each -- no padding
         // between texels (HP2TextureBytes' own real width*height*3
@@ -1446,6 +1368,87 @@ mod tests {
         };
         let bytes: [u8; 4] = unsafe { std::mem::transmute::<FColor, [u8; 4]>(color) };
         assert_eq!(bytes, [0x11, 0x22, 0x33, 0x44]);
+    }
+
+    #[test]
+    #[ignore = "needs a real GPU adapter; run explicitly with --ignored"]
+    fn p8_owned_bytes_upload_round_trips_through_render_loop() {
+        let created = crate::create_device_sync(
+            crate::BackendChoice::Auto,
+            None::<crate::HeadlessSurfaceCreator>,
+        )
+        .expect("expected a real GPU device");
+        let mut renderer = crate::RenderLoop::new();
+        let mut palette = [FColor {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }; 256];
+        palette[0] = FColor { r: 1, g: 2, b: 3, a: 4 };
+        palette[255] = FColor {
+            r: 251,
+            g: 252,
+            b: 253,
+            a: 254,
+        };
+        for (cache_id, mode, expected) in [
+            (41, P8MaskMode::Unmasked, [1u8, 2, 3, 4, 251, 252, 253, 254]),
+            (42, P8MaskMode::Masked, [0, 0, 0, 0, 251, 252, 253, 254]),
+        ] {
+            let rgba = p8_to_rgba8_bytes(&[0, 255], &palette, mode);
+            renderer.upload_texture(&created, cache_id, 2, 1, &rgba, TextureOptions::default());
+            let texture = &renderer
+                .texture_cache
+                .get(cache_id)
+                .expect("uploaded texture must be cached")
+                .texture;
+            let buffer = created.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("P8 conversion readback"),
+                size: 256,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = created
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("P8 conversion readback encoder"),
+                });
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &buffer,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(1),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 2,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+            created.queue.submit(std::iter::once(encoder.finish()));
+            let slice = buffer.slice(..);
+            slice.map_async(wgpu::MapMode::Read, |result| {
+                result.expect("GPU readback mapping must succeed");
+            });
+            created
+                .device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("GPU readback poll must succeed");
+            let mapped = slice
+                .get_mapped_range()
+                .expect("GPU readback must be mapped");
+            assert_eq!(&mapped[..8], &expected, "GPU bytes for mode {mode:?}");
+        }
     }
 
     // Needs a real GPU adapter. CI runners (ci.yml) have none. Run with

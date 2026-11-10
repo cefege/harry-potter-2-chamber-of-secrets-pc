@@ -164,6 +164,16 @@ pub fn resize_viewport(
     out
 }
 
+/// Logical mouse scale and letterbox offset in SDL window coordinates.
+/// Returns None for an unavailable or minimized window.
+pub fn fullscreen_mouse_mapping(window_x: i32, window_y: i32, size_x: i32, size_y: i32) -> Option<(f32, f32, f32, f32)> {
+    if window_x <= 0 || window_y <= 0 || size_x <= 0 || size_y <= 0 { return None; }
+    let scale = (window_x as f64 / size_x as f64).min(window_y as f64 / size_y as f64);
+    let left = (window_x as f64 - size_x as f64 * scale) * 0.5;
+    let top = (window_y as f64 - size_y as f64 * scale) * 0.5;
+    Some(((1.0 / scale) as f32, (1.0 / scale) as f32, left as f32, top as f32))
+}
+
 /// `IsFullscreen` (`SDLViewport.cpp:750-753`).
 pub fn is_fullscreen(blit_flags: u32) -> bool {
     blit_flags & BLIT_FULLSCREEN != 0
@@ -195,6 +205,13 @@ fn clamp_i32(x: i32, min: i32, max: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fullscreen_mouse_mapping_fits_and_centers() {
+        assert_eq!(fullscreen_mouse_mapping(1920, 1080, 800, 600), Some((600.0 / 1080.0, 600.0 / 1080.0, 240.0, 0.0)));
+        assert_eq!(fullscreen_mouse_mapping(800, 1200, 800, 600), Some((1.0, 1.0, 0.0, 300.0)));
+        assert_eq!(fullscreen_mouse_mapping(0, 1200, 800, 600), None);
+    }
 
     // Reference values captured from the verbatim C++ bodies with clang++
     // (see the module doc). f32 results are compared by bit pattern.

@@ -199,7 +199,11 @@ impl CoreAccess<'_> {
                 (archive as *const ObjectArchive<'_>).cast_mut().cast(),
                 kind,
                 &ops,
-            )
+            )?;
+            if kind == Kind::MetadataFunction && archive.is_loading() {
+                crate::stock_input_fix::fix(self, object)?;
+            }
+            Ok(())
         }
     }
 

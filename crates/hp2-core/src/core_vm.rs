@@ -6,7 +6,286 @@ use crate::core_native_catalog;
 use crate::object_owner::{CanonicalNativeBinding, OwnedFunctionRecord};
 use crate::vm_owner::{VmExecutor, VmHost};
 use hp2_abi::engine::generated::{FFrame, TArrayRaw, UField, UFunction, UObject};
-use std::{ffi::c_void, ptr};
+use std::{cell::{Cell, RefCell}, ffi::c_void, marker::PhantomData, ptr};
+
+/// A synchronous, post-script-call hook. The records and parameter storage are
+/// borrowed only for the call. The hook must not retain them. It may reenter
+/// the VM; calls made while the hook runs are not observed by this hook.
+pub type ScriptPostCallHook = for<'a> unsafe fn(
+    CoreAccess<'a>, *mut UObject, *mut UFunction, *const u8, usize,
+) -> RuntimeResult<()>;
+
+/// A pre-call hook may consume a void script call after validating its frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptPreCallDecision { Continue, Consume }
+pub type ScriptPreCallHook = for<'a> unsafe fn(
+    CoreAccess<'a>, *mut UObject, *mut UFunction, *const u8, usize,
+) -> RuntimeResult<ScriptPreCallDecision>;
+
+/// Enter and exit surround the original script body. Exit also runs on error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScriptScopePhase { Enter, Exit { succeeded: bool } }
+pub type ScriptScopeHook = for<'a> unsafe fn(
+    CoreAccess<'a>, *mut UObject, *mut UFunction, *const u8, usize, ScriptScopePhase,
+) -> RuntimeResult<()>;
+#[derive(Clone)]
+struct ScriptScopeObserver { key: &'static str, functions: Vec<(*mut UFunction, i32)>, callback: ScriptScopeHook }
+
+#[derive(Clone)]
+struct ScriptPreObserver { key: &'static str, functions: Vec<(*mut UFunction, i32)>, callback: ScriptPreCallHook }
+
+#[derive(Clone, Copy)]
+struct ScriptHook {
+    functions: [*mut UFunction; 3],
+    callback: ScriptPostCallHook,
+}
+#[derive(Clone)]
+struct ScriptObserver { key: &'static str, functions: Vec<(*mut UFunction, i32)>, callback: ScriptPostCallHook }
+#[derive(Clone, Copy)]
+struct ScriptRedirect { object: *mut UObject, object_index: i32, from: *mut UFunction, from_index: i32, to: *mut UFunction, to_index: i32 }
+thread_local! {
+    static SCRIPT_REDIRECT: Cell<Option<ScriptRedirect>> = const { Cell::new(None) };
+    static SCRIPT_HOOK: Cell<Option<ScriptHook>> = const { Cell::new(None) };
+    static SCRIPT_HOOK_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static SCRIPT_OBSERVERS: RefCell<Vec<ScriptObserver>> = const { RefCell::new(Vec::new()) };
+    static SCRIPT_OBSERVERS_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static SCRIPT_PRE_OBSERVERS: RefCell<Vec<ScriptPreObserver>> = const { RefCell::new(Vec::new()) };
+    static SCRIPT_PRE_OBSERVERS_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    static SCRIPT_SCOPE_OBSERVERS: RefCell<Vec<ScriptScopeObserver>> = const { RefCell::new(Vec::new()) };
+    static SCRIPT_SCOPE_CALLBACK_ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+struct ScriptScopeObserverGuard<'a> { key: &'static str, _access: PhantomData<CoreAccess<'a>>, _thread: PhantomData<std::rc::Rc<()>> }
+impl Drop for ScriptScopeObserverGuard<'_> { fn drop(&mut self) { SCRIPT_SCOPE_OBSERVERS.with(|slot| slot.borrow_mut().retain(|item| item.key != self.key)); } }
+struct ScriptScopeActiveGuard;
+impl Drop for ScriptScopeActiveGuard { fn drop(&mut self) { SCRIPT_SCOPE_CALLBACK_ACTIVE.with(|active| active.set(false)); } }
+struct ScriptPreObserverGuard<'a> { key: &'static str, _access: PhantomData<CoreAccess<'a>>, _thread: PhantomData<std::rc::Rc<()>> }
+impl Drop for ScriptPreObserverGuard<'_> { fn drop(&mut self) { SCRIPT_PRE_OBSERVERS.with(|slot| slot.borrow_mut().retain(|item| item.key != self.key)); } }
+struct ScriptPreObserversActiveGuard;
+impl Drop for ScriptPreObserversActiveGuard { fn drop(&mut self) { SCRIPT_PRE_OBSERVERS_ACTIVE.with(|active| active.set(false)); } }
+struct ScriptObserverGuard<'a> { key: &'static str, _access: PhantomData<CoreAccess<'a>>, _thread: PhantomData<std::rc::Rc<()>> }
+impl Drop for ScriptObserverGuard<'_> { fn drop(&mut self) { SCRIPT_OBSERVERS.with(|slot| slot.borrow_mut().retain(|item| item.key != self.key)); } }
+struct ScriptObserversActiveGuard;
+impl Drop for ScriptObserversActiveGuard { fn drop(&mut self) { SCRIPT_OBSERVERS_ACTIVE.with(|active| active.set(false)); } }
+struct ScriptRedirectGuard<'a>(PhantomData<CoreAccess<'a>>);
+impl Drop for ScriptRedirectGuard<'_> { fn drop(&mut self) { SCRIPT_REDIRECT.with(|slot| slot.set(None)); } }
+struct ScriptHookGuard<'a>(PhantomData<CoreAccess<'a>>);
+impl Drop for ScriptHookGuard<'_> {
+    fn drop(&mut self) { SCRIPT_HOOK.with(|hook| hook.set(None)); }
+}
+struct ScriptHookActiveGuard;
+impl Drop for ScriptHookActiveGuard {
+    fn drop(&mut self) { SCRIPT_HOOK_ACTIVE.with(|active| active.set(false)); }
+}
+
+impl<'a> CoreAccess<'a> {
+    /// Temporarily substitute one interpreted function for one live receiver.
+    /// The caller must validate semantic and reflected frame compatibility.
+    /// The guard must not outlive the owner or any of the supplied records.
+    pub unsafe fn install_script_redirect(self, object: *mut UObject, from: *mut UFunction, to: *mut UFunction) -> RuntimeResult<impl Drop + 'a> {
+        if object.is_null() || from.is_null() || to.is_null() { return Err(RuntimeError::new("Null script redirect record")); }
+        let indices = unsafe { [(*object).index, (*from.cast::<UObject>()).index, (*to.cast::<UObject>()).index] };
+        if [object, from.cast(), to.cast()].into_iter().zip(indices).any(|(p, i)| i < 0 || self.object_at(i) != p.cast())
+            || unsafe { ((*from).function_flags | (*to).function_flags) & crate::vm_dispatch::FUNC_NATIVE != 0 } {
+            return Err(RuntimeError::new("Invalid script redirect record"));
+        }
+        SCRIPT_REDIRECT.with(|slot| {
+            if slot.get().is_some() { return Err(RuntimeError::new("Script redirect already installed")); }
+            slot.set(Some(ScriptRedirect { object, object_index: indices[0], from, from_index: indices[1], to, to_index: indices[2] }));
+            Ok(ScriptRedirectGuard(PhantomData))
+        })
+    }
+
+    /// Surround selected script bodies with paired enter/exit callbacks.
+    /// Callbacks must validate receiver and frame and cannot retain parameters.
+    /// The thread-bound guard must be dropped before the owner and records.
+    pub unsafe fn install_script_scope_observer(self, key: &'static str, functions: &[*mut UFunction], callback: ScriptScopeHook) -> RuntimeResult<impl Drop + 'a + use<'a>> {
+        if functions.is_empty() { return Err(RuntimeError::new("Script scope observer requires functions")); }
+        let mut entries = Vec::new();
+        for &function in functions {
+            if function.is_null() { return Err(RuntimeError::new("Null script scope observer function")); }
+            let object = function.cast::<UObject>();
+            let index = unsafe { (*object).index };
+            if index < 0 || self.object_at(index) != object.cast() || unsafe { (*function).function_flags } & crate::vm_dispatch::FUNC_NATIVE != 0 {
+                return Err(RuntimeError::new("Invalid script scope observer function"));
+            }
+            if !entries.iter().any(|&(p, _)| p == function) { entries.push((function, index)); }
+        }
+        SCRIPT_SCOPE_OBSERVERS.with(|slot| {
+            let mut observers = slot.borrow_mut();
+            if observers.iter().any(|item| item.key == key) { return Err(RuntimeError::new("Script scope observer key already installed")); }
+            observers.push(ScriptScopeObserver { key, functions: entries, callback });
+            Ok(ScriptScopeObserverGuard { key, _access: PhantomData, _thread: PhantomData })
+        })
+    }
+
+    /// Observe selected interpreted calls before their script bodies execute.
+    /// The callback may consume only a void call whose out parameters it has
+    /// handled. It must validate receiver identity and reflected frame layout.
+    /// Records must remain live until this thread-bound guard is dropped.
+    pub unsafe fn install_script_pre_observer(self, key: &'static str, functions: &[*mut UFunction], callback: ScriptPreCallHook) -> RuntimeResult<impl Drop + 'a + use<'a>> {
+        if functions.is_empty() { return Err(RuntimeError::new("Script pre-observer requires functions")); }
+        let mut entries = Vec::new();
+        for &function in functions {
+            if function.is_null() { return Err(RuntimeError::new("Null script pre-observer function")); }
+            let object = function.cast::<UObject>();
+            let index = unsafe { (*object).index };
+            if index < 0 || self.object_at(index) != object.cast() || unsafe { (*function).function_flags } & crate::vm_dispatch::FUNC_NATIVE != 0 {
+                return Err(RuntimeError::new("Invalid script pre-observer function"));
+            }
+            if !entries.iter().any(|&(p, _)| p == function) { entries.push((function, index)); }
+        }
+        SCRIPT_PRE_OBSERVERS.with(|slot| {
+            let mut observers = slot.borrow_mut();
+            if observers.iter().any(|item| item.key == key) { return Err(RuntimeError::new("Script pre-observer key already installed")); }
+            observers.push(ScriptPreObserver { key, functions: entries, callback });
+            Ok(ScriptPreObserverGuard { key, _access: PhantomData, _thread: PhantomData })
+        })
+    }
+
+    /// Install an independent scoped observer alongside the legacy post-call
+    /// hook. Callbacks must validate receiver identity and reflected frames.
+    /// The owner, functions and callback must outlive the returned guard.
+    pub unsafe fn install_script_observer(self, key: &'static str, functions: &[*mut UFunction], callback: ScriptPostCallHook) -> RuntimeResult<impl Drop + 'a + use<'a>> {
+        if functions.is_empty() { return Err(RuntimeError::new("Script observer requires functions")); }
+        let mut entries = Vec::new();
+        for &function in functions {
+            if function.is_null() { return Err(RuntimeError::new("Null script observer function")); }
+            let object = function.cast::<UObject>();
+            let index = unsafe { (*object).index };
+            if index < 0 || self.object_at(index) != object.cast() || unsafe { (*function).function_flags } & crate::vm_dispatch::FUNC_NATIVE != 0 {
+                return Err(RuntimeError::new("Invalid script observer function"));
+            }
+            if !entries.iter().any(|&(p, _)| p == function) { entries.push((function, index)); }
+        }
+        SCRIPT_OBSERVERS.with(|slot| {
+            let mut observers = slot.borrow_mut();
+            if observers.iter().any(|item| item.key == key) { return Err(RuntimeError::new("Script observer key already installed")); }
+            observers.push(ScriptObserver { key, functions: entries, callback });
+            Ok(ScriptObserverGuard { key, _access: PhantomData, _thread: PhantomData })
+        })
+    }
+
+    /// Install one engine-thread hook for exactly 2 reflected script functions.
+    /// Drop the returned guard before shutting down the owner or unloading its
+    /// packages. Installation fails rather than replacing an existing hook.
+    ///
+    /// # Safety
+    /// Both functions must be live, non-native records belonging to this owner
+    /// until the guard is dropped. The callback must validate receiver class and
+    /// reflected parameter layout before use, and must not retain raw borrows.
+    pub unsafe fn install_script_post_call_hook(
+        self, functions: [*mut UFunction; 2], callback: ScriptPostCallHook,
+    ) -> RuntimeResult<impl Drop + 'a> {
+        unsafe { self.install_script_post_call_hook_three([functions[0], functions[1], functions[1]], callback) }
+    }
+
+    /// Install a hook for three live interpreted functions on the engine thread.
+    /// The same lifetime and reentrancy rules as `install_script_post_call_hook` apply.
+    pub unsafe fn install_script_post_call_hook_three(
+        self, functions: [*mut UFunction; 3], callback: ScriptPostCallHook,
+    ) -> RuntimeResult<impl Drop + 'a> {
+        if functions.iter().any(|f| f.is_null()) {
+            return Err(RuntimeError::new("Script hook requires 3 functions"));
+        }
+        for function in functions {
+            let object = function.cast::<UObject>();
+            if self.object_at(unsafe { (*object).index }) != object.cast()
+                || unsafe { (*function).function_flags } & crate::vm_dispatch::FUNC_NATIVE != 0
+            {
+                return Err(RuntimeError::new("Script hook function is foreign or native"));
+            }
+        }
+        SCRIPT_HOOK.with(|slot| {
+            if slot.get().is_some() {
+                return Err(RuntimeError::new("Script hook already installed on this thread"));
+            }
+            slot.set(Some(ScriptHook { functions, callback }));
+            Ok(ScriptHookGuard(PhantomData))
+        })
+    }
+}
+
+fn script_post_call_hook(
+    access: CoreAccess<'_>, object: *mut UObject, function: *mut UFunction,
+    params: *const u8, size: usize,
+) -> RuntimeResult<()> {
+    let hook = SCRIPT_HOOK.with(Cell::get);
+    let Some(hook) = hook.filter(|hook| hook.functions.contains(&function)) else { return Ok(()); };
+    SCRIPT_HOOK_ACTIVE.with(|active| {
+        if active.replace(true) { return Ok(()); }
+        let _guard = ScriptHookActiveGuard;
+        unsafe { (hook.callback)(access, object, function, params, size) }
+    })
+}
+
+fn script_observers(access: CoreAccess<'_>, object: *mut UObject, function: *mut UFunction, params: *const u8, size: usize) -> RuntimeResult<()> {
+    let observers = SCRIPT_OBSERVERS.with(|slot| slot.borrow().iter().filter(|item| item.functions.iter().any(|(candidate, _)| *candidate == function)).cloned().collect::<Vec<_>>());
+    if observers.is_empty() { return Ok(()); }
+    SCRIPT_OBSERVERS_ACTIVE.with(|active| {
+        if active.replace(true) { return Ok(()); }
+        let _guard = ScriptObserversActiveGuard;
+        for item in observers {
+            if let Some((_, index)) = item.functions.iter().find(|(candidate, _)| *candidate == function) {
+                if access.object_at(*index) != function.cast() { return Err(RuntimeError::new("Stale script observer function")); }
+                unsafe { (item.callback)(access, object, function, params, size)?; }
+            }
+        }
+        Ok(())
+    })
+}
+
+fn script_pre_observers(access: CoreAccess<'_>, object: *mut UObject, function: *mut UFunction, params: *const u8, size: usize) -> RuntimeResult<ScriptPreCallDecision> {
+    let observers = SCRIPT_PRE_OBSERVERS.with(|slot| slot.borrow().iter().filter(|item| item.functions.iter().any(|(candidate, _)| *candidate == function)).cloned().collect::<Vec<_>>());
+    if observers.is_empty() { return Ok(ScriptPreCallDecision::Continue); }
+    SCRIPT_PRE_OBSERVERS_ACTIVE.with(|active| {
+        if active.replace(true) { return Ok(ScriptPreCallDecision::Continue); }
+        let _guard = ScriptPreObserversActiveGuard;
+        for item in observers {
+            if let Some((_, index)) = item.functions.iter().find(|(candidate, _)| *candidate == function) {
+                if access.object_at(*index) != function.cast() { return Err(RuntimeError::new("Stale script pre-observer function")); }
+                if unsafe { (item.callback)(access, object, function, params, size)? } == ScriptPreCallDecision::Consume {
+                    if unsafe { (*function).return_value_offset } != u16::MAX { return Err(RuntimeError::new("Cannot consume a script call with a return value")); }
+                    return Ok(ScriptPreCallDecision::Consume);
+                }
+            }
+        }
+        Ok(ScriptPreCallDecision::Continue)
+    })
+}
+
+fn script_scope_callback(access: CoreAccess<'_>, item: &ScriptScopeObserver, object: *mut UObject, function: *mut UFunction, params: *const u8, size: usize, phase: ScriptScopePhase) -> RuntimeResult<()> {
+    SCRIPT_SCOPE_CALLBACK_ACTIVE.with(|active| {
+        if active.replace(true) { return Ok(()); }
+        let _guard = ScriptScopeActiveGuard;
+        unsafe { (item.callback)(access, object, function, params, size, phase) }
+    })
+}
+fn script_scope_enter(access: CoreAccess<'_>, object: *mut UObject, function: *mut UFunction, params: *const u8, size: usize) -> RuntimeResult<Vec<ScriptScopeObserver>> {
+    if SCRIPT_SCOPE_CALLBACK_ACTIVE.with(Cell::get) { return Ok(Vec::new()); }
+    let candidates = SCRIPT_SCOPE_OBSERVERS.with(|slot| slot.borrow().iter().filter(|item| item.functions.iter().any(|(candidate, _)| *candidate == function)).cloned().collect::<Vec<_>>());
+    let mut entered = Vec::new();
+    for item in candidates {
+        let index = item.functions.iter().find(|(candidate, _)| *candidate == function).unwrap().1;
+        let result = if access.object_at(index) != function.cast() { Err(RuntimeError::new("Stale script scope function")) }
+            else { script_scope_callback(access, &item, object, function, params, size, ScriptScopePhase::Enter) };
+        if let Err(error) = result {
+            let _ = script_scope_exit(access, &entered, object, function, params, size, false);
+            return Err(error);
+        }
+        entered.push(item);
+    }
+    Ok(entered)
+}
+fn script_scope_exit(access: CoreAccess<'_>, entered: &[ScriptScopeObserver], object: *mut UObject, function: *mut UFunction, params: *const u8, size: usize, succeeded: bool) -> RuntimeResult<()> {
+    let mut failure = None;
+    for item in entered.iter().rev() {
+        if let Err(error) = script_scope_callback(access, item, object, function, params, size, ScriptScopePhase::Exit { succeeded }) {
+            if failure.is_none() { failure = Some(error); }
+        }
+    }
+    if let Some(error) = failure { Err(error) } else { Ok(()) }
+}
 
 /// Applies UObject::ProcessEvent's source-ordered entry policy. VM function
 /// calls use their separate FFrame dispatch path and must not pass through here.
@@ -648,6 +927,15 @@ impl VmHost for VmHostState<'_> {
         execute_flow(self.access, vm, operation, object, frame, result)
     }
 
+    fn redirect_function(&self, object: *mut c_void, function: *mut UFunction) -> RuntimeResult<*mut UFunction> {
+        let redirect = SCRIPT_REDIRECT.with(Cell::get);
+        let Some(r) = redirect.filter(|r| r.object.cast::<c_void>() == object && r.from == function) else { return Ok(function); };
+        if self.access.object_at(r.object_index) != r.object.cast() || self.access.object_at(r.from_index) != r.from.cast() || self.access.object_at(r.to_index) != r.to.cast() {
+            return Err(RuntimeError::new("Stale script redirect"));
+        }
+        Ok(r.to)
+    }
+
     fn event_boundary(
         &self,
         phase: crate::vm_owner::EventBoundary,
@@ -663,9 +951,28 @@ impl VmHost for VmHostState<'_> {
         frame: *mut hp2_abi::engine::generated::FFrame, result: *mut c_void,
         from_script_call: bool, execute: impl FnOnce() -> RuntimeResult<()>,
     ) -> RuntimeResult<()> {
+        let mut executed = false;
         self.access.with_interpreted_call(
-            object.cast(), function, frame, result, from_script_call, execute,
-        )
+            object.cast(), function, frame, result, from_script_call, || {
+                let params = unsafe { (*frame).locals.cast::<u8>() };
+                let size = usize::from(unsafe { (*function).parms_size });
+                if script_pre_observers(self.access, object.cast(), function, params, size)? == ScriptPreCallDecision::Consume { return Ok(()); }
+                let scopes = script_scope_enter(self.access, object.cast(), function, params, size)?;
+                let result = execute();
+                let exit = script_scope_exit(self.access, &scopes, object.cast(), function, params, size, result.is_ok());
+                result?;
+                exit?;
+                executed = true;
+                Ok(())
+            },
+        )?;
+        if executed {
+            let params = unsafe { (*frame).locals.cast::<u8>() };
+            let size = usize::from(unsafe { (*function).parms_size });
+            if from_script_call { script_post_call_hook(self.access, object.cast(), function, params, size)?; }
+            script_observers(self.access, object.cast(), function, params, size)?;
+        }
+        Ok(())
     }
 
     fn check_runaway(

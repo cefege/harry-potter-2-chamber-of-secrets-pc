@@ -3,9 +3,10 @@
 # runs can be pointed at an alternate data root without editing this file.
 set(HP2_TEST_DATA_ROOT "${HP2_UNREAL_ROOT}" CACHE PATH
     "Prototype data root passed to behavioral tests via -datadir/--data-root")
-set(HP2_CPP_ORACLE_APP
-    "${PROJECT_SOURCE_DIR}/dist/macos-arm64/HarryPotter2.app" CACHE PATH
-    "Independent first-party C++ oracle app bundle used by parity tests")
+# A packaged Rust product must never become the default native reference.
+# CACHE without FORCE preserves existing values for explicit owner review.
+set(HP2_CPP_ORACLE_APP "" CACHE PATH
+    "Candidate C++ oracle path; not acceptance, native parity is blocked")
 
 # The Rust workspace builds the shipping products through corrosion: hp2_game_rust,
 # hp2_ucc_rust, and the standalone hp2_import importer CLI. Each is imported and
@@ -22,10 +23,6 @@ corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml"
         "${PROJECT_SOURCE_DIR}/crates/hp2-import/Cargo.toml")
     hp2_enable_cargo_provenance(hp2_ucc_rust)
     hp2_enable_cargo_provenance(hp2_game_rust)
-    option(HP2_EXPERIMENTAL_IN_GAME_OVERLAY "Enable the unverified in-game overlay in hp2_game_rust" OFF)
-    if(HP2_EXPERIMENTAL_IN_GAME_OVERLAY)
-        corrosion_set_features(hp2_game_rust FEATURES hp2-engine/in-game-overlay)
-    endif()
     hp2_enable_cargo_provenance(hp2_import)
     corrosion_set_features(hp2_import FEATURES archive)
     # Corrosion's binary linker does not traverse CMake INTERFACE libraries.
@@ -33,7 +30,7 @@ corrosion_import_crate(MANIFEST_PATH "${PROJECT_SOURCE_DIR}/Cargo.toml"
     corrosion_link_libraries(hp2_import
         archive_static zlibstatic hp2_bzip2 liblzma)
     corrosion_link_libraries(hp2_game_rust
-        SDL2::SDL2-static OpenAL::OpenAL archive_static nfd::nfd
+        SDL2::SDL2-static OpenAL::OpenAL archive_static
         zlibstatic hp2_bzip2 liblzma)
     if(APPLE)
         # Corrosion does not propagate SDL's framework dependencies either.
@@ -135,7 +132,8 @@ function(hp2_add_behavior_test test_name target)
         set(_hp2_test_tmp "${_hp2_tmp_alias}")
     endif()
 
-    add_test(NAME "${test_name}" COMMAND "${target}" ${ARGN})
+    hp2_prepare_cargo_test_command(_hp2_test_command "${target}" ${ARGN})
+    add_test(NAME "${test_name}" COMMAND ${_hp2_test_command})
     set(_hp2_test_env
         "HOME=${_hp2_test_home}"
         "TMPDIR=${_hp2_test_tmp}"
@@ -203,6 +201,32 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
         "--importer" "$<TARGET_FILE:hp2_import>"
     )
     set_tests_properties(import_cli_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(import_path_process_contracts "${Python3_EXECUTABLE}" -B
+        "${PROJECT_SOURCE_DIR}/Tests/ImportPathSafetyTests.py"
+        "--importer" "$<TARGET_FILE:hp2_import>"
+    )
+    set_tests_properties(import_path_process_contracts PROPERTIES LABELS "fast;data-none")
+
+# Metadata-only probes enforce the pointer contract without linking SDL or
+# executing an invalid window pointer. Use the configured, pinned compiler.
+hp2_add_behavior_test(platform_window_pointer_contracts "${Python3_EXECUTABLE}" -B
+    "${PROJECT_SOURCE_DIR}/Tests/WindowPointerSafetyTests.py"
+    "--source" "${PROJECT_SOURCE_DIR}/crates/hp2-platform/src/window_lifecycle.rs"
+    "--rustc" "$<TARGET_FILE:Rust::Rustc>"
+)
+set_tests_properties(platform_window_pointer_contracts PROPERTIES LABELS "fast;data-none")
+
+# Fake NFD/SDL calls exercise actual picker source in isolated processes. The
+# pthread predicate is real; these checks do not open or qualify native dialogs.
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    hp2_add_behavior_test(platform_picker_admission_contracts "${Python3_EXECUTABLE}" -B
+        "${PROJECT_SOURCE_DIR}/Tests/PickerSafetyTests.py"
+        "--source" "${PROJECT_SOURCE_DIR}/crates/hp2-platform/src/picker.rs"
+        "--rustc" "$<TARGET_FILE:Rust::Rustc>"
+        "--clang" "${CMAKE_C_COMPILER}"
+    )
+    set_tests_properties(platform_picker_admission_contracts PROPERTIES LABELS "fast;data-none")
+endif()
 
 # Deterministic build/observation fingerprint: writes out/<preset>/
 # hp2-state.json at configure time (toolchain, capability gates, data
@@ -230,6 +254,34 @@ else()
     set(HP2_CARGO_HOME "$ENV{HOME}/.cargo")
 endif()
 
+hp2_add_behavior_test(import_path_safety_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/import_path_safety_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-import
+    --lib
+    path_safety_
+    --
+    --test-threads=1
+)
+set_tests_properties(import_path_safety_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(import_library_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/import_library_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-import
+    --lib
+    --
+    --test-threads=1
+)
+set_tests_properties(import_library_contracts PROPERTIES LABELS "fast;data-none")
+
 hp2_add_behavior_test(core_config_safety "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_config_safety/Cargo"
@@ -242,6 +294,21 @@ hp2_add_behavior_test(core_config_safety "${CMAKE_COMMAND}" -E env
     --
     --test-threads=1
 )
+
+hp2_add_behavior_test(core_owner_paths_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/core_owner_paths_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core
+    --test=runtime_owner_paths_success
+    --test=runtime_owner_paths_five_paths
+    --
+    --test-threads=1
+)
+set_tests_properties(core_owner_paths_contracts PROPERTIES LABELS "fast;data-none")
 
 hp2_add_behavior_test(engine_settings_launcher_parity "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
@@ -268,6 +335,195 @@ hp2_add_behavior_test(engine_settings_config "${CMAKE_COMMAND}" -E env
     --
     --test-threads=1
 )
+
+# These focused tests share the existing settings Cargo cache to avoid another
+# full workspace dependency tree. Cargo serializes concurrent writers itself.
+set(HP2_STOCK_FPS_TEST_CARGO_DIR "${CMAKE_BINARY_DIR}/Testing/HP2/engine_settings_config/Cargo")
+hp2_add_behavior_test(stock_fps_adapter_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib stock_fps_menu::tests -- --test-threads=1
+)
+set_tests_properties(stock_fps_adapter_contracts PROPERTIES LABELS "fast;data-none")
+
+hp2_add_behavior_test(stock_graphics_menu_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib stock_graphics_menu::tests -- --test-threads=1
+)
+set_tests_properties(stock_graphics_menu_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(stock_graphics_settings "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --test stock_graphics_settings -- --test-threads=1
+)
+set_tests_properties(stock_graphics_settings PROPERTIES LABELS "fast;data-none")
+
+hp2_add_behavior_test(stock_graphics_gpu_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --test stock_graphics_gpu -- --test-threads=1)
+set_tests_properties(stock_graphics_gpu_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(stock_graphics_gpu_backend_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib stock_graphics_gpu_backend::tests -- --test-threads=1)
+set_tests_properties(stock_graphics_gpu_backend_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(live_texture_detail_policy_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib live_texture_detail::policy::tests -- --test-threads=1)
+set_tests_properties(live_texture_detail_policy_contracts PROPERTIES LABELS "fast;data-none")
+if(HP2_TEST_DATA_PRESENT)
+    hp2_add_behavior_test(stock_resolution_lifecycle_vm "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --lib stock_resolution_lifecycle::tests -- --test-threads=1)
+    set_tests_properties(stock_resolution_lifecycle_vm PROPERTIES LABELS "fast;data-prototype")
+    hp2_add_behavior_test(stock_render_scale_slider_vm "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --features=renderer-wgpu --lib stock_render_scale_control::tests::loaded_slider -- --ignored --test-threads=1)
+    set_tests_properties(stock_render_scale_slider_vm PROPERTIES LABELS "fast;data-prototype")
+    hp2_add_behavior_test(stock_input_owner_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --lib input_owner:: -- --test-threads=1)
+    set_tests_properties(stock_input_owner_contracts PROPERTIES LABELS "fast;data-prototype")
+endif()
+
+foreach(_hp2_python_contract IN ITEMS
+    RetailStockSettingsContracts RetailStockAdvancedGraphicsContracts RetailStockGraphicsPopupContracts
+    RetailDisplayModeContracts RetailAdvancedGraphicsFixtureTests RetailModernResolutionFixtureTests)
+    hp2_add_behavior_test("${_hp2_python_contract}" "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/${_hp2_python_contract}.py")
+    set_tests_properties("${_hp2_python_contract}" PROPERTIES LABELS "fast;data-none")
+endforeach()
+if(HP2_TEST_DATA_PRESENT)
+    hp2_add_behavior_test(StockInputBytecodeTests "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/StockInputBytecodeTests.py")
+    set_tests_properties(StockInputBytecodeTests PROPERTIES LABELS "fast;data-prototype")
+endif()
+
+# Render-scale checks use Cargo test binaries only; they never rebuild the game.
+hp2_add_behavior_test(stock_render_scale_policy "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --test=settings_policy_contracts render_scale_accepts_slider_steps_and_legacy_choice -- --test-threads=1
+)
+hp2_add_behavior_test(stock_render_scale_control "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --features=renderer-wgpu --lib stock_render_scale_ -- --test-threads=1
+)
+# These include ignored tests that create a real GPU device. Serialize them
+# with the other GPU behavior tests and reuse the shared Cargo test cache.
+hp2_add_behavior_test(live_graphics_wrapper_gpu "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --features=renderer-wgpu --lib
+    render_device_owner::live_graphics_wrapper_tests -- --include-ignored --test-threads=1
+)
+set_tests_properties(live_graphics_wrapper_gpu PROPERTIES
+    LABELS "integration;data-none;renderer;wgpu" RESOURCE_LOCK hp2_gpu TIMEOUT 600)
+hp2_add_behavior_test(stock_render_scale_launcher_parity "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --test=settings_launcher_parity -- --test-threads=1
+)
+hp2_add_behavior_test(stock_render_scale_replay_contracts "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/RetailStockRenderScaleContracts.py")
+set_tests_properties(stock_render_scale_policy stock_render_scale_control stock_render_scale_launcher_parity stock_render_scale_replay_contracts
+    PROPERTIES LABELS "fast;data-none")
+
+# Focused stock resolution contracts. These do not launch the game or require
+# SDL display hardware; the opt-in retail replay below covers the live menu.
+hp2_add_behavior_test(stock_resolution_popup_callbacks "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib stock_menu_extensions::tests -- --test-threads=1
+)
+set_tests_properties(stock_resolution_popup_callbacks PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(stock_resolution_menu_policy "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib stock_resolution_menu::tests -- --test-threads=1
+)
+set_tests_properties(stock_resolution_menu_policy PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(stock_resolution_discovery_policy "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib camera_owner::sdl_display_exec::tests -- --test-threads=1
+)
+set_tests_properties(stock_resolution_discovery_policy PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(stock_resolution_replay_contracts "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/RetailModernResolutionContracts.py")
+set_tests_properties(stock_resolution_replay_contracts PROPERTIES LABELS "fast;data-none")
+
+option(HP2_ENABLE_RETAIL_RESOLUTION_VISUAL "Enable the windowed retail resolution replay and visual-review captures" OFF)
+if(HP2_ENABLE_RETAIL_RESOLUTION_VISUAL)
+    if(NOT EXISTS "${HP2_TEST_DATA_ROOT}/overlay-manifest.json")
+        message(FATAL_ERROR "HP2_ENABLE_RETAIL_RESOLUTION_VISUAL requires a retail overlay manifest")
+    endif()
+    hp2_add_behavior_test(stock_resolution_retail_visual "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/RetailModernResolutionSmoke.py"
+        "--data-root=${HP2_TEST_DATA_ROOT}"
+        "--engine-bin=${CMAKE_BINARY_DIR}/hp2_game_rust"
+        --allow-window)
+    set_tests_properties(stock_resolution_retail_visual PROPERTIES LABELS "data-retail;renderer;visual-review" RUN_SERIAL TRUE TIMEOUT 300)
+endif()
+
+# The real VM hook fixture copies these prototype packages into the isolated
+# artifact root; it does not require or claim verified retail data.
+if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/System/Core.u"
+   AND EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/System/Default.ini"
+   AND EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/System/DefUser.ini")
+    hp2_add_behavior_test(core_script_post_call_hook "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-core --test=script_post_call_hook -- --test-threads=1
+    )
+    set_tests_properties(core_script_post_call_hook PROPERTIES LABELS "fast;data-prototype")
+endif()
+
+hp2_add_behavior_test(stock_fps_replay_contracts "${Python3_EXECUTABLE}"
+    "${PROJECT_SOURCE_DIR}/Tests/RetailStockFpsContracts.py"
+)
+set_tests_properties(stock_fps_replay_contracts PROPERTIES LABELS "fast;data-none")
+
+hp2_add_behavior_test(wgpu_frame_checkpoint_filter "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-wgpu --lib checkpoint_filter -- --test-threads=1
+)
+set_tests_properties(wgpu_frame_checkpoint_filter PROPERTIES LABELS "fast;data-none")
 
 hp2_add_behavior_test(engine_settings_policy "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
@@ -296,25 +552,14 @@ hp2_add_behavior_test(input_binding_foundation "${CMAKE_COMMAND}" -E env
 )
 set_tests_properties(input_binding_foundation PROPERTIES LABELS "unit;data-none")
 
-hp2_add_behavior_test(overlay_mouse_capture_arbitration "${CMAKE_COMMAND}" -E env
+hp2_add_behavior_test(display_fullscreen_mouse "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
-    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/overlay_mouse_capture_arbitration/Cargo"
-    "${HP2_CARGO_EXECUTABLE}" test
-    --locked --offline
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_fullscreen_mouse/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
     "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
-    --package=hp2-platform --features=overlay-mouse --lib capture_arbitration::tests
+    --package=hp2-platform --lib fullscreen_mouse_mapping
 )
-set_tests_properties(overlay_mouse_capture_arbitration PROPERTIES LABELS "unit;data-none")
-
-hp2_add_behavior_test(overlay_mouse_focus_contracts "${CMAKE_COMMAND}" -E env
-    "CARGO_HOME=${HP2_CARGO_HOME}"
-    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/overlay_mouse_capture_arbitration/Cargo"
-    "${HP2_CARGO_EXECUTABLE}" test
-    --locked --offline
-    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
-    --package=hp2-platform --features=overlay-mouse --lib focus
-)
-set_tests_properties(overlay_mouse_focus_contracts PROPERTIES LABELS "unit;data-none")
+set_tests_properties(display_fullscreen_mouse PROPERTIES LABELS "unit;data-none")
 
 hp2_add_behavior_test(input_binding_analysis "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
@@ -383,34 +628,6 @@ hp2_add_behavior_test(input_binding_config "${CMAKE_COMMAND}" -E env
     --test=binding_config
 )
 set_tests_properties(input_binding_config PROPERTIES LABELS "unit;data-none")
-
-hp2_add_behavior_test(in_game_overlay_contracts "${CMAKE_COMMAND}" -E env
-    "CARGO_HOME=${HP2_CARGO_HOME}"
-    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/in_game_overlay_contracts/Cargo"
-    "${HP2_CARGO_EXECUTABLE}" test
-    --locked
-    --offline
-    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
-    --package=hp2-engine
-    --features=in-game-overlay
-    --lib
-    overlay
-)
-set_tests_properties(in_game_overlay_contracts PROPERTIES LABELS "unit;data-none")
-
-hp2_add_behavior_test(overlay_settings_integration "${CMAKE_COMMAND}" -E env
-    "CARGO_HOME=${HP2_CARGO_HOME}"
-    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/overlay_settings_integration/Cargo"
-    "${HP2_CARGO_EXECUTABLE}" test
-    --locked
-    --offline
-    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
-    --package=hp2-engine
-    --features=in-game-overlay
-    --lib
-    overlay_settings_integration
-)
-set_tests_properties(overlay_settings_integration PROPERTIES LABELS "integration;data-none")
 
 hp2_add_behavior_test(core_parse_integer "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
@@ -968,11 +1185,34 @@ if(APPLE)
         --test=actor_screenshot_vm_native_owner_contracts
     )
     set_tests_properties(actor_screenshot_vm_native_owner_contracts PROPERTIES LABELS "runtime;data-none")
+    if(HP2_TEST_DATA_PRESENT)
+        hp2_add_behavior_test(display_command_routing "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+            "CARGO_ENCODED_RUSTFLAGS=${HP2_B5_GPU_RUSTFLAGS}"
+            "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+            "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-engine --features=sdl,renderer-wgpu --lib
+            camera_owner::sdl_display_exec::tests -- --test-threads=1
+        )
+        set_tests_properties(display_command_routing PROPERTIES
+            LABELS "integration;data-prototype;renderer" TIMEOUT 600)
+    endif()
+    hp2_add_behavior_test(display_fullscreen_gpu "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_fullscreen_gpu/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-wgpu --lib fullscreen_ -- --ignored --test-threads=1
+    )
+    set_tests_properties(display_fullscreen_gpu PROPERTIES
+        LABELS "integration;data-none;renderer;wgpu" RESOURCE_LOCK hp2_gpu TIMEOUT 600)
     # Integration tests also build Cargo's game binary: link the same CMake-owned
     # SDK products and frameworks as the native-free game, not a second SDK build.
     set(HP2_GAME_TEST_LINK_FLAGS)
     foreach(HP2_GAME_TEST_LIBRARY IN ITEMS
-            OpenAL::OpenAL archive_static nfd::nfd zlibstatic hp2_bzip2 liblzma)
+            OpenAL::OpenAL archive_static zlibstatic hp2_bzip2 liblzma)
         list(APPEND HP2_GAME_TEST_LINK_FLAGS
             "-Clink-arg=$<TARGET_FILE:${HP2_GAME_TEST_LIBRARY}>")
     endforeach()
@@ -986,20 +1226,25 @@ if(APPLE)
     list(JOIN HP2_GAME_TEST_LINK_FLAGS "${HP2_B5_RUSTFLAG_SEPARATOR}" HP2_GAME_TEST_LINK_FLAGS)
     set(HP2_GAME_TEST_RUSTFLAGS
         "${HP2_B5_GPU_RUSTFLAGS}${HP2_B5_RUSTFLAG_SEPARATOR}${HP2_GAME_TEST_LINK_FLAGS}")
-    hp2_add_behavior_test(launcher_ui_contracts "${CMAKE_COMMAND}" -E env
+    hp2_add_behavior_test(game_boot_unwind_contracts "${CMAKE_COMMAND}" -E env
         "CARGO_HOME=${HP2_CARGO_HOME}"
-        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/launcher_ui_contracts/Cargo"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/game_boot_unwind_contracts/Cargo"
         "CARGO_ENCODED_RUSTFLAGS=${HP2_GAME_TEST_RUSTFLAGS}"
-        "${HP2_CARGO_EXECUTABLE}" test
-        --locked
-        --offline
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
         "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
-        --package=hp2-game
-        --test=launcher_ui_contracts
-        --
-        --test-threads=1
+        --package=hp2-game --bin=hp2_game_rust
+        boot_services::unwind_tests::
+        -- --test-threads=1 --nocapture
     )
-    set_tests_properties(launcher_ui_contracts PROPERTIES LABELS "fast;data-none")
+    set_tests_properties(game_boot_unwind_contracts PROPERTIES
+        LABELS "integration;data-none"
+        FIXTURES_REQUIRED game_boot_unwind_source_order
+    )
+    hp2_add_behavior_test(no_startup_launcher_contracts "${Python3_EXECUTABLE}"
+        "${PROJECT_SOURCE_DIR}/Tests/NoStartupLauncherTests.py"
+        "$<TARGET_FILE:hp2_game_rust>"
+    )
+    set_tests_properties(no_startup_launcher_contracts PROPERTIES LABELS "fast;data-none")
     hp2_add_behavior_test(verification_audio_contracts "${CMAKE_COMMAND}" -E env
         "CARGO_HOME=${HP2_CARGO_HOME}"
         "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/verification_audio_contracts/Cargo"
@@ -1015,6 +1260,107 @@ if(APPLE)
         -- --test-threads=1
     )
     set_tests_properties(verification_audio_contracts PROPERTIES LABELS "runtime;data-none")
+endif()
+
+# Both tests exercise SDL through the CMake-owned static archive. Reuse the
+# display command Cargo cache instead of allocating another dependency tree.
+if(APPLE)
+    set(HP2_AUDIT_SDL_RUSTFLAGS "${HP2_B5_GPU_RUSTFLAGS}")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    get_target_property(_hp2_audit_sdl_dir SDL2::SDL2-static BINARY_DIR)
+    execute_process(COMMAND sh "${_hp2_audit_sdl_dir}/sdl2-config" --static-libs
+        RESULT_VARIABLE _hp2_audit_sdl_status OUTPUT_VARIABLE _hp2_audit_sdl_text OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT _hp2_audit_sdl_status EQUAL 0)
+        message(FATAL_ERROR "Cannot resolve SDL static dependencies for audit tests")
+    endif()
+    separate_arguments(_hp2_audit_sdl_items UNIX_COMMAND "${_hp2_audit_sdl_text}")
+    set(_hp2_audit_sdl_flags "-Clink-arg=$<TARGET_FILE:SDL2::SDL2-static>")
+    foreach(_hp2_audit_item IN LISTS _hp2_audit_sdl_items)
+        if(_hp2_audit_item MATCHES "^(-l|-Wl,|-pthread)" AND NOT _hp2_audit_item STREQUAL "-lSDL2")
+            list(APPEND _hp2_audit_sdl_flags "-Clink-arg=${_hp2_audit_item}")
+        endif()
+    endforeach()
+    string(ASCII 31 _hp2_audit_separator)
+    list(JOIN _hp2_audit_sdl_flags "${_hp2_audit_separator}" HP2_AUDIT_SDL_RUSTFLAGS)
+endif()
+if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    hp2_add_behavior_test(stock_resolution_transaction_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --features=sdl,renderer-wgpu --lib stock_resolution_transaction::tests -- --test-threads=1)
+    set_tests_properties(stock_resolution_transaction_contracts PROPERTIES LABELS "fast;data-none")
+    if(HP2_TEST_DATA_PRESENT)
+        hp2_add_behavior_test(stock_resolution_lifecycle_vm_sdl "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+            "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}" "HP2_CORE_DATA_ROOT=${HP2_TEST_DATA_ROOT}"
+            "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-engine --features=sdl,renderer-wgpu --lib stock_resolution_lifecycle::tests -- --test-threads=1)
+        set_tests_properties(stock_resolution_lifecycle_vm_sdl PROPERTIES LABELS "fast;data-prototype")
+    endif()
+    hp2_add_behavior_test(stock_display_transition_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --features=sdl,renderer-wgpu --lib stock_display_transition::tests -- --test-threads=1)
+    set_tests_properties(stock_display_transition_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(platform_live_display_mode_sdl "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-platform --features=sdl --lib live_display_mode::tests -- --test-threads=1)
+    set_tests_properties(platform_live_display_mode_sdl PROPERTIES LABELS "fast;data-none" TIMEOUT 120)
+endif()
+# Bounded policy characterization, initially qualified on macOS only.
+if(APPLE)
+    hp2_add_behavior_test(render_lifecycle_failure_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/render_lifecycle_failure_contracts/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-render --lib
+        lifecycle::tests::every_lifecycle_failure_returns_its_error_and_stops_at_that_leaf
+        -- --exact --test-threads=1
+    )
+    set_tests_properties(render_lifecycle_failure_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(render_pre_render_failure_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/render_pre_render_failure_contracts/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-render --lib
+        pre_render::tests::every_pre_render_failure_returns_its_error_and_stops_at_that_leaf
+        -- --exact --test-threads=1
+    )
+    set_tests_properties(render_pre_render_failure_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(render_precache_failure_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/render_precache_failure_contracts/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-render --lib
+        precache::tests::precache_stops_at_each_failed_query_without_later_callbacks
+        -- --exact --test-threads=1
+    )
+    set_tests_properties(render_precache_failure_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(platform_client_post_edit_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/platform_client_post_edit_contracts/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-platform --lib client_policy::client_post_edit_contracts::
+        -- --test-threads=1
+    )
+    set_tests_properties(platform_client_post_edit_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(platform_viewport_capture_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/platform_viewport_capture_contracts/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-platform --lib viewport_policy::viewport_capture_contracts::
+        -- --test-threads=1
+    )
+    set_tests_properties(platform_viewport_capture_contracts PROPERTIES LABELS "fast;data-none")
 endif()
 hp2_add_behavior_test(core_unix_file_manager "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
@@ -2701,7 +3047,60 @@ if(APPLE)
             --
             --test-threads=1
         )
+        hp2_add_behavior_test(texture_p8_bytes_contracts "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/texture_p8_bytes_contracts/Cargo"
+            "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-wgpu --lib
+            texture::tests::p8_owned_bytes_match_reference_and_expected_texels
+            -- --exact --test-threads=1
+        )
+        set_tests_properties(texture_p8_bytes_contracts PROPERTIES LABELS "fast;data-none")
+        # Explicitly execute the ignored device test. Missing GPU support is a
+        # failure, not a skip. This is readback, not real surface presentation.
+        hp2_add_behavior_test(texture_p8_upload_round_trip "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/texture_p8_upload_round_trip/Cargo"
+            "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-wgpu --lib
+            texture::tests::p8_owned_bytes_upload_round_trips_through_render_loop
+            -- --ignored --exact --test-threads=1
+        )
+        set_tests_properties(texture_p8_upload_round_trip PROPERTIES
+            LABELS "integration;data-none;renderer;wgpu"
+            RESOURCE_LOCK hp2_gpu
+            TIMEOUT 600
+        )
+        hp2_add_behavior_test(engine_p8_upload_contracts "${CMAKE_COMMAND}" -E env
+            "CARGO_HOME=${HP2_CARGO_HOME}"
+            "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_p8_upload_contracts/Cargo"
+            "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+            "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+            --package=hp2-engine --features=renderer-wgpu --lib
+            render_device_owner::p8_upload_tests::engine_p8_upload_policy_cache_and_errors
+            -- --ignored --exact --test-threads=1
+        )
+        set_tests_properties(engine_p8_upload_contracts PROPERTIES
+            LABELS "integration;data-none;renderer;wgpu"
+            RESOURCE_LOCK hp2_gpu
+            TIMEOUT 600
+        )
     endif()
+    hp2_add_behavior_test(wgpu_world_scale_gpu "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/wgpu_surface_round_trip/Cargo"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-wgpu --lib world_scale
+        -- --include-ignored --test-threads=1
+    )
+    set_tests_properties(wgpu_world_scale_gpu PROPERTIES
+        LABELS "integration;data-none;renderer;wgpu"
+        RESOURCE_LOCK hp2_gpu
+        TIMEOUT 600
+    )
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     # hp2_add_behavior_test (not a bare add_test): bare add_test sets no
     # HP2_ARTIFACT_DIR, so run_wgpu_smoke.py's own HP2_ARTIFACT_DIR

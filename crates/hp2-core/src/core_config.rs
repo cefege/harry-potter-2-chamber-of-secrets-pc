@@ -179,6 +179,36 @@ impl CoreConfig {
         Ok(())
     }
 
+    /// Publishes one scalar key without publishing other pending changes.
+    /// Reject a dirty target file, because rewriting it would publish unrelated
+    /// keys from the cache. Dirty entries for other files remain untouched.
+    pub(crate) fn publish_one(&mut self, filename: Option<&[u32]>, section: &[u32], key: &[u32], value: &[u32]) -> RuntimeResult<()> {
+        let (cache_key, path) = self.resolve_filename(filename)?;
+        let index = self.file_index(&cache_key, &path, true)?
+            .ok_or_else(|| RuntimeError::new("Configuration file was not created"))?;
+        if self.files[index].dirty {
+            return Err(RuntimeError::new("Cannot publish one property while its config file has pending changes"));
+        }
+        if self.files[index].no_save {
+            return Err(RuntimeError::new("Cannot publish a property to a detached config file"));
+        }
+        let mut staged = self.clone();
+        staged.set(filename, section, key, value)?;
+        if staged.get(filename, section, key)?.as_deref() != Some(terminated(value)) {
+            return Err(RuntimeError::new("Configuration cache rejected the requested property value"));
+        }
+        if !staged.files[index].dirty && read_config_bytes(&path)? != staged.files[index].original {
+            return Err(RuntimeError::new("Configuration file changed externally"));
+        }
+        // flush uses raw cache keys, not filename aliases.
+        staged.flush(Some(&cache_key), false)?;
+        if staged.files[index].dirty {
+            return Err(RuntimeError::new("Configuration property was not published"));
+        }
+        self.files[index] = staged.files[index].clone();
+        Ok(())
+    }
+
     /// Flushes cached files, optionally selecting a filename and reloading afterward.
     /// Each dirty file is staged and renamed separately; this is not a multi-file
     /// transaction. External byte changes are checked, but a non-cooperating

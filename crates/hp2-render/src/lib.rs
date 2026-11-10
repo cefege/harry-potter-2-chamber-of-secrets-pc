@@ -1,7 +1,9 @@
-//! Rust port of the engine's `Render/Src` subsystem.
+//! Renderer policies and algorithms used by the Rust engine.
 //!
-//! Each C++ file is ported line-by-line; the C++ side keeps only the URender
-//! shell and trampolines that forward into the exports in `hp2-ffi`.
+//! `hp2-engine/src/render_owner.rs` owns the canonical renderer graph and calls
+//! lifecycle, pre-render, post-render, and precache policies. Its game-draw
+//! caller is `hp2-engine/src/game_draw_owner.rs`. The Engine render-device owner
+//! retains runtime and device resources; `hp2-wgpu` supplies GPU implementations.
 
 pub mod actor_sprite;
 pub mod console;

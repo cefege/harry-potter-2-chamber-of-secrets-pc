@@ -212,7 +212,15 @@ impl crate::pawn_native_files::ConsoleCommandOps for PlayerConsole<'_, '_, '_> {
     type Error = RuntimeError;
     type Output = bool;
     unsafe fn player_exec(&mut self) -> RuntimeResult<bool> {
-        unsafe { crate::player_exec_owner::exec(self.access, (*self.pawn).player.cast(), self.command, self.output) }
+        let player = unsafe { (*self.pawn).player };
+        // ConsoleCommand calls the virtual UPlayer::Exec. A viewport must see
+        // input and viewport commands first; viewport dispatch then invokes the
+        // qualified UPlayer route once, without re-entering this method.
+        if !player.is_null() && unsafe { is_a(self.access, player.cast(), "Engine.Viewport")? } {
+            unsafe { crate::camera_owner::exec(self.access, player.cast(), self.command, self.output) }
+        } else {
+            unsafe { crate::player_exec_owner::exec(self.access, player.cast(), self.command, self.output) }
+        }
     }
     unsafe fn engine_exec(&mut self) -> RuntimeResult<bool> {
         let engine = unsafe { actor_engine(self.pawn.cast())? };

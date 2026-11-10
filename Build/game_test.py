@@ -33,6 +33,7 @@ import time
 from typing import Any, BinaryIO, Callable, Iterator, Sequence
 
 import hp2_proc
+import oracle_preflight
 import actor_transition_ledger
 import creature_generator_trace
 import fire_texture_trace
@@ -1810,6 +1811,8 @@ def _run_fidelity_side(
     actor_slot_dump_path: Path | None = None,
     rng_seed: int | None = None,
 ) -> tuple[dict[str, object], dict[str, dict[str, object]], dict[str, object] | None]:
+    if name == "cpp":
+        oracle_preflight.require_native_oracle()
     repo_root = _repo_root()
     side_root = artifact_root / name
     side_root.mkdir(parents=True, exist_ok=True)
@@ -1936,6 +1939,7 @@ def run_paired_game(
     fire_texture_trace_dir: Path | None = None,
     actor_slot_dump_dir: Path | None = None,
 ) -> dict[str, object]:
+    oracle_preflight.require_native_oracle()
     repo_root = _repo_root()
     app = _resolve_path(app, repo_root, strict=True)
     engine_bin = _resolve_path(engine_bin, repo_root, strict=True)
@@ -2227,7 +2231,7 @@ def main() -> int:
             )
         print(json.dumps(result, ensure_ascii=True, allow_nan=False, sort_keys=True))
         return 0 if result["passed"] else 1
-    except GameTestError as error:
+    except (GameTestError, oracle_preflight.OracleUnavailableError) as error:
         print(f"game_test.py: {error}", file=sys.stderr)
         return 2
 

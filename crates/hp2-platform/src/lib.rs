@@ -60,10 +60,9 @@ pub mod launcher_boot_video;
 pub mod launcher_delay;
 pub mod launcher_display_modes;
 pub mod launcher_splash;
+pub mod live_display_mode;
 pub mod message_box;
 pub mod mouse_capture;
-#[cfg(feature = "overlay-mouse")]
-pub mod capture_arbitration;
 pub mod mouse_state;
 pub mod picker;
 pub mod reveal;

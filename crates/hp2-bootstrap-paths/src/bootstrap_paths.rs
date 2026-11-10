@@ -895,7 +895,7 @@ pub fn run<F: FnMut(&[u8], &[u8]) -> i32>(
                 })
             };
             let Some(root) = root else {
-                stderr(&cat(&[b"hp2: no game data installed yet; the launcher will offer to import it.\nhp2: expected HarryPotter2/Unreal/System/Default.ini from the working directory or ", &out.text[3], b"/System/Default.ini\n"]));
+                stderr(&cat(&[b"hp2: no game data installed yet; import it with hp2_import (see hp2_import --help) or pass -datadir=PATH.\nhp2: expected HarryPotter2/Unreal/System/Default.ini from the working directory or ", &out.text[3], b"/System/Default.ini\n"]));
                 return out;
             };
             match install(&root, &user, &mut installer) {
@@ -1021,7 +1021,7 @@ mod tests {
     // serializing these tests keeps the stderr capture below deterministic
     // even when the harness runs tests concurrently.
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    fn serial() -> std::sync::MutexGuard<'static, ()> {
+    pub(super) fn serial() -> std::sync::MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(|error| error.into_inner())
     }
 
@@ -1495,3 +1495,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod runtime_configuration_contracts;

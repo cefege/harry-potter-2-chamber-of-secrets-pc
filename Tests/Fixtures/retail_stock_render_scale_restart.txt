@@ -1,0 +1,10 @@
+# Restart with the same isolated Game.ini. Observe the GPU before opening UI.
+tick 0.033333335
+idle 60
+press Enter
+idle 40
+press Escape
+idle 80
+mouse 680 455
+press LeftMouse
+idle 140

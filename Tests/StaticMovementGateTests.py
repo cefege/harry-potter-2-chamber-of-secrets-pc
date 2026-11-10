@@ -15,6 +15,7 @@ from unittest.mock import patch
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "Build"))
 import static_movement_gate  # noqa: E402
+from oracle_test_support import mocked_native_preflight
 
 
 class StaticMovementGateContracts(unittest.TestCase):
@@ -199,6 +200,7 @@ class StaticMovementGateContracts(unittest.TestCase):
         self.assertEqual(scenario["operations"][1]["rotation"], [10, 20, 30])
         self.assertEqual(scenario["operations"][2]["rotation"], [40, 50, 60])
 
+    @mocked_native_preflight
     def test_side_launches_use_engine_specific_trace_environment(self) -> None:
         artifact_dir = self.root / "artifacts"
         scenario_path = artifact_dir / static_movement_gate.SCENARIO_FILENAME

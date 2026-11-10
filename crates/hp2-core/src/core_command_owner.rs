@@ -118,7 +118,27 @@ unsafe extern "C" fn call(
             L::FindClass => {
                 let name = state.name_units(0)?;
                 let metaclass = access.native_class("Core.Class")?;
-                Ok(unsafe { access.find_object_by_name(metaclass, &name)? }.unwrap_or(ptr::null_mut()) as usize)
+                let mut found = unsafe { access.find_object_by_name(metaclass, &name)? };
+                // Stock scripts also use ini:Package.Class as a direct class
+                // selector. Preserve configured aliases, including broken or
+                // empty aliases: fall back only if the key does not exist.
+                // Restrict the fallback to one package separator and loaded
+                // classes, never a longer config alias or a package load.
+                let prefix = b"ini:";
+                if found.is_none() && name.len() < 1024 && name.len() > 4
+                    && name[..4].iter().zip(prefix).all(|(&unit, &byte)| unit <= 127 && (unit as u8).eq_ignore_ascii_case(&byte))
+                {
+                    let direct = &name[4..];
+                    let mut separators = direct.iter().enumerate().filter(|(_, unit)| **unit == u32::from('.'));
+                    let separator = separators.next().map(|(index, _)| index);
+                    if separator.is_some_and(|index| index > 0 && index + 1 < direct.len())
+                        && separators.next().is_none()
+                        && crate::core_reflection::resolve_configured_load_name(access, &name)?.is_none()
+                    {
+                        found = unsafe { access.find_object_by_name(metaclass, direct)? };
+                    }
+                }
+                Ok(found.unwrap_or(ptr::null_mut()) as usize)
             }
             L::FindProperty => {
                 let name = access.intern(&state.name_units(1)?, crate::name_owner::FindName::Find)?;
@@ -145,11 +165,20 @@ unsafe extern "C" fn call(
             L::SetProperty => {
                 let class = a as *mut UClass;
                 let property = b as *mut UProperty;
-                let defaults = unsafe { &mut (*class).defaults };
-                if defaults.num <= 0 { return Err(RuntimeError::new("Class has no default property storage")); }
-                let value = defaults.data.cast::<u8>().wrapping_offset(unsafe { (*property).offset } as isize);
                 let input = unsafe { core_text(state.command) };
-                unsafe { access.property_import_raw_value(property, value, &input, ptr::null_mut(), 1)?; }
+                let selector = display(&state.name_units(0)?);
+                if selector.to_ascii_lowercase().starts_with("ini:")
+                    && is_menu_config_property(access, class, property)? {
+                    unsafe { set_menu_config_property(access, class, property, &input)?; }
+                } else if selector.to_ascii_lowercase().starts_with("ini:")
+                    && is_stock_actor_config_property(access, class, property)? {
+                    unsafe { set_stock_actor_config_property(access, class, property, &input)?; }
+                } else {
+                    let defaults = unsafe { &mut (*class).defaults };
+                    if defaults.num <= 0 { return Err(RuntimeError::new("Class has no default property storage")); }
+                    let value = defaults.data.cast::<u8>().wrapping_offset(unsafe { (*property).offset } as isize);
+                    unsafe { access.property_import_raw_value(property, value, &input, ptr::null_mut(), 1)?; }
+                }
                 Ok(0)
             }
             L::NoGc => Ok(access.no_gc() as usize),
@@ -273,6 +302,218 @@ unsafe extern "C" fn call(
         }
     })();
     call_result(opaque, result, output)
+}
+
+fn is_stock_actor_config_property(access: CoreAccess<'_>, class: *mut UClass, property: *mut UProperty) -> RuntimeResult<bool> {
+    let path = object_path(access, class.cast());
+    let name = display(&access.name_text(i32::from_ne_bytes(unsafe { (*property.cast::<UObject>()).name }))?);
+    Ok((path.eq_ignore_ascii_case("HGame.Harry") && ["bAutoCenterCamera", "bAutoQuaff", "bMoveWhileCasting", "ObjectDetail", "Difficulty"].iter().any(|item| name.eq_ignore_ascii_case(item)))
+        || (path.eq_ignore_ascii_case("Engine.PlayerPawn") && name.eq_ignore_ascii_case("bInvertMouse")))
+}
+
+/// Stage a scalar SET value. Stock scripts send enum indices as decimal text.
+/// The legacy enum ImportText cursor consumes an unknown name before trying a
+/// number, so recognize numeric byte tokens here without changing ImportText's
+/// existing behavior for other callers. The caller checks the reflected range.
+unsafe fn import_staged_command_value(access: CoreAccess<'_>, property: *mut UProperty, kind: crate::core_class_specs::NativeRecordKind, staged: &mut u32, input: &[u32]) -> RuntimeResult<usize> {
+    use crate::core_class_specs::NativeRecordKind as K;
+    if kind == K::ByteProperty && input.first().is_some_and(|c| (48..=57).contains(c)) {
+        let end = input.iter().take_while(|c| (48..=57).contains(*c)).count();
+        let digits: String = input[..end].iter().filter_map(|&unit| char::from_u32(unit)).collect();
+        *staged = u32::from(digits.parse::<u8>().map_err(|_| RuntimeError::new("Invalid byte property value"))?);
+        return Ok(end);
+    }
+    unsafe { access.property_import_raw_value(property, (staged as *mut u32).cast(), input, ptr::null_mut(), 1) }
+}
+
+/// Stages the stock actor globalconfig values. Only actor implementations with
+/// the canonical Actor edit hook and nontransactional objects are admitted:
+/// that hook has no fallible callback in this state. All reflected descendants'
+/// defaults share the declaring class's globalconfig section.
+unsafe fn set_stock_actor_config_property(access: CoreAccess<'_>, class: *mut UClass, property: *mut UProperty, input: &[u32]) -> RuntimeResult<()> {
+    use crate::core_class_specs::NativeRecordKind as K;
+    let flags = unsafe { (*property).property_flags };
+    if flags & 0x44000 != 0x44000 || unsafe { (*class).class_flags } & 4 == 0 || unsafe { (*property).array_dim } != 1 {
+        return Err(RuntimeError::new("Expected scalar globalconfig property"));
+    }
+    let kind = unsafe { access.record_kind(property.cast())? };
+    let (size, mask) = match kind {
+        K::BoolProperty => (4, unsafe { (*property.cast::<hp2_abi::engine::generated::UBoolProperty>()).bit_mask as u32 }),
+        K::ByteProperty => (1, 0),
+        _ => return Err(RuntimeError::new("Expected stock bool or enum property")),
+    };
+    let offset = unsafe { (*property).offset };
+    if offset < 0 || unsafe { (*property).element_size } != size || (size == 4 && mask == 0) {
+        return Err(RuntimeError::new("Invalid actor property layout"));
+    }
+    let owner = unsafe { (*property.cast::<UObject>()).outer.cast::<UClass>() };
+    if owner.is_null() || !unsafe { crate::object_model::is_child_of(class.cast(), owner.cast()) } {
+        return Err(RuntimeError::new("Invalid globalconfig declaring class"));
+    }
+    let text = input.iter().copied().map(|c| char::from_u32(c).ok_or_else(|| RuntimeError::new("Invalid property text"))).collect::<RuntimeResult<String>>()?;
+    if size == 1 && text.trim().bytes().all(|byte| byte.is_ascii_digit()) && text.trim().parse::<u8>().is_err() {
+        return Err(RuntimeError::new("Invalid enum value"));
+    }
+    let selected_default = unsafe { access.default_object(class)? };
+    let selected_value = unsafe { access.property_address(selected_default, property)? };
+    let mut staged = if size == 1 { u32::from(unsafe { selected_value.read() }) } else { unsafe { selected_value.cast::<u32>().read_unaligned() } };
+    let consumed = unsafe { import_staged_command_value(access, property, kind, &mut staged, input)? };
+    if consumed == 0 || consumed > input.len() || input[consumed..].iter().any(|&c| !matches!(c, 32 | 9 | 10 | 13)) {
+        let name = display(&access.name_text(i32::from_ne_bytes(unsafe { (*property.cast::<UObject>()).name }))?);
+        return Err(RuntimeError::new(&format!("Invalid or incomplete property value: SET ini:{} {} {:?} (consumed {} of {})", object_path(access, class.cast()), name, text, consumed, input.len())));
+    }
+    if size == 1 {
+        let enumeration = unsafe { (*property.cast::<hp2_abi::engine::generated::UByteProperty>()).r#enum.cast::<hp2_abi::engine::generated::UEnum>() };
+        if enumeration.is_null() || staged >= unsafe { (*enumeration).names.num.max(0) as u32 } {
+            return Err(RuntimeError::new("Value is outside its reflected enum"));
+        }
+    }
+    let config_name = unsafe { (*class).class_config_name };
+    let actor = access.native_class("Engine.Actor")?;
+    let actor_default = unsafe { access.default_object(actor)? };
+    let actor_hook = unsafe { access.class_ops(actor_default)? }.post_edit_change;
+    let class_meta = access.native_class("Core.Class")?;
+    let mut defaults = Vec::new();
+    let mut objects = Vec::new();
+    for index in 0..access.object_count() {
+        let object = access.object_at(index);
+        if object.is_null() { continue; }
+        if unsafe { crate::object_model::is_a(object.cast(), class_meta.cast()) } {
+            let candidate = object.cast::<UClass>();
+            if unsafe { crate::object_model::is_child_of(candidate.cast(), owner.cast()) }
+                && unsafe { (*candidate).class_flags } & 4 != 0
+                && unsafe { (*candidate).class_config_name } == config_name
+                && unsafe { (*candidate).defaults.num } > 0 {
+                if offset.checked_add(size).is_none_or(|end| end > unsafe { (*candidate).properties_size }) {
+                    return Err(RuntimeError::new("Inherited globalconfig offset is out of bounds"));
+                }
+                let default = unsafe { access.default_object(candidate)? };
+                defaults.push(unsafe { access.property_address(default, property)? });
+            }
+        } else if unsafe { crate::object_model::is_a(object.cast(), class.cast()) } {
+            let hook = unsafe { access.class_ops(object)? }.post_edit_change;
+            // SpawnActor marks runtime actors transactional even when no
+            // transaction manager exists. In that normal state Modify is a
+            // no-op; only an installed manager can add a fallible side effect.
+            if (unsafe { (*object).object_flags } & 1 != 0 && access.has_object_transactions())
+                || !std::ptr::fn_addr_eq(hook, actor_hook)
+            {
+                return Err(RuntimeError::new("Cannot safely notify this actor"));
+            }
+            objects.push((object, unsafe { access.property_address(object, property)? }));
+        }
+    }
+    let mut persisted = Vec::new();
+    unsafe { access.property_export_raw_value(property, (&mut staged as *mut u32).cast(), ptr::null_mut(), 0, &mut persisted)?; }
+    let filename = access.name_text(i32::from_ne_bytes(config_name))?;
+    let section = object_path(access, owner.cast()).chars().map(u32::from).collect::<Vec<_>>();
+    let name = access.name_text(i32::from_ne_bytes(unsafe { (*property.cast::<UObject>()).name }))?;
+    unsafe { &mut *access.config_storage() }.publish_one(Some(&filename), &section, &name, &persisted)?;
+    unsafe fn assign(address: *mut u8, value: u32, size: i32, mask: u32) {
+        if size == 1 { unsafe { address.write(value as u8) }; }
+        else {
+            let old = unsafe { address.cast::<u32>().read_unaligned() };
+            unsafe { address.cast::<u32>().write_unaligned((old & !mask) | (value & mask)) };
+        }
+    }
+    for address in defaults { unsafe { assign(address, staged, size, mask); } }
+    for (object, address) in objects { unsafe { assign(address, staged, size, mask); access.post_edit_change(object)?; } }
+    Ok(())
+}
+
+fn is_menu_config_property(access: CoreAccess<'_>, class: *mut UClass, property: *mut UProperty) -> RuntimeResult<bool> {
+    let class_path = object_path(access, class.cast());
+    let name = display(&access.name_text(i32::from_ne_bytes(unsafe { (*property.cast::<UObject>()).name }))?);
+    Ok((class_path.eq_ignore_ascii_case("ALAudio.ALAudioSubsystem")
+        && (name.eq_ignore_ascii_case("MusicVolume") || name.eq_ignore_ascii_case("SoundVolume")))
+        || (class_path.eq_ignore_ascii_case("SDLDrv.SDLClient")
+            && (name.eq_ignore_ascii_case("Brightness") || name.eq_ignore_ascii_case("TextureDetail"))))
+}
+
+/// Transactional support for the stock sound/video menu. These exact native
+/// classes have known PostEditChange behavior: SDLClient uses Object::Modify;
+/// ALAudio additionally clamps both volume fields to [0,1]. Transactional
+/// objects and derived classes are rejected because their callbacks can reenter
+/// or fail after publication. No callback is invoked before the file is saved.
+unsafe fn set_menu_config_property(access: CoreAccess<'_>, class: *mut UClass, property: *mut UProperty, input: &[u32]) -> RuntimeResult<()> {
+    use crate::core_class_specs::NativeRecordKind as K;
+    let class_path = object_path(access, class.cast());
+    let property_name = access.name_text(i32::from_ne_bytes(unsafe { (*property.cast::<UObject>()).name }))?;
+    let property_text = display(&property_name);
+    let audio = class_path.eq_ignore_ascii_case("ALAudio.ALAudioSubsystem");
+    let client = class_path.eq_ignore_ascii_case("SDLDrv.SDLClient");
+    let is_float = (audio && (property_text.eq_ignore_ascii_case("MusicVolume") || property_text.eq_ignore_ascii_case("SoundVolume")))
+        || (client && property_text.eq_ignore_ascii_case("Brightness"));
+    let is_enum = client && property_text.eq_ignore_ascii_case("TextureDetail");
+    if !is_float && !is_enum {
+        return Err(RuntimeError::new("Transactional ini SET does not support this class and property"));
+    }
+    let flags = unsafe { (*property).property_flags };
+    if flags & crate::object_config::CPF_CONFIG_FLAG == 0 || flags & 0x40000 != 0
+        || unsafe { (*class).class_flags } & 4 == 0 || unsafe { (*property).array_dim } != 1 {
+        return Err(RuntimeError::new("Unsupported config property metadata"));
+    }
+    let kind = unsafe { access.record_kind(property.cast())? };
+    let size = if is_float && kind == K::FloatProperty { 4 } else if is_enum && kind == K::ByteProperty { 1 }
+        else { return Err(RuntimeError::new("Unexpected menu property type")); };
+    let offset = unsafe { (*property).offset };
+    if unsafe { (*property).element_size } != size || offset < 0
+        || offset.checked_add(size).is_none_or(|end| end > unsafe { (*class).properties_size }) {
+        return Err(RuntimeError::new("Invalid menu property layout"));
+    }
+    let text = input.iter().copied().map(|unit| char::from_u32(unit).ok_or_else(|| RuntimeError::new("Invalid property text"))).collect::<RuntimeResult<String>>()?;
+    if is_float {
+        let number = text.trim().parse::<f32>().map_err(|_| RuntimeError::new("Invalid floating-point property value"))?;
+        if !number.is_finite() || !(0.0..=1.0).contains(&number) {
+            return Err(RuntimeError::new("Menu property value must be between 0 and 1"));
+        }
+    } else if text.trim().bytes().all(|byte| byte.is_ascii_digit()) && text.trim().parse::<u8>().is_err() {
+        return Err(RuntimeError::new("Invalid texture detail value"));
+    }
+    let defaults = unsafe { access.default_object(class)? };
+    let default_value = unsafe { access.property_address(defaults, property)? };
+    let mut staged: u32 = if size == 1 { u32::from(unsafe { default_value.read() }) } else { unsafe { default_value.cast::<u32>().read_unaligned() } };
+    let consumed = unsafe { import_staged_command_value(access, property, kind, &mut staged, input)? };
+    if consumed == 0 || consumed > input.len() || input[consumed..].iter().any(|&c| !matches!(c, 32 | 9 | 10 | 13)) {
+        return Err(RuntimeError::new(&format!("Invalid or incomplete property value: SET ini:{} {} {:?} (consumed {} of {})", class_path, property_text, text, consumed, input.len())));
+    }
+    if is_enum {
+        let enumeration = unsafe { (*property.cast::<hp2_abi::engine::generated::UByteProperty>()).r#enum.cast::<hp2_abi::engine::generated::UEnum>() };
+        if enumeration.is_null() || staged >= unsafe { (*enumeration).names.num.max(0) as u32 } {
+            return Err(RuntimeError::new("Texture detail is outside its reflected enum"));
+        }
+    }
+    let mut objects = Vec::new();
+    for index in 0..access.object_count() {
+        let object = access.object_at(index);
+        if object.is_null() || !unsafe { crate::object_model::is_a(object.cast(), class.cast()) } { continue; }
+        if unsafe { (*object).class } != class.cast() || unsafe { (*object).object_flags } & 1 != 0 {
+            return Err(RuntimeError::new("Cannot safely notify a derived or transactional object"));
+        }
+        if audio {
+            let audio = object.cast::<hp2_abi::engine::generated::UALAudioSubsystem>();
+            let music = unsafe { ptr::addr_of!((*audio).music_volume).read_unaligned() };
+            let sound = unsafe { ptr::addr_of!((*audio).sound_volume).read_unaligned() };
+            if !music.is_finite() || !sound.is_finite() || !(0.0..=1.0).contains(&music) || !(0.0..=1.0).contains(&sound) {
+                return Err(RuntimeError::new("Audio notification would modify another out-of-range volume"));
+            }
+        }
+        objects.push((object, unsafe { access.property_address(object, property)? }));
+    }
+    let mut persisted = Vec::new();
+    unsafe { access.property_export_raw_value(property, (&mut staged as *mut u32).cast(), ptr::null_mut(), 0, &mut persisted)?; }
+    let filename = access.name_text(i32::from_ne_bytes(unsafe { (*class).class_config_name }))?;
+    let section: Vec<u32> = class_path.chars().map(u32::from).collect();
+    unsafe { &mut *access.config_storage() }.publish_one(Some(&filename), &section, &property_name, &persisted)?;
+    unsafe fn assign(address: *mut u8, value: u32, size: i32) {
+        if size == 1 { unsafe { address.write(value as u8) }; }
+        else { unsafe { address.cast::<u32>().write_unaligned(value) }; }
+    }
+    unsafe { assign(default_value, staged, size); }
+    for (object, address) in objects {
+        unsafe { assign(address, staged, size); access.post_edit_change(object)?; }
+    }
+    Ok(())
 }
 
 unsafe fn core_text(mut text: *const Tchar) -> Vec<u32> {
