@@ -72,7 +72,10 @@ jobs:
       - name: Build and package
         run: |
           set -euo pipefail
+          python3 -B Build/refresh_native_provenance.py --record-build-state --preset macos-arm64 --build-dir out/macos-arm64
           cmake --build --preset macos-arm64
+          # Reject changed headers before accepting the post-build provenance refresh.
+          python3 -B Build/refresh_native_provenance.py --preset macos-arm64 --build-dir out/macos-arm64
           cmake --build out/macos-arm64 --target hp2_macos_dmg
 
 
