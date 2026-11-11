@@ -3,8 +3,11 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
+import sys
 import subprocess
 import tempfile
 import unittest
@@ -28,6 +31,171 @@ CAPTURE_SPEC.loader.exec_module(capture_cargo_provenance)
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+class RustSymbolInspectionTests(unittest.TestCase):
+    def test_real_objects_and_bitcode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nm = check_native_free.rust_llvm_nm(
+                Path("cargo"), ROOT, capture_cargo_provenance._recorded_environment(os.environ), []
+            )
+            for forbidden in (False, True):
+                source = root / ("bad.rs" if forbidden else "good.rs")
+                source.write_text(
+                    'unsafe extern "C" { fn __cxa_throw(); }\n'
+                    '#[unsafe(no_mangle)] pub extern "C" fn fixture() { unsafe { __cxa_throw() } }\n'
+                    if forbidden else '#[unsafe(no_mangle)] pub extern "C" fn fixture() {}\n'
+                )
+                for kind in ("obj", "llvm-bc"):
+                    output = root / f"{source.stem}-{kind}"
+                    subprocess.run(["rustc", "--edition=2024", "--crate-type=lib",
+                                    f"--emit={kind}", "-o", str(output), str(source)],
+                                   check=True, capture_output=True)
+                    findings = check_native_free.inspect_rust_abi(output, nm)
+                    self.assertEqual(bool(findings), forbidden, (kind, findings))
+                    if forbidden:
+                        self.assertIn("C++ ABI dependency", findings[0])
+                archive = root / f"{source.stem}.rlib"
+                subprocess.run(["rustc", "--edition=2024", "--crate-type=lib",
+                                "-C", "lto=fat", "-C", "embed-bitcode=yes",
+                                "-o", str(archive), str(source)], check=True, capture_output=True)
+                findings = check_native_free.inspect_rust_abi(archive, nm)
+                self.assertEqual(bool(findings), forbidden, findings)
+                if forbidden:
+                    self.assertIn("C++ ABI dependency", findings[0])
+
+            malformed = root / "malformed.rlib"
+            malformed.write_bytes(b"!<arch>\ninvalid")
+            self.assertTrue(check_native_free.inspect_rust_abi(malformed, nm))
+            malformed.write_bytes(b"BC\xc0\xdeinvalid bitcode")
+            self.assertTrue(check_native_free.inspect_rust_abi(malformed, nm))
+            self.assertTrue(check_native_free.inspect_rust_abi(root / "missing", nm))
+            self.assertTrue(check_native_free.inspect_rust_abi(malformed, root / "missing-nm"))
+            junk = root / "junk.o"
+            junk.write_bytes(b"not an object")
+            archive = root / "junk.a"
+            subprocess.run([str(nm.with_name("llvm-ar")), "rc", str(archive), str(junk)],
+                           check=True, capture_output=True)
+            self.assertTrue(check_native_free.inspect_rust_abi(archive, nm))
+
+    def test_declaration_only_archive_and_unreadable_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            nm = check_native_free.rust_llvm_nm(
+                Path("cargo"), ROOT, capture_cargo_provenance._recorded_environment(os.environ), []
+            )
+            source = root / "declarations.rs"
+            source.write_text('pub struct DeclarationOnly { pub value: u32 }\n')
+            archive = root / "declarations.rlib"
+            subprocess.run(["rustc", "--edition=2024", "--crate-type=lib",
+                            "-C", "lto=fat", "-C", "embed-bitcode=yes",
+                            "-o", str(archive), str(source)], check=True, capture_output=True)
+            result = subprocess.run([str(nm), "-a", str(archive)], text=True, capture_output=True, check=True)
+            self.assertRegex(result.stderr, r'\.rcgu\.o: no symbols')
+            quiet = subprocess.run([str(nm), "--quiet", "-a", str(archive)], text=True,
+                                   capture_output=True, check=True)
+            self.assertEqual(quiet.stderr, "")
+            malformed = root / "broken.bc"
+            malformed.write_bytes(b"BC\xc0\xdeinvalid bitcode")
+            quiet_bad = subprocess.run([str(nm), "--quiet", "-a", str(malformed)], text=True,
+                                       capture_output=True)
+            self.assertNotEqual(quiet_bad.returncode, 0)
+            self.assertTrue(quiet_bad.stderr)
+            self.assertEqual(check_native_free.inspect_rust_abi(archive, nm), [])
+            junk = root / "invalid.o"
+            junk.write_bytes(b"not an object")
+            subprocess.run([str(nm.with_name("llvm-ar")), "r", str(archive), str(junk)],
+                           check=True, capture_output=True)
+            self.assertTrue(check_native_free.inspect_rust_abi(archive, nm))
+
+    def test_tool_warning_with_success_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            obj = Path(directory) / "fixture.rlib"
+            obj.touch()
+            result = subprocess.CompletedProcess([], 0, "", "invalid archive member\n")
+            with mock.patch.object(check_native_free.subprocess, "run", return_value=result):
+                self.assertTrue(check_native_free.inspect_rust_abi(obj, Path("llvm-nm")))
+
+    def test_metadata_warning_filter_is_exact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            obj = Path(directory) / "fixture.rlib"
+            obj.touch()
+            valid = f"{obj}:lib.rmeta: no symbols\n{obj}:lib.rmeta-link: no symbols\n"
+            for warning, rejected in ((valid, False),
+                                      (valid + "invalid archive member\n", True),
+                                      (f"other:lib.rmeta: no symbols\n", True),
+                                      (f"{obj}:lib.rmeta: no symbols extra\n", True)):
+                result = subprocess.CompletedProcess([], 0, "lib.rmeta:\nlib.rmeta-link:\n", warning)
+                listing = subprocess.CompletedProcess([], 0, "lib.rmeta\nlib.rmeta-link\n", "")
+                with self.subTest(warning=warning), mock.patch.object(check_native_free, "is_archive", return_value=True), \
+                     mock.patch.object(check_native_free.subprocess, "run", side_effect=[result, listing]):
+                    self.assertEqual(bool(check_native_free.inspect_rust_abi(obj, Path("nm"))), rejected)
+            result = subprocess.CompletedProcess([], 1, "lib.rmeta:\nlib.rmeta-link:\n", valid)
+            listing = subprocess.CompletedProcess([], 0, "lib.rmeta\nlib.rmeta-link\n", "")
+            with mock.patch.object(check_native_free, "is_archive", return_value=True), \
+                 mock.patch.object(check_native_free.subprocess, "run", side_effect=[result, listing]):
+                self.assertTrue(check_native_free.inspect_rust_abi(obj, Path("nm")))
+
+    def test_compiler_selection_precedence(self):
+        cases = [({"RUSTC": "explicit", "CARGO_BUILD_RUSTC": "cargo-env"}, "explicit"),
+                 ({"CARGO_BUILD_RUSTC": "cargo-env"}, "cargo-env"),
+                 ({}, "configured")]
+        for environment, expected in cases:
+            responses = [
+                subprocess.CompletedProcess([], 0, '{"build":{"rustc":"configured"}}', ''),
+                subprocess.CompletedProcess([], 0, 'host: fixture-host\nrelease: 1.99.1\nLLVM version: 23.1.1\n', ''),
+                subprocess.CompletedProcess([], 0, '/fixture/sysroot\n', ''),
+                subprocess.CompletedProcess([], 0, 'LLVM version 23.1.1\n', ''),
+            ]
+            with self.subTest(expected=expected), mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(
+                check_native_free.subprocess, "run", side_effect=responses
+            ) as run:
+                check_native_free.rust_llvm_nm(Path("cargo"), ROOT, environment, [])
+                self.assertEqual(run.call_args_list[1].args[0], [expected, "-vV"])
+
+    def test_cargo_config_and_toolchain_replayed(self):
+        responses = [
+            subprocess.CompletedProcess([], 0, '{"build":{"rustc":"configured-rustc"}}', ''),
+            subprocess.CompletedProcess([], 0, 'host: fixture-host\nrelease: 1.99.1\nLLVM version: 23.1.1\n', ''),
+            subprocess.CompletedProcess([], 0, '/fixture/sysroot\n', ''),
+            subprocess.CompletedProcess([], 0, 'LLVM version 23.1.1\n', ''),
+        ]
+        args = ["--config", 'build.rustc="configured-rustc"', "--config=net.offline=true",
+                "--", "--config=not-a-cargo-option"]
+        with mock.patch.object(check_native_free.subprocess, "run", side_effect=responses) as run:
+            check_native_free.rust_llvm_nm(Path("cargo"), ROOT, {"RUSTUP_TOOLCHAIN": "fixture"}, args)
+        self.assertEqual(run.call_args_list[0].args[0], [
+            "cargo", "-Z", "unstable-options", "--config", 'build.rustc="configured-rustc"',
+            "--config=net.offline=true", "config", "get", "--format", "json",
+        ])
+        self.assertEqual(run.call_args_list[1].args[0], ["configured-rustc", "-vV"])
+        self.assertEqual(run.call_args_list[1].kwargs["env"]["RUSTUP_TOOLCHAIN"], "fixture")
+        for args in (["--config"], ["--config="], ["--config", "--"]):
+            with self.assertRaises(check_native_free.GuardError):
+                check_native_free.cargo_config_args(args)
+
+    def test_missing_or_mismatched_tool_fails_closed(self):
+        for tool_version, accepted in (("23.1.1", True), ("23.1.1-rust-1.99.1-stable", True),
+                                       ("22.0.0", False), ("23.1.1.9", False),
+                                       ("23.1.1-rust-1.99.1-stable-malformed", False)):
+            responses = [
+                subprocess.CompletedProcess([], 0, '{}', ''),
+                subprocess.CompletedProcess([], 0, 'host: fixture-host\nrelease: 1.99.1\nLLVM version: 23.1.1\n', ''),
+                subprocess.CompletedProcess([], 0, '/fixture/sysroot\n', ''),
+                subprocess.CompletedProcess([], 0, f'LLVM version {tool_version}\n', ''),
+            ]
+            with self.subTest(tool_version=tool_version), mock.patch.object(
+                check_native_free.subprocess, "run", side_effect=responses
+            ):
+                if accepted:
+                    self.assertEqual(check_native_free.rust_llvm_nm(Path("cargo"), ROOT, {}, []).name, "llvm-nm")
+                else:
+                    with self.assertRaises(check_native_free.GuardError):
+                        check_native_free.rust_llvm_nm(Path("cargo"), ROOT, {}, [])
+        with mock.patch.object(check_native_free.subprocess, "run", side_effect=FileNotFoundError("missing")):
+            with self.assertRaises(check_native_free.GuardError):
+                check_native_free.rust_llvm_nm(Path("cargo"), ROOT, {}, [])
 
 
 class CargoProvenanceTests(unittest.TestCase):
@@ -88,7 +256,7 @@ class CargoProvenanceTests(unittest.TestCase):
         (artifact_dir / "cargo.stdout").write_bytes(stdout)
         (artifact_dir / "cargo.stderr").write_bytes(stderr)
         record = {
-            "schema_version": 1,
+            "schema_version": 3,
             "selected_target": "hp2_ucc_rust",
             "cargo_argv": [str(cargo), "rustc", *args],
             "cwd": str(command_dir.resolve()),
@@ -110,6 +278,17 @@ class CargoProvenanceTests(unittest.TestCase):
         record_path.write_text(json.dumps(record), encoding="utf-8")
         return build, record_path, command_dir, args
 
+
+    def test_record_rejects_legacy_incomplete_environment_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build, record_path, command_dir, args = self.make_record(Path(directory))
+            record = json.loads(record_path.read_text())
+            record["schema_version"] = 2
+            record_path.write_text(json.dumps(record))
+            with self.assertRaises(check_native_free.GuardError):
+                check_native_free.cargo_provenance_record(
+                    str(record_path), "hp2_ucc_rust", build, Path(record["cargo_argv"][0]), command_dir, args,
+                )
 
     def test_record_rejects_tampered_artifact_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -307,6 +486,97 @@ class LockedRegistryPackageTests(unittest.TestCase):
 
 
 class CargoCaptureTests(unittest.TestCase):
+    def test_replay_excludes_absent_controlled_selectors(self):
+        audit_env = {"HOME": "/audit/home", "PATH": "/audit/bin", "RUSTC": "wrong", "CARGO_BUILD_RUSTC": "wrong",
+                     "RUSTFLAGS": "wrong", "RUSTUP_TOOLCHAIN": "wrong",
+                     "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER": "wrong", "UNRELATED": "kept"}
+        with mock.patch.dict(os.environ, audit_env, clear=True):
+            recorded = {"HOME": "/build/home", "PATH": "/build/bin", "CARGO_PROFILE_RELEASE_LTO": "fat"}
+            replay = check_native_free.cargo_replay_environment(recorded)
+            without_home = check_native_free.cargo_replay_environment({})
+        self.assertEqual(replay, {"HOME": "/build/home", "PATH": "/build/bin", "CARGO_PROFILE_RELEASE_LTO": "fat",
+                                  "UNRELATED": "kept"})
+        self.assertEqual(without_home, {"UNRELATED": "kept"})
+        self.assertEqual(capture_cargo_provenance._recorded_environment({"HOME": "/build/home"}),
+                         {"HOME": "/build/home"})
+        self.assertTrue(check_native_free.provenance_environment_key("HOME"))
+        self.assertEqual(check_native_free.cargo_rustflags([], {}), [])
+        self.assertEqual(capture_cargo_provenance._recorded_environment({"RUSTUP_TOOLCHAIN": "fixture"}),
+                         {"RUSTUP_TOOLCHAIN": "fixture"})
+        self.assertTrue(check_native_free.provenance_environment_key("RUSTUP_TOOLCHAIN"))
+
+    def test_compiler_discovery_uses_recorded_home_without_tool_homes(self):
+        responses = [
+            subprocess.CompletedProcess([], 0, '{}', ''),
+            subprocess.CompletedProcess([], 0, 'host: fixture-host\nrelease: 1.99.1\nLLVM version: 23.1.1\n', ''),
+            subprocess.CompletedProcess([], 0, '/build/home/.rustup/toolchains/fixture\n', ''),
+            subprocess.CompletedProcess([], 0, 'LLVM version 23.1.1\n', ''),
+        ]
+        recorded = capture_cargo_provenance._recorded_environment({"HOME": "/build/home"})
+        with mock.patch.dict(os.environ, {"HOME": "/audit/home", "RUSTUP_HOME": "/audit/rustup",
+                                         "CARGO_HOME": "/audit/cargo"}, clear=True), mock.patch.object(
+            check_native_free.subprocess, "run", side_effect=responses
+        ) as run:
+            check_native_free.rust_llvm_nm(Path("cargo"), ROOT, recorded, [])
+        for call in run.call_args_list:
+            env = call.kwargs["env"]
+            self.assertEqual(env["HOME"], "/build/home")
+            self.assertNotIn("RUSTUP_HOME", env)
+            self.assertNotIn("CARGO_HOME", env)
+
+    def test_profile_environment_capture_and_real_graph_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "src").mkdir()
+            manifest = root / "Cargo.toml"
+            manifest.write_text('[package]\nname="replay-fixture"\nversion="0.1.0"\nedition="2024"\n[workspace]\n')
+            (root / "src" / "main.rs").write_text('fn main() {}\n')
+            (root / "Cargo.lock").write_text('version = 4\n[[package]]\nname = "replay-fixture"\nversion = "0.1.0"\n')
+            record_path = root / "capture" / "record.json"
+            cargo = Path(shutil.which("cargo"))
+            env = os.environ.copy()
+            env.update({
+                "HP2_CARGO_PROVENANCE_TARGET": "replay-fixture",
+                "HP2_CARGO_PROVENANCE_RECORD": str(record_path),
+                "HP2_CARGO_PROVENANCE_EXECUTABLE": str(cargo),
+                "CARGO_PROFILE_RELEASE_LTO": "fat",
+                "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "1",
+                "CARGO_INCREMENTAL": "0",
+                "CARGO_TARGET_DIR": str(root / "target"),
+            })
+            subprocess.run([sys.executable, str(ROOT / "Build/capture_cargo_provenance.py"),
+                            "rustc", "--release", "--offline", "--locked",
+                            "--manifest-path", str(manifest), "--message-format=json-render-diagnostics"],
+                           env=env, cwd=root, check=True, capture_output=True)
+            capture = json.loads(record_path.read_text())
+            self.assertEqual(capture["schema_version"], 3)
+            recorded = capture["environment"]
+            for key in ("CARGO_PROFILE_RELEASE_LTO", "CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "CARGO_INCREMENTAL"):
+                self.assertEqual(recorded[key], env[key])
+                self.assertTrue(check_native_free.provenance_environment_key(key))
+            rustc = shutil.which("rustc")
+            recorded["RUSTUP_TOOLCHAIN"] = "1.99.1"
+            with mock.patch.dict(os.environ, {"RUSTC": "/nonexistent/audit-rustc"}):
+                nm = check_native_free.rust_llvm_nm(
+                    cargo, root, recorded, ["--config", f'build.rustc="{rustc}"']
+                )
+            self.assertTrue(nm.is_file())
+            options = {"all_features": False, "features": [], "no_default_features": False,
+                       "target": None, "manifest": str(manifest), "package": "replay-fixture",
+                       "bin": "replay-fixture", "args": ["--release", "--offline", "--locked",
+                       "--manifest-path", str(manifest)]}
+            with mock.patch.dict(os.environ, {"CARGO_PROFILE_RELEASE_LTO": "off",
+                                             "CARGO_PROFILE_DEV_OPT_LEVEL": "2", "CARGO_INCREMENTAL": "1"}):
+                replay = check_native_free.cargo_replay_environment(recorded)
+                self.assertNotIn("CARGO_PROFILE_DEV_OPT_LEVEL", replay)
+                failures, metadata = check_native_free.check_cargo_metadata(manifest, cargo, options, recorded, root)
+                self.assertEqual(failures, [])
+                failures, graph = check_native_free.cargo_unit_graph(manifest, cargo, options, metadata, recorded, root)
+            self.assertEqual(failures, [])
+            profile = graph["units"][graph["roots"][0]]["profile"]
+            self.assertEqual((profile["lto"], profile["codegen_units"], profile["incremental"]),
+                             ("fat", 1, False))
+
     def run_capture(self, root: Path, include_output: bool) -> tuple[int, dict, Path]:
         root = root.resolve()
         build_dir = root / "build-hash"

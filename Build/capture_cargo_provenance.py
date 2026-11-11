@@ -16,13 +16,13 @@ from typing import Any
 from typing import BinaryIO
 
 ENVIRONMENT_KEYS = {
-    "AR", "CC", "CFLAGS", "CMAKE_PREFIX_PATH", "CPATH", "CPPFLAGS", "CXX",
+    "AR", "CC", "CFLAGS", "CMAKE_PREFIX_PATH", "CPATH", "CPPFLAGS", "CXX", "HOME",
     "CXXFLAGS", "DYLD_LIBRARY_PATH", "LDFLAGS", "LIBRARY_PATH",
     "MACOSX_DEPLOYMENT_TARGET", "OBJCFLAGS", "OBJCXXFLAGS", "PATH",
     "PKG_CONFIG_LIBDIR", "PKG_CONFIG_PATH", "SDKROOT", "TARGET", "RUSTC",
-    "RUSTC_WRAPPER", "RUSTFLAGS", "RUSTDOC", "RUSTUP_HOME", "CARGO_BUILD_TARGET",
+    "RUSTC_WRAPPER", "RUSTFLAGS", "RUSTDOC", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET",
     "CARGO_BUILD_RUSTC", "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
-    "CARGO_NET_OFFLINE", "BINDGEN_EXTRA_CLANG_ARGS", "CORROSION_BUILD_DIR",
+    "CARGO_NET_OFFLINE", "CARGO_INCREMENTAL", "BINDGEN_EXTRA_CLANG_ARGS", "CORROSION_BUILD_DIR",
 }
 
 
@@ -31,7 +31,7 @@ def _recorded_environment(environment: dict[str, str]) -> dict[str, str]:
         key: value for key, value in sorted(environment.items())
         if key in ENVIRONMENT_KEYS
         or key.startswith((
-            "AR_", "CC_", "CFLAGS_", "CXX_", "CXXFLAGS_", "CARGO_TARGET_", "RUSTC_",
+            "AR_", "CC_", "CFLAGS_", "CXX_", "CXXFLAGS_", "CARGO_TARGET_", "CARGO_PROFILE_", "RUSTC_",
         ))
     }
 
@@ -104,7 +104,7 @@ def _capture(args: argparse.Namespace, cargo_argv: list[str], child_env: dict[st
         (artifact_dir / "cargo.stdout").write_bytes(empty)
         (artifact_dir / "cargo.stderr").write_bytes(empty)
         record = {
-            "schema_version": 1,
+            "schema_version": 3,
             "selected_target": args.target,
             "cargo_argv": cargo_argv,
             "cwd": str(cwd),
@@ -176,7 +176,7 @@ def _capture(args: argparse.Namespace, cargo_argv: list[str], child_env: dict[st
         parse_error = str(error)
 
     record = {
-        "schema_version": 1,
+        "schema_version": 3,
         "selected_target": args.target,
         "cargo_argv": cargo_argv,
         "cwd": str(cwd),

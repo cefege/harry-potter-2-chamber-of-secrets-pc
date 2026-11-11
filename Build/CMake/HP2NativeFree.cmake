@@ -1,7 +1,8 @@
 include_guard(GLOBAL)
 
-# File API queries must exist before generation starts; creating the query
-# from the manifest function would miss the first configure's codemodel.
+# Keep the query available on reconfigure. CMake reads queries before it runs
+# CMakeLists.txt, so CI/release must also seed this file before the first configure.
+# See Docs/NATIVE_FREE_AUDIT.md for the equivalent local preparation commands.
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/.cmake/api/v1/query")
 file(WRITE "${CMAKE_BINARY_DIR}/.cmake/api/v1/query/codemodel-v2" "")
 
