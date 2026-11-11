@@ -15,6 +15,14 @@ jobs:
     # The macOS preset requires a native Apple silicon host. Linux has
     # separate arm64 and x64 jobs below.
     runs-on: macos-15
+    env:
+      # Bound peak compiler memory. Test debug/incremental output is not release evidence
+      # and consumes most of the space in the shared, multi-feature Cargo cache.
+      CARGO_BUILD_JOBS: "2"
+      CMAKE_BUILD_PARALLEL_LEVEL: "3"
+      CTEST_PARALLEL_LEVEL: "1"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -87,11 +95,37 @@ jobs:
       # Docs/BEHAVIOR_MATRIX.md for what each data profile covers.
       - name: Test (data-none profile)
         run: |
-          df -h /
-          ctest --preset macos-arm64 --no-tests=error -L data-none --output-on-failure
+          set -euo pipefail
+          artifacts="$PWD/out/macos-arm64/Testing/HP2/ci_resources/Artifacts"
+          mkdir -p "$artifacts"
+          # Retain resource measurements and stream progress while Cargo-backed tests run.
+          # A runner disconnect is an infrastructure failure, never a passing test result.
+          (
+            while true; do
+              date -u
+              df -h /
+              vm_stat
+              sleep 60
+            done
+          ) > "$artifacts/resources.log" 2>&1 &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true; wait "$monitor_pid" 2>/dev/null || true' EXIT
+          ctest --preset macos-arm64 --no-tests=error -L data-none --output-on-failure \
+            --output-junit "$artifacts/ctest.xml" 2>&1 | tee "$artifacts/ctest.log"
 
       - name: Verify bundle
         run: python3 Build/check_bundle.py
+
+      - name: Retain test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-data-none-evidence
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            out/macos-arm64/Testing/Temporary/
+            out/macos-arm64/Testing/HP2/*/Artifacts/
 
   linux-x64:
     if: github.event_name == 'workflow_dispatch'
