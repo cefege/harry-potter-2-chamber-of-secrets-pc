@@ -43,12 +43,17 @@ old binary's exact source identity is unresolved. Evidence is retained under
   ordinary-clock instability, but the cause is not proven.
 - The renderer smoke tool initially used the removed `hp2_game` filename. Its
   explicit Rust-executable repair reached the game, which exited 0 but presented
-  0 frames and reported 300 occluded frames. Actual window presentation remains
-  blocked, not passed. The tool also needed support for the current adapter log
+  0 frames and reported 300 occluded frames. That initial run was blocked,
+  not passed. The tool also needed support for the current adapter log
   marker; synthetic tool contracts preserve the presentation requirement.
+- After the owner confirmed that the display was awake, a distinct exact
+  `renderer_smoke_wgpu` CTest passed: 300 presented, 0 occluded, 0 outdated, and
+  0 other failures. It used the same saved candidate binary, default bloom-off,
+  and the configured prototype root. The earlier failure remains retained.
+  Evidence is under `out/task-20261111/Artifacts/renderer-awake-check/`. This
+  establishes real window presentation for that run, not bloom-on acceptance.
 
-Performance, broader map coverage, real surface presentation, and visual acceptance
-remain open. Do not promote bloom to a default from these component checks.
+Performance, broader map coverage, and visual acceptance remain open. Do not promote bloom to a default from these component checks.
 
 ## Not implemented by this experiment
 
