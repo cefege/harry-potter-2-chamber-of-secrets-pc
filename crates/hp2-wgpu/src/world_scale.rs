@@ -105,11 +105,13 @@ pub(crate) struct WorldScaleState {
     msaa_setting: i32,
     msaa_cached: Option<crate::msaa::PreparedMsaa>,
     msaa_seed: Option<(wgpu::TextureFormat, u32, crate::draw::PostProcessPipeline)>,
+    bloom: bool,
+    bloom_pipeline: Option<(wgpu::TextureFormat, crate::draw::BloomPipeline)>,
 }
 
 impl Default for WorldScaleState {
     fn default() -> Self {
-        Self { percent: 100, observations: WorldScaleObservations::default(), current_frame: FrameAvailability::default(), completed_frame: FrameAvailability::default(), cached: None, active: None, pipeline: None, identity: None, msaa_setting: 0, msaa_cached: None, msaa_seed: None }
+        Self { percent: 100, observations: WorldScaleObservations::default(), current_frame: FrameAvailability::default(), completed_frame: FrameAvailability::default(), cached: None, active: None, pipeline: None, identity: None, msaa_setting: 0, msaa_cached: None, msaa_seed: None, bloom: std::env::var_os("HP2_BLOOM").is_some_and(|v| v == "1"), bloom_pipeline: None }
     }
 }
 
@@ -236,7 +238,7 @@ impl RenderLoop {
     pub fn set_world_scale(&mut self, created: &crate::CreatedDevice, percent: u8) -> Result<(), String> {
         let scale = WorldScale::new(percent).map_err(str::to_owned)?;
         if self.world_scale_state.active.is_some() { return Err("world render scope is active".into()); }
-        let staged = if percent == 100 && self.world_scale_state.msaa_setting == 0 { None } else {
+        let staged = if percent == 100 && self.world_scale_state.msaa_setting == 0 && !self.world_scale_state.bloom { None } else {
             // Settings may be applied between frames. Use the most recent
             // renderer-owned scene in that case, and still validate before
             // publishing the requested value.
@@ -292,6 +294,26 @@ impl RenderLoop {
                 (pipeline, identity)
             } else { (None, None) }
         } else { (None, None) };
+        let bloom_pipeline = if self.world_scale_state.bloom {
+            let format = staged.as_ref().ok_or("bloom requires world targets")?.color.0.format();
+            if !matches!(&self.world_scale_state.bloom_pipeline, Some((f, _)) if *f == format) {
+                let device = &created.device;
+                let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+                let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+                let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+                let pipeline = crate::draw::BloomPipeline::new(device, format);
+                let poll = device.poll(wgpu::PollType::wait_indefinitely());
+                let memory_error = pollster::block_on(memory.pop());
+                let internal_error = pollster::block_on(internal.pop());
+                let validation_error = pollster::block_on(validation.pop());
+                poll.map_err(|e| format!("bloom pipeline poll failed: {e}"))?;
+                if let Some(error) = memory_error.or(internal_error).or(validation_error) {
+                    return Err(format!("bloom pipeline preparation failed: {error}"));
+                }
+                Some((format, pipeline))
+            } else { None }
+        } else { None };
+        if let Some(pipeline) = bloom_pipeline { self.world_scale_state.bloom_pipeline = Some(pipeline); }
         if let Some(pipeline) = pipeline { self.world_scale_state.pipeline = Some(pipeline); }
         if let Some(identity) = identity { self.world_scale_state.identity = Some(identity); }
         if self.world_scale_state.percent != percent {
@@ -350,7 +372,7 @@ impl RenderLoop {
         if unavailable && !self.world_scale_state.completed_frame.scale_unavailable && !self.world_scale_state.completed_frame.msaa_unavailable {
             eprintln!("WgpuDrv: WARNING: world scale {}% / MSAA {}x unavailable for this frame: earlier color draws require full-resolution composition", requested, self.world_scale_state.msaa_setting);
         }
-        if requested == 100 && self.world_scale_state.msaa_setting == 0 { return Ok(false); }
+        if requested == 100 && self.world_scale_state.msaa_setting == 0 && !self.world_scale_state.bloom { return Ok(false); }
         // A lost or outdated surface can leave the engine issuing draws without
         // an acquired frame. Match the ordinary draw path's no-op behavior.
         let mut frame = self.in_progress.take().unwrap();
@@ -371,7 +393,8 @@ impl RenderLoop {
         let size = WorldScale::new(self.world_scale_state.percent).unwrap().dimensions(frame.size.0, frame.size.1).map_err(str::to_owned)?;
         let format = frame.color_format;
         let stale = self.world_scale_state.cached.as_ref().is_none_or(|t| (t.color.0.width(), t.color.0.height()) != size || t.color.0.format() != format);
-        let pipeline_stale = !matches!(&self.world_scale_state.pipeline, Some((f, _)) if *f == format) || self.world_scale_state.identity.is_none();
+        let pipeline_stale = !matches!(&self.world_scale_state.pipeline, Some((f, _)) if *f == format) || self.world_scale_state.identity.is_none()
+            || (self.world_scale_state.bloom && !matches!(&self.world_scale_state.bloom_pipeline, Some((f, _)) if *f == format));
         if (stale || pipeline_stale) && let Err(error) = self.set_world_scale(created, requested) {
             self.world_scale_state.composition_failed(&error);
             return Ok(false);
@@ -428,8 +451,13 @@ impl RenderLoop {
                 })], ..Default::default()
             });
         }
-        self.world_scale_state.pipeline.as_ref().unwrap().1.record(&created.device, &mut frame.encoder,
-            self.world_scale_state.identity.as_ref().unwrap(), &scope.world_color.1, &scope.full_view);
+        if self.world_scale_state.bloom {
+            self.world_scale_state.bloom_pipeline.as_ref().unwrap().1.record(&created.device, &mut frame.encoder,
+                &scope.world_color.1, &scope.full_view);
+        } else {
+            self.world_scale_state.pipeline.as_ref().unwrap().1.record(&created.device, &mut frame.encoder,
+                self.world_scale_state.identity.as_ref().unwrap(), &scope.world_color.1, &scope.full_view);
+        }
         frame.view = scope.full_view;
         frame.samples = 1;
         let drawn_depth = std::mem::replace(&mut self.depth_target, scope.full_depth).ok_or("scaled world depth was lost")?;
@@ -444,6 +472,183 @@ impl RenderLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bloom_shader_validates() {
+        let module = naga::front::wgsl::parse_str(include_str!("shaders/bloom.wgsl")).expect("parse bloom WGSL");
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module).expect("validate bloom WGSL");
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn gpu_bloom_lifecycle_and_disabled_equivalence() {
+        let gpu = crate::create_device_sync(crate::BackendChoice::Auto, None::<crate::HeadlessSurfaceCreator>).unwrap();
+        let device = &gpu.device;
+        // Pipeline creation under an error scope validates the production WGSL.
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let _pipeline = crate::draw::BloomPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(pollster::block_on(validation.pop()).is_none(), "bloom shader validation");
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bloom test geometry"), source: wgpu::ShaderSource::Wgsl(r#"
+                @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+                    let p = array<vec2f, 3>(vec2f(-1., -1.), vec2f(3., -1.), vec2f(-1., 3.));
+                    return vec4f(p[i], 0., 1.);
+                }
+                @fragment fn fs() -> @location(0) vec4f { return vec4f(1., 1., 1., 1.); }
+            "#.into()),
+        });
+        let white = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("bloom test geometry"), layout: None,
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(), targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL })] }),
+            primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
+        });
+        let render = |bloom: bool| {
+            let target = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("bloom lifecycle target"), size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let mut renderer = RenderLoop::new();
+            renderer.world_scale_state.bloom = bloom;
+            crate::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+            assert_eq!(renderer.begin_scaled_world(&gpu).unwrap(), bloom);
+            if bloom { assert!(renderer.set_world_scale(&gpu, 50).is_err()); }
+            {
+                let frame = renderer.in_progress.as_mut().unwrap();
+                let _pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("world color"), color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view, depth_slice: None, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.2, g: 0.4, b: 0.6, a: 1.0 }), store: wgpu::StoreOp::Store },
+                    })], ..Default::default()
+                });
+            }
+            {
+                let frame = renderer.in_progress.as_mut().unwrap();
+                let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("bright world region"), color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view, depth_slice: None, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })], ..Default::default()
+                });
+                pass.set_pipeline(&white);
+                pass.set_scissor_rect(6, 6, 4, 4);
+                pass.draw(0..3, 0..1);
+            }
+            renderer.end_scaled_world(&gpu).unwrap();
+            assert!(!renderer.world_scale_state.is_active());
+            renderer.end_scaled_world(&gpu).unwrap();
+            // This UI pixel is drawn after composition and must not acquire a halo.
+            {
+                let frame = renderer.in_progress.as_mut().unwrap();
+                let mut pass = frame.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("UI after bloom"), color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &frame.view, depth_slice: None, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })], ..Default::default()
+                });
+                pass.set_pipeline(&white);
+                pass.set_scissor_rect(1, 1, 1, 1);
+                pass.draw(0..3, 0..1);
+            }
+            crate::unlock_frame(&gpu, &mut renderer, false);
+            crate::capture::read_texture_rgba8(&gpu, &target).unwrap()
+        };
+        let disabled = render(false);
+        assert_eq!(disabled, render(false), "disabled rendering must remain identical");
+        let enabled = render(true);
+        let pixel = |p: &[u8], x: usize, y: usize| -> [u8; 4] { p[(y * 16 + x) * 4..(y * 16 + x + 1) * 4].try_into().unwrap() };
+        assert_eq!(pixel(&disabled, 5, 7), [51, 102, 153, 255], "disabled world background must retain its color");
+        assert_eq!(pixel(&disabled, 7, 7), [255; 4], "disabled world highlight must retain its color");
+        assert!(pixel(&enabled, 5, 7)[0] > pixel(&disabled, 5, 7)[0], "bright world region must create a halo");
+        assert_eq!(pixel(&enabled, 1, 1), [255; 4]);
+        assert_eq!(pixel(&enabled, 2, 1), pixel(&disabled, 2, 1), "UI must not create a halo");
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn gpu_bloom_handles_msaa_scale_and_prior_color() {
+        let gpu = crate::create_device_sync(crate::BackendChoice::Auto, None::<crate::HeadlessSurfaceCreator>).unwrap();
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bloom scaled target"), size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let mut renderer = RenderLoop::new();
+        renderer.world_scale_state.bloom = true;
+        crate::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
+        renderer.set_world_scale(&gpu, 50).unwrap();
+        renderer.set_msaa(&gpu, 4).unwrap();
+        assert!(renderer.begin_scaled_world(&gpu).unwrap());
+        assert_eq!(renderer.in_progress.as_ref().unwrap().samples, 4);
+        assert_eq!(renderer.depth_target.as_ref().unwrap().0.width(), 8);
+        renderer.end_scaled_world(&gpu).unwrap();
+        assert_eq!(renderer.in_progress.as_ref().unwrap().samples, 1);
+        assert_eq!(renderer.depth_target.as_ref().unwrap().0.width(), 16);
+        renderer.in_progress.as_mut().unwrap().color_drawn = true;
+        assert!(!renderer.begin_scaled_world(&gpu).unwrap(), "prior UI must not be postprocessed");
+        renderer.end_scaled_world(&gpu).unwrap();
+        crate::unlock_frame(&gpu, &mut renderer, false);
+    }
+
+    #[test]
+    #[ignore = "requires a real GPU adapter"]
+    fn gpu_bloom_recreates_targets_on_resize_and_format_change() {
+        let gpu = crate::create_device_sync(crate::BackendChoice::Auto, None::<crate::HeadlessSurfaceCreator>).unwrap();
+        let device = &gpu.device;
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let target = |width, height, format| device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bloom resize test target"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format, usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let cases = [
+            (16, 12, wgpu::TextureFormat::Rgba8Unorm),
+            (10, 6, wgpu::TextureFormat::Rgba8Unorm),
+            (10, 6, wgpu::TextureFormat::Bgra8Unorm),
+        ];
+        let mut renderer = RenderLoop::new();
+        renderer.world_scale_state.bloom = true;
+        for (index, (width, height, format)) in cases.into_iter().enumerate() {
+            let texture = target(width, height, format);
+            crate::begin_offscreen_frame(&gpu, &mut renderer, &texture, wgpu::Color::BLACK);
+            if index == 0 { renderer.set_world_scale(&gpu, 50).unwrap(); }
+            assert!(renderer.begin_scaled_world(&gpu).unwrap());
+            let active_depth = &renderer.depth_target.as_ref().unwrap().0;
+            assert_eq!((active_depth.width(), active_depth.height()), (width / 2, height / 2));
+            renderer.end_scaled_world(&gpu).unwrap();
+            let cached = renderer.world_scale_state.cached.as_ref().unwrap();
+            assert_eq!((cached.color.0.width(), cached.color.0.height()), (width / 2, height / 2));
+            assert_eq!(cached.color.0.format(), format);
+            assert_eq!((cached.depth.0.width(), cached.depth.0.height()), (width / 2, height / 2));
+            assert_eq!(renderer.world_scale_state.pipeline.as_ref().unwrap().0, format);
+            assert_eq!(renderer.world_scale_state.bloom_pipeline.as_ref().unwrap().0, format);
+            let restored_depth = &renderer.depth_target.as_ref().unwrap().0;
+            assert_eq!((restored_depth.width(), restored_depth.height()), (width, height));
+            crate::unlock_frame(&gpu, &mut renderer, false);
+        }
+        let mut disabled = RenderLoop::new();
+        disabled.world_scale_state.bloom = false;
+        for (width, height, format) in cases {
+            let texture = target(width, height, format);
+            crate::begin_offscreen_frame(&gpu, &mut disabled, &texture, wgpu::Color::BLACK);
+            assert!(!disabled.begin_scaled_world(&gpu).unwrap());
+            disabled.end_scaled_world(&gpu).unwrap();
+            assert!(disabled.world_scale_state.cached.is_none());
+            assert!(disabled.world_scale_state.pipeline.is_none());
+            assert!(disabled.world_scale_state.bloom_pipeline.is_none());
+            crate::unlock_frame(&gpu, &mut disabled, false);
+        }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(pollster::block_on(validation.pop()).is_none(), "resize and format changes must validate on the GPU");
+    }
 
     #[test]
     fn frame_availability_aggregates_in_both_orders_and_resets() {
