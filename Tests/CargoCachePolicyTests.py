@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Exercise the real CMake policy in isolated script-mode fixtures."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -146,6 +149,238 @@ class CargoCachePolicyTests(unittest.TestCase):
                 self.assertEqual(model["version"]["major"], 2)
                 self.assertTrue((reply / model["jsonFile"]).is_file())
             self.assertEqual(seen, expected_presets, workflow)
+
+    def check_generated_header_snapshot(self, scenario):
+        root = ARTIFACTS / "ci-generated-headers"
+        root.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="lifecycle-", dir=root))
+        source = work / "source"
+        build = source / "out/synthetic"
+        sdl = build / "_deps/hp2_sdl2-src"
+        openal = build / "_deps/hp2_openal_soft-src"
+        for directory in (source / "Build/CMake", sdl / "include", openal / "cmake", openal / "hrtf"):
+            directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "Build/CMake/HP2NativeFree.cmake", source / "Build/CMake/HP2NativeFree.cmake")
+        shutil.copy2(ROOT / "Build/refresh_native_provenance.py", source / "Build/refresh_native_provenance.py")
+        shutil.copy2(ROOT / "Build/native-free-allowlist.json", source / "Build/native-free-allowlist.json")
+        (source / "CMakePresets.json").write_text(json.dumps({
+            "version": 3,
+            "configurePresets": [{"name": "synthetic", "generator": "Ninja",
+                                  "environment": {"HP2_PRESET_TEST": "initial"},
+                                  "binaryDir": "${sourceDir}/out/synthetic",
+                                  "cacheVariables": {"CMAKE_BUILD_TYPE": "Debug",
+                                                     "HP2_TEST_SECRET": "sentinel-secret-never-in-report"}}],
+        }), encoding="utf-8")
+        (sdl / "include/SDL_config.h.cmake").write_text("sdl template\n", encoding="utf-8")
+        (sdl / "CMakeLists.txt").write_text(
+            'add_custom_target(SDL2-static)\n'
+            'file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/include-config-release/SDL2/SDL_config.h" CONTENT "sdl generated\\n")\n',
+            encoding="utf-8",
+        )
+        (openal / "cmake/bin2h.script.cmake").write_text("# synthetic generator\n", encoding="utf-8")
+        (openal / "hrtf/Default HRTF.mhr").write_text("hrtf bytes\n", encoding="utf-8")
+        (openal / "CMakeLists.txt").write_text(
+            'add_custom_target(OpenAL ALL\n'
+            '  COMMAND "${CMAKE_COMMAND}" -E copy_if_different\n'
+            '    "${CMAKE_CURRENT_SOURCE_DIR}/hrtf/Default HRTF.mhr"\n'
+            '    "${CMAKE_CURRENT_BINARY_DIR}/default_hrtf.hpp"\n'
+            '  BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/default_hrtf.hpp" VERBATIM)\n',
+            encoding="utf-8",
+        )
+        (source / "CMakeLists.txt").write_text(
+            'cmake_minimum_required(VERSION 3.20)\n'
+            'project(GeneratedHeaderLifecycle LANGUAGES NONE)\n'
+            'add_custom_target(graph_probe ALL COMMAND "${CMAKE_COMMAND}" -E echo "$ENV{HP2_GRAPH_VALUE}" VERBATIM)\n'
+            'include("${CMAKE_SOURCE_DIR}/Build/CMake/HP2NativeFree.cmake")\n'
+            'add_subdirectory("${CMAKE_BINARY_DIR}/_deps/hp2_sdl2-src" "${CMAKE_BINARY_DIR}/_deps/hp2_sdl2-build")\n'
+            'add_subdirectory("${CMAKE_BINARY_DIR}/_deps/hp2_openal_soft-src" "${CMAKE_BINARY_DIR}/_deps/hp2_openal_soft-build")\n'
+            '_hp2_native_free_generated_headers(headers)\n'
+            'file(WRITE "${CMAKE_BINARY_DIR}/hp2-native-free-manifest.json" "[${headers}]")\n',
+            encoding="utf-8",
+        )
+
+        artifact_dir = work / "helper-artifacts"
+        artifact_dir.mkdir()
+        env = {**os.environ, "HP2_ARTIFACT_DIR": str(artifact_dir), "HP2_GRAPH_VALUE": "initial"}
+        helper = [sys.executable, "-B", str(source / "Build/refresh_native_provenance.py"),
+                  "--preset", "synthetic", "--build-dir", "out/synthetic"]
+
+        def run(name, command):
+            result = subprocess.run(command, cwd=source, env=env, text=True, capture_output=True, check=False)
+            (work / f"{name}.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        configure = ["cmake", "--preset", "synthetic"]
+        run("initial-configure", configure)
+        snapshot = build / "hp2-native-free-manifest.json"
+        self.assertEqual(json.loads(snapshot.read_text(encoding="utf-8")), [])
+        paths = {
+            "_deps/hp2_sdl2-build/include-config-release/SDL2/SDL_config.h": "SDL2-static",
+            "_deps/hp2_openal_soft-build/default_hrtf.hpp": "OpenAL",
+        }
+        self.assertTrue((build / next(iter(paths))).is_file(), "SDL output is generated after configure")
+        self.assertFalse((build / "_deps/hp2_openal_soft-build/default_hrtf.hpp").exists())
+        run("record-build-state", helper + ["--record-build-state"])
+        self.assertTrue((artifact_dir / "native-build-state.json").is_file())
+        run("build", ["cmake", "--build", str(build)])
+        before = {path: (build / path).read_bytes() for path in paths}
+        cache_before = (build / "CMakeCache.txt").read_bytes()
+        commands_before = subprocess.run(["ninja", "-C", str(build), "-t", "commands"],
+                                         check=True, capture_output=True).stdout
+        if scenario == "regenerate":
+            sdl_cmake = sdl / "CMakeLists.txt"
+            old = sdl_cmake.read_text(encoding="utf-8")
+            self.assertIn("sdl generated", old)
+            sdl_cmake.write_text(old.replace("sdl generated", "sdl changed"), encoding="utf-8")
+        elif scenario == "cache":
+            presets = source / "CMakePresets.json"
+            config = json.loads(presets.read_text(encoding="utf-8"))
+            config["configurePresets"][0]["cacheVariables"]["CMAKE_BUILD_TYPE"] = "Release"
+            presets.write_text(json.dumps(config), encoding="utf-8")
+        elif scenario == "preset_environment":
+            presets = source / "CMakePresets.json"
+            config = json.loads(presets.read_text(encoding="utf-8"))
+            config["configurePresets"][0]["environment"]["HP2_PRESET_TEST"] = "changed"
+            presets.write_text(json.dumps(config), encoding="utf-8")
+        elif scenario == "ninja_environment":
+            env["HP2_GRAPH_VALUE"] = "changed"
+        elif scenario == "missing_state":
+            (artifact_dir / "native-build-state.json").unlink()
+        elif scenario == "header_symlink":
+            header = build / "_deps/hp2_sdl2-build/include-config-release/SDL2/SDL_config.h"
+            first = build / "identical-first.h"
+            second = build / "identical-second.h"
+            first.write_bytes(header.read_bytes())
+            second.write_bytes(header.read_bytes())
+            header.unlink()
+            header.symlink_to(first)
+            self.assertEqual(header.read_bytes(), before[next(iter(paths))])
+            header.unlink()
+            header.symlink_to(second)
+            self.assertEqual(header.read_bytes(), before[next(iter(paths))])
+        elif scenario == "prefix_symlink":
+            prefix = build / "_deps/hp2_sdl2-build/include/SDL2"
+            prefix.parent.mkdir(parents=True, exist_ok=True)
+            first = build / "prefix-first"
+            second = build / "prefix-second"
+            for directory in (first, second):
+                directory.mkdir()
+                (directory / "same.h").write_bytes(b"identical header bytes\n")
+            prefix.symlink_to(first, target_is_directory=True)
+            original = (prefix / "same.h").read_bytes()
+            prefix.unlink()
+            prefix.symlink_to(second, target_is_directory=True)
+            self.assertEqual((prefix / "same.h").read_bytes(), original)
+        existing_evidence = set(artifact_dir.glob("refresh-native-provenance-*"))
+        result = subprocess.run(helper, cwd=source, env=env, text=True, capture_output=True, check=False)
+        (work / "refresh.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+        evidence = list(set(artifact_dir.glob("refresh-native-provenance-*")) - existing_evidence)
+        self.assertEqual(len(evidence), 1, result.stdout + result.stderr)
+        report_text = (evidence[0] / "report.json").read_text(encoding="utf-8")
+        self.assertNotIn("sentinel-secret-never-in-report", report_text)
+        report = json.loads(report_text)
+        if scenario in ("cache", "preset_environment", "ninja_environment", "missing_state", "header_symlink", "prefix_symlink"):
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(report["ok"])
+            diagnostic = report["error"].lower()
+            expected = {"cache": ("cache", "preset"), "preset_environment": ("preset",),
+                        "ninja_environment": ("ninja",), "missing_state": ("state",),
+                        "header_symlink": ("symlink",), "prefix_symlink": ("symlink",)}
+            self.assertTrue(any(word in diagnostic for word in expected[scenario]), diagnostic)
+            if scenario in ("cache", "preset_environment", "ninja_environment"):
+                for path, data in before.items():
+                    self.assertEqual((build / path).read_bytes(), data, path)
+            if scenario in ("preset_environment", "ninja_environment"):
+                self.assertEqual((build / "CMakeCache.txt").read_bytes(), cache_before)
+            if scenario == "ninja_environment":
+                commands_after = subprocess.run(["ninja", "-C", str(build), "-t", "commands"],
+                                                check=True, capture_output=True).stdout
+                self.assertNotEqual(commands_before, commands_after)
+            return
+        old_hashes = json.loads((evidence[0] / "before.json").read_text(encoding="utf-8"))
+        new_hashes = json.loads((evidence[0] / "after.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["configure_status"], 0, result.stdout + result.stderr)
+        self.assertTrue((evidence[0] / "manifest-before.json").is_file())
+        self.assertTrue((evidence[0] / "manifest-after.json").is_file())
+        self.assertEqual(set(old_hashes), set(paths))
+        if scenario == "regenerate":
+            changed_path = "_deps/hp2_sdl2-build/include-config-release/SDL2/SDL_config.h"
+            self.assertNotEqual(result.returncode, 0, "changed generated header must be rejected")
+            self.assertFalse(report["ok"])
+            self.assertEqual(report["changed"], [changed_path])
+            self.assertEqual(report["added"], [])
+            self.assertEqual(report["removed"], [])
+            self.assertIn("generated headers changed", report["error"])
+            self.assertNotEqual(old_hashes[changed_path], new_hashes[changed_path])
+            self.assertNotEqual((build / changed_path).read_bytes(), before[changed_path])
+            return
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(report["ok"])
+        self.assertEqual(old_hashes, new_hashes)
+        records = json.loads(snapshot.read_text(encoding="utf-8"))
+        self.assertEqual(len(records), len(paths))
+        self.assertEqual({record["path"] for record in records}, set(paths))
+        for record in records:
+            path = record["path"]
+            self.assertEqual(record["target"], paths[path])
+            self.assertEqual((build / path).read_bytes(), before[path], path)
+            self.assertEqual(record["sha256"], hashlib.sha256(before[path]).hexdigest())
+            for source_key, hash_key in (("template_path", "template_sha256"),
+                                         ("cmake_source", "cmake_sha256"),
+                                         ("input_source", "input_sha256")):
+                self.assertEqual(record[hash_key], hashlib.sha256(Path(record[source_key]).read_bytes()).hexdigest())
+
+    def test_generated_header_snapshot_after_build_and_refresh(self):
+        self.check_generated_header_snapshot("unchanged")
+
+    def test_generated_header_refresh_rejects_regeneration(self):
+        self.check_generated_header_snapshot("regenerate")
+
+    def test_generated_header_refresh_rejects_cache_change(self):
+        self.check_generated_header_snapshot("cache")
+
+    def test_refresh_rejects_prebuild_preset_environment_change(self):
+        self.check_generated_header_snapshot("preset_environment")
+
+    def test_refresh_rejects_ninja_command_graph_environment_change(self):
+        self.check_generated_header_snapshot("ninja_environment")
+
+    def test_refresh_requires_recorded_build_state(self):
+        self.check_generated_header_snapshot("missing_state")
+
+    def test_generated_header_refresh_rejects_header_symlink_retarget(self):
+        self.check_generated_header_snapshot("header_symlink")
+
+    def test_generated_header_refresh_rejects_prefix_symlink_retarget(self):
+        self.check_generated_header_snapshot("prefix_symlink")
+
+    def test_workflows_refresh_after_build_before_tests_or_packaging(self):
+        cases = [
+            ("ci.yml", "build", "macos-arm64", "test"),
+            ("ci.yml", "linux-x64", "linux-x64", "test"),
+            ("ci.yml", "linux-arm64", "linux-arm64", "test"),
+            ("release.yml", "publish", "macos-arm64", "package"),
+        ]
+        for workflow, job, preset, destination in cases:
+            with self.subTest(workflow=workflow, job=job):
+                text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+                match = re.search(rf"(?ms)^  {re.escape(job)}:\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)", text)
+                self.assertIsNotNone(match, f"missing {job} job in {workflow}")
+                block = match.group(1)
+                build = re.search(rf"(?m)^\s*(?:run:\s*)?cmake --build --preset {re.escape(preset)}(?:\s|$)", block)
+                self.assertIsNotNone(build, f"missing {preset} build")
+                record = re.search(rf"(?m)^\s*(?:run:\s*)?python3 -B Build/refresh_native_provenance\.py (?=[^\n]*--record-build-state)(?=[^\n]*--preset {re.escape(preset)}(?:\s|$))(?=[^\n]*--build-dir out/{re.escape(preset)}(?:\s|$))[^\n]*", block)
+                self.assertIsNotNone(record, f"missing pre-build {preset} state recording")
+                self.assertLess(record.start(), build.start(), f"{preset} state recorded after build")
+                refresh = re.search(rf"(?m)^\s*(?:run:\s*)?python3 -B Build/refresh_native_provenance\.py --preset {re.escape(preset)} --build-dir out/{re.escape(preset)}(?:\s|$)", block[build.end():])
+                self.assertIsNotNone(refresh, f"missing guarded post-build {preset} refresh")
+                refresh_start = build.end() + refresh.start()
+                if destination == "test":
+                    end = re.search(rf"(?m)^\s*(?:run:\s*)?(?:xvfb-run -a )?ctest --preset {re.escape(preset)}[^\n]*-L data-none", block)
+                else:
+                    end = re.search(r"(?m)^\s*(?:run:\s*)?cmake --build out/macos-arm64 --target hp2_macos_dmg(?:\s|$)", block)
+                self.assertIsNotNone(end, f"missing {destination} for {preset}")
+                self.assertLess(refresh_start, end.start(), f"{preset} refresh follows {destination}")
 
     def test_explicit_rustup_home(self):
         self.check_rustup_home("/toolchain path", "/toolchain path")

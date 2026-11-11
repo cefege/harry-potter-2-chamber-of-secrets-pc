@@ -86,7 +86,17 @@ jobs:
             --require-label data-none
 
       - name: Build
-        run: cmake --build --preset macos-arm64
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/macos-arm64/Testing/HP2/native_header_refresh/Artifacts
+        run: |
+          python3 -B Build/refresh_native_provenance.py --record-build-state --preset macos-arm64 --build-dir out/macos-arm64
+          cmake --build --preset macos-arm64
+
+      - name: Refresh generated-header provenance
+        # Record late outputs, but reject any regeneration that changes their bytes.
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/macos-arm64/Testing/HP2/native_header_refresh/Artifacts
+        run: python3 -B Build/refresh_native_provenance.py --preset macos-arm64 --build-dir out/macos-arm64
 
       # A fresh GitHub checkout has no game data — the data directories are
       # gitignored — so the data-backed contracts are not registered at
@@ -197,7 +207,16 @@ jobs:
             --require-label data-none
 
       - name: Build verification binaries
-        run: cmake --build --preset linux-x64 --target hp2_verification_binaries
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-x64/Testing/HP2/native_header_refresh/Artifacts
+        run: |
+          python3 -B Build/refresh_native_provenance.py --record-build-state --preset linux-x64 --build-dir out/linux-x64
+          cmake --build --preset linux-x64 --target hp2_verification_binaries
+
+      - name: Refresh generated-header provenance
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-x64/Testing/HP2/native_header_refresh/Artifacts
+        run: python3 -B Build/refresh_native_provenance.py --preset linux-x64 --build-dir out/linux-x64
 
       - name: Test (data-none profile)
         run: xvfb-run -a ctest --preset linux-x64 --no-tests=error -L data-none --output-on-failure
@@ -267,7 +286,16 @@ jobs:
             --require-label data-none
 
       - name: Build verification binaries
-        run: cmake --build --preset linux-arm64 --target hp2_verification_binaries
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-arm64/Testing/HP2/native_header_refresh/Artifacts
+        run: |
+          python3 -B Build/refresh_native_provenance.py --record-build-state --preset linux-arm64 --build-dir out/linux-arm64
+          cmake --build --preset linux-arm64 --target hp2_verification_binaries
+
+      - name: Refresh generated-header provenance
+        env:
+          HP2_ARTIFACT_DIR: ${{ github.workspace }}/out/linux-arm64/Testing/HP2/native_header_refresh/Artifacts
+        run: python3 -B Build/refresh_native_provenance.py --preset linux-arm64 --build-dir out/linux-arm64
 
       - name: Test (data-none profile)
         run: xvfb-run -a ctest --preset linux-arm64 --no-tests=error -L data-none --output-on-failure
