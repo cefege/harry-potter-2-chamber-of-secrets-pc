@@ -1,6 +1,17 @@
 # Opt in per build tree. Cargo manages fingerprints and locks within this cache.
 option(HP2_SHARED_TEST_CARGO_CACHE "Share a Cargo target directory among behavior tests" OFF)
 
+# Resolve before CTest replaces HOME. Toolchains are immutable build inputs, not
+# per-test writable application state; do not download one into every test home.
+function(hp2_test_rustup_home out_var)
+    if(DEFINED ENV{RUSTUP_HOME} AND NOT "$ENV{RUSTUP_HOME}" STREQUAL "")
+        set(_home "$ENV{RUSTUP_HOME}")
+    else()
+        set(_home "$ENV{HOME}/.rustup")
+    endif()
+    set(${out_var} "${_home}" PARENT_SCOPE)
+endfunction()
+
 # Preserve the command except for CARGO_TARGET_DIR assignments in the leading
 # environment of a CMake -E env command with an executable following it.
 function(hp2_prepare_cargo_test_command out_var)

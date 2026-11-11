@@ -134,7 +134,9 @@ function(hp2_add_behavior_test test_name target)
 
     hp2_prepare_cargo_test_command(_hp2_test_command "${target}" ${ARGN})
     add_test(NAME "${test_name}" COMMAND ${_hp2_test_command})
+    hp2_test_rustup_home(_hp2_test_rustup_home)
     set(_hp2_test_env
+        "RUSTUP_HOME=${_hp2_test_rustup_home}"
         "HOME=${_hp2_test_home}"
         "TMPDIR=${_hp2_test_tmp}"
         # Isolate every XDG base directory too: a real desktop session's

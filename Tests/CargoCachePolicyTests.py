@@ -67,6 +67,35 @@ class CargoCachePolicyTests(unittest.TestCase):
         (work / "cmake.log").write_text(result.stdout + result.stderr, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def check_rustup_home(self, explicit, expected):
+        work = ARTIFACTS / self.id().split(".")[-1]
+        work.mkdir(parents=True, exist_ok=True)
+        lines = [
+            "cmake_minimum_required(VERSION 3.20)",
+            f"include({quote(str(HELPER))})",
+            'set(ENV{HOME} "/configured home")',
+            f"set(ENV{{RUSTUP_HOME}} {quote(explicit)})",
+            "hp2_test_rustup_home(result)",
+            # A later isolated test HOME must not change the resolved build input.
+            'set(ENV{HOME} "/isolated test home")',
+            f"set(expected {quote(expected)})",
+            'if(NOT "${result}" STREQUAL "${expected}")',
+            '  message(FATAL_ERROR "toolchain home: <${result}> != <${expected}>")',
+            "endif()",
+        ]
+        fixture = work / "fixture.cmake"
+        fixture.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        result = subprocess.run(["cmake", "-P", str(fixture)], cwd=work,
+                                text=True, capture_output=True, check=False)
+        (work / "cmake.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_explicit_rustup_home(self):
+        self.check_rustup_home("/toolchain path", "/toolchain path")
+
+    def test_default_rustup_home(self):
+        self.check_rustup_home("", "/configured home/.rustup")
+
     def test_off_equivalence(self):
         args = ["@CMAKE@", "-E", "env", "CARGO_TARGET_DIR=/old cache", "cargo", "test"]
         self.check_command(False, args, args)
