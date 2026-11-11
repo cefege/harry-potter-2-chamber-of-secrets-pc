@@ -38,8 +38,7 @@ impl FireGlobals {
         let src = self.speed_rand_arr[idx];
         let dst = &mut self.speed_rand_arr[(idx + 31) & 63];
         *dst ^= src;
-        let result = *dst;
-        result
+        *dst
     }
 }
 

@@ -56,7 +56,7 @@ jobs:
       # Keep strict checks per qualified crate; the remaining ported crates still carry a
       # documented backlog of pre-existing warnings (see Docs/RUST_STYLE.md).
       - name: Rust clippy (qualified crates, strict)
-        run: cargo clippy --locked -p hp2-ui -p hp2-codecs -p hp2-file-hash -p hp2-bootstrap-paths -p hp2-ini --all-targets -- -D warnings
+        run: cargo clippy --locked -p hp2-ui -p hp2-codecs -p hp2-file-hash -p hp2-bootstrap-paths -p hp2-ini -p hp2-fire --all-targets -- -D warnings
 
       - name: Configure
         run: cmake --preset macos-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
