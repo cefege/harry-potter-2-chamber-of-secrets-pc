@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Exercise the real CMake policy in isolated script-mode fixtures."""
 
+import json
 import os
 from pathlib import Path
+import re
+import shlex
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +93,59 @@ class CargoCachePolicyTests(unittest.TestCase):
                                 text=True, capture_output=True, check=False)
         (work / "cmake.log").write_text(result.stdout + result.stderr, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_workflows_seed_file_api_before_first_configure(self):
+        cases = [
+            ("ci.yml", {"macos-arm64", "linux-x64", "linux-arm64"}),
+            ("release.yml", {"macos-arm64"}),
+        ]
+        work_root = ARTIFACTS / self.id().split(".")[-1]
+        work_root.mkdir(parents=True, exist_ok=True)
+        for workflow, expected_presets in cases:
+            text = (ROOT / ".github/workflows" / workflow).read_text(encoding="utf-8")
+            blocks = re.findall(
+                r"(?m)^      - name: Configure\n        run: \|\n((?:          [^\n]*\n)+)",
+                text,
+            )
+            seen = set()
+            for block in blocks:
+                lines = [line[10:] for line in block.splitlines()]
+                commands = [line for line in lines if line.startswith("cmake --preset ")]
+                self.assertEqual(len(commands), 1, block)
+                command = commands[0]
+                preset = shlex.split(command)[2]
+                self.assertNotIn(preset, seen)
+                seen.add(preset)
+                query = f"out/{preset}/.cmake/api/v1/query"
+                seed = f'touch "{query}/codemodel-v2"'
+                self.assertIn(seed, lines)
+                self.assertLess(lines.index(seed), lines.index(command))
+                work = Path(tempfile.mkdtemp(prefix=f"{workflow}-{preset}-", dir=work_root))
+                source = work / "source"
+                source.mkdir()
+                # Include the real policy: its in-configure query write alone is too late.
+                fixture = [
+                    "cmake_minimum_required(VERSION 3.20)",
+                    "project(FileApiFirstConfigure NONE)",
+                    f"include({quote(str(ROOT / 'Build/CMake/HP2NativeFree.cmake'))})",
+                ]
+                (source / "CMakeLists.txt").write_text("\n".join(fixture) + "\n", encoding="utf-8")
+                replacement = f"cmake -S source -B out/{preset}"
+                script = "\n".join(lines).replace(command, replacement)
+                (work / "configure.sh").write_text(script + "\n", encoding="utf-8")
+                result = subprocess.run(["bash", "-euo", "pipefail", "-c", script],
+                                        cwd=work, text=True, capture_output=True, check=False)
+                (work / "configure.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                reply = work / f"out/{preset}/.cmake/api/v1/reply"
+                indices = list(reply.glob("index-*.json"))
+                self.assertEqual(len(indices), 1, f"missing first-configure File API index: {work}")
+                index = json.loads(indices[0].read_text(encoding="utf-8"))
+                model = index["reply"]["codemodel-v2"]
+                self.assertEqual(model["kind"], "codemodel")
+                self.assertEqual(model["version"]["major"], 2)
+                self.assertTrue((reply / model["jsonFile"]).is_file())
+            self.assertEqual(seen, expected_presets, workflow)
 
     def test_explicit_rustup_home(self):
         self.check_rustup_home("/toolchain path", "/toolchain path")
