@@ -114,7 +114,8 @@ class CargoCachePolicyTests(unittest.TestCase):
             for block in blocks:
                 lines = [line[10:] for line in block.splitlines()]
                 commands = [line for line in lines if line.startswith("cmake --preset ")]
-                self.assertEqual(len(commands), 1, block)
+                self.assertEqual(len(commands), 2, block)
+                self.assertEqual(commands[0], commands[1], block)
                 command = commands[0]
                 preset = shlex.split(command)[2]
                 self.assertNotIn(preset, seen)
@@ -134,7 +135,17 @@ class CargoCachePolicyTests(unittest.TestCase):
                 ]
                 (source / "CMakeLists.txt").write_text("\n".join(fixture) + "\n", encoding="utf-8")
                 replacement = f"cmake -S source -B out/{preset}"
-                script = "\n".join(lines).replace(command, replacement)
+                script_lines = []
+                configured = 0
+                for line in lines:
+                    if line == command:
+                        configured += 1
+                        script_lines.append(replacement)
+                        if configured == 1:
+                            script_lines.append(f'cp out/{preset}/.cmake/api/v1/reply/index-*.json first-index.json')
+                    else:
+                        script_lines.append(line)
+                script = "\n".join(script_lines)
                 (work / "configure.sh").write_text(script + "\n", encoding="utf-8")
                 result = subprocess.run(["bash", "-euo", "pipefail", "-c", script],
                                         cwd=work, text=True, capture_output=True, check=False)
@@ -143,7 +154,7 @@ class CargoCachePolicyTests(unittest.TestCase):
                 reply = work / f"out/{preset}/.cmake/api/v1/reply"
                 indices = list(reply.glob("index-*.json"))
                 self.assertEqual(len(indices), 1, f"missing first-configure File API index: {work}")
-                index = json.loads(indices[0].read_text(encoding="utf-8"))
+                index = json.loads((work / "first-index.json").read_text(encoding="utf-8"))
                 model = index["reply"]["codemodel-v2"]
                 self.assertEqual(model["kind"], "codemodel")
                 self.assertEqual(model["version"]["major"], 2)
@@ -330,6 +341,106 @@ class CargoCachePolicyTests(unittest.TestCase):
                                          ("input_source", "input_sha256")):
                 self.assertEqual(record[hash_key], hashlib.sha256(Path(record[source_key]).read_bytes()).hexdigest())
 
+    def test_two_pass_preparation_stabilizes_archive_and_cache(self):
+        root = ARTIFACTS / "ci-generated-headers"
+        root.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix="two-pass-", dir=root))
+        source = work / "source"
+        build = source / "out/synthetic"
+        archive = build / "_deps/hp2_libarchive-src"
+        sdl = build / "_deps/hp2_sdl2-src"
+        for directory in (source / "Build/CMake", archive / "build/cmake", archive / "libarchive", sdl):
+            directory.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "Build/CMake/HP2NativeFree.cmake", source / "Build/CMake/HP2NativeFree.cmake")
+        shutil.copy2(ROOT / "Build/refresh_native_provenance.py", source / "Build/refresh_native_provenance.py")
+        shutil.copy2(ROOT / "Build/native-free-allowlist.json", source / "Build/native-free-allowlist.json")
+        (source / "CMakePresets.json").write_text(json.dumps({
+            "version": 3,
+            "configurePresets": [{"name": "synthetic", "generator": "Ninja",
+                                  "binaryDir": "${sourceDir}/out/synthetic"}],
+        }), encoding="utf-8")
+        template = archive / "build/cmake/config.h.in"
+        template.write_text("#cmakedefine HAVE_ICONV_H 1\n", encoding="utf-8")
+        (archive / "CMakeLists.txt").write_text(
+            'set(ENABLE_ICONV OFF CACHE BOOL "")\n'
+            'if(ENABLE_ICONV)\n  set(HAVE_ICONV_H 1 CACHE INTERNAL "archive probe")\nendif()\n'
+            'configure_file("${CMAKE_CURRENT_SOURCE_DIR}/build/cmake/config.h.in" "${CMAKE_CURRENT_BINARY_DIR}/config.h")\n'
+            'add_subdirectory(libarchive)\n', encoding="utf-8")
+        (archive / "libarchive/CMakeLists.txt").write_text(
+            'add_custom_target(archive_static ALL COMMAND "${CMAKE_COMMAND}" -E echo archive VERBATIM)\n', encoding="utf-8")
+        (sdl / "CMakeLists.txt").write_text('set(HAVE_ICONV_H 1 CACHE INTERNAL "SDL probe")\n', encoding="utf-8")
+        (source / "CMakeLists.txt").write_text(
+            'cmake_minimum_required(VERSION 3.20)\n'
+            'project(TwoPassLifecycle LANGUAGES NONE)\n'
+            'if(DEFINED CACHE{Rust_TOOLCHAIN})\n'
+            '  set(Rust_TOOLCHAIN stable CACHE STRING "toolchain" FORCE)\n'
+            'else()\n  set(Rust_TOOLCHAIN stable CACHE PATH "toolchain")\nendif()\n'
+            'include("${CMAKE_SOURCE_DIR}/Build/CMake/HP2NativeFree.cmake")\n'
+            'add_subdirectory("${CMAKE_BINARY_DIR}/_deps/hp2_libarchive-src" "${CMAKE_BINARY_DIR}/_deps/hp2_libarchive-build")\n'
+            'add_subdirectory("${CMAKE_BINARY_DIR}/_deps/hp2_sdl2-src" "${CMAKE_BINARY_DIR}/_deps/hp2_sdl2-build")\n'
+            '_hp2_native_free_generated_headers(headers)\n'
+            'file(WRITE "${CMAKE_BINARY_DIR}/hp2-native-free-manifest.json" "[${headers}]")\n', encoding="utf-8")
+        artifact_dir = work / "helper-artifacts"
+        artifact_dir.mkdir()
+        env = {**os.environ, "HP2_ARTIFACT_DIR": str(artifact_dir)}
+        helper = [sys.executable, "-B", str(source / "Build/refresh_native_provenance.py"),
+                  "--preset", "synthetic", "--build-dir", "out/synthetic"]
+
+        def run(name, command, success=True):
+            result = subprocess.run(command, cwd=source, env=env, text=True, capture_output=True, check=False)
+            (work / f"{name}.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+            if success:
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            else:
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result
+
+        configure = ["cmake", "--preset", "synthetic"]
+        header = build / "_deps/hp2_libarchive-build/config.h"
+        cache = build / "CMakeCache.txt"
+        state = artifact_dir / "native-build-state.json"
+        run("configure-first", configure)
+        first_header = header.read_bytes()
+        first_cache = cache.read_bytes()
+        first_manifest = json.loads((build / "hp2-native-free-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(first_manifest), 1)
+        self.assertEqual(first_manifest[0]["path"], "_deps/hp2_libarchive-build/config.h")
+        self.assertEqual(first_manifest[0]["sha256"], hashlib.sha256(first_header).hexdigest())
+        self.assertIn(b"/* #undef HAVE_ICONV_H */", first_header)
+        self.assertIn(b"HAVE_ICONV_H:INTERNAL=1", first_cache)
+        self.assertIn(b"Rust_TOOLCHAIN:PATH=stable", first_cache)
+        self.assertFalse(state.exists())
+        run("configure-second", configure)
+        prepared_header = header.read_bytes()
+        prepared_cache = cache.read_bytes()
+        self.assertIn(b"#define HAVE_ICONV_H 1", prepared_header)
+        self.assertIn(b"Rust_TOOLCHAIN:STRING=stable", prepared_cache)
+        self.assertNotEqual(first_header, prepared_header)
+        self.assertNotEqual(first_cache, prepared_cache)
+        manifest = json.loads((build / "hp2-native-free-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(manifest), 1)
+        self.assertEqual(manifest[0]["path"], "_deps/hp2_libarchive-build/config.h")
+        self.assertEqual(manifest[0]["sha256"], hashlib.sha256(prepared_header).hexdigest())
+        self.assertNotEqual(first_manifest[0]["sha256"], manifest[0]["sha256"])
+        self.assertFalse(state.exists())
+        run("record-prepared-state", helper + ["--record-build-state"])
+        self.assertTrue(state.is_file())
+        run("build", ["cmake", "--build", str(build)])
+        self.assertEqual(header.read_bytes(), prepared_header)
+        self.assertEqual(cache.read_bytes(), prepared_cache)
+        run("refresh-third-configure", helper)
+        self.assertEqual(header.read_bytes(), prepared_header)
+        self.assertEqual(cache.read_bytes(), prepared_cache)
+        template.write_text("#cmakedefine HAVE_ICONV_H 1\n#define POSTBUILD_DRIFT 1\n", encoding="utf-8")
+        before_evidence = set(artifact_dir.glob("refresh-native-provenance-*"))
+        run("refresh-reject-drift", helper, success=False)
+        evidence = set(artifact_dir.glob("refresh-native-provenance-*")) - before_evidence
+        self.assertEqual(len(evidence), 1)
+        report = json.loads((evidence.pop() / "report.json").read_text(encoding="utf-8"))
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["changed"], ["_deps/hp2_libarchive-build/config.h"])
+        self.assertIn("generated headers changed", report["error"])
+
     def test_generated_header_snapshot_after_build_and_refresh(self):
         self.check_generated_header_snapshot("unchanged")
 
@@ -371,6 +482,10 @@ class CargoCachePolicyTests(unittest.TestCase):
                 self.assertIsNotNone(build, f"missing {preset} build")
                 record = re.search(rf"(?m)^\s*(?:run:\s*)?python3 -B Build/refresh_native_provenance\.py (?=[^\n]*--record-build-state)(?=[^\n]*--preset {re.escape(preset)}(?:\s|$))(?=[^\n]*--build-dir out/{re.escape(preset)}(?:\s|$))[^\n]*", block)
                 self.assertIsNotNone(record, f"missing pre-build {preset} state recording")
+                configures = list(re.finditer(rf"(?m)^[ \t]*(?:run:[ \t]*)?cmake --preset {re.escape(preset)}(?:[ \t]|$)[^\n]*", block))
+                self.assertEqual(len(configures), 2, f"{preset} needs 2 preparation configures")
+                self.assertEqual(configures[0].group().strip(), configures[1].group().strip())
+                self.assertLess(configures[1].end(), record.start(), f"{preset} recorded before preparation")
                 self.assertLess(record.start(), build.start(), f"{preset} state recorded after build")
                 refresh = re.search(rf"(?m)^\s*(?:run:\s*)?python3 -B Build/refresh_native_provenance\.py --preset {re.escape(preset)} --build-dir out/{re.escape(preset)}(?:\s|$)", block[build.end():])
                 self.assertIsNotNone(refresh, f"missing guarded post-build {preset} refresh")

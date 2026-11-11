@@ -68,6 +68,9 @@ jobs:
           mkdir -p "out/macos-arm64/.cmake/api/v1/query"
           touch "out/macos-arm64/.cmake/api/v1/query/codemodel-v2"
           cmake --preset macos-arm64
+          # Settle SDL/libarchive probe sharing and Corrosion cache types before compilation.
+          # Keep the post-build guard strict; no stale-header build can qualify.
+          cmake --preset macos-arm64
 
       - name: Build and package
         run: |
