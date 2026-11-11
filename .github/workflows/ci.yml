@@ -59,7 +59,12 @@ jobs:
         run: cargo clippy --locked -p hp2-ui --all-targets -- -D warnings
 
       - name: Configure
-        run: cmake --preset macos-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
+        run: |
+          set -euo pipefail
+          # CMake reads File API queries before it executes CMakeLists.txt.
+          mkdir -p "out/macos-arm64/.cmake/api/v1/query"
+          touch "out/macos-arm64/.cmake/api/v1/query/codemodel-v2"
+          cmake --preset macos-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
 
       - name: Agent and required-test contracts
         env:
@@ -166,7 +171,11 @@ jobs:
             libgtk-3-dev xvfb
 
       - name: Configure
-        run: cmake --preset linux-x64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
+        run: |
+          set -euo pipefail
+          mkdir -p "out/linux-x64/.cmake/api/v1/query"
+          touch "out/linux-x64/.cmake/api/v1/query/codemodel-v2"
+          cmake --preset linux-x64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
 
       - name: Agent and required-test contracts
         env:
@@ -232,7 +241,11 @@ jobs:
             libgtk-3-dev xvfb
 
       - name: Configure
-        run: cmake --preset linux-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
+        run: |
+          set -euo pipefail
+          mkdir -p "out/linux-arm64/.cmake/api/v1/query"
+          touch "out/linux-arm64/.cmake/api/v1/query/codemodel-v2"
+          cmake --preset linux-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
 
       - name: Agent and required-test contracts
         env:

@@ -63,7 +63,11 @@ jobs:
           rustup show active-toolchain
 
       - name: Configure
-        run: cmake --preset macos-arm64
+        run: |
+          set -euo pipefail
+          mkdir -p "out/macos-arm64/.cmake/api/v1/query"
+          touch "out/macos-arm64/.cmake/api/v1/query/codemodel-v2"
+          cmake --preset macos-arm64
 
       - name: Build and package
         run: |
