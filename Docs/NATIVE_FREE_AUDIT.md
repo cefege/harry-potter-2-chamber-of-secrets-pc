@@ -65,7 +65,14 @@ Those records predate the final selector fixes. Schema-2 recapture rebuilt selec
 artifacts; importer stayed byte-identical, while UCC and game changed. Changes in
 fire/engine/wgpu inputs support an explanation, but the initial build did not hash
 every source file at compilation. These builds are not established as equivalent
-performance inputs. Schema-3 recapture and product audits are separate evidence.
+performance inputs.
+
+Final schema-3 recapture and the 3 exact product audits passed once each. Every
+record contains HOME, fat LTO, 1 codegen unit, and incremental compilation off.
+All selected products rebuilt (`fresh=false`); executable hashes and complete
+artifact-hash maps match schema 2. The 1,033 first-party source/manifest hashes
+match before and after the build. These results qualify those private archive
+checks, not the coverage limits or runtime/performance acceptance below.
 
 Two coverage limits remain:
 
