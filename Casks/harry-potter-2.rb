@@ -9,11 +9,11 @@
 #   brew install --cask cefege/hp2/harry-potter-2
 
 cask "harry-potter-2" do
-  version "0.2.0"
+  version "0.2.1"
 
   # Stamped by Build/stamp_cask.py during a tagged release, so the checksum
   # always matches the artifact that actually shipped.
-  sha256 "cb0e979520545f463571330fefd87ba8ebda9cdb80afcd67c0940bc3197ded6e"
+  sha256 "ff5ef1fd03c16d806d8771aa506b7bf37c4daf33112970b99d0f3cd3297d730d"
 
   url "https://github.com/cefege/harry-potter-2-chamber-of-secrets-pc/releases/download/v#{version}/HarryPotter2-#{version}-macos-arm64.dmg",
       verified: "github.com/cefege/harry-potter-2-chamber-of-secrets-pc/"
