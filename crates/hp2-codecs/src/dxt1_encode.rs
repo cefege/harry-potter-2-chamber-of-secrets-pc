@@ -287,9 +287,9 @@ impl ColourSet {
     }
 
     fn remap_indices(&self, source: &[u8; 16], target: &mut [u8; 16]) {
-        for i in 0..16 {
+        for (i, output) in target.iter_mut().enumerate() {
             let j = self.remap[i];
-            target[i] = if j == -1 { 3 } else { source[j as usize] };
+            *output = if j == -1 { 3 } else { source[j as usize] };
         }
     }
 }
@@ -388,7 +388,7 @@ impl SingleColourFit {
 
     fn compute_end_points(&mut self, lookups: [&'static [[SourceBlock; 2]; 256]; 3]) {
         self.error = i32::MAX;
-        for index in 0..2usize {
+        for index in [0usize, 1] {
             let mut sources = [[0u8; 3]; 3];
             let mut error = 0i32;
             for channel in 0..3 {
@@ -463,13 +463,13 @@ impl RangeFit {
             end = values[0];
             let mut min = values[0].dot(principle);
             let mut max = min;
-            for i in 1..count {
-                let val = values[i].dot(principle);
+            for &value in &values[1..count] {
+                let val = value.dot(principle);
                 if val < min {
-                    start = values[i];
+                    start = value;
                     min = val;
                 } else if val > max {
-                    end = values[i];
+                    end = value;
                     max = val;
                 }
             }
@@ -583,8 +583,8 @@ impl ClusterFit {
 
         self.order[16 * iteration..16 * iteration + 16].copy_from_slice(&order_work);
         self.xsum_wsum = Vec4::splat(0.0);
-        for i in 0..count {
-            let j = order_work[i] as usize;
+        for (i, &ordered) in order_work[..count].iter().enumerate() {
+            let j = ordered as usize;
             let p = Vec4::new(
                 self.snapshot.points[j].x,
                 self.snapshot.points[j].y,

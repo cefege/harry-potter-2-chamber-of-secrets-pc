@@ -53,10 +53,10 @@ jobs:
       # features, so every unified test binary needs native libraries that only the CMake build
       # supplies. The crate tests run through CTest below with that linkage instead.
       #
-      # Clippy is strict for the code written clean (hp2-ui); the ported crates still carry a
+      # Keep strict checks per qualified crate; the remaining ported crates still carry a
       # documented backlog of pre-existing warnings (see Docs/RUST_STYLE.md).
-      - name: Rust clippy (hp2-ui, strict)
-        run: cargo clippy --locked -p hp2-ui --all-targets -- -D warnings
+      - name: Rust clippy (qualified crates, strict)
+        run: cargo clippy --locked -p hp2-ui -p hp2-codecs -p hp2-file-hash -p hp2-bootstrap-paths -p hp2-ini --all-targets -- -D warnings
 
       - name: Configure
         run: cmake --preset macos-arm64 -DHP2_SHARED_TEST_CARGO_CACHE=ON
