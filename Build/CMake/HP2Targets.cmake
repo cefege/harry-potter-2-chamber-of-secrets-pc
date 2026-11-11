@@ -2823,7 +2823,7 @@ hp2_add_behavior_test(repair_save_contract "${Python3_EXECUTABLE}"
 hp2_add_behavior_test(ucc_smoke_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
 )
-if(EXISTS "${CMAKE_BINARY_DIR}/hp2_ucc_rust")
+if(TARGET hp2_ucc_rust)
     hp2_add_behavior_test(ucc_help_smoke "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
         --smoke "--ucc-binary=${CMAKE_BINARY_DIR}/hp2_ucc_rust"

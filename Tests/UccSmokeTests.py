@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -187,6 +188,7 @@ def run_ucc_help_smoke(
         synthesized = Path(tempfile.mkdtemp(prefix="hp2-ucc-smoke-data-"))
         (synthesized / "System").mkdir()
         (synthesized / "System" / "Default.ini").write_text("[Core.System]\n")
+        (synthesized / "System" / "DefUser.ini").write_text("")
         data_root = synthesized
 
     profile = classify_data_profile(data_root)
@@ -345,6 +347,79 @@ class UccSmokeContracts(unittest.TestCase):
         self.assertEqual(report["reason_code"], "")
         self.assertIn("exit 0", report["exit_reason"])
         self.assertEqual(set(report["data"]), {"profile"})
+
+    def test_synthesized_data_root_contains_required_defaults(self) -> None:
+        self._stub(
+            'root=${2#-datadir=}\n'
+            '[ -f "$root/System/Default.ini" ] && '
+            '[ -f "$root/System/DefUser.ini" ] || exit 29\n'
+            'printf \'Commands for "ucc":\\nucc help <command>\\n\''
+        )
+        report = run_ucc_help_smoke(self.binary, None, artifact_dir=self.root / "synth-artifacts")
+        self.assertEqual(report["status"], "pass", report)
+        self.assertEqual(report["data"], {"profile": "data-none"})
+        system = Path(report["command"][2].removeprefix("-datadir=")) / "System"
+        self.assertEqual((system / "Default.ini").read_text(), "[Core.System]\n")
+        self.assertEqual((system / "DefUser.ini").read_text(), "")
+
+    def test_cmake_registers_smoke_before_binary_exists(self) -> None:
+        cmake_source = (REPOSITORY_ROOT / "Build/CMake/HP2Targets.cmake").read_text()
+        registration = re.search(
+            r"(?ms)^if\([^\n]*\)\n\s*hp2_add_behavior_test\(ucc_help_smoke\b.*?^endif\(\)",
+            cmake_source,
+        )
+        self.assertIsNotNone(registration, "UCC smoke registration block not found")
+        source = self.root / "cmake-source"
+        source.mkdir()
+        (source / "CMakeLists.txt").write_text(
+            "cmake_minimum_required(VERSION 3.24)\n"
+            "project(ucc_registration NONE)\n"
+            "enable_testing()\n"
+            f"set(PROJECT_SOURCE_DIR {json.dumps(str(REPOSITORY_ROOT))})\n"
+            f"set(Python3_EXECUTABLE {json.dumps(sys.executable)})\n"
+            f"set(HP2_TEST_DATA_ROOT {json.dumps(str(self.root / 'no-data'))})\n"
+            "function(hp2_add_behavior_test name executable)\n"
+            "  add_test(NAME ${name} COMMAND ${executable} ${ARGN})\n"
+            "endfunction()\n"
+            "if(ADD_UCC_TARGET)\n"
+            "  add_executable(hp2_ucc_rust IMPORTED GLOBAL)\n"
+            "endif()\n"
+            + registration.group(0) + "\n"
+        )
+        env = os.environ.copy()
+        env.pop("HP2_UCC_BINARY", None)
+        env.pop("HP2_UCC_DATA_ROOT", None)
+        env["HP2_ARTIFACT_DIR"] = str(self.root / "ctest-artifacts")
+        for has_target in (False, True):
+            build = self.root / ("with-target" if has_target else "without-target")
+            subprocess.run(
+                ["cmake", "-S", str(source), "-B", str(build),
+                 f"-DADD_UCC_TARGET={'ON' if has_target else 'OFF'}"],
+                env=env, check=True, capture_output=True, text=True,
+            )
+            listing = subprocess.run(
+                ["ctest", "--test-dir", str(build), "--show-only=json-v1"],
+                env=env, check=True, capture_output=True, text=True,
+            )
+            names = [entry["name"] for entry in json.loads(listing.stdout)["tests"]]
+            self.assertEqual("ucc_help_smoke" in names, has_target, names)
+            if has_target:
+                self.assertFalse((build / "hp2_ucc_rust").exists())
+                result = subprocess.run(
+                    ["ctest", "--test-dir", str(build), "--no-tests=error",
+                     "--output-on-failure", "-R", "^ucc_help_smoke$"],
+                    env=env, capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                report = json.loads((self.root / "ctest-artifacts/ucc-help-report.json").read_text())
+                self.assertEqual((report["status"], report["reason_code"]), ("blocked", "binary_missing"))
+                artifact_root = os.environ.get("HP2_ARTIFACT_DIR")
+                if artifact_root:
+                    evidence = Path(artifact_root) / "ucc-registration-fixture"
+                    evidence.mkdir(parents=True, exist_ok=True)
+                    (evidence / "ctest-list.json").write_text(listing.stdout)
+                    (evidence / "ctest-missing-binary.log").write_text(result.stdout + result.stderr)
+                    (evidence / "missing-binary-report.json").write_text(json.dumps(report, indent=2) + "\n")
 
     def test_nonzero_exit_fails_with_exit_status_reason(self) -> None:
         self._stub("exit 7")
