@@ -3192,9 +3192,14 @@ if(APPLE)
     # and its log/report would never reach the per-test artifact
     # directory -- AGENTS.md Non-Negotiable #2 requires exactly that
     # path (caught on review).
+    hp2_add_behavior_test(renderer_smoke_tool_contracts "${Python3_EXECUTABLE}" -B
+        "${PROJECT_SOURCE_DIR}/Tests/WgpuSmokeToolTests.py"
+    )
+    set_tests_properties(renderer_smoke_tool_contracts PROPERTIES LABELS "fast;data-none")
     hp2_add_behavior_test(renderer_smoke_wgpu "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Build/run_wgpu_smoke.py"
         "--build-dir=${CMAKE_BINARY_DIR}"
+        "--engine-bin=$<TARGET_FILE:hp2_game_rust>"
         "--data-root=${HP2_TEST_DATA_ROOT}"
         "--ticks=300"
     )
