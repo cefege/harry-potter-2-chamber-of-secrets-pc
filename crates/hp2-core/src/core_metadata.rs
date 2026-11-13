@@ -19,6 +19,24 @@ const EMPTY_ARRAY_TAG: [u32; 1] = [0];
 // Optional EX_DebugInfo probes one token and one INT, then rewinds both cursors.
 const DEBUG_LOOKAHEAD_BYTES: i32 = 1 + std::mem::size_of::<i32>() as i32;
 
+// A reference visitor can change its desired value or the live operand.
+// Omit only a genuinely redundant write. This preserves ordinary immutable
+// script storage during marking, without losing reference replacement effects.
+#[cfg(test)]
+thread_local! {
+    // Decision instrumentation only; this is not a memory write watchpoint.
+    static REFERENCE_OPERAND_WRITE_DECISIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn reference_operand_unchanged(original: &[u8], desired: &[u8], live: &[u8]) -> bool {
+    let unchanged = desired == original && live == original;
+    #[cfg(test)]
+    if !unchanged {
+        REFERENCE_OPERAND_WRITE_DECISIONS.with(|count| count.set(count.get() + 1));
+    }
+    unchanged
+}
+
 struct DirectExpressionContext<'access, 'archive, 'data> {
     access: CoreAccess<'access>,
     structure: *mut UStruct,
@@ -74,41 +92,67 @@ impl crate::expression_archive::ExpressionOps for DirectExpressionContext<'_, '_
             let (width, name_none) = match kind {
                 ExprByte => {
                     let mut value = if self.archive.is_loading() { 0 } else { self.script_byte(offset, 1)?.read() };
+                    let original = [value];
                     self.archive.serialize_u8(&mut value)?;
-                    self.script_byte(offset, 1)?.write(value);
+                    let slot = self.script_byte(offset, 1)?;
+                    if self.archive.mode() != ArchiveMode::Reference || !reference_operand_unchanged(&original, &[value], std::slice::from_raw_parts(slot, 1)) {
+                        slot.write(value);
+                    }
                     (1, false)
                 }
                 ExprWord => {
                     let mut value = if self.archive.is_loading() { 0 } else { self.script_byte(offset, 2)?.cast::<u16>().read_unaligned() };
+                    let original = value.to_ne_bytes();
                     self.archive.serialize_u16(&mut value)?;
-                    self.script_byte(offset, 2)?.cast::<u16>().write_unaligned(value);
+                    let slot = self.script_byte(offset, 2)?;
+                    if self.archive.mode() != ArchiveMode::Reference || !reference_operand_unchanged(&original, &value.to_ne_bytes(), std::slice::from_raw_parts(slot, 2)) {
+                        slot.cast::<u16>().write_unaligned(value);
+                    }
                     (2, false)
                 }
                 ExprInt => {
                     let mut value = if self.archive.is_loading() { 0 } else { self.script_byte(offset, 4)?.cast::<i32>().read_unaligned() };
+                    let original = value.to_ne_bytes();
                     self.archive.serialize_i32(&mut value)?;
-                    self.script_byte(offset, 4)?.cast::<i32>().write_unaligned(value);
+                    let slot = self.script_byte(offset, 4)?;
+                    if self.archive.mode() != ArchiveMode::Reference || !reference_operand_unchanged(&original, &value.to_ne_bytes(), std::slice::from_raw_parts(slot, 4)) {
+                        slot.cast::<i32>().write_unaligned(value);
+                    }
                     (4, false)
                 }
                 ExprFloat => {
                     let mut value = if self.archive.is_loading() { 0.0 } else { self.script_byte(offset, 4)?.cast::<f32>().read_unaligned() };
+                    let original = value.to_bits().to_ne_bytes();
                     self.archive.serialize_f32(&mut value)?;
-                    self.script_byte(offset, 4)?.cast::<f32>().write_unaligned(value);
+                    let slot = self.script_byte(offset, 4)?;
+                    if self.archive.mode() != ArchiveMode::Reference || !reference_operand_unchanged(&original, &value.to_bits().to_ne_bytes(), std::slice::from_raw_parts(slot, 4)) {
+                        slot.cast::<f32>().write_unaligned(value);
+                    }
                     (4, false)
                 }
                 ExprName => {
                     let mut value = if self.archive.is_loading() { 0 } else { self.script_byte(offset, 4)?.cast::<i32>().read_unaligned() };
+                    let original = value.to_ne_bytes();
                     self.archive.serialize_name_slot(&mut value)?;
-                    self.script_byte(offset, 4)?.cast::<i32>().write_unaligned(value);
+                    let slot = self.script_byte(offset, 4)?;
+                    if self.archive.mode() != ArchiveMode::Reference || !reference_operand_unchanged(&original, &value.to_ne_bytes(), std::slice::from_raw_parts(slot, 4)) {
+                        slot.cast::<i32>().write_unaligned(value);
+                    }
                     (4, value == 0)
                 }
                 ExprProperty | ExprStruct | ExprClass | ExprObject => {
+                    let original = if self.archive.is_loading() { -1 } else {
+                        self.script_byte(offset, 4)?.cast::<i32>().read_unaligned()
+                    };
                     let mut object = if self.archive.is_loading() { ptr::null_mut() } else {
-                        self.object_index(self.script_byte(offset, 4)?.cast::<i32>().read_unaligned())?
+                        self.object_index(original)?
                     };
                     self.archive.serialize_object_slot(&mut object)?;
                     let index = if object.is_null() { -1 } else { (*object).index };
-                    self.script_byte(offset, 4)?.cast::<i32>().write_unaligned(index);
+                    let slot = self.script_byte(offset, 4)?;
+                    if self.archive.mode() != ArchiveMode::Reference || !reference_operand_unchanged(&original.to_ne_bytes(), &index.to_ne_bytes(), std::slice::from_raw_parts(slot, 4)) {
+                        slot.cast::<i32>().write_unaligned(index);
+                    }
                     (4, false)
                 }
             };
@@ -720,6 +764,10 @@ unsafe impl MetadataOps for DirectMetadataOps<'_> {
     }
 }
 
+
+#[cfg(test)]
+#[path = "core_metadata_reference_tests.rs"]
+mod reference_tests;
 
 #[cfg(test)]
 mod tests {

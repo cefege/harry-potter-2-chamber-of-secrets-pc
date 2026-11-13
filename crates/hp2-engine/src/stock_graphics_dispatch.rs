@@ -22,7 +22,7 @@ unsafe fn popup(a: CoreAccess<'_>, receiver: *mut UObject, _: *mut UFunction, _:
 }
 unsafe fn keyboard(a: CoreAccess<'_>, receiver: *mut UObject, f: *mut UFunction, params: *const u8, size: usize) -> RuntimeResult<()> {
     let result = (|| -> RuntimeResult<()> {
-        if receiver.is_null() || !(0..a.object_count()).any(|i| a.object_at(i) == receiver.cast()) { return Ok(()); }
+        if receiver.is_null() || !a.contains_object(receiver) { return Ok(()); }
         // Ignore explicit Super.KeyDown calls; only the receiver's actual
         // dispatch target must advance the control once per key event.
         let key_name = a.intern_str("KeyDown", FindName::Find)?;

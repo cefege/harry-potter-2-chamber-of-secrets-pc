@@ -53,7 +53,7 @@ unsafe fn property(access: CoreAccess<'_>, object: *mut UObject, name: &str, kin
 unsafe fn obj_prop(access: CoreAccess<'_>, object: *mut UObject, name: &str) -> RuntimeResult<*mut UObject> {
     Ok(unsafe { property(access, object, name, "Core.ObjectProperty", size_of::<*mut c_void>())?.cast::<*mut UObject>().read_unaligned() })
 }
-fn live(access: CoreAccess<'_>, p: *mut UObject) -> bool { !p.is_null() && (0..access.object_count()).any(|i| access.object_at(i) == p.cast()) }
+fn live(access: CoreAccess<'_>, p: *mut UObject) -> bool { !p.is_null() && access.contains_object(p) }
 unsafe fn is_a(access: CoreAccess<'_>, p: *mut UObject, class: *mut UClass) -> bool { live(access, p) && unsafe { hp2_core::object_model::is_a(p.cast(), class.cast()) } }
 unsafe fn string(access: CoreAccess<'_>, object: *mut UObject, name: &str) -> RuntimeResult<String> {
     let a = unsafe { property(access, object, name, "Core.StrProperty", size_of::<TArrayRaw>())?.cast::<TArrayRaw>().read_unaligned() };

@@ -19,7 +19,7 @@ unsafe fn function(a: CoreAccess<'_>, class: *mut UClass, name: &str) -> Runtime
     Ok(f)
 }
 fn live(a: CoreAccess<'_>, object: *mut UObject) -> bool {
-    !object.is_null() && (0..a.object_count()).any(|i| a.object_at(i) == object.cast())
+    !object.is_null() && a.contains_object(object)
 }
 
 /// Distinguish the exact stock methods and validate the receiver and W frame.

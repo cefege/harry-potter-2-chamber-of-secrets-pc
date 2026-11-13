@@ -2,7 +2,7 @@
 //! or painting.
 use std::rc::Rc;
 
-use crate::style::{Align, Color, Direction, Edges, Font, Justify, Rect, Size, Style, TextAlign};
+use crate::style::{Align, BlendMode, Color, Direction, Edges, Font, Justify, Rect, Size, Style, TextAlign};
 
 pub(crate) type Click = Rc<dyn Fn()>;
 pub(crate) type Toggle = Rc<dyn Fn(bool)>;
@@ -14,6 +14,7 @@ type StyleMod = Rc<dyn Fn(&mut Style)>;
 pub(crate) enum Kind {
     Box,
     Text(String),
+    Image(crate::paint::TextureRef, crate::paint::Fit),
     Button(String),
     Checkbox {
         text: String,
@@ -123,6 +124,11 @@ impl Node {
         self.modify(move |s| s.color = color)
     }
 
+    /// Sets image compositing without changing text paint policy.
+    pub fn blend(self, blend: BlendMode) -> Self {
+        self.modify(move |s| s.blend = blend)
+    }
+
     pub fn background(self, color: Color) -> Self {
         self.modify(move |s| s.background = Some(color))
     }
@@ -194,6 +200,11 @@ pub fn label(text: &str) -> Node {
     Node::new(Kind::Text(text.to_owned()))
 }
 
+/// Non-interactive artwork; the host supplies the texture and the view supplies its size.
+pub fn image(texture: crate::paint::TextureRef, fit: crate::paint::Fit) -> Node {
+    Node::new(Kind::Image(texture, fit))
+}
+
 pub fn button(text: &str) -> Node {
     Node::new(Kind::Button(text.to_owned()))
 }
@@ -257,7 +268,7 @@ pub fn number_input(
 
 impl Kind {
     pub(crate) fn focusable(&self) -> bool {
-        !matches!(self, Kind::Box | Kind::Text(_))
+        !matches!(self, Kind::Box | Kind::Text(_) | Kind::Image(..))
     }
 }
 

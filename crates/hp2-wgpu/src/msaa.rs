@@ -5,6 +5,23 @@
 
 use crate::{CreatedDevice, draw};
 
+fn select_format_features(
+    format: wgpu::TextureFormat,
+    device_features: wgpu::Features,
+    adapter_features: wgpu::TextureFormatFeatures,
+) -> wgpu::TextureFormatFeatures {
+    if device_features.contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES) {
+        adapter_features
+    } else {
+        format.guaranteed_format_features(device_features)
+    }
+}
+
+/// Format capabilities available to the created device, not merely its adapter.
+pub(crate) fn effective_format_features(created: &CreatedDevice, format: wgpu::TextureFormat) -> wgpu::TextureFormatFeatures {
+    select_format_features(format, created.device.features(), created.adapter.get_texture_format_features(format))
+}
+
 /// The persisted UI values are 0 (off), 2 and 4; WGPU uses 1 for off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SampleCount(u32);
@@ -56,6 +73,18 @@ impl PreparedMsaa {
         size: (u32, u32),
         count: SampleCount,
     ) -> Result<Self, String> {
+        Self::prepare_with_sampleable_depth(created, format, size, count, false)
+    }
+
+    /// Prepare the actual MSAA attachments, optionally allowing per-sample depth reads.
+    /// This does not resolve depth or change the normal attachment-only allocation.
+    pub(crate) fn prepare_with_sampleable_depth(
+        created: &CreatedDevice,
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+        count: SampleCount,
+        sampleable_depth: bool,
+    ) -> Result<Self, String> {
         let device = &created.device;
         let limit = device.limits().max_texture_dimension_2d;
         if size.0 == 0 || size.1 == 0 || size.0 > limit || size.1 > limit {
@@ -70,16 +99,14 @@ impl PreparedMsaa {
                 depth: None,
             });
         }
-        let color_features = created.adapter.get_texture_format_features(format);
-        let depth_features = created
-            .adapter
-            .get_texture_format_features(draw::DEPTH_FORMAT);
+        let color_features = effective_format_features(created, format);
+        let depth_features = effective_format_features(created, draw::DEPTH_FORMAT);
         if !color_features
             .allowed_usages
             .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
             || !depth_features
                 .allowed_usages
-                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT | if sampleable_depth { wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::empty() })
             || !color_features.flags.sample_count_supported(count.get())
             || !depth_features.flags.sample_count_supported(count.get())
             || !color_features
@@ -94,7 +121,7 @@ impl PreparedMsaa {
         let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
         let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        let make = |label, format| {
+        let make = |label, format, usage| {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
                 size: wgpu::Extent3d {
@@ -106,18 +133,20 @@ impl PreparedMsaa {
                 sample_count: count.get(),
                 dimension: wgpu::TextureDimension::D2,
                 format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage,
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
             (texture, view)
         };
-        let color = make("hp2 MSAA color", format);
-        let depth = make("hp2 MSAA depth", draw::DEPTH_FORMAT);
+        let color = make("hp2 MSAA color", format, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let depth_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | if sampleable_depth { wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::empty() };
+        let depth = make("hp2 MSAA depth", draw::DEPTH_FORMAT, depth_usage);
         let poll = device.poll(wgpu::PollType::wait_indefinitely());
-        let error = pollster::block_on(memory.pop())
-            .or(pollster::block_on(internal.pop()))
-            .or(pollster::block_on(validation.pop()));
+        let memory_error = pollster::block_on(memory.pop());
+        let internal_error = pollster::block_on(internal.pop());
+        let validation_error = pollster::block_on(validation.pop());
+        let error = memory_error.or(internal_error).or(validation_error);
         poll.map_err(|e| format!("MSAA device poll failed: {e}"))?;
         if let Some(error) = error {
             return Err(format!("MSAA allocation failed: {error}"));
@@ -135,6 +164,19 @@ impl PreparedMsaa {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn device_format_features_choose_guarantees_or_adapter() {
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut adapter = format.guaranteed_format_features(wgpu::Features::empty());
+        adapter.flags |= wgpu::TextureFormatFeatureFlags::MULTISAMPLE_X2;
+        let ordinary = select_format_features(format, wgpu::Features::empty(), adapter);
+        assert!(!ordinary.flags.sample_count_supported(2));
+        assert!(ordinary.flags.sample_count_supported(4));
+        let enabled = select_format_features(format, wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES, adapter);
+        assert_eq!(enabled, adapter);
+        assert!(enabled.flags.sample_count_supported(2));
+    }
+
     #[test]
     fn setting_values_are_exact() {
         for (setting, count) in [(0, 1), (2, 2), (4, 4)] {

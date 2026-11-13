@@ -263,6 +263,9 @@ pub(crate) unsafe fn event_post_render(
     if function.is_null() {
         return Err(RuntimeError::new("Canonical Console PostRender metadata is unavailable"));
     }
+    if unsafe { crate::ui_console_views::post_render(access, console.cast(), canvas.cast(), function)? } {
+        return Ok(());
+    }
     #[repr(C)] struct Params { canvas: *mut UCanvas }
     let mut params = Params { canvas };
     unsafe { access.execute_event(console.cast(), function, (&mut params as *mut Params).cast(), ptr::null_mut()) }

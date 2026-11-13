@@ -8,6 +8,7 @@ use hp2_abi::FVector;
 use hp2_core::{
     canonical_vm_native::{finish_arguments, log_frame, step_argument, step_argument_out, VmNativeSpec},
     core_access::{CoreAccess, RuntimeError, RuntimeResult},
+    NativeTileScope,
 };
 use std::{ffi::c_void, ptr};
 /// Immutable native UCanvas registrations installed by the parent Core registry.
@@ -111,14 +112,76 @@ unsafe fn draw_text(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FF
 }
 
 unsafe fn draw_tile(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FFrame, _result: *mut c_void) -> RuntimeResult<()> {
-    tile(access, object, frame, false)
+    unsafe { tile(access, object, frame, false, None) }
 }
 
 unsafe fn draw_tile_clipped(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FFrame, _result: *mut c_void) -> RuntimeResult<()> {
-    tile(access, object, frame, true)
+    unsafe { tile(access, object, frame, true, None) }
 }
 
-unsafe fn tile(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FFrame, clipped: bool) -> RuntimeResult<()> {
+/// Runs the ordinary DrawTile owner under a current Core lexical handoff.
+///
+/// # Safety
+/// `access`, `object`, `frame`, and `scope` must identify the same live, current
+/// selected native invocation. The scope must authorize this runner's seven
+/// ordered, synchronously writable destinations and its one finish operation.
+/// Neither the scope nor a destination may escape or operate a suspended frame.
+pub(crate) unsafe fn health_draw_tile_selected(
+    access: CoreAccess<'_>,
+    object: *mut UObject,
+    frame: *mut FFrame,
+    _result: *mut c_void,
+    scope: &NativeTileScope<'_>,
+) -> RuntimeResult<()> {
+    // SAFETY: the caller supplies the matching live invocation and scope.
+    unsafe { tile(access, object, frame, false, Some(scope)) }
+}
+
+unsafe fn tile_texture_input(
+    access: CoreAccess<'_>,
+    frame: *mut FFrame,
+    destination: *mut *mut UTexture,
+    selected: Option<&NativeTileScope<'_>>,
+) -> RuntimeResult<()> {
+    // SAFETY: the runner supplies its current, writable texture destination.
+    unsafe {
+        match selected {
+            Some(scope) => scope.step_texture(destination),
+            None => step_argument(access, frame, destination.cast()),
+        }
+    }
+}
+
+unsafe fn tile_float_input(
+    access: CoreAccess<'_>,
+    frame: *mut FFrame,
+    destination: *mut f32,
+    selected: Option<&NativeTileScope<'_>>,
+) -> RuntimeResult<()> {
+    // SAFETY: the runner supplies its current, writable float destination.
+    unsafe {
+        match selected {
+            Some(scope) => scope.step_float(destination),
+            None => step_argument(access, frame, destination.cast()),
+        }
+    }
+}
+
+unsafe fn tile_finish(
+    access: CoreAccess<'_>,
+    frame: *mut FFrame,
+    selected: Option<&NativeTileScope<'_>>,
+) -> RuntimeResult<()> {
+    // SAFETY: the runner calls finish once on the same current invocation.
+    unsafe {
+        match selected {
+            Some(scope) => scope.finish_arguments(),
+            None => finish_arguments(access, frame),
+        }
+    }
+}
+
+unsafe fn tile(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FFrame, clipped: bool, selected: Option<&NativeTileScope<'_>>) -> RuntimeResult<()> {
     if object.is_null() { return Err(RuntimeError::new("Null canonical UCanvas")); }
     let mut texture = std::ptr::null_mut::<UTexture>();
     let mut xl = 0.0_f32;
@@ -128,14 +191,14 @@ unsafe fn tile(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FFrame,
     let mut ul = 0.0_f32;
     let mut vl = 0.0_f32;
     unsafe {
-        step_argument(access, frame, (&raw mut texture).cast())?;
-        step_argument(access, frame, (&raw mut xl).cast())?;
-        step_argument(access, frame, (&raw mut yl).cast())?;
-        step_argument(access, frame, (&raw mut u).cast())?;
-        step_argument(access, frame, (&raw mut v).cast())?;
-        step_argument(access, frame, (&raw mut ul).cast())?;
-        step_argument(access, frame, (&raw mut vl).cast())?;
-        finish_arguments(access, frame)?;
+        tile_texture_input(access, frame, &raw mut texture, selected)?;
+        tile_float_input(access, frame, &raw mut xl, selected)?;
+        tile_float_input(access, frame, &raw mut yl, selected)?;
+        tile_float_input(access, frame, &raw mut u, selected)?;
+        tile_float_input(access, frame, &raw mut v, selected)?;
+        tile_float_input(access, frame, &raw mut ul, selected)?;
+        tile_float_input(access, frame, &raw mut vl, selected)?;
+        tile_finish(access, frame, selected)?;
         if clipped {
             crate::canvas_owner::native_draw_tile_clipped(access, object.cast(), texture, xl, yl, u, v, ul, vl)
         } else {
@@ -189,32 +252,12 @@ unsafe fn draw_actor(access: CoreAccess<'_>, object: *mut UObject, frame: *mut F
         finish_arguments(access, frame)?;
         let canvas = object.cast::<UCanvas>();
         if canvas.is_null() { return Err(RuntimeError::new("Null canonical UCanvas")); }
-        let render = ptr::addr_of!((*canvas).render).read_unaligned().cast::<URender>();
         if actor.is_null() {
             let message = (*b"DrawActor: Missing Actor").map(u32::from);
             log_frame(access, frame, &message)?;
             return Ok(());
         }
-        let scene = ptr::addr_of!((*canvas).frame).read_unaligned().cast::<FSceneNode>();
-        let viewport = ptr::addr_of!((*canvas).viewport).read_unaligned().cast::<UViewport>();
-        let view_actor = if viewport.is_null() { ptr::null_mut() } else {
-            ptr::addr_of!((*viewport).actor).read_unaligned().cast::<hp2_abi::engine::generated::APlayerPawn>()
-        };
-        if render.is_null() || scene.is_null() || viewport.is_null() || view_actor.is_null() {
-            return Err(RuntimeError::new("Invalid canonical Canvas DrawActor input"));
-        }
-        let old_render_map = ptr::addr_of!((*view_actor).rend_map).read_unaligned();
-        if wireframe != 0 {
-            ptr::addr_of_mut!((*view_actor).rend_map).write_unaligned(hp2_abi::engine::generated::ENGINE_REN_WIRE);
-        }
-        (*actor).set_b_hidden(false);
-        if clear_z != 0 {
-            let device = ptr::addr_of!((*viewport).ren_dev).read_unaligned().cast();
-            crate::render_device_owner::clear_z(access, device)?;
-        }
-        crate::render_owner::draw_actor(access, render, scene, actor)?;
-        (*actor).set_b_hidden(true);
-        ptr::addr_of_mut!((*view_actor).rend_map).write_unaligned(old_render_map);
+        crate::canvas_owner::draw_actor(access, canvas, actor, wireframe != 0, clear_z != 0)?;
         Ok(())
     }
 }
@@ -334,3 +377,7 @@ unsafe fn draw_portal(access: CoreAccess<'_>, object: *mut UObject, frame: *mut 
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "canvas_tile_vm_tests.rs"]
+mod tile_vm_tests;

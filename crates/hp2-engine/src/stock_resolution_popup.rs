@@ -23,7 +23,7 @@ unsafe fn object_field(access: CoreAccess<'_>, obj: *mut UObject, class: *mut UC
     Ok(unsafe { access.property_address(obj, p)?.cast::<*mut UObject>().read_unaligned() })
 }
 fn valid(access: CoreAccess<'_>, p: *mut UObject, c: *mut UClass) -> bool {
-    !p.is_null() && (0..access.object_count()).any(|i| access.object_at(i) == p.cast()) && unsafe { hp2_core::object_model::is_a(p.cast(), c.cast()) }
+    !p.is_null() && access.contains_object(p) && unsafe { hp2_core::object_model::is_a(p.cast(), c.cast()) }
 }
 unsafe fn function(access: CoreAccess<'_>, class: *mut UClass) -> RuntimeResult<*mut UFunction> {
     Ok(unsafe { field(access, class.cast(), "BeforePaint", "Core.Function")? }.cast())

@@ -382,6 +382,10 @@ hp2_add_behavior_test(wgpu_mipmap_contracts "${CMAKE_COMMAND}" -E env
     --package=hp2-wgpu --lib mipmaps:: -- --test-threads=1
 )
 set_tests_properties(wgpu_mipmap_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(game_state_screen_trace_source_contracts "${Python3_EXECUTABLE}" -B
+    "${PROJECT_SOURCE_DIR}/Tests/GameStateScreenTraceSourceTests.py")
+set_tests_properties(game_state_screen_trace_source_contracts PROPERTIES LABELS "fast;data-none")
+
 hp2_add_behavior_test(ui_hud_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
@@ -390,6 +394,142 @@ hp2_add_behavior_test(ui_hud_contracts "${CMAKE_COMMAND}" -E env
     --package=hp2-engine --lib ui_hud::tests -- --test-threads=1
 )
 set_tests_properties(ui_hud_contracts PROPERTIES LABELS "fast;data-none")
+# Synthetic actual-Core/Engine Context+native, no device, not a HUD cutover.
+# The parent must invoke each exact CTest separately and serially, stopping at
+# the first failure. RUN_SERIAL protects only one CTest invocation, not others.
+foreach(_hp2_canvas_tile_case IN ITEMS
+    canvas_canonical_466_null_texture
+    canvas_canonical_466_null_texture_log_error
+    canvas_canonical_466_style_none
+    canvas_canonical_466_finish_error
+    canvas_canonical_466_null_context
+    canvas_canonical_466_null_context_strict
+    canvas_canonical_468_null_texture
+    canvas_canonical_468_null_texture_log_error
+    canvas_canonical_468_style_none
+    canvas_canonical_468_finish_error
+    canvas_canonical_468_null_context
+    canvas_canonical_468_null_context_strict
+    canvas_canonical_468_zero_x
+    canvas_canonical_468_zero_y
+)
+    hp2_add_behavior_test("${_hp2_canvas_tile_case}" "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --lib
+        "canvas_vm_native::tile_vm_tests::${_hp2_canvas_tile_case}"
+        -- --exact --ignored --test-threads=1
+    )
+    set_tests_properties("${_hp2_canvas_tile_case}" PROPERTIES
+        LABELS "integration;data-none" RUN_SERIAL TRUE)
+endforeach()
+unset(_hp2_canvas_tile_case)
+# Selected current-frame Core handoff; synthetic, not production geometry.
+foreach(_hp2_canvas_selected_case IN ITEMS
+    canvas_selected_466_null_texture
+    canvas_selected_466_null_texture_log_error
+    canvas_selected_466_style_none
+    canvas_selected_466_finish_error
+    canvas_selected_466_null_context
+    canvas_selected_466_null_context_strict
+)
+    hp2_add_behavior_test("${_hp2_canvas_selected_case}" "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --lib
+        "canvas_vm_native::tile_vm_tests::selected::${_hp2_canvas_selected_case}"
+        -- --exact --ignored --test-threads=1
+    )
+    set_tests_properties("${_hp2_canvas_selected_case}" PROPERTIES
+        LABELS "integration;data-none" RUN_SERIAL TRUE)
+endforeach()
+unset(_hp2_canvas_selected_case)
+# Synthetic Context integer operands; no USize property/retail qualification.
+foreach(_hp2_geometry_case IN ITEMS
+    canvas_synthetic_geometry_constants
+    canvas_synthetic_geometry_constants_null_icon
+    canvas_synthetic_geometry_constants_finish_error
+)
+    hp2_add_behavior_test("${_hp2_geometry_case}" "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --lib
+        "canvas_vm_native::tile_vm_tests::geometry::${_hp2_geometry_case}"
+        -- --exact --ignored --test-threads=1
+    )
+    set_tests_properties("${_hp2_geometry_case}" PROPERTIES LABELS "integration;data-none" RUN_SERIAL TRUE)
+endforeach()
+unset(_hp2_geometry_case)
+# Prototype metadata and a real Texture; no retail or draw qualification.
+hp2_add_behavior_test(canvas_prototype_usize_geometry "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib
+    canvas_vm_native::tile_vm_tests::geometry::real_property::canvas_prototype_usize_geometry
+    -- --exact --ignored --test-threads=1 --nocapture
+)
+set_tests_properties(canvas_prototype_usize_geometry PROPERTIES LABELS "integration;data-prototype" RUN_SERIAL TRUE)
+# Fixed IntConstByte health-white-channel comparison; not retail admission.
+hp2_add_behavior_test(canvas_white_channels_normal_comparison "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib
+    "canvas_vm_native::tile_vm_tests::white_normal::canvas_white_channels_normal_comparison"
+    -- --exact --ignored --test-threads=1
+)
+set_tests_properties(canvas_white_channels_normal_comparison PROPERTIES
+    LABELS "integration;data-none" RUN_SERIAL TRUE)
+foreach(_hp2_white_null_case IN ITEMS
+    canvas_white_channels_all_null_sink
+    canvas_white_channels_green_null_output_failure
+)
+    hp2_add_behavior_test("${_hp2_white_null_case}" "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --lib
+        "canvas_vm_native::tile_vm_tests::white_normal::null_cases::${_hp2_white_null_case}"
+        -- --exact --ignored --test-threads=1
+    )
+    set_tests_properties("${_hp2_white_null_case}" PROPERTIES LABELS "integration;data-none" RUN_SERIAL TRUE)
+endforeach()
+unset(_hp2_white_null_case)
+# Closed, fully-writing Function-local hotkey trees; not production admission.
+hp2_add_behavior_test(canvas_hotkey_xy_normal_comparison "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib
+    "canvas_vm_native::tile_vm_tests::hotkey_normal::hotkey_xy_normal_canonical_selected"
+    -- --exact --ignored --test-threads=1
+)
+set_tests_properties(canvas_hotkey_xy_normal_comparison PROPERTIES
+    LABELS "integration;data-none" RUN_SERIAL TRUE)
+# Real event allocation witness, independent of mutable Function extent.
+hp2_add_behavior_test(canvas_hotkey_scalar_local_witness "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine --lib
+    "canvas_vm_native::tile_vm_tests::hotkey_normal::hotkey_scalar_local_allocation_witness"
+    -- --exact --ignored --test-threads=1
+)
+set_tests_properties(canvas_hotkey_scalar_local_witness PROPERTIES
+    LABELS "integration;data-none" RUN_SERIAL TRUE)
 # This policy is not wired into the HUD yet; do not label it a runtime cutover.
 hp2_add_behavior_test(ui_health_policy_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
@@ -502,6 +642,9 @@ hp2_add_behavior_test(stock_render_scale_launcher_parity "${CMAKE_COMMAND}" -E e
 hp2_add_behavior_test(perf_harness_contracts "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/PerfHarnessTests.py")
 set_tests_properties(perf_harness_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(perf_baseline_tool_contracts "${Python3_EXECUTABLE}" -B
+    "${PROJECT_SOURCE_DIR}/Tests/PerfBaselineToolTests.py")
+set_tests_properties(perf_baseline_tool_contracts PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(stock_render_scale_replay_contracts "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/RetailStockRenderScaleContracts.py")
 set_tests_properties(stock_render_scale_policy stock_render_scale_control stock_render_scale_launcher_parity stock_render_scale_replay_contracts
@@ -550,6 +693,24 @@ if(HP2_ENABLE_RETAIL_RESOLUTION_VISUAL)
     set_tests_properties(stock_resolution_retail_visual PROPERTIES LABELS "data-retail;renderer;visual-review" RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 
+# Pure trait forwarding only; no reflected object or prototype package is used.
+foreach(_hp2_snapshot_host_case IN ITEMS
+    snapshot_default_forwards_legacy_and_result_hosts
+    locals_snapshot_default_forwards_existing_snapshot_override
+)
+    hp2_add_behavior_test("core_${_hp2_snapshot_host_case}" "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-core --test=script_post_call_hook
+        "snapshot_host::${_hp2_snapshot_host_case}" -- --exact --test-threads=1
+    )
+    set_tests_properties("core_${_hp2_snapshot_host_case}" PROPERTIES
+        LABELS "integration;data-none" RUN_SERIAL TRUE)
+endforeach()
+unset(_hp2_snapshot_host_case)
+
 # The real VM hook fixture copies these prototype packages into the isolated
 # artifact root; it does not require or claim verified retail data.
 if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/System/Core.u"
@@ -563,6 +724,26 @@ if(EXISTS "${PROJECT_SOURCE_DIR}/HarryPotter2/Unreal/System/Core.u"
         --package=hp2-core --test=script_post_call_hook -- --test-threads=1
     )
     set_tests_properties(core_script_post_call_hook PROPERTIES LABELS "fast;data-prototype")
+    hp2_add_behavior_test(core_script_argument_snapshot_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-core --test=script_post_call_hook
+        lazy_arguments::stock_and_scoped_lazy_arguments_preserve_reentry_context_and_failure
+        -- --exact --test-threads=1
+    )
+    set_tests_properties(core_script_argument_snapshot_contracts PROPERTIES LABELS "fast;data-prototype")
+    hp2_add_behavior_test(core_script_let_snapshot_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${HP2_STOCK_FPS_TEST_CARGO_DIR}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-core --test=script_post_call_hook
+        assignment_value::assignment_value_delegation_matches_stock_and_respects_live_destinations
+        -- --exact --test-threads=1
+    )
+    set_tests_properties(core_script_let_snapshot_contracts PROPERTIES LABELS "fast;data-prototype")
 endif()
 
 hp2_add_behavior_test(stock_fps_replay_contracts "${Python3_EXECUTABLE}"
@@ -1308,6 +1489,21 @@ if(APPLE)
         LABELS "fast;data-none"
         RESOURCE_LOCK game_boot_unwind_cargo
     )
+    # Reporter lifetime tests need the same linked SDK products as the game.
+    hp2_add_behavior_test(game_state_reporter_lifecycle_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}"
+        "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/game_boot_unwind_contracts/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_GAME_TEST_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+        "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-game --bin=hp2_game_rust
+        reporters::screen_trace_tests::
+        -- --test-threads=1 --nocapture
+    )
+    set_tests_properties(game_state_reporter_lifecycle_contracts PROPERTIES
+        LABELS "integration;data-none"
+        RESOURCE_LOCK game_boot_unwind_cargo
+    )
     hp2_add_behavior_test(no_startup_launcher_contracts "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/NoStartupLauncherTests.py"
         "$<TARGET_FILE:hp2_game_rust>"
@@ -1687,6 +1883,24 @@ hp2_add_behavior_test(texture_owner "${CMAKE_COMMAND}" -E env
     --test-threads=1
 )
 set_tests_properties(texture_owner PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(engine_bitmap_usize_metadata_contract "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/engine_bitmap_usize_metadata_contract/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --locked
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --test=bitmap_usize_metadata_contract
+    prototype_engine_bitmap_usize_descriptor_contract
+    --
+    --exact
+    --ignored
+    --test-threads=1
+    --nocapture
+)
+set_tests_properties(engine_bitmap_usize_metadata_contract PROPERTIES LABELS "integration;data-prototype" RUN_SERIAL TRUE)
 hp2_add_behavior_test(font_owner_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/font_owner_contracts/Cargo"
@@ -1741,6 +1955,18 @@ hp2_add_behavior_test(rust_core_runtime "${CMAKE_COMMAND}" -E env
     --test-threads=1
 )
 set_tests_properties(rust_core_runtime PROPERTIES LABELS "integration;data-prototype")
+hp2_add_behavior_test(core_gc_script_metadata_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/rust_core_runtime/Cargo"
+    "HP2_CORE_DATA_ROOT=${HP2_UNREAL_ROOT}"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    # Match the existing prototype Core runtime qualification profile.
+    --config=profile.test.opt-level=1
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core --test=gc_script_metadata_preflight
+    -- --test-threads=1 --nocapture
+)
+set_tests_properties(core_gc_script_metadata_contracts PROPERTIES LABELS "integration;data-prototype")
 hp2_add_behavior_test(canonical_engine_package_load "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/canonical_engine_package_load/Cargo"
@@ -1982,6 +2208,14 @@ hp2_add_behavior_test(metadata_script_tail_contracts "${CMAKE_COMMAND}" -E env
     --lib core_metadata::tests::native_call_at_script_end_peeks_and_rewinds_without_widening_operand_bounds
 )
 set_tests_properties(metadata_script_tail_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(metadata_reference_writeback_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/CargoCache"
+    "${HP2_CARGO_EXECUTABLE}" test --locked --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-core --lib core_metadata::reference_tests:: -- --test-threads=1
+)
+set_tests_properties(metadata_reference_writeback_contracts PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(canonical_property_export_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/canonical_property_export_contracts/Cargo"
@@ -2832,7 +3066,7 @@ hp2_add_behavior_test(repair_save_contract "${Python3_EXECUTABLE}"
 hp2_add_behavior_test(ucc_smoke_contract "${Python3_EXECUTABLE}"
     "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
 )
-if(EXISTS "${CMAKE_BINARY_DIR}/hp2_ucc_rust")
+if(TARGET hp2_ucc_rust)
     hp2_add_behavior_test(ucc_help_smoke "${Python3_EXECUTABLE}"
         "${PROJECT_SOURCE_DIR}/Tests/UccSmokeTests.py"
         --smoke "--ucc-binary=${CMAKE_BINARY_DIR}/hp2_ucc_rust"

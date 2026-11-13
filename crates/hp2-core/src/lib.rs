@@ -53,7 +53,7 @@ mod core_reflection;
 mod core_save;
 pub mod core_ucc;
 mod core_vm;
-pub use core_vm::{ScriptPreCallDecision, ScriptPreCallHook, ScriptScopeHook, ScriptScopePhase};
+pub use core_vm::{NativeTileEntry, NativeTileFloat, NativeTileScope, ScriptAssignmentValue, ScriptBodyReplacement, ScriptBodyResultReplacement, ScriptBodyStatements, ScriptCallArguments, ScriptPlainArgument, ScriptPreCallDecision, ScriptPreCallHook, ScriptScopeHook, ScriptScopePhase};
 mod core_vm_state;
 pub mod crc;
 pub mod download_codec;

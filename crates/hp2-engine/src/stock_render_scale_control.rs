@@ -27,7 +27,7 @@ fn trace(a: CoreAccess<'_>, event: &str, scale: Scale, unavailable: bool) {
         let _ = a.emit_log(category, &message);
     }
 }
-fn live(a: CoreAccess<'_>, p: *mut UObject) -> bool { !p.is_null() && (0..a.object_count()).any(|i| a.object_at(i) == p.cast()) }
+fn live(a: CoreAccess<'_>, p: *mut UObject) -> bool { !p.is_null() && a.contains_object(p) }
 unsafe fn field(a: CoreAccess<'_>, st: *mut UStruct, name: &str, kind: &str, width: usize, limit: usize, param: bool) -> RuntimeResult<usize> {
     let p = unsafe { a.find_field(st, a.intern_str(name, FindName::Find)?, a.native_class(kind)?) }.cast::<UProperty>();
     if p.is_null() { return Err(RuntimeError::new(&format!("Render scale missing field {name}"))); }

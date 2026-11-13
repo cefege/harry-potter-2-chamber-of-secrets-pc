@@ -42,6 +42,18 @@ impl Default for Color {
     }
 }
 
+/// Image compositing policy; `Inherit` leaves the host's current mode unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BlendMode {
+    #[default]
+    Inherit,
+    Invisible,
+    Opaque,
+    Masked,
+    Translucent,
+    Modulated,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Direction {
     Row,
@@ -145,6 +157,7 @@ pub struct Style {
     pub align: Align,
     pub justify: Justify,
     pub color: Color,
+    pub blend: BlendMode,
     pub background: Option<Color>,
     pub font: Font,
     pub text_align: TextAlign,

@@ -77,7 +77,7 @@ fn owner(a: CoreAccess<'_>, state: &mut State) -> RuntimeResult<()> {
     let id = a.owner_context::<crate::core_owner::EngineState>().map(|s| s as *const _ as usize).ok_or_else(|| RuntimeError::new("Graphics menu owner unavailable"))?;
     if state.owner != id { *state = State { owner: id, ..Default::default() }; } Ok(())
 }
-pub(crate) fn live(a: CoreAccess<'_>, p: *mut UObject) -> bool { !p.is_null() && (0..a.object_count()).any(|i| a.object_at(i) == p.cast()) }
+pub(crate) fn live(a: CoreAccess<'_>, p: *mut UObject) -> bool { !p.is_null() && a.contains_object(p) }
 pub(crate) unsafe fn is_a(a: CoreAccess<'_>, p: *mut UObject, class: *mut UClass) -> bool { live(a,p) && unsafe { hp2_core::object_model::is_a(p.cast(),class.cast()) } }
 pub(crate) unsafe fn field(a: CoreAccess<'_>, st: *mut UStruct, name: &str, kind: &str, width: usize, size: usize, arg: bool) -> RuntimeResult<usize> {
     let p = unsafe { a.find_field(st,a.intern_str(name,FindName::Find)?,a.native_class(kind)?) }.cast::<UProperty>();

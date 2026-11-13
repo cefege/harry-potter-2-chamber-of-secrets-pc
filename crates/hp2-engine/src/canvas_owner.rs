@@ -1,5 +1,5 @@
 //! Canonical UCanvas metadata and direct Core operations.
-use hp2_abi::{engine::generated::{FCanvasTextLayout, FCanvasTextRequest, FColor, FSceneNode, FTextureInfo, UFont, URenderDevice, UCanvas, UObject, UTexture, UViewport}, FPlane, FVector};
+use hp2_abi::{engine::generated::{AActor, APlayerPawn, FCanvasTextLayout, FCanvasTextRequest, FColor, FSceneNode, FTextureInfo, UFont, URender, URenderDevice, UCanvas, UObject, UTexture, UViewport}, FPlane, FVector};
 use hp2_core::{
     core_access::{CoreAccess, RuntimeError, RuntimeResult},
     core_class_specs::{NativeClassSpec, NativeRecordKind, StartupProperty, StartupPropertyKind, StartupScalarKind, StartupStructField},
@@ -59,6 +59,44 @@ pub(crate) static NATIVE_CLASSES: &[NativeClassSpec] = &[NativeClassSpec {
     operations: None,
     properties: PROPERTIES, defaults: &[],
 }];
+
+/// Draws a live actor with Canvas's exact temporary visibility and render-map effects.
+///
+/// # Safety
+/// Inputs and the Canvas's scene, viewport, renderer and view actor must be live
+/// canonical records. Failures intentionally retain the native partial effects.
+pub(crate) unsafe fn draw_actor(
+    access: CoreAccess<'_>, canvas: *mut UCanvas, actor: *mut AActor,
+    wireframe: bool, clear_z: bool,
+) -> RuntimeResult<()> {
+    unsafe {
+        if canvas.is_null() || actor.is_null() {
+            return Err(RuntimeError::new("Null canonical Canvas DrawActor input"));
+        }
+        let render = ptr::addr_of!((*canvas).render).read_unaligned().cast::<URender>();
+        let scene = ptr::addr_of!((*canvas).frame).read_unaligned().cast::<FSceneNode>();
+        let viewport = ptr::addr_of!((*canvas).viewport).read_unaligned().cast::<UViewport>();
+        let view_actor = if viewport.is_null() { ptr::null_mut() } else {
+            ptr::addr_of!((*viewport).actor).read_unaligned().cast::<APlayerPawn>()
+        };
+        if render.is_null() || scene.is_null() || viewport.is_null() || view_actor.is_null() {
+            return Err(RuntimeError::new("Invalid canonical Canvas DrawActor input"));
+        }
+        let old_render_map = ptr::addr_of!((*view_actor).rend_map).read_unaligned();
+        if wireframe {
+            ptr::addr_of_mut!((*view_actor).rend_map).write_unaligned(hp2_abi::engine::generated::ENGINE_REN_WIRE);
+        }
+        (*actor).set_b_hidden(false);
+        if clear_z {
+            let device = ptr::addr_of!((*viewport).ren_dev).read_unaligned().cast();
+            crate::render_device_owner::clear_z(access, device)?;
+        }
+        crate::render_owner::draw_actor(access, render, scene, actor)?;
+        (*actor).set_b_hidden(true);
+        ptr::addr_of_mut!((*view_actor).rend_map).write_unaligned(old_render_map);
+        Ok(())
+    }
+}
 
 /// Runs Script Reset and copies the active scene extents into canonical Canvas fields.
 ///

@@ -1,7 +1,7 @@
 use hp2_abi::FColor;
 use hp2_abi::engine::generated::{
     AActor, FStateFrame, TArrayRaw, UALAudioSubsystem, UBoolProperty, UClass, UEngine, UGameEngine,
-    ULevel, UObject, UProperty, UStruct, UViewport,
+    UFunction, ULevel, UObject, UProperty, UStruct, UViewport,
 };
 use hp2_core::core_access::{CoreAccess, RuntimeError, RuntimeResult, VmObservation};
 use hp2_engine::{EngineOwner, SpawnInstrumentation, SpawnInstrumentationEvent};
@@ -16,6 +16,10 @@ use hp2_launcher::{
         trace_services,
     },
 };
+#[cfg(test)]
+#[path = "reporters/screen_trace_tests.rs"]
+mod screen_trace_tests;
+
 use std::{
     cell::{Cell, RefCell},
     ffi::{CStr, c_char, c_void},
@@ -71,9 +75,16 @@ pub(super) fn check_callback_error() -> RuntimeResult<()> {
     }
 }
 
+// Retail function flags, parameter layouts and bodies are not verified yet.
+// A registered observer deliberately selects nothing until that evidence exists.
+unsafe fn select_cutscene_blocked(_: CoreAccess<'_>, _: *mut UObject, _: *mut UFunction) -> RuntimeResult<bool> { Ok(false) }
+unsafe fn observe_cutscene_blocked(_: CoreAccess<'_>, _: *mut UObject, _: *mut UFunction, _: *const u8, _: usize, _: hp2_core::ScriptScopePhase) -> RuntimeResult<()> { Ok(()) }
+
 pub(super) struct RuntimeReporters {
     context: Box<ReportContext>,
     gates: crate::gate_reporters::GateReporters,
+    cutscene_guard: Option<Box<dyn Drop>>,
+    game_state_trace_active: bool,
     attached: bool,
 }
 
@@ -110,12 +121,38 @@ impl RuntimeReporters {
                 return Err(error);
             }
         };
-        let reporters = Self {
+        let mut reporters = Self {
             context,
             gates,
+            cutscene_guard: None,
+            game_state_trace_active: false,
             attached: true,
         };
-        let owner = unsafe { &*owner };
+        // The raw owner contract above guarantees a stable live owner until detach.
+        // The inferred 'static lifetime erases that contract only for the guard's
+        // PhantomData. The guard is explicitly dropped before owner/context teardown;
+        // neither selector nor callback retains a pointer or reference.
+        let owner: &'static EngineOwner = unsafe { &*owner };
+        reporters.game_state_trace_active = hp2_engine::game_engine_owner::start_game_state_trace();
+        if reporters.game_state_trace_active {
+            match unsafe { owner.access().install_resolved_script_scope_observer(
+                "game-state-cutscene-blocked", select_cutscene_blocked, observe_cutscene_blocked,
+            ) } {
+                Ok(guard) => reporters.cutscene_guard = Some(Box::new(guard)),
+                Err(error) => {
+                    eprintln!("HP2_GAME_STATE_TRACE incomplete: observer registration: {error}");
+                    hp2_engine::game_engine_owner::finish_game_state_trace(false);
+                    reporters.game_state_trace_active = false;
+                }
+            }
+        }
+        // Exercise real partial-setup cleanup in isolated test subprocesses only.
+        #[cfg(test)]
+        match std::env::var("HP2_GAME_STATE_TRACE_TEST_SETUP").as_deref() {
+            Ok("error") => return Err(RuntimeError::new("injected reporter setup failure")),
+            Ok("panic") => panic!("injected reporter setup panic"),
+            _ => {}
+        }
         // Once the lexical owner exists, failed setup releases all published hooks.
         crate::fire_probe::initialize_services(owner)?;
         crate::runtime_trace::install(owner)?;
@@ -260,9 +297,15 @@ impl RuntimeReporters {
     }
 
     pub(super) fn detach(&mut self) -> RuntimeResult<()> {
+        self.detach_inner(true)
+    }
+
+    fn detach_inner(&mut self, complete: bool) -> RuntimeResult<()> {
         if !self.attached {
             return Ok(());
         }
+        // Drop the thread-bound guard while the owner and callback context live.
+        drop(self.cutscene_guard.take());
         self.end_loop_scope();
         let mut result = self.gates.detach();
         let owner = unsafe { &*self.context.owner };
@@ -277,13 +320,18 @@ impl RuntimeReporters {
             }
         });
         self.attached = false;
-        result.and(check_callback_error())
+        let result = result.and(check_callback_error());
+        if self.game_state_trace_active {
+            hp2_engine::game_engine_owner::finish_game_state_trace(complete && result.is_ok());
+            self.game_state_trace_active = false;
+        }
+        result
     }
 }
 
 impl Drop for RuntimeReporters {
     fn drop(&mut self) {
-        if let Err(error) = self.detach() {
+        if let Err(error) = self.detach_inner(false) {
             retain_callback_error(error);
         }
     }

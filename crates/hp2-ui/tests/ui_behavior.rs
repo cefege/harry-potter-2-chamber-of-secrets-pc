@@ -9,6 +9,83 @@ use hp2_ui::{
 
 const LEFT: PointerButton = PointerButton::Left;
 
+#[test]
+fn image_keeps_absolute_geometry_and_does_not_take_keyboard_focus() {
+    use hp2_ui::{Fit, TextureRef, image};
+    let mut ui = Ui::new(
+        Store::new(),
+        || {
+            col().children([
+                image(TextureRef("spell".to_owned()), Fit::Stretch)
+                    .key("art")
+                    .at(3., 175.)
+                    .width(Size::Px(64.))
+                    .height(Size::Px(32.)),
+                button("Action").key("action"),
+            ])
+        },
+        FixedMetrics::default(),
+    );
+    ui.resize(640., 480.);
+    assert!(ui.draw().contains(&DrawCmd::Image {
+        texture: TextureRef("spell".to_owned()),
+        rect: Rect::new(3., 175., 64., 32.),
+        fit: Fit::Stretch,
+        color: Color::WHITE,
+        blend: hp2_ui::BlendMode::Inherit,
+    }));
+    assert_eq!(ui.text_requests().len(), 1, "art is not a text request");
+    ui.key(Key::Tab);
+    assert_eq!(ui.focused(), Some("action"));
+}
+
+#[test]
+fn image_paint_tracks_resolved_style_changes_without_tinting_widget_art() {
+    use hp2_ui::{BlendMode, Fit, TextureRef, image};
+    let store = Store::new();
+    let paint = store.signal((Color(12, 34, 56, 78), BlendMode::Translucent));
+    let observed = paint.clone();
+    let mut ui = Ui::new(
+        store,
+        move || {
+            let (color, blend) = observed.get();
+            col().child(
+                image(TextureRef("meter".into()), Fit::Region(2., 3., 11., 13.))
+                    .class("image")
+                    .color(color)
+                    .blend(blend)
+                    .at(-7., 9.)
+                    .width(Size::Px(22.))
+                    .height(Size::Px(26.)),
+            ).child(button("label").color(color))
+        },
+        FixedMetrics::default(),
+    ).with_stylesheet(Stylesheet::new().with("image", Style {
+        color: Color(1, 2, 3, 4),
+        blend: BlendMode::Masked,
+        ..Style::default()
+    })).with_skin(Skin::new().with(SkinPart::ButtonIdle, "button"));
+    ui.resize(640., 480.);
+    for (color, blend) in [
+        (Color(12, 34, 56, 78), BlendMode::Translucent),
+        (Color(91, 82, 73, 64), BlendMode::Modulated),
+    ] {
+        paint.set((color, blend));
+        let commands = ui.draw();
+        assert_eq!(commands[0], DrawCmd::Image {
+            texture: TextureRef("meter".into()),
+            rect: Rect::new(-7., 9., 22., 26.),
+            fit: Fit::Region(2., 3., 11., 13.),
+            color,
+            blend,
+        });
+        assert!(commands.iter().any(|command| matches!(command,
+            DrawCmd::Image { texture, color: Color::WHITE, blend: BlendMode::Inherit, .. }
+                if texture.0 == "button"
+        )), "text color must not change existing menu artwork");
+    }
+}
+
 fn click(ui: &mut Ui, x: f32, y: f32) {
     ui.pointer_move(x, y);
     ui.pointer_down(x, y, LEFT);

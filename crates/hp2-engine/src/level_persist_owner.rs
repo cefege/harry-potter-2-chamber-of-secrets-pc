@@ -440,9 +440,19 @@ pub unsafe fn load_persistent_actors(access: CoreAccess<'_>, level: *mut ULevel,
                 break;
             }
             let actor = pending.remove(index).1;
-            unsafe { serialize_persistence(access, actor, &borrowed)?; }
+            crate::game_load_map_owner::game_state_trace("restore_actor_begin", || {
+                format!("level={level:p} actor={actor:p} name_utf32={name:?}")
+            });
+            let restored = unsafe { serialize_persistence(access, actor, &borrowed) };
+            crate::game_load_map_owner::game_state_trace("restore_actor_serialize_end", || {
+                format!("level={level:p} actor={actor:p} name_utf32={name:?} returned={}", restored.is_ok())
+            });
+            restored?;
             if cursor.is_error()? { log_code(access, 25, &map, &pa_text)?; break; }
             unsafe { (*actor).set_b_script_initialized(false); }
+            crate::game_load_map_owner::game_state_trace("restore_actor_end", || {
+                format!("level={level:p} actor={actor:p} name_utf32={name:?}")
+            });
         }
         let Some(eof) = read_wire(&cursor)? else {
             log_code(access, 26, &map, &pa_text)?;

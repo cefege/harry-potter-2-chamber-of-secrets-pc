@@ -27,10 +27,245 @@ CAPTURE_SPEC = importlib.util.spec_from_file_location(
 capture_cargo_provenance = importlib.util.module_from_spec(CAPTURE_SPEC)
 assert CAPTURE_SPEC.loader is not None
 CAPTURE_SPEC.loader.exec_module(capture_cargo_provenance)
+FINAL_SPEC = importlib.util.spec_from_file_location("capture_final_bin", ROOT / "Build" / "capture_final_bin.py")
+capture_final_bin = importlib.util.module_from_spec(FINAL_SPEC)
+assert FINAL_SPEC.loader is not None
+FINAL_SPEC.loader.exec_module(capture_final_bin)
 
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+class FinalBinaryEvidenceUnitTests(unittest.TestCase):
+    def make_evidence(self, root):
+        root = root.resolve()
+        run = root / "producer" / "final-bin-test"
+        run.mkdir(parents=True)
+        sysroot, sdk = root / "sysroot", root / "sdk"
+        sysroot.mkdir()
+        sdk.mkdir()
+        (sysroot / "bin").mkdir()
+        compiler = sysroot / "bin" / "rustc"
+        llvm = sysroot / "llvm-nm"
+        sdk_file = sdk / "sdk.tbd"
+        cargo = sysroot / "bin" / "cargo"
+        linker, ld, exe, obj = [root / name for name in ("clang", "ld", "exe", "input.o")]
+        retained = run / "object-0.o"
+        for path in (compiler, llvm, sdk_file, cargo, linker, ld, exe, obj, retained):
+            path.write_bytes(path.name.encode())
+        obj.write_bytes(b"\xcf\xfa\xed\xfe" + bytes(8) + (1).to_bytes(4, "little") + bytes(16))
+        retained.write_bytes(obj.read_bytes())
+        python = str(Path(sys.executable).resolve())
+        files = [str(cargo), str(compiler), str(Path(capture_final_bin.__file__).resolve()), python]
+        trees = [str(sysroot), str(sdk)]
+        context = {"target": "game", "compiler": str(compiler), "python": python, "files": files, "trees": trees,
+                   "identity": capture_final_bin.identity(files, trees), "run_dir": str(run),
+                   "cargo_argv": [str(cargo), "rustc"], "cwd": str(root),
+                   "config_sha256": sha256(json.dumps({}, sort_keys=True).encode())}
+        invocation = {"original": [str(compiler), "-C", "linker=" + str(linker)],
+                      "delegated": [str(compiler), "-C", "linker=" + str(Path(capture_final_bin.__file__).resolve())]}
+        (run / "rustc-argv.json").write_text(json.dumps(invocation))
+        link = {"argv": [str(obj), "-o", str(exe), "-fuse-ld=" + str(ld)], "linker": str(linker), "ld": str(ld),
+                "tool_identity": capture_final_bin.identity([str(linker), str(ld)], []),
+                "objects": [{"argument": 0, "source_argument": str(obj), "source": str(obj), "kind": "object",
+                             "path": str(retained), "sha256": capture_final_bin.digest(retained),
+                             "source_sha256_before": capture_final_bin.digest(retained),
+                             "source_sha256_after": capture_final_bin.digest(retained),
+                             "retained_sha256_before": capture_final_bin.digest(retained),
+                             "retained_sha256_after": capture_final_bin.digest(retained)}],
+                "output": str(exe), "post_rustc_sha256": capture_final_bin.digest(exe),
+                "rustc_argv_sha256": capture_final_bin.digest(run / "rustc-argv.json")}
+        (run / "context.json").write_text(json.dumps(context))
+        (run / "link.json").write_text(json.dumps(link))
+        evidence = {"schema_version": 1, "context": context, "link": link, "executable": str(exe)}
+        return evidence, root / "producer", {"compiler": compiler, "llvm": llvm, "sdk": sdk_file,
+                                            "cargo": cargo, "linker": linker, "ld": ld,
+                                            "exe": exe, "object": retained}
+
+    def verify_fixture(self, evidence, producer):
+        with mock.patch.object(capture_final_bin, "config_query", return_value={}):
+            return capture_final_bin.verify(evidence, producer, {"SDKROOT": evidence["context"]["trees"][1]})
+
+    def test_every_wrapper_environment_and_config_selector_is_rejected(self):
+        capture_final_bin.reject_wrappers({}, {})
+        for key in ("RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER",
+                    "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"):
+            for value in ("", "/wrapper"):
+                with self.subTest(key=key, value=value), self.assertRaises(capture_final_bin.Unsupported):
+                    capture_final_bin.reject_wrappers({key: value}, {})
+                with self.subTest(config_env=key, value=value), self.assertRaises(capture_final_bin.Unsupported):
+                    capture_final_bin.reject_wrappers({}, {"env": {key: value}})
+        for key in ("rustc-wrapper", "rustc_wrapper", "rustc-workspace-wrapper", "rustc_workspace_wrapper"):
+            with self.subTest(key=key), self.assertRaises(capture_final_bin.Unsupported):
+                capture_final_bin.reject_wrappers({}, {"build": {key: "/wrapper"}})
+            with self.subTest(flat=key), self.assertRaises(capture_final_bin.Unsupported):
+                capture_final_bin.reject_wrappers({}, {"build." + key: "/wrapper"})
+
+    def test_config_cli_aliases_are_forwarded_and_malformed_config_rejected(self):
+        argv = ["cargo", "rustc", "--config", "a.toml", "--config=build.rustc-wrapper='x'", "--", "--config", "ignored"]
+        self.assertEqual(capture_final_bin.config_arguments(argv),
+                         ["--config", "a.toml", "--config=build.rustc-wrapper='x'"])
+        for malformed in (["cargo", "rustc", "--config"], ["cargo", "rustc", "--config="],
+                          ["cargo", "rustc", "--config", "--other"]):
+            with self.subTest(malformed=malformed), self.assertRaises(capture_final_bin.Unsupported):
+                capture_final_bin.config_arguments(malformed)
+        with self.assertRaises(capture_final_bin.Unsupported):
+            capture_final_bin.reject_wrappers({}, {"build": []})
+
+    def test_missing_stale_and_wrong_executable_are_rejected(self):
+        for mutation in ("missing", "stale", "executable"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                evidence, producer, paths = self.make_evidence(Path(directory))
+                self.assertEqual(self.verify_fixture(evidence, producer), [paths["object"]])
+                if mutation == "missing":
+                    paths["object"].unlink()
+                elif mutation == "stale":
+                    paths["object"].write_bytes(b"valid object from an older link")
+                else:
+                    paths["exe"].write_bytes(b"different executable")
+                with self.assertRaises((OSError, capture_final_bin.Unsupported)):
+                    self.verify_fixture(evidence, producer)
+
+    def test_fresh_true_never_accepts_missing_or_stale_sidecar(self):
+        for mutation in ("missing", "stale", "untouched"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                evidence, _, paths = self.make_evidence(Path(directory))
+                if mutation == "missing":
+                    paths["object"].unlink()
+                elif mutation == "stale":
+                    paths["object"].write_bytes(b"older link")
+                event = {"reason": "compiler-artifact", "target": {"name": "game", "kind": ["bin"]},
+                         "fresh": True, "executable": str(paths["exe"])}
+                with self.assertRaisesRegex(capture_final_bin.Unsupported, "fresh"):
+                    capture_final_bin.finish(evidence["context"], [event], {})
+
+    def test_replaced_tools_sysroot_sdk_and_llvm_are_rejected(self):
+        for key in ("compiler", "llvm", "sdk", "cargo", "linker", "ld"):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
+                evidence, producer, paths = self.make_evidence(Path(directory))
+                paths[key].write_bytes(b"replacement")
+                with self.assertRaises(capture_final_bin.Unsupported):
+                    self.verify_fixture(evidence, producer)
+
+    def test_linker_record_must_cover_every_direct_object(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence, producer, _ = self.make_evidence(Path(directory))
+            evidence["link"]["argv"].insert(1, "/unretained/other.o")
+            (Path(evidence["context"]["run_dir"]) / "link.json").write_text(json.dumps(evidence["link"]))
+            with self.assertRaisesRegex(capture_final_bin.Unsupported, "inventory"):
+                self.verify_fixture(evidence, producer)
+
+    def test_changed_compiler_invocation_evidence_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence, producer, _ = self.make_evidence(Path(directory))
+            (Path(evidence["context"]["run_dir"]) / "rustc-argv.json").write_text("{}")
+            with self.assertRaisesRegex(capture_final_bin.Unsupported, "invocation evidence"):
+                self.verify_fixture(evidence, producer)
+
+    def test_changed_or_wrapped_cargo_configuration_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence, producer, _ = self.make_evidence(Path(directory))
+            for config in ({"build": {"rustc-wrapper": "/other"}}, {"build": {"jobs": 1}}):
+                with self.subTest(config=config), mock.patch.object(capture_final_bin, "config_query", return_value=config):
+                    with self.assertRaises(capture_final_bin.Unsupported):
+                        capture_final_bin.verify(evidence, producer, {"SDKROOT": evidence["context"]["trees"][1]})
+
+    def test_unrecognized_linker_forms_fail_closed(self):
+        for args in ([], ["-C", "linker=cc"], ["-C", "linker=/a", "-Clinker=/b"]):
+            with self.subTest(args=args), self.assertRaises(capture_final_bin.Unsupported):
+                capture_final_bin._compiler_linker(args)
+        for args in (["@response"], ["-Wl,@response"], ["-Wl,-filelist,hidden"],
+                     ["-Xlinker", "hidden.o"], ["-Wl,hidden"], ["-object_path_lto", "hidden"],
+                     ["-load", "hidden"], ["-lazy_framework", "hidden"], ["-lto_library", "hidden"],
+                     ["--unknown"], ["-o", "x", "-o", "y"]):
+            with self.subTest(args=args), self.assertRaises(capture_final_bin.Unsupported):
+                capture_final_bin.linker_file_arguments(args)
+        with tempfile.TemporaryDirectory() as directory:
+            bad = Path(directory) / "extensionless"
+            bad.write_bytes(b"not an object")
+            with self.assertRaises(capture_final_bin.Unsupported):
+                capture_final_bin.linker_input_kind(bad)
+            bitcode = Path(directory) / "bitcode-without-extension"
+            bitcode.write_bytes(b"BC\xc0\xde" + b"fixture")
+            self.assertEqual(capture_final_bin.linker_input_kind(bitcode), "bitcode")
+
+    def test_direct_sysroot_cargo_required_and_shim_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sysroot = root / "sysroot"
+            (sysroot / "bin").mkdir(parents=True)
+            cargo = sysroot / "bin" / "cargo"
+            cargo.write_bytes(b"real cargo")
+            shim = root / "rustup"
+            shim.write_bytes(b"shim")
+            alias = root / "cargo"
+            alias.symlink_to(shim)
+            self.assertEqual(capture_final_bin.require_direct_cargo(str(cargo), sysroot), cargo)
+            with self.assertRaisesRegex(capture_final_bin.Unsupported, "direct executable"):
+                capture_final_bin.require_direct_cargo(str(alias), sysroot)
+            cargo.unlink()
+            cargo.symlink_to(shim)
+            with self.assertRaisesRegex(capture_final_bin.Unsupported, "direct executable"):
+                capture_final_bin.require_direct_cargo(str(cargo), sysroot)
+
+    def test_extensionless_and_archive_inputs_captured_and_originals_rechecked(self):
+        for mutation in ("none", "source", "retained"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                run = root / "run"
+                run.mkdir()
+                obj, archive, linker, ld, output = [root / name for name in ("extensionless", "library", "clang", "ld", "exe")]
+                obj.write_bytes(b"\xcf\xfa\xed\xfe" + bytes(8) + (1).to_bytes(4, "little") + bytes(16))
+                archive.write_bytes(b"!<arch>\n")
+                linker.write_bytes(b"clang")
+                ld.write_bytes(b"ld")
+                args = [str(obj), str(archive), "-o", str(output), "-fuse-ld=" + str(ld)]
+                def delegate(command, **kwargs):
+                    self.assertEqual(command, [str(linker), *args])
+                    if mutation == "source":
+                        obj.write_bytes(b"changed during link")
+                    if mutation == "retained":
+                        (run / "object-0.o").write_bytes(b"changed retained copy")
+                    output.write_bytes(b"linked")
+                    return subprocess.CompletedProcess(command, 0)
+                with mock.patch.dict(os.environ, {"HP2_FINAL_BIN_REAL_LINKER": str(linker)}), \
+                     mock.patch.object(capture_final_bin, "_native_program", return_value=True), \
+                     mock.patch.object(capture_final_bin.subprocess, "run", side_effect=delegate):
+                    if mutation == "none":
+                        self.assertEqual(capture_final_bin.linker_wrapper({"run_dir": str(run)}, args), 0)
+                        record = json.loads((run / "link.json").read_text())
+                        self.assertEqual([item["kind"] for item in record["objects"]], ["object", "archive"])
+                        for item in record["objects"]:
+                            self.assertEqual(capture_final_bin.digest(Path(item["path"])), item["sha256"])
+                            self.assertEqual(capture_final_bin.digest(Path(item["source"])), item["sha256"])
+                            for field in ("source_sha256_before", "source_sha256_after",
+                                          "retained_sha256_before", "retained_sha256_after"):
+                                self.assertEqual(item[field], item["sha256"])
+                    else:
+                        with self.assertRaisesRegex(capture_final_bin.Unsupported, "changed during delegation"):
+                            capture_final_bin.linker_wrapper({"run_dir": str(run)}, args)
+
+    def test_final_object_is_inspected_for_main_only_forbidden_abi(self):
+        with tempfile.TemporaryDirectory() as directory:
+            evidence, producer, _ = self.make_evidence(Path(directory))
+            obj = self.verify_fixture(evidence, producer)[0]
+            result = subprocess.CompletedProcess([], 0, "                 U ___cxa_begin_catch\n", "")
+            with mock.patch.object(check_native_free.subprocess, "run", return_value=result):
+                self.assertIn("C++ ABI dependency", check_native_free.inspect_rust_abi(obj, Path("llvm-nm"))[0])
+
+    def test_preflight_failure_invalidates_previous_qualification_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = root / "cargo-provenance.json"
+            record.write_text('{"schema_version": 4, "status": 0}')
+            args = type("Args", (), {"record": str(record), "target": "game", "mode": "final-bin-v1"})()
+            helper = mock.Mock()
+            helper.Unsupported = capture_final_bin.Unsupported
+            helper.prepare.side_effect = capture_final_bin.Unsupported("wrapper")
+            with mock.patch.object(capture_cargo_provenance, "_final_bin_module", return_value=helper):
+                self.assertEqual(capture_cargo_provenance._capture(args, ["cargo", "rustc"], {}), 1)
+            self.assertIn("unsupported", json.loads(record.read_text())["capture_error"])
 
 
 class RustSymbolInspectionTests(unittest.TestCase):
@@ -278,6 +513,43 @@ class CargoProvenanceTests(unittest.TestCase):
         record_path.write_text(json.dumps(record), encoding="utf-8")
         return build, record_path, command_dir, args
 
+
+    def test_record_schema4_requires_matching_final_link_and_fresh_false(self):
+        with tempfile.TemporaryDirectory() as directory:
+            build, record_path, command_dir, args = self.make_record(Path(directory))
+            record = json.loads(record_path.read_text())
+            event = record["messages"][0]
+            event["target"]["kind"] = ["bin"]
+            event["fresh"] = False
+            record["schema_version"] = 4
+            record["final_bin"] = {
+                "context": {"target": "hp2_ucc_rust", "cargo_argv": record["cargo_argv"],
+                            "cwd": record["cwd"], "files": [str(Path(record["cargo_argv"][0]).resolve())]},
+                "executable": event["executable"],
+            }
+            def save():
+                stdout = "".join(json.dumps(message, separators=(",", ":")) + "\n"
+                                 for message in record["messages"]).encode()
+                (record_path.parent / "cargo.stdout").write_bytes(stdout)
+                record["stdout_sha256"] = sha256(stdout)
+                record_path.write_text(json.dumps(record))
+            save()
+            helper = mock.Mock()
+            helper.Unsupported = capture_final_bin.Unsupported
+            helper.verify.return_value = [record_path.parent / "retained.o"]
+            spec = mock.Mock()
+            with mock.patch.object(check_native_free.importlib.util, "spec_from_file_location", return_value=spec), \
+                 mock.patch.object(check_native_free.importlib.util, "module_from_spec", return_value=helper):
+                verified = check_native_free.cargo_provenance_record(
+                    str(record_path), "hp2_ucc_rust", build, Path(record["cargo_argv"][0]), command_dir, args,
+                    configured_environment={"HP2_CARGO_PROVENANCE_MODE": "final-bin-v1"})
+                self.assertEqual(verified["_final_bin_objects"], helper.verify.return_value)
+                event["fresh"] = True
+                save()
+                with self.assertRaises(check_native_free.GuardError):
+                    check_native_free.cargo_provenance_record(
+                        str(record_path), "hp2_ucc_rust", build, Path(record["cargo_argv"][0]), command_dir, args,
+                        configured_environment={"HP2_CARGO_PROVENANCE_MODE": "final-bin-v1"})
 
     def test_record_rejects_legacy_incomplete_environment_schema(self):
         with tempfile.TemporaryDirectory() as directory:

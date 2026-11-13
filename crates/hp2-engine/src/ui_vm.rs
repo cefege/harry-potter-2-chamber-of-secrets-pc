@@ -2,7 +2,7 @@
 //! Arguments are matched to the function's reflected parameters by name and layout.
 use std::ffi::c_void;
 
-use hp2_abi::engine::generated::{TArrayRaw, UObject};
+use hp2_abi::engine::generated::{TArrayRaw, UBoolProperty, UFunction, UObject};
 use hp2_core::core_access::{CoreAccess, RuntimeResult};
 
 use crate::stock_graphics_menu::{field, function};
@@ -14,6 +14,7 @@ pub(crate) enum V<'a> {
     I(i32),
     /// A `byte` parameter (enum values such as notify events).
     U8(u8),
+    Bool(bool),
     S(&'a str),
 }
 
@@ -24,6 +25,31 @@ pub(crate) enum V<'a> {
 /// `receiver` must be a live object; object arguments must be live objects of the parameter class.
 pub(crate) unsafe fn invoke(a: CoreAccess<'_>, receiver: *mut UObject, name: &str, args: &[(&str, V<'_>)], out_floats: &[&str], result: *mut c_void) -> RuntimeResult<Vec<f32>> {
     let f = unsafe { function(a, receiver, name)? };
+    unsafe { invoke_function(a, receiver, f, args, out_floats, result) }
+}
+
+/// Calls a state-first virtual function without an active bytecode frame.
+///
+/// # Safety
+/// The receiver and object arguments must remain live through synchronous reentry.
+pub(crate) unsafe fn invoke_virtual(a: CoreAccess<'_>, receiver: *mut UObject, name: &str, args: &[(&str, V<'_>)], out_floats: &[&str], result: *mut c_void) -> RuntimeResult<Vec<f32>> {
+    let name = a.intern_str(name, hp2_core::name_owner::FindName::Find)?;
+    let function = unsafe { a.find_object_function_by_name(receiver, name, false)? };
+    if function.is_null() {
+        return Err(hp2_core::core_access::RuntimeError::new("Missing virtual function"));
+    }
+    unsafe { invoke_resolved(a, receiver, function, args, out_floats, result) }
+}
+
+/// Calls the exact declared/super function, without virtual redispatch.
+///
+/// # Safety
+/// Function metadata, receiver and object arguments must remain live through reentry.
+pub(crate) unsafe fn invoke_resolved(a: CoreAccess<'_>, receiver: *mut UObject, function: *mut UFunction, args: &[(&str, V<'_>)], out_floats: &[&str], result: *mut c_void) -> RuntimeResult<Vec<f32>> {
+    unsafe { invoke_function(a, receiver, function, args, out_floats, result) }
+}
+
+unsafe fn invoke_function(a: CoreAccess<'_>, receiver: *mut UObject, f: *mut UFunction, args: &[(&str, V<'_>)], out_floats: &[&str], result: *mut c_void) -> RuntimeResult<Vec<f32>> {
     let size = usize::from(unsafe { (*f).parms_size });
     let mut frame = vec![0u64; size.div_ceil(8).max(1)];
     let base = frame.as_mut_ptr().cast::<u8>();
@@ -35,6 +61,7 @@ pub(crate) unsafe fn invoke(a: CoreAccess<'_>, receiver: *mut UObject, name: &st
                 V::F(_) => ("Core.FloatProperty", 4),
                 V::I(_) => ("Core.IntProperty", 4),
                 V::U8(_) => ("Core.ByteProperty", 1),
+                V::Bool(_) => ("Core.BoolProperty", 4),
                 V::S(_) => ("Core.StrProperty", size_of::<TArrayRaw>()),
             };
             let offset = unsafe { field(a, f.cast(), arg_name, kind, width, size, true)? };
@@ -44,6 +71,20 @@ pub(crate) unsafe fn invoke(a: CoreAccess<'_>, receiver: *mut UObject, name: &st
                     V::F(v) => base.add(offset).cast::<f32>().write_unaligned(*v),
                     V::I(v) => base.add(offset).cast::<i32>().write_unaligned(*v),
                     V::U8(v) => base.add(offset).write(*v),
+                    V::Bool(value) => {
+                        let property = a.find_field(
+                            f.cast(),
+                            a.intern_str(arg_name, hp2_core::name_owner::FindName::Find)?,
+                            a.native_class("Core.BoolProperty")?,
+                        ).cast::<UBoolProperty>();
+                        if property.is_null() || (*property).bit_mask.count_ones() != 1 {
+                            return Err(hp2_core::core_access::RuntimeError::new("Invalid boolean argument mask"));
+                        }
+                        let mask = (*property).bit_mask;
+                        let slot = base.add(offset).cast::<u32>();
+                        let old = slot.read_unaligned();
+                        slot.write_unaligned(if *value { old | mask } else { old & !mask });
+                    }
                     V::S(s) => {
                         let mut array: TArrayRaw = std::mem::zeroed();
                         a.assign_fstring(&mut array, &s.chars().map(u32::from).chain([0]).collect::<Vec<_>>())?;

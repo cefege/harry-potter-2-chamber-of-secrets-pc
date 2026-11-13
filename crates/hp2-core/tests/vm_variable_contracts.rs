@@ -648,6 +648,7 @@ fn dynamic_array_negative_does_not_grow_and_positive_growth_uses_saved_array() {
             let mut inner = Property::scalar(0);
             let mut p = Property::scalar(0);
             p.is_array = true;
+            p.size = std::mem::size_of::<hp2_abi::engine::generated::TArrayRaw>() as i32;
             p.inner = inner.object();
             let mut array = Array {
                 count: 1,
@@ -677,6 +678,7 @@ fn array_growth_error_preserves_base_and_never_copies() {
         let mut inner = Property::scalar(0);
         let mut p = Property::scalar(0);
         p.is_array = true;
+        p.size = std::mem::size_of::<hp2_abi::engine::generated::TArrayRaw>() as i32;
         p.inner = inner.object();
         let mut array = Array {
             count: 1,

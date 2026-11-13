@@ -47,6 +47,7 @@ fn intrinsic(node: &Node, m: &dyn TextMetrics) -> (f32, f32) {
     let pad = node.style.padding;
     let (w, h) = match &node.kind {
         Kind::Text(text) => m.text_size(text, node.style.font),
+        Kind::Image(..) => (0., 0.),
         Kind::Button(text) => {
             let (tw, th) = m.text_size(text, node.style.font);
             (tw + 2. * BUTTON_PAD, th.max(WIDGET_HEIGHT))

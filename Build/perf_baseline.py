@@ -8,10 +8,12 @@ Every sample runs in a fresh helper process so ``ru_maxrss`` of its single
 child is that run's own peak.
 
 This measures one binary, one data root, one machine. Compare two runs only if
-they used the same data root, ticks, maps, renderer and machine state. It does
-not measure GPU time separately, audio, input latency or physical display
-presentation. Gameplay is deterministic, so noise comes from the OS/GPU/thermal
-state; check ``spread`` before trusting a difference.
+they used equivalent fixtures, RNG inputs, ticks, maps, renderer and machine
+state. The optional deterministic clock requires input/audio/visual markers;
+it does not prove RNG equivalence or a valid campaign state. CutError messages
+reject a sample. This does not measure GPU time separately, audio quality,
+input latency or physical display presentation. Check ``spread`` and retain
+fixture/parity evidence before interpreting a difference.
 
 Caps: every sample is forced uncapped and verified. The engine ini gets
 ``FrameRateLimit=1000`` (a 1000 fps ceiling; SleepFrameCap never binds) and ``UseVSync=Off`` (Immediate present),
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import platform
 import re
 import resource
@@ -49,6 +52,10 @@ PERF = re.compile(
     r"p95_ms=([\d.]+) p99_ms=([\d.]+) max_ms=([\d.]+)"
 )
 LOAD = re.compile(r"Load time (\S+): ([\d.]+) seconds total, ([\d.]+) app")
+PRESENTED = re.compile(r"WgpuDrv: frames presented=(\d+) occluded=(\d+) outdated=(\d+) other_failure=(\d+)")
+PRESENTATION_KEYS = ("presented", "occluded", "outdated", "other_failure")
+VERIFY = re.compile(r"<HP2_VERIFY>\s+(input|audio|visuals)=(\S+)")
+EXPECTED_VERIFY = {"input": "isolated", "audio": "loopback", "visuals": "tick"}
 
 
 def sha256(path: Path) -> str:
@@ -92,17 +99,31 @@ def one(args: argparse.Namespace) -> int:
     log = Path(args.log)
     ini = uncapped_ini(Path(args.data_root).resolve(strict=True), log.with_suffix(".ini"), args.renderer)
     started = time.monotonic()
+    extra_env = {"HP2_FRAME_TIMING": "1"}
+    if args.deterministic_clock:
+        extra_env["HP2_DETERMINISTIC_VERIFICATION"] = "1"
     result = game_test.run_game(
         app=args.engine_bin, engine_bin=args.engine_bin, data_root=args.data_root,
         selected_map=f"Maps/{args.one}.unr", renderer=args.renderer, ticks=args.ticks,
-        timeout_seconds=args.timeout, log_path=log, no_sound=True,
-        extra_env={"HP2_FRAME_TIMING": "1"}, ini_file=ini, fixed_dt=1.0 / 60.0,
+        timeout_seconds=args.timeout, log_path=log, no_sound=not args.deterministic_clock,
+        extra_env=extra_env, ini_file=ini, fixed_dt=1.0 / 60.0,
     )
     wall = time.monotonic() - started
     text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
+    # Each tally describes one device; sum all tallies so a clean device cannot
+    # hide presentation failures reported by another device.
+    tallies = [tuple(map(int, m.groups())) for m in PRESENTED.finditer(text)]
+    presentation = {key: sum(row[i] for row in tallies) for i, key in enumerate(PRESENTATION_KEYS)}
     sample = {"map": args.one, "exit_status": result.get("exit_status"),
               "timed_out": result.get("timed_out"), "wall_seconds": wall,
-              "failure_markers": result.get("failure_markers", [])}
+              "failure_markers": result.get("failure_markers", []),
+              "run_passed": result.get("passed", False), "presentation": presentation,
+              "cut_error_count": text.count("CutError:")}
+    if args.deterministic_clock:
+        markers = {key: [] for key in EXPECTED_VERIFY}
+        for key, value in VERIFY.findall(text):
+            markers[key].append(value)
+        sample["verification"] = markers
     for match in PERF.finditer(text):
         label, n, mean, p50, p95, p99, mx = match.groups()
         sample[label] = {"n": int(n), "mean": float(mean), "p50": float(p50),
@@ -115,7 +136,33 @@ def one(args: argparse.Namespace) -> int:
     peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     sample["peak_rss_mb"] = peak / (1024 * 1024 if sys.platform == "darwin" else 1024)
     print("PERF_SAMPLE " + json.dumps(sample))
-    return 0
+    return 0 if valid_sample(sample, args.deterministic_clock) else 1
+
+
+def valid_sample(sample: dict, deterministic_clock: bool) -> bool:
+    presentation = sample.get("presentation", {})
+    cut_errors = sample.get("cut_error_count")
+    if not isinstance(cut_errors, int) or isinstance(cut_errors, bool) or cut_errors != 0:
+        return False
+    if (not sample.get("run_passed") or sample.get("exit_status") != 0
+            or sample.get("timed_out") or sample.get("failure_markers")
+            or presentation.get("presented", 0) <= 0
+            or any(presentation.get(key) != 0 for key in PRESENTATION_KEYS[1:])):
+        return False
+    for name in ("tick", "interval"):
+        timing = sample.get(name, {})
+        if not isinstance(timing.get("n"), int) or timing["n"] <= 0:
+            return False
+        for key in ("mean", "p50", "p95", "p99", "max"):
+            value = timing.get(key)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                return False
+    if deterministic_clock:
+        markers = sample.get("verification", {})
+        if any(not markers.get(key) or any(value != expected for value in markers[key])
+               for key, expected in EXPECTED_VERIFY.items()):
+            return False
+    return True
 
 
 TARGET_FPS = 60.0
@@ -165,6 +212,8 @@ def main() -> int:
                         help="fail a sample when more of the frame than this is outside the engine tick")
     parser.add_argument("--target-fps", type=float, default=TARGET_FPS)
     parser.add_argument("--evaluate", type=Path, help="print the target table for an existing report and exit")
+    parser.add_argument("--deterministic-clock", action="store_true",
+                        help="require isolated input, loopback audio and tick-driven visuals")
     parser.add_argument("--one")
     parser.add_argument("--log")
     args = parser.parse_args()
@@ -189,6 +238,8 @@ def main() -> int:
                        "--engine-bin", str(engine), "--data-root", str(args.data_root),
                        "--ticks", str(args.ticks), "--renderer", args.renderer,
                        "--timeout", str(args.timeout), "--log", str(log)]
+            if args.deterministic_clock:
+                command.append("--deterministic-clock")
             done = subprocess.run(command, capture_output=True, text=True)
             lines = [l for l in done.stdout.splitlines() if l.startswith("PERF_SAMPLE ")]
             if done.returncode != 0 or not lines:
@@ -196,7 +247,7 @@ def main() -> int:
                 print(f"FAILED {name} #{repeat}: see .error", file=sys.stderr)
                 return 1
             sample = json.loads(lines[-1][len("PERF_SAMPLE "):])
-            if sample["exit_status"] != 0 or sample["timed_out"] or sample["failure_markers"] or "tick" not in sample:
+            if not valid_sample(sample, args.deterministic_clock):
                 (out_dir / f"{args.label}-{name}-{repeat}.error").write_text(json.dumps(sample, indent=2))
                 print(f"FAILED {name} #{repeat}: run was not clean", file=sys.stderr)
                 return 1
@@ -226,12 +277,14 @@ def main() -> int:
     report = {
         "label": args.label, "engine": str(engine), "engine_sha256": sha256(engine),
         "data_root": str(args.data_root), "ticks": args.ticks, "repeats": args.repeats,
-        "renderer": args.renderer, "machine": platform.platform(), "processor": platform.processor(),
+        "renderer": args.renderer, "deterministic_clock": args.deterministic_clock,
+        "machine": platform.platform(), "processor": platform.processor(),
         "cpu": subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout.strip(),
         "summary": summary, "target": evaluate(summary, args.target_fps), "samples": samples,
         "caps": "FrameRateLimit=1000 and UseVSync=Off forced via the engine ini; idle-fraction detector enforced",
         "limits": ["single machine and data root", "tick cost includes any GPU/present waits inside the engine tick",
-                   "no audio, physical display or input latency"],
+                   "no physical display or input latency",
+                   "loopback audio only" if args.deterministic_clock else "no audio"],
     }
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print_table(report["target"], args.target_fps)

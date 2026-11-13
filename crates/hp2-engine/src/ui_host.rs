@@ -5,7 +5,7 @@ use std::{cell::RefCell, collections::HashMap, ptr, rc::Rc};
 
 use hp2_abi::engine::generated::{TArrayRaw, UClass, UObject, UProperty};
 use hp2_core::{core_access::{CoreAccess, RuntimeError, RuntimeResult}, name_owner::FindName};
-use hp2_ui::{DrawCmd, Fit, Font, Rect, TextAlign, TextMetrics};
+use hp2_ui::{BlendMode, DrawCmd, Fit, Font, Rect, TextAlign, TextMetrics};
 
 use crate::{stock_graphics_menu::{live, object, prop}, ui_vm::{invoke, V}};
 
@@ -54,6 +54,9 @@ pub(crate) struct HostMetrics {
 }
 
 impl HostMetrics {
+    pub(crate) fn clear(&self) {
+        self.cache.borrow_mut().clear();
+    }
     pub(crate) fn knows(&self, text: &str, font: Font) -> bool {
         self.cache.borrow().contains_key(&(text.to_owned(), font))
     }
@@ -147,13 +150,25 @@ impl Surface {
     }
 }
 
+/// Engine styles are an adapter detail, not part of the toolkit vocabulary.
+pub(crate) fn canvas_blend(blend: BlendMode) -> Option<u8> {
+    match blend {
+        BlendMode::Inherit => None,
+        BlendMode::Invisible => Some(0),
+        BlendMode::Opaque => Some(1),
+        BlendMode::Masked => Some(2),
+        BlendMode::Translucent => Some(3),
+        BlendMode::Modulated => Some(4),
+    }
+}
+
 /// What a toolkit draw list needs from a canvas. Implemented for UWindow pages (page units,
 /// drawn through the page's script helpers) and for the HUD canvas (pixels, drawn directly).
 pub(crate) trait DrawTarget {
     unsafe fn fill(&self, a: CoreAccess<'_>, rect: Rect, color: [u8; 4]) -> RuntimeResult<()>;
     unsafe fn texture_object(&self, a: CoreAccess<'_>, name: &str) -> RuntimeResult<*mut UObject>;
     /// Draws texture region `src` into `dest`.
-    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect) -> RuntimeResult<()>;
+    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect, color: [u8; 4], blend: BlendMode) -> RuntimeResult<()>;
     /// Draws `text` with its top-left at `(x, y)`.
     unsafe fn text_at(&self, a: CoreAccess<'_>, x: f32, y: f32, text: &str, font: Font, color: [u8; 4]) -> RuntimeResult<()>;
 }
@@ -165,8 +180,11 @@ impl DrawTarget for Surface {
     unsafe fn texture_object(&self, a: CoreAccess<'_>, name: &str) -> RuntimeResult<*mut UObject> {
         unsafe { self.texture(a, name) }
     }
-    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect) -> RuntimeResult<()> {
-        unsafe { self.set_color(a, [255, 255, 255, 255])? };
+    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect, color: [u8; 4], blend: BlendMode) -> RuntimeResult<()> {
+        unsafe { self.set_color(a, color)? };
+        if let Some(style) = canvas_blend(blend) {
+            unsafe { prop(a, self.canvas, "Style", "Core.ByteProperty", 1)?.write(style) };
+        }
         unsafe { invoke(a, self.page, "DrawStretchedTextureSegment", &[("C", V::Obj(self.canvas)), ("X", V::F(dest.x)), ("Y", V::F(dest.y)), ("W", V::F(dest.w)), ("H", V::F(dest.h)), ("tX", V::F(src.x)), ("tY", V::F(src.y)), ("tW", V::F(src.w)), ("tH", V::F(src.h)), ("Tex", V::Obj(tex))], &[], ptr::null_mut())? };
         Ok(())
     }
@@ -189,7 +207,7 @@ pub(crate) unsafe fn render_commands<T: DrawTarget>(target: &T, a: CoreAccess<'_
                     unsafe { target.fill(a, edge, c)? };
                 }
             }
-            DrawCmd::Image { texture, rect, fit } => {
+            DrawCmd::Image { texture, rect, fit, color, blend } => {
                 let tex = unsafe { target.texture_object(a, &texture.0)? };
                 let size = unsafe { (i32_prop(a, tex, "USize") as f32, i32_prop(a, tex, "VSize") as f32) };
                 // Destination rectangle and the texture region drawn into it.
@@ -199,12 +217,10 @@ pub(crate) unsafe fn render_commands<T: DrawTarget>(target: &T, a: CoreAccess<'_
                     Fit::Region(u, v, w, h) => (*rect, Rect::new(*u, *v, *w, *h)),
                 };
                 let Some((dest, src)) = clip_image(dest, src, clips.last().copied()) else { continue };
-                unsafe { target.segment(a, tex, dest, src)? };
+                unsafe { target.segment(a, tex, dest, src, [color.0, color.1, color.2, color.3], *blend)? };
             }
             DrawCmd::Text { rect, text, font, color, align } => {
-                if text.is_empty() {
-                    continue;
-                }
+                // Even empty native text calls retain font, color and cursor side effects.
                 let (tw, th) = metrics.text_size(text, *font);
                 let x = match align {
                     TextAlign::Left => rect.x,

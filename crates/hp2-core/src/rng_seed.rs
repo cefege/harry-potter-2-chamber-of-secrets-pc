@@ -475,6 +475,129 @@ mod tests {
         );
     }
 
+    // All environment changes for these cases occur in the parent Command.
+    // The child never mutates its environment, even though libtest has threads.
+    #[test]
+    #[ignore = "fresh-process helper invoked by rng seed metadata binding contracts"]
+    fn rng_seed_metadata_binding_child() {
+        if std::env::var_os("HP2_RNG_METADATA_CHILD").is_none() { return; }
+        let case = std::env::var("HP2_RNG_METADATA_CASE").unwrap();
+        let order = std::env::var("HP2_RNG_METADATA_ORDER").unwrap();
+        let trace_path = std::env::var_os("HP2_RNG_TRACE").unwrap();
+        let seed = match case.as_str() {
+            "absent" => 777,
+            "zero" | "maximum" => 1,
+            "ordinary" | "invalid" | "replay" => 42,
+            _ => panic!("unknown metadata case"),
+        };
+        rng_private::srand(seed);
+        let expected = [rng_private::rand(), rng_private::rand()];
+        rng_private::srand(1);
+        let replay_expected = rng_private::rand();
+        rng_private::srand(777);
+        if order == "trace-first" {
+            crate::ansi_trace::with_process_state(|state| {
+                assert!(state.initialized && state.enabled);
+                assert_eq!((state.count, state.call_count), (0, 0));
+                assert!(!state.diagnostic_seeded);
+            });
+        } else {
+            assert_eq!(order, "bootstrap-first");
+        }
+        // SAFETY: this fresh subprocess does not mutate its environment.
+        // The bootstrap is outside the trace-state mutex.
+        unsafe { crate::unix_rng_bootstrap::bootstrap_diagnostic_rng_seed(RAND_MAX) };
+        if order == "bootstrap-first" {
+            crate::ansi_trace::with_process_state_raw(|state| assert!(!state.initialized));
+        }
+        crate::ansi_trace::with_process_state(|state| {
+            assert_eq!((state.count, state.call_count), (0, 0));
+            assert_eq!(state.diagnostic_seeded, case != "absent");
+            if case != "absent" {
+                let requested = match case.as_str() { "zero" => 0, "maximum" => RAND_MAX, _ => 42 };
+                assert_eq!((state.diagnostic_requested_seed, state.diagnostic_seed), (requested, effective(requested, RAND_MAX)));
+            }
+            assert_eq!(crate::ansi_trace::direct_rand_value(state), expected[0]);
+            assert_eq!((state.count, state.call_count), (1, 1));
+            if case == "replay" {
+                rng_private::srand(1);
+                crate::ansi_trace::reset_for_replay(state);
+                assert_eq!((state.count, state.call_count), (0, 0));
+            } else {
+                assert_eq!(crate::ansi_trace::direct_rand_value(state), expected[1]);
+                assert_eq!((state.count, state.call_count), (2, 2));
+            }
+        });
+        if case == "replay" {
+            // Exercise publication after replay without reentering the trace mutex.
+            let (requested, effective) = crate::unix_rng_bootstrap::diagnostic_rng_seed_state()
+                .expect("accepted bootstrap state");
+            crate::ansi_trace::publish_bootstrapped_diagnostic_seed(requested, effective);
+            crate::ansi_trace::with_process_state(|state| {
+                assert!(state.replay_seeded);
+                assert_eq!((state.count, state.call_count), (0, 0));
+                assert_eq!(crate::ansi_trace::direct_rand_value(state), replay_expected);
+                assert_eq!((state.count, state.call_count), (1, 1));
+            });
+        }
+        crate::ansi_trace::flush_process_state();
+        let trace = std::fs::read_to_string(trace_path).expect("trace output");
+        if case == "replay" {
+            assert!(trace.contains("\"seed\":1,\"start_reason\":\"replay\""));
+            assert!(!trace.contains("\"requested_seed\""));
+            assert!(trace.contains("\"count\":1,\"call_count\":1"));
+        } else {
+            assert!(trace.contains("\"count\":2,\"call_count\":2"));
+            if case == "absent" {
+                assert!(!trace.contains("\"requested_seed\""));
+                assert!(!trace.contains("\"start_reason\""));
+                assert!(!trace.contains("\"seed\":"));
+            } else {
+                let requested = match case.as_str() { "zero" => 0, "maximum" => RAND_MAX, _ => 42 };
+                assert!(trace.contains(&format!("\"seed\":{},\"requested_seed\":{requested},\"start_reason\":\"diagnostic\"", effective(requested, RAND_MAX))));
+            }
+        }
+    }
+
+    #[test]
+    fn rng_seed_metadata_binding_fresh_processes() {
+        let root = std::path::PathBuf::from(std::env::var_os("HP2_ARTIFACT_DIR").expect("HP2_ARTIFACT_DIR"));
+        let root = root.join(format!("rng-seed-metadata-{}", std::process::id()));
+        std::fs::create_dir(&root).expect("new metadata evidence directory");
+        for order in ["bootstrap-first", "trace-first"] {
+            for case in ["ordinary", "zero", "maximum", "absent", "invalid", "replay"] {
+                let trace = root.join(format!("{order}-{case}.json"));
+                let mut command = Command::new(std::env::current_exe().unwrap());
+                command.args(["rng_seed::tests::rng_seed_metadata_binding_child", "--exact", "--ignored", "--test-threads=1"])
+                    .env("HP2_RNG_METADATA_CHILD", "1")
+                    .env("HP2_RNG_METADATA_ORDER", order)
+                    .env("HP2_RNG_METADATA_CASE", case)
+                    .env("HP2_RNG_TRACE", &trace)
+                    .env("HP2_RNG_TRACE_LIMIT", "8")
+                    .env_remove("HP2_GLOBAL_TICK_TRACE")
+                    .env_remove("HP2_STARTUP_RNG_PHASE_TRACE")
+                    .env_remove("HP2_FIRE_TEXTURE_TRACE");
+                match case {
+                    "ordinary" | "replay" => { command.env("HP2_RNG_SEED", "42"); }
+                    "zero" => { command.env("HP2_RNG_SEED", "0"); }
+                    "maximum" => { command.env("HP2_RNG_SEED", RAND_MAX.to_string()); }
+                    "invalid" => { command.env("HP2_RNG_SEED", "invalid"); }
+                    "absent" => { command.env_remove("HP2_RNG_SEED"); }
+                    _ => unreachable!(),
+                }
+                let output = command.output().expect("spawn metadata child");
+                if case == "invalid" {
+                    assert_eq!(output.status.code(), Some(1), "{order}/{case}: {output:?}");
+                    assert_eq!(String::from_utf8_lossy(&output.stderr), format!("Invalid HP2_RNG_SEED: expected an unsigned decimal value from 0 to {RAND_MAX}\n"));
+                    assert!(!trace.exists(), "invalid seed must not emit a completed trace");
+                } else {
+                    assert!(output.status.success(), "{order}/{case}: {output:?}");
+                    assert!(trace.is_file(), "missing {order}/{case} trace");
+                }
+            }
+        }
+    }
+
     #[test]
     fn bootstrap_default_context_preserves_seeded_stream() {
         let output = run_bootstrap_child(

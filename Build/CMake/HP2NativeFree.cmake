@@ -46,6 +46,11 @@ function(hp2_enable_cargo_provenance target)
         "HP2_CARGO_PROVENANCE_TARGET=${target}"
         "HP2_CARGO_PROVENANCE_RECORD=${_record}"
         "HP2_CARGO_PROVENANCE_EXECUTABLE=${_original_cargo}")
+    # Opt-in qualification mode is deliberately separate from schema-3 builds.
+    # It rejects unsupported wrappers and requires a rebuilt binary.
+    if(HP2_NATIVE_FREE_FINAL_BIN)
+        corrosion_set_env_vars("${target}" "HP2_CARGO_PROVENANCE_MODE=final-bin-v1")
+    endif()
 
     # Cargo JSON events are required for authentic artifact and build-script
     # provenance; add this option to the selected cargo rustc invocation.

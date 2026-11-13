@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,8 @@ ENVIRONMENT_KEYS = {
     "MACOSX_DEPLOYMENT_TARGET", "OBJCFLAGS", "OBJCXXFLAGS", "PATH",
     "PKG_CONFIG_LIBDIR", "PKG_CONFIG_PATH", "SDKROOT", "TARGET", "RUSTC",
     "RUSTC_WRAPPER", "RUSTFLAGS", "RUSTDOC", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET",
-    "CARGO_BUILD_RUSTC", "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
     "CARGO_NET_OFFLINE", "CARGO_INCREMENTAL", "BINDGEN_EXTRA_CLANG_ARGS", "CORROSION_BUILD_DIR",
 }
 
@@ -89,12 +91,47 @@ def _cargo_messages(stdout: bytes) -> list[dict[str, Any]]:
     return messages
 
 
+def _final_bin_module():
+    spec = importlib.util.spec_from_file_location("capture_final_bin", Path(__file__).with_name("capture_final_bin.py"))
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load final-binary capture helper")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _capture(args: argparse.Namespace, cargo_argv: list[str], child_env: dict[str, str]) -> int:
     cwd = Path.cwd().resolve()
     artifact_dir = Path(args.record).resolve().parent
     artifact_dir.mkdir(parents=True, exist_ok=True)
     child_env["HP2_ARTIFACT_DIR"] = str(artifact_dir)
     selected_environment = _recorded_environment(child_env)
+    original_environment = dict(child_env)
+    mode = getattr(args, "mode", "schema3")
+    if mode == "final-bin-v1":
+        # Cargo's merged config includes build settings such as CARGO_BUILD_JOBS.
+        # Preserve them for the qualification replay without changing schema 3.
+        selected_environment.update({key: value for key, value in child_env.items()
+                                     if key.startswith("CARGO_BUILD_")})
+    if mode not in {"schema3", "final-bin-v1"}:
+        print(f"unsupported Cargo provenance mode: {mode}", file=sys.stderr)
+        return 1
+    final_bin = None
+    context = None
+    if mode == "final-bin-v1":
+        # Never leave an earlier successful qualification record on failure.
+        Path(args.record).write_text(json.dumps({"schema_version": 4, "status": 1,
+                                                "capture_error": "capture did not complete"}) + "\n", encoding="utf-8")
+        try:
+            final_bin = _final_bin_module()
+            context, child_env = final_bin.prepare(cargo_argv, cwd, child_env, artifact_dir, args.target)
+        except (OSError, ValueError, RuntimeError) as error:
+            # Invalidate any earlier successful producer record before returning.
+            failure = {"schema_version": 4, "selected_target": args.target, "status": 1,
+                       "capture_error": f"final-binary qualification unsupported: {error}"}
+            Path(args.record).write_text(json.dumps(failure, indent=2) + "\n", encoding="utf-8")
+            print(f"final-binary qualification unsupported: {error}", file=sys.stderr)
+            return 1
     stdout_capture = BytesIO()
     stderr_capture = BytesIO()
     try:
@@ -104,7 +141,7 @@ def _capture(args: argparse.Namespace, cargo_argv: list[str], child_env: dict[st
         (artifact_dir / "cargo.stdout").write_bytes(empty)
         (artifact_dir / "cargo.stderr").write_bytes(empty)
         record = {
-            "schema_version": 3,
+            "schema_version": 4 if final_bin else 3,
             "selected_target": args.target,
             "cargo_argv": cargo_argv,
             "cwd": str(cwd),
@@ -175,8 +212,15 @@ def _capture(args: argparse.Namespace, cargo_argv: list[str], child_env: dict[st
     except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
         parse_error = str(error)
 
+    final_evidence = None
+    if final_bin and parse_error is None and result.returncode == 0:
+        try:
+            final_evidence = final_bin.finish(context, messages, original_environment)
+        except (KeyError, OSError, ValueError, final_bin.Unsupported) as error:
+            parse_error = f"final-binary qualification incomplete: {error}"
+
     record = {
-        "schema_version": 3,
+        "schema_version": 4 if final_bin else 3,
         "selected_target": args.target,
         "cargo_argv": cargo_argv,
         "cwd": str(cwd),
@@ -188,6 +232,8 @@ def _capture(args: argparse.Namespace, cargo_argv: list[str], child_env: dict[st
         "artifact_sha256": artifacts,
         "build_script_output_sha256": build_script_outputs,
     }
+    if final_bin:
+        record["final_bin"] = final_evidence
     if parse_error is not None:
         record["capture_error"] = parse_error
     record_path = Path(args.record)
@@ -203,6 +249,7 @@ def main() -> int:
     target = os.environ.pop("HP2_CARGO_PROVENANCE_TARGET", None)
     record = os.environ.pop("HP2_CARGO_PROVENANCE_RECORD", None)
     cargo_executable = os.environ.pop("HP2_CARGO_PROVENANCE_EXECUTABLE", None)
+    mode = os.environ.pop("HP2_CARGO_PROVENANCE_MODE", "schema3")
     if not target or not record or not cargo_executable:
         print("Cargo provenance proxy was invoked without Corrosion target configuration", file=sys.stderr)
         return 2
@@ -210,7 +257,7 @@ def main() -> int:
     cargo_argv = [cargo_executable, *sys.argv[1:]]
     if not sys.argv[1:] or sys.argv[1] != "rustc":
         return subprocess.run(cargo_argv, env=child_env, check=False).returncode
-    args = argparse.Namespace(target=target, record=record)
+    args = argparse.Namespace(target=target, record=record, mode=mode)
     return _capture(args, cargo_argv, child_env)
 
 

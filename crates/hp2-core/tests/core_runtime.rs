@@ -10,6 +10,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
+#[path = "core_runtime/health_callback_gc.rs"]
+mod health_callback_gc;
+#[path = "core_runtime/dynamic_array.rs"]
+mod dynamic_array;
+#[path = "core_runtime/console_arguments.rs"]
+mod console_arguments;
+
 static REENTER_OUTPUT: AtomicBool = AtomicBool::new(false);
 static REENTRY_VEC_X: AtomicI32 = AtomicI32::new(0);
 static REENTRY_WARNING_COUNT: AtomicI32 = AtomicI32::new(0);
@@ -324,6 +331,93 @@ fn captured_output() -> Vec<(i32, Vec<u32>)> {
 
 fn utf32(text: &str) -> Vec<u32> { text.chars().map(u32::from).collect() }
 
+thread_local! {
+    static SCOPE_GC_PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SCOPE_GC_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static SCOPE_GC_EVENTS: std::cell::RefCell<Vec<(*mut UFunction, hp2_core::ScriptScopePhase)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+unsafe fn select_rooted_scope_gc(access: CoreAccess<'_>, _: *mut UObject, _: *mut UFunction) -> RuntimeResult<bool> {
+    if SCOPE_GC_PENDING.with(|pending| pending.replace(false)) {
+        access.collect_garbage(0, 0, &|_| Ok(()))?;
+        SCOPE_GC_COUNT.with(|count| count.set(count.get() + 1));
+    }
+    Ok(true)
+}
+
+unsafe fn record_rooted_scope_gc(_: CoreAccess<'_>, _: *mut UObject, function: *mut UFunction, _: *const u8, _: usize, phase: hp2_core::ScriptScopePhase) -> RuntimeResult<()> {
+    SCOPE_GC_EVENTS.with(|events| events.borrow_mut().push((function, phase)));
+    Ok(())
+}
+
+// The existing rust_core_runtime CTest uses test opt-level=1 for deep Core.u GC.
+// The separate unoptimized hook-test GC overflow remains unresolved evidence.
+#[test]
+fn rooted_selector_gc_scope() {
+    use std::{io::Write, ptr};
+    let artifact = PathBuf::from(std::env::var_os("HP2_ARTIFACT_DIR").expect("HP2_ARTIFACT_DIR"));
+    let root = artifact.join(format!("rooted-scope-gc-{}", std::process::id()));
+    assert!(!root.exists(), "use a new isolated fixture");
+    fs::create_dir_all(root.join("System")).unwrap();
+    let source = workspace_root().join("System");
+    fs::copy(source.join("Core.u"), root.join("System/Core.u")).unwrap();
+    fs::copy(source.join("Default.ini"), root.join("System/System.ini")).unwrap();
+    fs::copy(source.join("DefUser.ini"), root.join("System/User.ini")).unwrap();
+    let exe = std::env::current_exe().expect("test executable path");
+    #[cfg(target_os = "macos")]
+    let stack_bytes = unsafe { libc::pthread_get_stacksize_np(libc::pthread_self()) };
+    #[cfg(not(target_os = "macos"))]
+    let stack_bytes = 0_usize;
+    writeln!(std::io::stderr().lock(), "rooted_selector_gc_scope executable={} pthread_stack_bytes={} rust_core_runtime_registered_test_opt_level=1", exe.display(), stack_bytes).unwrap();
+    let owner = owner(&root, &root.join("System/System.ini"));
+    let access = owner.access();
+    access.set_process_mode(CoreProcessMode { is_client: true, is_scriptable: true, ..CoreProcessMode::default() });
+    let commandlet: Vec<u32> = "Core.SimpleCommandlet".chars().map(u32::from).chain([0]).collect();
+    unsafe { access.static_load_class(access.native_class("Commandlet").unwrap(), ptr::null_mut(), &commandlet, 1).unwrap(); }
+    let class = access.native_class("Object").unwrap();
+    let object = unsafe { access.construct_object(class, access.transient_package(), 0, 0x4000, ptr::null_mut()).unwrap() };
+    let mut callee_code = vec![0x04, 0x0b];
+    let mut caller_code = Vec::new();
+    let make_function = |name: &str, code: &mut Vec<u8>| {
+        let function = unsafe { access.construct_object(access.native_class("Function").unwrap(), class.cast(), access.intern_str(name, FindName::Add).unwrap(), 0x4000, ptr::null_mut()).unwrap() }.cast::<UFunction>();
+        unsafe {
+            (*function).function_flags = 0;
+            (*function).parms_size = 0;
+            (*function).return_value_offset = u16::MAX;
+            (*function.cast::<UStruct>()).properties_size = 0;
+            (*function.cast::<UStruct>()).properties_align = 4;
+            (*function.cast::<UStruct>()).script = TArrayRaw { data: code.as_mut_ptr().cast(), num: code.len() as i32, max: code.len() as i32 };
+        }
+        function
+    };
+    let callee = make_function("RootedScopeCallee", &mut callee_code);
+    caller_code.push(0x1c);
+    caller_code.extend(unsafe { (*callee.cast::<UObject>()).index }.to_le_bytes());
+    caller_code.extend([0x16, 0x04, 0x0b]);
+    let caller = make_function("RootedScopeCaller", &mut caller_code);
+    unsafe { for root in [object, caller.cast::<UObject>(), callee.cast::<UObject>()] { access.add_root(root); } }
+    let object_index = unsafe { (*object).index };
+    let caller_index = unsafe { (*caller.cast::<UObject>()).index };
+    let callee_index = unsafe { (*callee.cast::<UObject>()).index };
+    let scope = unsafe { access.install_resolved_script_scope_observer("rooted-scope-gc", select_rooted_scope_gc, record_rooted_scope_gc).unwrap() };
+    SCOPE_GC_EVENTS.with(|events| events.borrow_mut().clear());
+    SCOPE_GC_COUNT.with(|count| count.set(0));
+    SCOPE_GC_PENDING.with(|pending| pending.set(true));
+    unsafe { access.execute_event(object, caller, ptr::null_mut(), ptr::null_mut()).unwrap(); }
+    assert_eq!(SCOPE_GC_COUNT.with(std::cell::Cell::get), 1, "selector ran a real collection");
+    assert_eq!(access.object_at(object_index), object);
+    assert_eq!(access.object_at(caller_index), caller.cast());
+    assert_eq!(access.object_at(callee_index), callee.cast());
+    SCOPE_GC_EVENTS.with(|events| assert_eq!(*events.borrow(), vec![
+        (caller, hp2_core::ScriptScopePhase::Enter), (callee, hp2_core::ScriptScopePhase::Enter),
+        (callee, hp2_core::ScriptScopePhase::Exit { succeeded: true }), (caller, hp2_core::ScriptScopePhase::Exit { succeeded: true }),
+    ]));
+    drop(scope);
+    unsafe { for function in [caller, callee] { (*function.cast::<UStruct>()).script = TArrayRaw { data: ptr::null_mut(), num: 0, max: 0 }; } }
+    for root in [object, caller.cast::<UObject>(), callee.cast::<UObject>()] { access.remove_root(root); }
+    owner.shutdown().unwrap();
+}
+
 #[test]
 fn core_runtime_acceptance() {
     let (data_root, system_ini) = isolated_data_root();
@@ -548,7 +642,7 @@ fn core_runtime_acceptance() {
     let script = unsafe { (*test_function.cast::<UStruct>()).script };
     assert!(!script.data.is_null() && script.num > 0, "TestFunction owns actual loaded bytecode");
     // SAFETY: this is the mutable script body of a Rust-owned loaded function; restore immediately after invocation.
-    let code = unsafe { script.data.cast::<u8>() };
+    let code = script.data.cast::<u8>();
     let original = unsafe { code.read() };
     unsafe { code.write(0xff); }
     let errors_before_invalid_opcode = access.error_count();

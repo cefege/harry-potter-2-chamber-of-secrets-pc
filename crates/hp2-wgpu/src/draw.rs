@@ -144,6 +144,15 @@ pub fn create_depth_target(
     width: u32,
     height: u32,
 ) -> (wgpu::Texture, wgpu::TextureView) {
+    create_depth_target_with_sampling(device, width, height, false)
+}
+
+pub(crate) fn create_depth_target_with_sampling(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    sampleable: bool,
+) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("draw.rs depth target"),
         size: wgpu::Extent3d {
@@ -155,7 +164,7 @@ pub fn create_depth_target(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | if sampleable { wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::empty() },
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

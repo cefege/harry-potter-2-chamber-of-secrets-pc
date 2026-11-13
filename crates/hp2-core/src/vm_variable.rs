@@ -488,9 +488,9 @@ where
                             s.warning(e.frame, VmVariableBounds, index, s.array_num(array))?;
                             index = 0;
                         } else if index >= s.array_num(array) {
-                            s.array_add(array, s.field(property, VmVariableElementSize), index.wrapping_add(1).wrapping_sub(s.array_num(array)))?;
+                            s.array_add(array, s.field(s.link(property, VmVariableInner), VmVariableElementSize), index.wrapping_add(1).wrapping_sub(s.array_num(array)))?;
                         }
-                        let displacement = index.wrapping_mul(s.field(property, VmVariableElementSize));
+                        let displacement = index.wrapping_mul(s.field(s.link(property, VmVariableInner), VmVariableElementSize));
                         e.address.write(s.array_data(array).offset(displacement as isize));
                         if !result.is_null() {
                             s.copy(s.link(property, VmVariableInner), result, e.address.read(), VmVariableCopySingle)?;

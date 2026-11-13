@@ -6,6 +6,7 @@ import argparse
 from collections import Counter
 import functools
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -551,7 +552,8 @@ PROVENANCE_ENV_KEYS = {
     "MACOSX_DEPLOYMENT_TARGET", "OBJCFLAGS", "OBJCXXFLAGS", "PATH",
     "PKG_CONFIG_LIBDIR", "PKG_CONFIG_PATH", "SDKROOT", "TARGET", "RUSTC",
     "RUSTC_WRAPPER", "RUSTFLAGS", "RUSTDOC", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET",
-    "CARGO_BUILD_RUSTC", "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
     "CARGO_NET_OFFLINE", "CARGO_INCREMENTAL", "BINDGEN_EXTRA_CLANG_ARGS", "CORROSION_BUILD_DIR",
 }
 
@@ -580,8 +582,11 @@ def cargo_provenance_record(
     if not beneath(record_path, build / "Testing/HP2"):
         raise GuardError(f"Cargo provenance record is outside Testing/HP2 artifacts: {record_path}")
     record = load_json(record_path)
-    if not isinstance(record, dict) or record.get("schema_version") != 3:
+    if not isinstance(record, dict) or record.get("schema_version") not in {3, 4}:
         raise GuardError(f"invalid Cargo provenance schema: {record_path}")
+    configured_mode = (configured_environment or {}).get("HP2_CARGO_PROVENANCE_MODE", "schema3")
+    if configured_mode not in {"schema3", "final-bin-v1"} or record["schema_version"] != (4 if configured_mode == "final-bin-v1" else 3):
+        raise GuardError(f"Cargo provenance schema differs from configured qualification mode: {record_path}")
     if record.get("capture_error"):
         raise GuardError(f"Cargo provenance capture is incomplete: {record['capture_error']}")
     if record.get("selected_target") != product:
@@ -614,6 +619,7 @@ def cargo_provenance_record(
             "HP2_CARGO_PROVENANCE_TARGET",
             "HP2_CARGO_PROVENANCE_RECORD",
             "HP2_CARGO_PROVENANCE_EXECUTABLE",
+            "HP2_CARGO_PROVENANCE_MODE",
         }
         unclassified = sorted(
             key for key in configured_environment
@@ -757,6 +763,29 @@ def cargo_provenance_record(
             raise GuardError(f"Cargo build-script output hash is malformed: {path}")
         if file_sha256(path) != expected_hash:
             raise GuardError(f"Cargo build-script output hash does not match: {path}")
+    if record["schema_version"] == 4:
+        spec = importlib.util.spec_from_file_location("capture_final_bin", Path(__file__).with_name("capture_final_bin.py"))
+        if spec is None or spec.loader is None:
+            raise GuardError("cannot load final-binary evidence verifier")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        try:
+            evidence = record["final_bin"]
+            selected = [message for message in messages if message.get("reason") == "compiler-artifact"
+                        and message.get("target", {}).get("name") == product
+                        and "bin" in message.get("target", {}).get("kind", [])]
+            if (len(selected) != 1 or selected[0].get("fresh") is not False
+                    or evidence["context"]["target"] != product
+                    or evidence["context"]["cargo_argv"] != argv
+                    or evidence["context"]["cwd"] != str(recorded_cwd)
+                    or str(Path(cargo_token).resolve(strict=True)) not in evidence["context"]["files"]
+                    or cargo_reported_path(selected[0].get("executable"), "selected binary")
+                    != Path(evidence["executable"]).resolve(strict=True)):
+                raise helper.Unsupported("selected Cargo binary event does not match final-link evidence")
+            record["_final_bin_objects"] = helper.verify(evidence, record_path.parent,
+                                                         cargo_replay_environment(environment))
+        except (KeyError, OSError, TypeError, ValueError, helper.Unsupported) as exc:
+            raise GuardError(f"invalid final-binary qualification evidence: {exc}") from exc
     return record
 
 
@@ -2612,6 +2641,7 @@ def main() -> int:
     parser.add_argument("--build-dir", required=True, type=Path)
     parser.add_argument("--product", required=True, action="append")
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--require-final-bin", action="store_true", help="require schema-4 final-binary evidence")
     args = parser.parse_args()
     build = args.build_dir.resolve()
     repo = Path(__file__).resolve().parents[1]
@@ -2684,6 +2714,8 @@ def main() -> int:
                     )
                 except GuardError as exc:
                     findings.append(str(exc))
+                if args.require_final_bin and cargo_record and cargo_record.get("schema_version") != 4:
+                    findings.append(f"final-binary qualification evidence is required for {name}")
                 if cargo_record and not cargo_options.get("target"):
                     cargo_options["target"] = cargo_record["environment"].get("CARGO_BUILD_TARGET")
                 selected_manifest = (
@@ -2739,6 +2771,7 @@ def main() -> int:
                 findings.extend(artifact_findings)
                 rust_outputs.update(path.resolve() for path in outputs)
                 rust_symbol_outputs.update(path.resolve() for path in symbol_outputs)
+                rust_symbol_outputs.update(producer_record.get("_final_bin_objects", []))
             sdk = apple_sdk_root(build, allow)
             for value in sources:
                 if is_generated_rule_label(value) and not value.exists():
@@ -2817,6 +2850,10 @@ def main() -> int:
                 except GuardError as exc:
                     findings.append(str(exc))
                 else:
+                    if cargo_record.get("schema_version") == 4:
+                        sysroot = Path(cargo_record["final_bin"]["context"]["trees"][0]).resolve()
+                        if not nm.resolve().is_relative_to(sysroot):
+                            findings.append("selected LLVM nm is outside the bound compiler sysroot")
                     for obj in sorted(rust_objects):
                         findings.extend(inspect_rust_abi(obj, nm))
             installed = item.get("installed_file")

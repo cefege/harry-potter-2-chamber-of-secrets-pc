@@ -375,6 +375,46 @@ pub trait VmHost: Sized {
         execute()
     }
 
+    /// Runs an interpreted body with separate observation and execution results.
+    ///
+    /// `observed_result` retains the caller's original address. `body_result`
+    /// includes the VM return-local fallback when the caller discards a result.
+    /// Existing hosts retain their original observation policy by default.
+    fn interpreted_call_with_result(
+        &self, object: *mut c_void, function: *mut UFunction, frame: *mut FFrame,
+        observed_result: *mut c_void, _body_result: *mut c_void, from_script_call: bool,
+        execute: impl FnOnce() -> RuntimeResult<()>,
+    ) -> RuntimeResult<()> {
+        self.interpreted_call(object, function, frame, observed_result, from_script_call, execute)
+    }
+
+    /// Carries the resolved event's original script range to a body owner.
+    ///
+    /// The executor captures this range before event callbacks or local setup.
+    /// Existing hosts retain their result and observation policy unchanged.
+    fn interpreted_call_with_script_snapshot(
+        &self, object: *mut c_void, function: *mut UFunction, frame: *mut FFrame,
+        observed_result: *mut c_void, body_result: *mut c_void, from_script_call: bool,
+        _script_base: *mut u8, _script_length: usize,
+        execute: impl FnOnce() -> RuntimeResult<()>,
+    ) -> RuntimeResult<()> {
+        self.interpreted_call_with_result(object, function, frame, observed_result, body_result, from_script_call, execute)
+    }
+
+    /// Carries the event owner's original locals allocation and script ranges.
+    /// The default preserves existing hosts' script-snapshot overrides.
+    fn interpreted_call_with_locals_snapshot(
+        &self, object: *mut c_void, function: *mut UFunction, frame: *mut FFrame,
+        observed_result: *mut c_void, body_result: *mut c_void, from_script_call: bool,
+        script_base: *mut u8, script_length: usize, _locals_base: *mut u8, _locals_size: usize, _parameter_size: usize,
+        execute: impl FnOnce() -> RuntimeResult<()>,
+    ) -> RuntimeResult<()> {
+        self.interpreted_call_with_script_snapshot(
+            object, function, frame, observed_result, body_result, from_script_call,
+            script_base, script_length, execute,
+        )
+    }
+
     /// Apply the canonical runaway/recursion guard before each event step.
     fn check_runaway(
         &self,
@@ -520,8 +560,9 @@ impl<'host, H: VmHost> VmExecutor<'host, H> {
                 let native = self.host.native_binding(function)?;
                 unsafe { self.execute_native(native, u32::from((*function).i_native), object, frame, result)?; }
             } else {
-                self.host.interpreted_call(
-                    object, function, frame, observed_result, !parent.is_null(),
+                self.host.interpreted_call_with_locals_snapshot(
+                    object, function, frame, observed_result, result, !parent.is_null(), base, script_length,
+                    locals_ptr, size, parameter_size,
                     || unsafe { self.run_script(object, function, frame, result, base, script_length) },
                 )?;
             }
@@ -698,7 +739,7 @@ impl<'host, H: VmHost> VmExecutor<'host, H> {
         })
     }
 
-    fn dispatch(
+    pub(crate) fn dispatch(
         &self,
         encoded_opcode: u8,
         object: *mut c_void,

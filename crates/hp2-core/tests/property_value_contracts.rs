@@ -517,6 +517,68 @@ fn scalar_defaults_masks_nan_and_float_zero() {
     }
 }
 #[test]
+fn packed_object_slots_copy_compare_and_keep_forward_overlap() {
+    use std::{mem, ptr};
+    #[repr(align(16))]
+    struct Slots([u8; 48]);
+    let width = mem::size_of::<Object>();
+    let packed = hp2_abi::engine::generated::CORE_PROPERTY_ALIGNMENT as usize;
+    assert!(mem::align_of::<Object>() > packed, "supported 64-bit targets must exercise a genuinely packed pointer slot");
+    // SAFETY: UObject is a plain ABI record. These live records are only used
+    // as pointer values, never dereferenced by the selected copy/compare ops.
+    let mut records: [UObject; 4] = unsafe { mem::zeroed() };
+    let values = records.each_mut().map(|record| (record as *mut UObject).cast::<c_void>());
+    let mut n = scalar();
+    n.property().element_size = width as i32;
+    let mut c = Context::default();
+    for (source_offset, target_offset) in [(0, 0), (0, packed), (packed, 0), (packed, packed)] {
+        let mut source = Slots([0xa5; 48]);
+        let mut target = Slots([0xa5; 48]);
+        let from = source.0.as_mut_ptr().wrapping_add(source_offset).cast::<Object>();
+        let to = target.0.as_mut_ptr().wrapping_add(target_offset).cast::<Object>();
+        if source_offset == packed { assert_ne!((from as usize) % mem::align_of::<Object>(), 0, "source must not accidentally align"); }
+        if target_offset == packed { assert_ne!((to as usize) % mem::align_of::<Object>(), 0, "target must not accidentally align"); }
+        // SAFETY: both slots contain width writable bytes inside live arrays;
+        // unaligned access is deliberate. No reference to a packed Object is made.
+        unsafe { from.write_unaligned(values[0]); }
+        for operation in [Hp2ValueOperation::ValueCopySingle, Hp2ValueOperation::ValueCopyComplete] {
+            // SAFETY: each scalar slot is live for one pointer. Actual pointer
+            // values retain their provenance and the property declares width.
+            unsafe {
+                to.write_unaligned(values[1]);
+                assert_eq!(execute(Hp2ValueKind::ValueObject, operation, &mut n, &mut c, to.cast(), from.cast()), Ok(1));
+                assert_eq!(to.read_unaligned(), values[0], "copy must publish the same pointer");
+                assert_eq!(execute(Hp2ValueKind::ValueObject, Hp2ValueOperation::ValueIdentical, &mut n, &mut c, to.cast(), from.cast()), Ok(1));
+                to.write_unaligned(values[1]);
+                assert_eq!(execute(Hp2ValueKind::ValueObject, Hp2ValueOperation::ValueIdentical, &mut n, &mut c, to.cast(), from.cast()), Ok(0));
+                assert_eq!(execute(Hp2ValueKind::ValueObject, Hp2ValueOperation::ValueIdentical, &mut n, &mut c, to.cast(), null_mut()), Ok(0));
+                to.write_unaligned(null_mut());
+                assert_eq!(execute(Hp2ValueKind::ValueObject, Hp2ValueOperation::ValueIdentical, &mut n, &mut c, to.cast(), null_mut()), Ok(1));
+            }
+            // SAFETY: the source is still the same live pointer-sized slot;
+            // compare pointers, not a byte snapshot of their representation.
+            assert_eq!(unsafe { from.read_unaligned() }, values[0], "copy/compare must not modify the source pointer");
+            assert!(source.0[..source_offset].iter().chain(&source.0[source_offset + width..]).all(|&byte| byte == 0xa5), "source guard bytes changed");
+            assert!(target.0[..target_offset].iter().chain(&target.0[target_offset + width..]).all(|&byte| byte == 0xa5), "neighboring bytes changed");
+        }
+    }
+    let mut overlap = Slots([0xa5; 48]);
+    let base = overlap.0.as_mut_ptr().wrapping_add(packed).cast::<Object>();
+    n.property().array_dim = 3;
+    // SAFETY: all four pointer-sized slots fit within the array. Forward copy
+    // intentionally aliases complete source and destination slots, never bytes
+    // of a pointer. No immutable or mutable references to those slots exist.
+    unsafe {
+        for (i, value) in values.into_iter().enumerate() { base.add(i).write_unaligned(value); }
+        assert_eq!(execute(Hp2ValueKind::ValueObject, Hp2ValueOperation::ValueCopyComplete, &mut n, &mut c, base.add(1).cast(), base.cast()), Ok(1));
+        for i in 0..4 { assert_eq!(base.add(i).read_unaligned(), values[0], "forward overlap must read the earlier assignment at slot {i}"); }
+    }
+    assert!(overlap.0[..packed].iter().chain(&overlap.0[packed + 4 * width..]).all(|&byte| byte == 0xa5), "overlap copy changed boundary bytes");
+    assert_eq!(c.calls, 0, "copy/compare must not add virtual calls");
+    assert!(c.wire.is_empty(), "copy/compare must not serialize values");
+}
+
+#[test]
 fn bool_wire_is_canonical_and_failed_local_payload_does_not_publish() {
     unsafe {
         let mut n = scalar();
