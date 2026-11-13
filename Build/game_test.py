@@ -935,7 +935,7 @@ def _validate_rng_trace(document: object) -> dict[str, str] | None:
     missing = [key for key in header if key not in document]
     if missing:
         return _rng_trace_problem("rng_trace.header_missing", f"missing required field {missing[0]}")
-    if document["version"] != RNG_TRACE_FORMAT_VERSION or isinstance(document["version"], bool):
+    if not _json_integer(document["version"]) or document["version"] != RNG_TRACE_FORMAT_VERSION:
         return _rng_trace_problem("rng_trace.version_invalid", "version must equal 2")
     if document["enabled"] is not True:
         return _rng_trace_problem("rng_trace.enabled_invalid", "enabled must be true")
@@ -975,33 +975,36 @@ def _validate_rng_trace(document: object) -> dict[str, str] | None:
     for index, boundary in enumerate(boundaries):
         if not isinstance(boundary, dict) or not _json_integer(boundary.get("index")) or boundary["index"] < 0 or not isinstance(boundary.get("phase"), str) or not boundary["phase"]:
             return _rng_trace_problem("rng_trace.boundary_invalid", f"tick boundary {index} is malformed")
-    consumer_fields = ("kind", "actor", "class", "function", "native", "native_slot", "callsite_offset")
+    consumer_fields = {"kind", "actor", "class", "function", "native", "native_slot", "callsite_offset"}
     for index, (output, sample) in enumerate(zip(outputs, samples)):
         if not isinstance(output, dict) or not _json_integer(output.get("ordinal")) or not _json_integer(output.get("raw")) or output["ordinal"] != index or not 0 <= output["raw"] <= document["rand_max"]:
             return _rng_trace_problem("rng_trace.output_invalid", f"output {index} is malformed")
         if not isinstance(sample, dict):
             return _rng_trace_problem("rng_trace.sample_invalid", f"sample {index} does not match its output")
-        required_sample = {"ordinal", "raw", "tick", "consumer"}
-        allowed_sample = required_sample | {"outer_consumer"}
-        if not required_sample.issubset(sample) or set(sample) - allowed_sample:
-            return _rng_trace_problem("rng_trace.sample_schema_invalid", f"sample {index} must contain ordinal, raw, tick, and consumer")
-        if sample["ordinal"] != output["ordinal"] or sample["raw"] != output["raw"] or not isinstance(sample["tick"], dict):
+        required_sample = {"ordinal", "raw", "tick", "consumer", "outer_consumer"}
+        if set(sample) != required_sample:
+            return _rng_trace_problem("rng_trace.sample_schema_invalid", f"sample {index} must contain ordinal, raw, tick, consumer, and outer_consumer")
+        if not _json_integer(sample["ordinal"]) or not _json_integer(sample["raw"]) or sample["ordinal"] != output["ordinal"] or sample["raw"] != output["raw"] or not isinstance(sample["tick"], dict):
             return _rng_trace_problem("rng_trace.sample_invalid", f"sample {index} does not match its output")
         tick = sample["tick"]
         if set(tick) != {"index", "phase"} or not _json_integer(tick.get("index")) or tick["index"] < 0 or not isinstance(tick.get("phase"), str) or not tick["phase"]:
             return _rng_trace_problem("rng_trace.sample_tick_invalid", f"sample {index} has an invalid tick")
-        for consumer_name in ("consumer", "outer_consumer"):
-            if consumer_name not in sample:
-                continue
+        for consumer_name, expected_kind in (("consumer", "native"), ("outer_consumer", "function")):
             consumer = sample[consumer_name]
-            if not isinstance(consumer, dict) or any(field not in consumer for field in consumer_fields):
-                return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} has an incomplete {consumer_name}")
-            if not isinstance(consumer["kind"], str) or not consumer["kind"]:
+            if consumer is None:
+                continue
+            if not isinstance(consumer, dict) or set(consumer) != consumer_fields:
+                return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} has an incomplete or unknown field in {consumer_name}")
+            if consumer["kind"] != expected_kind:
                 return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} {consumer_name} kind is invalid")
             if any(value is not None and not isinstance(value, str) for value in (consumer["actor"], consumer["class"], consumer["function"], consumer["native"])):
                 return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} {consumer_name} paths must be strings or null")
-            if any(value is not None and not _json_integer(value) for value in (consumer["native_slot"], consumer["callsite_offset"])):
-                return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} {consumer_name} offsets must be integers or null")
+            offsets = (consumer["native_slot"], consumer["callsite_offset"])
+            if expected_kind == "native":
+                if any(not _json_integer(value) or not -(2**31) <= value < 2**31 for value in offsets):
+                    return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} {consumer_name} offsets must be signed 32-bit integers")
+            elif consumer["native"] is not None or any(value is not None for value in offsets):
+                return _rng_trace_problem("rng_trace.consumer_invalid", f"sample {index} {consumer_name} native fields must be null")
     return None
 
 

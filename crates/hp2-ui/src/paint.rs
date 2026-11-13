@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::{
     layout::{CHECK_GAP, TextMetrics},
     node::{Kind, Node},
-    style::{Color, Font, Rect, TextAlign},
+    style::{BlendMode, Color, Font, Rect, TextAlign},
 };
 
 /// Names a texture in the host (for the game: `"HGame.FEComboIdleTexture"`).
@@ -199,6 +199,8 @@ pub enum DrawCmd {
         texture: TextureRef,
         rect: Rect,
         fit: Fit,
+        color: Color,
+        blend: BlendMode,
     },
     Text {
         rect: Rect,
@@ -237,6 +239,8 @@ fn part(out: &mut Vec<DrawCmd>, skin: &Skin, part: SkinPart, rect: Rect, fallbac
             texture: texture.clone(),
             rect,
             fit: *fit,
+            color: Color::WHITE,
+            blend: BlendMode::Inherit,
         }),
         None => out.push(DrawCmd::Rect {
             rect,
@@ -332,7 +336,11 @@ pub(crate) fn texts(node: &Node, out: &mut Vec<(String, Font)>) {
         Kind::Select { options, .. } => {
             out.extend(options.iter().map(|o| (o.clone(), node.style.font)))
         }
-        Kind::NumberInput { .. } | Kind::Slider { .. } | Kind::Box | Kind::ImageButton(_) => {}
+        Kind::NumberInput { .. }
+        | Kind::Slider { .. }
+        | Kind::Box
+        | Kind::ImageButton(_)
+        | Kind::Image(..) => {}
     }
     for child in &node.children {
         texts(child, out);
@@ -354,7 +362,7 @@ fn paint_node(
     let focused = state.focus == Some(key);
     let style = &node.style;
     // Like a stock UWindow control, a widget's art is clipped to its own rectangle.
-    let clipped = !matches!(node.kind, Kind::Box | Kind::Text(_));
+    let clipped = !matches!(node.kind, Kind::Box | Kind::Text(_) | Kind::Image(..));
     if clipped {
         let clip = if matches!(node.kind, Kind::Slider { .. }) {
             Rect::new(
@@ -369,6 +377,13 @@ fn paint_node(
         out.push(DrawCmd::PushClip(clip));
     }
     match &node.kind {
+        Kind::Image(texture, fit) => out.push(DrawCmd::Image {
+            texture: texture.clone(),
+            rect,
+            fit: *fit,
+            color: style.color,
+            blend: style.blend,
+        }),
         Kind::Box => {
             if let Some(color) = style.background {
                 out.push(DrawCmd::Rect { rect, color });
@@ -398,6 +413,8 @@ fn paint_node(
                     texture: art.texture.clone(),
                     rect: Rect::new(rect.x + art.offset.0, rect.y + art.offset.1, w, h),
                     fit: art.fit,
+                    color: Color::WHITE,
+                    blend: BlendMode::Inherit,
                 });
             }
             let text_rect = match b.text_pos {
@@ -509,6 +526,8 @@ fn paint_node(
                     texture: texture.clone(),
                     rect: track,
                     fit: *fit,
+                    color: Color::WHITE,
+                    blend: BlendMode::Inherit,
                 });
             }
             part(

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import functools
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -19,6 +21,81 @@ FORBIDDEN = re.compile(r"(?:hp2[-_]native[-_]exception(?![\w-])|hp2[-_]core[-_]r
 LEGACY_NATIVE_DIR = re.compile(r"(?:^|[/\\])(?:Core|FFI|NativeException)(?:[/\\]|$)", re.I)
 ABI_SYMBOLS = re.compile(r"(?:__cxa_(?:throw|rethrow|begin_catch|end_catch)|__gxx_personality|_ZTV|_ZTI|_ZTT|typeinfo for|vtable for)")
 NATIVE_COMPILE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".C", ".c++", ".cppm", ".cxxm", ".ixx", ".mpp", ".m", ".mm", ".s", ".S", ".asm"}
+
+
+def rust_llvm_nm(cargo: Path, command_dir: Path, environment: dict, cargo_args: list[str]) -> Path:
+    """Find llvm-nm in the sysroot of the compiler selected by Cargo."""
+    env = cargo_replay_environment(environment)
+    env["RUSTC_BOOTSTRAP"] = "1"
+
+    def query(command: list[str]) -> str:
+        try:
+            result = subprocess.run(command, cwd=command_dir, env=env, text=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as exc:
+            raise GuardError(f"cannot execute {command[0]}: {exc}") from exc
+        if result.returncode:
+            raise GuardError(f"cannot query {command[0]}: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    try:
+        config = json.loads(query([str(cargo), "-Z", "unstable-options", *cargo_config_args(cargo_args),
+                                   "config", "get", "--format", "json"]))
+        rustc = env.get("RUSTC") or env.get("CARGO_BUILD_RUSTC") or config.get("build", {}).get("rustc") or "rustc"
+        if not isinstance(rustc, str) or not rustc:
+            raise ValueError("invalid build.rustc")
+        version = query([rustc, "-vV"])
+        host = re.search(r"^host: (\S+)$", version, re.M)
+        llvm = re.search(r"^LLVM version: (\S+)$", version, re.M)
+        release = re.search(r"^release: (\S+)$", version, re.M)
+        if not host or not llvm or not release:
+            raise ValueError("missing rustc host, release, or LLVM version")
+        sysroot = Path(query([rustc, "--print", "sysroot"]))
+        tool = sysroot / "lib" / "rustlib" / host.group(1) / "bin" / ("llvm-nm.exe" if os.name == "nt" else "llvm-nm")
+        tool_version = query([str(tool), "--version"])
+        tool_llvm = re.search(r"^\s*LLVM version (\S+)\s*$", tool_version, re.M)
+        allowed_versions = {llvm.group(1), f"{llvm.group(1)}-rust-{release.group(1)}-stable"}
+        if not tool_llvm or tool_llvm.group(1) not in allowed_versions:
+            raise ValueError(f"llvm-nm does not match rustc LLVM {llvm.group(1)}")
+        return tool
+    except (json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+        raise GuardError(f"cannot identify matching Rust LLVM tools: {exc}") from exc
+
+
+def inspect_rust_abi(obj: Path, nm: Path) -> list[str]:
+    if not obj.is_file():
+        return [f"missing selected Rust compiler-artifact for ABI inspection: {obj}"]
+    try:
+        result = subprocess.run([str(nm), "-a", str(obj)], text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except OSError as exc:
+        return [f"cannot inspect selected Rust artifact {obj}: {exc}"]
+    # llvm-nm can silently skip unrecognized archive members while exiting 0.
+    # Require an output header for every member reported by the matching llvm-ar.
+    no_symbols_warnings = set()
+    if is_archive(obj):
+        try:
+            listing = subprocess.run([str(nm.with_name("llvm-ar")), "t", str(obj)], text=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as exc:
+            return [f"cannot list selected Rust archive {obj}: {exc}"]
+        if listing.returncode or listing.stderr:
+            return [f"cannot list selected Rust archive {obj}: {listing.stderr.strip()}"]
+        members = listing.stdout.splitlines()
+        if not members or any(not member or member.endswith(":") for member in members):
+            return [f"invalid or empty selected Rust archive {obj}"]
+        expected = Counter(members)
+        headers = Counter(line[:-1] for line in result.stdout.splitlines()
+                          if line.endswith(":") and line[:-1] in expected)
+        if headers != expected:
+            return [f"cannot inspect every member of selected Rust archive {obj}"]
+        no_symbols_warnings = {f"{obj}:{member}: no symbols" for member in members}
+    diagnostics = [line for line in result.stderr.splitlines() if line not in no_symbols_warnings]
+    if result.returncode or diagnostics:
+        return [f"cannot inspect selected Rust artifact {obj}: {result.stderr.strip()}"]
+    if ABI_SYMBOLS.search(result.stdout):
+        return [f"first-party Rust compiler-artifact contains C++ ABI dependency: {obj}"]
+    return []
 
 
 def is_archive(path: Path) -> bool:
@@ -247,6 +324,24 @@ def cargo_option(args: list[str], name: str, default: str | None = None) -> str 
     return default
 
 
+def cargo_config_args(args: list[str]) -> list[str]:
+    result = []
+    index = 0
+    while index < len(args) and args[index] != "--":
+        token = args[index]
+        if token == "--config":
+            index += 1
+            if index >= len(args) or args[index] == "--" or not args[index]:
+                raise GuardError("Cargo --config has no value")
+            result.extend(["--config", args[index]])
+        elif token.startswith("--config="):
+            if not token[len("--config="):]:
+                raise GuardError("Cargo --config has no value")
+            result.append(token)
+        index += 1
+    return result
+
+
 def cargo_build_options(args: list[str], command_dir: Path) -> dict:
     cargo_args = args[:args.index("--")] if "--" in args else args
     features = []
@@ -273,8 +368,8 @@ def cargo_build_options(args: list[str], command_dir: Path) -> dict:
         "manifest": cargo_option(cargo_args, "--manifest-path"),
     }
 
-def cargo_rustflags(prefix: list[str]) -> list[str]:
-    selected_env = dict(os.environ)
+def cargo_rustflags(prefix: list[str], recorded: dict[str, str]) -> list[str]:
+    selected_env = dict(recorded)
     cursor = 0
     while cursor < len(prefix):
         token = prefix[cursor]
@@ -452,20 +547,27 @@ def cargo_reported_path(raw: object, label: str) -> Path:
 
 
 PROVENANCE_ENV_KEYS = {
-    "AR", "CC", "CFLAGS", "CMAKE_PREFIX_PATH", "CPATH", "CPPFLAGS", "CXX",
+    "AR", "CC", "CFLAGS", "CMAKE_PREFIX_PATH", "CPATH", "CPPFLAGS", "CXX", "HOME",
     "CXXFLAGS", "DYLD_LIBRARY_PATH", "LDFLAGS", "LIBRARY_PATH",
     "MACOSX_DEPLOYMENT_TARGET", "OBJCFLAGS", "OBJCXXFLAGS", "PATH",
     "PKG_CONFIG_LIBDIR", "PKG_CONFIG_PATH", "SDKROOT", "TARGET", "RUSTC",
-    "RUSTC_WRAPPER", "RUSTFLAGS", "RUSTDOC", "RUSTUP_HOME", "CARGO_BUILD_TARGET",
-    "CARGO_BUILD_RUSTC", "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
-    "CARGO_NET_OFFLINE", "BINDGEN_EXTRA_CLANG_ARGS", "CORROSION_BUILD_DIR",
+    "RUSTC_WRAPPER", "RUSTFLAGS", "RUSTDOC", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN", "CARGO_BUILD_TARGET",
+    "CARGO_BUILD_RUSTC", "CARGO_BUILD_RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+    "CARGO_HOME", "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_NET_OFFLINE", "CARGO_INCREMENTAL", "BINDGEN_EXTRA_CLANG_ARGS", "CORROSION_BUILD_DIR",
 }
 
 
 def provenance_environment_key(key: str) -> bool:
     return key in PROVENANCE_ENV_KEYS or key.startswith((
-        "AR_", "CC_", "CFLAGS_", "CXX_", "CXXFLAGS_", "CARGO_TARGET_", "RUSTC_",
+        "AR_", "CC_", "CFLAGS_", "CXX_", "CXXFLAGS_", "CARGO_TARGET_", "CARGO_PROFILE_", "RUSTC_",
     ))
+
+
+def cargo_replay_environment(recorded: dict[str, str]) -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if not provenance_environment_key(key)}
+    env.update(recorded)
+    return env
 
 
 def cargo_provenance_record(
@@ -480,8 +582,11 @@ def cargo_provenance_record(
     if not beneath(record_path, build / "Testing/HP2"):
         raise GuardError(f"Cargo provenance record is outside Testing/HP2 artifacts: {record_path}")
     record = load_json(record_path)
-    if not isinstance(record, dict) or record.get("schema_version") != 1:
+    if not isinstance(record, dict) or record.get("schema_version") not in {3, 4}:
         raise GuardError(f"invalid Cargo provenance schema: {record_path}")
+    configured_mode = (configured_environment or {}).get("HP2_CARGO_PROVENANCE_MODE", "schema3")
+    if configured_mode not in {"schema3", "final-bin-v1"} or record["schema_version"] != (4 if configured_mode == "final-bin-v1" else 3):
+        raise GuardError(f"Cargo provenance schema differs from configured qualification mode: {record_path}")
     if record.get("capture_error"):
         raise GuardError(f"Cargo provenance capture is incomplete: {record['capture_error']}")
     if record.get("selected_target") != product:
@@ -514,6 +619,7 @@ def cargo_provenance_record(
             "HP2_CARGO_PROVENANCE_TARGET",
             "HP2_CARGO_PROVENANCE_RECORD",
             "HP2_CARGO_PROVENANCE_EXECUTABLE",
+            "HP2_CARGO_PROVENANCE_MODE",
         }
         unclassified = sorted(
             key for key in configured_environment
@@ -657,6 +763,29 @@ def cargo_provenance_record(
             raise GuardError(f"Cargo build-script output hash is malformed: {path}")
         if file_sha256(path) != expected_hash:
             raise GuardError(f"Cargo build-script output hash does not match: {path}")
+    if record["schema_version"] == 4:
+        spec = importlib.util.spec_from_file_location("capture_final_bin", Path(__file__).with_name("capture_final_bin.py"))
+        if spec is None or spec.loader is None:
+            raise GuardError("cannot load final-binary evidence verifier")
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        try:
+            evidence = record["final_bin"]
+            selected = [message for message in messages if message.get("reason") == "compiler-artifact"
+                        and message.get("target", {}).get("name") == product
+                        and "bin" in message.get("target", {}).get("kind", [])]
+            if (len(selected) != 1 or selected[0].get("fresh") is not False
+                    or evidence["context"]["target"] != product
+                    or evidence["context"]["cargo_argv"] != argv
+                    or evidence["context"]["cwd"] != str(recorded_cwd)
+                    or str(Path(cargo_token).resolve(strict=True)) not in evidence["context"]["files"]
+                    or cargo_reported_path(selected[0].get("executable"), "selected binary")
+                    != Path(evidence["executable"]).resolve(strict=True)):
+                raise helper.Unsupported("selected Cargo binary event does not match final-link evidence")
+            record["_final_bin_objects"] = helper.verify(evidence, record_path.parent,
+                                                         cargo_replay_environment(environment))
+        except (KeyError, OSError, TypeError, ValueError, helper.Unsupported) as exc:
+            raise GuardError(f"invalid final-binary qualification evidence: {exc}") from exc
     return record
 
 
@@ -1076,10 +1205,12 @@ def generated_native_header(
     return False
 
 
-def check_cargo_metadata(manifest_path: Path, cargo: Path, options: dict) -> tuple[list[str], dict]:
+def check_cargo_metadata(
+    manifest_path: Path, cargo: Path, options: dict, environment: dict, command_dir: Path,
+) -> tuple[list[str], dict]:
     manifest_path = manifest_path.resolve()
     command = [
-        str(cargo), "metadata", "--locked", "--format-version", "1",
+        str(cargo), *cargo_config_args(options.get("args", [])), "metadata", "--locked", "--format-version", "1",
         "--manifest-path", str(manifest_path),
     ]
     if options["all_features"]:
@@ -1092,7 +1223,7 @@ def check_cargo_metadata(manifest_path: Path, cargo: Path, options: dict) -> tup
         command.extend(["--filter-platform", options["target"]])
     try:
         result = subprocess.run(
-            command, cwd=manifest_path.parent, text=True,
+            command, cwd=command_dir, env=cargo_replay_environment(environment), text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
     except OSError as exc:
@@ -1138,8 +1269,7 @@ def cargo_unit_graph(
             index += 1
     if "--locked" not in raw_args and not any(arg.startswith("--locked=") for arg in raw_args):
         command.append("--locked")
-    child_environment = os.environ.copy()
-    child_environment.update(environment)
+    child_environment = cargo_replay_environment(environment)
     child_environment["RUSTC_BOOTSTRAP"] = "1"
     try:
         result = subprocess.run(
@@ -2511,6 +2641,7 @@ def main() -> int:
     parser.add_argument("--build-dir", required=True, type=Path)
     parser.add_argument("--product", required=True, action="append")
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--require-final-bin", action="store_true", help="require schema-4 final-binary evidence")
     args = parser.parse_args()
     build = args.build_dir.resolve()
     repo = Path(__file__).resolve().parents[1]
@@ -2583,6 +2714,8 @@ def main() -> int:
                     )
                 except GuardError as exc:
                     findings.append(str(exc))
+                if args.require_final_bin and cargo_record and cargo_record.get("schema_version") != 4:
+                    findings.append(f"final-binary qualification evidence is required for {name}")
                 if cargo_record and not cargo_options.get("target"):
                     cargo_options["target"] = cargo_record["environment"].get("CARGO_BUILD_TARGET")
                 selected_manifest = (
@@ -2598,6 +2731,7 @@ def main() -> int:
                     allow["cargo_manifest"] = str(cargo_manifest)
                     metadata_findings, cargo_metadata = check_cargo_metadata(
                         cargo_manifest, cargo, cargo_options,
+                        cargo_record.get("environment", {}) if cargo_record else {}, cargo_dir,
                     )
                     findings.extend(metadata_findings)
                     if cargo_metadata:
@@ -2637,6 +2771,7 @@ def main() -> int:
                 findings.extend(artifact_findings)
                 rust_outputs.update(path.resolve() for path in outputs)
                 rust_symbol_outputs.update(path.resolve() for path in symbol_outputs)
+                rust_symbol_outputs.update(producer_record.get("_final_bin_objects", []))
             sdk = apple_sdk_root(build, allow)
             for value in sources:
                 if is_generated_rule_label(value) and not value.exists():
@@ -2687,7 +2822,9 @@ def main() -> int:
                 build_script_link_args.extend(script_args)
             if cargo_args is not None:
                 separator = cargo_args.index("--") if "--" in cargo_args else len(cargo_args)
-                linker_args = cargo_rustflags(cargo_env_prefix or []) + cargo_args[separator + 1:]
+                linker_args = cargo_rustflags(
+                    cargo_env_prefix or [], cargo_record.get("environment", {}) if cargo_record else {},
+                ) + cargo_args[separator + 1:]
                 findings.extend(audit_link_inputs(
                     linker_args, cargo_dir, name, api_artifacts, producers,
                     object_sources, rust_outputs, cargo_archives, repo, build,
@@ -2703,15 +2840,22 @@ def main() -> int:
             if not target.is_file():
                 findings.append(f"missing product artifact: {target}")
             rust_objects = rust_symbol_outputs
-            for obj in sorted(rust_objects):
-                if not obj.is_file():
-                    findings.append(f"missing selected Rust compiler-artifact for ABI inspection: {obj}")
-                    continue
-                nm = subprocess.run(["nm", "-a", str(obj)], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                if nm.returncode:
-                    findings.append(f"cannot inspect selected Rust artifact {obj}: {nm.stderr.strip()}")
-                elif ABI_SYMBOLS.search(nm.stdout):
-                    findings.append(f"first-party Rust compiler-artifact contains C++ ABI dependency: {obj}")
+            if cargo is None or cargo_record is None:
+                findings.append(f"cannot inspect Rust ABI without Cargo provenance for {name}")
+            elif not rust_objects:
+                findings.append(f"no selected Rust artifacts for ABI inspection for {name}")
+            else:
+                try:
+                    nm = rust_llvm_nm(cargo, cargo_dir, cargo_record.get("environment", {}), cargo_args)
+                except GuardError as exc:
+                    findings.append(str(exc))
+                else:
+                    if cargo_record.get("schema_version") == 4:
+                        sysroot = Path(cargo_record["final_bin"]["context"]["trees"][0]).resolve()
+                        if not nm.resolve().is_relative_to(sysroot):
+                            findings.append("selected LLVM nm is outside the bound compiler sysroot")
+                    for obj in sorted(rust_objects):
+                        findings.extend(inspect_rust_abi(obj, nm))
             installed = item.get("installed_file")
             if installed:
                 installed_path = resolved(installed, build)

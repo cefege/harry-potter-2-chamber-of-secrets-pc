@@ -136,8 +136,7 @@ fn tab_order(order: &[usize], added: usize, focusable: impl Fn(usize) -> bool) -
 unsafe fn fix_tab_chain(access: CoreAccess<'_>, b: Bindings, page: *mut UObject, control: *mut UObject) -> RuntimeResult<()> {
     let pointer = |object: *mut UObject, offset: usize| unsafe { ptr::read_unaligned(object.cast::<u8>().add(offset).cast::<*mut UObject>()) };
     let set_pointer = |object: *mut UObject, offset: usize, value: *mut UObject| unsafe { ptr::write_unaligned(object.cast::<u8>().add(offset).cast::<*mut UObject>(), value) };
-    let live_objects: std::collections::HashSet<usize> = (0..access.object_count()).map(|i| access.object_at(i) as usize).filter(|&v| v != 0).collect();
-    let valid = |object: *mut UObject| !object.is_null() && live_objects.contains(&(object as usize)) && unsafe { hp2_core::object_model::is_a(object.cast(), b.dialog.cast()) };
+    let valid = |object: *mut UObject| access.contains_object(object) && unsafe { hp2_core::object_model::is_a(object.cast(), b.dialog.cast()) };
     let last = pointer(page, b.tab_last);
     if !valid(last) { return Err(RuntimeError::new("Stock FPS tab tail is invalid")); }
     let first = pointer(last, b.tab_next);

@@ -25,5 +25,6 @@ Choose tests by the touched domain and production feature set, not by style alon
 
 The ported crates carry a backlog of pre-existing `rustc`/clippy warnings (unused imports,
 redundant `unsafe` blocks, style lints) inherited from the port. CI runs clippy with
-`-D warnings` only for crates written clean (`hp2-ui`); add a crate to that step once its backlog
-is cleared. Do not suppress the backlog with blanket `allow` attributes.
+`-D warnings` for `hp2-ui`, `hp2-codecs`, `hp2-file-hash`, `hp2-bootstrap-paths`, `hp2-ini`,
+and `hp2-fire`;
+add another crate to that step once its backlog is cleared and its behavioral checks pass. Do not suppress the backlog with blanket `allow` attributes.

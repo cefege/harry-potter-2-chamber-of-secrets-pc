@@ -144,6 +144,15 @@ pub fn create_depth_target(
     width: u32,
     height: u32,
 ) -> (wgpu::Texture, wgpu::TextureView) {
+    create_depth_target_with_sampling(device, width, height, false)
+}
+
+pub(crate) fn create_depth_target_with_sampling(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    sampleable: bool,
+) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("draw.rs depth target"),
         size: wgpu::Extent3d {
@@ -155,7 +164,7 @@ pub fn create_depth_target(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | if sampleable { wgpu::TextureUsages::TEXTURE_BINDING } else { wgpu::TextureUsages::empty() },
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -2471,6 +2480,59 @@ impl PostProcessPipeline {
         if let Some((x, y, width, height)) = viewport {
             pass.set_viewport(x, y, width, height, 0.0, 1.0);
         }
+        pass.draw(0..4, 0..1);
+    }
+}
+
+/// World-only bloom composite. The source and destination must not alias.
+pub(crate) struct BloomPipeline {
+    pipeline: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+}
+
+impl BloomPipeline {
+    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("world bloom shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bloom.wgsl").into()),
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("world bloom pipeline"), layout: None,
+            vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_main"), compilation_options: Default::default(), buffers: &[] },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+            depth_stencil: None, multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module, entry_point: Some("fs_main"), compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            multiview_mask: None, cache: None,
+        });
+        let layout = pipeline.get_bind_group_layout(0);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("world bloom sampler"), mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear, ..Default::default()
+        });
+        Self { pipeline, layout, sampler }
+    }
+
+    pub(crate) fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, source: &wgpu::TextureView, target: &wgpu::TextureView) {
+        let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("world bloom source"), layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+            ],
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("world bloom composite"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target, depth_slice: None, resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+            })], ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &bindings, &[]);
         pass.draw(0..4, 0..1);
     }
 }

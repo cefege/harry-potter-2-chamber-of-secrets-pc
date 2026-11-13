@@ -18,10 +18,49 @@ use std::{cell::RefCell, collections::HashMap, ffi::c_void, ptr};
 
 use hp2_abi::engine::generated::{UFunction, UObject};
 use hp2_core::{core_access::{CoreAccess, RuntimeError, RuntimeResult}, name_owner::FindName, ScriptPreCallDecision};
-use hp2_ui::{Color, Font, Rect, Size, Store, TextAlign, Ui, col, label};
+use hp2_ui::{BlendMode, Color, DrawCmd, Fit, Font, Rect, Size, Store, TextAlign, TextureRef, Ui, col, label};
+
+#[path = "ui_spell_selector.rs"]
+mod spell_selector;
+
+#[path = "ui_magic_strength.rs"]
+mod magic_strength;
+#[path = "ui_countdown.rs"]
+mod countdown;
+
+#[path = "ui_player_health.rs"]
+mod player_health;
+#[path = "ui_enemy_health.rs"]
+mod enemy_health;
+#[path = "ui_status_groups.rs"]
+mod status_groups;
+#[path = "ui_vendor.rs"]
+mod vendor;
+#[path = "ui_pickups.rs"]
+mod pickups;
+#[path = "ui_popups.rs"]
+mod popups;
+#[path = "ui_quidditch_bar.rs"]
+mod quidditch_bar;
+#[path = "ui_quidditch_score.rs"]
+mod quidditch_score;
+#[path = "ui_challenge_score.rs"]
+mod challenge_score;
+#[path = "ui_spell_lesson.rs"]
+mod spell_lesson;
+#[path = "ui_cutscene.rs"]
+mod cutscene;
+#[path = "ui_muggle_meter.rs"]
+mod muggle_meter;
+#[path = "ui_extra_hud.rs"]
+mod extra_hud;
+#[path = "ui_ceremony.rs"]
+mod ceremony;
+#[path = "ui_weapon_overlay.rs"]
+mod weapon_overlay;
 
 use crate::{
-    stock_graphics_menu::{field, live, object, prop, read_boolean},
+    stock_graphics_menu::{field, is_a, live, object, prop, read_boolean},
     ui_host::{find_texture, name_of, render_commands, DrawTarget, HostMetrics},
 };
 
@@ -32,6 +71,10 @@ const SUBTITLE_SHADOW: Color = Color(0, 0, 0, 255);
 fn enabled() -> bool {
     std::env::var_os("HP2_STOCK_HUD").is_none()
 }
+
+
+struct HudGuards<A, B> { _pre: A, _components: B }
+impl<A, B> Drop for HudGuards<A, B> { fn drop(&mut self) {} }
 
 fn warn(a: CoreAccess<'_>, error: &impl std::fmt::Display) {
     if let Ok(category) = a.intern_str("Warning", FindName::Add) {
@@ -119,10 +162,16 @@ impl DrawTarget for CanvasTarget {
         }
         unsafe { find_texture(a, name) }
     }
-    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect) -> RuntimeResult<()> {
+    unsafe fn segment(&self, a: CoreAccess<'_>, tex: *mut UObject, dest: Rect, src: Rect, color: [u8; 4], blend: BlendMode) -> RuntimeResult<()> {
         unsafe {
-            self.set_color(a, [255, 255, 255, 255])?;
-            self.tile(a, tex, dest, src)
+            self.set_color(a, color)?;
+            if let Some(style) = crate::ui_host::canvas_blend(blend) {
+                self.set_style(a, style)?;
+                self.set_pos(a, dest.x, dest.y)?;
+                crate::canvas_owner::native_draw_tile(a, self.canvas.cast(), tex.cast(), dest.w, dest.h, src.x, src.y, src.w, src.h)
+            } else {
+                self.tile(a, tex, dest, src)
+            }
         }
     }
     unsafe fn text_at(&self, a: CoreAccess<'_>, x: f32, y: f32, text: &str, font: Font, color: [u8; 4]) -> RuntimeResult<()> {
@@ -237,7 +286,7 @@ unsafe fn draw_border(a: CoreAccess<'_>, manager: *mut UObject, canvas: *mut UOb
             continue;
         }
         if live(a, border) {
-            unsafe { target.segment(a, border, rect, Rect::new(0., 0., 1., 1.))? };
+            unsafe { target.segment(a, border, rect, Rect::new(0., 0., 1., 1.), [255; 4], BlendMode::Inherit)? };
         } else {
             unsafe { target.fill(a, rect, [0, 0, 0, 255])? };
         }
@@ -334,58 +383,38 @@ unsafe fn draw_cut_style_text(a: CoreAccess<'_>, hud: *mut UObject, function: *m
     unsafe { draw_wrapped(a, &target, &text, x, y, height, Color(color[0], color[1], color[2], 255), &fonts) }
 }
 
-/// `StatusItem.DrawItem(canvas, nCurrX, nCurrY, fScaleFactor)`: the icon, then the count.
-unsafe fn draw_status_item(a: CoreAccess<'_>, item: *mut UObject, function: *mut UFunction, params: *const u8, size: usize, canvas: *mut UObject, with_icon: bool) -> RuntimeResult<()> {
-    let expected = usize::from(unsafe { (*function).parms_size });
-    if params.is_null() || size < expected {
-        return Err(RuntimeError::new("StatusItem frame"));
-    }
-    let at = |name: &str, kind: &str| unsafe { field(a, function.cast(), name, kind, 4, expected, true) };
-    let x = unsafe { params.add(at("nCurrX", "Core.IntProperty")?).cast::<i32>().read_unaligned() } as f32;
-    let y = unsafe { params.add(at("nCurrY", "Core.IntProperty")?).cast::<i32>().read_unaligned() } as f32;
-    let scale = unsafe { params.add(at("fScaleFactor", "Core.FloatProperty")?).cast::<f32>().read_unaligned() };
-    let target = CanvasTarget { canvas, tile_style: None, fonts: [ptr::null_mut(); 4] };
-    if with_icon {
-        let icon = unsafe { object(a, item, "textureHudIcon")? };
-        if live(a, icon) {
-            let (w, h) = unsafe { (int_of(a, icon, "USize")? as f32, int_of(a, icon, "VSize")? as f32) };
-            unsafe { target.tile(a, icon, Rect::new(x, y, w * scale, h * scale), Rect::new(0., 0., w, h))? };
-        }
-        if !unsafe { read_boolean(a, item, "bDisplayCount")? } {
-            return Ok(());
-        }
-    }
-    // The count, centred on the icon's count anchor, with a shadow for legibility.
-    let mut text = unsafe { int_of(a, item, "nCount")? }.to_string();
-    if unsafe { read_boolean(a, item, "bDisplayMaxCount")? } {
-        text = format!("{text}/{}", unsafe { int_of(a, item, "nMaxCount")? });
-    }
-    let mut color = [0_u8; 4];
-    unsafe { crate::ui_vm::invoke(a, item, "GetCountColor", &[], &[], (&raw mut color).cast())? };
-    let mut font: *mut UObject = ptr::null_mut();
-    unsafe { crate::ui_vm::invoke(a, item, "GetCountFont", &[("canvas", crate::ui_vm::V::Obj(canvas))], &[], (&raw mut font).cast())? };
-    if !live(a, font) {
-        return Err(RuntimeError::new("StatusItem count font"));
-    }
-    let target = CanvasTarget { canvas, tile_style: None, fonts: [font; 4] };
-    let (tw, th) = unsafe { target.text_size(a, &text, Font::Slot(0))? };
-    let cx = x + unsafe { int_of(a, item, "nCountMiddleX")? } as f32 * scale - tw / 2.;
-    let cy = y + unsafe { int_of(a, item, "nCountMiddleY")? } as f32 * scale - th / 2.;
-    // A light count gets a dark shadow and a dark count a light one.
-    let luminance = u32::from(color[0]) * 3 + u32::from(color[1]) * 6 + u32::from(color[2]);
-    let shadow = if luminance > 1280 { [0, 0, 0, 255] } else { [255, 255, 255, 160] };
-    unsafe {
-        target.text_at(a, cx + 1., cy + 1., &text, Font::Slot(0), shadow)?;
-        target.text_at(a, cx, cy, &text, Font::Slot(0), [color[0], color[1], color[2], 255])?;
-    }
-    Ok(())
+/// Typed counter composition; unsupported routes decline before callbacks or painting.
+unsafe fn status_callback(a: CoreAccess<'_>, item: *mut UObject, function: *mut UFunction, params: *const u8, size: usize, canvas: *mut UObject, name: &str) -> RuntimeResult<ScriptPreCallDecision> {
+    let with_icon = name == "DrawItem";
+    let prepared = (|| -> RuntimeResult<Option<(i32, i32, f32, i32)>> {
+        let expected = usize::from(unsafe { (*function).parms_size });
+        if params.is_null() || size < expected { return Ok(None); }
+        let at = |name: &str, kind: &str| unsafe { field(a, function.cast(), name, kind, 4, expected, true) };
+        let x = unsafe { params.add(at("nCurrX", "Core.IntProperty")?).cast::<i32>().read_unaligned() };
+        let y = unsafe { params.add(at("nCurrY", "Core.IntProperty")?).cast::<i32>().read_unaligned() };
+        let scale = unsafe { params.add(at("fScaleFactor", "Core.FloatProperty")?).cast::<f32>().read_unaligned() };
+        let supported = if with_icon { unsafe { status_groups::admits_item(a, item, canvas)? } }
+            else { unsafe { status_groups::admits_specified_count(a, item, canvas)? } };
+        if !supported { return Ok(None); }
+        let count = if name == "DrawSpecifiedCount" {
+            unsafe { params.add(at("nLocalCount", "Core.IntProperty")?).cast::<i32>().read_unaligned() }
+        } else if with_icon { 0 } else { unsafe { int_of(a, item, "nCount")? } };
+        Ok(Some((x, y, scale, count)))
+    })();
+    let (x, y, scale, count) = match prepared {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) | Err(_) => return Ok(ScriptPreCallDecision::Continue),
+    };
+    if with_icon { unsafe { status_groups::draw_item(a, item, canvas, x, y, scale)? }; }
+    else { unsafe { status_groups::draw_specified_count(a, item, canvas, x, y, scale, count)? }; }
+    Ok(ScriptPreCallDecision::Consume)
 }
 
 /// Frame-rate independent replacement of the state functions `SlideIn/SlideOut.SetCurrBorderHeight`.
 unsafe fn slide(a: CoreAccess<'_>, manager: *mut UObject, canvas: *mut UObject, growing: bool) -> RuntimeResult<()> {
     // The script's own maximum (retail scales it with the resolution).
     let mut max = 0_f32;
-    unsafe { crate::ui_vm::invoke(a, manager, "GetMaxBorderHeight", &[("Canvas", crate::ui_vm::V::Obj(canvas))], &[], (&raw mut max).cast())? };
+    unsafe { crate::ui_vm::invoke_virtual(a, manager, "GetMaxBorderHeight", &[("Canvas", crate::ui_vm::V::Obj(canvas))], &[], (&raw mut max).cast())? };
     if !max.is_finite() || max <= 0. {
         max = unsafe { int_of(a, canvas, "SizeY")? } as f32 / 8.;
     }
@@ -404,6 +433,20 @@ unsafe fn slide(a: CoreAccess<'_>, manager: *mut UObject, canvas: *mut UObject, 
     unsafe { set_f32(a, manager, "fCurrBorderHeight", next) }
 }
 
+/// Retail countdown placement. Keep the script's f32 order and int conversion.
+fn timer_origin(size_x: i32, size_y: i32, scale: f32) -> (f32, f32) {
+    let x = (size_x as f32 - 8.0 * scale - 205.0 * scale) as i32;
+    let y = (size_y as f32 - 8.0 * scale - 58.0 * scale) as i32;
+    (x as f32, y as f32)
+}
+
+fn timer_segment(remaining: f32, duration: f32) -> f32 {
+    (remaining / duration) * 118.0
+}
+
+
+
+
 unsafe fn callback(a: CoreAccess<'_>, receiver: *mut UObject, function: *mut UFunction, params: *const u8, size: usize) -> RuntimeResult<ScriptPreCallDecision> {
     if receiver.is_null() || !live(a, receiver) {
         return Ok(ScriptPreCallDecision::Continue);
@@ -413,6 +456,58 @@ unsafe fn callback(a: CoreAccess<'_>, receiver: *mut UObject, function: *mut UFu
         return Ok(ScriptPreCallDecision::Continue);
     };
     if !live(a, canvas) {
+        return Ok(ScriptPreCallDecision::Continue);
+    }
+    if matches!(name.as_str(), "DrawItem" | "DrawCount" | "DrawSpecifiedCount") {
+        return unsafe { status_callback(a, receiver, function, params, size, canvas, &name) };
+    }
+    // Read-only admission ends before callbacks, measurements or painting.
+    let admitted = (|| -> RuntimeResult<()> {
+        unsafe {
+            CanvasState::save(a, canvas)?;
+            for field_name in ["SizeX", "SizeY"] { int_of(a, canvas, field_name)?; }
+            for field_name in ["CurYL", "OrgX", "OrgY", "ClipX", "ClipY"] {
+                f32_of(a, canvas, field_name)?;
+            }
+            match name.as_str() {
+                "DrawBorder" => {
+                    f32_of(a, receiver, "fCurrBorderHeight")?;
+                    let level = object(a, receiver, "Level")?;
+                    if !live(a, level) { return Err(RuntimeError::new("HUD level unavailable")); }
+                    object(a, level, "PlayerHarryActor")?;
+                    let border = object(a, receiver, "textureBorder")?;
+                    if !live(a, border) { find_texture(a, "UWindow.WhiteTexture")?; }
+                }
+                "DrawCutStyleText" => {
+                    for (field_name, kind, width) in [
+                        ("strText", "Core.StrProperty", size_of::<hp2_abi::engine::generated::TArrayRaw>()),
+                        ("nXPos", "Core.IntProperty", 4),
+                        ("nYPos", "Core.IntProperty", 4),
+                        ("nHeight", "Core.IntProperty", 4),
+                        ("colorText", "Core.StructProperty", 4),
+                        ("fontText", "Core.ObjectProperty", size_of::<*mut UObject>()),
+                    ] { field(a, function.cast(), field_name, kind, width, size, true)?; }
+                    let fonts = player_fonts(a, object(a, receiver, "Owner")?)?;
+                    if fonts[1..].iter().any(|&font| !live(a, font)) {
+                        return Err(RuntimeError::new("HUD fonts unavailable"));
+                    }
+                }
+                "SetCurrBorderHeight" => {
+                    f32_of(a, receiver, "fCurrBorderHeight")?;
+                    let level = object(a, receiver, "Level")?;
+                    if !live(a, level) { return Err(RuntimeError::new("HUD level unavailable")); }
+                    f32_of(a, level, "TimeSeconds")?;
+                    if a.find_object_function_by_name(receiver, a.intern_str("GetMaxBorderHeight", FindName::Find)?, false)?.is_null() {
+                        return Err(RuntimeError::new("HUD border callback unavailable"));
+                    }
+                }
+                _ => return Err(RuntimeError::new("Unsupported HUD drawing route")),
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = admitted {
+        warn(a, &error);
         return Ok(ScriptPreCallDecision::Continue);
     }
     let result = (|| -> RuntimeResult<()> {
@@ -428,12 +523,6 @@ unsafe fn callback(a: CoreAccess<'_>, receiver: *mut UObject, function: *mut UFu
                 }
                 drawn
             }
-            "DrawItem" | "DrawCount" => {
-                let saved = unsafe { CanvasState::save(a, canvas)? };
-                let drawn = unsafe { draw_status_item(a, receiver, function, params, size, canvas, name == "DrawItem") };
-                unsafe { saved.restore(a)? };
-                drawn
-            }
             "SetCurrBorderHeight" => {
                 let state = name_of(a, unsafe { object(a, function.cast(), "Outer") }.unwrap_or(ptr::null_mut()));
                 unsafe { slide(a, receiver, canvas, state == "SlideIn") }
@@ -441,14 +530,8 @@ unsafe fn callback(a: CoreAccess<'_>, receiver: *mut UObject, function: *mut UFu
             _ => Ok(()),
         }
     })();
-    match result {
-        Ok(()) => Ok(ScriptPreCallDecision::Consume),
-        Err(error) => {
-            // Fall back to the stock drawing for this call.
-            warn(a, &error);
-            Ok(ScriptPreCallDecision::Continue)
-        }
-    }
+    result?;
+    Ok(ScriptPreCallDecision::Consume)
 }
 
 unsafe fn find_function(a: CoreAccess<'_>, owner_path: &str, owner_class: &str, name: &str) -> RuntimeResult<*mut UFunction> {
@@ -467,7 +550,7 @@ pub(crate) unsafe fn install(a: CoreAccess<'_>) -> RuntimeResult<Option<impl Dro
     for (owner, class, names) in [
         ("HGame.CutSceneManager", "Core.Class", &["DrawBorder"][..]),
         ("HGame.HPHud", "Core.Class", &["DrawCutStyleText"][..]),
-        ("HGame.StatusItem", "Core.Class", &["DrawItem", "DrawCount"][..]),
+        ("HGame.StatusItem", "Core.Class", &["DrawItem", "DrawCount", "DrawSpecifiedCount"][..]),
         ("HGame.CutSceneManager.SlideIn", "Core.State", &["SetCurrBorderHeight"][..]),
         ("HGame.CutSceneManager.SlideOut", "Core.State", &["SetCurrBorderHeight"][..]),
     ] {
@@ -479,15 +562,179 @@ pub(crate) unsafe fn install(a: CoreAccess<'_>) -> RuntimeResult<Option<impl Dro
             }
         }
     }
-    if functions.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(unsafe { a.install_script_pre_observer("ui-hud", &functions, callback)? }))
+    let pre = if functions.is_empty() { None } else {
+        Some(unsafe { a.install_script_pre_observer("ui-hud", &functions, callback)? })
+    };
+    let selector = unsafe { spell_selector::install(a)? };
+    let magic = unsafe { magic_strength::install(a)? };
+    let timer = unsafe { countdown::install(a)? };
+    let player_health = unsafe { player_health::install(a)? };
+    let enemy_health = unsafe { enemy_health::install(a)? };
+    let status = unsafe { status_groups::install(a)? };
+    let vendor = unsafe { vendor::install(a)? };
+    let pickups = unsafe { pickups::install(a)? };
+    let popups = unsafe { popups::install(a)? };
+    let quidditch_bar = unsafe { quidditch_bar::install(a)? };
+    let quidditch_score = unsafe { quidditch_score::install(a)? };
+    let challenge = unsafe { challenge_score::install(a)? };
+    let lesson = unsafe { spell_lesson::install(a)? };
+    let cutscene = unsafe { cutscene::install(a)? };
+    let muggle = unsafe { muggle_meter::install(a)? };
+    let extra = unsafe { extra_hud::install(a)? };
+    let ceremony = unsafe { ceremony::install(a)? };
+    let weapon = unsafe { weapon_overlay::install(a)? };
+    if pre.is_none() && selector.is_none() && magic.is_none() && timer.is_none()
+        && player_health.is_none() && enemy_health.is_none() && status.is_none()
+        && vendor.is_none() && pickups.is_none() && popups.is_none()
+        && quidditch_bar.is_none() && quidditch_score.is_none() && challenge.is_none()
+        && lesson.is_none() && cutscene.is_none() && muggle.is_none() && extra.is_none()
+        && ceremony.is_none() && weapon.is_none() { return Ok(None); }
+    Ok(Some(HudGuards { _pre: pre, _components: (
+        (selector, magic, timer), (player_health, enemy_health),
+        (status, vendor, pickups, popups), (quidditch_bar, quidditch_score, challenge, lesson),
+        (cutscene, muggle, extra, ceremony, weapon),
+    ) }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn magic_meter_retains_signed_geometry_and_tint() {
+        magic_strength::assert_view();
+    }
+
+    #[test]
+    fn countdown_rebuilds_bar_and_elapsed_views_without_clamping() {
+        countdown::assert_view();
+    }
+
+    #[test]
+    fn spell_selector_whole_view_preserves_retail_geometry() {
+        spell_selector::assert_view();
+    }
+
+
+    #[test]
+    fn player_health_preserves_bolt_count_boundaries_and_signed_regions() {
+        player_health::assert_view();
+    }
+
+    #[test]
+    fn enemy_health_preserves_source_clamp_and_frame_fill_geometry() {
+        enemy_health::assert_view();
+    }
+
+    #[test]
+    fn status_groups_preserve_layout_visibility_and_count_composition() {
+        status_groups::assert_view();
+    }
+
+    #[test]
+    fn vendor_preserves_whole_bar_geometry() {
+        vendor::assert_view();
+    }
+
+    #[test]
+    fn popups_preserve_pages_and_warning_branches() {
+        popups::assert_view();
+    }
+
+    #[test]
+    fn quidditch_bar_preserves_signed_progress_and_flash_geometry() {
+        quidditch_bar::assert_view();
+    }
+
+    #[test]
+    fn quidditch_score_preserves_opponent_and_tally_views() {
+        quidditch_score::assert_view();
+    }
+
+    #[test]
+    fn challenge_score_preserves_points_and_star_views() {
+        challenge_score::assert_view();
+    }
+
+    #[test]
+    fn spell_lesson_preserves_integer_half_centering() {
+        spell_lesson::assert_view();
+    }
+
+    #[test]
+    fn cutscene_preserves_comment_and_fast_forward_view() {
+        cutscene::assert_view();
+    }
+
+    #[test]
+    fn console_preserves_source_text_and_image_geometry() {
+        crate::ui_console_views::assert_view();
+    }
+
+    #[test]
+    fn ceremony_preserves_integer_centered_scripted_texture_score() {
+        ceremony::assert_view();
+    }
+
+    #[test]
+    fn weapon_overlay_geometry_clock_edges() {
+        weapon_overlay::assert_edges();
+    }
+
+    #[test]
+    fn empty_caption_preserves_actual_canvas_position_and_line_height() {
+        use hp2_abi::engine::generated::UCanvas;
+        let root = std::env::var_os("HP2_ARTIFACT_DIR").map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join(format!("hp2-ui-{}",std::process::id())))
+            .join("empty-caption");
+        std::fs::create_dir_all(root.join("System")).unwrap();
+        std::fs::write(root.join("System/Default.ini"),"").unwrap();
+        std::fs::write(root.join("System/DefUser.ini"),"").unwrap();
+        let owner = crate::EngineOwner::new(hp2_core::core_access::CoreOptions {
+            data_root:root.clone(),system_ini:root.join("System/Default.ini"),user_ini:root.join("System/DefUser.ini"),
+            command_line:Vec::new(),output:|_,_,_|Ok(()),log_file:Some(std::fs::File::create(root.join("runtime.log")).unwrap()),
+        }).unwrap();
+        let a = owner.access();
+        unsafe {
+            let canvas = a.construct_object(a.native_class("Engine.Canvas").unwrap(),a.transient_package(),0,0,ptr::null_mut()).unwrap().cast::<UCanvas>();
+            let font = a.construct_object(a.native_class("Engine.Font").unwrap(),a.transient_package(),0,0,ptr::null_mut()).unwrap();
+            (*canvas).cur_x = 100.; (*canvas).cur_y = 101.; (*canvas).cur_yl = 7.;
+            let target = CanvasTarget { canvas:canvas.cast(),tile_style:None,fonts:[font;4] };
+            let metrics = HostMetrics::default(); metrics.learn("",Font::Slot(0),(0.,0.));
+            let mut ui = Ui::new(Store::new(),|| col().children([label("").font(Font::Slot(0)).at(20.,30.).width(Size::Px(0.)).height(Size::Px(0.))]),metrics.clone());
+            ui.resize(100.,100.); ui.relayout();
+            render_commands(&target,a,&ui.draw(),&metrics).unwrap();
+            assert_eq!(((*canvas).cur_x,(*canvas).cur_y,(*canvas).cur_yl),(20.,30.,7.));
+            assert_eq!(ptr::addr_of!((*canvas).font).read_unaligned(),font.cast());
+        }
+    }
+
+    #[test]
+    fn muggle_meter_preserves_signed_detection_geometry() {
+        muggle_meter::assert_view();
+    }
+
+    #[test]
+    fn extra_hud_preserves_hoops_and_distinct_spell_icon() {
+        extra_hud::assert_view();
+    }
+
+
+    #[test]
+    fn retail_timer_origin_truncates_after_scaled_subtractions() {
+        assert_eq!(timer_origin(1280, 720, 2.0), (854.0, 588.0));
+        assert_eq!(timer_origin(640, 480, 0.75), (480.0, 430.0));
+    }
+
+
+    #[test]
+    fn timer_segment_does_not_clamp_or_hide_zero_division() {
+        assert_eq!(timer_segment(30.0, 60.0), 59.0);
+        assert_eq!(timer_segment(90.0, 60.0), 177.0);
+        assert!(timer_segment(1.0, 0.0).is_infinite());
+        assert!(timer_segment(0.0, 0.0).is_nan());
+    }
+
     #[test]
     fn wrap_breaks_on_words_and_keeps_long_words_whole() {
         let mut width = |s: &str| s.len() as f32;

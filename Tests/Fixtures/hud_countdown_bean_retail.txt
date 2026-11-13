@@ -1,0 +1,11 @@
+# Retail BeanRewardRoom, 800x600, NativeText=False.
+# The placed BeanRoomTimerManager0 starts through bStartOnLevelLoad=True.
+# Run 190 ticks; retain complete frames 10,60,90,120,180 for both HUD paths.
+# Covers ordinary non-expired display only; numeric, expiry and Gold remain open.
+# Proven by whole-hud-01/countdown-bean-01; no timer state is forced.
+tick 0.033333335
+idle 60
+press K
+idle 60
+press K
+idle 60

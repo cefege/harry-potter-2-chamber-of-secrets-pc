@@ -123,6 +123,7 @@ mod stock_graphics_menu;
 mod stock_input_menu;
 mod ui_host;
 mod ui_hud;
+mod ui_console_views;
 mod ui_mirror;
 mod ui_pages;
 mod ui_vm;

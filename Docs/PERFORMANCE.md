@@ -126,6 +126,22 @@ prints a per-operation breakdown of every `LoadMap` (`<HP2_PERF> load_phase`).
 * Remaining load cost (Adv1Willow load, 420 ms): EndLoad ~140 ms (package preload), garbage collection
   ~128 ms, fade ~125 ms.
 
+## Change 5: constant-time object liveness (hp2-core, hp2-engine)
+
+The Rust menus/HUD and the stock settings adapters checked that an object pointer was still alive by
+scanning the whole object table (`(0..object_count()).any(..)`), many times per frame; 45% of
+main-thread time in Entry was `CoreAccess::object_at`. `ObjectStorage` now keeps a pointer -> slot map,
+updated when a slot is published or removed, and `CoreAccess::contains_object` answers the same
+question without dereferencing the pointer. Uncapped, `-wgpu`, retail data copy, 400-600 ticks:
+
+| Scene | Before | After |
+| --- | --- | --- |
+| Main menu (Startup, frontend on) | 10.70 ms (~93 fps) | 3.64 ms (~275 fps) |
+| Entry, Rust HUD | 10.2 ms | 3.25 ms |
+| Grandstaircase_hub, Rust HUD | 18.4 ms | 8.5 ms |
+
+With the fix, the Rust HUD costs the same as `HP2_STOCK_HUD=1` (Entry 2.9-3.4 ms, Grandstaircase_hub 8.5 ms).
+
 ## Image-quality features (Sound/Video > Advanced, all default on)
 
 | Setting | Ini key `[WgpuDrv.WgpuRenderDevice]` | What it does |

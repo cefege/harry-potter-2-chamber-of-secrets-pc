@@ -37,6 +37,11 @@ pub fn with_process_state<R>(operation: impl FnOnce(&mut TraceState) -> R) -> R 
     let mut state = process_trace();
     if !state.initialized {
         initialize(&mut state);
+        // Bootstrap can precede the first trace operation. Bind only once, after
+        // tracing has read its own environment and established its gate state.
+        if let Some((requested, effective)) = crate::unix_rng_bootstrap::diagnostic_rng_seed_state() {
+            set_diagnostic_seed(&mut state, requested, effective);
+        }
     }
     operation(&mut state)
 }
@@ -46,6 +51,17 @@ pub fn with_process_state_raw<R>(operation: impl FnOnce(&mut TraceState) -> R) -
     let mut state = process_trace();
     operation(&mut state)
 }
+
+// Bootstrap also handles the opposite order: tracing might already exist.
+// Do not initialize it here or read its environment early.
+pub(crate) fn publish_bootstrapped_diagnostic_seed(requested: u32, effective: u32) {
+    with_process_state_raw(|state| {
+        if state.initialized {
+            set_diagnostic_seed(state, requested, effective);
+        }
+    });
+}
+
 /// Publishes the source `appSetRandTraceTick` operation to the process trace
 /// without crossing a C service table.
 pub fn set_process_tick(tick_index: u64, phase: &'static [u8]) {

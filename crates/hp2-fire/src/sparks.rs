@@ -569,7 +569,7 @@ unsafe fn delete_sparks_inner(
                     // Delete spark by replacing it with last one (+ delete last one).
                     (*st).active_spark_num -= 1;
                     let last = (*st).active_spark_num as usize;
-                    (*spark_at(sparks, s as usize)) = (*spark_at(sparks, last));
+                    (*spark_at(sparks, s as usize)) = *spark_at(sparks, last);
                 }
                 s += 1;
             }
@@ -860,7 +860,7 @@ pub unsafe fn post_draw_sparks(
                 let dest = texel((*sp).x as i32, (*sp).y as i32, (*st).u_bits);
 
                 // Save real sky value.
-                let dim_star = (*pixel_at(mips0, dest));
+                let dim_star = *pixel_at(mips0, dest);
                 (*sp).byte_b = dim_star;
 
                 // Put in the star if under cutoff.

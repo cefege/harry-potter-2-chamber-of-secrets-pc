@@ -758,11 +758,13 @@ pub unsafe fn run_with<O: PropertyValueOps>(
                         == 0
                 }
                 ValueObject => {
-                    a.cast::<Object>().read()
+                    // Script properties keep four-byte packing even when a
+                    // native object pointer needs eight-byte alignment.
+                    a.cast::<Object>().read_unaligned()
                         == if b.is_null() {
                             std::ptr::null_mut()
                         } else {
-                            b.cast::<Object>().read()
+                            b.cast::<Object>().read_unaligned()
                         }
                 }
                 ValueName => {
@@ -873,7 +875,8 @@ unsafe fn copy_scalar(kind: Hp2ValueKind, a: Object, b: Object) {
             ValueByte => a.cast::<u8>().write(b.cast::<u8>().read()),
             ValueInt | ValueName => a.cast::<i32>().write(b.cast::<i32>().read()),
             ValueFloat => a.cast::<f32>().write(b.cast::<f32>().read()),
-            ValueObject => a.cast::<Object>().write(b.cast::<Object>().read()),
+            // Both the source and destination can be packed script slots.
+            ValueObject => a.cast::<Object>().write_unaligned(b.cast::<Object>().read_unaligned()),
             _ => unreachable!(),
         }
     }

@@ -60,7 +60,8 @@ pub fn initialize_scoped(
 ) -> Result<(), FireCallbackError> {
     let mut sine = [0.0; 256];
     for (index, value) in sine.iter_mut().enumerate() {
-        let angle = (index as f32 / 256.0) * 6.2831853_f32;
+        // TAU has the same f32 bits as the original 6.2831853f literal.
+        let angle = (index as f32 / 256.0) * std::f32::consts::TAU;
         crate::abi::checked(services.sine.ok_or(FireCallbackError)?(
             services.context,
             angle,
@@ -246,4 +247,12 @@ pub fn calc_slow_fire(bitmap: &mut [u8], render_table: &[u8], xdim: u32, ydim: u
     let r = xd - 1;
     bitmap[this + r] = render_table
         [px(bitmap, this + r) + px(bitmap, this + r - 1) + px(bitmap, this) + px(&line0, r)];
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn tau_matches_original_fire_literal_bits() {
+        assert_eq!(std::f32::consts::TAU.to_bits(), 0x40c9_0fdb);
+    }
 }

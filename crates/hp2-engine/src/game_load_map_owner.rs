@@ -8,7 +8,71 @@ use hp2_abi::engine::generated::{
 };
 use hp2_core::core_access::{CoreAccess, RuntimeError, RuntimeResult};
 use hp2_core::name_owner::FindName;
-use std::{cell::{Cell, RefCell}, path::PathBuf, ptr};
+use std::{cell::{Cell, RefCell}, io::Write, path::PathBuf, ptr, sync::{Mutex, atomic::{AtomicBool, Ordering}}};
+
+struct GameStateTraceSession {
+    file: std::fs::File,
+    records: u64,
+    hash: u64,
+    failed: bool,
+}
+static GAME_STATE_TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
+static GAME_STATE_TRACE_SESSION: Mutex<Option<GameStateTraceSession>> = Mutex::new(None);
+
+fn trace_hash(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes { hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3); }
+    hash
+}
+fn trace_failure(error: &impl std::fmt::Display) {
+    let _ = writeln!(std::io::stderr().lock(), "HP2_GAME_STATE_TRACE incomplete: {error}");
+}
+
+// Called once per reporter lifetime. Never append to a previous session.
+pub(crate) fn game_state_trace_start() -> bool {
+    let Some(path) = std::env::var_os("HP2_GAME_STATE_TRACE").filter(|value| !value.is_empty()) else { return false };
+    let id = match std::env::var("HP2_GAME_STATE_TRACE_ID") {
+        Ok(id) if id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) => id,
+        _ => { trace_failure(&"a fresh 32-digit lowercase hex HP2_GAME_STATE_TRACE_ID is required"); return false; }
+    };
+    let Ok(mut slot) = GAME_STATE_TRACE_SESSION.lock() else { trace_failure(&"session lock poisoned"); return false };
+    if slot.is_some() { trace_failure(&"session already active"); return false; }
+    let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(file) => file,
+        Err(error) => { trace_failure(&error); return false; }
+    };
+    let header = format!("event=trace_start version=1 session={id} capture_selection=blocked\n");
+    if let Err(error) = file.write_all(header.as_bytes()) { trace_failure(&error); return false; }
+    *slot = Some(GameStateTraceSession { file, records: 0, hash: trace_hash(0xcbf29ce484222325, header.as_bytes()), failed: false });
+    GAME_STATE_TRACE_ENABLED.store(true, Ordering::Release);
+    true
+}
+
+// The footer certifies only the screening trace transport, not game success or
+// cutscene capture coverage. Its absence means the consumer must reject it.
+pub(crate) fn game_state_trace_finish(complete: bool) {
+    GAME_STATE_TRACE_ENABLED.store(false, Ordering::Release);
+    let Ok(mut slot) = GAME_STATE_TRACE_SESSION.lock() else { trace_failure(&"session lock poisoned"); return };
+    let Some(mut session) = slot.take() else { return };
+    if !complete || session.failed { trace_failure(&"session did not complete"); return; }
+    if let Err(error) = session.file.sync_data() { trace_failure(&error); return; }
+    let footer = format!("event=trace_end records={} hash={:016x} capture_selection=blocked\n", session.records, session.hash);
+    if let Err(error) = session.file.write_all(footer.as_bytes()) { trace_failure(&error); }
+}
+
+// Trace failures do not change LoadMap results. Disabled calls do not read the
+// environment, format details, allocate, or acquire a lock.
+pub(crate) fn game_state_trace(event: &str, details: impl FnOnce() -> String) {
+    if !GAME_STATE_TRACE_ENABLED.load(Ordering::Acquire) { return; }
+    let details = details();
+    let Ok(mut slot) = GAME_STATE_TRACE_SESSION.lock() else { trace_failure(&"session lock poisoned"); return };
+    let Some(session) = slot.as_mut() else { return };
+    if session.failed { return; }
+    let line = format!("record={} event={event} {details}\n", session.records);
+    match session.file.write_all(line.as_bytes()) {
+        Ok(()) => { session.hash = trace_hash(session.hash, line.as_bytes()); session.records += 1; }
+        Err(error) => { session.failed = true; trace_failure(&error); }
+    }
+}
 
 // Infer the probed fixed-array extent without borrowing an unaligned field.
 const fn array_extent<T, const N: usize>(_: *const [T; N]) -> usize { N }
@@ -173,11 +237,26 @@ impl CoreOps<'_> {
 
 struct CoreScreenActorsOps<'a> {
     access: CoreAccess<'a>,
+    level: *mut ULevel,
     group_storage: RefCell<Vec<Vec<u32>>>,
 }
 
 impl crate::level::ScreenActorsOps for CoreScreenActorsOps<'_> {
     type Error = RuntimeError;
+    unsafe fn screen_trace(&self, event: &'static str, actor: *mut std::ffi::c_void,
+                           text: *mut std::ffi::c_void, value: i32) {
+        game_state_trace(event, || {
+            // The callback can destroy the actor. Never dereference it on return.
+            let name = if actor.is_null() || event == "resolve_end" { None } else {
+                Some(unsafe { self.access.object_full_name(actor.cast()) }
+                    .map_err(|error| error.to_string()))
+            };
+            let units = if text.is_null() { None } else {
+                Some(string_units(unsafe { &*text.cast::<TArrayRaw>() }))
+            };
+            format!("level={:p} actor={actor:p} name_utf32={name:?} text_utf32={units:?} value={value}", self.level)
+        });
+    }
     unsafe fn actors_num(&self, level: *mut std::ffi::c_void) -> RuntimeResult<i32> { crate::level_owner::actor_count(level.cast()) }
     unsafe fn actors_get(&self, level: *mut std::ffi::c_void, index: i32) -> RuntimeResult<*mut std::ffi::c_void> { Ok(crate::level_owner::actor_at(level.cast(), index).cast()) }
     unsafe fn actor_is_player(&self, actor: *mut std::ffi::c_void) -> RuntimeResult<i32> {
@@ -655,9 +734,12 @@ impl LoadMapOps for CoreOps<'_> {
                 SetEngine => { (*level).base.engine = engine.cast(); Ok(0) }
                 Travel => self.output(self.context.travel_info as usize),
                 AssignTravel => {
-                    if !self.context.travel_info.is_null() {
-                        crate::level_owner::assign_travel_map(self.access, ptr::addr_of_mut!((*level).travel_info), self.context.travel_info)?;
-                    }
+                    game_state_trace("travel_assign_begin", || format!("level={level:p} travel={:p}", self.context.travel_info));
+                    let result = if !self.context.travel_info.is_null() {
+                        crate::level_owner::assign_travel_map(self.access, ptr::addr_of_mut!((*level).travel_info), self.context.travel_info)
+                    } else { Ok(()) };
+                    game_state_trace("travel_assign_end", || format!("level={level:p} returned={}", result.is_ok()));
+                    result?;
                     Ok(0)
                 }
                 Flush => { crate::engine_owner::flush(self.access, engine.cast(), false)?; Ok(0) }
@@ -688,7 +770,13 @@ impl LoadMapOps for CoreOps<'_> {
                 }
                 Persistent => {
                     let map = hp2_core::native_text::fstring_text(ptr::addr_of!((*self.context.url).map));
-                    crate::level_persist_owner::load_persistent_actors(self.access, level, map)?;
+                    game_state_trace("persistent_begin", || format!("level={level:p} travel={:p}", self.context.travel_info));
+                    let outcome = crate::level_persist_owner::load_persistent_actors(self.access, level, map);
+                    game_state_trace("persistent_end", || match &outcome {
+                        Ok(value) => format!("level={level:p} returned=ok value={value}"),
+                        Err(error) => format!("level={level:p} returned=error error={error:?}"),
+                    });
+                    outcome?;
                     Ok(0)
                 }
                 IteratorValid => {
@@ -1236,7 +1324,8 @@ impl LoadMapOps for CoreOps<'_> {
                     let mut current = TArrayRaw { data: ptr::null_mut(), num: 0, max: 0 };
                     let mut buffer = TArrayRaw { data: ptr::null_mut(), num: 0, max: 0 };
                     let mut token = TArrayRaw { data: ptr::null_mut(), num: 0, max: 0 };
-                    let ops = CoreScreenActorsOps { access: self.access, group_storage: RefCell::new(Vec::new()) };
+                    let ops = CoreScreenActorsOps { access: self.access, level, group_storage: RefCell::new(Vec::new()) };
+                    game_state_trace("screen_begin", || format!("level={level:p} travel={:p}", self.context.travel_info));
                     let result = crate::level::level_screen_actors_body_with(
                         &ops, level.cast(), (&mut current as *mut TArrayRaw).cast(),
                         (&mut buffer as *mut TArrayRaw).cast(), (&mut token as *mut TArrayRaw).cast(),
@@ -1244,7 +1333,9 @@ impl LoadMapOps for CoreOps<'_> {
                     let current_cleanup = if current.data.is_null() { Ok(()) } else { self.access.destroy_owned_fstring(&mut current) };
                     let buffer_cleanup = if buffer.data.is_null() { Ok(()) } else { self.access.destroy_owned_fstring(&mut buffer) };
                     let token_cleanup = if token.data.is_null() { Ok(()) } else { self.access.destroy_owned_fstring(&mut token) };
-                    result.and(current_cleanup).and(buffer_cleanup).and(token_cleanup)?;
+                    let result = result.and(current_cleanup).and(buffer_cleanup).and(token_cleanup);
+                    game_state_trace("screen_end", || format!("level={level:p} returned={}", result.is_ok()));
+                    result?;
                     Ok(0)
                 }
                 ProfileEnabled => self.output(usize::from(hp2_abi::engine::generated::CORE_LINKER_CONSTANTS.slow_checks != 0)),
@@ -1624,7 +1715,7 @@ mod render_host_contracts {
         };
         let excluded: Vec<u32> = "gs_Intro,gs_Hub,gs_Finale".chars().map(u32::from).chain([0]).collect();
         unsafe { access.assign_fstring(exclude, &excluded) }.unwrap();
-        let ops = CoreScreenActorsOps { access, group_storage: RefCell::new(Vec::new()) };
+        let ops = CoreScreenActorsOps { access, level: ptr::null_mut(), group_storage: RefCell::new(Vec::new()) };
         let mut state = TArrayRaw { data: ptr::null_mut(), num: 0, max: 0 };
         for (current, expected) in [("GS_HUB", 1), ("GS_HUB_EXT", 0), ("GS_HU", 1)] {
             let units: Vec<u32> = current.chars().map(u32::from).chain([0]).collect();

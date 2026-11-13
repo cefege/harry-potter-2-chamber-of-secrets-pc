@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic single-map wgpu renderer smoke for HP2.
 
-Wraps a gate-on (HP2_ENABLE_WGPU_DRIVER=ON) hp2_game build with:
+Wraps the current hp2_game_rust build with:
   - a generated Engine.ini selecting WgpuDrv.WgpuRenderDevice
     (ApplyPortableConfig preserves valid custom selections),
   - fixed ticks/timeout, isolated HOME, structured schema-v1 report.
@@ -34,7 +34,8 @@ def blocked(name: str, reason: str) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--build-dir", required=True, help="gate-on build dir containing hp2_game")
+    ap.add_argument("--build-dir", required=True, help="build dir containing hp2_game_rust")
+    ap.add_argument("--engine-bin", help="explicit game executable; defaults to <build-dir>/hp2_game_rust")
     ap.add_argument("--data-root", default="HarryPotter2/Unreal")
     ap.add_argument("--map", default="Entry")
     ap.add_argument("--ticks", type=int, default=300)
@@ -43,7 +44,7 @@ def main() -> int:
     args = ap.parse_args()
 
     repo = Path(__file__).resolve().parent.parent
-    binary = (Path(args.build_dir) / "hp2_game").resolve()
+    binary = (Path(args.engine_bin) if args.engine_bin else Path(args.build_dir) / "hp2_game_rust").resolve()
     data_root = (repo / args.data_root).resolve()
 
     if not binary.is_file():
@@ -94,7 +95,11 @@ def main() -> int:
 
     failure = re.search(r"History:|General protection|Assertion|Access violation|"
                         r"no compatible GPU adapter|Failed to initialize", text, re.I)
-    adapter = re.search(r'WgpuDrv: adapter "(.+?)" backend (\S+)', text)
+    legacy_adapter = re.search(r'WgpuDrv: adapter "(.+?)" backend (\S+)', text)
+    selected_adapter = re.search(r"^WgpuDrv: selected adapter (.+)$", text, re.M)
+    adapter = (legacy_adapter.group(1).strip() if legacy_adapter else
+               selected_adapter.group(1).strip() if selected_adapter else None)
+    backend = legacy_adapter.group(2).strip() if legacy_adapter else None
 
     # "WgpuDrv: frames presented=N occluded=M outdated=K
     # other_failure=J", logged once by UWgpuRenderDevice::Exit. Used
@@ -156,8 +161,8 @@ def main() -> int:
         "command": cmd,
         "exit_reason": ("timeout" if timed_out else
                         f"exit_{rc}" if rc is not None else "unknown"),
-        "adapter": adapter.group(1).strip() if adapter else None,
-        "backend": adapter.group(2).strip() if adapter else None,
+        "adapter": adapter,
+        "backend": backend,
         "ticks_requested": args.ticks,
     }
     print(json.dumps(report))

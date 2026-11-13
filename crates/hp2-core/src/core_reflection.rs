@@ -318,7 +318,7 @@ impl CoreAccess<'_> {
                 value,
                 input,
                 ptr::null_mut(),
-                1,
+                2, // PPF_Delimited: consume one property token per console argument.
             )
         }
     }
@@ -372,7 +372,7 @@ impl CoreAccess<'_> {
     /// when the native execution-initialization lifecycle requires it.
     pub unsafe fn initialize_execution(self, object: *mut UObject) -> RuntimeResult<()> {
         if object.is_null() { return Err(RuntimeError::new("Cannot initialize a null object")); }
-        if !(0..self.object_count()).any(|index| self.object_at(index) == object) {
+        if !self.contains_object(object) {
             return Err(RuntimeError::new("Object does not belong to this owner"));
         }
         // SAFETY: pointer identity was matched against this owner's live slots.

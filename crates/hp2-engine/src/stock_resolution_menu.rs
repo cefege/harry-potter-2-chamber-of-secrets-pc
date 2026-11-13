@@ -25,7 +25,7 @@ unsafe fn object_field(access: CoreAccess<'_>, object: *mut UObject, class: *mut
 }
 fn live(access: CoreAccess<'_>, p: *mut UObject) -> bool {
     // Compare against the object table before dereferencing an untrusted script reference.
-    !p.is_null() && (0..access.object_count()).any(|i| access.object_at(i) == p.cast())
+    !p.is_null() && access.contains_object(p)
 }
 fn valid(access: CoreAccess<'_>, p: *mut UObject, c: *mut UClass) -> bool {
     live(access, p) && unsafe { hp2_core::object_model::is_a(p.cast(), c.cast()) }

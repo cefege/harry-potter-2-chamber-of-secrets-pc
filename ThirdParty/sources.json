@@ -25,10 +25,7 @@
         "BSD-3Clause",
         "LICENSE-pffft"
       ],
-      "role": "replaceable bundled dynamic OpenAL implementation",
-      "modification_notes": [
-        "Windows llvm-mingw builds apply a CMake build-tree compatibility rewrite in alc/alc.cpp: use a lambda for EffectSlotCluster dereference so libc++ can resolve the std::views::transform adaptor. The pinned upstream source remains unchanged."
-      ]
+      "role": "replaceable bundled dynamic OpenAL implementation"
     },
     {
       "name": "libogg",
@@ -99,7 +96,7 @@
       "name": "openfonts",
       "source_type": "vendored",
       "license": "SIL Open Font License 1.1 (Liberation Fonts; Noto Sans CJK)",
-      "role": "staged text fallback for web-wasm64 and Windows x64: Liberation Sans for Latin, Liberation Mono for console text, and Noto Sans SC for CJK; no runtime download or system-font dependency.",
+      "role": "staged text fallback for the macOS and Linux dists: Liberation Sans for Latin, Liberation Mono for console text, and Noto Sans SC for CJK; no runtime download or system-font dependency.",
       "upstreams": [
         {
           "name": "Liberation Fonts",
@@ -188,44 +185,6 @@
       "license": "zlib-style",
       "upstream_license_path": "LICENSE",
       "role": "native file and folder selection for the launcher"
-    },
-    {
-      "name": "FreeType",
-      "source_type": "git",
-      "url": "https://github.com/freetype/freetype",
-      "tag": "VER-2-14-3",
-      "commit": "0a0221a1347e2f1e07c395263540026e9a0aa7c7",
-      "license": "FreeType License (BSD-3-Clause-style)",
-      "upstream_license_path": "LICENSE.TXT",
-      "role": "statically bundled Windows native text rasterizer"
-    },
-    {
-      "name": "HarfBuzz",
-      "source_type": "git",
-      "url": "https://github.com/harfbuzz/harfbuzz",
-      "tag": "14.5.1",
-      "commit": "eb033319fc2ebe723597fa497d4bb4331bab8b6b",
-      "license": "MIT",
-      "upstream_license_path": "COPYING",
-      "role": "statically bundled Windows text shaping"
-    },
-    {
-      "name": "llvm-mingw",
-      "source_type": "release-archive",
-      "url": "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-x86_64.zip",
-      "tag": "20261006",
-      "commit": "e1878a59f8bf3e1a73afe28f1b83168b1d029ed8",
-      "archive_names": [
-        "llvm-mingw-20261006-ucrt-aarch64.zip",
-        "llvm-mingw-20261006-ucrt-armv7.zip",
-        "llvm-mingw-20261006-ucrt-i686.zip",
-        "llvm-mingw-20261006-ucrt-macos-universal.tar.xz",
-        "llvm-mingw-20261006-ucrt-ubuntu-22.04-aarch64.tar.xz",
-        "llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz",
-        "llvm-mingw-20261006-ucrt-x86_64.zip"
-      ],
-      "license": "Apache-2.0 WITH LLVM-exception; mingw-w64 headers under ZPL-2.1",
-      "role": "Windows x64 toolchain (UCRT)"
     }
   ]
 }

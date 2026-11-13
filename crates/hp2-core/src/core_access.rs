@@ -245,6 +245,9 @@ struct CoreState {
     check_conflicts: bool,
     debugger: RefCell<Option<Rc<dyn ScriptDebugger>>>,
     vm_observer: Cell<Option<VmObserver>>,
+    // A borrowed host exists only during a selected replacement callback.
+    // Its lexical guard restores the prior value before the host can drop.
+    active_script_vm: Cell<Option<crate::core_vm::ActiveScriptVm>>,
     transactions: RefCell<Option<Rc<dyn ObjectTransactions>>>,
     cache_command: Cell<Option<CacheCommandHandler>>,
     exit_purge: Cell<bool>,
@@ -390,6 +393,7 @@ impl CoreOwner {
                 check_conflicts,
                 debugger: RefCell::new(None),
                 vm_observer: Cell::new(None),
+                active_script_vm: Cell::new(None),
                 transactions: RefCell::new(None),
                 cache_command: Cell::new(None),
                 exit_purge: Cell::new(false),
@@ -521,6 +525,14 @@ pub struct CoreAccess<'a> {
 }
 
 impl<'a> CoreAccess<'a> {
+    pub(crate) fn active_script_vm(self) -> Option<crate::core_vm::ActiveScriptVm> {
+        self.state.active_script_vm.get()
+    }
+
+    pub(crate) fn replace_active_script_vm(self, active: Option<crate::core_vm::ActiveScriptVm>) -> Option<crate::core_vm::ActiveScriptVm> {
+        self.state.active_script_vm.replace(active)
+    }
+
     pub(crate) fn loader_state(self) -> *mut crate::core_loader::LoaderState {
         self.state.loader.get()
     }
@@ -772,6 +784,24 @@ impl<'a> CoreAccess<'a> {
 
     pub(crate) fn vm_natives(self) -> Option<&'static [VmNativeSpec]> {
         self.state.vm_natives.get()
+    }
+
+    /// Checks numeric external catalog resolution against an installed descriptor.
+    ///
+    /// Core opcodes take precedence. Otherwise the first external entry wins,
+    /// and its descriptor address must equal `expected` in the installed static
+    /// slice, not an equivalent copy or a matching handler address. This does
+    /// not establish that bytecode can encode or reach the number. The caller
+    /// must separately validate the actual instruction sites. This query invokes
+    /// no handler and allocates or changes no cache or registration.
+    #[must_use]
+    pub fn effective_external_vm_native_is(self, opcode: u16, expected: &'static VmNativeSpec) -> bool {
+        if crate::core_native_catalog::iter().any(|spec| spec.opcode == Some(i32::from(opcode))) {
+            return false;
+        }
+        self.vm_natives().unwrap_or(&[]).iter()
+            .find(|spec| spec.native_index == Some(opcode))
+            .is_some_and(|spec| std::ptr::eq(spec, expected))
     }
 
     /// Returns the current process-mode flags used by Core.
@@ -1469,6 +1499,13 @@ impl<'a> CoreAccess<'a> {
         unsafe { (*self.state.objects.get()).at(index).cast() }
     }
 
+    /// Whether `object` is currently published in this owner's object table, in constant time.
+    /// Never dereferences `object`, so a stale pointer is safe to test.
+    pub fn contains_object<T>(self, object: *const T) -> bool {
+        // SAFETY: the capability is engine-thread confined; no hook is invoked.
+        !object.is_null() && unsafe { (*self.state.objects.get()).index_of(object.cast()).is_some() }
+    }
+
     pub fn intern(self, text: &[u32], mode: FindName) -> RuntimeResult<i32> {
         // SAFETY: name operations are direct and cannot invoke external hooks.
         unsafe { (&mut *self.state.names.get()).intern(text, mode).map(|name| name.index) }
@@ -1488,6 +1525,21 @@ impl<'a> CoreAccess<'a> {
             && text.iter().zip(expected.bytes()).all(|(a, b)| {
                 char::from_u32(*a).is_some_and(|c| c.eq_ignore_ascii_case(&(b as char)))
             }))
+    }
+
+    /// Compares a live UTF-32 name with exact text without copying or interning.
+    ///
+    /// This read-only comparison performs no callback or allocation for a valid
+    /// name. It neither exposes a borrowed name slice nor changes a name cache.
+    ///
+    /// # Errors
+    /// Returns the same invalid-index error as `name_text` for an absent slot.
+    pub fn name_is(self, index: i32, expected: &str) -> RuntimeResult<bool> {
+        // SAFETY: name storage remains immutably borrowed only for this local
+        // comparison, which cannot invoke callbacks or mutate the name owner.
+        let name = unsafe { (&*self.state.names.get()).text_slice(index) }
+            .ok_or_else(|| RuntimeError::new("Invalid name index"))?;
+        Ok(name.iter().copied().eq(expected.chars().map(u32::from)))
     }
 
     pub fn name_text(self, index: i32) -> RuntimeResult<Vec<u32>> {

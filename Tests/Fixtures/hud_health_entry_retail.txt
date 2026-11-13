@@ -1,0 +1,17 @@
+# Retail Entry health view. Start at 800x600, NativeText=False.
+# Isolated User.ini bindings: F5=AddHealthPotential 600; F6=AddHealth -50.
+# Existing game commands; gameplay, health transitions and callbacks stay script-owned.
+# Run 165 ticks; retain complete frames 10,30,50,90,140 for both HUD paths.
+# Proven by whole-hud-01/health-entry-01, not full health-family acceptance.
+tick 0.033333335
+idle 20
+press F5
+idle 18
+press K
+idle 18
+press F6
+idle 18
+press K
+idle 65
+press K
+idle 5

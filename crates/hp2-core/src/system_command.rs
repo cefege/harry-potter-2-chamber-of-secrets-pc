@@ -251,7 +251,7 @@ pub unsafe fn execute_system_command(
     command: *const u32,
     output: &mut dyn FnMut(&[u32]) -> crate::core_access::RuntimeResult<()>,
 ) -> crate::core_access::RuntimeResult<bool> {
-    if system.is_null() || !(0..access.object_count()).any(|index| access.object_at(index) == system) {
+    if !access.contains_object(system) {
         return Err(crate::core_access::RuntimeError::new("USystem command object is not owned by Core"));
     }
     let system_class = access.native_class("Core.System")?;

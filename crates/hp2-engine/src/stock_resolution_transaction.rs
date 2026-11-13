@@ -50,7 +50,7 @@ thread_local! {
     static TIMEOUTS: RefCell<Vec<(*mut UViewport, i32, usize)>> = const { RefCell::new(Vec::new()) };
 }
 fn live(a: CoreAccess<'_>, object: *mut UObject) -> bool {
-    !object.is_null() && (0..a.object_count()).any(|i| a.object_at(i) == object.cast())
+    !object.is_null() && a.contains_object(object)
 }
 unsafe fn property(a: CoreAccess<'_>, object: *mut UObject, name: &str, kind: &str, width: usize) -> RuntimeResult<(*mut UProperty, *mut u8)> {
     if !live(a, object) { return Err(RuntimeError::new("Resolution transaction object is not live")); }

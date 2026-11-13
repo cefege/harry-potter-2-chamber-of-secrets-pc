@@ -238,7 +238,7 @@ pub unsafe fn redraw_sparks(
                         (*spark_at(sparks, t)).y as i32,
                         (*st).u_bits,
                     );
-                    let previous = (*pixel_at(mips0, dest));
+                    let previous = *pixel_at(mips0, dest);
                     let value = g.speed_rand()?;
                     (*pixel_at(mips0, dest)) = value;
                     trace.burn_write(
@@ -1079,7 +1079,7 @@ pub unsafe fn redraw_sparks(
             if removed {
                 // `*ThisSpark = Sparks(--ActiveSparkNum)`. The moved spark is not re-tested.
                 (*st).active_spark_num -= 1;
-                (*spark_at(sparks, s)) = (*spark_at(sparks, (*st).active_spark_num as usize));
+                (*spark_at(sparks, s)) = *spark_at(sparks, (*st).active_spark_num as usize);
             }
             s += 1;
         }

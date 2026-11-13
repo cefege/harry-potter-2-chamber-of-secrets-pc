@@ -1309,6 +1309,8 @@ pub unsafe fn level_init(s: &Hp2LevelCoreServices, obj: Obj, root_outside: i32) 
 /// Implementations must access only live objects belonging to their backend.
 pub(crate) trait ScreenActorsOps {
     type Error;
+    // Observation must not call script, modify the game, or change its errors.
+    unsafe fn screen_trace(&self, _event: &'static str, _actor: Obj, _text: Obj, _value: i32) {}
     unsafe fn actors_num(&self, level: Obj) -> Result<i32, Self::Error>;
     unsafe fn actors_get(&self, level: Obj, index: i32) -> Result<Obj, Self::Error>;
     unsafe fn actor_is_player(&self, actor: Obj) -> Result<i32, Self::Error>;
@@ -1395,17 +1397,21 @@ pub unsafe fn level_screen_actors_body_with<O: ScreenActorsOps>(
             i += 1;
         }
 
+        s.screen_trace("player", pawn, cur_gstate, 0);
         // *** Error checking: if the current state is not set then return.
         if s.fstring_eq_chars(cur_gstate, NONE.as_ptr())? != 0 {
+            s.screen_trace("none_state", pawn, cur_gstate, 0);
             return Ok(());
         }
         // If we didn't find the player or its CurGState is invalid, return.
         if pawn.is_null()
             || s.fstring_instr_fstring(s.pawn_game_state_master_list(pawn)?, cur_gstate)? < 0
         {
+            s.screen_trace("invalid_state", pawn, cur_gstate, 0);
             s.screen_invalid_state(pawn)?;
             return Ok(());
         }
+        s.screen_trace("valid_state", pawn, cur_gstate, 0);
 
         // *** Screen Actors: screen them according to the current GameState.
         let mut i = 0;
@@ -1418,11 +1424,13 @@ pub unsafe fn level_screen_actors_body_with<O: ScreenActorsOps>(
             // Reset local vars for the next token.
             s.fstring_assign_chars(buffer, s.actor_group_chars(act)?)?;
             s.fstring_caps(buffer, buffer)?;
+            s.screen_trace("actor_group", act, buffer, 0);
             let mut has_gstate = false;
             let mut in_cur_gstate = false;
             loop {
                 // See if this actor has an excludeGameState list containing CurGState.
                 let exclude = s.actor_exclude_game_states(act)?;
+                s.screen_trace("actor_exclude", act, exclude, 0);
                 if s.fstring_len(exclude)? != 0 {
                     if s.exclude_caps_contains(exclude, cur_gstate)? != 0 {
                         // CurGState is in the actor's *exclude* list.
@@ -1469,13 +1477,19 @@ pub unsafe fn level_screen_actors_body_with<O: ScreenActorsOps>(
                 s.fstring_mid(buffer, buffer, s.fstring_len(token)?, MAXINT)?;
             }
             // Set bInCurrentGameState and resolve the GameState if this actor has one.
+            s.screen_trace("decision", act, ptr::null_mut(),
+                if has_gstate { i32::from(in_cur_gstate) } else { -1 });
             if has_gstate {
                 s.actor_set_in_current_game_state(act, in_cur_gstate as i32)?;
                 if s.is_editor()? == 0 {
-                    s.actor_event_on_resolve_game_state(act)?;
+                    s.screen_trace("resolve_begin", act, ptr::null_mut(), 0);
+                    let result = s.actor_event_on_resolve_game_state(act);
+                    s.screen_trace("resolve_end", act, ptr::null_mut(), i32::from(result.is_ok()));
+                    result?;
                 }
             }
         }
+        s.screen_trace("screen_complete", ptr::null_mut(), cur_gstate, 0);
     }
     Ok(())
 }

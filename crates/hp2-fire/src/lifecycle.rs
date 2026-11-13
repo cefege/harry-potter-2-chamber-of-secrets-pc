@@ -837,14 +837,22 @@ fn water_host_set(owner: usize, slot: usize, value: usize) {
 
 fn water_host_remove_if_empty(owner: usize) {
     let mut states = WATER_HOST_STATES.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(pos) = states.iter().position(|(key, _)| *key == owner) {
-        if states[pos].1 == [0, 0] {
-            states.remove(pos);
-        }
+    if let Some(pos) = states.iter().position(|(key, _)| *key == owner)
+        && states[pos].1 == [0, 0]
+    {
+        states.remove(pos);
     }
 }
 
 static ICE_MOUSE: Mutex<(f32, f32)> = Mutex::new((0.0, 0.0));
+/// Finds a water allocation for the owner and slot.
+///
+/// # Safety
+/// The caller must uphold the lifecycle owner and context invariants, and `slot` must be 0 or 1.
+#[expect(
+    clippy::result_unit_err,
+    reason = "Preserve the existing lifecycle error contract"
+)]
 pub unsafe fn water_pointer(
     services: FractalServices,
     context: *mut c_void,
@@ -859,7 +867,11 @@ pub unsafe fn water_pointer(
     .water_pointer(slot)
 }
 
-/// Called only with a valid native context and synchronous checked callbacks.
+/// Calls the lifecycle entry through synchronous checked callbacks.
+///
+/// # Safety
+/// The native context, owner, callback table, and any objects or buffers selected by the
+/// entry and its arguments must remain valid through all synchronous callbacks and reentry.
 /// Native typed leaves retain all allocator, UObject, archive and mip lifetimes.
 pub unsafe fn run(
     services: FractalServices,

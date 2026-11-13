@@ -773,7 +773,7 @@ class GameTestContracts(unittest.TestCase):
             game_test._validate_rng_trace(nested_consumer),
             {
                 "code": "rng_trace.sample_schema_invalid",
-                "detail": "sample 0 must contain ordinal, raw, tick, and consumer",
+                "detail": "sample 0 must contain ordinal, raw, tick, consumer, and outer_consumer",
             },
         )
 
@@ -1672,6 +1672,127 @@ class GameTestContracts(unittest.TestCase):
         self.assertEqual(cpp_run["actor_transition_ledger"]["status"], "valid")
         self.assertFalse(rust_run["passed"])
         self.assertEqual(rust_run["actor_transition_ledger"]["status"], "missing")
+
+class RngTraceSchemaContracts(unittest.TestCase):
+    """Pure schema tests: no process, game, Cargo, or file access."""
+
+    @staticmethod
+    def context(kind: str) -> dict[str, object]:
+        return {
+            "kind": kind, "actor": "Actor", "class": "Class", "function": "Function",
+            "native": "Rand" if kind == "native" else None,
+            "native_slot": -1 if kind == "native" else None,
+            "callsite_offset": 0 if kind == "native" else None,
+        }
+
+    @classmethod
+    def document(cls) -> dict[str, object]:
+        return {
+            "version": 2, "enabled": True, "rand_max": 32767, "count": 2,
+            "call_count": 2, "limit": 8, "capture_available": True, "truncated": False,
+            "outputs": [{"ordinal": 0, "raw": 0}, {"ordinal": 1, "raw": 1}],
+            "tick_boundaries": [{"index": 0, "phase": "startup"}],
+            "samples": [
+                {"ordinal": 0, "raw": 0, "tick": {"index": 0, "phase": "startup"},
+                 "consumer": None, "outer_consumer": None},
+                {"ordinal": 1, "raw": 1, "tick": {"index": 1, "phase": "tick"},
+                 "consumer": cls.context("native"), "outer_consumer": cls.context("function")},
+            ],
+        }
+
+    def assert_rejected(self, document: dict[str, object], code: str) -> None:
+        problem = game_test._validate_rng_trace(document)
+        self.assertIsNotNone(problem)
+        self.assertEqual(problem["code"], code)
+
+    def test_nullable_context_combinations_preserve_every_sample(self) -> None:
+        native = self.context("native")
+        outer = self.context("function")
+        for consumer, outer_consumer in ((None, None), (native, None), (None, outer), (native, outer)):
+            with self.subTest(consumer=consumer, outer=outer_consumer):
+                document = self.document()
+                document["samples"][0]["consumer"] = consumer
+                document["samples"][0]["outer_consumer"] = outer_consumer
+                original = json.dumps(document, sort_keys=True)
+                self.assertIsNone(game_test._validate_rng_trace(document))
+                self.assertEqual(json.dumps(document, sort_keys=True), original)
+
+    def test_missing_required_context_and_unknown_sample_fields_are_rejected(self) -> None:
+        for field in ("consumer", "outer_consumer"):
+            with self.subTest(missing=field):
+                document = self.document()
+                del document["samples"][0][field]
+                self.assert_rejected(document, "rng_trace.sample_schema_invalid")
+        document = self.document()
+        document["samples"][0]["extra"] = None
+        self.assert_rejected(document, "rng_trace.sample_schema_invalid")
+
+    def test_nonnull_contexts_require_exact_fields_kind_and_types(self) -> None:
+        for name, kind in (("consumer", "native"), ("outer_consumer", "function")):
+            for field in self.context(kind):
+                with self.subTest(context=name, missing=field):
+                    document = self.document()
+                    del document["samples"][1][name][field]
+                    self.assert_rejected(document, "rng_trace.consumer_invalid")
+            for field, value in (("kind", "other"), ("actor", 1), ("class", False),
+                                 ("function", []), ("native", {}), ("native_slot", True),
+                                 ("callsite_offset", "0"), ("extra", 0)):
+                with self.subTest(context=name, field=field):
+                    document = self.document()
+                    document["samples"][1][name][field] = value
+                    self.assert_rejected(document, "rng_trace.consumer_invalid")
+            for value in ([], "native", 0, True):
+                with self.subTest(context=name, value=value):
+                    document = self.document()
+                    document["samples"][1][name] = value
+                    self.assert_rejected(document, "rng_trace.consumer_invalid")
+
+    def test_context_offsets_match_serialized_signed_integers(self) -> None:
+        for field in ("native_slot", "callsite_offset"):
+            for value in (None, True, 1.0, -(2**31) - 1, 2**31):
+                with self.subTest(field=field, value=value):
+                    document = self.document()
+                    document["samples"][1]["consumer"][field] = value
+                    self.assert_rejected(document, "rng_trace.consumer_invalid")
+            for value in (-(2**31), 2**31 - 1):
+                with self.subTest(field=field, valid=value):
+                    document = self.document()
+                    document["samples"][1]["consumer"][field] = value
+                    self.assertIsNone(game_test._validate_rng_trace(document))
+        for field, value in (("native", "Rand"), ("native_slot", 0), ("callsite_offset", 0)):
+            with self.subTest(outer_field=field):
+                document = self.document()
+                document["samples"][1]["outer_consumer"][field] = value
+                self.assert_rejected(document, "rng_trace.consumer_invalid")
+
+    def test_sample_ordinal_and_raw_reject_boolean_and_float_aliases(self) -> None:
+        for field in ("ordinal", "raw"):
+            for value in (True, 1.0):
+                with self.subTest(field=field, value=value):
+                    document = self.document()
+                    document["samples"][1][field] = value
+                    self.assert_rejected(document, "rng_trace.sample_invalid")
+        for value in (True, 2.0):
+            with self.subTest(version=value):
+                document = self.document()
+                document["version"] = value
+                self.assert_rejected(document, "rng_trace.version_invalid")
+
+    def test_counts_output_and_tick_validation_remain_in_force(self) -> None:
+        for field, value, code in (("count", 1, "rng_trace.count_invalid"),
+                                   ("call_count", 1, "rng_trace.call_count_invalid"),
+                                   ("limit", 0, "rng_trace.boundary_count_invalid")):
+            with self.subTest(field=field):
+                document = self.document()
+                document[field] = value
+                self.assert_rejected(document, code)
+        document = self.document()
+        document["outputs"][1]["raw"] = True
+        self.assert_rejected(document, "rng_trace.output_invalid")
+        document = self.document()
+        document["samples"][1]["tick"]["index"] = True
+        self.assert_rejected(document, "rng_trace.sample_tick_invalid")
+
 
 if __name__ == "__main__":
     unittest.main()

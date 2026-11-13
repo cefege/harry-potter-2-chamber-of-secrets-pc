@@ -101,7 +101,7 @@ fn collect(node: &Node, out: &mut Vec<Target>) {
         Kind::Slider { .. } => Some(Tag::Slider),
         Kind::Select { .. } => Some(Tag::Select),
         Kind::NumberInput { .. } => Some(Tag::Number),
-        Kind::Box | Kind::Text(_) => None,
+        Kind::Box | Kind::Text(_) | Kind::Image(..) => None,
     };
     if let (Some(tag), false, Some(key)) = (tag, node.disabled, &node.key) {
         out.push(Target {
@@ -438,7 +438,11 @@ impl Ui {
                     Some((key.to_owned(), *selected))
                 };
             }
-            Kind::Slider { .. } | Kind::NumberInput { .. } | Kind::Box | Kind::Text(_) => {}
+            Kind::Slider { .. }
+            | Kind::NumberInput { .. }
+            | Kind::Box
+            | Kind::Text(_)
+            | Kind::Image(..) => {}
         }
     }
 

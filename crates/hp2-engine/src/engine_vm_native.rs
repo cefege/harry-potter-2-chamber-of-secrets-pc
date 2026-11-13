@@ -1199,6 +1199,16 @@ unsafe fn get_entry_level(
     result: *mut c_void,
 ) -> RuntimeResult<()> {
     unsafe { finish_arguments(access, frame)?; }
+    let info = unsafe { entry_level_info(object)? };
+    unsafe { result.cast::<*mut c_void>().write_unaligned(info.cast()); }
+    Ok(())
+}
+
+/// Returns the Entry level-info actor for the same canonical owner chain as GetEntryLevel.
+///
+/// # Safety
+/// `object` is a live PlayerPawn whose Level, GameEngine and Entry level remain live.
+pub(crate) unsafe fn entry_level_info(object: *mut UObject) -> RuntimeResult<*mut UObject> {
     let pawn = object.cast::<APlayerPawn>();
     if pawn.is_null() {
         return Err(RuntimeError::new("GetEntryLevel received a null canonical PlayerPawn"));
@@ -1216,8 +1226,7 @@ unsafe fn get_entry_level(
         return Err(RuntimeError::new("GetEntryLevel GameEngine has no Entry Level"));
     }
     let info = unsafe { crate::package_map_level_owner::level_info(entry)? };
-    result.cast::<*mut c_void>().write_unaligned(info.cast());
-    Ok(())
+    Ok(info.cast())
 }
 
 /// Adds and optionally persists one URL option through the canonical URL policy.

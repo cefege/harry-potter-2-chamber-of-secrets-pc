@@ -6,7 +6,9 @@
 use crate::core_access::{RuntimeError, RuntimeResult};
 use crate::object_owner::OwnedObject;
 use hp2_abi::engine::generated::UObject;
+use crate::fast_hash::FastMap;
 use std::ffi::c_void;
+use std::hash::BuildHasherDefault;
 use std::ptr::{self, addr_of, addr_of_mut};
 
 pub const HASH_BUCKETS: usize = 4096;
@@ -33,6 +35,8 @@ impl ObjectSlot {
 
 pub struct ObjectStorage {
     objects: Vec<ObjectSlot>,
+    /// Published pointer -> slot index, so membership checks need not scan `objects`.
+    indices: FastMap<usize, i32>,
     available: Vec<i32>,
     hash: [*mut c_void; HASH_BUCKETS],
 }
@@ -47,6 +51,7 @@ impl ObjectStorage {
     pub const fn new() -> Self {
         Self {
             objects: Vec::new(),
+            indices: FastMap::with_hasher(BuildHasherDefault::new()),
             available: Vec::new(),
             hash: [ptr::null_mut(); HASH_BUCKETS],
         }
@@ -61,6 +66,15 @@ impl ObjectStorage {
             .map(ObjectSlot::pointer)
             .unwrap_or(ptr::null_mut())
     }
+    /// The slot holding `object`, if it is currently published.
+    pub fn index_of(&self, object: *const c_void) -> Option<i32> {
+        self.indices.get(&(object as usize)).copied()
+    }
+    fn forget(&mut self, object: *mut c_void, index: i32) {
+        if !object.is_null() && self.indices.get(&(object as usize)) == Some(&index) {
+            self.indices.remove(&(object as usize));
+        }
+    }
     pub fn hash_head(&self, bucket: i32) -> *mut c_void {
         self.hash[bucket as usize]
     }
@@ -71,7 +85,9 @@ impl ObjectStorage {
         *self = Self::new();
     }
     pub fn remove(&mut self, index: i32) {
+        let object = self.objects[index as usize].pointer();
         self.objects[index as usize] = ObjectSlot::Empty;
+        self.forget(object, index);
         self.available.push(index);
     }
     pub(crate) fn remove_owned(&mut self, index: i32) -> RuntimeResult<OwnedObject> {
@@ -83,6 +99,7 @@ impl ObjectStorage {
         }
         match std::mem::replace(slot, ObjectSlot::Empty) {
             ObjectSlot::Owned(object) => {
+                self.forget(object.as_ptr().cast(), index);
                 self.available.push(index);
                 Ok(object)
             }
@@ -261,7 +278,11 @@ unsafe fn publish_slot(storage: *mut ObjectStorage, mut slot: ObjectSlot, index:
             object.publish();
         }
         let object = slot.pointer();
-        (&mut (*storage).objects)[index as usize] = slot;
+        let storage = &mut *storage;
+        let previous = storage.objects[index as usize].pointer();
+        storage.forget(previous, index);
+        storage.objects[index as usize] = slot;
+        storage.indices.insert(object as usize, index);
         addr_of_mut!((*object.cast::<UObject>()).index).write(index);
         hash(storage, object);
     }

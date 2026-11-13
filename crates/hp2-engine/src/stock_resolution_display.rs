@@ -89,14 +89,14 @@ pub(crate) unsafe fn sync(access: CoreAccess<'_>, engine: *mut UGameEngine) -> R
     // Snapshot the live set before following reflected references. The pass is
     // synchronous and does not invoke script, so GC cannot invalidate it.
     let live: Vec<*mut UObject> = (0..access.object_count()).map(|i| access.object_at(i).cast()).filter(|p: &*mut UObject| !p.is_null()).collect();
-    let valid = |object: *mut UObject, class: *mut UClass| !object.is_null() && live.contains(&object)
+    let valid = |object: *mut UObject, class: *mut UClass| access.contains_object(object)
         && unsafe { hp2_core::object_model::is_a(object.cast(), class.cast()) };
     let mut viewports = Vec::new();
     for i in 0..list.num as usize {
         let viewport = unsafe { list.data.cast::<*mut UViewport>().add(i).read() };
-        if viewport.is_null() || !live.contains(&viewport.cast()) { continue; }
+        if !access.contains_object(viewport) { continue; }
         let console = unsafe { (*viewport).console.cast::<UObject>() };
-        if console.is_null() || !live.contains(&console) { continue; }
+        if !access.contains_object(console) { continue; }
         if let Some(size) = unsafe { crate::camera_owner::sdl_display_exec::current_resolution(access, viewport)? } {
             viewports.push((console, size));
         }

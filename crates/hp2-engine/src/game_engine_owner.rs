@@ -11,6 +11,14 @@ use hp2_core::{
 };
 use std::{alloc::Layout, ptr};
 
+/// Start an exclusive diagnostic session. False means disabled or incomplete.
+#[doc(hidden)]
+pub fn start_game_state_trace() -> bool { crate::game_load_map_owner::game_state_trace_start() }
+
+/// Finish only the session successfully started by this owner.
+#[doc(hidden)]
+pub fn finish_game_state_trace(complete: bool) { crate::game_load_map_owner::game_state_trace_finish(complete); }
+
 const OBJECT_FLAGS: u32 = 4 | 0x0008_0000 | 0x0000_4000 | 0x0400_0000;
 const CLASS_CONFIG: u32 = 0x0000_0004;
 const CLASS_TRANSIENT: u32 = 0x0000_0008;
