@@ -258,8 +258,8 @@ unsafe fn cut_manager(a:CoreAccess<'_>,group:*mut UObject)->RuntimeResult<*mut U
     }
 }
 /// Final-coordinate arithmetic takes query results, never gameplay policy or mutable actor state.
-fn final_coordinates(family:usize,size:(i32,i32),icon:(i32,i32),objective_top:Option<i32>,cut_border:i32)->(i32,i32) {
-    let scale=size.0 as f32/640.;
+fn final_coordinates(family:usize,size:(i32,i32),icon:(i32,i32),objective_top:Option<i32>,cut_border:i32,hud:f32)->(i32,i32) {
+    let scale=size.0 as f32/640.*hud;
     match family {
         0=>(0,0),
         1=>((scale*4.) as i32,(scale*70.) as i32),
@@ -299,7 +299,7 @@ unsafe fn final_position(a:CoreAccess<'_>,group:*mut UObject,canvas:*mut UObject
             }
             if !live(a,group)||!live(a,canvas){return Err(RuntimeError::new("Status receiver destroyed during layout query"));}
         }
-        Ok(final_coordinates(family,size,icon,top,border))
+        Ok(final_coordinates(family,size,icon,top,border,crate::display_options::hud_scale(a)))
     }
 }
 fn fly_origin(family:usize,final_xy:(i32,i32),height:i32,scale:f32,canvas_height:i32)->(i32,i32) {
@@ -337,7 +337,7 @@ unsafe fn position(a:CoreAccess<'_>,group:*mut UObject,canvas:*mut UObject,menu:
         let total=super::f32_of(a,group,if incoming{"fTotalEffectInTime"}else{"fTotalEffectOutTime"})?;
         let final_xy=final_position(a,group,canvas,route.family,menu,icon)?;
         if layout_route(a,group)?!=Some(route){return Err(RuntimeError::new("Status layout changed during final-position query"));}
-        let origin_scale=if route.family==0{0.}else{int_of(a,canvas,"SizeX")? as f32/640.};
+        let origin_scale=if route.family==0{0.}else{int_of(a,canvas,"SizeX")? as f32/640.*crate::display_options::hud_scale(a)};
         // Every concrete origin calls final-position again. Objective/cut queries must repeat,
         // even if the preceding callback returned the same visible geometry.
         let origin_final=final_position(a,group,canvas,route.family,menu,icon)?;
@@ -383,7 +383,7 @@ unsafe fn preflight_group(a:CoreAccess<'_>,group:*mut UObject,canvas:*mut UObjec
 }
 unsafe fn render_group(a:CoreAccess<'_>,group:*mut UObject,canvas:*mut UObject,menu:bool,full_cut:bool)->RuntimeResult<()> {
     unsafe {
-        let scale=int_of(a,canvas,"SizeX")? as f32/640.;
+        let scale=int_of(a,canvas,"SizeX")? as f32/640.*crate::display_options::hud_scale(a);
         if menu {return Ok(());}
         if !read_boolean(a,group,"bCurrRenderInCutScene")?&&full_cut {return Ok(());}
         invoke_virtual(a,group,"HandleMenuModeSwitching",&[("bMenuMode",V::Bool(menu))],&[],ptr::null_mut())?;
@@ -447,9 +447,9 @@ pub(super) fn assert_view() {
     assert_eq!(count_anchor(790,590,(0,0),1.,(30.,20.),(800,600)),(768.,580.));
     assert_eq!(count_anchor(-20,-30,(0,0),1.,(30.,20.),(800,600)),(-35.,-40.));
     let expected=[(0,0),(5,87),(5,362),(5,175),(612,5),(520,5),(745,5),(745,207),(5,500),(745,500)];
-    for (family,expected) in expected.into_iter().enumerate(){assert_eq!(final_coordinates(family,(800,600),(40,20),None,75),expected,"layout family {family}");}
-    assert_eq!(final_coordinates(8,(800,600),(40,20),Some(400),75),(5,368));
-    assert_eq!(final_coordinates(9,(800,600),(40,20),Some(400),75),(745,368));
+    for (family,expected) in expected.into_iter().enumerate(){assert_eq!(final_coordinates(family,(800,600),(40,20),None,75,1.0),expected,"layout family {family}");}
+    assert_eq!(final_coordinates(8,(800,600),(40,20),Some(400),75,1.0),(5,368));
+    assert_eq!(final_coordinates(9,(800,600),(40,20),Some(400),75,1.0),(745,368));
     assert_eq!(fly_origin(0,(5,7),20,1.25,600),(5,-20));
     assert_eq!(fly_origin(3,(5,7),20,1.25,600),(5,625));
     assert_eq!(fly_coordinates((100,100),(0,-100),true,0.25,1.),(75,50));

@@ -507,9 +507,7 @@ impl<'access, 'archive, 'data> ArchiveRoot<'access, 'archive, 'data> {
         defaults: *mut c_void,
         defaults_count: i32,
     ) -> RuntimeResult<Self> {
-        let string_property = class_name_id(access, "StringProperty")?;
-        let str_property = class_name_id(access, "StrProperty")?;
-        let struct_property = class_name_id(access, "StructProperty")?;
+        let [string_property, str_property, struct_property, _] = access.property_type_names()?;
         Ok(Self {
             access, archive, structure, data, defaults, defaults_count,
             string_property, str_property, struct_property,
@@ -517,10 +515,6 @@ impl<'access, 'archive, 'data> ArchiveRoot<'access, 'archive, 'data> {
             array_index: std::cell::Cell::new(-1),
         })
     }
-}
-
-pub(crate) fn class_name_id(access: CoreAccess<'_>, name: &str) -> RuntimeResult<i32> {
-    access.intern_str(name, crate::name_owner::FindName::Find)
 }
 
 fn name_string(access: CoreAccess<'_>, index: i32) -> RuntimeResult<String> {
@@ -544,7 +538,7 @@ fn object_full_name(access: CoreAccess<'_>, object: *mut UObject) -> RuntimeResu
 
 pub(crate) unsafe fn property_id(access: CoreAccess<'_>, property: *mut UProperty) -> RuntimeResult<i32> {
     if unsafe { access.record_kind(property.cast())? } == NativeRecordKind::ClassProperty {
-        class_name_id(access, "ObjectProperty")
+        Ok(access.property_type_names()?[3])
     } else {
         let class = unsafe { (*property.cast::<UObject>()).class };
         if class.is_null() { Err(RuntimeError::new("Property has no class")) }

@@ -40,7 +40,10 @@ unsafe fn play(access: CoreAccess<'_>, object: *mut UObject, frame: *mut FFrame,
         step_argument(access, frame, (&raw mut args.disable_3d).cast())?;
         step_argument(access, frame, (&raw mut args.looping).cast())?;
         finish_arguments(access, frame)?;
-        crate::actor_audio_core::play_sound(access, object.cast::<AActor>(), frame, kind, &args)
+        crate::actor_audio_core::play_sound(access, object.cast::<AActor>(), frame, kind, &args)?;
+        // Always-on subtitles: spoken `AllDialog` lines without a script-requested subtitle.
+        if kind != 0 { crate::ui_accessibility::on_play_sound(access, object, args.sound)?; }
+        Ok(())
     }
 }
 

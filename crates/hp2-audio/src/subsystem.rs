@@ -51,6 +51,10 @@ pub struct Config {
     pub doppler_factor: f32,
     pub music_volume: f32,
     pub sound_volume: f32,
+    /// Extra gain for voice sources (dialog and other `SLOT_Talk` or streamed
+    /// non-music sounds), `0.0..=1.0`. `1.0` leaves them unchanged. Not in the
+    /// original: it comes from `VoiceVolume` in the user's INI.
+    pub voice_volume: f32,
     pub roll_off: f32,
     pub max_channels: i32,
     pub use_precache: bool,
@@ -88,6 +92,8 @@ pub struct Source {
     pub id: i32,
     pub started: bool,
     pub paused: bool,
+    /// Voice line (see [`Config::voice_volume`]); its gain is scaled live.
+    pub voice: bool,
     pub lip_sync: Option<LipSync>,
 }
 
@@ -113,8 +119,16 @@ impl Source {
             id: 0,
             started: false,
             paused: false,
+            voice: false,
             lip_sync: None,
         }
+    }
+
+    /// The `AL_GAIN` to publish for a base gain: voice sources get the live
+    /// voice scale, everything else is untouched. A scale of exactly `1.0`
+    /// returns the base gain bit for bit.
+    pub fn output_gain(&self, base: f32, cfg: &Config) -> f32 {
+        if self.voice { base * cfg.voice_volume } else { base }
     }
 }
 

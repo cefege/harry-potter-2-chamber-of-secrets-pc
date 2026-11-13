@@ -4,22 +4,26 @@
 /// (top row, wgpu's texture origin). `texture` must have
 /// `TextureUsages::COPY_SRC`. Supported formats: Rgba8Unorm, Rgba8UnormSrgb
 /// (returned as-is), Bgra8Unorm, Bgra8UnormSrgb (B and R swapped to RGBA).
-/// Returns `None` for any other format. Blocks until the GPU finishes.
+/// Rgba16Float (the HDR surface) is clamped to 0..=1 and quantized, so the
+/// SDR range reads back like an 8-bit frame. Returns `None` for any other
+/// format. Blocks until the GPU finishes.
 pub fn read_texture_rgba8(
     created: &crate::CreatedDevice,
     texture: &wgpu::Texture,
 ) -> Option<Vec<u8>> {
-    let swap_rb = match texture.format() {
-        wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => false,
-        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => true,
+    let (swap_rb, half_float) = match texture.format() {
+        wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => (false, false),
+        wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => (true, false),
+        wgpu::TextureFormat::Rgba16Float => (false, true),
         _ => return None,
     };
     let width = texture.width();
     let height = texture.height();
+    let bytes_per_pixel = if half_float { 8 } else { 4 };
     // copy_texture_to_buffer requires bytes_per_row to be a multiple of
     // COPY_BYTES_PER_ROW_ALIGNMENT (256), so rows are padded on the GPU
     // side and unpadded on the CPU side below.
-    let unpadded = width * 4;
+    let unpadded = width * bytes_per_pixel;
     let padded =
         unpadded.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 
@@ -70,10 +74,15 @@ pub fn read_texture_rgba8(
         .expect("buffer should be mapped after a successful map_async + device.poll");
 
     let unpadded = unpadded as usize;
-    let mut out = Vec::with_capacity(unpadded * height as usize);
+    let mut out = Vec::with_capacity(width as usize * 4 * height as usize);
     for row in 0..height as usize {
         let start = row * padded as usize;
-        out.extend_from_slice(&mapped[start..start + unpadded]);
+        let bytes = &mapped[start..start + unpadded];
+        if half_float {
+            out.extend(bytes.chunks_exact(2).map(|h| unorm8(f16_to_f32(u16::from_le_bytes([h[0], h[1]])))));
+        } else {
+            out.extend_from_slice(bytes);
+        }
     }
     if swap_rb {
         for pixel in out.chunks_exact_mut(4) {
@@ -83,6 +92,22 @@ pub fn read_texture_rgba8(
     drop(mapped);
     buffer.unmap();
     Some(out)
+}
+
+/// IEEE 754 binary16 to f32.
+fn f16_to_f32(bits: u16) -> f32 {
+    let sign = if bits & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let exponent = i32::from((bits >> 10) & 0x1f);
+    let mantissa = f32::from(bits & 0x3ff);
+    sign * match exponent {
+        0 => mantissa * 2f32.powi(-24),
+        31 => if mantissa == 0.0 { f32::INFINITY } else { f32::NAN },
+        _ => (1.0 + mantissa / 1024.0) * 2f32.powi(exponent - 15),
+    }
+}
+
+fn unorm8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// HP2_CAPTURE_FRAMES state, mirroring `GFrameCapture` in XOpenGL.cpp.
@@ -279,6 +304,16 @@ fn parse_ticks(text: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn half_float_readback_converts_sdr_range_and_clamps_highlights() {
+        assert_eq!(super::f16_to_f32(0x3c00), 1.0);
+        assert_eq!(super::f16_to_f32(0x3800), 0.5);
+        assert_eq!(super::f16_to_f32(0x0001), 2f32.powi(-24));
+        assert_eq!(super::unorm8(super::f16_to_f32(0x3800)), 128);
+        assert_eq!(super::unorm8(super::f16_to_f32(0x4000)), 255); // 2.0: HDR highlight
+        assert_eq!(super::unorm8(super::f16_to_f32(0xbc00)), 0);
+    }
+
     use super::*;
 
     #[test]

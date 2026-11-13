@@ -28,6 +28,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import platform
 import re
 import resource
@@ -132,6 +133,8 @@ def one(args: argparse.Namespace) -> int:
     sample["load_seconds"] = loads[-1] if loads else None
     sample["ini"] = str(ini)
     sample["frame_rate_limit"] = re.search(r"^FrameRateLimit=(.*)$", ini.read_text(), re.MULTILINE).group(1)
+    # game_test runs hidden unless HP2_BACKGROUND=0: every frame renders off screen, none presents.
+    sample["offscreen"] = os.environ.get("HP2_BACKGROUND", "1") == "1"
     # macOS reports bytes; Linux kilobytes.
     peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     sample["peak_rss_mb"] = peak / (1024 * 1024 if sys.platform == "darwin" else 1024)
@@ -144,10 +147,15 @@ def valid_sample(sample: dict, deterministic_clock: bool) -> bool:
     cut_errors = sample.get("cut_error_count")
     if not isinstance(cut_errors, int) or isinstance(cut_errors, bool) or cut_errors != 0:
         return False
+    if sample.get("offscreen"):
+        # Hidden window: frames render fully to the off-screen target and report Occluded.
+        presented_ok = (presentation.get("presented", 0) == 0 and presentation.get("occluded", 0) > 0
+                        and all(presentation.get(key) == 0 for key in PRESENTATION_KEYS[2:]))
+    else:
+        presented_ok = (presentation.get("presented", 0) > 0
+                        and all(presentation.get(key) == 0 for key in PRESENTATION_KEYS[1:]))
     if (not sample.get("run_passed") or sample.get("exit_status") != 0
-            or sample.get("timed_out") or sample.get("failure_markers")
-            or presentation.get("presented", 0) <= 0
-            or any(presentation.get(key) != 0 for key in PRESENTATION_KEYS[1:])):
+            or sample.get("timed_out") or sample.get("failure_markers") or not presented_ok):
         return False
     for name in ("tick", "interval"):
         timing = sample.get(name, {})

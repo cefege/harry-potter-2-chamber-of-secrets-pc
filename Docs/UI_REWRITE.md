@@ -20,6 +20,10 @@ to say so. Until a screen is replaced its stock page and the `stock_*` observers
 
 `HP2_STOCK_MENUS=1` brings back the stock page. `HP2_UI_DEBUG=1` logs input and applied commands.
 
+With a recognized gamepad, the left stick or D-pad moves the menu pointer,
+A clicks, and B goes back. The Controls page shows gamepad button names while
+the pad is connected; keyboard and mouse labels remain unchanged otherwise.
+
 ### How the mirrored pages work (`ui_mirror`)
 The stock controls stay alive and in place (the page script still sees their geometry), but
 their own `Paint` and pointer functions are swallowed by script pre-call hooks. Each paint reads

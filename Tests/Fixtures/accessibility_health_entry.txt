@@ -1,0 +1,11 @@
+# Entry health loss and gain, 800x600, NativeText=False.
+# Isolated bindings: F5=AddHealthPotential 600; F6=AddHealth -50; F7=AddHealth 50.
+# Loss colour frames ~60-80; gain colour frames ~120-140.
+tick 0.033333335
+idle 20
+press F5
+idle 40
+press F6
+idle 60
+press F7
+idle 40

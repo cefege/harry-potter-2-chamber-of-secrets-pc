@@ -18,6 +18,15 @@ use hp2_render::mesh_lod_pipeline::{
 use hp2_render::mesh_shared::{self, MeshBatchDraw, MeshSharedGeometry, MeshSharedOps, MeshTextureInfo};
 use std::{cell::{Cell, RefCell}, ffi::{c_void, CStr}, fmt::{self, Write as _}, mem, ptr, sync::Mutex};
 
+/// `[WgpuDrv.WgpuRenderDevice] HighDetailModels`: draw meshes at full detail
+/// instead of reducing vertices with distance (`ShapeLODMode` 0, fix 1.0).
+static HIGH_DETAIL_MODELS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static FULL_DETAIL_LOD_MODE: i32 = 0;
+
+pub(crate) fn set_high_detail_models(on: bool) {
+    HIGH_DETAIL_MODELS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 static SKEL_LINKUP: Mutex<()> = Mutex::new(());
 impl CoreSkelHost<'_, '_> {
     fn array<T>(raw: &TArrayRaw) -> &[T] {
@@ -1084,8 +1093,14 @@ unsafe fn draw_actor_mesh(
     state.global_adjust = unsafe { (*render).global_shape_lod_adjust };
     state.rect = unsafe { [(*sprite).x1, (*sprite).y1, (*sprite).x2, (*sprite).y2] };
     state.fx = unsafe { (*frame).fx };
-    state.mode = unsafe { ptr::addr_of!((*render).shape_lod_mode) };
-    state.fix = unsafe { (*render).shape_lod_fix };
+    if HIGH_DETAIL_MODELS.load(std::sync::atomic::Ordering::Relaxed) {
+        // Fixed mode at full vertex count: every mesh keeps all its detail.
+        state.mode = &FULL_DETAIL_LOD_MODE;
+        state.fix = 1.0;
+    } else {
+        state.mode = unsafe { ptr::addr_of!((*render).shape_lod_mode) };
+        state.fix = unsafe { (*render).shape_lod_fix };
+    }
     state.morph = unsafe { ptr::addr_of!((*mesh).lod_morph) };
     state.morph_enabled = 0;
     state.wire = unsafe { (*render).wire_show as i32 };

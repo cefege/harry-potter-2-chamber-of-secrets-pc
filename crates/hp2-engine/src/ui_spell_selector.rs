@@ -39,6 +39,8 @@ struct Selector {
     icons: [Icon; 3],
     text_sizes: [(f32, f32); 3],
     tint: [u8; 4],
+    /// Player HUD size multiplier (`HudScale`); exactly 1.0 by default.
+    hud: f32,
 }
 
 struct SelectorUi {
@@ -63,7 +65,7 @@ fn hotkey_font(width: i32) -> Font {
 }
 
 fn view(model: &Selector) -> Node {
-    let scale = model.size.0 as f32 / BASE_WIDTH;
+    let scale = model.size.0 as f32 / BASE_WIDTH * model.hud;
     let x = (2. * scale) as i32;
     let mut y = (START_Y * scale) as i32;
     let mut children = Vec::with_capacity(6);
@@ -165,6 +167,7 @@ unsafe fn snapshot(
             tint: prop(a, canvas, "DrawColor", "Core.StructProperty", 4)?
                 .cast::<[u8; 4]>()
                 .read_unaligned(),
+            hud: crate::display_options::hud_scale(a),
         })
     }
 }
@@ -384,6 +387,7 @@ pub(super) fn assert_view() {
         }),
         text_sizes: [(9., 13.); 3],
         tint: [17, 33, 65, 73],
+        hud: 1.0,
     };
     let metrics = HostMetrics::default();
     for width in [512, 513, 640, 641, 800, 1280] {

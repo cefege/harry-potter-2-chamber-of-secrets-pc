@@ -278,6 +278,7 @@ unsafe fn destroy_sdl_client(access: CoreAccess<'_>, object: *mut UObject) -> Ru
     }
     #[cfg(feature = "sdl")]
     unsafe {
+        hp2_platform::game_controller::close();
         let joystick = (*client).joystick;
         if !joystick.is_null() { hp2_platform::joystick::close_joystick(joystick.cast()); }
         (*client).joystick = ptr::null_mut();
@@ -441,6 +442,8 @@ pub unsafe fn init_client(
         }
     }
     #[cfg(feature = "sdl")]
+    crate::input_options::apply_persisted(access, unsafe { (*client).use_joystick != 0 });
+    #[cfg(feature = "sdl")]
     if unsafe { (*client).use_joystick != 0 } {
         let opened = unsafe {
             hp2_platform::joystick::open_joystick(
@@ -459,6 +462,9 @@ pub unsafe fn init_client(
         } else {
             unsafe { (*client).use_joystick = 0; }
         }
+        // A recognized gamepad at the selected index also opens as an SDL game
+        // controller; its events then replace the raw joystick layout.
+        hp2_platform::game_controller::open_configured(unsafe { (*client).joystick_number });
     }
     Ok(())
 }
@@ -601,6 +607,11 @@ impl PlatformOwnerState {
     }
     fn owns(&self, viewport: *mut USDLViewport) -> bool {
         !viewport.is_null() && self.viewports.borrow().contains(&(viewport as usize))
+    }
+    /// The live viewport that owns an SDL window (the game has exactly one).
+    pub(crate) fn primary_viewport(&self) -> Option<*mut USDLViewport> {
+        self.viewports.borrow().iter().copied().map(|v| v as *mut USDLViewport)
+            .filter(|v| unsafe { !ptr::addr_of!((**v).sdl_window).read_unaligned().is_null() }).min()
     }
     pub(crate) unsafe fn destroy_viewport(&self, viewport: *mut USDLViewport) -> RuntimeResult<()> {
         if viewport.is_null() { return Err(RuntimeError::new("Null canonical SDL viewport")); }
@@ -905,6 +916,18 @@ pub(crate) unsafe fn client_tick(
 }
 
 
+/// `SDL_WINDOW_ALLOW_HIGHDPI` (`SDL_video.h`): lets Retina/HiDPI displays back the window with
+/// a native-resolution drawable so the renderer, bitmap menus and text are not upscaled.
+/// `HP2_HIGHDPI=0` restores the old 1x backing store.
+#[cfg(feature = "sdl")]
+const SDL_WINDOW_ALLOW_HIGHDPI: u32 = 0x0000_2000;
+
+#[cfg(feature = "sdl")]
+fn high_dpi_flags(flags: u32) -> u32 {
+    let flags = if hp2_platform::background_mode() { flags | hp2_platform::viewport::SDL_WINDOW_HIDDEN } else { flags };
+    if std::env::var_os("HP2_HIGHDPI").as_deref() == Some(std::ffi::OsStr::new("0")) { flags } else { flags | SDL_WINDOW_ALLOW_HIGHDPI }
+}
+
 /// Creates and initializes the SDL window portion of `USDLViewport::OpenWindow`.
 ///
 /// # Safety
@@ -954,7 +977,7 @@ pub unsafe fn open_viewport_window(
                 }
             }
         };
-        let requested = crate::stock_display_transition::startup_mode(preference, startup, temporary);
+        let requested = crate::stock_display_transition::startup_mode(preference, startup, temporary, crate::display_options::fullscreen_mode(access));
         let start_fullscreen = requested != hp2_platform::live_display_mode::DisplayMode::Windowed;
         if start_fullscreen && !desktop {
             let x = unsafe { ptr::addr_of!((*client).base.fullscreen_viewport_x).read_unaligned() };
@@ -972,7 +995,11 @@ pub unsafe fn open_viewport_window(
                 (windows::SDL_GL_BLUE_SIZE, 8),
             ] { windows::set_gl_attribute(attribute, value); }
             let borderless = unsafe { ptr::addr_of!((*client).borderless_window).read_unaligned() != 0 };
-            let window = windows::create_window(width, height, hp2_platform::viewport::window_flags(temporary, borderless));
+            let window = windows::create_window_on_display(
+                width, height,
+                high_dpi_flags(hp2_platform::viewport::window_flags(temporary, borderless)),
+                crate::display_options::display_index(access),
+            );
             if window.is_null() {
                 return Err(RuntimeError::new("SDL_CreateWindow failed"));
             }

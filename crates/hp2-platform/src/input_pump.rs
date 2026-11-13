@@ -33,7 +33,9 @@
 //! events still run. Replayed events also use verification-aware translation;
 //! replayed relative samples are passed directly to [`relative_mouse`].
 
+use crate::game_controller;
 use crate::input_event::{self, HP2InputEvent, ik, ist};
+use crate::input_options;
 use crate::joystick_input::{self, JOY_AXIS_KEYS, MAX_JOYSTICK_AXES};
 use crate::mouse_capture::{self, Action as CaptureAction, State, WindowFlags};
 use crate::mouse_state;
@@ -279,6 +281,11 @@ pub mod sdl_event {
     pub const JOYBUTTONDOWN: u32 = 0x603;
     pub const JOYBUTTONUP: u32 = 0x604;
     pub const QUIT: u32 = 0x100;
+    pub use crate::game_controller::event::{
+        AXISMOTION as CONTROLLERAXISMOTION, BUTTONDOWN as CONTROLLERBUTTONDOWN,
+        BUTTONUP as CONTROLLERBUTTONUP, DEVICEADDED as CONTROLLERDEVICEADDED,
+        DEVICEREMOVED as CONTROLLERDEVICEREMOVED,
+    };
 }
 
 /// `SDL_WindowEventID` values used by the pump (`SDL_video.h`, enum counts
@@ -476,6 +483,41 @@ pub mod ffi {
         pub padding1: u8,
         pub padding2: u8,
     }
+    /// `SDL_ControllerAxisEvent` (`SDL_events.h`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlControllerAxisEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub which: i32,
+        pub axis: u8,
+        pub padding1: u8,
+        pub padding2: u8,
+        pub padding3: u8,
+        pub value: i16,
+        pub padding4: u16,
+    }
+    /// `SDL_ControllerButtonEvent` (`SDL_events.h`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlControllerButtonEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub which: i32,
+        pub button: u8,
+        pub state: u8,
+        pub padding1: u8,
+        pub padding2: u8,
+    }
+    /// `SDL_ControllerDeviceEvent` (`SDL_events.h`); `which` is the device
+    /// index for additions and the instance id for removals.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct SdlControllerDeviceEvent {
+        pub kind: u32,
+        pub timestamp: u32,
+        pub which: i32,
+    }
     /// `SDL_WindowEvent` (`SDL_events.h:208-219`).
     #[repr(C)]
     #[derive(Clone, Copy)]
@@ -505,6 +547,9 @@ pub mod ffi {
         pub jaxis: SdlJoyAxisEvent,
         pub jbutton: SdlJoyButtonEvent,
         pub jhat: SdlJoyHatEvent,
+        pub caxis: SdlControllerAxisEvent,
+        pub cbutton: SdlControllerButtonEvent,
+        pub cdevice: SdlControllerDeviceEvent,
         pub window: SdlWindowEvent,
         pub padding: [u8; 56],
         // SDL's omitted user/drop events contain pointers and align the union.
@@ -563,6 +608,17 @@ pub unsafe fn poll_and_flatten(window: *mut std::ffi::c_void) -> Option<SdlEvent
                 out.joy_button = raw.jbutton.button
             }
             sdl_event::JOYHATMOTION => out.joy_hat = raw.jhat.value,
+            sdl_event::CONTROLLERAXISMOTION => {
+                out.joy_axis = raw.caxis.axis;
+                out.joy_axis_value = raw.caxis.value as i32;
+            }
+            sdl_event::CONTROLLERBUTTONDOWN | sdl_event::CONTROLLERBUTTONUP => {
+                out.joy_button = raw.cbutton.button
+            }
+            // Device index (added) / instance id (removed), carried in `motion_x`.
+            sdl_event::CONTROLLERDEVICEADDED | sdl_event::CONTROLLERDEVICEREMOVED => {
+                out.motion_x = raw.cdevice.which
+            }
             sdl_event::WINDOWEVENT => {
                 out.window_event = raw.window.event;
                 out.window_data1 = raw.window.data1;
@@ -684,6 +740,77 @@ fn push_normalized(out: &mut ActionList, event: HP2InputEvent) {
     }
 }
 
+#[derive(Default)]
+struct MenuPointer {
+    position: Option<(f32, f32)>,
+    stick: [f32; 2],
+    dpad: [bool; 4],
+    held: [Option<i32>; 15],
+    mouse_buttons: u32,
+    last_step: Option<std::time::Instant>,
+}
+
+impl MenuPointer {
+    fn dimensions(ctx: &Context) -> (f32, f32) {
+        let width = ctx.size_x as f32 / ctx.mouse_scale_x.max(f32::EPSILON);
+        let height = ctx.size_y as f32 / ctx.mouse_scale_y.max(f32::EPSILON);
+        (width.max(1.0), height.max(1.0))
+    }
+
+    fn position_action(&mut self, ctx: &Context) -> Action {
+        let (w, h) = Self::dimensions(ctx);
+        let (x, y) = self.position.get_or_insert((w * 0.5, h * 0.5));
+        *x = x.clamp(0.0, (w - 1.0).max(0.0));
+        *y = y.clamp(0.0, (h - 1.0).max(0.0));
+        let virtual_left = self.held.iter().any(|key| *key == Some(ik::LEFT_MOUSE));
+        Action::EngineMousePosition {
+            buttons: self.mouse_buttons | u32::from(virtual_left),
+            x: *x * ctx.mouse_scale_x,
+            y: *y * ctx.mouse_scale_y,
+        }
+    }
+
+    fn step(&mut self, ctx: &Context, dt: f32) -> Option<Action> {
+        let curve = |v: f32| {
+            let magnitude = ((v.abs() - 0.2) / 0.8).clamp(0.0, 1.0);
+            v.signum() * magnitude * magnitude
+        };
+        let dx = curve(self.stick[0]) * 1.2 + (self.dpad[3] as i32 - self.dpad[2] as i32) as f32 * 0.45;
+        let dy = curve(self.stick[1]) * 1.2 + (self.dpad[1] as i32 - self.dpad[0] as i32) as f32 * 0.45;
+        if dx == 0.0 && dy == 0.0 {
+            return None;
+        }
+        let (w, h) = Self::dimensions(ctx);
+        let (x, y) = self.position.get_or_insert((w * 0.5, h * 0.5));
+        *x = (*x + dx * w * dt).clamp(0.0, (w - 1.0).max(0.0));
+        *y = (*y + dy * w * dt).clamp(0.0, (h - 1.0).max(0.0));
+        Some(self.position_action(ctx))
+    }
+
+    fn button(&mut self, button: i32, pressed: bool, menu: bool) -> Option<(i32, i32)> {
+        let index = usize::try_from(button).ok().filter(|&i| i < self.held.len())?;
+        if (game_controller::button::DPAD_UP..=game_controller::button::DPAD_RIGHT).contains(&button) {
+            self.dpad[(button - game_controller::button::DPAD_UP) as usize] = pressed;
+        }
+        let key = if pressed {
+            let key = self.held[index].or_else(|| match (menu, button) {
+                (true, game_controller::button::A) => Some(ik::LEFT_MOUSE),
+                (true, game_controller::button::B) => Some(ik::ESCAPE),
+                _ => game_controller::button_key(button),
+            })?;
+            self.held[index] = Some(key);
+            key
+        } else {
+            self.held[index].take().or_else(|| game_controller::button_key(button))?
+        };
+        Some((key, if pressed { ist::PRESS } else { ist::RELEASE }))
+    }
+}
+
+#[cfg(feature = "sdl")]
+static MENU_POINTER: LazyLock<std::sync::Mutex<MenuPointer>> =
+    LazyLock::new(|| std::sync::Mutex::new(MenuPointer::default()));
+
 /// Translates one polled event under the process verification switch.
 pub fn translate_event(ctx: &Context, ev: &SdlEvent) -> ActionList {
     translate_event_with_verification(ctx, ev, deterministic_verification())
@@ -703,6 +830,16 @@ pub fn translate_event_with_verification(
     ev: &SdlEvent,
     verification: bool,
 ) -> ActionList {
+    translate_event_inner(ctx, ev, verification, None, false)
+}
+
+fn translate_event_inner(
+    ctx: &Context,
+    ev: &SdlEvent,
+    verification: bool,
+    mut pointer: Option<&mut MenuPointer>,
+    menu: bool,
+) -> ActionList {
     let mut out = ActionList::new();
     match ev.kind {
         sdl_event::KEYDOWN | sdl_event::KEYUP if !verification => {
@@ -719,6 +856,12 @@ pub fn translate_event_with_verification(
             }
         }
         sdl_event::MOUSEMOTION if !verification => {
+            if let Some(pointer) = pointer.as_deref_mut() {
+                if !ctx.mouse_is_grabbed {
+                    pointer.position = Some((ev.motion_x as f32, ev.motion_y as f32));
+                    pointer.mouse_buttons = mouse_state::buttons_from_sdl_state(ev.motion_state);
+                }
+            }
             if !ctx.mouse_is_grabbed && ctx.has_engine {
                 out.push(Action::EngineMousePosition {
                     buttons: mouse_state::buttons_from_sdl_state(ev.motion_state),
@@ -745,7 +888,7 @@ pub fn translate_event_with_verification(
                 });
             }
         }
-        sdl_event::JOYAXISMOTION if !verification => {
+        sdl_event::JOYAXISMOTION if !verification && !game_controller::active() => {
             if let Some((key, value)) = joystick_input::map_joystick_axis(
                 ev.joy_axis as i32,
                 ev.joy_axis_value,
@@ -760,7 +903,7 @@ pub fn translate_event_with_verification(
                 });
             }
         }
-        sdl_event::JOYBUTTONDOWN | sdl_event::JOYBUTTONUP if !verification => {
+        sdl_event::JOYBUTTONDOWN | sdl_event::JOYBUTTONUP if !verification && !game_controller::active() => {
             if let Some((key, action)) = joystick_input::map_joystick_button(
                 ev.joy_button as i32,
                 ev.kind == sdl_event::JOYBUTTONDOWN,
@@ -772,7 +915,7 @@ pub fn translate_event_with_verification(
                 });
             }
         }
-        sdl_event::JOYHATMOTION if !verification => {
+        sdl_event::JOYHATMOTION if !verification && !game_controller::active() => {
             if ctx.joy_hat_folds_to_buttons {
                 let (new_last, events, count) =
                     joystick_input::fold_joystick_hat(ev.joy_hat, ctx.last_joy_hat);
@@ -784,6 +927,40 @@ pub fn translate_event_with_verification(
                     });
                 }
                 out.push(Action::SetLastJoyHat(new_last));
+            }
+        }
+        sdl_event::CONTROLLERAXISMOTION if !verification => {
+            if let Some(pointer) = pointer.as_deref_mut() {
+                if (ev.joy_axis as i32) <= game_controller::axis::LEFT_Y {
+                    pointer.stick[ev.joy_axis as usize] = (ev.joy_axis_value as f32 / 32767.0).clamp(-1.0, 1.0);
+                }
+            }
+            let events = game_controller::translate_axis(
+                ev.joy_axis as i32,
+                ev.joy_axis_value,
+                ctx.joystick_dead_zone,
+                ctx.scale_jbx,
+                ctx.scale_jby,
+                input_options::gamepad_look_sensitivity(),
+            );
+            for (key, action, delta) in events.iter() {
+                out.push(Action::Cause { key, action, delta });
+            }
+        }
+        sdl_event::CONTROLLERBUTTONDOWN | sdl_event::CONTROLLERBUTTONUP if !verification => {
+            let pressed = ev.kind == sdl_event::CONTROLLERBUTTONDOWN;
+            if menu && pressed && ev.joy_button as i32 == game_controller::button::A && ctx.has_engine {
+                if let Some(pointer) = pointer.as_deref_mut() {
+                    out.push(pointer.position_action(ctx));
+                }
+            }
+            let translated = if let Some(pointer) = pointer.as_deref_mut() {
+                pointer.button(ev.joy_button as i32, pressed, menu)
+            } else {
+                game_controller::translate_button(ev.joy_button as i32, pressed)
+            };
+            if let Some((key, action)) = translated {
+                out.push(Action::Cause { key, action, delta: 0.0 });
             }
         }
         sdl_event::WINDOWEVENT => translate_window(ctx, ev, verification, &mut out),
@@ -859,20 +1036,40 @@ fn translate_window(ctx: &Context, ev: &SdlEvent, verification: bool, out: &mut 
 
 /// Relative-mouse deltas sampled once per pump while grabbed (the C++ shell
 /// gates the `SDL_GetRelativeMouseState` call on `MouseIsGrabbed && SdlWindow`).
+///
+/// `MouseSensitivityX`/`MouseSensitivityY` multiply the deltas here, on top of
+/// the script-side `MouseSensitivity`; the defaults of `1.0` leave them exact.
 pub fn relative_mouse(ctx: &Context, delta_x: i32, delta_y: i32) -> ActionList {
+    relative_mouse_scaled(
+        ctx,
+        delta_x,
+        delta_y,
+        input_options::mouse_sensitivity_x(),
+        input_options::mouse_sensitivity_y(),
+    )
+}
+
+/// [`relative_mouse`] with explicit per-axis sensitivity multipliers.
+pub fn relative_mouse_scaled(
+    ctx: &Context,
+    delta_x: i32,
+    delta_y: i32,
+    sensitivity_x: f32,
+    sensitivity_y: f32,
+) -> ActionList {
     let mut out = ActionList::new();
     if delta_x != 0 {
         out.push(Action::Cause {
             key: ik::MOUSE_X,
             action: ist::AXIS,
-            delta: delta_x as f32 * ctx.mouse_scale_x,
+            delta: delta_x as f32 * ctx.mouse_scale_x * sensitivity_x,
         });
     }
     if delta_y != 0 {
         out.push(Action::Cause {
             key: ik::MOUSE_Y,
             action: ist::AXIS,
-            delta: -(delta_y as f32) * ctx.mouse_scale_y,
+            delta: -(delta_y as f32) * ctx.mouse_scale_y * sensitivity_y,
         });
     }
     out
@@ -1072,14 +1269,85 @@ pub unsafe fn update_input_with<B: UpdateInputBackend>(
         let Some(event) = (unsafe { poll_and_flatten(window) }) else {
             break;
         };
-        if input_trace::recording() && event.kind != 0x200 && event.kind != 0x100 {
+        if !verification
+            && matches!(
+                event.kind,
+                sdl_event::CONTROLLERDEVICEADDED | sdl_event::CONTROLLERDEVICEREMOVED
+            )
+        {
+            // Hot-plug is device state, not input: it is neither recorded nor
+            // translated. Unplugging releases everything the pad held.
+            if game_controller::handle_device_event(event.kind, event.motion_x)
+                == game_controller::DeviceChange::Closed
+            {
+                release_controller_inputs(backend)?;
+            }
+            continue;
+        }
+        let raw_joystick_shadowed = matches!(
+            event.kind,
+            sdl_event::JOYAXISMOTION
+                | sdl_event::JOYBUTTONDOWN
+                | sdl_event::JOYBUTTONUP
+                | sdl_event::JOYHATMOTION
+        ) && game_controller::active();
+        if input_trace::recording()
+            && event.kind != 0x200
+            && event.kind != 0x100
+            && !raw_joystick_shadowed
+        {
             if let Some(now) = input_trace::gameplay_time(backend.game_time()?) {
                 input_trace::record_event(now, &event);
             }
         }
         let context = backend.context()?;
-        let actions = translate_event_with_verification(&context, &event, verification);
+        let actions = {
+            let mut pointer = MENU_POINTER.lock().expect("menu pointer lock poisoned");
+            translate_event_inner(&context, &event, verification, Some(&mut pointer), game_controller::menu_mode())
+        };
         execute_actions(backend, &actions)?;
+    }
+    if !verification {
+        let context = backend.context()?;
+        let action = {
+            let mut pointer = MENU_POINTER.lock().expect("menu pointer lock poisoned");
+            let now = std::time::Instant::now();
+            let dt = pointer.last_step.replace(now).map_or(0.0, |last| now.duration_since(last).as_secs_f32().min(0.1));
+            if game_controller::active() && game_controller::menu_mode() && context.has_engine && !context.mouse_is_grabbed {
+                pointer.step(&context, dt)
+            } else {
+                None
+            }
+        };
+        if let Some(action) = action {
+            backend.execute_action(action)?;
+        }
+    }
+    Ok(())
+}
+
+/// Neutralizes every input the game controller layer can hold: axes to zero,
+/// buttons released only when currently down.
+#[cfg(feature = "sdl")]
+pub(crate) fn release_controller_inputs<B: UpdateInputBackend>(
+    backend: &mut B,
+) -> Result<(), B::Error> {
+    for key in game_controller::AXIS_KEYS {
+        backend.cause_input(key, ist::AXIS, 0.0)?;
+    }
+    for key in game_controller::held_key_candidates() {
+        if backend.key_down(key)? {
+            backend.cause_input(key, ist::RELEASE, 0.0)?;
+        }
+    }
+    let virtual_click = {
+        let mut pointer = MENU_POINTER.lock().expect("menu pointer lock poisoned");
+        let held = pointer.held.contains(&Some(ik::LEFT_MOUSE));
+        *pointer = MenuPointer::default();
+        held
+    };
+    if virtual_click && backend.key_down(ik::LEFT_MOUSE)? {
+        backend.cause_input(ik::LEFT_MOUSE, ist::RELEASE, 0.0)?;
     }
     Ok(())
 }
@@ -1097,6 +1365,7 @@ pub(crate) fn release_all_with<B: UpdateInputBackend>(backend: &mut B) -> Result
             ReleaseStep::SetLastJoyHat(key) => backend.set_last_joy_hat(key)?,
         }
     }
+    *MENU_POINTER.lock().expect("menu pointer lock poisoned") = MenuPointer::default();
     Ok(())
 }
 

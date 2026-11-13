@@ -158,6 +158,11 @@ impl CoreAccess<'_> {
         let free = unsafe { access.free_slot(linker_index) };
         match (result, destroy, free) {
             (Ok(paths), Ok(()), Ok(())) => {
+                // Make the bytes durable before the rename publishes them, so a crash or power
+                // loss cannot leave a renamed-but-empty slot file.
+                if let Ok(file) = fs::File::open(&paths.temporary) {
+                    let _ = file.sync_all();
+                }
                 match fs::rename(&paths.temporary, &paths.final_path) {
                     Ok(()) => Ok(true),
                     Err(_) => {

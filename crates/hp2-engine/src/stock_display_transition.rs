@@ -11,9 +11,12 @@ fn units(s: &str) -> Vec<u32> { s.chars().map(u32::from).collect() }
 fn name(mode: DisplayMode) -> &'static str {
     match mode { DisplayMode::Windowed => "Windowed", DisplayMode::ExclusiveFullscreen => "ExclusiveFullscreen", DisplayMode::BorderlessFullscreen => "BorderlessFullscreen" }
 }
-pub(crate) fn startup_mode(explicit: Option<DisplayMode>, startup_fullscreen: bool, temporary: bool) -> DisplayMode {
+/// A legacy `StartupFullscreen=True` with no explicit mode enters the player's fullscreen
+/// flavour (`FullscreenMode`, default borderless desktop).
+fn legacy_fullscreen(flavour: crate::display_options::FullscreenMode) -> DisplayMode { flavour.display_mode() }
+pub(crate) fn startup_mode(explicit: Option<DisplayMode>, startup_fullscreen: bool, temporary: bool, flavour: crate::display_options::FullscreenMode) -> DisplayMode {
     if temporary { return DisplayMode::Windowed; }
-    explicit.unwrap_or(if startup_fullscreen { DisplayMode::BorderlessFullscreen } else { DisplayMode::Windowed })
+    explicit.unwrap_or(if startup_fullscreen { legacy_fullscreen(flavour) } else { DisplayMode::Windowed })
 }
 fn parse(s: &str) -> Option<DisplayMode> {
     if s.eq_ignore_ascii_case("Windowed") { Some(DisplayMode::Windowed) }
@@ -32,7 +35,7 @@ pub(crate) fn explicit_mode(access: CoreAccess<'_>) -> RuntimeResult<Option<Disp
 /// Missing new preference retains the historic StartupFullscreen behaviour.
 pub(crate) fn saved_mode(access: CoreAccess<'_>, client: *mut USDLClient) -> RuntimeResult<DisplayMode> {
     if client.is_null() { return Err(RuntimeError::new("Display mode client unavailable")); }
-    Ok(explicit_mode(access)?.unwrap_or_else(|| if unsafe { (*client).startup_fullscreen != 0 } { DisplayMode::BorderlessFullscreen } else { DisplayMode::Windowed }))
+    Ok(explicit_mode(access)?.unwrap_or_else(|| if unsafe { (*client).startup_fullscreen != 0 } { legacy_fullscreen(crate::display_options::fullscreen_mode(access)) } else { DisplayMode::Windowed }))
 }
 
 /// Weak snapshot retained across ticks. Revalidate it before every use.
@@ -97,6 +100,19 @@ impl<'a> ViewportBackend<'a> {
             logical: snapshot.logical, window_size: snapshot.window_size, window_position: snapshot.window_position })
     }
     fn window(&self) -> *mut window_lifecycle::SdlWindow { unsafe { (*self.viewport).sdl_window.cast() } }
+    /// Moves the game to monitor `display`. A windowed window is re-centered there; a fullscreen
+    /// one leaves fullscreen (SDL ignores moves of fullscreen windows), moves, and re-enters
+    /// its mode so renderer targets and mouse mapping follow.
+    pub(crate) fn move_to_display(&mut self, display: i32) -> RuntimeResult<()> {
+        let mode = self.current()?;
+        if mode == DisplayMode::Windowed {
+            unsafe { window_lifecycle::center_window_on_display(self.window(), display); }
+            return Ok(());
+        }
+        self.apply(DisplayMode::Windowed)?;
+        unsafe { window_lifecycle::center_window_on_display(self.window(), display); }
+        self.apply(mode)
+    }
 }
 impl Backend for ViewportBackend<'_> {
     type Error = RuntimeError;
@@ -138,7 +154,9 @@ impl Backend for ViewportBackend<'_> {
     fn persist(&mut self, mode: DisplayMode) -> RuntimeResult<()> {
         let section = units("SDLDrv.SDLClient");
         let fullscreen = if mode == DisplayMode::Windowed { "False" } else { "True" };
-        self.access.config_update_system_staged(&[(section.clone(), units("HP2DisplayMode"), units(name(mode))), (section, units("StartupFullscreen"), units(fullscreen))])?;
+        let mut changes = vec![(section.clone(), units("HP2DisplayMode"), units(name(mode))), (section.clone(), units("StartupFullscreen"), units(fullscreen))];
+        if let Some((key, value)) = crate::display_options::persisted_flavour(self.access, mode) { changes.push((section, units(key), units(&value))); }
+        self.access.config_update_system_staged(&changes)?;
         unsafe { (*self.client).startup_fullscreen = u32::from(mode != DisplayMode::Windowed); }
         Ok(())
     }
@@ -148,11 +166,15 @@ impl Backend for ViewportBackend<'_> {
 mod tests {
     use super::*;
     #[test] fn startup_false_is_windowed_even_without_a_new_preference() {
-        assert_eq!(startup_mode(None, false, false), DisplayMode::Windowed);
-        assert_eq!(startup_mode(None, true, false), DisplayMode::BorderlessFullscreen);
-        assert_eq!(startup_mode(Some(DisplayMode::Windowed), true, false), DisplayMode::Windowed);
-        assert_eq!(startup_mode(Some(DisplayMode::ExclusiveFullscreen), false, false), DisplayMode::ExclusiveFullscreen);
-        assert_eq!(startup_mode(Some(DisplayMode::ExclusiveFullscreen), true, true), DisplayMode::Windowed);
+        use crate::display_options::FullscreenMode::{Borderless, Exclusive, NativeSpaces};
+        assert_eq!(startup_mode(None, false, false, Borderless), DisplayMode::Windowed);
+        assert_eq!(startup_mode(None, true, false, Borderless), DisplayMode::BorderlessFullscreen);
+        assert_eq!(startup_mode(None, true, false, NativeSpaces), DisplayMode::BorderlessFullscreen);
+        assert_eq!(startup_mode(None, true, false, Exclusive), DisplayMode::ExclusiveFullscreen);
+        assert_eq!(startup_mode(None, false, false, Exclusive), DisplayMode::Windowed);
+        assert_eq!(startup_mode(Some(DisplayMode::Windowed), true, false, Borderless), DisplayMode::Windowed);
+        assert_eq!(startup_mode(Some(DisplayMode::ExclusiveFullscreen), false, false, Borderless), DisplayMode::ExclusiveFullscreen);
+        assert_eq!(startup_mode(Some(DisplayMode::ExclusiveFullscreen), true, true, Borderless), DisplayMode::Windowed);
     }
     #[test] fn names_are_distinct_and_round_trip() {
         for mode in [DisplayMode::Windowed, DisplayMode::ExclusiveFullscreen, DisplayMode::BorderlessFullscreen] { assert_eq!(parse(name(mode)), Some(mode)); }

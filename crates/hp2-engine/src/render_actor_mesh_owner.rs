@@ -3,6 +3,7 @@
 mod render_actor_mesh_provider;
 #[path = "render_actor_lod_provider.rs"]
 mod render_actor_lod_provider;
+pub(crate) use render_actor_lod_provider::set_high_detail_models;
 
 pub(crate) use render_actor_lod_provider::{
     skeletal_adjust_root_movement, skeletal_bone_coords, skeletal_root_movement,

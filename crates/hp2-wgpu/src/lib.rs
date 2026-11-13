@@ -759,6 +759,8 @@ pub struct RenderLoop {
     /// Real `UseSRGBTextures`: selects an sRGB-encoding swapchain
     /// format (`surface_color_format`). Off by default, like XOpenGL.
     srgb_framebuffer: bool,
+    /// Extended-dynamic-range output (`[WgpuDrv.WgpuRenderDevice] HDR`).
+    hdr: bool,
     /// Lazily created once this `RenderLoop`'s whole lifetime (unlike
     /// `texture_cache`'s own real per-`CacheID` entries, never
     /// invalidated/replaced): a real 1x1 opaque white GPU texture,
@@ -980,6 +982,7 @@ impl RenderLoop {
             samplers: std::collections::HashMap::new(),
             anisotropy_clamp: 1,
             srgb_framebuffer: false,
+            hdr: false,
             dummy_texture: None,
             last_scene: None,
             capture: None,
@@ -1050,8 +1053,11 @@ impl RenderLoop {
     pub fn prepare_fullscreen_targets(&self, created: &CreatedDevice, width: u32, height: u32) -> Result<PreparedLogicalTargets, String> {
         let surface = created.surface.as_ref().ok_or("WGPU surface unavailable")?;
         let caps = surface.get_capabilities(&created.adapter);
-        let format = surface_color_format(&caps.formats, self.srgb_framebuffer)
-            .ok_or("WGPU surface has no compatible color format")?;
+        let format = match hdr_surface(&caps, self.hdr, self.srgb_framebuffer) {
+            Some((format, _)) => format,
+            None => surface_color_format(&caps.formats, self.srgb_framebuffer)
+                .ok_or("WGPU surface has no compatible color format")?,
+        };
         self.prepare_logical_targets(&created.device, format, width, height)
     }
 
@@ -1069,12 +1075,17 @@ impl RenderLoop {
     /// Optional image-quality features (Sound/Video "Advanced", `[WgpuDrv.WgpuRenderDevice]`).
     /// Textures and pipelines built afterwards use them; the caches are dropped so everything is
     /// rebuilt on demand. Call between frames.
-    pub fn set_quality(&mut self, mipmaps: bool, alpha_to_coverage: bool, smooth_lightmaps: bool) {
-        if self.texture_cache.generate_mips != mipmaps {
-            self.texture_cache.generate_mips = mipmaps;
+    pub fn set_quality(&mut self, quality: Quality) {
+        if self.texture_cache.generate_mips != quality.mipmaps {
+            self.texture_cache.generate_mips = quality.mipmaps;
             self.texture_cache.clear();
         }
-        draw::set_quality_flags(alpha_to_coverage, smooth_lightmaps);
+        if self.hdr != quality.hdr {
+            self.hdr = quality.hdr;
+            self.configured_size = None;
+        }
+        self.set_world_post(quality.post);
+        draw::set_quality_flags(quality.alpha_to_coverage, quality.smooth_lightmaps);
         self.line_pipelines = PipelineCache::new();
         self.tile_pipelines = PipelineCache::new();
         self.point_pipelines = PipelineCache::new();
@@ -2341,6 +2352,8 @@ pub struct SceneFrame {
     /// selects the real source's wireframe-editor `zFar` (131072)
     /// over the normal one (65336).
     pub is_wireframe_zfar: bool,
+    /// Multiplier for the normal perspective far plane (1.0 preserves stock).
+    pub far_plane_scale: f32,
     pub gamma: f32,
     pub light_color_intensity: f32,
     pub light_map_intensity: f32,
@@ -2398,8 +2411,10 @@ pub fn compute_frame_uniforms(scene: &SceneFrame) -> FrameUniforms {
 
     let z_far = if scene.is_wireframe_zfar {
         Z_FAR_WIREFRAME
-    } else {
+    } else if scene.is_ortho {
         Z_FAR_NORMAL
+    } else {
+        Z_FAR_NORMAL * scene.far_plane_scale
     };
     let aspect = scene.fy / scene.fx;
 
@@ -2569,13 +2584,16 @@ pub fn configure_surface(
         return Err(SurfaceConfigureError::NoDefaultConfig);
     };
     config.present_mode = present_mode;
-    if let Some(format) = surface_color_format(&capabilities.formats, loop_state.srgb_framebuffer) {
+    loop_state.ensure_capture_initialized();
+    if let Some((format, color_space)) = hdr_surface(&capabilities, loop_state.hdr, loop_state.srgb_framebuffer) {
+        config.format = format;
+        config.color_space = color_space;
+    } else if let Some(format) = surface_color_format(&capabilities.formats, loop_state.srgb_framebuffer) {
         config.format = format;
     }
     // Capture reads the presented surface texture back, which needs COPY_SRC
     // on swapchain textures, requested only when capture is active and the
     // surface supports it.
-    loop_state.ensure_capture_initialized();
     if loop_state
         .capture
         .as_ref()
@@ -2845,6 +2863,31 @@ pub fn resolve_present_mode(
 /// shader output a second time and wash the image out. Falls back to
 /// `formats[0]` when the wanted variant is not supported. `None` only
 /// for an empty `formats`.
+/// Optional image-quality features (Sound/Video "Advanced", `[WgpuDrv.WgpuRenderDevice]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Quality {
+    pub mipmaps: bool,
+    pub alpha_to_coverage: bool,
+    pub smooth_lightmaps: bool,
+    pub post: draw::WorldPost,
+    pub hdr: bool,
+}
+
+/// The extended-range surface used for HDR output: half-float with an extended
+/// sRGB color space, linear when the game writes linear (sRGB framebuffer)
+/// values. `None` when not requested or unsupported; the SDR choice applies.
+/// Values up to 1.0 look exactly as in SDR; brighter highlights use the headroom.
+pub fn hdr_surface(caps: &wgpu::SurfaceCapabilities, requested: bool, srgb: bool) -> Option<(wgpu::TextureFormat, wgpu::SurfaceColorSpace)> {
+    if !requested { return None; }
+    let format = wgpu::TextureFormat::Rgba16Float;
+    let (space, flag) = if srgb {
+        (wgpu::SurfaceColorSpace::ExtendedSrgbLinear, wgpu::SurfaceColorSpaces::EXTENDED_SRGB_LINEAR)
+    } else {
+        (wgpu::SurfaceColorSpace::ExtendedSrgb, wgpu::SurfaceColorSpaces::EXTENDED_SRGB)
+    };
+    caps.color_spaces(format).contains(flag).then_some((format, space))
+}
+
 pub fn surface_color_format(
     formats: &[wgpu::TextureFormat],
     srgb: bool,
@@ -3831,6 +3874,7 @@ mod tests {
             viewport_fov_angle: 90.0,
             is_ortho: false,
             is_wireframe_zfar: false,
+            far_plane_scale: 1.0,
             gamma: 1.0,
             light_color_intensity: 1.5,
             light_map_intensity: 4.0,
@@ -4042,6 +4086,21 @@ mod tests {
             "expected far-plane NDC z ~= 1.0 (WebGPU convention), got {}",
             far_clip.z / far_clip.w
         );
+    }
+
+    #[test]
+    fn draw_distance_extends_perspective_clip_without_changing_editor_views() {
+        let point = glam::Vec4::new(0.0, 0.0, 100_000.0, 1.0);
+        let mut scene = reference_perspective_scene();
+        let original = compute_frame_uniforms(&scene).modelviewproj_mat * point;
+        assert!(original.z > original.w, "original clips at 65336 units");
+        scene.far_plane_scale = 2.0;
+        let extended = compute_frame_uniforms(&scene).modelviewproj_mat * point;
+        assert!(extended.z < extended.w, "2x must retain geometry at 100000 units");
+        scene.is_ortho = true;
+        let extended_ortho = compute_frame_uniforms(&scene).proj_mat;
+        scene.far_plane_scale = 1.0;
+        assert_eq!(extended_ortho, compute_frame_uniforms(&scene).proj_mat);
     }
 
     #[test]
@@ -6461,6 +6520,12 @@ mod tests {
                 let source = std::fs::read_to_string(&path)
                     .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
                 validate("common.wgsl", &source);
+            } else if stem.starts_with("world_post") {
+                // Fragments composed by draw::world_post_source (feature consts
+                // prepended, the AO helper appended); validated as composed. Every
+                // feature combination is covered in world_scale's tests.
+                let all = draw::WorldPost { bloom: true, ambient_occlusion: true, color_grading: true, sharpen: true, fxaa: true };
+                validate(&format!("{stem}.wgsl (composed)"), &draw::world_post_source(all, 1));
             } else {
                 // Every other shader is validated the same way real
                 // pipeline creation will eventually build it --

@@ -236,11 +236,12 @@ pub unsafe fn tick_with<O: TickOps>(s: &O, e: *mut c_void, dt: f32) -> Result<()
             && !unsafe { super::g_level(e) }.is_null()
         {
             let vp0 = unsafe { super::client_viewport(client, 0) };
+            let menu_mode = unsafe { super::actor_show_menu(super::viewport_actor(vp0)) } != 0
+                || unsafe { super::viewport_show_windows_mouse(vp0) } != 0;
+            hp2_platform::game_controller::set_menu_mode(menu_mode);
             let is_paused = (unsafe {
                 s.level_info_pauser_nonempty(s.level_info(super::g_level(e))?)?
-            } != 0
-                || unsafe { super::actor_show_menu(super::viewport_actor(vp0)) } != 0
-                || unsafe { super::viewport_show_windows_mouse(vp0) } != 0) as i32;
+            } != 0 || menu_mode) as i32;
             let was_paused = WAS_PAUSED.load(Ordering::Relaxed);
             if is_paused != 0 && was_paused == 0 {
                 s.viewport_set_mouse_capture(vp0, 0, 0, 0)?;
@@ -252,6 +253,7 @@ pub unsafe fn tick_with<O: TickOps>(s: &O, e: *mut c_void, dt: f32) -> Result<()
             }
             WAS_PAUSED.store(is_paused, Ordering::Relaxed);
         } else {
+            hp2_platform::game_controller::set_menu_mode(false);
             WAS_PAUSED.store(0, Ordering::Relaxed);
         }
 

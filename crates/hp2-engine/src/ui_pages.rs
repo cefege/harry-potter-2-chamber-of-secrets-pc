@@ -8,7 +8,7 @@ use hp2_abi::engine::generated::{UFunction, UObject};
 use hp2_core::{core_access::{CoreAccess, RuntimeError, RuntimeResult}, name_owner::FindName};
 use hp2_ui::{
     Align, Color, Edges, Font, Justify, Key, PointerButton, PopupMetrics, Signal, Size, Skin, SkinPart, SliderMetrics, Store, Style, Stylesheet, Ui,
-    checkbox, col, label, row, select, slider,
+    button, checkbox, col, label, row, select, slider,
 };
 
 use crate::{
@@ -41,9 +41,119 @@ enum Command {
     PickIndex(Ctl, usize),
     PickText(Ctl, String),
     Check(Ctl, bool),
-    /// Quality feature `index` (mipmaps, alpha-to-coverage, smooth lightmaps) on or off.
+    /// Quality feature `index` (`render_device_owner::QUALITY_KEYS`) on or off.
     Quality(usize, bool),
+    /// "More options" entry `index` set to a value (0/1 for toggles, choice index, or a number).
+    Extra(usize, f32),
 }
+
+/// How a "More options" entry is edited.
+pub(crate) enum ExtraKind {
+    Toggle,
+    Range { min: f32, max: f32, step: f32, unit: &'static str },
+    Choice(Vec<String>),
+}
+
+/// A setting on the "More options" panel. `get` reads the saved value; `set` saves and applies it.
+pub(crate) struct ExtraOption {
+    pub caption: &'static str,
+    pub kind: ExtraKind,
+    pub get: fn(CoreAccess<'_>) -> f32,
+    pub set: unsafe fn(CoreAccess<'_>, f32) -> RuntimeResult<()>,
+}
+
+/// Every "More options" entry, in display order (two columns, first half on the left).
+fn extra_options() -> Vec<ExtraOption> {
+    use crate::{audio_owner as audio, display_options as display, input_options as input, ui_accessibility as access};
+    vec![
+        ExtraOption {
+            caption: "Draw Distance",
+            kind: ExtraKind::Choice(["Original", "2x", "4x"].into_iter().map(str::to_owned).collect()),
+            get: |a| f32::from(crate::render_device_owner::draw_distance(a)),
+            set: |a, v| crate::render_device_owner::set_draw_distance(a, v as u8),
+        },
+        ExtraOption {
+            caption: "Voice Volume",
+            kind: ExtraKind::Range { min: 0., max: 100., step: 1., unit: "" },
+            get: |a| (audio::voice_volume(a) / 2.55).round(),
+            set: |a, v| audio::set_voice_volume(a, v * 2.55),
+        },
+        ExtraOption {
+            caption: "Sound in background",
+            kind: ExtraKind::Toggle,
+            get: |a| f32::from(u8::from(audio::play_in_background(a))),
+            set: |a, v| audio::set_play_in_background(a, v >= 0.5),
+        },
+        ExtraOption {
+            caption: "Mouse left/right",
+            kind: ExtraKind::Range { min: 10., max: 300., step: 5., unit: "%" },
+            get: |a| (input::mouse_sensitivity_x(a) * 100.).round(),
+            set: |a, v| input::set_mouse_sensitivity_x(a, v / 100.),
+        },
+        ExtraOption {
+            caption: "Mouse up/down",
+            kind: ExtraKind::Range { min: 10., max: 300., step: 5., unit: "%" },
+            get: |a| (input::mouse_sensitivity_y(a) * 100.).round(),
+            set: |a, v| input::set_mouse_sensitivity_y(a, v / 100.),
+        },
+        ExtraOption {
+            caption: "Raw mouse",
+            kind: ExtraKind::Toggle,
+            get: |a| f32::from(u8::from(input::raw_mouse(a))),
+            set: |a, v| input::set_raw_mouse(a, v >= 0.5),
+        },
+        ExtraOption {
+            caption: "Gamepad",
+            kind: ExtraKind::Toggle,
+            get: |a| f32::from(u8::from(input::use_game_controller(a))),
+            set: |a, v| input::set_use_game_controller(a, v >= 0.5),
+        },
+        ExtraOption {
+            caption: "Gamepad look",
+            kind: ExtraKind::Range { min: 10., max: 300., step: 5., unit: "%" },
+            get: |a| (input::gamepad_look_sensitivity(a) * 100.).round(),
+            set: |a, v| input::set_gamepad_look_sensitivity(a, v / 100.),
+        },
+        ExtraOption {
+            caption: "HUD size",
+            kind: ExtraKind::Range { min: display::HUD_SCALE_MIN_PERCENT, max: display::HUD_SCALE_MAX_PERCENT, step: 5., unit: "%" },
+            get: display::hud_scale_percent,
+            set: |a, v| display::set_hud_scale_percent(a, v),
+        },
+        ExtraOption {
+            caption: "Fullscreen style",
+            kind: ExtraKind::Choice(display::FullscreenMode::ALL.iter().map(|m| m.caption().to_owned()).collect()),
+            get: |a| display::fullscreen_mode(a).index() as f32,
+            // Spaces changes apply at the next start (the returned flag); the choice is saved either way.
+            set: |a, v| display::set_fullscreen_mode(a, display::FullscreenMode::from_index(v as usize)).map(|_| ()),
+        },
+        ExtraOption {
+            caption: "Monitor",
+            kind: ExtraKind::Choice((1..=display::display_count().max(1)).map(|n| format!("Display {n}")).collect()),
+            get: |a| display::display_index(a) as f32,
+            set: |a, v| display::set_display_index(a, v as i32),
+        },
+        ExtraOption {
+            caption: "Subtitle size",
+            kind: ExtraKind::Range { min: 100., max: 200., step: 10., unit: "%" },
+            get: access::subtitle_scale,
+            set: |a, v| access::set_subtitle_scale(a, v),
+        },
+        ExtraOption {
+            caption: "Always subtitles",
+            kind: ExtraKind::Toggle,
+            get: |a| f32::from(u8::from(access::always_subtitles(a))),
+            set: |a, v| access::set_always_subtitles(a, v >= 0.5),
+        },
+        ExtraOption {
+            caption: "Colour-blind HUD",
+            kind: ExtraKind::Toggle,
+            get: |a| f32::from(u8::from(access::color_blind_hud(a))),
+            set: |a, v| access::set_color_blind_hud(a, v >= 0.5),
+        },
+    ]
+}
+
 
 struct AdvancedRow {
     caption: &'static str,
@@ -65,8 +175,11 @@ struct Data {
     display: Signal<String>,
     display_options: Vec<String>,
     show_fps: Signal<bool>,
-    quality: [Signal<bool>; 3],
+    quality: [Signal<bool>; crate::render_device_owner::QUALITY_COUNT],
     advanced: Vec<AdvancedRow>,
+    /// The "More options" panel is shown instead of the Video/Audio panel.
+    more: Signal<bool>,
+    extras: Vec<(ExtraOption, Signal<f32>)>,
     queue: Rc<RefCell<Vec<Command>>>,
 }
 
@@ -89,8 +202,10 @@ impl Data {
             display: store.signal(String::new()),
             display_options: display_choices(),
             show_fps: store.signal(false),
-            quality: [store.signal(true), store.signal(true), store.signal(true)],
+            quality: std::array::from_fn(|_| store.signal(false)),
             advanced,
+            more: store.signal(false),
+            extras: extra_options().into_iter().map(|o| (o, store.signal(0.))).collect(),
             queue: Rc::new(RefCell::new(Vec::new())),
         })
     }
@@ -142,10 +257,17 @@ fn scale_slider(_: *mut UObject) -> Option<*mut UObject> { None }
 // ---- the view ----------------------------------------------------------------------------
 
 const COLUMN_W: f32 = 280.;
-/// Image-quality features (`render_device_owner::quality_settings`), in that order.
-const QUALITY_CAPTIONS: [&str; 3] = ["Mipmaps", "Edge AA", "Light filter"];
-const QUALITY_KEYS: [&str; 3] = ["Mipmaps", "AlphaToCoverage", "SmoothLightmaps"];
+/// Captions for `render_device_owner::QUALITY_KEYS`, in that order. The first three are
+/// On/Off rows under Advanced; the rest are the "Enhancements" checkboxes.
+const QUALITY_CAPTIONS: [&str; crate::render_device_owner::QUALITY_COUNT] =
+    ["Mipmaps", "Edge AA", "Light filter", "Bloom", "Soft shadows", "Rich color", "Sharpen", "Smooth edges", "Full detail", "HDR", "Fog"];
+const QUALITY_ROWS: usize = 3;
 const ART_W: f32 = 133.;
+const EFFECT_ROW_H: f32 = 20.;
+/// Width of every "More options" control (the slider art width), so they line up.
+const EXTRA_BOX_W: f32 = ART_W;
+/// Advanced rows are shorter than the Video/Audio rows so the Enhancements fit on the page.
+const ADVANCED_ROW_H: f32 = 22.;
 
 fn key_of(ctl: Ctl) -> String {
     format!("{ctl:?}")
@@ -203,7 +325,65 @@ fn volume_block(caption: String, slider_node: hp2_ui::Node) -> hp2_ui::Node {
     )
 }
 
+/// The button that flips between the Video/Audio panel and the "More options" panel.
+fn panel_switch(d: &Rc<Data>) -> hp2_ui::Node {
+    let more = d.more.clone();
+    let caption = if more.get() { "< Video and Audio" } else { "More options >" };
+    button(caption).key("PanelSwitch").class("caption").on_click(move || more.set(!more.get()))
+}
+
+fn extras_view(d: &Rc<Data>) -> hp2_ui::Node {
+    let mut rows: Vec<hp2_ui::Node> = d.extras.iter().enumerate().map(|(i, (option, value))| {
+        let (queue, signal) = (d.queue.clone(), value.clone());
+        let node = match &option.kind {
+            ExtraKind::Toggle => {
+                let options = ["On".to_owned(), "Off".to_owned()];
+                select(&options, usize::from(value.get() < 0.5), move |choice| {
+                    let v = if choice == 0 { 1. } else { 0. };
+                    signal.set(v);
+                    queue.borrow_mut().push(Command::Extra(i, v));
+                })
+                .color(GREY)
+                .font(Font::Bold)
+                .width(Size::Px(ART_W))
+            }
+            ExtraKind::Choice(options) => {
+                let selected = (value.get().max(0.) as usize).min(options.len().saturating_sub(1));
+                select(options, selected, move |choice| {
+                    signal.set(choice as f32);
+                    queue.borrow_mut().push(Command::Extra(i, choice as f32));
+                })
+                .color(GREY)
+                .font(Font::Bold)
+                .width(Size::Px(ART_W))
+            }
+            ExtraKind::Range { min, max, step, .. } => slider(*min, *max, *step, value.get(), move |v| {
+                signal.set(v);
+                queue.borrow_mut().push(Command::Extra(i, v));
+            }),
+        };
+        let caption = match &option.kind {
+            ExtraKind::Range { unit, .. } => format!("{} {}{unit}", option.caption, value.get().round() as i32),
+            _ => option.caption.to_owned(),
+        };
+        row()
+            .width(Size::Px(COLUMN_W))
+            .height(Size::Px(30.))
+            .child(label(&caption).class("caption").width(Size::Px(COLUMN_W - EXTRA_BOX_W)).height(Size::Px(24.)))
+            .child(row().width(Size::Px(EXTRA_BOX_W)).justify(Justify::End).child(node.key(&format!("Extra{i}"))))
+    }).collect();
+    let right = rows.split_off(rows.len().div_ceil(2));
+    let column = |rows: Vec<hp2_ui::Node>| col().width(Size::Px(COLUMN_W)).children(rows);
+    col()
+        .padding(Edges { top: 44., left: 30., ..Edges::default() })
+        .child(row().width(Size::Px(COLUMN_W * 2. + 16.)).height(Size::Px(26.)).justify(Justify::SpaceBetween).child(label("More options").class("header")).child(panel_switch(d)))
+        .child(row().gap(16.).child(column(rows)).child(column(right)))
+}
+
 fn view(d: &Rc<Data>) -> hp2_ui::Node {
+    if d.more.get() {
+        return extras_view(d);
+    }
     let resolution = select_node(d, Ctl::Resolution, &d.resolution, &d.resolution_options.get(), true);
     let textures = select_node(d, Ctl::Textures, &d.textures, &d.texture_options.get(), true);
     let video = col()
@@ -235,15 +415,15 @@ fn view(d: &Rc<Data>) -> hp2_ui::Node {
     };
     let audio = col()
         .width(Size::Px(COLUMN_W))
-        .child(label("Audio").class("header").height(Size::Px(26.)))
+        .child(row().width(Size::Px(COLUMN_W)).height(Size::Px(26.)).justify(Justify::SpaceBetween).child(label("Audio").class("header")).child(panel_switch(d)))
         .child(volume_block(format!("Music Volume - {}", d.music.get() as i32), slider_node(d, Ctl::Music, 0., 100., &d.music)))
         .child(volume_block(format!("Sound Volume - {}", d.sound.get() as i32), slider_node(d, Ctl::Sound, 0., 100., &d.sound)))
         .child(combo_row("Display", display, 32.))
         .child(row().width(Size::Px(COLUMN_W)).height(Size::Px(26.)).justify(Justify::End).child(col().width(Size::Px(ART_W)).child(fps)));
 
     // Advanced: the GPU and display rows, then the image-quality features; five per column.
-    let mut rows: Vec<hp2_ui::Node> = d.advanced.iter().enumerate().map(|(i, r)| combo_row(r.caption, select_node(d, Ctl::Advanced(i), &r.current, &r.options, false), 26.)).collect();
-    for (i, caption) in QUALITY_CAPTIONS.iter().enumerate() {
+    let mut rows: Vec<hp2_ui::Node> = d.advanced.iter().enumerate().map(|(i, r)| combo_row(r.caption, select_node(d, Ctl::Advanced(i), &r.current, &r.options, false), ADVANCED_ROW_H)).collect();
+    for (i, caption) in QUALITY_CAPTIONS.iter().enumerate().take(QUALITY_ROWS) {
         let options = ["On".to_owned(), "Off".to_owned()];
         let (queue, signal) = (d.queue.clone(), d.quality[i].clone());
         let selected = usize::from(!signal.get());
@@ -254,15 +434,34 @@ fn view(d: &Rc<Data>) -> hp2_ui::Node {
         .key(&key_of(Ctl::Quality(i)))
         .color(GREY)
         .font(Font::Bold);
-        rows.push(combo_row(caption, node, 26.));
+        rows.push(combo_row(caption, node, ADVANCED_ROW_H));
     }
     let right: Vec<_> = rows.split_off(rows.len().div_ceil(2));
     let left = rows;
     let advanced_column = |rows: Vec<hp2_ui::Node>| col().width(Size::Px(COLUMN_W)).children(rows);
 
+    // Enhancements: compact checkboxes, four per row across both columns.
+    let effect_w = (COLUMN_W * 2. + 16.) / 4.;
+    let effects: Vec<hp2_ui::Node> = (QUALITY_ROWS..QUALITY_CAPTIONS.len()).map(|i| {
+        let (queue, signal) = (d.queue.clone(), d.quality[i].clone());
+        checkbox(QUALITY_CAPTIONS[i], signal.get(), move |on| {
+            signal.set(on);
+            queue.borrow_mut().push(Command::Quality(i, on));
+        })
+        .key(&key_of(Ctl::Quality(i)))
+        .class("caption")
+        .width(Size::Px(effect_w))
+        .height(Size::Px(EFFECT_ROW_H))
+    }).collect();
+    let mut effects = effects.into_iter().peekable();
+    let mut effect_rows = Vec::new();
+    while effects.peek().is_some() {
+        effect_rows.push(row().children(effects.by_ref().take(4).collect::<Vec<_>>()));
+    }
+
     col().padding(Edges { top: 44., left: 30., ..Edges::default() }).child(row().gap(16.).height(Size::Px(226.)).align(Align::Start).child(video).child(audio)).child(
         col().child(label("Advanced").class("header").height(Size::Px(24.))).child(row().gap(16.).child(advanced_column(left)).child(advanced_column(right))),
-    )
+    ).child(col().children(effect_rows))
 }
 
 /// The stock 12-step render-scale slider as a percent.
@@ -367,9 +566,12 @@ unsafe fn refresh(a: CoreAccess<'_>, data: &Data, h: &Handles) -> RuntimeResult<
         if let Some(fps) = h.fps {
             data.show_fps.set(read_boolean(a, fps, "bChecked")?);
         }
-        let (mipmaps, edges, lighting) = crate::render_device_owner::quality_settings(a);
-        for (signal, on) in data.quality.iter().zip([mipmaps, edges, lighting]) {
+        let quality = crate::render_device_owner::quality_settings(a);
+        for (signal, on) in data.quality.iter().zip(quality) {
             signal.set(on);
+        }
+        for (option, signal) in &data.extras {
+            signal.set((option.get)(a));
         }
         for (row, combo) in data.advanced.iter().zip(&h.advanced) {
             row.current.set(text(a, *combo)?);
@@ -580,6 +782,7 @@ unsafe fn execute(a: CoreAccess<'_>, page: *mut UObject, h: &Handles, command: C
             Command::PickText(c, t) => format!("text {c:?} {t}"),
             Command::Check(c, on) => format!("check {c:?} {on}"),
             Command::Quality(i, on) => format!("quality {i} {on}"),
+            Command::Extra(i, v) => format!("extra {i} {v}"),
         };
         log(a, &format!("HP2_UI_EXEC {what} active={}", crate::stock_menu_extensions::active()));
     }
@@ -614,13 +817,18 @@ unsafe fn execute(a: CoreAccess<'_>, page: *mut UObject, h: &Handles, command: C
         }
         Command::Quality(index, on) => {
             let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
-            let key = QUALITY_KEYS.get(index).ok_or_else(|| RuntimeError::new("Unknown quality setting"))?;
+            let key = crate::render_device_owner::QUALITY_KEYS.get(index).ok_or_else(|| RuntimeError::new("Unknown quality setting"))?;
             a.config_update_system_staged(&[(units(crate::render_device_owner::QUALITY_SECTION), units(key), units(if on { "True" } else { "False" }))])?;
-            let (mipmaps, edges, lighting) = crate::render_device_owner::quality_settings(a);
+            let quality = crate::render_device_owner::quality_settings(a);
             #[cfg(feature = "renderer-wgpu")]
-            unsafe { crate::render_device_owner::set_global_quality(a, mipmaps, edges, lighting)? };
+            unsafe { crate::render_device_owner::set_global_quality(a, quality)? };
             #[cfg(not(feature = "renderer-wgpu"))]
-            let _ = (mipmaps, edges, lighting);
+            let _ = quality;
+        }
+        Command::Extra(index, value) => {
+            let set = PAGES.with(|pages| pages.borrow().iter().find(|p| p.page.p == page).and_then(|p| p.data.extras.get(index).map(|(o, _)| o.set)));
+            let set = set.ok_or_else(|| RuntimeError::new("Unknown extra setting"))?;
+            unsafe { set(a, value)? };
         }
         Command::Check(_, on) => {
             if let Some(fps) = h.fps {

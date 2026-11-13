@@ -232,6 +232,8 @@ pub unsafe fn update_mouse_grab_state_with(
             unsafe { ffi::SDL_ShowCursor(if capture { SDL_DISABLE } else { SDL_ENABLE }) };
         }
     }
+    // Background runs never take the user's cursor.
+    let verification = verification || crate::background_mode();
     // Do not initialize replay mode or sample hardware in verification mode.
     let replay = !verification && crate::input_pump::input_replaying();
     capture_transition(&mut SdlCapture(sdl_window), capture, mouse_is_grabbed, verification, replay)

@@ -161,6 +161,8 @@ impl crate::game_save::SaveGameOps for CoreSaveGameOps<'_> {
     unsafe fn level_save_package(&self, engine: *mut c_void, filename: *const u32) -> RuntimeResult<i32> {
         let level = self.level(engine)?;
         let path = unsafe { path_from_wide(filename)? };
+        // Keep the previous good save as `<slot>.bak` before this save replaces it.
+        crate::save_slot_recovery::preserve_previous(&path);
         let outer = unsafe { ptr::addr_of!((*level).base.base.outer).read_unaligned().cast::<UObject>() };
         let saved = unsafe { self.access.save_package(outer, level.cast(), 0, &path, None)? };
         Ok(i32::from(saved))

@@ -8,6 +8,7 @@ mod sprite;
 mod dynamic;
 #[path = "render_actor_mesh_owner.rs"]
 pub(super) mod mesh;
+pub(crate) use mesh::set_high_detail_models;
 
 /// Implements `URender::DrawIcon`'s Canvas submission for a scene-pipeline Icon packet.
 ///

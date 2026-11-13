@@ -1157,7 +1157,7 @@ impl LoadMapOps for CoreOps<'_> {
                         }
                         Ok(())
                     };
-                    self.access.collect_garbage(keep, 0, &output)?;
+                    self.access.collect_garbage_with(keep, 0, !trace.is_empty(), &output)?;
                     Ok(0)
                 }
                 Connectivity => {

@@ -2484,21 +2484,55 @@ impl PostProcessPipeline {
     }
 }
 
-/// World-only bloom composite. The source and destination must not alias.
-pub(crate) struct BloomPipeline {
+/// Optional world-only post effects (`[WgpuDrv.WgpuRenderDevice]` Bloom, AmbientOcclusion,
+/// ColorGrading, Sharpen, FXAA). Applied when the world is composited; UI is unaffected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WorldPost {
+    pub bloom: bool,
+    pub ambient_occlusion: bool,
+    pub color_grading: bool,
+    pub sharpen: bool,
+    pub fxaa: bool,
+}
+
+impl WorldPost {
+    pub fn any(self) -> bool {
+        self.bloom || self.ambient_occlusion || self.color_grading || self.sharpen || self.fxaa
+    }
+}
+
+/// WGSL for one feature combination. Ambient occlusion binds the world depth
+/// (single or multisampled); without it the depth binding is absent.
+pub(crate) fn world_post_source(post: WorldPost, depth_samples: u32) -> String {
+    let ao = if post.ambient_occlusion {
+        let depth = if depth_samples > 1 { "texture_depth_multisampled_2d" } else { "texture_depth_2d" };
+        include_str!("shaders/world_post_ao.wgsl").replace("DEPTH_TEXTURE", depth)
+    } else {
+        "fn ambient_occlusion(uv: vec2f) -> f32 { return 1.0; }\n".to_owned()
+    };
+    format!(
+        "const BLOOM: bool = {};\nconst AMBIENT_OCCLUSION: bool = {};\nconst COLOR_GRADING: bool = {};\nconst SHARPEN: bool = {};\nconst FXAA: bool = {};\n{}\n{}",
+        post.bloom, post.ambient_occlusion, post.color_grading, post.sharpen, post.fxaa,
+        include_str!("shaders/world_post.wgsl"), ao,
+    )
+}
+
+/// World post-effect composite. The source and destination must not alias.
+pub(crate) struct WorldPostPipeline {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    depth_planes: Option<[wgpu::Buffer; 4]>,
 }
 
-impl BloomPipeline {
-    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+impl WorldPostPipeline {
+    pub(crate) fn new(device: &wgpu::Device, format: wgpu::TextureFormat, post: WorldPost, depth_samples: u32) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("world bloom shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bloom.wgsl").into()),
+            label: Some("world post shader"),
+            source: wgpu::ShaderSource::Wgsl(world_post_source(post, depth_samples).into()),
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("world bloom pipeline"), layout: None,
+            label: Some("world post pipeline"), layout: None,
             vertex: wgpu::VertexState { module: &module, entry_point: Some("vs_main"), compilation_options: Default::default(), buffers: &[] },
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
             depth_stencil: None, multisample: Default::default(),
@@ -2510,22 +2544,40 @@ impl BloomPipeline {
         });
         let layout = pipeline.get_bind_group_layout(0);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("world bloom sampler"), mag_filter: wgpu::FilterMode::Linear,
+            label: Some("world post sampler"), mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear, ..Default::default()
         });
-        Self { pipeline, layout, sampler }
+        use wgpu::util::DeviceExt;
+        // Four immutable projection choices are reused, so changing draw distance
+        // does not allocate or upload a new uniform every frame.
+        let depth_planes = post.ambient_occlusion.then(|| {
+            [crate::Z_FAR_NORMAL, crate::Z_FAR_NORMAL * 2.0, crate::Z_FAR_NORMAL * 4.0, crate::Z_FAR_WIREFRAME].map(|far| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("world post depth plane"),
+                    contents: bytemuck::bytes_of(&[far, 0.0, 0.0, 0.0]),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                })
+            })
+        });
+        Self { pipeline, layout, sampler, depth_planes }
     }
 
-    pub(crate) fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, source: &wgpu::TextureView, target: &wgpu::TextureView) {
+    /// `depth` is required exactly when the pipeline was built with ambient occlusion.
+    pub(crate) fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, source: &wgpu::TextureView, depth: Option<&wgpu::TextureView>, target: &wgpu::TextureView, depth_plane: usize) -> Result<(), String> {
+        let mut entries = vec![
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+        ];
+        if let Some(planes) = &self.depth_planes {
+            let depth = depth.ok_or("ambient occlusion needs the world depth")?;
+            entries.push(wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(depth) });
+            entries.push(wgpu::BindGroupEntry { binding: 3, resource: planes[depth_plane].as_entire_binding() });
+        }
         let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("world bloom source"), layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
-            ],
+            label: Some("world post source"), layout: &self.layout, entries: &entries,
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("world bloom composite"),
+            label: Some("world post composite"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target, depth_slice: None, resolve_target: None,
                 ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
@@ -2534,6 +2586,7 @@ impl BloomPipeline {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &bindings, &[]);
         pass.draw(0..4, 0..1);
+        Ok(())
     }
 }
 

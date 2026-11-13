@@ -24,6 +24,8 @@
     <string>@PROJECT_VERSION@</string>
     <key>CFBundleVersion</key>
     <string>@PROJECT_VERSION@</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.games</string>
     <key>LSArchitecturePriority</key>
     <array>
         <string>arm64</string>
@@ -31,6 +33,8 @@
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>LSRequiresNativeExecution</key>
+    <true/>
+    <key>LSSupportsGameMode</key>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>

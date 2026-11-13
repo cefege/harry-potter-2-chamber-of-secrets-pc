@@ -1205,6 +1205,30 @@ hp2_add_behavior_test(actor_save_game_exists "${CMAKE_COMMAND}" -E env
     actor::save_game_exists_tests
 )
 set_tests_properties(actor_save_game_exists PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(save_slot_recovery_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/save_slot_recovery_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-engine
+    --lib
+    save_slot_recovery::
+    -- --test-threads=1
+)
+set_tests_properties(save_slot_recovery_contracts PROPERTIES LABELS "fast;data-none")
+hp2_add_behavior_test(crash_log_contracts "${CMAKE_COMMAND}" -E env
+    "CARGO_HOME=${HP2_CARGO_HOME}"
+    "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/crash_log_contracts/Cargo"
+    "${HP2_CARGO_EXECUTABLE}" test
+    --offline
+    "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+    --package=hp2-platform
+    --lib
+    crash_reporter::log::tests::
+    -- --test-threads=1
+)
+set_tests_properties(crash_log_contracts PROPERTIES LABELS "fast;data-none")
 hp2_add_behavior_test(actor_iterator_contracts "${CMAKE_COMMAND}" -E env
     "CARGO_HOME=${HP2_CARGO_HOME}"
     "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/actor_iterator_contracts/Cargo"
@@ -1568,12 +1592,24 @@ if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
         --package=hp2-engine --features=sdl,renderer-wgpu --lib stock_display_transition::tests -- --test-threads=1)
     set_tests_properties(stock_display_transition_contracts PROPERTIES LABELS "fast;data-none")
+    hp2_add_behavior_test(display_options_contracts "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-engine --features=sdl,renderer-wgpu --lib display_options::tests -- --test-threads=1)
+    set_tests_properties(display_options_contracts PROPERTIES LABELS "fast;data-none")
     hp2_add_behavior_test(platform_live_display_mode_sdl "${CMAKE_COMMAND}" -E env
         "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
         "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}"
         "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
         --package=hp2-platform --features=sdl --lib live_display_mode::tests -- --test-threads=1)
     set_tests_properties(platform_live_display_mode_sdl PROPERTIES LABELS "fast;data-none" TIMEOUT 120)
+    hp2_add_behavior_test(platform_display_options_sdl "${CMAKE_COMMAND}" -E env
+        "CARGO_HOME=${HP2_CARGO_HOME}" "CARGO_TARGET_DIR=${CMAKE_BINARY_DIR}/Testing/HP2/display_command_routing/Cargo"
+        "CARGO_ENCODED_RUSTFLAGS=${HP2_AUDIT_SDL_RUSTFLAGS}"
+        "${HP2_CARGO_EXECUTABLE}" test --locked --offline "--manifest-path=${PROJECT_SOURCE_DIR}/Cargo.toml"
+        --package=hp2-platform --features=sdl --lib -- window_lifecycle::display_tests sdl_runtime::tests --test-threads=1)
+    set_tests_properties(platform_display_options_sdl PROPERTIES LABELS "fast;data-none" TIMEOUT 120)
 endif()
 # Bounded policy characterization, initially qualified on macOS only.
 if(APPLE)

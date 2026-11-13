@@ -192,7 +192,7 @@ pub(super) unsafe fn validate_scale(a: CoreAccess<'_>, receiver: *mut UObject) -
 pub(super) unsafe fn scale(a: CoreAccess<'_>, receiver: *mut UObject, canvas: *mut UObject) -> RuntimeResult<f32> {
     let mut value = 0.;
     unsafe { invoke_virtual(a, receiver, "GetScaleFactor", &[("Canvas", V::Obj(canvas))], &[], (&raw mut value).cast::<c_void>())?; }
-    Ok(value)
+    Ok(value * crate::display_options::hud_scale(a))
 }
 
 pub(super) unsafe fn texture(a: CoreAccess<'_>, receiver: *mut UObject, name: &str) -> RuntimeResult<*mut UObject> {

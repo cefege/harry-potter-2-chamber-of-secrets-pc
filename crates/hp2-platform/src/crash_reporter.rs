@@ -18,10 +18,18 @@
 //! `atos -o <image_path> -l <image_base> <frame>` resolves every frame
 //! (file and line when the binary carries line tables) without guessing
 //! the ASLR slide.
+//!
+//! Besides the JSON report, `log` writes a human-readable, timestamped
+//! `crash-<UTC>-<pid>.log` into the player's `Logs` directory (message,
+//! backtrace, version, engine-log tail) for fatal signals, Rust panics and
+//! fatal errors reported through `report_fatal_error`.
 
+mod log;
+
+pub use log::{report_fatal_error, set_engine_log};
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_int, c_void};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 const MAX_FRAMES: usize = 64;
 const LOG_TAIL_BYTES: usize = 16384;
@@ -120,6 +128,9 @@ static PROCESS_NAME: Bytes<PROCESS_NAME_CAPACITY> = Bytes::new();
 static LOG_HINT: Bytes<LOG_HINT_CAPACITY> = Bytes::new();
 static REPORT_PATH: Bytes<REPORT_PATH_CAPACITY> = Bytes::new();
 static LOG_TAIL: Bytes<LOG_TAIL_BYTES> = Bytes::new();
+/// Bytes of `LOG_TAIL` filled by the last report, and whether they are UTF-16LE (BOM seen).
+static LOG_TAIL_LEN: AtomicUsize = AtomicUsize::new(0);
+static LOG_TAIL_UTF16: AtomicBool = AtomicBool::new(false);
 static REPORT: Report = Report {
     buf: Bytes::new(),
     len: UnsafeCell::new(0),
@@ -278,8 +289,16 @@ fn append_engine_log_tail() {
         unsafe { libc::close(fd) };
         return;
     }
+    // The engine log is UTF-16LE with a BOM; keep the tail on a code-unit boundary then.
+    let mut bom = [0u8; 2];
+    // SAFETY: `fd` is open and `bom` is a valid 2-byte destination.
+    let utf16 = unsafe { libc::pread(fd, bom.as_mut_ptr().cast(), 2, 0) } == 2 && bom == [0xFF, 0xFE];
+    LOG_TAIL_UTF16.store(utf16, Ordering::SeqCst);
     let tail = LOG_TAIL_BYTES as libc::off_t;
-    let start = if size > tail { size - tail } else { 0 };
+    let mut start = if size > tail { size - tail } else { 0 };
+    if utf16 {
+        start &= !1;
+    }
     // SAFETY: `fd` is an open descriptor.
     unsafe { libc::lseek(fd, start, libc::SEEK_SET) };
     let mut total = 0usize;
@@ -299,6 +318,7 @@ fn append_engine_log_tail() {
     }
     // SAFETY: `fd` is an open descriptor.
     unsafe { libc::close(fd) };
+    LOG_TAIL_LEN.store(total, Ordering::SeqCst);
 
     append_bytes(b",\"log_tail\":\"");
     for i in 0..total {
@@ -430,10 +450,12 @@ unsafe fn write_report(exit_reason: &[u8], reason_code: &[u8], signal: c_int) {
     }
     append_engine_log_tail();
 
+    let mut frame_count = 0usize;
     if WATCHED_SIGNALS.contains(&signal) {
         let frames: *mut *mut c_void = FRAMES.0.get().cast();
         // SAFETY: FRAMES holds MAX_FRAMES slots.
         let count = unsafe { backtrace(frames, MAX_FRAMES as c_int) };
+        frame_count = count.max(0) as usize;
         append_bytes(b",\"frames\":[");
         for i in 0..count.max(0) as usize {
             if i != 0 {
@@ -493,6 +515,9 @@ unsafe fn write_report(exit_reason: &[u8], reason_code: &[u8], signal: c_int) {
     write_fd(2, b" ".as_ptr(), 1);
     write_fd(2, REPORT_PATH.ptr(), REPORT_PATH.c_len());
     write_fd(2, b"\n".as_ptr(), 1);
+
+    // SAFETY: still the latched single writer; frames and log tail are in their statics.
+    unsafe { log::write_signal_log(reason_code, signal, frame_count) };
 }
 
 extern "C" fn handler(signal: c_int, info: *mut libc::siginfo_t, context: *mut c_void) {
@@ -607,6 +632,8 @@ pub unsafe fn install(config: *const Hp2CrashReporterConfig) {
 
         store_f64(&INSTALL_TIME, now_monotonic());
         capture_image_info();
+        log::configure();
+        log::install_panic_hook();
     }
 
     // SA_NODEFER: without it the signal stays blocked during `handler`, the

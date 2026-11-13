@@ -148,6 +148,7 @@ unsafe fn draw(a: CoreAccess<'_>, manager: *mut UObject, canvas: *mut UObject) -
     // SAFETY: admitted callbacks execute at their source points, with resources re-read afterward.
     unsafe {
         let mut scale = 0.; invoke_virtual(a, canvas, "GetHudScaleFactor", &[], &[], (&raw mut scale).cast())?;
+        scale *= crate::display_options::hud_scale(a);
         let (x, y) = timer_origin(int_of(a, canvas, "SizeX")?, int_of(a, canvas, "SizeY")?, scale);
         let empty = texture(a, manager, "textureTimerEmpty")?;
         let (w, h) = (int_of(a, empty, "USize")? as f32, int_of(a, empty, "VSize")? as f32);

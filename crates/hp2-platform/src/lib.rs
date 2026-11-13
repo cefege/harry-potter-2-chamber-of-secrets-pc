@@ -51,7 +51,9 @@ pub mod clipboard;
 pub mod crash_reporter;
 pub mod cursor;
 pub mod display_mode;
+pub mod game_controller;
 pub mod input_event;
+pub mod input_options;
 pub mod input_pump;
 pub mod joystick;
 pub mod joystick_input;
@@ -72,3 +74,11 @@ pub mod viewport;
 pub mod viewport_policy;
 pub mod window_chrome;
 pub mod window_lifecycle;
+
+/// `HP2_BACKGROUND=1`: run without touching the desktop (debugging, replays, captures).
+/// The window is created hidden, the app never activates or takes focus (macOS
+/// background app, no Dock icon), and the mouse is never grabbed, hidden or warped.
+/// Rendering continues off screen, so `HP2_CAPTURE_FRAMES` still works.
+pub fn background_mode() -> bool {
+    std::env::var_os("HP2_BACKGROUND").is_some_and(|v| v == "1")
+}

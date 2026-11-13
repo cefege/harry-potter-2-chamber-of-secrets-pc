@@ -176,18 +176,23 @@ unsafe fn read_item(a: CoreAccess<'_>, o: *mut UObject, w: f32, h: f32) -> Optio
         if is(a, o, "UWindow.UWindowButton") {
             let raised = class_name_of(a, o) == "HPMenuRaisedButton";
             let over_color = bool_of(a, o, "bColorOver").then(|| color_of(a, o, "OverColor"));
+            let original_text = text();
+            let pad_text = hp2_platform::game_controller::active()
+                .then(|| hp2_platform::game_controller::button_labels(&original_text))
+                .flatten();
+            let text_pos = pad_text.is_none().then(|| (f32_of(a, o, "TextX"), f32_of(a, o, "TextY")));
             let art = ImageButton {
                 up: button_art(a, o, "UpTexture", "UpRegion", w, h),
                 over: button_art(a, o, "OverTexture", "OverRegion", w, h),
                 down: button_art(a, o, "DownTexture", "DownRegion", w, h),
                 disabled: button_art(a, o, "DisabledTexture", "DisabledRegion", w, h),
-                text: text(),
+                text: pad_text.unwrap_or(original_text),
                 over_color,
                 shadow: bool_of(a, o, "bShadowText"),
                 text_align: align_of(u8_of(a, o, "Align")),
                 text_inset: if raised { i32_of(a, o, "textOffsetX") as f32 } else { 0. },
                 // The stock layout (its own BeforePaint or the page) already placed the caption.
-                text_pos: Some((f32_of(a, o, "TextX"), f32_of(a, o, "TextY"))),
+                text_pos,
             };
             return Some(Item::Button { art: Box::new(art), font: font(), color: color() });
         }

@@ -185,6 +185,13 @@ class BundleIntegrityContracts(unittest.TestCase):
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["reason_code"], "bundle.framework_missing")
 
+    def test_info_plist_template_opts_into_game_mode(self) -> None:
+        template = (REPOSITORY_ROOT / "Build/CMake/HarryPotter2-Info.plist.in").read_text()
+        plist = plistlib.loads(template.replace("@PROJECT_VERSION@", "0.0.0").encode())
+        self.assertEqual(plist["LSApplicationCategoryType"], "public.app-category.games")
+        self.assertIs(plist["LSSupportsGameMode"], True)
+        self.assertIs(plist["NSHighResolutionCapable"], True)
+
 
 if __name__ == "__main__":
     unittest.main()

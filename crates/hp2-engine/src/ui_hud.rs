@@ -667,6 +667,11 @@ mod tests {
     }
 
     #[test]
+    fn accessibility_options_and_palette_contracts() {
+        crate::ui_accessibility::assert_contracts();
+    }
+
+    #[test]
     fn console_preserves_source_text_and_image_geometry() {
         crate::ui_console_views::assert_view();
     }
