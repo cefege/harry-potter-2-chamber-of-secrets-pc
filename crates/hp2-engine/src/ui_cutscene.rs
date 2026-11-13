@@ -4,7 +4,7 @@ use std::{cell::RefCell, mem::size_of, ptr};
 
 use hp2_abi::engine::generated::{TArrayRaw, UFunction, UObject};
 use hp2_core::{ScriptPreCallDecision, core_access::{CoreAccess, RuntimeError, RuntimeResult}};
-use hp2_ui::{Color, Font, Node, Rect, Signal, Size, Store, TextAlign, Ui, col, label};
+use hp2_ui::{BlendMode, Color, Fit, Font, Node, Rect, Signal, Size, Store, TextAlign, TextureRef, Ui, col, image, label};
 
 use super::{CanvasTarget, SUBTITLE_SHADOW, param_object, player_fonts, wrap};
 use crate::{
@@ -20,12 +20,19 @@ struct Subtitle {
     line_height: f32,
     font: Font,
     rows: Vec<(String, Color, f32, f32)>,
+    /// Darkening strip (top, height) behind enlarged text that outgrows the border bar.
+    backing: Option<(f32, f32)>,
 }
 fn subtitle_view(model: &Subtitle) -> Node {
-    col().children(model.rows.iter().map(|(text, color, x, y)| {
+    let backing = model.backing.map(|(y, h)| {
+        image(TextureRef("UWindow.WhiteTexture".to_owned()), Fit::Stretch)
+            .color(Color(24, 24, 24, 255)).blend(BlendMode::Modulated)
+            .at(0., y).width(Size::Px(model.width)).height(Size::Px(h))
+    });
+    col().children(backing.into_iter().chain(model.rows.iter().map(|(text, color, x, y)| {
         label(text).font(model.font).color(*color).text_align(TextAlign::Center)
             .at(*x, *y).width(Size::Px(model.width)).height(Size::Px(model.line_height))
-    }))
+    })))
 }
 struct Retained {
     manager: Weak,
@@ -37,7 +44,7 @@ thread_local! { static VIEWS: RefCell<Vec<Retained>> = const { RefCell::new(Vec:
 
 /// Preserve the existing deliberate wrapping, fallback fonts and shadow policy,
 /// rather than silently reverting subtitles to the retail unwrapped formula.
-unsafe fn subtitle(a: CoreAccess<'_>, manager: *mut UObject, hud: *mut UObject, c: *mut UObject, text: &str, top: f32, height: f32, tint: [u8; 4]) -> RuntimeResult<()> {
+unsafe fn subtitle(a: CoreAccess<'_>, manager: *mut UObject, hud: *mut UObject, c: *mut UObject, text: &str, top: f32, height: f32, tint: [u8; 4], scaled: bool) -> RuntimeResult<()> {
     if text.trim().is_empty() || height <= 0. { return Ok(()); }
     unsafe {
         let saved_font = object(a, c, "Font")?;
@@ -63,36 +70,58 @@ unsafe fn subtitle(a: CoreAccess<'_>, manager: *mut UObject, hud: *mut UObject, 
                 if fits { break; }
             }
             let Some((font, lines, line_height)) = chosen else { return Ok(()); };
-            let block_height = line_height * lines.len() as f32;
-            let y0 = if height <= 4. * line_height && block_height <= height { top + (height - block_height) / 2. } else { top };
-            let mut rows = Vec::with_capacity(lines.len() * 2);
-            for (index, line) in lines.into_iter().enumerate() {
-                let y = y0 + line_height * index as f32;
-                rows.push((line.clone(), SUBTITLE_SHADOW, 1.5, y + 1.5));
-                rows.push((line, Color(tint[0], tint[1], tint[2], 255), 0., y));
-            }
-            let model = Subtitle { width: width.max(1.), line_height, font, rows };
-            let retained = VIEWS.with(|views| {
-                let mut views = views.borrow_mut(); views.retain(|v| v.manager.live(a));
-                views.iter().position(|v| v.manager.p == manager).map(|i| views.swap_remove(i))
-            });
-            let metrics = retained.as_ref().map_or_else(HostMetrics::default, |v| v.metrics.clone());
-            metrics.clear();
-            // Always remeasure: fonts/providers and viewport can change without
-            // changing the text. No callback or measurement is cached away.
-            for (text, _, _, _) in &model.rows {
-                if !metrics.knows(text, font) { metrics.learn(text, font, target.text_size(a, text, font)?); }
-            }
-            let mut retained = retained.unwrap_or_else(|| {
-                let store = Store::new(); let current = store.signal(model.clone()); let observed = current.clone();
-                Retained { manager: Weak::new(manager), model: current, ui: Ui::new(store, move || subtitle_view(&observed.get()), metrics.clone()), metrics: metrics.clone() }
-            });
-            retained.model.set(model);
-            retained.ui.resize(width, int(a, c, "SizeY")? as f32);
-            retained.ui.relayout();
-            let result = render_commands(&target, a, &retained.ui.draw(), &metrics);
-            if retained.manager.live(a) { VIEWS.with(|views| views.borrow_mut().push(retained)); }
-            result
+            // The font slot is chosen at the original size; the size option then scales that font
+            // (re-wrapping at the larger size) and an overflowing block grows upward from the
+            // bottom of the band instead of dropping below the screen.
+            let factor = if scaled { crate::ui_accessibility::subtitle_factor(a) } else { 1. };
+            crate::canvas_text::with_extra_hud_text_scale(factor, || -> RuntimeResult<()> {
+                let (lines, line_height) = if factor == 1. { (lines, line_height) } else {
+                    let mut error = None;
+                    let mut measure = |value: &str| match target.text_size(a, value, font) {
+                        Ok(size) => size.0,
+                        Err(e) => { error = Some(e); 0. }
+                    };
+                    let lines = wrap(text, width.max(1.) - 2. * margin, &mut measure);
+                    if let Some(error) = error { return Err(error); }
+                    (lines, target.text_size(a, "Ag", font)?.1)
+                };
+                let block_height = line_height * lines.len() as f32;
+                let y0 = if height <= 4. * line_height && block_height <= height { top + (height - block_height) / 2. }
+                    else if factor > 1. { (top + height - block_height - line_height * 0.25).max(0.) }
+                    else { top };
+                let mut rows = Vec::with_capacity(lines.len() * 2);
+                for (index, line) in lines.into_iter().enumerate() {
+                    let y = y0 + line_height * index as f32;
+                    rows.push((line.clone(), SUBTITLE_SHADOW, 1.5, y + 1.5));
+                    rows.push((line, Color(tint[0], tint[1], tint[2], 255), 0., y));
+                }
+                let backing = (factor > 1. && block_height > height).then(|| {
+                    let top = (y0 - line_height * 0.2).max(0.);
+                    (top, y0 + block_height + line_height * 0.2 - top)
+                });
+                let model = Subtitle { width: width.max(1.), line_height, font, rows, backing };
+                let retained = VIEWS.with(|views| {
+                    let mut views = views.borrow_mut(); views.retain(|v| v.manager.live(a));
+                    views.iter().position(|v| v.manager.p == manager).map(|i| views.swap_remove(i))
+                });
+                let metrics = retained.as_ref().map_or_else(HostMetrics::default, |v| v.metrics.clone());
+                metrics.clear();
+                // Always remeasure: fonts/providers and viewport can change without
+                // changing the text. No callback or measurement is cached away.
+                for (text, _, _, _) in &model.rows {
+                    if !metrics.knows(text, font) { metrics.learn(text, font, target.text_size(a, text, font)?); }
+                }
+                let mut retained = retained.unwrap_or_else(|| {
+                    let store = Store::new(); let current = store.signal(model.clone()); let observed = current.clone();
+                    Retained { manager: Weak::new(manager), model: current, ui: Ui::new(store, move || subtitle_view(&observed.get()), metrics.clone()), metrics: metrics.clone() }
+                });
+                retained.model.set(model);
+                retained.ui.resize(width, int(a, c, "SizeY")? as f32);
+                retained.ui.relayout();
+                let result = render_commands(&target, a, &retained.ui.draw(), &metrics);
+                if retained.manager.live(a) { VIEWS.with(|views| views.borrow_mut().push(retained)); }
+                result
+            })
         })();
         // Retail saves these three fields, not CurX/CurY/CurYL. The toolkit's
         // bitmap-native cursor and line-height effects remain observable.
@@ -153,10 +182,10 @@ unsafe fn custom_subtitle(a: CoreAccess<'_>, hud: *mut UObject, c: *mut UObject,
         result?; cleaned?; need(a, c)
     }
 }
-unsafe fn draw_subtitle(a: CoreAccess<'_>, manager: *mut UObject, hud: *mut UObject, c: *mut UObject, f: *mut UFunction, text: &str, y: i32, height: i32, tint: [u8; 4], canonical: *mut UFunction) -> RuntimeResult<()> {
+unsafe fn draw_subtitle(a: CoreAccess<'_>, manager: *mut UObject, hud: *mut UObject, c: *mut UObject, f: *mut UFunction, text: &str, y: i32, height: i32, tint: [u8; 4], canonical: *mut UFunction, scaled: bool) -> RuntimeResult<()> {
     unsafe {
         need(a, hud)?;
-        if !canonical.is_null() && f == canonical { subtitle(a, manager, hud, c, text, y as f32, height as f32, tint) }
+        if !canonical.is_null() && f == canonical { subtitle(a, manager, hud, c, text, y as f32, height as f32, tint, scaled) }
         else { custom_subtitle(a, hud, c, f, text, y, height, tint) }
     }
 }
@@ -194,7 +223,7 @@ unsafe fn draw(a: CoreAccess<'_>, manager: *mut UObject, c: *mut UObject, canoni
         let y = ((int(a, c, "SizeY")? as f32 - float(a, manager, "fCurrBorderHeight")?) + 1.) as i32;
         let height = max_height(a, manager, c)?;
         let tint = prop(a, manager, "colorCutTextBlue", "Core.StructProperty", 4)?.cast::<[u8; 4]>().read_unaligned();
-        draw_subtitle(a, manager, hud, c, painter, &first, y, height, tint, canonical)?;
+        draw_subtitle(a, manager, hud, c, painter, &first, y, height, tint, canonical, true)?;
         need(a, manager)?; need(a, c)?;
         if !read_string(a, manager, "strCutCommentText")?.is_empty() {
             let hud = harry_hud(a, manager)?;
@@ -202,7 +231,7 @@ unsafe fn draw(a: CoreAccess<'_>, manager: *mut UObject, c: *mut UObject, canoni
             let comment = read_string(a, manager, "strCutCommentText")?;
             let height = max_height(a, manager, c)?;
             let tint = prop(a, manager, "colorCutTextBlue", "Core.StructProperty", 4)?.cast::<[u8; 4]>().read_unaligned();
-            draw_subtitle(a, manager, hud, c, painter, &comment, 5, height, tint, canonical)?;
+            draw_subtitle(a, manager, hud, c, painter, &comment, 5, height, tint, canonical, false)?;
             need(a, manager)?; need(a, c)?;
         }
         if read_boolean(a, manager, "bShowFF")? {
@@ -289,10 +318,20 @@ pub(super) fn assert_view() {
     assert_eq!((icon_index(30, false), icon_index(30, true)), (0, 0));
     // Odd texture dimensions use integer halves before float conversion.
     assert_eq!((801 / 2) as f32 - (65 / 2) as f32, 368.);
-    let model = Subtitle { width: 800., line_height: 18., font: Font::Slot(1), rows: vec![("caption".to_owned(), SUBTITLE_SHADOW, 1.5, 41.5), ("caption".to_owned(), Color(1, 2, 3, 255), 0., 40.)] };
+    let model = Subtitle { width: 800., line_height: 18., font: Font::Slot(1), rows: vec![("caption".to_owned(), SUBTITLE_SHADOW, 1.5, 41.5), ("caption".to_owned(), Color(1, 2, 3, 255), 0., 40.)], backing: None };
     let metrics = HostMetrics::default(); metrics.learn("caption", Font::Slot(1), (70., 18.));
     let mut ui = Ui::new(Store::new(), move || subtitle_view(&model), metrics);
     ui.resize(800., 600.);
     let commands = ui.draw();
     assert_eq!(commands.iter().filter(|c| matches!(c, hp2_ui::DrawCmd::Text { .. })).count(), 2);
+    assert!(!commands.iter().any(|c| matches!(c, hp2_ui::DrawCmd::Image { .. })));
+    // Enlarged text adds one modulating strip behind the rows, before them in paint order.
+    let backed = Subtitle { width: 800., line_height: 18., font: Font::Slot(1), rows: vec![("caption".to_owned(), Color(1, 2, 3, 255), 0., 40.)], backing: Some((30., 40.)) };
+    let metrics = HostMetrics::default(); metrics.learn("caption", Font::Slot(1), (70., 18.));
+    let mut ui = Ui::new(Store::new(), move || subtitle_view(&backed), metrics);
+    ui.resize(800., 600.);
+    let commands = ui.draw();
+    let strip = commands.iter().position(|c| matches!(c, hp2_ui::DrawCmd::Image { blend: BlendMode::Modulated, rect, .. } if rect.y == 30. && rect.h == 40.));
+    let text = commands.iter().position(|c| matches!(c, hp2_ui::DrawCmd::Text { .. }));
+    assert!(strip.is_some() && strip < text);
 }

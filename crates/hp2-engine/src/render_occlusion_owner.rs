@@ -109,6 +109,7 @@ impl<'a> CoreOcclusionState<'a> {
         let info = unsafe { crate::package_map_level_owner::level_info(level)? };
         let device = unsafe { (*viewport).ren_dev.cast::<URenderDevice>() };
         if device.is_null() { return Err(RuntimeError::new("Canonical occlusion viewport has no render device")); }
+        // UnRender.cpp gates volumetric fog on Viewport->Actor->Region.Zone->bFogZone.
         let zone = unsafe { (*actor).region.zone.cast::<AZoneInfo>() };
         let stacks_ptrs = stacks.stack_ptrs();
         let render_state = graph.render_state_ptr();

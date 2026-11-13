@@ -24,6 +24,7 @@ mod lighting;
 mod surface;
 #[path = "render_actor_owner.rs"]
 mod actor;
+pub(crate) use actor::set_high_detail_models;
 #[path = "render_scene_draw_owner.rs"]
 mod scene_draw;
 #[path = "render_occlusion_owner.rs"]

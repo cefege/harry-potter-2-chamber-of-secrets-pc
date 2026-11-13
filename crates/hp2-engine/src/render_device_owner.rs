@@ -1864,29 +1864,85 @@ pub(crate) unsafe fn set_global_anisotropy(access: CoreAccess<'_>, setting: u16)
     Ok(())
 }
 
-/// The optional image-quality features: `(mipmaps, alpha_to_coverage, smooth_lightmaps)`.
-/// Stored as `[WgpuDrv.WgpuRenderDevice] Mipmaps / AlphaToCoverage / SmoothLightmaps`; all default on.
-pub(crate) fn quality_settings(access: CoreAccess<'_>) -> (bool, bool, bool) {
-    let read = |key: &str| {
-        let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
-        access.config_get_units(&units(QUALITY_SECTION), &units(key)).ok().flatten()
-            .map(|v| v.iter().take_while(|&&c| c != 0).filter_map(|&c| char::from_u32(c)).collect::<String>())
-            .map_or(true, |v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "off" | "0"))
-    };
-    (read("Mipmaps"), read("AlphaToCoverage"), read("SmoothLightmaps"))
-}
+/// Optional image-quality features in `[WgpuDrv.WgpuRenderDevice]`, in Video-page order.
+pub(crate) const QUALITY_KEYS: [&str; QUALITY_COUNT] = [
+    "Mipmaps", "AlphaToCoverage", "SmoothLightmaps",
+    "Bloom", "AmbientOcclusion", "ColorGrading", "Sharpen", "FXAA", "HighDetailModels", "HDR", "DistanceFog",
+];
+pub(crate) const QUALITY_COUNT: usize = 11;
+/// The original three and volumetric fog default on; added effects default off.
+const QUALITY_DEFAULTS: [bool; QUALITY_COUNT] = [true, true, true, false, false, false, false, false, false, false, true];
 pub(crate) const QUALITY_SECTION: &str = "WgpuDrv.WgpuRenderDevice";
+
+static DRAW_DISTANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Returns the persisted far-plane choice; unknown values retain the original.
+pub(crate) fn draw_distance(access: CoreAccess<'_>) -> u8 {
+    let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
+    let value = access.config_get_units(&units(QUALITY_SECTION), &units("DrawDistance")).ok().flatten();
+    let text: String = value.unwrap_or_default().into_iter().take_while(|&c| c != 0).filter_map(char::from_u32).collect();
+    match text.trim().to_ascii_lowercase().as_str() {
+        "2x" => 1,
+        "4x" => 2,
+        _ => 0,
+    }
+}
+
+/// Persists and applies the perspective far-plane choice at the next scene.
+pub(crate) fn set_draw_distance(access: CoreAccess<'_>, index: u8) -> RuntimeResult<()> {
+    let index = index.min(2);
+    let value = ["Original", "2x", "4x"][index as usize];
+    let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
+    access.config_update_system_staged(&[(units(QUALITY_SECTION), units("DrawDistance"), units(value))])?;
+    DRAW_DISTANCE.store(index, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
+/// Reads every quality key; a missing key takes its default, "false"/"off"/"0" mean off.
+pub(crate) fn quality_settings(access: CoreAccess<'_>) -> [bool; QUALITY_COUNT] {
+    let units = |t: &str| t.chars().map(u32::from).collect::<Vec<_>>();
+    std::array::from_fn(|i| {
+        access.config_get_units(&units(QUALITY_SECTION), &units(QUALITY_KEYS[i])).ok().flatten()
+            .map(|v| v.iter().take_while(|&&c| c != 0).filter_map(|&c| char::from_u32(c)).collect::<String>())
+            .map_or(QUALITY_DEFAULTS[i], |v| !matches!(v.trim().to_ascii_lowercase().as_str(), "false" | "off" | "0"))
+    })
+}
+
+#[cfg(feature = "renderer-wgpu")]
+fn wgpu_quality(q: [bool; QUALITY_COUNT]) -> hp2_wgpu::Quality {
+    hp2_wgpu::Quality {
+        mipmaps: q[0], alpha_to_coverage: q[1], smooth_lightmaps: q[2],
+        post: hp2_wgpu::draw::WorldPost { bloom: q[3], ambient_occlusion: q[4], color_grading: q[5], sharpen: q[6], fxaa: q[7] },
+        hdr: q[9],
+    }
+}
+
+/// Applies settings that live outside the GPU renderer (mesh detail).
+#[cfg(feature = "renderer-wgpu")]
+unsafe fn apply_engine_quality(device: *mut UWgpuRenderDevice, q: [bool; QUALITY_COUNT]) {
+    crate::render_owner::set_high_detail_models(q[8]);
+    // The world traversal only collects volumetric lights when both capabilities
+    // are set. WGPU's complex and Gouraud shaders already consume their fog.
+    unsafe {
+        ptr::addr_of_mut!((*device).base.supports_fog_maps).write_unaligned(u32::from(q[10]));
+        let flags = device.cast::<u8>().add(URenderDevice::VOLUMETRIC_LIGHTING_BIT / 8);
+        let mask = 1 << (URenderDevice::VOLUMETRIC_LIGHTING_BIT % 8);
+        let previous = flags.read();
+        flags.write(if q[10] { previous | mask } else { previous & !mask });
+    }
+}
 
 /// Applies the quality features to the running renderer (textures and pipelines rebuild on demand).
 #[cfg(feature = "renderer-wgpu")]
-pub(crate) unsafe fn set_global_quality(access: CoreAccess<'_>, mipmaps: bool, alpha_to_coverage: bool, smooth_lightmaps: bool) -> RuntimeResult<()> {
+pub(crate) unsafe fn set_global_quality(access: CoreAccess<'_>, quality: [bool; QUALITY_COUNT]) -> RuntimeResult<()> {
     let owner = state(access)?;
     let device = owner.global_device.get().cast::<UWgpuRenderDevice>();
     if device.is_null() { return Err(RuntimeError::new("No active render device")); }
     let runtime = owner.runtime(device as usize)?;
     let mut lease = runtime.lease()?;
     let resources = lease.resources();
-    resources.loop_state.set_quality(mipmaps, alpha_to_coverage, smooth_lightmaps);
+    resources.loop_state.set_quality(wgpu_quality(quality));
+    unsafe { apply_engine_quality(device, quality); }
     Ok(())
 }
 
@@ -2206,8 +2262,10 @@ impl hp2_wgpu::driver_policy::DriverPolicyAdapter for CorePolicy<'_> {
             Leaf::Srgb => self.with_resources(|resources| {
                 let srgb = self.read_i32(unsafe { ptr::addr_of!((*self.device).use_srgb_textures) }) != 0;
                 resources.loop_state.set_srgb_framebuffer(srgb);
-                let (mipmaps, alpha_to_coverage, smooth_lightmaps) = quality_settings(self.access);
-                resources.loop_state.set_quality(mipmaps, alpha_to_coverage, smooth_lightmaps);
+                let quality = quality_settings(self.access);
+                resources.loop_state.set_quality(wgpu_quality(quality));
+                DRAW_DISTANCE.store(draw_distance(self.access), std::sync::atomic::Ordering::Relaxed);
+                unsafe { apply_engine_quality(self.device, quality); }
                 Ok(0)
             }).map(|v| value(v, 0.0)),
             Leaf::AdapterLog => self.log_adapter().map(|()| value(0, 0.0)),
@@ -2688,6 +2746,7 @@ impl CorePolicy<'_> {
             fx,fy,effective_fov_angle:effective,viewport_fov_angle:unsafe{(*actor).base.fov_angle},
             is_ortho:matches!(rend_map,13|14|15),
             is_wireframe_zfar:self.access.process_mode().is_editor&&rend_map==1,
+            far_plane_scale: [1.0, 2.0, 4.0][DRAW_DISTANCE.load(std::sync::atomic::Ordering::Relaxed).min(2) as usize],
             gamma:self.read_f32(unsafe { ptr::addr_of!((*self.device).gamma) }),
             light_color_intensity:0.0,light_map_intensity:0.0,
         };

@@ -92,6 +92,7 @@ unsafe fn draw(a: CoreAccess<'_>, receiver: *mut UObject, canvas: *mut UObject) 
     unsafe {
         let mut scale = 0.;
         invoke_virtual(a, receiver, "GetScaleFactor", &[("Canvas", V::Obj(canvas))], &[], (&raw mut scale).cast())?;
+        scale *= crate::display_options::hud_scale(a);
         let model = snapshot(a, receiver, canvas, scale)?;
         let (w, h) = model.viewport;
         let mut retained = VIEWS.with(|views| {

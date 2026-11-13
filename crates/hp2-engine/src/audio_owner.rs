@@ -138,11 +138,26 @@ unsafe fn post_edit_change(access: CoreAccess<'_>, object: *mut UObject) -> Runt
 }
 
 /// Owns one audio runtime per canonical audio subsystem object.
-#[derive(Default)]
 pub(crate) struct AudioOwnerState {
     resources: RefCell<HashMap<usize, Rc<AudioRuntime>>>,
     stream_manager_owned: Cell<bool>,
     stream_users: Cell<usize>,
+    /// Live `VoiceVolume` (0..=255), mirrored from the INI by [`load_settings`].
+    voice_volume: Cell<u8>,
+    /// Live `PlayInBackground`, mirrored from the INI by [`load_settings`].
+    play_in_background: Cell<bool>,
+}
+
+impl Default for AudioOwnerState {
+    fn default() -> Self {
+        Self {
+            resources: RefCell::default(),
+            stream_manager_owned: Cell::new(false),
+            stream_users: Cell::new(0),
+            voice_volume: Cell::new(VOICE_VOLUME_DEFAULT),
+            play_in_background: Cell::new(PLAY_IN_BACKGROUND_DEFAULT),
+        }
+    }
 }
 
 struct AudioRuntime {
@@ -202,12 +217,14 @@ pub fn fidelity_active_source(
     })
 }
 
-fn config(audio: *mut UALAudioSubsystem, max_radius_multiplier: f32) -> Config {
+fn config(access: CoreAccess<'_>, audio: *mut UALAudioSubsystem, max_radius_multiplier: f32) -> Config {
+    let voice_volume = state(access).map_or(1.0, |owner| f32::from(owner.voice_volume.get()) / 255.0);
     unsafe {
         Config {
             doppler_factor: ptr::addr_of!((*audio).doppler_factor).read_unaligned(),
             music_volume: ptr::addr_of!((*audio).music_volume).read_unaligned(),
             sound_volume: ptr::addr_of!((*audio).sound_volume).read_unaligned(),
+            voice_volume,
             roll_off: ptr::addr_of!((*audio).roll_off).read_unaligned(),
             max_channels: ptr::addr_of!((*audio).max_channels).read_unaligned(),
             use_precache: ptr::addr_of!((*audio).use_precache).read_unaligned() != 0,
@@ -233,6 +250,104 @@ fn with_audio<T>(
     })
 }
 
+const SETTINGS_SECTION: &str = "ALAudio.ALAudioSubsystem";
+const VOICE_VOLUME_KEY: &str = "VoiceVolume";
+const PLAY_IN_BACKGROUND_KEY: &str = "PlayInBackground";
+/// Full voice gain: dialog is exactly as loud as the other effects.
+const VOICE_VOLUME_DEFAULT: u8 = 255;
+/// Audio is held while the window is unfocused, like a paused level.
+const PLAY_IN_BACKGROUND_DEFAULT: bool = true;
+
+fn setting_units(text: &str) -> Vec<u32> {
+    text.chars().map(u32::from).collect()
+}
+
+fn read_setting(access: CoreAccess<'_>, key: &str) -> Option<String> {
+    let units = access.config_get_units(&setting_units(SETTINGS_SECTION), &setting_units(key)).ok().flatten()?;
+    Some(units.iter().take_while(|&&unit| unit != 0).filter_map(|&unit| char::from_u32(unit)).collect())
+}
+
+fn parse_voice_volume(text: &str) -> Option<u8> {
+    let value = text.trim().parse::<f64>().ok()?;
+    value.is_finite().then(|| value.round().clamp(0.0, 255.0) as u8)
+}
+
+fn parse_play_in_background(text: &str) -> bool {
+    matches!(text.trim().to_ascii_lowercase().as_str(), "true" | "on" | "yes" | "1")
+}
+
+/// `VoiceVolume` in `[ALAudio.ALAudioSubsystem]`, `0..=255`. 255 (also the value
+/// when the key is missing or unreadable) leaves dialog as loud as `SoundVolume`
+/// makes it; 0 silences voice lines. Music and `SoundVolume` are unaffected.
+pub(crate) fn voice_volume(access: CoreAccess<'_>) -> f32 {
+    read_setting(access, VOICE_VOLUME_KEY)
+        .and_then(|text| parse_voice_volume(&text))
+        .unwrap_or(VOICE_VOLUME_DEFAULT)
+        .into()
+}
+
+/// Stores `VoiceVolume` (clamped and rounded to `0..=255`) in the System INI and
+/// applies it to the playing voice lines from the next audio update.
+pub(crate) fn set_voice_volume(access: CoreAccess<'_>, value: f32) -> RuntimeResult<()> {
+    if !value.is_finite() {
+        return Err(RuntimeError::new("VoiceVolume must be finite"));
+    }
+    let value = value.round().clamp(0.0, 255.0) as u8;
+    access.config_update_system_staged(&[(
+        setting_units(SETTINGS_SECTION),
+        setting_units(VOICE_VOLUME_KEY),
+        setting_units(&value.to_string()),
+    )])?;
+    state(access)?.voice_volume.set(value);
+    Ok(())
+}
+
+/// `PlayInBackground` in `[ALAudio.ALAudioSubsystem]`. Off (the default and the
+/// value when the key is missing) holds all audio while the window is unfocused;
+/// on keeps it playing.
+pub(crate) fn play_in_background(access: CoreAccess<'_>) -> bool {
+    read_setting(access, PLAY_IN_BACKGROUND_KEY)
+        .map_or(PLAY_IN_BACKGROUND_DEFAULT, |text| parse_play_in_background(&text))
+}
+
+/// Stores `PlayInBackground` in the System INI and applies it from the next
+/// audio update.
+pub(crate) fn set_play_in_background(access: CoreAccess<'_>, enabled: bool) -> RuntimeResult<()> {
+    access.config_update_system_staged(&[(
+        setting_units(SETTINGS_SECTION),
+        setting_units(PLAY_IN_BACKGROUND_KEY),
+        setting_units(if enabled { "True" } else { "False" }),
+    )])?;
+    state(access)?.play_in_background.set(enabled);
+    Ok(())
+}
+
+/// Mirrors the persisted settings into the per-update cache.
+fn load_settings(access: CoreAccess<'_>) -> RuntimeResult<()> {
+    let owner = state(access)?;
+    owner.voice_volume.set(voice_volume(access) as u8);
+    owner.play_in_background.set(play_in_background(access));
+    Ok(())
+}
+
+/// The window has lost keyboard focus and the user has not asked for background
+/// audio. Deterministic verification runs (replays, fixed-step captures) are
+/// never held: they are driven without a focused window.
+fn background_suspended(access: CoreAccess<'_>) -> bool {
+    let Ok(owner) = state(access) else { return false };
+    !owner.play_in_background.get() && window_unfocused()
+}
+
+#[cfg(feature = "sdl")]
+fn window_unfocused() -> bool {
+    !hp2_platform::input_pump::deterministic_verification() && hp2_platform::keyboard_focus::keyboard_focus_absent()
+}
+
+#[cfg(not(feature = "sdl"))]
+fn window_unfocused() -> bool {
+    false
+}
+
 /// Initializes the subsystem, then attaches the initial viewport in source order.
 pub(crate) fn initialize(
     access: CoreAccess<'_>,
@@ -245,8 +360,9 @@ pub(crate) fn initialize(
     let owner = state(access)?;
     let was_initialized = owner.with_subsystem(audio as usize, |subsystem| Ok(subsystem.initialized))?;
     owner.ensure_stream_manager()?;
+    load_settings(access)?;
     let result = with_audio(access, audio, |subsystem, host| {
-        let mut cfg = config(audio, host.audio_radius_multiplier());
+        let mut cfg = config(access, audio, host.audio_radius_multiplier());
         let initialized = subsystem.init(host, &mut cfg)?;
         unsafe { ptr::addr_of_mut!((*audio).roll_off).write_unaligned(cfg.roll_off); }
         Ok(initialized)
@@ -282,7 +398,7 @@ pub(crate) fn set_viewport(
     viewport: *mut UViewport,
 ) -> RuntimeResult<()> {
     with_audio(access, audio, |subsystem, host| {
-        let cfg = config(audio, host.audio_radius_multiplier());
+        let cfg = config(access, audio, host.audio_radius_multiplier());
         subsystem.set_viewport(host, &cfg, viewport as usize)?;
         unsafe { ptr::addr_of_mut!((*audio).viewport).write_unaligned(subsystem.viewport as *mut std::ffi::c_void); }
         Ok(())
@@ -299,7 +415,7 @@ pub(crate) fn detach_viewport(
     }
     with_audio(access, audio, |subsystem, host| {
         if subsystem.viewport == viewport as usize {
-            let cfg = config(audio, host.audio_radius_multiplier());
+            let cfg = config(access, audio, host.audio_radius_multiplier());
             subsystem.set_viewport(host, &cfg, 0)?;
             unsafe { ptr::addr_of_mut!((*audio).viewport).write_unaligned(ptr::null_mut()); }
         }
@@ -317,7 +433,7 @@ pub(crate) fn shutdown(access: CoreAccess<'_>, audio: *mut UALAudioSubsystem) ->
         set_sound_audio(access, ptr::null_mut())?;
     }
     with_audio(access, audio, |subsystem, host| {
-        let cfg = config(audio, host.audio_radius_multiplier());
+        let cfg = config(access, audio, host.audio_radius_multiplier());
         subsystem.destroy(host, &cfg)?;
         unsafe { ptr::addr_of_mut!((*audio).viewport).write_unaligned(subsystem.viewport as *mut std::ffi::c_void); }
         Ok(())
@@ -344,8 +460,9 @@ pub(crate) fn update(
             x_axis: [coords.x_axis.x, coords.x_axis.y, coords.x_axis.z],
             y_axis: [coords.y_axis.x, coords.y_axis.y, coords.y_axis.z],
             z_axis: [coords.z_axis.x, coords.z_axis.y, coords.z_axis.z],
+            suspended: background_suspended(access),
         };
-        let cfg = config(audio, host.audio_radius_multiplier());
+        let cfg = config(access, audio, host.audio_radius_multiplier());
         subsystem.update(host, &cfg, &view)
     })
 }
@@ -356,7 +473,7 @@ pub(crate) fn play_sound(
     request: &hp2_audio::playback::PlayRequest,
 ) -> RuntimeResult<i32> {
     with_audio(access, audio, |subsystem, host| {
-        let cfg = config(audio, host.audio_radius_multiplier());
+        let cfg = config(access, audio, host.audio_radius_multiplier());
         subsystem.play_sound(host, &cfg, request)
     })
 }
@@ -393,7 +510,8 @@ pub(crate) fn modify_sound(
     value: f32,
 ) -> RuntimeResult<bool> {
     with_audio(access, audio, |subsystem, host| {
-        subsystem.modify_sound(host, actor, id, sound, parameter, value)
+        let cfg = config(access, audio, host.audio_radius_multiplier());
+        subsystem.modify_sound(host, &cfg, actor, id, sound, parameter, value)
     })
 }
 
@@ -404,7 +522,7 @@ pub(crate) fn play_music(
     fade_in_time: f32,
 ) -> RuntimeResult<i32> {
     with_audio(access, audio, |subsystem, host| {
-        let cfg = config(audio, host.audio_radius_multiplier());
+        let cfg = config(access, audio, host.audio_radius_multiplier());
         subsystem.play_music(host, &cfg, song, fade_in_time)
     })
 }
@@ -700,5 +818,33 @@ impl Drop for AudioRuntimeLease {
         let subsystem = self.subsystem.take();
         *self.runtime.subsystem.borrow_mut() = subsystem;
         self.runtime.busy.set(false);
+    }
+}
+
+#[cfg(test)]
+mod audio_tests {
+    use super::{parse_play_in_background, parse_voice_volume};
+
+    #[test]
+    fn voice_volume_is_rounded_clamped_and_rejects_garbage() {
+        assert_eq!(parse_voice_volume("255"), Some(255));
+        assert_eq!(parse_voice_volume(" 128 "), Some(128));
+        assert_eq!(parse_voice_volume("0"), Some(0));
+        assert_eq!(parse_voice_volume("12.6"), Some(13));
+        assert_eq!(parse_voice_volume("999"), Some(255));
+        assert_eq!(parse_voice_volume("-4"), Some(0));
+        assert_eq!(parse_voice_volume("loud"), None);
+        assert_eq!(parse_voice_volume(""), None);
+        assert_eq!(parse_voice_volume("NaN"), None);
+    }
+
+    #[test]
+    fn play_in_background_is_off_unless_explicitly_true() {
+        for on in ["True", "true", "TRUE", " on ", "Yes", "1"] {
+            assert!(parse_play_in_background(on), "{on}");
+        }
+        for off in ["False", "false", "0", "off", "", "maybe"] {
+            assert!(!parse_play_in_background(off), "{off}");
+        }
     }
 }

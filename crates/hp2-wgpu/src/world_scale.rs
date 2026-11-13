@@ -105,14 +105,29 @@ pub(crate) struct WorldScaleState {
     msaa_setting: i32,
     msaa_cached: Option<crate::msaa::PreparedMsaa>,
     msaa_seed: Option<(wgpu::TextureFormat, u32, crate::draw::PostProcessPipeline)>,
-    bloom: bool,
+    post: crate::draw::WorldPost,
     scene_depth_requested: bool,
-    bloom_pipeline: Option<(wgpu::TextureFormat, crate::draw::BloomPipeline)>,
+    post_pipeline: Option<(PostKey, crate::draw::WorldPostPipeline)>,
+}
+
+/// Color format, depth sample count and feature set a world post pipeline was built for.
+type PostKey = (wgpu::TextureFormat, u32, crate::draw::WorldPost);
+
+impl WorldScaleState {
+    fn depth_sampleable(&self) -> bool { self.scene_depth_requested || self.post.ambient_occlusion }
+    fn world_scope_forced(&self) -> bool { self.post.any() || self.scene_depth_requested }
+    fn post_key(&self, format: wgpu::TextureFormat) -> PostKey {
+        let samples = crate::msaa::SampleCount::from_setting(self.msaa_setting).map_or(1, |c| c.get());
+        (format, if self.msaa_setting == 0 { 1 } else { samples }, self.post)
+    }
+    fn post_pipeline_ready(&self, format: wgpu::TextureFormat) -> bool {
+        !self.post.any() || matches!(&self.post_pipeline, Some((k, _)) if *k == self.post_key(format))
+    }
 }
 
 impl Default for WorldScaleState {
     fn default() -> Self {
-        Self { percent: 100, observations: WorldScaleObservations::default(), current_frame: FrameAvailability::default(), completed_frame: FrameAvailability::default(), cached: None, active: None, pipeline: None, identity: None, msaa_setting: 0, msaa_cached: None, msaa_seed: None, bloom: std::env::var_os("HP2_BLOOM").is_some_and(|v| v == "1"), scene_depth_requested: false, bloom_pipeline: None }
+        Self { percent: 100, observations: WorldScaleObservations::default(), current_frame: FrameAvailability::default(), completed_frame: FrameAvailability::default(), cached: None, active: None, pipeline: None, identity: None, msaa_setting: 0, msaa_cached: None, msaa_seed: None, post: crate::draw::WorldPost::default(), scene_depth_requested: false, post_pipeline: None }
     }
 }
 
@@ -147,7 +162,7 @@ struct WorldScope {
 impl RenderLoop {
     fn prepare_world_targets(&self, created: &crate::CreatedDevice, format: wgpu::TextureFormat, size: (u32, u32)) -> Result<PreparedLogicalTargets, String> {
         let device = &created.device;
-        if !self.world_scale_state.scene_depth_requested {
+        if !self.world_scale_state.depth_sampleable() {
             return self.prepare_logical_targets(device, format, size.0, size.1);
         }
         let limit = device.limits().max_texture_dimension_2d;
@@ -227,7 +242,7 @@ impl RenderLoop {
                 return Err("scene format cannot be sampled for MSAA composition".into());
             }
         }
-        let staged = crate::msaa::PreparedMsaa::prepare_with_sampleable_depth(created, format, size, count, self.world_scale_state.scene_depth_requested)?;
+        let staged = crate::msaa::PreparedMsaa::prepare_with_sampleable_depth(created, format, size, count, self.world_scale_state.depth_sampleable())?;
         let world = if count.get() > 1 { Some(self.prepare_world_targets(created, format, size)?) } else { None };
         let mut staged_pipelines = None;
         let mut staged_world_pipeline = None;
@@ -313,7 +328,7 @@ impl RenderLoop {
     pub fn set_world_scale(&mut self, created: &crate::CreatedDevice, percent: u8) -> Result<(), String> {
         let scale = WorldScale::new(percent).map_err(str::to_owned)?;
         if self.world_scale_state.active.is_some() { return Err("world render scope is active".into()); }
-        let staged = if percent == 100 && self.world_scale_state.msaa_setting == 0 && !self.world_scale_state.bloom && !self.world_scale_state.scene_depth_requested { None } else {
+        let staged = if percent == 100 && self.world_scale_state.msaa_setting == 0 && !self.world_scale_state.world_scope_forced() { None } else {
             // Settings may be applied between frames. Use the most recent
             // renderer-owned scene in that case, and still validate before
             // publishing the requested value.
@@ -341,7 +356,7 @@ impl RenderLoop {
             } else { return Err("no scene available to validate world scale".into()); };
             let size = scale.dimensions(size.0, size.1).map_err(str::to_owned)?;
             Some(crate::msaa::PreparedMsaa::prepare_with_sampleable_depth(created, format, size,
-                crate::msaa::SampleCount::from_setting(self.world_scale_state.msaa_setting).unwrap(), self.world_scale_state.scene_depth_requested)?)
+                crate::msaa::SampleCount::from_setting(self.world_scale_state.msaa_setting).unwrap(), self.world_scale_state.depth_sampleable())?)
         } else { None };
         let (pipeline, identity) = if let Some(ref targets) = staged {
             let format = targets.color.0.format();
@@ -369,26 +384,27 @@ impl RenderLoop {
                 (pipeline, identity)
             } else { (None, None) }
         } else { (None, None) };
-        let bloom_pipeline = if self.world_scale_state.bloom {
-            let format = staged.as_ref().ok_or("bloom requires world targets")?.color.0.format();
-            if !matches!(&self.world_scale_state.bloom_pipeline, Some((f, _)) if *f == format) {
+        let post_pipeline = if self.world_scale_state.post.any() {
+            let format = staged.as_ref().ok_or("world post effects require world targets")?.color.0.format();
+            let key = self.world_scale_state.post_key(format);
+            if !matches!(&self.world_scale_state.post_pipeline, Some((k, _)) if *k == key) {
                 let device = &created.device;
                 let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
                 let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
                 let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-                let pipeline = crate::draw::BloomPipeline::new(device, format);
+                let pipeline = crate::draw::WorldPostPipeline::new(device, format, key.2, key.1);
                 let poll = device.poll(wgpu::PollType::wait_indefinitely());
                 let memory_error = pollster::block_on(memory.pop());
                 let internal_error = pollster::block_on(internal.pop());
                 let validation_error = pollster::block_on(validation.pop());
-                poll.map_err(|e| format!("bloom pipeline poll failed: {e}"))?;
+                poll.map_err(|e| format!("world post pipeline poll failed: {e}"))?;
                 if let Some(error) = memory_error.or(internal_error).or(validation_error) {
-                    return Err(format!("bloom pipeline preparation failed: {error}"));
+                    return Err(format!("world post pipeline preparation failed: {error}"));
                 }
-                Some((format, pipeline))
+                Some((key, pipeline))
             } else { None }
         } else { None };
-        if let Some(pipeline) = bloom_pipeline { self.world_scale_state.bloom_pipeline = Some(pipeline); }
+        if let Some(pipeline) = post_pipeline { self.world_scale_state.post_pipeline = Some(pipeline); }
         if let Some(pipeline) = pipeline { self.world_scale_state.pipeline = Some(pipeline); }
         if let Some(identity) = identity { self.world_scale_state.identity = Some(identity); }
         if self.world_scale_state.percent != percent {
@@ -404,6 +420,19 @@ impl RenderLoop {
     }
 
     pub fn world_scale(&self) -> u8 { self.world_scale_state.percent }
+
+    /// Selects the world post effects. Targets are rebuilt on demand when ambient
+    /// occlusion changes whether world depth must be sampleable. Call between frames.
+    pub fn set_world_post(&mut self, post: crate::draw::WorldPost) {
+        if self.world_scale_state.post == post { return; }
+        if self.world_scale_state.post.ambient_occlusion != post.ambient_occlusion {
+            self.world_scale_state.cached = None;
+            self.world_scale_state.msaa_cached = None;
+        }
+        self.world_scale_state.post = post;
+    }
+
+    pub fn world_post(&self) -> crate::draw::WorldPost { self.world_scale_state.post }
 
     /// A scale can be preflighted once the first drawable scene exists.
     pub fn has_world_scale_frame(&self) -> bool { self.in_progress.is_some() }
@@ -447,7 +476,7 @@ impl RenderLoop {
         if unavailable && !self.world_scale_state.completed_frame.scale_unavailable && !self.world_scale_state.completed_frame.msaa_unavailable {
             eprintln!("WgpuDrv: WARNING: world scale {}% / MSAA {}x unavailable for this frame: earlier color draws require full-resolution composition", requested, self.world_scale_state.msaa_setting);
         }
-        if requested == 100 && self.world_scale_state.msaa_setting == 0 && !self.world_scale_state.bloom && !self.world_scale_state.scene_depth_requested { return Ok(false); }
+        if requested == 100 && self.world_scale_state.msaa_setting == 0 && !self.world_scale_state.world_scope_forced() { return Ok(false); }
         // A lost or outdated surface can leave the engine issuing draws without
         // an acquired frame. Match the ordinary draw path's no-op behavior.
         let mut frame = self.in_progress.take().unwrap();
@@ -469,7 +498,7 @@ impl RenderLoop {
         let format = frame.color_format;
         let stale = self.world_scale_state.cached.as_ref().is_none_or(|t| (t.color.0.width(), t.color.0.height()) != size || t.color.0.format() != format);
         let pipeline_stale = !matches!(&self.world_scale_state.pipeline, Some((f, _)) if *f == format) || self.world_scale_state.identity.is_none()
-            || (self.world_scale_state.bloom && !matches!(&self.world_scale_state.bloom_pipeline, Some((f, _)) if *f == format));
+            || !self.world_scale_state.post_pipeline_ready(format);
         if (stale || pipeline_stale) && let Err(error) = self.set_world_scale(created, requested) {
             self.world_scale_state.composition_failed(&error);
             return Ok(false);
@@ -526,9 +555,18 @@ impl RenderLoop {
                 })], ..Default::default()
             });
         }
-        if self.world_scale_state.bloom {
-            self.world_scale_state.bloom_pipeline.as_ref().unwrap().1.record(&created.device, &mut frame.encoder,
-                &scope.world_color.1, &scope.full_view);
+        let mut post_error = None;
+        if self.world_scale_state.post.any() {
+            let depth = self.depth_target.as_ref().map(|(_, view)| view);
+            let depth_plane = match self.last_scene {
+                Some(scene) if scene.is_wireframe_zfar => 3,
+                Some(scene) if !scene.is_ortho && scene.far_plane_scale >= 4.0 => 2,
+                Some(scene) if !scene.is_ortho && scene.far_plane_scale >= 2.0 => 1,
+                _ => 0,
+            };
+            let recorded = self.world_scale_state.post_pipeline.as_ref().ok_or_else(|| "world post pipeline was lost".to_owned())
+                .and_then(|(_, pipeline)| pipeline.record(&created.device, &mut frame.encoder, &scope.world_color.1, depth, &scope.full_view, depth_plane));
+            post_error = recorded.err();
         } else {
             self.world_scale_state.pipeline.as_ref().unwrap().1.record(&created.device, &mut frame.encoder,
                 self.world_scale_state.identity.as_ref().unwrap(), &scope.world_color.1, &scope.full_view);
@@ -540,7 +578,7 @@ impl RenderLoop {
         self.world_scale_state.cached = Some(PreparedLogicalTargets { color: scope.world_color, depth: world_depth });
         self.world_scale_state.msaa_cached = scope.msaa;
         self.in_progress = Some(frame);
-        Ok(())
+        post_error.map_or(Ok(()), Err)
     }
 }
 
@@ -548,11 +586,45 @@ impl RenderLoop {
 mod tests {
     use super::*;
 
+    const BLOOM_ONLY: crate::draw::WorldPost = crate::draw::WorldPost { bloom: true, ambient_occlusion: false, color_grading: false, sharpen: false, fxaa: false };
+
     #[test]
-    fn bloom_shader_validates() {
-        let module = naga::front::wgsl::parse_str(include_str!("shaders/bloom.wgsl")).expect("parse bloom WGSL");
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-            .validate(&module).expect("validate bloom WGSL");
+    #[ignore = "requires a real GPU adapter"]
+    fn gpu_world_scale_ao_accepts_each_depth_plane() {
+        let gpu = crate::create_device_sync(crate::BackendChoice::Auto, None::<crate::HeadlessSurfaceCreator>).unwrap();
+        let device = &gpu.device;
+        let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let post = crate::draw::WorldPost { ambient_occlusion: true, ..Default::default() };
+        let pipeline = crate::draw::WorldPostPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, post, 1);
+        let texture = |format, usage| device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("AO depth-plane test"), size: wgpu::Extent3d { width: 4, height: 4, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format, usage, view_formats: &[],
+        });
+        let source = texture(wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING);
+        let target = texture(wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let depth = texture(wgpu::TextureFormat::Depth32Float, wgpu::TextureUsages::TEXTURE_BINDING);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        for plane in 0..4 {
+            pipeline.record(device, &mut encoder, &source.create_view(&Default::default()),
+                Some(&depth.create_view(&Default::default())), &target.create_view(&Default::default()), plane).unwrap();
+        }
+        gpu.queue.submit([encoder.finish()]);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(pollster::block_on(validation.pop()).is_none(), "AO shader and depth bindings");
+    }
+
+    #[test]
+    fn world_post_shader_validates_every_feature_combination() {
+        for bits in 0u8..32 {
+            for samples in [1, 4] {
+                let post = crate::draw::WorldPost { bloom: bits & 1 != 0, ambient_occlusion: bits & 2 != 0, color_grading: bits & 4 != 0, sharpen: bits & 8 != 0, fxaa: bits & 16 != 0 };
+                let source = crate::draw::world_post_source(post, samples);
+                let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("parse world post WGSL {post:?}: {e}"));
+                naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                    .validate(&module).unwrap_or_else(|e| panic!("validate world post WGSL {post:?}: {e:?}"));
+            }
+        }
     }
 
     #[test]
@@ -562,7 +634,7 @@ mod tests {
         let device = &gpu.device;
         // Pipeline creation under an error scope validates the production WGSL.
         let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let _pipeline = crate::draw::BloomPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm);
+        let _pipeline = crate::draw::WorldPostPipeline::new(device, wgpu::TextureFormat::Rgba8Unorm, BLOOM_ONLY, 1);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         assert!(pollster::block_on(validation.pop()).is_none(), "bloom shader validation");
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -589,7 +661,7 @@ mod tests {
                 view_formats: &[],
             });
             let mut renderer = RenderLoop::new();
-            renderer.world_scale_state.bloom = bloom;
+            renderer.world_scale_state.post = crate::draw::WorldPost { bloom: bloom, ..Default::default() };
             crate::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
             assert_eq!(renderer.begin_scaled_world(&gpu).unwrap(), bloom);
             if bloom { assert!(renderer.set_world_scale(&gpu, 50).is_err()); }
@@ -655,7 +727,7 @@ mod tests {
             view_formats: &[],
         });
         let mut renderer = RenderLoop::new();
-        renderer.world_scale_state.bloom = true;
+        renderer.world_scale_state.post = crate::draw::WorldPost { bloom: true, ..Default::default() };
         crate::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
         renderer.set_world_scale(&gpu, 50).unwrap();
         renderer.set_msaa(&gpu, 4).unwrap();
@@ -690,7 +762,7 @@ mod tests {
             (10, 6, wgpu::TextureFormat::Bgra8Unorm),
         ];
         let mut renderer = RenderLoop::new();
-        renderer.world_scale_state.bloom = true;
+        renderer.world_scale_state.post = crate::draw::WorldPost { bloom: true, ..Default::default() };
         for (index, (width, height, format)) in cases.into_iter().enumerate() {
             let texture = target(width, height, format);
             crate::begin_offscreen_frame(&gpu, &mut renderer, &texture, wgpu::Color::BLACK);
@@ -704,13 +776,13 @@ mod tests {
             assert_eq!(cached.color.0.format(), format);
             assert_eq!((cached.depth.0.width(), cached.depth.0.height()), (width / 2, height / 2));
             assert_eq!(renderer.world_scale_state.pipeline.as_ref().unwrap().0, format);
-            assert_eq!(renderer.world_scale_state.bloom_pipeline.as_ref().unwrap().0, format);
+            assert_eq!(renderer.world_scale_state.post_pipeline.as_ref().unwrap().0.0, format);
             let restored_depth = &renderer.depth_target.as_ref().unwrap().0;
             assert_eq!((restored_depth.width(), restored_depth.height()), (width, height));
             crate::unlock_frame(&gpu, &mut renderer, false);
         }
         let mut disabled = RenderLoop::new();
-        disabled.world_scale_state.bloom = false;
+        disabled.world_scale_state.post = crate::draw::WorldPost { bloom: false, ..Default::default() };
         for (width, height, format) in cases {
             let texture = target(width, height, format);
             crate::begin_offscreen_frame(&gpu, &mut disabled, &texture, wgpu::Color::BLACK);
@@ -718,7 +790,7 @@ mod tests {
             disabled.end_scaled_world(&gpu).unwrap();
             assert!(disabled.world_scale_state.cached.is_none());
             assert!(disabled.world_scale_state.pipeline.is_none());
-            assert!(disabled.world_scale_state.bloom_pipeline.is_none());
+            assert!(disabled.world_scale_state.post_pipeline.is_none());
             crate::unlock_frame(&gpu, &mut disabled, false);
         }
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
@@ -747,7 +819,7 @@ mod tests {
                         view_formats: &[],
                     });
                     let mut renderer = RenderLoop::new();
-                    renderer.world_scale_state.bloom = false;
+                    renderer.world_scale_state.post = crate::draw::WorldPost { bloom: false, ..Default::default() };
                     crate::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
                     if color_features.flags.sample_count_supported(4)
                         && depth_features.flags.sample_count_supported(4)
@@ -780,7 +852,7 @@ mod tests {
             let target = texture("scene depth world target");
             let output = texture("scene depth readback");
             let mut renderer = RenderLoop::new();
-            renderer.world_scale_state.bloom = false;
+            renderer.world_scale_state.post = crate::draw::WorldPost { bloom: false, ..Default::default() };
             crate::begin_offscreen_frame(&gpu, &mut renderer, &target, wgpu::Color::BLACK);
             renderer.set_scene_depth_requested(&gpu, true).unwrap();
             if samples > 1 { renderer.set_msaa(&gpu, samples as i32).unwrap(); }
@@ -857,7 +929,7 @@ mod tests {
             view_formats: &[],
         });
         let mut renderer = RenderLoop::new();
-        renderer.world_scale_state.bloom = false;
+        renderer.world_scale_state.post = crate::draw::WorldPost { bloom: false, ..Default::default() };
         for (index, (width, height, format, scale)) in [
             (16, 12, wgpu::TextureFormat::Rgba8Unorm, 50),
             (10, 6, wgpu::TextureFormat::Rgba8Unorm, 100),

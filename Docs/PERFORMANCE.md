@@ -142,6 +142,35 @@ question without dereferencing the pointer. Uncapped, `-wgpu`, retail data copy,
 
 With the fix, the Rust HUD costs the same as `HP2_STOCK_HUD=1` (Entry 2.9-3.4 ms, Grandstaircase_hub 8.5 ms).
 
+## Change 6: map-load garbage collection (hp2-core, hp2-engine)
+
+Garbage collection is the largest part of a level switch (PrivetDr: 88-98 ms of ~135 ms). Two costs in it
+were pure waste:
+
+* `ArchiveRoot::new` re-interned the class names `StringProperty`, `StrProperty` and `StructProperty`
+  (and `ObjectProperty` per class property) for every object it marked. `CoreAccess::property_type_names`
+  now interns them once per run.
+* The mark pass built a full-name `Vec<u32>` for every reference edge and every destroyed object only
+  to hand it to a trace sink that `LoadMap` discards. `DirectGc` now skips that when nothing is
+  listening; `HP2_GC_TRACE` still turns the trace on, and object order, destruction order and RNG use
+  are unchanged.
+
+Interleaved A/B, same machine, retail data copy, wgpu, `HP2_FRAME_TIMING=1`, `--ticks 60`, 3 runs each,
+median `LoadMap` wall time to the first drawn frame:
+
+| Map | Before | After | Change |
+| --- | --- | --- | --- |
+| PrivetDr | 134 ms | 104 ms | -22% |
+| Adv1Willow | 190 ms | 141 ms | -26% |
+| GreatHall_G | 126 ms | 91 ms | -28% |
+| Grounds_hub | 251 ms | 208 ms | -17% |
+| Quidditch | 222 ms | 188 ms | -15% |
+| Duel01 | 121 ms | 92 ms | -24% |
+
+The startup `Entry` load is 350 ms -> 310 ms. PrivetDr's `Gc` phase went 97.7 ms -> 57.0 ms. What is left is
+the per-object property walk (`property_archive::load_one` scans the class property list linearly for
+every tag, as the original does) and `EndLoad`; neither was changed.
+
 ## Image-quality features (Sound/Video > Advanced, all default on)
 
 | Setting | Ini key `[WgpuDrv.WgpuRenderDevice]` | What it does |

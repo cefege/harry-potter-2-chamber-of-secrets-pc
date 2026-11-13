@@ -97,11 +97,13 @@ impl BootHost {
         }
     }
     pub(super) fn fail_status(&mut self, status: i32) -> i32 {
-        if let Some(error) = self.first_error.take() {
-            eprintln!("hp2_game: {error}");
-        } else {
-            eprintln!("hp2_game: launcher service failed ({status})");
-        }
+        let message = match self.first_error.take() {
+            Some(error) => error.to_string(),
+            None => format!("launcher service failed ({status})"),
+        };
+        eprintln!("hp2_game: {message}");
+        #[cfg(unix)]
+        hp2_platform::crash_reporter::report_fatal_error(&message);
         1
     }
     fn call(
@@ -177,6 +179,9 @@ impl BootHost {
             }
             Leaf::SetVideoHint => hp2_platform::launcher_display_modes::set_video_driver_hint(),
             Leaf::SdlInit => {
+                if let Some(owner) = self.owner.as_ref() {
+                    hp2_engine::display_options::publish_boot_preferences(owner.access());
+                }
                 out.integer = hp2_platform::launcher_boot_video::init_video_and_joystick()
             }
             Leaf::LogSdlInitFailure => self.log_sdl_failure()?,
@@ -316,6 +321,8 @@ impl BootHost {
             .as_ref()
             .ok_or_else(|| RuntimeError::new("User root was not initialized"))?
             .join("HarryPotter2.log");
+        #[cfg(unix)]
+        hp2_platform::crash_reporter::set_engine_log(&log_path);
         let mut log = fs::File::create(log_path)
             .map_err(|e| RuntimeError::new(&format!("could not open game log: {e}")))?;
         log.write_all(&[0xff, 0xfe])

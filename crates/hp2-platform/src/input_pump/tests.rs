@@ -837,3 +837,128 @@ fn verification_keeps_resize_and_suppresses_focus_transitions() {
     );
     assert!(translate_event_with_verification(&pending, &gained, true).is_empty());
 }
+
+#[test]
+fn constants_for_controller_events_match_pinned_header_values() {
+    assert_eq!(sdl_event::CONTROLLERAXISMOTION, 0x650);
+    assert_eq!(sdl_event::CONTROLLERBUTTONDOWN, 0x651);
+    assert_eq!(sdl_event::CONTROLLERBUTTONUP, 0x652);
+    assert_eq!(sdl_event::CONTROLLERDEVICEADDED, 0x653);
+    assert_eq!(sdl_event::CONTROLLERDEVICEREMOVED, 0x654);
+}
+
+#[test]
+fn mouse_sensitivity_multiplies_each_axis_independently() {
+    let mut c = ctx();
+    c.mouse_scale_x = 2.0;
+    c.mouse_scale_y = 0.5;
+    // Unit multipliers are bit-identical to the stock path.
+    assert_eq!(
+        collect(&relative_mouse_scaled(&c, 3, -2, 1.0, 1.0)),
+        vec![
+            Action::Cause { key: ik::MOUSE_X, action: ist::AXIS, delta: 6.0 },
+            Action::Cause { key: ik::MOUSE_Y, action: ist::AXIS, delta: 1.0 },
+        ]
+    );
+    assert_eq!(
+        collect(&relative_mouse_scaled(&c, 3, -2, 2.0, 0.5)),
+        vec![
+            Action::Cause { key: ik::MOUSE_X, action: ist::AXIS, delta: 12.0 },
+            Action::Cause { key: ik::MOUSE_Y, action: ist::AXIS, delta: 0.5 },
+        ]
+    );
+}
+
+#[test]
+fn controller_events_map_to_joystick_keys_and_verification_drops_them() {
+    let mut c = ctx();
+    c.joystick_dead_zone = 0.0;
+    let stick = SdlEvent {
+        joy_axis: crate::game_controller::axis::LEFT_X as u8,
+        joy_axis_value: 16384,
+        ..event(sdl_event::CONTROLLERAXISMOTION)
+    };
+    assert_eq!(
+        collect(&translate_event_with_verification(&c, &stick, false)),
+        vec![Action::Cause { key: ik::JOY_X, action: ist::AXIS, delta: 0.5 }]
+    );
+    let jump = SdlEvent {
+        joy_button: crate::game_controller::button::A as u8,
+        ..event(sdl_event::CONTROLLERBUTTONDOWN)
+    };
+    assert_eq!(
+        collect(&translate_event_with_verification(&c, &jump, false)),
+        vec![Action::Cause { key: ik::JOY1 + 1, action: ist::PRESS, delta: 0.0 }]
+    );
+    let release = SdlEvent { kind: sdl_event::CONTROLLERBUTTONUP, ..jump };
+    assert_eq!(
+        collect(&translate_event_with_verification(&c, &release, false)),
+        vec![Action::Cause { key: ik::JOY1 + 1, action: ist::RELEASE, delta: 0.0 }]
+    );
+    for ev in [stick, jump, release] {
+        assert!(collect(&translate_event_with_verification(&c, &ev, true)).is_empty());
+    }
+    // Device events never become input.
+    assert!(collect(&translate_event_with_verification(&c, &event(sdl_event::CONTROLLERDEVICEADDED), false)).is_empty());
+}
+
+#[test]
+fn controller_pointer_deadzone_motion_clamp_and_mouse_sync() {
+    let c = ctx();
+    let mut pointer = MenuPointer::default();
+    let mut axis = event(sdl_event::CONTROLLERAXISMOTION);
+    axis.joy_axis = game_controller::axis::LEFT_X as u8;
+    axis.joy_axis_value = 5000;
+    let actions = translate_event_inner(&c, &axis, false, Some(&mut pointer), true);
+    assert_eq!(actions.len(), 1, "the joystick axis must still be forwarded");
+    assert!(pointer.step(&c, 1.0).is_none(), "small stick movements are ignored");
+    axis.joy_axis_value = 32767;
+    translate_event_inner(&c, &axis, false, Some(&mut pointer), true);
+    assert_eq!(pointer.step(&c, 1.0), Some(Action::EngineMousePosition { buttons: 0, x: 799.0, y: 300.0 }));
+    let mut motion = event(sdl_event::MOUSEMOTION);
+    motion.motion_x = 100;
+    motion.motion_y = 80;
+    translate_event_inner(&c, &motion, false, Some(&mut pointer), true);
+    let Some(Action::EngineMousePosition { x, y, .. }) = pointer.step(&c, 0.1) else { panic!("expected pointer movement") };
+    assert!((x - 196.0).abs() < 0.001 && y == 80.0);
+    axis.joy_axis_value = 0;
+    translate_event_inner(&c, &axis, false, Some(&mut pointer), true);
+    let mut right = event(sdl_event::CONTROLLERBUTTONDOWN);
+    right.joy_button = game_controller::button::DPAD_RIGHT as u8;
+    assert_eq!(collect(&translate_event_inner(&c, &right, false, Some(&mut pointer), true)),
+        vec![Action::Cause { key: game_controller::JOY_POV_RIGHT, action: ist::PRESS, delta: 0.0 }]);
+    let Some(Action::EngineMousePosition { x, y, .. }) = pointer.step(&c, 0.1) else { panic!("expected D-pad movement") };
+    assert!((x - 232.0).abs() < 0.001 && y == 80.0);
+}
+
+#[test]
+fn controller_menu_buttons_pair_across_mode_changes() {
+    let c = ctx();
+    let mut pointer = MenuPointer::default();
+    for (button, menu_key, game_key) in [
+        (game_controller::button::A, ik::LEFT_MOUSE, ik::JOY1 + 1),
+        (game_controller::button::B, ik::ESCAPE, ik::JOY1 + 2),
+    ] {
+        let mut down = event(sdl_event::CONTROLLERBUTTONDOWN);
+        down.joy_button = button as u8;
+        let up = SdlEvent { kind: sdl_event::CONTROLLERBUTTONUP, ..down };
+        let actions = collect(&translate_event_inner(&c, &down, false, Some(&mut pointer), true));
+        assert_eq!(actions.last(), Some(&Action::Cause { key: menu_key, action: ist::PRESS, delta: 0.0 }));
+        assert_eq!(collect(&translate_event_inner(&c, &up, false, Some(&mut pointer), false)),
+            vec![Action::Cause { key: menu_key, action: ist::RELEASE, delta: 0.0 }]);
+        assert_eq!(collect(&translate_event_inner(&c, &down, false, Some(&mut pointer), false)),
+            vec![Action::Cause { key: game_key, action: ist::PRESS, delta: 0.0 }]);
+        assert_eq!(collect(&translate_event_inner(&c, &up, false, Some(&mut pointer), true)),
+            vec![Action::Cause { key: game_key, action: ist::RELEASE, delta: 0.0 }]);
+        assert!(translate_event_inner(&c, &down, true, Some(&mut pointer), true).is_empty());
+    }
+}
+
+#[test]
+fn controller_labels_replace_only_complete_key_tokens() {
+    assert_eq!(game_controller::button_labels("Joy1 or Joy10 / JoyPovUp"),
+        Some("X or R3 / D-pad Up".to_owned()));
+    assert_eq!(game_controller::button_labels("Joy8 Joy100 xJoy1 JoyPovUp_suffix"), None);
+    assert_eq!(game_controller::button_labels("Joy2, Joy3; Joy11 Joy12"),
+        Some("A, B; LT RT".to_owned()));
+}

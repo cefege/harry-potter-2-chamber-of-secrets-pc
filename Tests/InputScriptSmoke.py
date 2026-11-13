@@ -332,6 +332,8 @@ def _supervised_run(
     Returns (captured output, exit status or None, timed_out, launch_error).
     """
     environment = os.environ.copy()
+    # Never show the window or take the user's focus/cursor; HP2_BACKGROUND=0 shows it.
+    environment.setdefault("HP2_BACKGROUND", "1")
     temporary = home / "tmp"
     config = home / ".config"
     cache = home / ".cache"

@@ -105,6 +105,16 @@ impl<'a, 'd> CoreTravelOps<'a, 'd> {
         self.context.access.emit_log(category, &message)
     }
 
+    /// Before a slot is loaded: a missing/corrupt `SaveN.usa` is replaced by its `.bak`.
+    fn recover_slot_file(&self, slot: &std::path::Path) -> RuntimeResult<()> {
+        use crate::save_slot_recovery::{recover_slot, Recovery};
+        match recover_slot(slot) {
+            Recovery::NotNeeded => Ok(()),
+            Recovery::Restored(why) => self.log_text("Warning: save slot was unusable (", &format!("{why}); restored from {}.bak", slot.display()).chars().map(u32::from).collect::<Vec<_>>()),
+            Recovery::Unrecoverable(why) => self.log_text("Warning: save slot is unusable and has no usable backup: ", &format!("{}: {why}", slot.display()).chars().map(u32::from).collect::<Vec<_>>()),
+        }
+    }
+
     fn object_name(&self, object: *mut UObject) -> RuntimeResult<Vec<u32>> {
         if object.is_null() { return Err(RuntimeError::new("Null object in canonical game travel")); }
         self.context.access.name_text(i32::from_ne_bytes(unsafe { (*object).name }))
@@ -331,6 +341,7 @@ impl TravelOps for CoreTravelOps<'_, '_> {
                 }
                 12 => {
                     let slot = arg as i32;
+                    self.recover_slot_file(&self.slot_file(&format!("Save{slot}.usa"))?)?;
                     let mut error = empty_string();
                     let mut temp = empty_string();
                     let mut path = hp2_core::native_path::path_to_units(&self.slot_file(&format!("Save{slot}.usa"))?)?;

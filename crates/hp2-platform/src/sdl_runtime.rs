@@ -38,15 +38,28 @@ mod ffi {
     }
 }
 
+/// Player preference (`FullscreenMode=NativeSpaces`) published by the engine before
+/// `SDL_Init`; SDL reads the Spaces hint once at video init, so changing it needs a restart.
+#[cfg(feature = "sdl")]
+static NATIVE_SPACES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Selects macOS native-Spaces fullscreen for the next `SDL_Init` (no effect afterwards).
+#[cfg(feature = "sdl")]
+pub fn request_native_spaces(enabled: bool) {
+    NATIVE_SPACES.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Prefer SDL's borderless desktop implementation over macOS fullscreen
-/// Spaces. SDL must read this hint before video initialization. Respect an
-/// existing SDL hint or environment override instead of replacing it.
+/// Spaces unless the player chose native Spaces. SDL must read this hint before
+/// video initialization. Respect an existing SDL hint or environment override
+/// instead of replacing it.
 #[cfg(feature = "sdl")]
 pub fn configure_fullscreen_hint() -> bool {
     #[cfg(target_os = "macos")]
     unsafe {
         if !ffi::SDL_GetHint(c"SDL_VIDEO_MAC_FULLSCREEN_SPACES".as_ptr()).is_null() { return true; }
-        if ffi::SDL_SetHint(c"SDL_VIDEO_MAC_FULLSCREEN_SPACES".as_ptr(), c"0".as_ptr()) != 0 { return true; }
+        let value = if NATIVE_SPACES.load(std::sync::atomic::Ordering::Relaxed) { c"1" } else { c"0" };
+        if ffi::SDL_SetHint(c"SDL_VIDEO_MAC_FULLSCREEN_SPACES".as_ptr(), value.as_ptr()) != 0 { return true; }
         ffi::SDL_SetError(c"Could not set macOS fullscreen hint".as_ptr());
         false
     }

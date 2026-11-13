@@ -56,6 +56,14 @@ pub struct PlayRequest {
     pub in_priority: f32,
 }
 
+/// Whether a sound is a voice line: the `SLOT_Talk` slot (every `PlayDialog`
+/// default and the character grunts), or a streamed non-music sound (the
+/// `AllDialog` XA streams).
+fn is_voice(is_talk: bool, core_flags: i32, req_flags: i32) -> bool {
+    is_talk
+        || ((core_flags | req_flags) & SF_STREAMING != 0 && (core_flags | req_flags) & SF_MUSIC == 0)
+}
+
 /// The slot match shared by `StopSound(Actor, Id, Sound, ...)` and `ModifySound`.
 fn matches_slot(source: &Source, actor: usize, id: i32, sound: usize) -> bool {
     let same_slot = (source.id & !1) == (id & !1) || ((id & 14) == SLOT_NONE && source.id < 0);
@@ -104,6 +112,7 @@ impl Subsystem {
         s.id = 0;
         s.started = false;
         s.paused = false;
+        s.voice = false;
         Ok(())
     }
 
@@ -231,6 +240,7 @@ impl Subsystem {
         } else {
             req.location
         };
+        let voice = is_voice(is_talk, info.core_flags, req.flags);
         let volume_field = if (req.flags & SF_MUSIC) != 0 {
             cfg.music_volume
         } else {
@@ -275,6 +285,7 @@ impl Subsystem {
             s.volume = volume_field;
             s.started = true;
             s.paused = false;
+            s.voice = voice;
             s.flags = flags;
             if let Some(ls) = lip_sync {
                 s.lip_sync = Some(ls);
@@ -283,7 +294,8 @@ impl Subsystem {
 
         let sid = self.sources[index].source;
         host.al_source_f(sid, AL_REFERENCE_DISTANCE, used_radius * DISTANCE_FACTOR);
-        host.al_source_f(sid, AL_GAIN, if fade_in { 0.0 } else { volume_field });
+        let start_gain = self.sources[index].output_gain(volume_field, cfg);
+        host.al_source_f(sid, AL_GAIN, if fade_in { 0.0 } else { start_gain });
         host.al_source_f(sid, AL_PITCH, pitch);
         let looping = if (working & SF_STREAMING) != 0 {
             AL_FALSE
@@ -498,6 +510,7 @@ impl Subsystem {
     pub fn modify_sound<H: Host + ?Sized>(
         &mut self,
         host: &mut H,
+        cfg: &Config,
         actor: usize,
         id: i32,
         sound: usize,
@@ -514,7 +527,8 @@ impl Subsystem {
                 SOUND_VOLUME => {
                     let volume = clamp(value, 0.01, 1.0);
                     self.sources[i].volume = volume;
-                    host.al_source_f(sid, AL_GAIN, volume);
+                    let gain = self.sources[i].output_gain(volume, cfg);
+                    host.al_source_f(sid, AL_GAIN, gain);
                 }
                 SOUND_RADIUS => {
                     {
@@ -583,5 +597,57 @@ impl Subsystem {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SLOT_TALK_ID: i32 = SLOT_TALK * 2;
+
+    #[test]
+    fn voice_is_talk_slot_or_streamed_non_music() {
+        // Talk slot, whatever the sound is.
+        assert!(is_voice((SLOT_TALK_ID & 14) == SLOT_TALK * 2, 0, 0));
+        // AllDialog-style XA stream played on another slot.
+        assert!(is_voice(false, SF_STREAMING, 0));
+        assert!(is_voice(false, 0, SF_STREAMING));
+        // Music is streamed but is not a voice, in either flag word.
+        assert!(!is_voice(false, SF_STREAMING | SF_MUSIC, SF_STREAMING | SF_MUSIC));
+        assert!(!is_voice(false, SF_STREAMING, SF_MUSIC));
+        // Ordinary effects.
+        assert!(!is_voice(false, 0, 0));
+        assert!(!is_voice(false, SF_NO3D, 0));
+    }
+
+    fn cfg(voice_volume: f32) -> Config {
+        Config {
+            doppler_factor: 1.0,
+            music_volume: 0.5,
+            sound_volume: 0.5,
+            voice_volume,
+            roll_off: 1.0,
+            max_channels: 32,
+            use_precache: false,
+            max_radius_multiplier: 1.0,
+            use_eax: false,
+            use_mmsystem: false,
+            reverse_stereo: false,
+        }
+    }
+
+    #[test]
+    fn voice_gain_scales_only_voice_sources_and_full_scale_is_exact() {
+        let mut source = Source::empty(1);
+        for base in [0.01_f32, 0.3, 0.7, 1.0] {
+            assert_eq!(source.output_gain(base, &cfg(0.0)).to_bits(), base.to_bits());
+        }
+        source.voice = true;
+        for base in [0.01_f32, 0.3, 0.7, 1.0] {
+            assert_eq!(source.output_gain(base, &cfg(1.0)).to_bits(), base.to_bits());
+        }
+        assert_eq!(source.output_gain(0.8, &cfg(0.5)), 0.4);
+        assert_eq!(source.output_gain(0.8, &cfg(0.0)), 0.0);
     }
 }

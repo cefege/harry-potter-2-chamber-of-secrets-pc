@@ -66,6 +66,8 @@ struct DirectGc<'a, 'b> {
     marks: MarkState,
     output: &'b dyn Fn(GcLog) -> RuntimeResult<()>,
     no_gc: i32,
+    /// Emit the per-object edge/destroy events (each copies full names).
+    trace: bool,
 }
 
 impl DirectGc<'_, '_> {
@@ -447,6 +449,7 @@ impl<'a, 'b, 'archive> GcMarkOps<ObjectArchive<'archive>> for DirectGc<'a, 'b> {
     }
 
     fn referenced(&self, object: *mut c_void, context: *mut c_void) -> RuntimeResult<()> {
+        if !self.trace { return Ok(()); }
         self.emit(GcLog::Referenced {
             object: self.full_name(object.cast())?,
             context: if context.is_null() {
@@ -458,6 +461,7 @@ impl<'a, 'b, 'archive> GcMarkOps<ObjectArchive<'archive>> for DirectGc<'a, 'b> {
     }
 
     fn mark_edge(&self, object: *mut c_void, referrer: *mut c_void) -> RuntimeResult<()> {
+        if !self.trace { return Ok(()); }
         self.emit(GcLog::Marked {
             object: self.full_name(object.cast())?,
             context: if referrer.is_null() {
@@ -555,6 +559,7 @@ impl PurgeOps for DirectGc<'_, '_> {
     }
 
     fn log_destroy(&self, index: i32, object: *mut c_void) -> RuntimeResult<()> {
+        if !self.trace { return Ok(()); }
         self.emit(GcLog::GarbageCollected {
             index,
             object: self.full_name(object.cast())?,
@@ -638,11 +643,28 @@ impl CoreAccess<'_> {
         no_gc: i32,
         output: &impl Fn(GcLog) -> RuntimeResult<()>,
     ) -> RuntimeResult<()> {
+        self.collect_garbage_with(keep, no_gc, true, output)
+    }
+
+    /// Like [`Self::collect_garbage`]; `trace == false` skips the per-object `Referenced`,
+    /// `Marked` and `GarbageCollected` events, whose copied full names cost an allocation per
+    /// object even when the consumer discards them.
+    ///
+    /// # Errors
+    /// Returns the first archive, class-hook, purge, or output callback error.
+    pub fn collect_garbage_with(
+        self,
+        keep: u32,
+        no_gc: i32,
+        trace: bool,
+        output: &impl Fn(GcLog) -> RuntimeResult<()>,
+    ) -> RuntimeResult<()> {
         let gc = DirectGc {
             access: self,
             marks: MarkState::default(),
             output,
             no_gc,
+            trace,
         };
         gc.emit(GcLog::Collecting)?;
         object_gc::initialize_marks_with(&gc)?;
@@ -670,6 +692,7 @@ impl CoreAccess<'_> {
             marks: MarkState::default(),
             output,
             no_gc: 0,
+            trace: true,
         };
         // SAFETY: forwarded caller contract; generic policy preserves ignored-slot
         // clearing and committed mark/context mutations if recursion returns an error.
@@ -696,6 +719,7 @@ impl CoreAccess<'_> {
             marks: MarkState::default(),
             output,
             no_gc,
+            trace: true,
         };
         // SAFETY: forwarded caller contract; the decision policy only reads and
         // conditionally rewrites the target through the exact supplied slot.

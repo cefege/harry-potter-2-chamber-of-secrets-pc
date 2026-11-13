@@ -55,8 +55,14 @@ checks). Settings belong in the in-game Options pages. Every menu page and the m
 box are drawn and driven by `hp2-ui`: Sound/Video has a hand-written view (`ui_pages`);
 every other page is mirrored (`ui_mirror`: stock controls stay alive and in place, their
 own `Paint`/pointer handlers are swallowed by script pre-call hooks, actions run through
-the controls' own script functions). The HUD subtitle bar, letterbox and status counters
-are Rust (`ui_hud`); the health bar and the minigame HUD managers are still stock.
+the controls' own script functions). Every HUD view is drawn by Rust `hp2-ui` components
+installed by `ui_hud::install` (health, enemy health, magic, spell selector, timers, status
+counters, vendor, pickups, popups, Quidditch, challenge/lesson scores, cutscene text, console
+and loading screens); scripts keep gameplay state, dispatch and order.
+Extra settings live on the Video page's **More options** panel (draw distance, voice volume,
+mouse axes, raw mouse, gamepad, HUD size, fullscreen style, monitor, subtitle size, always
+subtitles, colour-blind HUD). In menus a gamepad drives the pointer (stick/D-pad), A clicks,
+B is Escape; the Controls page shows pad button names when a controller is active.
 `HP2_STOCK_MENUS=1` / `HP2_STOCK_HUD=1` restore the stock drawing. See
 [Docs/UI_REWRITE.md](Docs/UI_REWRITE.md) and
 [Docs/STOCK_MENU_LAYOUT.md](Docs/STOCK_MENU_LAYOUT.md). Do not restore the launcher
@@ -67,7 +73,9 @@ while the game keeps running (`game_save_owner`; `HP2_SYNC_SAVE=1` forces the bl
 loads, travel and shutdown wait for it). The level-replacing fade is 25% of
 `Console.FadeoutTime` (`HP2_LOAD_FADE_SCALE`). Image-quality features (`Mipmaps`,
 `AlphaToCoverage`, `SmoothLightmaps` in `[WgpuDrv.WgpuRenderDevice]`, render scale 50-200%)
-default on. Performance and quality evidence is in [Docs/PERFORMANCE.md](Docs/PERFORMANCE.md).
+default on. Volumetric fog (`DistanceFog`, default on: original behaviour) is gated, as in
+`UnRender.cpp`, by the viewport actor's zone, not the camera's; `DrawDistance` (Original/2x/4x)
+only scales the perspective far plane. Performance and quality evidence is in [Docs/PERFORMANCE.md](Docs/PERFORMANCE.md).
 
 Generated ABI declarations and pinned third-party sources are not style-cleanup
 candidates. Inspect a policy's real caller and resource owner before claiming a
@@ -153,6 +161,10 @@ ctest --preset macos-arm64 --no-tests=error --output-on-failure -R '^core_config
 Use `linux-arm64` or `linux-x64` on a matching Linux host. Sanitizer and full-map
 presets are separate qualifications; a preset name does not prove that Rust was
 instrumented. Inspect the actual compiler/link flags and reports.
+
+Test harnesses (`Build/game_test.py`, `Tests/InputScriptSmoke.py`, `Build/perf_baseline.py`)
+run the game hidden by default (`HP2_BACKGROUND=1`: no window, no mouse grab, frames render
+off screen and still capture); set `HP2_BACKGROUND=0` to see the window.
 
 UI, HUD and rendering changes need pictures, not just tests: drive the game with
 `Tests/InputScriptSmoke.py --smoke` fixtures, capture frames with `HP2_CAPTURE_FRAMES` /

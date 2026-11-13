@@ -617,6 +617,8 @@ def _isolated_environment(home: Path) -> dict[str, str]:
     for directory in (temporary, config, cache, data):
         directory.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
+    # Never show the window or take the user's focus/cursor; HP2_BACKGROUND=0 shows it.
+    environment.setdefault("HP2_BACKGROUND", "1")
     environment.update({
         "HOME": str(home), "CFFIXED_USER_HOME": str(home),
         "TMPDIR": str(temporary) + os.sep, "XDG_CONFIG_HOME": str(config),

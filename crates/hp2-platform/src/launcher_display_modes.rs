@@ -64,7 +64,7 @@ pub fn set_video_driver_hint() {
     unsafe {
         ffi::SDL_SetHint(SDL_HINT_VIDEODRIVER.as_ptr().cast(), DRIVER.as_ptr().cast());
         #[cfg(target_os = "macos")]
-        ffi::SDL_SetHint(c"SDL_MAC_BACKGROUND_APP".as_ptr(), c"0".as_ptr());
+        ffi::SDL_SetHint(c"SDL_MAC_BACKGROUND_APP".as_ptr(), if crate::background_mode() { c"1" } else { c"0" }.as_ptr());
     }
 }
 

@@ -264,7 +264,9 @@ pub(super) unsafe fn draw(a: CoreAccess<'_>, item: *mut UObject, canvas: *mut UO
         let mut x = (5. * scale) as i32;
         let y = (4. * scale) as i32;
         let target = CanvasTarget { canvas, tile_style: None, fonts: [ptr::null_mut(); 4] };
+        let color_blind = crate::ui_accessibility::color_blind_hud(a);
         for index in 0..count {
+            let mut overlay = None;
             let units = int_of(a, item, "nUnitsPerIcon")?;
             let ratio = if remaining >= units { 1. } else { remaining as f32 / units as f32 };
             remaining = remaining.wrapping_sub(int_of(a, item, "nUnitsPerIcon")?);
@@ -281,6 +283,12 @@ pub(super) unsafe fn draw(a: CoreAccess<'_>, item: *mut UObject, canvas: *mut UO
                 let mut tint = [0_u8; 4];
                 invoke_virtual(a, item, "GetHealthDrawColor", &[], &[], tint.as_mut_ptr().cast::<c_void>())?;
                 if !receiver.live(a) || !output.live(a) || read_boolean(a, item, "bDeleteMe")? { return Err(RuntimeError::new("Health callback destroyed its view")); }
+                if color_blind {
+                    // Blue/orange instead of the retail red/green change colours.
+                    let palette = crate::ui_accessibility::health_palette(tint);
+                    tint = palette.fill;
+                    overlay = palette.overlay;
+                }
                 target.set_color(a, tint)?;
             }
             if !receiver.live(a) || !output.live(a) || read_boolean(a, item, "bDeleteMe")? { return Err(RuntimeError::new("Health view destroyed during drawing")); }
@@ -293,6 +301,17 @@ pub(super) unsafe fn draw(a: CoreAccess<'_>, item: *mut UObject, canvas: *mut UO
                 let fill = object(a, item, "textureHealthOrangeInside")?;
                 texture_size(a, fill)?;
                 paint_picture(a, item, canvas, Picture { texture: (*fill).index, dest, source, color: color(a, canvas)?, blend: BlendMode::Inherit })?;
+                if let Some(add) = overlay {
+                    // The fill texture is gold, which a tint cannot turn blue: add coloured
+                    // copies of the (light) HUD icon bolt over the same region of the fill.
+                    // Translucent drawing multiplies texel by colour, so a few passes are
+                    // needed for the added colour to carry over the fill.
+                    if texture_size(a, texture)? == texture_size(a, fill)? {
+                        for _ in 0..crate::ui_accessibility::HEALTH_OVERLAY_PASSES {
+                            paint_picture(a, item, canvas, Picture { texture: (*texture).index, dest, source, color: add, blend: BlendMode::Translucent })?;
+                        }
+                    }
+                }
             }
             x = x.wrapping_add((int_of(a, item, "nActualIconW")? as f32 * scale) as i32);
         }
@@ -308,7 +327,7 @@ unsafe fn callback(a: CoreAccess<'_>, item: *mut UObject, function: *mut UFuncti
         let Some(canvas) = param_object(a, function, params, size, "Canvas") else { return Ok(ScriptPreCallDecision::Continue); };
         if !admits(a, item, canvas)? { return Ok(ScriptPreCallDecision::Continue); }
         let offset = field(a, function.cast(), "fScaleFactor", "Core.FloatProperty", 4, size, true)?;
-        let scale = params.add(offset).cast::<f32>().read_unaligned();
+        let scale = params.add(offset).cast::<f32>().read_unaligned() * crate::display_options::hud_scale(a);
         draw(a, item, canvas, scale)?;
         Ok(ScriptPreCallDecision::Consume)
     }

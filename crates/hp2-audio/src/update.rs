@@ -41,6 +41,9 @@ pub struct UpdateView {
     pub y_axis: Vec3,
     /// `SceneNode->Coords.ZAxis`.
     pub z_axis: Vec3,
+    /// The window has lost focus and `PlayInBackground` is off: hold every
+    /// voice paused until focus returns. Not in the original.
+    pub suspended: bool,
 }
 
 /// A pending ambient start, collected before any `PlaySound` call.
@@ -103,7 +106,7 @@ impl Subsystem {
         self.last_time = current_time;
 
         let realtime = vp.realtime;
-        let paused = vp.paused;
+        let paused = vp.paused || view.suspended;
         if (!realtime && self.last_realtime) || (paused && !self.last_paused) {
             self.pause_sounds(host);
         } else if (realtime && !self.last_realtime) || (!paused && self.last_paused) {
@@ -114,6 +117,11 @@ impl Subsystem {
         }
         self.last_realtime = realtime;
         self.last_paused = paused;
+        if view.suspended {
+            // A sound started while suspended (or restarted by RESTARTSOUNDS)
+            // must stay silent too.
+            self.pause_sounds(host);
+        }
 
         self.handle_finished_sources(host)?;
 
@@ -406,7 +414,8 @@ impl Subsystem {
             }
             volume = fade_step.volume;
 
-            host.al_source_f(source, AL_GAIN, volume);
+            let gain = self.sources[i].output_gain(volume, cfg);
+            host.al_source_f(source, AL_GAIN, gain);
 
             if (flags & SF_NO3D) == 0 {
                 self.update_reference_distance(host, vp, i, view_location, current_time)?;

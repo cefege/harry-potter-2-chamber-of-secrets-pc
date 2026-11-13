@@ -87,6 +87,7 @@ unsafe fn draw(a: CoreAccess<'_>, manager: *mut UObject, canvas: *mut UObject) -
         let output = Weak::new(canvas);
         let mut scale = 0_f32;
         invoke_virtual(a, manager, "GetScaleFactor", &[("Canvas", V::Obj(canvas))], &[], (&raw mut scale).cast())?;
+        scale *= crate::display_options::hud_scale(a);
         if !receiver.live(a) || !output.live(a) || read_boolean(a, manager, "bDeleteMe")? { return Err(RuntimeError::new("Enemy scale callback destroyed its view")); }
         let (x, y) = frame_origin(scale, int_of(a, canvas, "SizeY")?);
         icon(a, manager, canvas, object(a, manager, "textureBarFull")?, x, y, scale)?;

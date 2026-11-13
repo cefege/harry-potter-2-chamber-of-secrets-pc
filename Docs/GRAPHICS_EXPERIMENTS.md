@@ -3,18 +3,67 @@
 These changes are not default-enabled or release-accepted. The normal renderer and
 stock fallback settings remain supported. This is not a DrawArena sign-off.
 
-## World-only bloom
+## World-only enhancements
 
-Start a newly built game process with `HP2_BLOOM=1` to request a subtle highlight
-halo. Unset the variable, or use a value other than `1`, to leave bloom off. There
-is no in-game setting yet. The choice is read when the render loop is created.
+Sound/Video "Advanced" has checkboxes for optional enhancements, all default off and
+stored in `[WgpuDrv.WgpuRenderDevice]`: `Bloom`, `AmbientOcclusion` ("Soft
+shadows"), `ColorGrading` ("Rich color"), `Sharpen`, `FXAA` ("Smooth edges"),
+`HighDetailModels` ("Full detail") and `HDR`. They apply live
+(`render_device_owner::set_global_quality`). The `HP2_BLOOM` variable is gone.
 
-The owner is `crates/hp2-wgpu/src/world_scale.rs`. It stages a sampleable world
-color target even at 100% scale, resolves MSAA when required, and composites the
-world through `draw::BloomPipeline` before later UI draws. The shader is
-`crates/hp2-wgpu/src/shaders/bloom.wgsl`. Earlier color draws make that world scope
-ineligible: it retains the existing full-resolution path rather than processing
-prior UI. Resource and pipeline errors retain the compositor's error path.
+The owner of the post effects is `crates/hp2-wgpu/src/world_scale.rs`. It stages a
+sampleable world color target even at 100% scale, resolves MSAA when required, and
+runs one fused pass (`draw::WorldPostPipeline`, `shaders/world_post.wgsl`, plus
+`world_post_ao.wgsl` reading the world depth when soft shadows are on) before later
+UI draws, so the HUD and menus are never processed. Earlier color draws make that
+world scope ineligible: it retains the existing full-resolution path rather than
+processing prior UI. Resource and pipeline errors retain the compositor's error path.
+
+`HighDetailModels` forces mesh LOD to full vertex count (`ShapeLODMode` 0, fix 1.0)
+in `render_actor_lod_provider.rs`. `HDR` configures an `Rgba16Float` extended-sRGB
+surface (macOS EDR) when the display offers it, otherwise SDR; frame capture reads it
+back clamped to SDR.
+
+## Fog and draw distance
+
+The Video page's Fog checkbox controls `[WgpuDrv.WgpuRenderDevice] DistanceFog`
+(default True). This enables the original volumetric-light and fog-map path, not
+a synthetic uniform distance haze. Retail `Adv8Forest`, `Adv3DungeonQuest`,
+`Ch6WizardCard` and `Adv6Goyle` contain fog zones and lights with nonzero volumetric radius; their inventory is
+retained under `out/task-20261112/Artifacts/fog-draw-distance/retail-fog.jsonl`.
+The retained Direct3D source advertises fog maps but not distance fog; the
+declared `ZoneInfo.FogDistance` has no established renderer consumer. As in
+`UnRender.cpp`, the viewport actor's zone (`Viewport->Actor->Region.Zone->bFogZone`)
+gates volumetric fog.
+
+More options → Draw Distance stores `DrawDistance=Original`, `2x`, or `4x` in
+the same section. It extends the renderer's perspective far plane (original
+65336 units); it does not change fog-light radius, portal visibility, actor
+visibility radius or mesh LOD. Fog and farther planes require visual and
+performance qualification on retail maps before a parity claim.
+
+On the available Apple M1 Max, hidden-window Entry runs (600 ticks, three
+repeats, no fog zone) measured median tick p50 2.807 ms before and 2.735 ms
+after. `Ch6WizardCard`, whose start position is inside a fog zone, measured p50
+8.44 ms before (fog never drawn) and 9.58 ms after (fog drawn), p95 13.65 → 12.60 ms;
+GPU time was not isolated. Fog off/on captures there differ across the whole
+frame (`viewclass/Ch6WizardCard-actorzone.png`, `Ch6WizardCard-sheet.png`); the
+`Adv8Forest` start is not a fog zone and stays pixel-identical, as the
+viewport-actor rule requires. No original-renderer parity capture exists yet.
+Evidence is under `out/task-20261112/Artifacts/fog-draw-distance/`.
+
+2026-11-12 checks (macOS arm64, wgpu, retail overlay
+`out/task-20261111/Artifacts/load-times/retail-data`): `wgpu_world_scale_gpu`,
+`wgpu_surface_round_trip`, `stock_graphics_menu_contracts`, `stock_graphics_settings`,
+`ui_toolkit_contracts`, `ui_host_contracts`, `engine_settings_config` and
+`engine_settings_policy` passed. Entry frame 110 off/on and the Sound/Video page were
+captured and inspected; `Build/perf_baseline.py`-equivalent Entry runs (600 ticks ×3)
+showed tick p50 3.3–6.6 ms off and 3.2–3.4 ms on: no CPU cost above noise. GPU time
+was not measured separately and HDR output was not observed on an EDR display.
+Evidence: `out/task-20261112/Artifacts/graphics-01/`.
+
+### Earlier bloom-only evidence
+
 
 ### Evidence scope
 
@@ -53,10 +102,9 @@ old binary's exact source identity is unresolved. Evidence is retained under
   Evidence is under `out/task-20261111/Artifacts/renderer-awake-check/`. This
   establishes real window presentation for that run, not bloom-on acceptance.
 
-Performance, broader map coverage, and visual acceptance remain open. Do not promote bloom to a default from these component checks.
+Broader map coverage and visual acceptance remain open. Do not promote these to defaults from these component checks.
 
-## Not implemented by this experiment
+## Not implemented
 
-New character-shadow rendering, soft particles, ambient occlusion, and widescreen
-menu artwork remain separate work. Existing stock effects are not evidence that
-these upgrades are complete.
+New character-shadow rendering, soft particles, HD texture packs and widescreen menu
+artwork remain separate work.

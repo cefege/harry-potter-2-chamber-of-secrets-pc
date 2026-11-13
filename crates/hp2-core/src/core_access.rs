@@ -229,6 +229,9 @@ struct CoreState {
     /// `None` is cached once found; the others only once they are nonzero (a missing
     /// name reads as index 0 and could still appear later).
     value_names: Cell<[Option<i32>; 4]>,
+    /// Name indices the property archive needs per object/tag: StringProperty, StrProperty,
+    /// StructProperty, ObjectProperty. Cached only once nonzero, like `value_names`.
+    property_type_names: Cell<[Option<i32>; 4]>,
 
     loader: UnsafeCell<crate::core_loader::LoaderState>,
     config: UnsafeCell<crate::core_config::CoreConfig>,
@@ -377,6 +380,7 @@ impl CoreOwner {
                 native_class_cache: RefCell::new(Default::default()),
                 property_slots: RefCell::new(Default::default()),
                 value_names: Cell::new([None; 4]),
+                property_type_names: Cell::new([None; 4]),
 
                 loader: UnsafeCell::new(crate::core_loader::LoaderState::new()),
                 config: UnsafeCell::new(config),
@@ -1239,6 +1243,21 @@ impl<'a> CoreAccess<'a> {
             }
         }
         self.state.value_names.set(cached);
+        Ok(cached.map(|name| name.unwrap_or(0)))
+    }
+
+    /// The four property class names the property archive resolves on every object and tag.
+    pub(crate) fn property_type_names(self) -> RuntimeResult<[i32; 4]> {
+        let mut cached = self.state.property_type_names.get();
+        for (index, text) in ["StringProperty", "StrProperty", "StructProperty", "ObjectProperty"].into_iter().enumerate() {
+            if cached[index].is_none() {
+                let name = self.intern_str(text, FindName::Find)?;
+                if name != 0 {
+                    cached[index] = Some(name);
+                }
+            }
+        }
+        self.state.property_type_names.set(cached);
         Ok(cached.map(|name| name.unwrap_or(0)))
     }
 

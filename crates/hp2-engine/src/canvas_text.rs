@@ -302,13 +302,33 @@ pub fn text_scale_from(cv: &Hp2CanvasView, ui_scale: f32) -> f32 {
         ui = 1.0;
     }
     ui = c_clamp(ui, 0.75, 2.0);
-    c_max(1.0, width / 640.0) * ui
+    c_max(1.0, width / 640.0) * ui * HUD_TEXT_SCALE.with(|slot| slot.get())
 }
 
 thread_local! {
     // The console paints into a centered virtual 4:3 canvas. Its text must use
     // the same scale as its controls, not the enclosing widescreen frame.
     static CONSOLE_TEXT_SCALE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+    // Player HUD size (`HudScale`) multiplier for Canvas text drawn by the HUD pass; exactly
+    // 1.0 (a bit-exact no-op multiply) everywhere else.
+    static HUD_TEXT_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+/// Runs the HUD draw pass with its Canvas text scaled by the player's HUD size.
+pub(crate) fn with_hud_text_scale<T>(scale: f32, draw: impl FnOnce() -> T) -> T {
+    struct Restore(f32);
+    impl Drop for Restore {
+        fn drop(&mut self) { HUD_TEXT_SCALE.with(|slot| slot.set(self.0)); }
+    }
+    let _restore = Restore(HUD_TEXT_SCALE.with(|slot| slot.replace(scale)));
+    draw()
+}
+
+/// Multiplies the current HUD text scale while `draw` runs (the subtitle size option). A factor of
+/// exactly 1.0 is a bit-exact no-op.
+pub(crate) fn with_extra_hud_text_scale<T>(factor: f32, draw: impl FnOnce() -> T) -> T {
+    let current = HUD_TEXT_SCALE.with(|slot| slot.get());
+    with_hud_text_scale(current * factor, draw)
 }
 
 pub(crate) fn with_console_text_scale<T>(scale: f32, draw: impl FnOnce() -> T) -> T {

@@ -41,6 +41,8 @@ mod ffi {
         pub fn SDL_GL_GetDrawableSize(window: *mut SdlWindow, w: *mut c_int, h: *mut c_int);
         pub fn SDL_GetWindowFlags(window: *mut SdlWindow) -> u32;
         pub fn SDL_GL_SetAttribute(attr: c_int, value: c_int) -> c_int;
+        pub fn SDL_GetNumVideoDisplays() -> c_int;
+        pub fn SDL_SetWindowPosition(window: *mut SdlWindow, x: c_int, y: c_int);
     }
 }
 /// Returns the flags of a launcher window.
@@ -73,20 +75,51 @@ const SDL_WINDOW_FULLSCREEN_DESKTOP: u32 = 0x0000_1001;
 /// `WindowStore`.
 #[cfg(feature = "sdl")]
 pub fn create_window(width: i32, height: i32, flags: u32) -> *mut SdlWindow {
+    create_window_on_display(width, height, flags, 0)
+}
+
+/// `SDL_WINDOWPOS_CENTERED_DISPLAY(display)` (`SDL_video.h`:
+/// `SDL_WINDOWPOS_CENTERED_MASK | display`). Negative indices fall back to display 0.
+pub const fn centered_on_display(display: i32) -> i32 {
+    (0x2FFF_0000u32 | if display < 0 { 0 } else { display as u32 & 0xFFFF }) as i32
+}
+
+/// `SDL_GetNumVideoDisplays()`; at least 1 so a failed query keeps display 0 usable.
+#[cfg(feature = "sdl")]
+pub fn display_count() -> i32 {
+    // SAFETY: argument-free SDL query; SDL video must be initialized for a real answer.
+    unsafe { ffi::SDL_GetNumVideoDisplays() }.max(1)
+}
+
+/// Clamps a persisted display index to the displays that exist now, so an unplugged
+/// monitor falls back to the nearest remaining one instead of failing.
+pub const fn clamp_display(display: i32, count: i32) -> i32 {
+    let last = if count < 1 { 0 } else { count - 1 };
+    if display < 0 { 0 } else if display > last { last } else { display }
+}
+
+/// [`create_window`] centered on `display` (clamped to the connected displays).
+#[cfg(feature = "sdl")]
+pub fn create_window_on_display(width: i32, height: i32, flags: u32, display: i32) -> *mut SdlWindow {
     const TITLE: &std::ffi::CStr = c"Harry Potter 2";
+    let at = centered_on_display(clamp_display(display, display_count()));
     // SAFETY: `TITLE` is a valid NUL-terminated C string for the
     // duration of this call; SDL copies it internally.
-    unsafe {
-        ffi::SDL_CreateWindow(
-            TITLE.as_ptr(),
-            SDL_WINDOWPOS_CENTERED,
-            SDL_WINDOWPOS_CENTERED,
-            width,
-            height,
-            flags,
-        )
-    }
+    unsafe { ffi::SDL_CreateWindow(TITLE.as_ptr(), at, at, width, height, flags) }
 }
+
+/// Centers a windowed (not fullscreen) window on `display`; SDL ignores moves of fullscreen
+/// windows, so callers leave fullscreen first.
+///
+/// # Safety
+/// `window` must be a live SDL window on the video thread.
+#[cfg(feature = "sdl")]
+pub unsafe fn center_window_on_display(window: *mut SdlWindow, display: i32) {
+    let at = centered_on_display(clamp_display(display, display_count()));
+    // SAFETY: the caller supplies a live SDL window.
+    unsafe { ffi::SDL_SetWindowPosition(window, at, at) }
+}
+
 /// Creates the standalone egui launcher window on the shared SDL video subsystem.
 #[cfg(feature = "sdl")]
 pub fn create_launcher_window(title: &std::ffi::CStr, width: i32, height: i32) -> *mut SdlWindow {
@@ -240,5 +273,26 @@ pub fn set_gl_attribute(attr: std::os::raw::c_int, value: i32) {
     // original leaf ignored and so do we.
     unsafe {
         ffi::SDL_GL_SetAttribute(attr, value);
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::{centered_on_display, clamp_display};
+
+    #[test]
+    fn centered_display_matches_sdl_windowpos_macro() {
+        assert_eq!(centered_on_display(0) as u32, 0x2FFF_0000);
+        assert_eq!(centered_on_display(2) as u32, 0x2FFF_0002);
+        assert_eq!(centered_on_display(-3) as u32, 0x2FFF_0000);
+    }
+
+    #[test]
+    fn saved_display_falls_back_to_a_connected_one() {
+        assert_eq!(clamp_display(0, 1), 0);
+        assert_eq!(clamp_display(1, 2), 1);
+        assert_eq!(clamp_display(5, 2), 1);
+        assert_eq!(clamp_display(-1, 3), 0);
+        assert_eq!(clamp_display(4, 0), 0);
     }
 }

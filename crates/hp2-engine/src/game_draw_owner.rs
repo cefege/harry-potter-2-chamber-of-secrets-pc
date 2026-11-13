@@ -543,7 +543,10 @@ impl crate::game_tick::draw::DrawOps for CoreDrawOps<'_> {
         actor: *mut std::ffi::c_void,
         canvas: *mut std::ffi::c_void,
     ) -> RuntimeResult<()> {
-        unsafe { actor_canvas_event(self.access, actor.cast(), canvas.cast(), "PostRender") }
+        let scale = crate::display_options::hud_scale(self.access);
+        crate::canvas_text::with_hud_text_scale(scale, || unsafe {
+            actor_canvas_event(self.access, actor.cast(), canvas.cast(), "PostRender")
+        })
     }
 
     unsafe fn viewport_ui_scale(&self, viewport: *mut std::ffi::c_void) -> RuntimeResult<f32> {

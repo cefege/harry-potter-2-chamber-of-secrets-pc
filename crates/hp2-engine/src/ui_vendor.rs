@@ -118,7 +118,7 @@ unsafe fn draw(a:CoreAccess<'_>,receiver:*mut UObject,canvas:*mut UObject)->Runt
     unsafe {
         prop(a,receiver,"VendorCanvas","Core.ObjectProperty",size_of::<*mut UObject>())?.cast::<*mut UObject>().write_unaligned(canvas);
         let saved_font=object(a,canvas,"Font")?;
-        let mut scale=0f32;invoke_virtual(a,canvas,"GetHudScaleFactor",&[],&[],(&raw mut scale).cast())?;
+        let mut scale=0f32;invoke_virtual(a,canvas,"GetHudScaleFactor",&[],&[],(&raw mut scale).cast())?;scale*=crate::display_options::hud_scale(a);
         if !live(a,receiver)||!live(a,canvas){return Err(RuntimeError::new("Vendor destroyed during scale callback"));}
         let mut yes=0u32;invoke_virtual(a,receiver,"IsMouseOverVendorYes",&[],&[],(&raw mut yes).cast())?;
         if !live(a,receiver)||!live(a,canvas){return Err(RuntimeError::new("Vendor destroyed during Yes hover callback"));}
