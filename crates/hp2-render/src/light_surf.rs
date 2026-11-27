@@ -702,6 +702,7 @@ pub unsafe fn surf_merge_with<O: SurfSetupOps + ?Sized>(
             max_u: info.MaxU,
             min_v: info.MinV,
             max_v: info.MaxV,
+            dark: actor.b_dark_light(),
         };
         let illumination_len = (uclamp * vclamp).max(0) as usize;
         let word_len = (u_size * vclamp).max(0) as usize;

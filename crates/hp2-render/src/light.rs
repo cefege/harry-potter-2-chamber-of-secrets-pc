@@ -381,10 +381,14 @@ pub struct MergeParams {
     pub max_u: i32,
     pub min_v: i32,
     pub max_v: i32,
+    /// `Info->Actor->bDarkLight`: the light is subtracted instead of added.
+    pub dark: bool,
 }
 
 /// Blends the illumination `src` (stride `uclamp`) through `palette` into
 /// `dest`, adding `stream` (stride `usize_`) with per-channel saturation.
+/// A dark light (`p.dark`) is subtracted instead, each colour channel
+/// clamped at zero and the top byte kept, as the x86 `Merge` does.
 /// `stream` is `None` when it is `dest` itself (`Merge(.., Stream, Stream)`);
 /// each word is read before it is written, so the in-place form is exact.
 pub fn merge(
@@ -434,12 +438,18 @@ pub fn merge(
                 Some(s) => s[stream_row + j],
                 None => dest[dest_row + j],
             };
-            let mut d = base.wrapping_add(palette[c as usize]);
-            if d & 0x8080_8080 != 0 {
-                let mut sat = d & 0x8080_8080;
-                sat -= sat >> 7;
-                d = (d & 0x7f7f_7f7f) | sat;
-            }
+            let light = palette[c as usize];
+            let d = if p.dark {
+                subtract_light(base, light)
+            } else {
+                let mut d = base.wrapping_add(light);
+                if d & 0x8080_8080 != 0 {
+                    let mut sat = d & 0x8080_8080;
+                    sat -= sat >> 7;
+                    d = (d & 0x7f7f_7f7f) | sat;
+                }
+                d
+            };
             dest[dest_row + j] = d;
         }
 
@@ -447,6 +457,18 @@ pub fn merge(
         stream_row += usize_;
         dest_row += usize_;
     }
+}
+
+/// `base - light` on the three colour bytes, each clamped at zero; the top
+/// byte of `base` is kept.
+#[inline]
+fn subtract_light(base: u32, light: u32) -> u32 {
+    let mut d = base & 0xff00_0000;
+    for shift in [0, 8, 16] {
+        let v = ((base >> shift) & 0xff).saturating_sub((light >> shift) & 0xff);
+        d |= v << shift;
+    }
+    d
 }
 
 // ---------------------------------------------------------------------------

@@ -346,6 +346,7 @@ fn merge_matches_oracle() {
             max_u,
             min_v,
             max_v,
+            dark: false,
         };
         // Out-of-place: `Merge(Tex, eff, key, Info, Stream, Dest)`, Dest seeded 0xA5A5A5A5.
         let mut dest = [0xA5A5_A5A5u32; 20 * 8];
@@ -366,6 +367,31 @@ fn merge_matches_oracle() {
         n += 1;
     }
     assert_eq!(n, 81);
+}
+
+/// A dark light (`bDarkLight`) is subtracted from the stream, each colour byte
+/// clamped at zero and the top byte kept; the shared oracle only covers lights
+/// that add.
+#[test]
+fn merge_subtracts_dark_lights() {
+    let mut pal = [0u32; 256];
+    pal[1] = 0x0010_2030;
+    let src = [1u8, 0];
+    let p = MergeParams {
+        effect: 0,
+        key: 0,
+        uclamp: 2,
+        usize_: 2,
+        min_u: 0,
+        max_u: 2,
+        min_v: 0,
+        max_v: 1,
+        dark: true,
+    };
+    let zero = [0f32; 256];
+    let mut dest = [0x7f40_1020u32, 0x0102_0304];
+    merge(&p, &src, &pal, None, &mut dest, &zero, &zero);
+    assert_eq!(dest, [0x7f30_0000, 0x0102_0304]);
 }
 
 // ---------------------------------------------------------------------------
